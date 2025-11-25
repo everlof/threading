@@ -17,7 +17,7 @@ final class TerminalSession: NSObject {
     private var profile: TerminalProfile
 
     /// The PID of the shell process, captured after starting.
-    private var shellPid: pid_t = 0
+    private(set) var shellPid: pid_t = 0
 
     /// The name of the profile used for this session.
     var profileName: String {

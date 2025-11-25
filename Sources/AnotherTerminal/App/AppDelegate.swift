@@ -230,6 +230,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(withTitle: "Bigger", action: #selector(increaseFontSize), keyEquivalent: "+")
         viewMenu.addItem(withTitle: "Smaller", action: #selector(decreaseFontSize), keyEquivalent: "-")
 
+        viewMenu.addItem(NSMenuItem.separator())
+        viewMenu.addItem(withTitle: "Toggle Process Tree", action: #selector(toggleProcessTree), keyEquivalent: "p")
+
         mainMenu.addItem(viewMenuItem)
 
         // Window Menu
@@ -311,6 +314,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectTabByNumber(_ sender: NSMenuItem) {
         let tabIndex = sender.tag - 1  // Convert 1-based to 0-based
         activeWindowController?.selectTab(at: tabIndex)
+    }
+
+    @objc private func toggleProcessTree() {
+        activeWindowController?.toggleProcessTree()
     }
 
     // MARK: - Window Config File Actions

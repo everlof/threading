@@ -46,6 +46,16 @@ enum MenuIdentifiers {
     static let helpMenu = "Help"
 }
 
+// MARK: - Process Tree Defaults
+
+enum ProcessTreeDefaults {
+    static let refreshInterval: TimeInterval = 2.0
+    static let minPaneHeight: CGFloat = 100
+    static let maxPaneHeight: CGFloat = 600
+    static let defaultPaneHeight: CGFloat = 200
+    static let detailPanelWidth: CGFloat = 200
+}
+
 // MARK: - Notification Names
 
 extension Notification.Name {

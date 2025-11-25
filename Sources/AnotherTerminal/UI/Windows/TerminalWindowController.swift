@@ -5,12 +5,19 @@ final class TerminalWindowController: NSWindowController {
 
     // MARK: - Properties
 
+    private var splitViewController: NSSplitViewController!
     private var terminalViewController: TerminalTabViewController!
+    private var processTreePaneController: ProcessTreePaneController?
+    private var processTreeSplitItem: NSSplitViewItem?
+
     private var findBar: FindBarView?
     private var findBarTopConstraint: NSLayoutConstraint?
 
     /// Identifier for grouping tabbed windows together for state persistence.
     private(set) var tabGroupID: UUID = UUID()
+
+    /// Whether the process tree pane is currently visible.
+    private(set) var isProcessTreeVisible: Bool = false
 
     var session: TerminalSession {
         terminalViewController.session
@@ -21,7 +28,7 @@ final class TerminalWindowController: NSWindowController {
     convenience init() {
         let window = Self.createWindow()
         self.init(window: window)
-        setupTerminalViewController()
+        setupSplitViewController()
         window.delegate = self
     }
 
@@ -73,10 +80,34 @@ final class TerminalWindowController: NSWindowController {
 
     // MARK: - Setup
 
-    private func setupTerminalViewController() {
+    private func setupSplitViewController() {
+        splitViewController = NSSplitViewController()
+        splitViewController.splitView.isVertical = false  // Horizontal split (top/bottom)
+        splitViewController.splitView.dividerStyle = .thin
+
+        // Process tree pane (top, initially collapsed)
+        processTreePaneController = ProcessTreePaneController()
+        processTreePaneController?.onClose = { [weak self] in
+            self?.hideProcessTree()
+        }
+
+        let paneItem = NSSplitViewItem(contentListWithViewController: processTreePaneController!)
+        paneItem.canCollapse = true
+        paneItem.isCollapsed = true
+        paneItem.minimumThickness = ProcessTreeDefaults.minPaneHeight
+        paneItem.automaticMaximumThickness = ProcessTreeDefaults.maxPaneHeight
+        processTreeSplitItem = paneItem
+        splitViewController.addSplitViewItem(paneItem)
+
+        // Terminal view controller (bottom, main content)
         terminalViewController = TerminalTabViewController()
         terminalViewController.delegate = self
-        window?.contentViewController = terminalViewController
+
+        let terminalItem = NSSplitViewItem(viewController: terminalViewController)
+        terminalItem.canCollapse = false
+        splitViewController.addSplitViewItem(terminalItem)
+
+        window?.contentViewController = splitViewController
     }
 
     // MARK: - Public Methods
@@ -134,6 +165,52 @@ final class TerminalWindowController: NSWindowController {
 
     func decreaseFontSize() {
         terminalViewController.decreaseFontSize()
+    }
+
+    // MARK: - Process Tree
+
+    /// Toggles the process tree pane visibility.
+    func toggleProcessTree() {
+        if isProcessTreeVisible {
+            hideProcessTree()
+        } else {
+            showProcessTree()
+        }
+    }
+
+    /// Shows the process tree pane.
+    func showProcessTree() {
+        guard let paneItem = processTreeSplitItem else { return }
+
+        // Update the pane with current shell PID
+        processTreePaneController?.setRootPid(session.shellPid)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            paneItem.isCollapsed = false
+        }
+
+        isProcessTreeVisible = true
+
+        // Keep focus on terminal
+        window?.makeFirstResponder(terminalViewController.session.terminalView)
+    }
+
+    /// Hides the process tree pane.
+    func hideProcessTree() {
+        guard let paneItem = processTreeSplitItem else { return }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            paneItem.isCollapsed = true
+        }
+
+        isProcessTreeVisible = false
+
+        // Return focus to terminal
+        window?.makeFirstResponder(terminalViewController.session.terminalView)
     }
 
     // MARK: - Find
