@@ -33,6 +33,8 @@ final class TerminalSession: NSObject {
 
     private func setupTerminalView() {
         terminalView.processDelegate = self
+        // Allow Option key to compose special characters (e.g., ~ on non-US keyboards)
+        terminalView.optionAsMetaKey = false
         applyProfile()
     }
 
