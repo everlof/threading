@@ -2,6 +2,12 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
+    // MARK: - Singleton
+
+    static var shared: AppDelegate {
+        NSApp.delegate as! AppDelegate
+    }
+
     // MARK: - Properties
 
     private var windowControllers: [TerminalWindowController] = []
@@ -10,6 +16,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Get the window controller for the currently active window
         guard let keyWindow = NSApp.keyWindow else { return windowControllers.first }
         return windowControllers.first { $0.window === keyWindow }
+    }
+
+    // MARK: - Window Controller Management
+
+    func addWindowController(_ controller: TerminalWindowController) {
+        guard !windowControllers.contains(where: { $0 === controller }) else { return }
+        windowControllers.append(controller)
+    }
+
+    func removeWindowController(_ controller: TerminalWindowController) {
+        windowControllers.removeAll { $0 === controller }
     }
 
     // MARK: - NSApplicationDelegate
@@ -37,9 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openNewWindow() {
         let windowController = TerminalWindowController()
-        windowController.window?.delegate = self
         windowControllers.append(windowController)
         windowController.showWindow(nil)
+        windowController.startShell()
     }
 
     @objc func openNewTab() {

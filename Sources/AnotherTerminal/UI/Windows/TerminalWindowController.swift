@@ -5,17 +5,12 @@ final class TerminalWindowController: NSWindowController {
 
     // MARK: - Properties
 
-    private var tabViewController: NSTabViewController!
-    private var tabs: [TerminalTabViewController] = []
+    private var terminalViewController: TerminalTabViewController!
     private var findBar: FindBarView?
     private var findBarTopConstraint: NSLayoutConstraint?
 
-    private var currentTab: TerminalTabViewController? {
-        guard tabViewController.selectedTabViewItemIndex >= 0,
-              tabViewController.selectedTabViewItemIndex < tabs.count else {
-            return nil
-        }
-        return tabs[tabViewController.selectedTabViewItemIndex]
+    var session: TerminalSession {
+        terminalViewController.session
     }
 
     // MARK: - Initialization
@@ -23,8 +18,8 @@ final class TerminalWindowController: NSWindowController {
     convenience init() {
         let window = Self.createWindow()
         self.init(window: window)
-        setupTabViewController()
-        addNewTab()
+        setupTerminalViewController()
+        window.delegate = self
     }
 
     // MARK: - Window Creation
@@ -59,118 +54,73 @@ final class TerminalWindowController: NSWindowController {
         window.title = TerminalDefaults.defaultShell
         window.center()
         window.isReleasedWhenClosed = false
-        window.tabbingMode = .disallowed  // Use our own tab management
+
+        // Native macOS tabs (like Terminal.app/Safari)
+        window.tabbingMode = .automatic
+        window.tabbingIdentifier = "AnotherTerminalWindow"
 
         return window
     }
 
-    // MARK: - Tab View Setup
+    // MARK: - Setup
 
-    private func setupTabViewController() {
-        tabViewController = NSTabViewController()
-        tabViewController.tabStyle = .segmentedControlOnTop  // Show tab bar
+    private func setupTerminalViewController() {
+        terminalViewController = TerminalTabViewController()
+        terminalViewController.delegate = self
+        window?.contentViewController = terminalViewController
+    }
 
-        window?.contentViewController = tabViewController
+    // MARK: - Public Methods
+
+    func startShell() {
+        terminalViewController.startShell()
+        window?.makeFirstResponder(terminalViewController.session.terminalView)
     }
 
     // MARK: - Tab Management
 
     func openNewTab() {
-        addNewTab()
-    }
+        guard let currentWindow = window else { return }
 
-    private func addNewTab() {
-        let tabVC = TerminalTabViewController()
-        tabVC.delegate = self
+        let newWindowController = TerminalWindowController()
+        guard let newWindow = newWindowController.window else { return }
 
-        let tabItem = NSTabViewItem(viewController: tabVC)
-        tabItem.label = TerminalDefaults.defaultShell
+        currentWindow.addTabbedWindow(newWindow, ordered: .above)
+        newWindow.makeKeyAndOrderFront(nil)
+        newWindowController.startShell()
 
-        tabs.append(tabVC)
-        tabViewController.addTabViewItem(tabItem)
-        tabViewController.selectedTabViewItemIndex = tabs.count - 1
-
-        tabVC.startShell()
-
-        updateWindowTitle()
-        window?.makeFirstResponder(tabVC.session.terminalView)
+        // Keep reference to prevent deallocation
+        AppDelegate.shared.addWindowController(newWindowController)
     }
 
     func closeCurrentTab() {
-        guard let currentTab = currentTab,
-              let index = tabs.firstIndex(where: { $0 === currentTab }) else {
-            return
-        }
-
-        closeTab(at: index)
-    }
-
-    private func closeTab(at index: Int) {
-        guard index >= 0, index < tabs.count else { return }
-
-        tabs.remove(at: index)
-        tabViewController.removeTabViewItem(tabViewController.tabViewItems[index])
-
-        if tabs.isEmpty {
-            window?.close()
-        } else {
-            let newIndex = min(index, tabs.count - 1)
-            tabViewController.selectedTabViewItemIndex = newIndex
-            updateWindowTitle()
-            window?.makeFirstResponder(currentTab?.session.terminalView)
-        }
+        window?.close()
     }
 
     func selectNextTab() {
-        let count = tabs.count
-        guard count > 1 else { return }
-
-        let currentIndex = tabViewController.selectedTabViewItemIndex
-        let nextIndex = (currentIndex + 1) % count
-        tabViewController.selectedTabViewItemIndex = nextIndex
-        updateWindowTitle()
-        window?.makeFirstResponder(currentTab?.session.terminalView)
+        window?.selectNextTab(nil)
     }
 
     func selectPreviousTab() {
-        let count = tabs.count
-        guard count > 1 else { return }
-
-        let currentIndex = tabViewController.selectedTabViewItemIndex
-        let previousIndex = (currentIndex - 1 + count) % count
-        tabViewController.selectedTabViewItemIndex = previousIndex
-        updateWindowTitle()
-        window?.makeFirstResponder(currentTab?.session.terminalView)
+        window?.selectPreviousTab(nil)
     }
 
     func selectTab(at index: Int) {
-        guard index >= 0, index < tabs.count else { return }
-        tabViewController.selectedTabViewItemIndex = index
-        updateWindowTitle()
-        window?.makeFirstResponder(currentTab?.session.terminalView)
-    }
+        guard let window = window,
+              let tabbedWindows = window.tabbedWindows,
+              index >= 0, index < tabbedWindows.count else { return }
 
-    // MARK: - Window Title
-
-    private func updateWindowTitle() {
-        guard let currentTab = currentTab else { return }
-        window?.title = currentTab.session.title
-
-        if let directory = currentTab.session.currentDirectory {
-            window?.representedURL = directory
-        } else {
-            window?.representedURL = nil
-        }
+        tabbedWindows[index].makeKeyAndOrderFront(nil)
     }
 
     // MARK: - Font Management
 
     func increaseFontSize() {
-        currentTab?.increaseFontSize()
+        terminalViewController.increaseFontSize()
     }
 
     func decreaseFontSize() {
-        currentTab?.decreaseFontSize()
+        terminalViewController.decreaseFontSize()
     }
 
     // MARK: - Find
@@ -181,7 +131,7 @@ final class TerminalWindowController: NSWindowController {
         if findBar == nil {
             let bar = FindBarView()
             bar.translatesAutoresizingMaskIntoConstraints = false
-            bar.terminalView = currentTab?.session.terminalView
+            bar.terminalView = terminalViewController.session.terminalView
             bar.onClose = { [weak self] in
                 self?.hideFindBar()
             }
@@ -219,8 +169,20 @@ final class TerminalWindowController: NSWindowController {
         }, completionHandler: { [weak self] in
             self?.findBar?.removeFromSuperview()
             self?.findBar = nil
-            self?.window?.makeFirstResponder(self?.currentTab?.session.terminalView)
+            self?.window?.makeFirstResponder(self?.terminalViewController.session.terminalView)
         })
+    }
+
+    // MARK: - Window Title
+
+    private func updateWindowTitle() {
+        window?.title = terminalViewController.session.title
+
+        if let directory = terminalViewController.session.currentDirectory {
+            window?.representedURL = directory
+        } else {
+            window?.representedURL = nil
+        }
     }
 }
 
@@ -233,26 +195,16 @@ extension TerminalWindowController: TerminalTabViewControllerDelegate {
     }
 
     func terminalTab(_ tab: TerminalTabViewController, titleChangedTo title: String) {
-        if let index = tabs.firstIndex(where: { $0 === tab }) {
-            tabViewController.tabViewItems[index].label = title
-        }
-
-        if tab === currentTab {
-            updateWindowTitle()
-        }
+        window?.title = title
     }
 
     func terminalTab(_ tab: TerminalTabViewController, directoryChangedTo directory: URL?) {
-        if tab === currentTab {
-            window?.representedURL = directory
-        }
+        window?.representedURL = directory
     }
 
     func terminalTabDidTerminate(_ tab: TerminalTabViewController, exitCode: Int32?) {
-        guard let index = tabs.firstIndex(where: { $0 === tab }) else { return }
-
         DispatchQueue.main.async { [weak self] in
-            self?.closeTab(at: index)
+            self?.window?.close()
             NotificationCenter.default.post(name: .terminalSessionDidEnd, object: self)
         }
     }
@@ -263,9 +215,7 @@ extension TerminalWindowController: TerminalTabViewControllerDelegate {
 extension TerminalWindowController: NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
-        for tab in tabs {
-            tab.session.terminate()
-        }
-        tabs.removeAll()
+        terminalViewController.session.terminate()
+        AppDelegate.shared.removeWindowController(self)
     }
 }
