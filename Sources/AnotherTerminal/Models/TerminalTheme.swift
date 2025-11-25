@@ -1,4 +1,5 @@
 import AppKit
+import SwiftTerm
 
 /// Color scheme for terminal rendering.
 struct TerminalTheme: Codable, Equatable {
@@ -255,4 +256,41 @@ extension TerminalTheme {
     )
 
     static let allThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean]
+
+    /// Convert theme to SwiftTerm Color array (16 ANSI colors)
+    func asSwiftTermColors() -> [Color] {
+        return [
+            black.asSwiftTermColor(),
+            red.asSwiftTermColor(),
+            green.asSwiftTermColor(),
+            yellow.asSwiftTermColor(),
+            blue.asSwiftTermColor(),
+            magenta.asSwiftTermColor(),
+            cyan.asSwiftTermColor(),
+            white.asSwiftTermColor(),
+            brightBlack.asSwiftTermColor(),
+            brightRed.asSwiftTermColor(),
+            brightGreen.asSwiftTermColor(),
+            brightYellow.asSwiftTermColor(),
+            brightBlue.asSwiftTermColor(),
+            brightMagenta.asSwiftTermColor(),
+            brightCyan.asSwiftTermColor(),
+            brightWhite.asSwiftTermColor()
+        ]
+    }
+}
+
+// MARK: - NSColor to SwiftTerm Color
+
+extension NSColor {
+    func asSwiftTermColor() -> Color {
+        guard let rgb = usingColorSpace(.sRGB) else {
+            return Color(red: 0, green: 0, blue: 0)
+        }
+        return Color(
+            red: UInt16(rgb.redComponent * 65535),
+            green: UInt16(rgb.greenComponent * 65535),
+            blue: UInt16(rgb.blueComponent * 65535)
+        )
+    }
 }

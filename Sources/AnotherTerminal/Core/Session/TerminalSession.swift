@@ -40,11 +40,18 @@ final class TerminalSession: NSObject {
         let font = NSFont.monospacedSystemFont(ofSize: profile.fontSize, weight: .regular)
         terminalView.font = font
 
+        // Install ANSI color palette first
+        let colors = profile.theme.asSwiftTermColors()
+        terminalView.installColors(colors)
+
         // Apply theme colors
         terminalView.nativeForegroundColor = profile.theme.foreground
         terminalView.nativeBackgroundColor = profile.theme.background
         terminalView.selectedTextBackgroundColor = profile.theme.selection
         terminalView.caretColor = profile.theme.cursor
+
+        // Force redraw
+        terminalView.needsDisplay = true
     }
 
     // MARK: - Shell Management
