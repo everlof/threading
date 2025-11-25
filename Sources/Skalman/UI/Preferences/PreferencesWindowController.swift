@@ -8,6 +8,7 @@ final class PreferencesWindowController: NSWindowController {
     private enum TabIdentifiers {
         static let general = "general"
         static let profiles = "profiles"
+        static let ai = "ai"
     }
 
     private enum WindowSize {
@@ -89,8 +90,16 @@ final class PreferencesWindowController: NSWindowController {
         profilesTab.identifier = TabIdentifiers.profiles
         profilesTab.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: "Profiles")
 
+        // AI Tab
+        let aiVC = AIPreferencesViewController()
+        let aiTab = NSTabViewItem(viewController: aiVC)
+        aiTab.label = "AI"
+        aiTab.identifier = TabIdentifiers.ai
+        aiTab.image = NSImage(systemSymbolName: "brain", accessibilityDescription: "AI")
+
         tabViewController.addTabViewItem(generalTab)
         tabViewController.addTabViewItem(profilesTab)
+        tabViewController.addTabViewItem(aiTab)
 
         window?.contentViewController = tabViewController
     }

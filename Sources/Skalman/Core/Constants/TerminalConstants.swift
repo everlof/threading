@@ -56,6 +56,17 @@ enum ProcessTreeDefaults {
     static let detailPanelWidth: CGFloat = 200
 }
 
+// MARK: - AI Defaults
+
+enum AIDefaults {
+    static let maxOutputLength = 50_000
+    static let requestTimeout: TimeInterval = 30
+    static let ollamaDefaultURL = "http://localhost:11434"
+    static let ollamaDefaultModel = "llama3"
+    static let claudeDefaultModel = "claude-sonnet-4-20250514"
+    static let openaiDefaultModel = "gpt-4"
+}
+
 // MARK: - Notification Names
 
 extension Notification.Name {

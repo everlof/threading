@@ -11,6 +11,9 @@ import SwiftTerm
 /// view draws its content, ensuring proper alpha compositing for color emoji.
 final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
+    /// Handler for OSC 1337 content (used for shell integration output capture).
+    var onOSC1337Content: ((String) -> Void)?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         configureForEmojiRendering()
@@ -48,6 +51,15 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     override public func makeBackingLayer() -> CALayer {
         return EmojiFixedBackingLayer(terminalView: self)
+    }
+
+    // MARK: - OSC 1337 Handling
+
+    override func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {
+        super.iTermContent(source: source, content: content)
+        if let data = String(bytes: content, encoding: .utf8) {
+            onOSC1337Content?(data)
+        }
     }
 }
 

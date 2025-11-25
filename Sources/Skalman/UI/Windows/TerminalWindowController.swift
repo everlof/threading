@@ -13,6 +13,10 @@ final class TerminalWindowController: NSWindowController {
     private var findBar: FindBarView?
     private var findBarTopConstraint: NSLayoutConstraint?
 
+    private var aiInputBar: AIInputBar?
+    private var aiInputBarBottomConstraint: NSLayoutConstraint?
+    private(set) var isAIModeActive: Bool = false
+
     /// Identifier for grouping tabbed windows together for state persistence.
     private(set) var tabGroupID: UUID = UUID()
 
@@ -293,6 +297,186 @@ final class TerminalWindowController: NSWindowController {
             self?.findBar = nil
             self?.window?.makeFirstResponder(self?.terminalViewController.session.terminalView)
         })
+    }
+
+    // MARK: - AI Mode
+
+    /// Toggles AI input mode on/off.
+    func toggleAIMode() {
+        if isAIModeActive {
+            hideAIInputBar()
+        } else {
+            showAIInputBar()
+        }
+    }
+
+    /// Shows the AI input bar at the bottom of the window.
+    func showAIInputBar() {
+        guard let contentView = window?.contentView else { return }
+
+        if aiInputBar == nil {
+            let bar = AIInputBar()
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.onSubmit = { [weak self] prompt in
+                self?.handleAIPrompt(prompt)
+            }
+            bar.onCancel = { [weak self] in
+                self?.hideAIInputBar()
+            }
+
+            contentView.addSubview(bar)
+
+            aiInputBarBottomConstraint = bar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: 40)
+
+            NSLayoutConstraint.activate([
+                aiInputBarBottomConstraint!,
+                bar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+                bar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
+            ])
+
+            aiInputBar = bar
+        }
+
+        aiInputBar?.updateProviderLabel()
+
+        // Animate in
+        aiInputBarBottomConstraint?.constant = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            contentView.layoutSubtreeIfNeeded()
+        }
+
+        isAIModeActive = true
+        aiInputBar?.focus()
+    }
+
+    /// Hides the AI input bar.
+    func hideAIInputBar() {
+        guard let contentView = window?.contentView, aiInputBar != nil else { return }
+
+        aiInputBarBottomConstraint?.constant = 40
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            contentView.layoutSubtreeIfNeeded()
+        }, completionHandler: { [weak self] in
+            self?.aiInputBar?.removeFromSuperview()
+            self?.aiInputBar = nil
+            self?.isAIModeActive = false
+            self?.window?.makeFirstResponder(self?.terminalViewController.session.terminalView)
+        })
+    }
+
+    /// Handles an AI prompt submission.
+    private func handleAIPrompt(_ prompt: String) {
+        guard AIService.shared.isConfigured else {
+            showAIError("AI not configured. Please set up an AI provider in Preferences.")
+            return
+        }
+
+        aiInputBar?.setLoading(true)
+
+        let context = AIContext.current(
+            workingDirectory: session.effectiveWorkingDirectory()?.path,
+            shell: ProfileStorage.shared.defaultProfile.shellPath
+        )
+
+        Task {
+            do {
+                let command = try await AIService.shared.generateCommand(prompt: prompt, context: context)
+
+                await MainActor.run {
+                    aiInputBar?.setLoading(false)
+                    aiInputBar?.clear()
+                    hideAIInputBar()
+
+                    // Insert the generated command at the prompt
+                    session.insertText(command)
+                }
+            } catch {
+                await MainActor.run {
+                    aiInputBar?.setLoading(false)
+                    showAIError(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// Sends the last command output to AI for analysis.
+    func analyzeLastOutput() {
+        guard AIService.shared.isConfigured else {
+            let providerType = AISettingsStorage.shared.settings.providerType
+            let hasKey = KeychainManager.Service(providerType: providerType).map { KeychainManager.hasKey(for: $0) } ?? false
+            showAIError("AI not configured.\n\nProvider: \(providerType.displayName)\nAPI Key saved: \(hasKey ? "Yes" : "No")\n\nPlease set up an AI provider in Preferences > AI.")
+            return
+        }
+
+        let capture = session.outputCapture
+
+        guard capture.hasOutput,
+              let output = capture.getLastOutput(),
+              let command = capture.getLastCommand() else {
+            showAIInfo("Shell Integration Required", message: "To analyze command output:\n\n1. Run shell integration: AI > Run Shell Integration\n2. Use 'sk <command>' to capture output\n3. Press Cmd+Shift+E to analyze")
+            return
+        }
+
+        let exitCode = capture.getLastExitCode()
+        let columns = session.terminalView.getTerminal().cols
+
+        // Show inline loading indicator
+        session.sendANSI("\n\u{001B}[36m⏳ Analyzing output...\u{001B}[0m")
+
+        // Run analysis in background
+        Task {
+            do {
+                let explanation = try await AIService.shared.explainOutput(
+                    command: command,
+                    output: output,
+                    exitCode: exitCode,
+                    columns: columns
+                )
+
+                await MainActor.run {
+                    // Convert literal \x1b sequences to actual escape characters
+                    let formatted = explanation
+                        .replacingOccurrences(of: "\\x1b[", with: "\u{001B}[")
+                        .replacingOccurrences(of: "\\e[", with: "\u{001B}[")
+                        .replacingOccurrences(of: "\\033[", with: "\u{001B}[")
+
+                    // Clear the loading message and show result with ANSI formatting
+                    session.sendANSI("\r\u{001B}[K") // Clear current line
+                    session.sendANSI("\n\u{001B}[1;35m━━━ AI Analysis ━━━\u{001B}[0m\n")
+                    session.sendANSI("\u{001B}[33mCommand:\u{001B}[0m \(command)\n")
+                    session.sendANSI("\u{001B}[33mExit code:\u{001B}[0m \(exitCode)\n\n")
+                    session.sendANSI(formatted)
+                    session.sendANSI("\n\u{001B}[1;35m━━━━━━━━━━━━━━━━━━━\u{001B}[0m\n\n")
+                }
+            } catch {
+                await MainActor.run {
+                    session.sendANSI("\r\u{001B}[K") // Clear loading line
+                    session.sendANSI("\n\u{001B}[1;31m❌ AI Error:\u{001B}[0m \(error.localizedDescription)\n\n")
+                }
+            }
+        }
+    }
+
+    /// Shows an AI error alert.
+    private func showAIError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "AI Error"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    /// Shows an AI info alert.
+    private func showAIInfo(_ title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     // MARK: - Window Title

@@ -11,7 +11,7 @@ let package = Package(
         .executable(name: "Skalman", targets: ["Skalman"])
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.0.0")
+        .package(path: "SwiftTerm")
     ],
     targets: [
         .executableTarget(

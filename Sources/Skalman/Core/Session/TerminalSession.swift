@@ -19,6 +19,9 @@ final class TerminalSession: NSObject {
     /// The PID of the shell process, captured after starting.
     private(set) var shellPid: pid_t = 0
 
+    /// Captures terminal output for AI analysis.
+    let outputCapture = OutputCapture()
+
     /// The name of the profile used for this session.
     var profileName: String {
         profile.name
@@ -43,7 +46,20 @@ final class TerminalSession: NSObject {
         terminalView.processDelegate = self
         // Allow Option key to compose special characters (e.g., ~ on non-US keyboards)
         terminalView.optionAsMetaKey = false
+
+        // Set up OSC 1337 handler for shell integration
+        terminalView.onOSC1337Content = { [weak self] content in
+            self?.handleOSC1337(content)
+        }
+
         applyProfile()
+    }
+
+    private func handleOSC1337(_ content: String) {
+        // Handle Skalman shell integration sequences
+        if content.hasPrefix("SkalmanOutput=") {
+            outputCapture.handleOSCSequence(content)
+        }
     }
 
     private func applyProfile() {
@@ -101,6 +117,13 @@ final class TerminalSession: NSObject {
         // Capture the new shell PID after a short delay to ensure the process is spawned
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.captureShellPid(existingChildren: existingChildren)
+        }
+
+        // Auto-run shell integration if enabled
+        if AISettingsStorage.shared.settings.autoRunShellIntegration {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.runShellIntegration()
+            }
         }
 
         delegate?.terminalSessionDidStart(self)
@@ -168,6 +191,35 @@ final class TerminalSession: NSObject {
         // Otherwise, query the shell process directly
         guard shellPid > 0 else { return nil }
         return ProcessUtility.workingDirectory(forPid: shellPid)
+    }
+
+    // MARK: - AI Integration
+
+    /// Inserts text at the current cursor position (e.g., a generated command).
+    /// This sends the text to the PTY as if the user typed it.
+    func insertText(_ text: String) {
+        terminalView.send(txt: text)
+    }
+
+    /// Returns true if output capture is available for AI analysis.
+    var hasOutputCapture: Bool {
+        outputCapture.hasOutput
+    }
+
+    /// Runs the shell integration script in the current session.
+    func runShellIntegration() {
+        let command = ShellIntegration.sourceCommand
+        terminalView.send(txt: command + "\n")
+    }
+
+    /// Sends ANSI-formatted text to be displayed in the terminal.
+    /// This writes directly to the terminal display, not to the shell's stdin.
+    func sendANSI(_ text: String) {
+        // Feed the text directly to the terminal emulator for display
+        // This makes it appear as output, not as typed input
+        if let data = text.data(using: .utf8) {
+            terminalView.feed(byteArray: ArraySlice(data))
+        }
     }
 
 }

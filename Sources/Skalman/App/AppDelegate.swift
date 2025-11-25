@@ -222,6 +222,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         mainMenu.addItem(editMenuItem)
 
+        // AI Menu
+        let aiMenu = NSMenu(title: "AI")
+        let aiMenuItem = NSMenuItem()
+        aiMenuItem.submenu = aiMenu
+
+        let toggleAIModeItem = NSMenuItem(title: "Toggle AI Mode", action: #selector(toggleAIMode), keyEquivalent: "a")
+        toggleAIModeItem.keyEquivalentModifierMask = [.command, .shift]
+        aiMenu.addItem(toggleAIModeItem)
+
+        let analyzeOutputItem = NSMenuItem(title: "Analyze Last Output", action: #selector(analyzeLastOutput), keyEquivalent: "e")
+        analyzeOutputItem.keyEquivalentModifierMask = [.command, .shift]
+        aiMenu.addItem(analyzeOutputItem)
+
+        aiMenu.addItem(NSMenuItem.separator())
+        aiMenu.addItem(withTitle: "Run Shell Integration", action: #selector(runShellIntegration), keyEquivalent: "")
+        aiMenu.addItem(withTitle: "Copy Shell Integration Command", action: #selector(copyShellIntegrationCommand), keyEquivalent: "")
+        aiMenu.addItem(NSMenuItem.separator())
+        aiMenu.addItem(withTitle: "AI Preferences...", action: #selector(showAIPreferences), keyEquivalent: "")
+
+        mainMenu.addItem(aiMenuItem)
+
         // View Menu
         let viewMenu = NSMenu(title: MenuIdentifiers.viewMenu)
         let viewMenuItem = NSMenuItem()
@@ -327,6 +348,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func setWindowTitle() {
         activeWindowController?.showSetTitleDialog()
+    }
+
+    @objc private func toggleAIMode() {
+        activeWindowController?.toggleAIMode()
+    }
+
+    @objc private func analyzeLastOutput() {
+        activeWindowController?.analyzeLastOutput()
+    }
+
+    @objc private func showAIPreferences() {
+        PreferencesWindowController.show()
+        // TODO: Auto-select AI tab when showing preferences
+    }
+
+    @objc private func runShellIntegration() {
+        activeWindowController?.session.runShellIntegration()
+    }
+
+    @objc private func copyShellIntegrationCommand() {
+        let command = ShellIntegration.sourceCommand
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+
+        // Show alert confirmation
+        let alert = NSAlert()
+        alert.messageText = "Shell Integration Command Copied"
+        alert.informativeText = "Paste this into your ~/.bashrc or ~/.zshrc:\n\n\(command)"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     // MARK: - Window Config File Actions
