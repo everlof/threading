@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
@@ -33,7 +34,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
-        openNewWindow()
+
+        // Try to restore previous session, otherwise open a fresh window
+        if let savedState = StateManager.shared.loadAppState() {
+            restoreState(savedState)
+        } else {
+            openNewWindow()
+        }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Save current state BEFORE windows close (this is called when Cmd+Q is pressed)
+        if !windowControllers.isEmpty {
+            saveCurrentState()
+        }
+        return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -43,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // When user manually closes all windows, clear state so we don't restore them
+        StateManager.shared.clearAppState()
         return true
     }
 
@@ -61,6 +78,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openNewTab() {
         activeWindowController?.openNewTab()
+    }
+
+    // MARK: - State Persistence
+
+    private func saveCurrentState() {
+        var windowStates: [WindowState] = []
+
+        // Group controllers by their tab groups
+        var processedTabGroups = Set<UUID>()
+
+        for controller in windowControllers {
+            guard let window = controller.window else { continue }
+
+            // Skip if we've already processed this tab group
+            guard !processedTabGroups.contains(controller.tabGroupID) else { continue }
+            processedTabGroups.insert(controller.tabGroupID)
+
+            // Get all tabbed windows in this group
+            let tabbedWindows = window.tabbedWindows ?? [window]
+
+            for (index, tabbedWindow) in tabbedWindows.enumerated() {
+                if let tabbedController = windowControllers.first(where: { $0.window === tabbedWindow }) {
+                    let state = tabbedController.collectWindowState(tabIndex: index)
+                    windowStates.append(state)
+                }
+            }
+        }
+
+        let appState = AppState(windows: windowStates, savedAt: Date())
+        StateManager.shared.saveAppState(appState)
+    }
+
+    private func restoreState(_ state: AppState) {
+        // Group windows by tabGroupID to restore tab groups
+        let tabGroups = Dictionary(grouping: state.windows) { $0.tabGroupID }
+
+        for (_, windowStates) in tabGroups {
+            let sorted = windowStates.sorted { $0.tabIndex < $1.tabIndex }
+            var firstWindow: NSWindow?
+
+            for windowState in sorted {
+                let controller = TerminalWindowController(tabGroupID: windowState.tabGroupID)
+                windowControllers.append(controller)
+
+                if let first = firstWindow {
+                    // Add as a tab to the first window
+                    first.addTabbedWindow(controller.window!, ordered: .above)
+                } else {
+                    // First window in this tab group - restore its frame
+                    firstWindow = controller.window
+                    controller.window?.setFrame(windowState.frame, display: true)
+                }
+
+                controller.showWindow(nil)
+
+                // Start shell in the saved working directory
+                let initialDirectory: URL?
+                if let path = windowState.sessions.first?.workingDirectory {
+                    initialDirectory = URL(fileURLWithPath: path)
+                } else {
+                    initialDirectory = nil
+                }
+                controller.startShell(initialDirectory: initialDirectory)
+            }
+        }
+
+        // If no windows were restored, open a fresh one
+        if windowControllers.isEmpty {
+            openNewWindow()
+        }
     }
 
     // MARK: - Menu Setup
@@ -97,6 +184,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         shellMenu.addItem(withTitle: "New Window", action: #selector(openNewWindow), keyEquivalent: "n")
         shellMenu.addItem(withTitle: "New Tab", action: #selector(openNewTab), keyEquivalent: "t")
+        shellMenu.addItem(NSMenuItem.separator())
+
+        let openWindowItem = NSMenuItem(title: "Open Window...", action: #selector(openWindowConfigFromFile), keyEquivalent: "O")
+        openWindowItem.keyEquivalentModifierMask = [.command, .shift]
+        shellMenu.addItem(openWindowItem)
+
+        let saveWindowItem = NSMenuItem(title: "Save Window As...", action: #selector(saveWindowConfig), keyEquivalent: "S")
+        saveWindowItem.keyEquivalentModifierMask = [.command, .shift]
+        shellMenu.addItem(saveWindowItem)
+
         shellMenu.addItem(NSMenuItem.separator())
         shellMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
         shellMenu.addItem(withTitle: "Close Tab", action: #selector(closeCurrentTab), keyEquivalent: "w")
@@ -215,6 +312,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tabIndex = sender.tag - 1  // Convert 1-based to 0-based
         activeWindowController?.selectTab(at: tabIndex)
     }
+
+    // MARK: - Window Config File Actions
+
+    @objc private func openWindowConfigFromFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "anotherterm")].compactMap { $0 }
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        openWindowConfig(from: url)
+    }
+
+    @objc private func saveWindowConfig() {
+        guard let controller = activeWindowController,
+              let window = controller.window else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "anotherterm")].compactMap { $0 }
+        panel.nameFieldStringValue = "Window.anotherterm"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // Collect state for all tabs in the current window
+        var sessions: [SessionSnapshot] = []
+        let tabbedWindows = window.tabbedWindows ?? [window]
+
+        for tabbedWindow in tabbedWindows {
+            if let tabbedController = windowControllers.first(where: { $0.window === tabbedWindow }) {
+                let snapshot = SessionSnapshot(
+                    identifier: tabbedController.session.identifier,
+                    profileName: tabbedController.session.profileName,
+                    workingDirectory: tabbedController.session.effectiveWorkingDirectory()?.path,
+                    title: tabbedController.session.title
+                )
+                sessions.append(snapshot)
+            }
+        }
+
+        let windowState = WindowState(
+            identifier: UUID(),
+            frame: window.frame,
+            tabGroupID: controller.tabGroupID,
+            tabIndex: 0,
+            sessions: sessions
+        )
+
+        StateManager.shared.saveWindowState(windowState, to: url)
+    }
+
+    private func openWindowConfig(from url: URL) {
+        guard let windowState = StateManager.shared.loadWindowState(from: url) else { return }
+
+        // Create a new window with all the tabs from the saved config
+        var firstWindow: NSWindow?
+        let newTabGroupID = UUID()
+
+        for session in windowState.sessions {
+            let controller = TerminalWindowController(tabGroupID: newTabGroupID)
+            windowControllers.append(controller)
+
+            if let first = firstWindow {
+                first.addTabbedWindow(controller.window!, ordered: .above)
+            } else {
+                firstWindow = controller.window
+                controller.window?.setFrame(windowState.frame, display: true)
+            }
+
+            controller.showWindow(nil)
+
+            let initialDirectory: URL?
+            if let path = session.workingDirectory {
+                initialDirectory = URL(fileURLWithPath: path)
+            } else {
+                initialDirectory = nil
+            }
+            controller.startShell(initialDirectory: initialDirectory)
+        }
+    }
+
+    // MARK: - Open Files
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.pathExtension == "anotherterm" {
+            openWindowConfig(from: url)
+        }
+    }
 }
 
 // MARK: - NSWindowDelegate
@@ -223,6 +407,13 @@ extension AppDelegate: NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
+
+        // Save state BEFORE removing the controller (so we capture all windows)
+        // But only if this isn't the last window (last window save is handled specially)
+        if windowControllers.count > 1 {
+            saveCurrentState()
+        }
+
         windowControllers.removeAll { $0.window === window }
     }
 }

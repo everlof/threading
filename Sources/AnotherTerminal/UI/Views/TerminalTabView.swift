@@ -8,6 +8,7 @@ final class TerminalTabViewController: NSViewController {
 
     let session: TerminalSession
     private var shellStartPending = false
+    private var pendingInitialDirectory: URL?
 
     weak var delegate: TerminalTabViewControllerDelegate?
 
@@ -51,7 +52,12 @@ final class TerminalTabViewController: NSViewController {
     // MARK: - Public Methods
 
     func startShell() {
+        startShell(initialDirectory: nil)
+    }
+
+    func startShell(initialDirectory: URL?) {
         // Defer shell start to next run loop iteration to ensure UI is fully initialized
+        pendingInitialDirectory = initialDirectory
         DispatchQueue.main.async { [weak self] in
             self?.startShellInternal()
         }
@@ -60,7 +66,8 @@ final class TerminalTabViewController: NSViewController {
     private func startShellInternal() {
         let terminal = session.terminalView.getTerminal()
         if terminal.cols > 0 && terminal.rows > 0 {
-            session.startShell()
+            session.startShell(initialDirectory: pendingInitialDirectory)
+            pendingInitialDirectory = nil
         } else {
             // Fallback: wait for sizeChanged delegate callback
             shellStartPending = true
@@ -97,7 +104,8 @@ extension TerminalTabViewController: TerminalSessionDelegate {
         // Start shell once terminal has valid dimensions (fallback path)
         if shellStartPending && cols > 0 && rows > 0 {
             shellStartPending = false
-            session.startShell()
+            session.startShell(initialDirectory: pendingInitialDirectory)
+            pendingInitialDirectory = nil
         }
     }
 

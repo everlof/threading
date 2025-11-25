@@ -16,6 +16,14 @@ final class TerminalSession: NSObject {
 
     private var profile: TerminalProfile
 
+    /// The PID of the shell process, captured after starting.
+    private var shellPid: pid_t = 0
+
+    /// The name of the profile used for this session.
+    var profileName: String {
+        profile.name
+    }
+
     // MARK: - Initialization
 
     init(profile: TerminalProfile = .default, frame: NSRect = .zero) {
@@ -59,19 +67,56 @@ final class TerminalSession: NSObject {
     // MARK: - Shell Management
 
     func startShell() {
+        startShell(initialDirectory: nil)
+    }
+
+    func startShell(initialDirectory: URL?) {
         guard !isRunning else { return }
+
+        // Capture existing child PIDs before starting
+        let existingChildren = Set(ProcessUtility.findAllChildProcesses())
 
         let environment = buildEnvironment()
 
-        terminalView.startProcess(
-            executable: profile.shellPath,
-            args: profile.shellArguments,
-            environment: environment,
-            execName: (profile.shellPath as NSString).lastPathComponent
-        )
+        if let dir = initialDirectory {
+            // Wrap shell invocation to cd to the directory first, then exec the real shell
+            let shellArgs = profile.shellArguments.joined(separator: " ")
+            terminalView.startProcess(
+                executable: "/bin/sh",
+                args: ["-c", "cd '\(dir.path)' && exec \(profile.shellPath) \(shellArgs)"],
+                environment: environment,
+                execName: (profile.shellPath as NSString).lastPathComponent
+            )
+        } else {
+            terminalView.startProcess(
+                executable: profile.shellPath,
+                args: profile.shellArguments,
+                environment: environment,
+                execName: (profile.shellPath as NSString).lastPathComponent
+            )
+        }
 
         isRunning = true
+
+        // Capture the new shell PID after a short delay to ensure the process is spawned
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.captureShellPid(existingChildren: existingChildren)
+        }
+
         delegate?.terminalSessionDidStart(self)
+    }
+
+    /// Captures the shell PID by comparing child processes before and after starting.
+    private func captureShellPid(existingChildren: Set<pid_t>) {
+        let currentChildren = Set(ProcessUtility.findAllChildProcesses())
+        let newChildren = currentChildren.subtracting(existingChildren)
+
+        if let newPid = newChildren.first {
+            shellPid = newPid
+        } else if let anyChild = currentChildren.first {
+            // Fallback: use any child we can find
+            shellPid = anyChild
+        }
     }
 
     func terminate() {
@@ -108,6 +153,21 @@ final class TerminalSession: NSObject {
     func decreaseFontSize() {
         profile.fontSize = max(profile.fontSize - 1, 8)
         applyProfile()
+    }
+
+    // MARK: - Working Directory
+
+    /// Returns the effective working directory for this session.
+    /// First checks if OSC 7 reported a directory, then falls back to querying the shell process.
+    func effectiveWorkingDirectory() -> URL? {
+        // If we already have a directory from OSC 7, use that
+        if let currentDirectory = currentDirectory {
+            return currentDirectory
+        }
+
+        // Otherwise, query the shell process directly
+        guard shellPid > 0 else { return nil }
+        return ProcessUtility.workingDirectory(forPid: shellPid)
     }
 
 }

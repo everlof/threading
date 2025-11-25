@@ -9,6 +9,9 @@ final class TerminalWindowController: NSWindowController {
     private var findBar: FindBarView?
     private var findBarTopConstraint: NSLayoutConstraint?
 
+    /// Identifier for grouping tabbed windows together for state persistence.
+    private(set) var tabGroupID: UUID = UUID()
+
     var session: TerminalSession {
         terminalViewController.session
     }
@@ -20,6 +23,12 @@ final class TerminalWindowController: NSWindowController {
         self.init(window: window)
         setupTerminalViewController()
         window.delegate = self
+    }
+
+    /// Initialize with a specific tab group ID (for restoring tabbed windows).
+    convenience init(tabGroupID: UUID) {
+        self.init()
+        self.tabGroupID = tabGroupID
     }
 
     // MARK: - Window Creation
@@ -73,7 +82,11 @@ final class TerminalWindowController: NSWindowController {
     // MARK: - Public Methods
 
     func startShell() {
-        terminalViewController.startShell()
+        startShell(initialDirectory: nil)
+    }
+
+    func startShell(initialDirectory: URL?) {
+        terminalViewController.startShell(initialDirectory: initialDirectory)
         window?.makeFirstResponder(terminalViewController.session.terminalView)
     }
 
@@ -82,7 +95,7 @@ final class TerminalWindowController: NSWindowController {
     func openNewTab() {
         guard let currentWindow = window else { return }
 
-        let newWindowController = TerminalWindowController()
+        let newWindowController = TerminalWindowController(tabGroupID: tabGroupID)
         guard let newWindow = newWindowController.window else { return }
 
         currentWindow.addTabbedWindow(newWindow, ordered: .above)
@@ -183,6 +196,26 @@ final class TerminalWindowController: NSWindowController {
         } else {
             window?.representedURL = nil
         }
+    }
+
+    // MARK: - State Persistence
+
+    /// Collects the current state of this window for persistence.
+    func collectWindowState(tabIndex: Int) -> WindowState {
+        let sessionSnapshot = SessionSnapshot(
+            identifier: session.identifier,
+            profileName: session.profileName,
+            workingDirectory: session.effectiveWorkingDirectory()?.path,
+            title: session.title
+        )
+
+        return WindowState(
+            identifier: UUID(),
+            frame: window?.frame ?? .zero,
+            tabGroupID: tabGroupID,
+            tabIndex: tabIndex,
+            sessions: [sessionSnapshot]
+        )
     }
 }
 
