@@ -7,6 +7,7 @@ final class TerminalTabViewController: NSViewController {
     // MARK: - Properties
 
     let session: TerminalSession
+    private var shellStartPending = false
 
     weak var delegate: TerminalTabViewControllerDelegate?
 
@@ -38,6 +39,7 @@ final class TerminalTabViewController: NSViewController {
         view.window?.makeFirstResponder(session.terminalView)
     }
 
+
     // MARK: - Setup
 
     private func setupTerminalView() {
@@ -49,7 +51,20 @@ final class TerminalTabViewController: NSViewController {
     // MARK: - Public Methods
 
     func startShell() {
-        session.startShell()
+        // Defer shell start to next run loop iteration to ensure UI is fully initialized
+        DispatchQueue.main.async { [weak self] in
+            self?.startShellInternal()
+        }
+    }
+
+    private func startShellInternal() {
+        let terminal = session.terminalView.getTerminal()
+        if terminal.cols > 0 && terminal.rows > 0 {
+            session.startShell()
+        } else {
+            // Fallback: wait for sizeChanged delegate callback
+            shellStartPending = true
+        }
     }
 
     func increaseFontSize() {
@@ -79,7 +94,11 @@ extension TerminalTabViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, sizeChangedTo cols: Int, rows: Int) {
-        // Tab doesn't need to handle size changes
+        // Start shell once terminal has valid dimensions (fallback path)
+        if shellStartPending && cols > 0 && rows > 0 {
+            shellStartPending = false
+            session.startShell()
+        }
     }
 
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {

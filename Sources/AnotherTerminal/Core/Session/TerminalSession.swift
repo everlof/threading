@@ -82,6 +82,7 @@ final class TerminalSession: NSObject {
 
         env[EnvironmentKeys.term] = TerminalDefaults.terminalType
         env[EnvironmentKeys.shell] = profile.shellPath
+        env["TERM_PROGRAM"] = "AnotherTerminal"
 
         if env[EnvironmentKeys.lang] == nil {
             env[EnvironmentKeys.lang] = "en_US.UTF-8"
