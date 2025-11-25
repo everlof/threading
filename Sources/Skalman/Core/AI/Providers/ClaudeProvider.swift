@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// AI provider implementation for Anthropic's Claude API.
 final class ClaudeProvider: AIProvider {
@@ -55,6 +56,7 @@ final class ClaudeProvider: AIProvider {
 
     private func sendMessage(userMessage: String, systemPrompt: String) async throws -> String {
         guard isConfigured else {
+            SkalmanLogger.ai.error("Claude API key not configured")
             throw AIError.missingAPIKey
         }
 
@@ -79,32 +81,57 @@ final class ClaudeProvider: AIProvider {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        // Log request
+        let startTime = Date()
+        SkalmanLogger.aiRequest.debug("Claude request - model: \(self.model)")
+        SkalmanLogger.aiRequest.debug("System prompt: \(systemPrompt)")
+        SkalmanLogger.aiRequest.debug("User message: \(userMessage)")
+
         let (data, response) = try await session.data(for: request)
+        let duration = Date().timeIntervalSince(startTime)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            SkalmanLogger.aiResponse.error("Claude response: invalid HTTP response")
             throw AIError.invalidResponse
         }
 
         switch httpResponse.statusCode {
         case 200:
-            return try parseResponse(data)
+            let result = try parseResponse(data, duration: duration)
+            return result
         case 429:
+            SkalmanLogger.aiResponse.error("Claude response: rate limited")
             throw AIError.rateLimited
         case 401:
+            SkalmanLogger.aiResponse.error("Claude response: authentication failed")
             throw AIError.missingAPIKey
         default:
             let message = try? parseErrorMessage(data)
+            SkalmanLogger.aiResponse.error("Claude response: server error \(httpResponse.statusCode) - \(message ?? "unknown")")
             throw AIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
     }
 
-    private func parseResponse(_ data: Data) throws -> String {
+    private func parseResponse(_ data: Data, duration: TimeInterval) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = json["content"] as? [[String: Any]],
               let firstBlock = content.first,
               let text = firstBlock["text"] as? String else {
+            SkalmanLogger.aiResponse.error("Claude response: failed to parse JSON")
             throw AIError.invalidResponse
         }
+
+        // Extract and log token usage
+        if let usage = json["usage"] as? [String: Any] {
+            let inputTokens = usage["input_tokens"] as? Int ?? 0
+            let outputTokens = usage["output_tokens"] as? Int ?? 0
+            SkalmanLogger.aiResponse.info("Claude response - duration: \(String(format: "%.2f", duration))s, input_tokens: \(inputTokens), output_tokens: \(outputTokens)")
+
+            // Record token usage
+            TokenUsageManager.shared.record(model: model, inputTokens: inputTokens, outputTokens: outputTokens)
+        }
+
+        SkalmanLogger.aiResponse.debug("Claude response text: \(text)")
         return text
     }
 

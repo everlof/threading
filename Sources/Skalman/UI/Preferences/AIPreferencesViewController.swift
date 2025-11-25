@@ -24,24 +24,6 @@ final class AIPreferencesViewController: NSViewController {
 
     // MARK: - UI Elements
 
-    private lazy var shellIntegrationButton: NSButton = {
-        let button = NSButton(title: "Copy Shell Integration Command", target: self, action: #selector(copyShellIntegration))
-        button.bezelStyle = .rounded
-        return button
-    }()
-
-    private lazy var shellIntegrationLabel: NSTextField = {
-        let label = NSTextField(wrappingLabelWithString: "For AI output analysis, add the shell integration to your profile (.bashrc/.zshrc)")
-        label.font = NSFont.systemFont(ofSize: 11)
-        label.textColor = .secondaryLabelColor
-        return label
-    }()
-
-    private lazy var autoRunCheckbox: NSButton = {
-        let button = NSButton(checkboxWithTitle: "Automatically run shell integration on new windows/tabs", target: self, action: #selector(autoRunChanged))
-        return button
-    }()
-
     private lazy var providerPopup: NSPopUpButton = {
         let popup = NSPopUpButton()
         popup.target = self
@@ -138,10 +120,24 @@ final class AIPreferencesViewController: NSViewController {
         return row
     }()
 
+    // Token usage section
+    private lazy var tokenUsageLabel: NSTextField = {
+        let label = NSTextField(wrappingLabelWithString: "No token usage recorded")
+        label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        label.textColor = .secondaryLabelColor
+        return label
+    }()
+
+    private lazy var resetTokensButton: NSButton = {
+        let button = NSButton(title: "Reset", target: self, action: #selector(resetTokenUsage))
+        button.bezelStyle = .rounded
+        return button
+    }()
+
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 350))
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 420))
     }
 
     override func viewDidLoad() {
@@ -189,12 +185,16 @@ final class AIPreferencesViewController: NSViewController {
         stackView.addArrangedSubview(statusRow)
         stackView.addArrangedSubview(createSpacer())
 
-        // Shell integration section
-        let shellIntegrationSection = createSectionLabel("Shell Integration")
-        stackView.addArrangedSubview(shellIntegrationSection)
-        stackView.addArrangedSubview(shellIntegrationLabel)
-        stackView.addArrangedSubview(autoRunCheckbox)
-        stackView.addArrangedSubview(shellIntegrationButton)
+        // Token usage section
+        let tokenUsageSection = createSectionLabel("Token Usage")
+        let tokenRow = NSStackView()
+        tokenRow.orientation = .horizontal
+        tokenRow.spacing = 12
+        tokenRow.addArrangedSubview(tokenUsageLabel)
+        tokenRow.addArrangedSubview(resetTokensButton)
+
+        stackView.addArrangedSubview(tokenUsageSection)
+        stackView.addArrangedSubview(tokenRow)
 
         view.addSubview(stackView)
 
@@ -310,11 +310,38 @@ final class AIPreferencesViewController: NSViewController {
         ollamaURLField.stringValue = settings.ollamaURL
         ollamaModelField.stringValue = settings.ollamaModel
 
-        // Load auto-run setting
-        autoRunCheckbox.state = settings.autoRunShellIntegration ? .on : .off
+        // Load token usage
+        updateTokenUsageDisplay()
 
         // Update visibility
         updateUIForProvider()
+    }
+
+    private func updateTokenUsageDisplay() {
+        let usage = TokenUsageManager.shared.allModels()
+
+        if usage.isEmpty {
+            tokenUsageLabel.stringValue = "No token usage recorded"
+            return
+        }
+
+        var lines: [String] = []
+        for (model, tokens) in usage.sorted(by: { $0.key < $1.key }) {
+            let displayModel = model.count > 25 ? String(model.prefix(22)) + "..." : model
+            lines.append("\(displayModel): \(formatTokenCount(tokens.totalTokens)) tokens")
+        }
+
+        tokenUsageLabel.stringValue = lines.joined(separator: "\n")
+    }
+
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        } else if count >= 1_000 {
+            return String(format: "%.1fK", Double(count) / 1_000)
+        } else {
+            return "\(count)"
+        }
     }
 
     private func updateAPIKeyStatus() {
@@ -422,22 +449,17 @@ final class AIPreferencesViewController: NSViewController {
         settings = currentSettings
     }
 
-    @objc private func autoRunChanged() {
-        var currentSettings = settings
-        currentSettings.autoRunShellIntegration = autoRunCheckbox.state == .on
-        settings = currentSettings
-    }
+    @objc private func resetTokenUsage() {
+        let alert = NSAlert()
+        alert.messageText = "Reset Token Usage"
+        alert.informativeText = "This will clear all recorded token usage statistics. This action cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Reset")
+        alert.addButton(withTitle: "Cancel")
 
-    @objc private func copyShellIntegration() {
-        let command = ShellIntegration.sourceCommand
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
-
-        // Show feedback
-        let originalTitle = shellIntegrationButton.title
-        shellIntegrationButton.title = "Copied!"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.shellIntegrationButton.title = originalTitle
+        if alert.runModal() == .alertFirstButtonReturn {
+            TokenUsageManager.shared.resetAll()
+            updateTokenUsageDisplay()
         }
     }
 

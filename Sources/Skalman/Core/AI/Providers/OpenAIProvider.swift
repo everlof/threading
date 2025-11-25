@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// AI provider implementation for OpenAI's API.
 final class OpenAIProvider: AIProvider {
@@ -54,6 +55,7 @@ final class OpenAIProvider: AIProvider {
 
     private func sendMessage(userMessage: String, systemPrompt: String) async throws -> String {
         guard isConfigured else {
+            SkalmanLogger.ai.error("OpenAI API key not configured")
             throw AIError.missingAPIKey
         }
 
@@ -77,33 +79,57 @@ final class OpenAIProvider: AIProvider {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        // Log request
+        let startTime = Date()
+        SkalmanLogger.aiRequest.debug("OpenAI request - model: \(self.model)")
+        SkalmanLogger.aiRequest.debug("System prompt: \(systemPrompt)")
+        SkalmanLogger.aiRequest.debug("User message: \(userMessage)")
+
         let (data, response) = try await session.data(for: request)
+        let duration = Date().timeIntervalSince(startTime)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            SkalmanLogger.aiResponse.error("OpenAI response: invalid HTTP response")
             throw AIError.invalidResponse
         }
 
         switch httpResponse.statusCode {
         case 200:
-            return try parseResponse(data)
+            return try parseResponse(data, duration: duration)
         case 429:
+            SkalmanLogger.aiResponse.error("OpenAI response: rate limited")
             throw AIError.rateLimited
         case 401:
+            SkalmanLogger.aiResponse.error("OpenAI response: authentication failed")
             throw AIError.missingAPIKey
         default:
             let message = try? parseErrorMessage(data)
+            SkalmanLogger.aiResponse.error("OpenAI response: server error \(httpResponse.statusCode) - \(message ?? "unknown")")
             throw AIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
     }
 
-    private func parseResponse(_ data: Data) throws -> String {
+    private func parseResponse(_ data: Data, duration: TimeInterval) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
               let firstChoice = choices.first,
               let message = firstChoice["message"] as? [String: Any],
               let content = message["content"] as? String else {
+            SkalmanLogger.aiResponse.error("OpenAI response: failed to parse JSON")
             throw AIError.invalidResponse
         }
+
+        // Extract and log token usage
+        if let usage = json["usage"] as? [String: Any] {
+            let promptTokens = usage["prompt_tokens"] as? Int ?? 0
+            let completionTokens = usage["completion_tokens"] as? Int ?? 0
+            SkalmanLogger.aiResponse.info("OpenAI response - duration: \(String(format: "%.2f", duration))s, prompt_tokens: \(promptTokens), completion_tokens: \(completionTokens)")
+
+            // Record token usage
+            TokenUsageManager.shared.record(model: model, inputTokens: promptTokens, outputTokens: completionTokens)
+        }
+
+        SkalmanLogger.aiResponse.debug("OpenAI response text: \(content)")
         return content
     }
 

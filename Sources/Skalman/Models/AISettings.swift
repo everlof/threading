@@ -34,7 +34,6 @@ struct AISettings: Codable, Equatable {
     var ollamaModel: String
     var claudeModel: String
     var openaiModel: String
-    var autoRunShellIntegration: Bool
 
     // MARK: - Default Settings
 
@@ -43,23 +42,21 @@ struct AISettings: Codable, Equatable {
         ollamaURL: AIDefaults.ollamaDefaultURL,
         ollamaModel: AIDefaults.ollamaDefaultModel,
         claudeModel: AIDefaults.claudeDefaultModel,
-        openaiModel: AIDefaults.openaiDefaultModel,
-        autoRunShellIntegration: false
+        openaiModel: AIDefaults.openaiDefaultModel
     )
 
     // MARK: - Codable (with defaults for missing keys)
 
     enum CodingKeys: String, CodingKey {
-        case providerType, ollamaURL, ollamaModel, claudeModel, openaiModel, autoRunShellIntegration
+        case providerType, ollamaURL, ollamaModel, claudeModel, openaiModel
     }
 
-    init(providerType: AIProviderType, ollamaURL: String, ollamaModel: String, claudeModel: String, openaiModel: String, autoRunShellIntegration: Bool) {
+    init(providerType: AIProviderType, ollamaURL: String, ollamaModel: String, claudeModel: String, openaiModel: String) {
         self.providerType = providerType
         self.ollamaURL = ollamaURL
         self.ollamaModel = ollamaModel
         self.claudeModel = claudeModel
         self.openaiModel = openaiModel
-        self.autoRunShellIntegration = autoRunShellIntegration
     }
 
     init(from decoder: Decoder) throws {
@@ -69,7 +66,6 @@ struct AISettings: Codable, Equatable {
         ollamaModel = try container.decodeIfPresent(String.self, forKey: .ollamaModel) ?? AIDefaults.ollamaDefaultModel
         claudeModel = try container.decodeIfPresent(String.self, forKey: .claudeModel) ?? AIDefaults.claudeDefaultModel
         openaiModel = try container.decodeIfPresent(String.self, forKey: .openaiModel) ?? AIDefaults.openaiDefaultModel
-        autoRunShellIntegration = try container.decodeIfPresent(Bool.self, forKey: .autoRunShellIntegration) ?? false
     }
 }
 

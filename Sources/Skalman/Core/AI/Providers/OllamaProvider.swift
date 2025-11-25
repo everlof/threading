@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// AI provider implementation for Ollama (local LLM).
 final class OllamaProvider: AIProvider {
@@ -63,28 +64,48 @@ final class OllamaProvider: AIProvider {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        // Log request
+        let startTime = Date()
+        SkalmanLogger.aiRequest.debug("Ollama request - model: \(self.model), url: \(url.absoluteString)")
+        SkalmanLogger.aiRequest.debug("Prompt: \(prompt)")
+
         let (data, response) = try await session.data(for: request)
+        let duration = Date().timeIntervalSince(startTime)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            SkalmanLogger.aiResponse.error("Ollama response: invalid HTTP response")
             throw AIError.invalidResponse
         }
 
         switch httpResponse.statusCode {
         case 200:
-            return try parseResponse(data)
+            return try parseResponse(data, duration: duration)
         case 404:
+            SkalmanLogger.aiResponse.error("Ollama response: model '\(self.model)' not found")
             throw AIError.serverError(statusCode: 404, message: "Model '\(model)' not found. Run 'ollama pull \(model)' first.")
         default:
             let message = try? parseErrorMessage(data)
+            SkalmanLogger.aiResponse.error("Ollama response: server error \(httpResponse.statusCode) - \(message ?? "unknown")")
             throw AIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
     }
 
-    private func parseResponse(_ data: Data) throws -> String {
+    private func parseResponse(_ data: Data, duration: TimeInterval) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let response = json["response"] as? String else {
+            SkalmanLogger.aiResponse.error("Ollama response: failed to parse JSON")
             throw AIError.invalidResponse
         }
+
+        // Extract and log token usage (Ollama provides eval counts)
+        let promptEvalCount = json["prompt_eval_count"] as? Int ?? 0
+        let evalCount = json["eval_count"] as? Int ?? 0
+        SkalmanLogger.aiResponse.info("Ollama response - duration: \(String(format: "%.2f", duration))s, prompt_eval_count: \(promptEvalCount), eval_count: \(evalCount)")
+
+        // Record token usage
+        TokenUsageManager.shared.record(model: model, inputTokens: promptEvalCount, outputTokens: evalCount)
+
+        SkalmanLogger.aiResponse.debug("Ollama response text: \(response)")
         return response
     }
 

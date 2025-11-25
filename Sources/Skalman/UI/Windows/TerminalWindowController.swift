@@ -401,80 +401,12 @@ final class TerminalWindowController: NSWindowController {
         }
     }
 
-    /// Sends the last command output to AI for analysis.
-    func analyzeLastOutput() {
-        guard AIService.shared.isConfigured else {
-            let providerType = AISettingsStorage.shared.settings.providerType
-            let hasKey = KeychainManager.Service(providerType: providerType).map { KeychainManager.hasKey(for: $0) } ?? false
-            showAIError("AI not configured.\n\nProvider: \(providerType.displayName)\nAPI Key saved: \(hasKey ? "Yes" : "No")\n\nPlease set up an AI provider in Preferences > AI.")
-            return
-        }
-
-        let capture = session.outputCapture
-
-        guard capture.hasOutput,
-              let output = capture.getLastOutput(),
-              let command = capture.getLastCommand() else {
-            showAIInfo("Shell Integration Required", message: "To analyze command output:\n\n1. Run shell integration: AI > Run Shell Integration\n2. Use 'sk <command>' to capture output\n3. Press Cmd+Shift+E to analyze")
-            return
-        }
-
-        let exitCode = capture.getLastExitCode()
-        let columns = session.terminalView.getTerminal().cols
-
-        // Show inline loading indicator
-        session.sendANSI("\n\u{001B}[36m⏳ Analyzing output...\u{001B}[0m")
-
-        // Run analysis in background
-        Task {
-            do {
-                let explanation = try await AIService.shared.explainOutput(
-                    command: command,
-                    output: output,
-                    exitCode: exitCode,
-                    columns: columns
-                )
-
-                await MainActor.run {
-                    // Convert literal \x1b sequences to actual escape characters
-                    let formatted = explanation
-                        .replacingOccurrences(of: "\\x1b[", with: "\u{001B}[")
-                        .replacingOccurrences(of: "\\e[", with: "\u{001B}[")
-                        .replacingOccurrences(of: "\\033[", with: "\u{001B}[")
-
-                    // Clear the loading message and show result with ANSI formatting
-                    session.sendANSI("\r\u{001B}[K") // Clear current line
-                    session.sendANSI("\n\u{001B}[1;35m━━━ AI Analysis ━━━\u{001B}[0m\n")
-                    session.sendANSI("\u{001B}[33mCommand:\u{001B}[0m \(command)\n")
-                    session.sendANSI("\u{001B}[33mExit code:\u{001B}[0m \(exitCode)\n\n")
-                    session.sendANSI(formatted)
-                    session.sendANSI("\n\u{001B}[1;35m━━━━━━━━━━━━━━━━━━━\u{001B}[0m\n\n")
-                }
-            } catch {
-                await MainActor.run {
-                    session.sendANSI("\r\u{001B}[K") // Clear loading line
-                    session.sendANSI("\n\u{001B}[1;31m❌ AI Error:\u{001B}[0m \(error.localizedDescription)\n\n")
-                }
-            }
-        }
-    }
-
     /// Shows an AI error alert.
     private func showAIError(_ message: String) {
         let alert = NSAlert()
         alert.messageText = "AI Error"
         alert.informativeText = message
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
-    /// Shows an AI info alert.
-    private func showAIInfo(_ title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
