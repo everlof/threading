@@ -19,22 +19,49 @@ final class TerminalWindowController: NSWindowController {
     /// Whether the process tree pane is currently visible.
     private(set) var isProcessTreeVisible: Bool = false
 
+    /// Custom window title override (nil means use shell title).
+    /// This is shared across all windows in the same tab group.
+    private var _windowTitleOverride: String?
+    var windowTitleOverride: String? {
+        get { _windowTitleOverride }
+        set {
+            _windowTitleOverride = newValue
+            // Only apply if view controller is set up
+            if terminalViewController != nil {
+                applyWindowTitleToTabGroup()
+            }
+        }
+    }
+
     var session: TerminalSession {
         terminalViewController.session
     }
 
     // MARK: - Initialization
 
+    override init(window: NSWindow?) {
+        super.init(window: window)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     convenience init() {
+        self.init(windowTitleOverride: nil)
+    }
+
+    convenience init(windowTitleOverride: String?) {
         let window = Self.createWindow()
         self.init(window: window)
+        self.windowTitleOverride = windowTitleOverride
         setupSplitViewController()
         window.delegate = self
     }
 
     /// Initialize with a specific tab group ID (for restoring tabbed windows).
-    convenience init(tabGroupID: UUID) {
-        self.init()
+    convenience init(tabGroupID: UUID, windowTitleOverride: String? = nil) {
+        self.init(windowTitleOverride: windowTitleOverride)
         self.tabGroupID = tabGroupID
     }
 
@@ -119,6 +146,10 @@ final class TerminalWindowController: NSWindowController {
     func startShell(initialDirectory: URL?) {
         terminalViewController.startShell(initialDirectory: initialDirectory)
         window?.makeFirstResponder(terminalViewController.session.terminalView)
+        // Apply initial window title override if set
+        if let override = windowTitleOverride, !override.isEmpty {
+            window?.title = override
+        }
     }
 
     // MARK: - Tab Management
@@ -126,7 +157,8 @@ final class TerminalWindowController: NSWindowController {
     func openNewTab() {
         guard let currentWindow = window else { return }
 
-        let newWindowController = TerminalWindowController(tabGroupID: tabGroupID)
+        // New tabs inherit the window title override from the tab group
+        let newWindowController = TerminalWindowController(tabGroupID: tabGroupID, windowTitleOverride: windowTitleOverride)
         guard let newWindow = newWindowController.window else { return }
 
         currentWindow.addTabbedWindow(newWindow, ordered: .above)
@@ -291,8 +323,61 @@ final class TerminalWindowController: NSWindowController {
             frame: window?.frame ?? .zero,
             tabGroupID: tabGroupID,
             tabIndex: tabIndex,
-            sessions: [sessionSnapshot]
+            sessions: [sessionSnapshot],
+            windowTitleOverride: windowTitleOverride
         )
+    }
+
+    // MARK: - Title Override
+
+    /// Shows a dialog to set a custom window title.
+    func showSetTitleDialog() {
+        let alert = NSAlert()
+        alert.messageText = "Set Window Title"
+        alert.informativeText = "Enter a custom title for this window. Leave empty to use the automatic title."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        textField.stringValue = windowTitleOverride ?? ""
+        textField.placeholderString = session.title
+        alert.accessoryView = textField
+
+        alert.window.initialFirstResponder = textField
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            let newTitle = textField.stringValue
+            setWindowTitle(override: newTitle.isEmpty ? nil : newTitle)
+        }
+    }
+
+    /// Sets a custom window title override for this tab group. Pass nil to revert to automatic titles.
+    func setWindowTitle(override: String?) {
+        // Apply to all windows in the tab group
+        guard let window = window else {
+            windowTitleOverride = override
+            return
+        }
+
+        let tabbedWindows = window.tabbedWindows ?? [window]
+        for tabbedWindow in tabbedWindows {
+            if let controller = tabbedWindow.windowController as? TerminalWindowController {
+                // Set directly to avoid triggering didSet recursively
+                controller.windowTitleOverride = override
+            }
+        }
+    }
+
+    /// Applies the window title override to all windows in the tab group.
+    private func applyWindowTitleToTabGroup() {
+        guard let window = window, terminalViewController != nil else { return }
+
+        if let override = windowTitleOverride, !override.isEmpty {
+            window.title = override
+        } else {
+            window.title = session.title
+        }
     }
 }
 
@@ -305,7 +390,13 @@ extension TerminalWindowController: TerminalTabViewControllerDelegate {
     }
 
     func terminalTab(_ tab: TerminalTabViewController, titleChangedTo title: String) {
-        window?.title = title
+        // Always update tab title with shell title
+        window?.tab.title = title
+        // Only update window title if no override is set for this tab group
+        if windowTitleOverride == nil || windowTitleOverride?.isEmpty == true {
+            window?.title = title
+        }
+        // If override is set, keep showing the override (don't change window.title)
     }
 
     func terminalTab(_ tab: TerminalTabViewController, directoryChangedTo directory: URL?) {

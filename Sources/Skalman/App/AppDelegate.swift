@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var firstWindow: NSWindow?
 
             for windowState in sorted {
-                let controller = TerminalWindowController(tabGroupID: windowState.tabGroupID)
+                let controller = TerminalWindowController(tabGroupID: windowState.tabGroupID, windowTitleOverride: windowState.windowTitleOverride)
                 windowControllers.append(controller)
 
                 if let first = firstWindow {
@@ -184,6 +184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         shellMenu.addItem(withTitle: "New Window", action: #selector(openNewWindow), keyEquivalent: "n")
         shellMenu.addItem(withTitle: "New Tab", action: #selector(openNewTab), keyEquivalent: "t")
+        shellMenu.addItem(NSMenuItem.separator())
+
+        let setTitleItem = NSMenuItem(title: "Set Window Title...", action: #selector(setWindowTitle), keyEquivalent: "T")
+        setTitleItem.keyEquivalentModifierMask = [.command, .shift]
+        shellMenu.addItem(setTitleItem)
         shellMenu.addItem(NSMenuItem.separator())
 
         let openWindowItem = NSMenuItem(title: "Open Window...", action: #selector(openWindowConfigFromFile), keyEquivalent: "O")
@@ -320,6 +325,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activeWindowController?.toggleProcessTree()
     }
 
+    @objc private func setWindowTitle() {
+        activeWindowController?.showSetTitleDialog()
+    }
+
     // MARK: - Window Config File Actions
 
     @objc private func openWindowConfigFromFile() {
@@ -363,7 +372,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             frame: window.frame,
             tabGroupID: controller.tabGroupID,
             tabIndex: 0,
-            sessions: sessions
+            sessions: sessions,
+            windowTitleOverride: controller.windowTitleOverride
         )
 
         StateManager.shared.saveWindowState(windowState, to: url)
@@ -377,7 +387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let newTabGroupID = UUID()
 
         for session in windowState.sessions {
-            let controller = TerminalWindowController(tabGroupID: newTabGroupID)
+            let controller = TerminalWindowController(tabGroupID: newTabGroupID, windowTitleOverride: windowState.windowTitleOverride)
             windowControllers.append(controller)
 
             if let first = firstWindow {

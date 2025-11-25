@@ -25,6 +25,7 @@ struct WindowState: Codable {
     let tabGroupID: UUID
     let tabIndex: Int
     let sessions: [SessionSnapshot]
+    let windowTitleOverride: String?
 }
 
 // MARK: - App State

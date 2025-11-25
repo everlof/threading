@@ -14,17 +14,31 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         configureForEmojiRendering()
+        setupContextMenu()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         configureForEmojiRendering()
+        setupContextMenu()
     }
 
     private func configureForEmojiRendering() {
         wantsLayer = true
         layer?.isOpaque = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+
+    private func setupContextMenu() {
+        let contextMenu = NSMenu()
+        contextMenu.addItem(withTitle: "Rename Window...", action: #selector(renameWindow(_:)), keyEquivalent: "")
+        menu = contextMenu
+    }
+
+    @objc private func renameWindow(_ sender: Any?) {
+        // Walk up the responder chain to find the window controller
+        guard let windowController = window?.windowController as? TerminalWindowController else { return }
+        windowController.showSetTitleDialog()
     }
 
     override public func viewWillDraw() {
