@@ -7,7 +7,7 @@ final class TerminalSession: NSObject {
     // MARK: - Properties
 
     let identifier: UUID
-    let terminalView: LocalProcessTerminalView
+    let terminalView: EmojiFixedTerminalView
     private(set) var title: String
     private(set) var currentDirectory: URL?
     private(set) var isRunning: Bool = false
@@ -30,7 +30,7 @@ final class TerminalSession: NSObject {
         self.identifier = UUID()
         self.profile = profile
         self.title = profile.shellPath
-        self.terminalView = LocalProcessTerminalView(frame: frame)
+        self.terminalView = EmojiFixedTerminalView(frame: frame)
 
         super.init()
 
