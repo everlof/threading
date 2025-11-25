@@ -27,6 +27,17 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         wantsLayer = true
         layer?.isOpaque = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
+        updateLayerContentsScale()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateLayerContentsScale()
+    }
+
+    private func updateLayerContentsScale() {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1.0
+        layer?.contentsScale = scale
     }
 
     private func setupContextMenu() {
@@ -60,6 +71,7 @@ private class EmojiFixedBackingLayer: CALayer {
     init(terminalView: EmojiFixedTerminalView) {
         self.terminalView = terminalView
         super.init()
+        configureForHiDPI()
     }
 
     override init(layer: Any) {
@@ -67,13 +79,25 @@ private class EmojiFixedBackingLayer: CALayer {
             self.terminalView = other.terminalView
         }
         super.init(layer: layer)
+        configureForHiDPI()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        configureForHiDPI()
+    }
+
+    private func configureForHiDPI() {
+        // Set contentsScale to match Retina display for crisp rendering
+        contentsScale = NSScreen.main?.backingScaleFactor ?? 1.0
     }
 
     override func draw(in ctx: CGContext) {
+        // Update contentsScale in case display changed
+        if let scale = terminalView?.window?.backingScaleFactor {
+            contentsScale = scale
+        }
+
         // Fill with background color before the view draws
         // This ensures emoji alpha compositing works correctly
         if let bgColor = terminalView?.nativeBackgroundColor.cgColor {
