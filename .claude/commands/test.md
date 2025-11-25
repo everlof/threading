@@ -1,7 +1,7 @@
-Run the test suite for AnotherTerminal.
+Run the test suite for Skalman.
 
 ```bash
-xcodebuild -scheme AnotherTerminal -configuration Debug test 2>&1
+swift test 2>&1
 ```
 
 Analyze test results and report:

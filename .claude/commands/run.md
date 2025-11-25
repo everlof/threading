@@ -1,7 +1,7 @@
-Build and run AnotherTerminal.
+Build and run Skalman.
 
 ```bash
-xcodebuild -scheme AnotherTerminal -configuration Debug build && open "$(xcodebuild -scheme AnotherTerminal -configuration Debug -showBuildSettings 2>/dev/null | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $3}')/AnotherTerminal.app"
+swift build && .build/debug/Skalman
 ```
 
 If the app fails to launch, check Console.app for crash logs.

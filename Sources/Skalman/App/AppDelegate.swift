@@ -324,7 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openWindowConfigFromFile() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "anotherterm")].compactMap { $0 }
+        panel.allowedContentTypes = [UTType(filenameExtension: "skalman")].compactMap { $0 }
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
 
@@ -337,8 +337,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let window = controller.window else { return }
 
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "anotherterm")].compactMap { $0 }
-        panel.nameFieldStringValue = "Window.anotherterm"
+        panel.allowedContentTypes = [UTType(filenameExtension: "skalman")].compactMap { $0 }
+        panel.nameFieldStringValue = "Window.skalman"
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
@@ -402,7 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Open Files
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.pathExtension == "anotherterm" {
+        for url in urls where url.pathExtension == "skalman" {
             openWindowConfig(from: url)
         }
     }

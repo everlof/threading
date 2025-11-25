@@ -3,21 +3,21 @@
 import PackageDescription
 
 let package = Package(
-    name: "AnotherTerminal",
+    name: "Skalman",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "AnotherTerminal", targets: ["AnotherTerminal"])
+        .executable(name: "Skalman", targets: ["Skalman"])
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.0.0")
     ],
     targets: [
         .executableTarget(
-            name: "AnotherTerminal",
+            name: "Skalman",
             dependencies: ["SwiftTerm"],
-            path: "Sources/AnotherTerminal"
+            path: "Sources/Skalman"
         )
     ]
 )

@@ -73,7 +73,7 @@ final class TerminalWindowController: NSWindowController {
 
         // Native macOS tabs (like Terminal.app/Safari)
         window.tabbingMode = .automatic
-        window.tabbingIdentifier = "AnotherTerminalWindow"
+        window.tabbingIdentifier = "SkalmanWindow"
 
         return window
     }

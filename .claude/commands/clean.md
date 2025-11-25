@@ -1,8 +1,8 @@
-Clean the build directory and derived data.
+Clean the build directory.
 
 ```bash
-xcodebuild -scheme AnotherTerminal clean
-rm -rf ~/Library/Developer/Xcode/DerivedData/AnotherTerminal-*
+swift package clean
+rm -rf .build
 ```
 
 Confirm cleanup completed successfully.

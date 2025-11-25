@@ -1,7 +1,7 @@
-Build the AnotherTerminal project in Debug configuration.
+Build the Skalman project.
 
 ```bash
-xcodebuild -scheme AnotherTerminal -configuration Debug build 2>&1 | head -100
+swift build 2>&1
 ```
 
 After building, report any errors or warnings found.

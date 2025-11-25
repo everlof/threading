@@ -4,22 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AnotherTerminal is a native macOS terminal emulator built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+**.
+Skalman is a native macOS terminal emulator built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+**.
 
 ## Build & Run Commands
 
 ```bash
 # Build the project
-xcodebuild -scheme AnotherTerminal -configuration Debug build
-
-# Run tests
-xcodebuild -scheme AnotherTerminal -configuration Debug test
+swift build
 
 # Build for release
-xcodebuild -scheme AnotherTerminal -configuration Release build
+swift build -c release
 
-# Clean build
-xcodebuild -scheme AnotherTerminal clean
+# Run after building
+.build/debug/Skalman
 ```
 
 ## Dependencies
@@ -32,6 +29,7 @@ xcodebuild -scheme AnotherTerminal clean
 ### Core Components
 
 - **LocalProcessTerminalView**: SwiftTerm's AppKit view that combines terminal rendering + PTY handling
+- **EmojiFixedTerminalView**: Subclass that fixes emoji rendering with proper background compositing
 - **TerminalSession**: Manages SwiftTerm view lifecycle, shell process, and session state
 - **TerminalWindowController**: NSWindowController hosting terminal sessions
 - **TerminalProfile**: User preferences for font, colors, shell configuration
@@ -111,7 +109,7 @@ enum TerminalError: LocalizedError {
 ## File Organization
 
 ```
-AnotherTerminal/
+Sources/Skalman/
 ├── App/                    # App entry point, AppDelegate
 ├── Core/
 │   ├── Constants/          # TerminalConstants.swift

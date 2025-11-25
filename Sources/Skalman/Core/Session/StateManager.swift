@@ -13,7 +13,7 @@ final class StateManager {
     private var appSupportDirectory: URL {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDirectory = appSupport.appendingPathComponent("AnotherTerminal")
+        let appDirectory = appSupport.appendingPathComponent("Skalman")
 
         if !fileManager.fileExists(atPath: appDirectory.path) {
             try? fileManager.createDirectory(at: appDirectory, withIntermediateDirectories: true)
