@@ -4,7 +4,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Properties
 
-    private var mainWindowController: TerminalWindowController?
+    private var windowControllers: [TerminalWindowController] = []
+
+    private var activeWindowController: TerminalWindowController? {
+        // Get the window controller for the currently active window
+        guard let keyWindow = NSApp.keyWindow else { return windowControllers.first }
+        return windowControllers.first { $0.window === keyWindow }
+    }
 
     // MARK: - NSApplicationDelegate
 
@@ -14,7 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        mainWindowController?.close()
+        for controller in windowControllers {
+            controller.close()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -29,12 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openNewWindow() {
         let windowController = TerminalWindowController()
+        windowController.window?.delegate = self
+        windowControllers.append(windowController)
         windowController.showWindow(nil)
-        mainWindowController = windowController
     }
 
     @objc func openNewTab() {
-        mainWindowController?.openNewTab()
+        activeWindowController?.openNewTab()
     }
 
     // MARK: - Menu Setup
@@ -73,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shellMenu.addItem(withTitle: "New Tab", action: #selector(openNewTab), keyEquivalent: "t")
         shellMenu.addItem(NSMenuItem.separator())
         shellMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
-        shellMenu.addItem(withTitle: "Close Tab", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        shellMenu.addItem(withTitle: "Close Tab", action: #selector(closeCurrentTab), keyEquivalent: "w")
 
         mainMenu.addItem(shellMenuItem)
 
@@ -117,6 +126,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(NSMenuItem.separator())
+
+        let showPreviousTabItem = NSMenuItem(title: "Show Previous Tab", action: #selector(selectPreviousTab), keyEquivalent: "[")
+        showPreviousTabItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(showPreviousTabItem)
+
+        let showNextTabItem = NSMenuItem(title: "Show Next Tab", action: #selector(selectNextTab), keyEquivalent: "]")
+        showNextTabItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(showNextTabItem)
+
+        windowMenu.addItem(NSMenuItem.separator())
+
+        // Cmd+1 through Cmd+9 for tab switching
+        for i in 1...9 {
+            let tabItem = NSMenuItem(title: "Select Tab \(i)", action: #selector(selectTabByNumber(_:)), keyEquivalent: "\(i)")
+            tabItem.tag = i
+            windowMenu.addItem(tabItem)
+        }
+
+        windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
 
         mainMenu.addItem(windowMenuItem)
@@ -139,18 +167,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu Actions
 
     @objc private func showPreferences() {
-        // TODO: Implement preferences window
+        PreferencesWindowController.show()
     }
 
     @objc private func showFind() {
-        mainWindowController?.showFind()
+        activeWindowController?.showFind()
     }
 
     @objc private func increaseFontSize() {
-        mainWindowController?.increaseFontSize()
+        activeWindowController?.increaseFontSize()
     }
 
     @objc private func decreaseFontSize() {
-        mainWindowController?.decreaseFontSize()
+        activeWindowController?.decreaseFontSize()
+    }
+
+    @objc private func selectNextTab() {
+        activeWindowController?.selectNextTab()
+    }
+
+    @objc private func selectPreviousTab() {
+        activeWindowController?.selectPreviousTab()
+    }
+
+    @objc private func closeCurrentTab() {
+        activeWindowController?.closeCurrentTab()
+    }
+
+    @objc private func selectTabByNumber(_ sender: NSMenuItem) {
+        let tabIndex = sender.tag - 1  // Convert 1-based to 0-based
+        activeWindowController?.selectTab(at: tabIndex)
+    }
+}
+
+// MARK: - NSWindowDelegate
+
+extension AppDelegate: NSWindowDelegate {
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        windowControllers.removeAll { $0.window === window }
     }
 }
