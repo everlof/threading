@@ -123,6 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 windowControllers.append(controller)
 
                 if let first = firstWindow {
+                    // Exclude tab windows from Window menu - only the first window should appear
+                    controller.window?.isExcludedFromWindowsMenu = true
                     // Add as a tab to the first window
                     first.addTabbedWindow(controller.window!, ordered: .above)
                 } else {
@@ -414,6 +416,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             windowControllers.append(controller)
 
             if let first = firstWindow {
+                // Exclude tab windows from Window menu - only the first window should appear
+                controller.window?.isExcludedFromWindowsMenu = true
                 first.addTabbedWindow(controller.window!, ordered: .above)
             } else {
                 firstWindow = controller.window

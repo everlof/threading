@@ -165,6 +165,9 @@ final class TerminalWindowController: NSWindowController {
         let newWindowController = TerminalWindowController(tabGroupID: tabGroupID, windowTitleOverride: windowTitleOverride)
         guard let newWindow = newWindowController.window else { return }
 
+        // Exclude tab windows from Window menu - only the main window should appear
+        newWindow.isExcludedFromWindowsMenu = true
+
         currentWindow.addTabbedWindow(newWindow, ordered: .above)
         newWindow.makeKeyAndOrderFront(nil)
         newWindowController.startShell()
