@@ -283,6 +283,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         windowMenu.addItem(NSMenuItem.separator())
+
+        // Cmd+Ctrl+1 through Cmd+Ctrl+9 for window group switching
+        for i in 1...9 {
+            let windowItem = NSMenuItem(title: "Select Window \(i)", action: #selector(selectWindowByNumber(_:)), keyEquivalent: "\(i)")
+            windowItem.keyEquivalentModifierMask = [.command, .control]
+            windowItem.tag = i
+            windowMenu.addItem(windowItem)
+        }
+
+        windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
 
         mainMenu.addItem(windowMenuItem)
@@ -335,6 +345,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectTabByNumber(_ sender: NSMenuItem) {
         let tabIndex = sender.tag - 1  // Convert 1-based to 0-based
         activeWindowController?.selectTab(at: tabIndex)
+    }
+
+    @objc private func selectWindowByNumber(_ sender: NSMenuItem) {
+        let windowIndex = sender.tag - 1  // Convert 1-based to 0-based
+
+        // Get unique window groups (first window of each tab group)
+        var seenTabGroups = Set<UUID>()
+        var mainWindows: [NSWindow] = []
+
+        for controller in windowControllers {
+            guard let window = controller.window, !seenTabGroups.contains(controller.tabGroupID) else { continue }
+            seenTabGroups.insert(controller.tabGroupID)
+            mainWindows.append(window)
+        }
+
+        // Sort by window order (front to back based on orderfront time isn't available,
+        // so we use the order they appear in windowControllers which is creation order)
+        guard windowIndex >= 0, windowIndex < mainWindows.count else { return }
+        mainWindows[windowIndex].makeKeyAndOrderFront(nil)
     }
 
     @objc private func toggleProcessTree() {
