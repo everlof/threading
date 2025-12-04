@@ -42,8 +42,17 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     private func setupContextMenu() {
         let contextMenu = NSMenu()
+        contextMenu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+        contextMenu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        contextMenu.addItem(NSMenuItem.separator())
         contextMenu.addItem(withTitle: "Rename Window...", action: #selector(renameWindow(_:)), keyEquivalent: "")
         menu = contextMenu
+    }
+
+    // MARK: - Mouse Handling
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        return true
     }
 
     @objc private func renameWindow(_ sender: Any?) {
@@ -57,53 +66,17 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         super.viewWillDraw()
     }
 
-    override public func makeBackingLayer() -> CALayer {
-        return EmojiFixedBackingLayer(terminalView: self)
-    }
-}
-
-/// Custom backing layer that ensures proper background fill before drawing.
-/// This fixes emoji rendering by filling the dirty region with the background
-/// color before CoreText draws color emoji glyphs.
-private class EmojiFixedBackingLayer: CALayer {
-    weak var terminalView: EmojiFixedTerminalView?
-
-    init(terminalView: EmojiFixedTerminalView) {
-        self.terminalView = terminalView
-        super.init()
-        configureForHiDPI()
-    }
-
-    override init(layer: Any) {
-        if let other = layer as? EmojiFixedBackingLayer {
-            self.terminalView = other.terminalView
-        }
-        super.init(layer: layer)
-        configureForHiDPI()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        configureForHiDPI()
-    }
-
-    private func configureForHiDPI() {
-        // Set contentsScale to match Retina display for crisp rendering
-        contentsScale = NSScreen.main?.backingScaleFactor ?? 1.0
-    }
-
-    override func draw(in ctx: CGContext) {
-        // Update contentsScale in case display changed
-        if let scale = terminalView?.window?.backingScaleFactor {
-            contentsScale = scale
+    override public func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            super.draw(dirtyRect)
+            return
         }
 
-        // Fill with background color before the view draws
-        // This ensures emoji alpha compositing works correctly
-        if let bgColor = terminalView?.nativeBackgroundColor.cgColor {
-            ctx.setFillColor(bgColor)
-            ctx.fill(bounds)
-        }
-        super.draw(in: ctx)
+        // Fill background FIRST for proper emoji alpha compositing
+        context.setFillColor(nativeBackgroundColor.cgColor)
+        context.fill(dirtyRect)
+
+        // Now let SwiftTerm draw on top (selection will overwrite background where needed)
+        super.draw(dirtyRect)
     }
 }

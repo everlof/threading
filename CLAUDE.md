@@ -21,8 +21,10 @@ swift build -c release
 
 ## Dependencies
 
-- **SwiftTerm** (via SPM): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
-  - Repository: https://github.com/migueldeicaza/SwiftTerm
+- **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
+  - Location: `./SwiftTerm/` (git submodule)
+  - Upstream: https://github.com/migueldeicaza/SwiftTerm
+  - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
 
 ## Architecture
 
