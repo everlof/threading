@@ -38,9 +38,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Try to restore previous session, otherwise open a fresh window
         if let savedState = StateManager.shared.loadAppState() {
             restoreState(savedState)
+            cleanupOrphanedHistoryFiles(for: savedState)
         } else {
+            // No saved state - clean up all history files
+            HistoryManager.cleanupOrphanedHistoryFiles(activeSessionIDs: [])
             openNewWindow()
         }
+    }
+
+    private func cleanupOrphanedHistoryFiles(for state: AppState) {
+        // Collect all session IDs from restored windows
+        var activeSessionIDs = Set<UUID>()
+        for windowState in state.windows {
+            for session in windowState.sessions {
+                activeSessionIDs.insert(session.identifier)
+            }
+        }
+        HistoryManager.cleanupOrphanedHistoryFiles(activeSessionIDs: activeSessionIDs)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -119,7 +133,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var firstWindow: NSWindow?
 
             for windowState in sorted {
-                let controller = TerminalWindowController(tabGroupID: windowState.tabGroupID, windowTitleOverride: windowState.windowTitleOverride)
+                // Restore session identifier for history persistence
+                let sessionIdentifier = windowState.sessions.first?.identifier
+                let controller = TerminalWindowController(
+                    tabGroupID: windowState.tabGroupID,
+                    windowTitleOverride: windowState.windowTitleOverride,
+                    sessionIdentifier: sessionIdentifier
+                )
                 windowControllers.append(controller)
 
                 if let first = firstWindow {
@@ -441,7 +461,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let newTabGroupID = UUID()
 
         for session in windowState.sessions {
-            let controller = TerminalWindowController(tabGroupID: newTabGroupID, windowTitleOverride: windowState.windowTitleOverride)
+            // Restore session identifier for history persistence
+            let controller = TerminalWindowController(
+                tabGroupID: newTabGroupID,
+                windowTitleOverride: windowState.windowTitleOverride,
+                sessionIdentifier: session.identifier
+            )
             windowControllers.append(controller)
 
             if let first = firstWindow {

@@ -37,6 +37,9 @@ final class TerminalWindowController: NSWindowController {
         }
     }
 
+    /// Session identifier for restoring history (set before setupSplitViewController).
+    private var restoredSessionIdentifier: UUID?
+
     var session: TerminalSession {
         terminalViewController.session
     }
@@ -55,17 +58,18 @@ final class TerminalWindowController: NSWindowController {
         self.init(windowTitleOverride: nil)
     }
 
-    convenience init(windowTitleOverride: String?) {
+    convenience init(windowTitleOverride: String?, sessionIdentifier: UUID? = nil) {
         let window = Self.createWindow()
         self.init(window: window)
         self.windowTitleOverride = windowTitleOverride
+        self.restoredSessionIdentifier = sessionIdentifier
         setupSplitViewController()
         window.delegate = self
     }
 
     /// Initialize with a specific tab group ID (for restoring tabbed windows).
-    convenience init(tabGroupID: UUID, windowTitleOverride: String? = nil) {
-        self.init(windowTitleOverride: windowTitleOverride)
+    convenience init(tabGroupID: UUID, windowTitleOverride: String? = nil, sessionIdentifier: UUID? = nil) {
+        self.init(windowTitleOverride: windowTitleOverride, sessionIdentifier: sessionIdentifier)
         self.tabGroupID = tabGroupID
     }
 
@@ -131,7 +135,7 @@ final class TerminalWindowController: NSWindowController {
         splitViewController.addSplitViewItem(paneItem)
 
         // Terminal view controller (bottom, main content)
-        terminalViewController = TerminalTabViewController()
+        terminalViewController = TerminalTabViewController(sessionIdentifier: restoredSessionIdentifier)
         terminalViewController.delegate = self
 
         let terminalItem = NSSplitViewItem(viewController: terminalViewController)

@@ -26,8 +26,8 @@ final class TerminalSession: NSObject {
 
     // MARK: - Initialization
 
-    init(profile: TerminalProfile = .default, frame: NSRect = .zero) {
-        self.identifier = UUID()
+    init(profile: TerminalProfile = .default, frame: NSRect = .zero, identifier: UUID? = nil) {
+        self.identifier = identifier ?? UUID()
         self.profile = profile
         self.title = profile.shellPath
         self.terminalView = EmojiFixedTerminalView(frame: frame)
@@ -135,6 +135,11 @@ final class TerminalSession: NSObject {
         if env[EnvironmentKeys.lang] == nil {
             env[EnvironmentKeys.lang] = "en_US.UTF-8"
         }
+
+        // Per-session history file
+        HistoryManager.ensureHistoryDirectoryExists()
+        let historyPath = HistoryManager.historyFilePath(for: identifier)
+        env["HISTFILE"] = historyPath.path
 
         return env.map { "\($0.key)=\($0.value)" }
     }

@@ -14,8 +14,8 @@ final class TerminalTabViewController: NSViewController {
 
     // MARK: - Initialization
 
-    init(profile: TerminalProfile = ProfileStorage.shared.defaultProfile) {
-        self.session = TerminalSession(profile: profile)
+    init(profile: TerminalProfile = ProfileStorage.shared.defaultProfile, sessionIdentifier: UUID? = nil) {
+        self.session = TerminalSession(profile: profile, identifier: sessionIdentifier)
         super.init(nibName: nil, bundle: nil)
         session.delegate = self
     }
