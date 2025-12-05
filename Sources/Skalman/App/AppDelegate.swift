@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var windowControllers: [TerminalWindowController] = []
 
+    /// The currently active workspace ID, if any.
+    private var activeWorkspaceID: UUID?
+
     private var activeWindowController: TerminalWindowController? {
         // Get the window controller for the currently active window
         guard let keyWindow = NSApp.keyWindow else { return windowControllers.first }
@@ -35,7 +38,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
 
-        // Try to restore previous session, otherwise open a fresh window
+        // Try to restore last active workspace first
+        if let lastWorkspaceID = WorkspaceManager.getLastActiveWorkspaceID(),
+           let workspace = WorkspaceManager.loadWorkspace(id: lastWorkspaceID) {
+            restoreWorkspace(workspace)
+            return
+        }
+
+        // Fall back to session state
         if let savedState = StateManager.shared.loadAppState() {
             restoreState(savedState)
             cleanupOrphanedHistoryFiles(for: savedState)
@@ -60,6 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Save current state BEFORE windows close (this is called when Cmd+Q is pressed)
         if !windowControllers.isEmpty {
+            // If we have an active workspace, update it
+            if let workspaceID = activeWorkspaceID {
+                updateWorkspace(id: workspaceID)
+            }
             saveCurrentState()
         }
         return .terminateNow
@@ -172,6 +186,185 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Workspace Management
+
+    private func restoreWorkspace(_ workspace: Workspace) {
+        activeWorkspaceID = workspace.id
+        WorkspaceManager.setLastActiveWorkspace(id: workspace.id)
+
+        // Restore windows from workspace
+        let appState = AppState(windows: workspace.windows, savedAt: workspace.lastUsedAt)
+        restoreState(appState)
+
+        // Collect session IDs for history cleanup
+        var activeSessionIDs = Set<UUID>()
+        for windowState in workspace.windows {
+            for session in windowState.sessions {
+                activeSessionIDs.insert(session.identifier)
+            }
+        }
+        HistoryManager.cleanupOrphanedHistoryFiles(activeSessionIDs: activeSessionIDs)
+
+        // Update last used timestamp
+        WorkspaceManager.touchWorkspace(id: workspace.id)
+    }
+
+    private func updateWorkspace(id: UUID) {
+        guard var workspace = WorkspaceManager.loadWorkspace(id: id) else { return }
+
+        // Collect current window states
+        workspace.windows = collectCurrentWindowStates()
+        workspace.lastUsedAt = Date()
+
+        WorkspaceManager.saveWorkspace(workspace)
+    }
+
+    private func collectCurrentWindowStates() -> [WindowState] {
+        var windowStates: [WindowState] = []
+        var processedTabGroups = Set<UUID>()
+
+        for controller in windowControllers {
+            guard let window = controller.window else { continue }
+            guard !processedTabGroups.contains(controller.tabGroupID) else { continue }
+            processedTabGroups.insert(controller.tabGroupID)
+
+            let tabbedWindows = window.tabbedWindows ?? [window]
+
+            for (index, tabbedWindow) in tabbedWindows.enumerated() {
+                if let tabbedController = windowControllers.first(where: { $0.window === tabbedWindow }) {
+                    let state = tabbedController.collectWindowState(tabIndex: index)
+                    windowStates.append(state)
+                }
+            }
+        }
+
+        return windowStates
+    }
+
+    private func closeAllWindows() {
+        // Close all windows without saving state
+        for controller in windowControllers {
+            controller.window?.close()
+        }
+        windowControllers.removeAll()
+    }
+
+    @objc private func saveWorkspace() {
+        guard !windowControllers.isEmpty else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Save Workspace"
+        alert.informativeText = "Enter a name for this workspace:"
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        textField.stringValue = "My Workspace"
+        alert.accessoryView = textField
+        alert.window.initialFirstResponder = textField
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let name = textField.stringValue.isEmpty ? "Untitled Workspace" : textField.stringValue
+        let windows = collectCurrentWindowStates()
+
+        let workspace = Workspace(name: name, windows: windows)
+        WorkspaceManager.saveWorkspace(workspace)
+
+        // Make this the active workspace
+        activeWorkspaceID = workspace.id
+        WorkspaceManager.setLastActiveWorkspace(id: workspace.id)
+    }
+
+    @objc private func openWorkspacePicker() {
+        let workspaces = WorkspaceManager.listWorkspaces()
+
+        if workspaces.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "No Workspaces"
+            alert.informativeText = "You haven't saved any workspaces yet. Use 'Save Workspace...' to create one."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Open Workspace"
+        alert.informativeText = "Select a workspace to open. This will close all current windows."
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Delete")
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 24), pullsDown: false)
+        for workspace in workspaces {
+            let title = "\(workspace.name) (\(workspace.windowCount) window\(workspace.windowCount == 1 ? "" : "s"))"
+            popup.addItem(withTitle: title)
+            popup.lastItem?.representedObject = workspace.id
+        }
+        alert.accessoryView = popup
+
+        let response = alert.runModal()
+
+        guard let selectedID = popup.selectedItem?.representedObject as? UUID else { return }
+
+        if response == .alertFirstButtonReturn {
+            // Open
+            guard let workspace = WorkspaceManager.loadWorkspace(id: selectedID) else { return }
+
+            // Save current workspace if active
+            if let currentID = activeWorkspaceID {
+                updateWorkspace(id: currentID)
+            }
+
+            closeAllWindows()
+            restoreWorkspace(workspace)
+
+        } else if response == .alertThirdButtonReturn {
+            // Delete
+            let confirm = NSAlert()
+            confirm.messageText = "Delete Workspace?"
+            confirm.informativeText = "Are you sure you want to delete this workspace? This cannot be undone."
+            confirm.addButton(withTitle: "Delete")
+            confirm.addButton(withTitle: "Cancel")
+            confirm.alertStyle = .warning
+
+            if confirm.runModal() == .alertFirstButtonReturn {
+                WorkspaceManager.deleteWorkspace(id: selectedID)
+
+                // If we deleted the active workspace, clear it
+                if activeWorkspaceID == selectedID {
+                    activeWorkspaceID = nil
+                }
+            }
+        }
+    }
+
+    @objc private func closeWorkspace() {
+        guard activeWorkspaceID != nil else {
+            let alert = NSAlert()
+            alert.messageText = "No Active Workspace"
+            alert.informativeText = "There is no workspace currently open."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        // Save and close
+        if let workspaceID = activeWorkspaceID {
+            updateWorkspace(id: workspaceID)
+        }
+
+        activeWorkspaceID = nil
+        WorkspaceManager.setLastActiveWorkspace(id: nil)
+
+        // Don't close windows, just detach from workspace
+        let alert = NSAlert()
+        alert.messageText = "Workspace Closed"
+        alert.informativeText = "The workspace has been saved and closed. Your windows remain open but are no longer associated with a workspace."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     // MARK: - Menu Setup
 
     private func setupMenuBar() {
@@ -220,6 +413,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let saveWindowItem = NSMenuItem(title: "Save Window As...", action: #selector(saveWindowConfig), keyEquivalent: "S")
         saveWindowItem.keyEquivalentModifierMask = [.command, .shift]
         shellMenu.addItem(saveWindowItem)
+
+        shellMenu.addItem(NSMenuItem.separator())
+
+        // Workspaces submenu
+        let workspacesMenu = NSMenu(title: "Workspaces")
+        let workspacesMenuItem = NSMenuItem(title: "Workspaces", action: nil, keyEquivalent: "")
+        workspacesMenuItem.submenu = workspacesMenu
+
+        let saveWorkspaceItem = NSMenuItem(title: "Save Workspace...", action: #selector(saveWorkspace), keyEquivalent: "S")
+        saveWorkspaceItem.keyEquivalentModifierMask = [.command, .control]
+        workspacesMenu.addItem(saveWorkspaceItem)
+
+        let openWorkspaceItem = NSMenuItem(title: "Open Workspace...", action: #selector(openWorkspacePicker), keyEquivalent: "O")
+        openWorkspaceItem.keyEquivalentModifierMask = [.command, .control]
+        workspacesMenu.addItem(openWorkspaceItem)
+
+        workspacesMenu.addItem(NSMenuItem.separator())
+
+        let closeWorkspaceItem = NSMenuItem(title: "Close Workspace", action: #selector(closeWorkspace), keyEquivalent: "")
+        workspacesMenu.addItem(closeWorkspaceItem)
+
+        shellMenu.addItem(workspacesMenuItem)
 
         shellMenu.addItem(NSMenuItem.separator())
         shellMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
