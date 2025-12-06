@@ -79,7 +79,7 @@ final class TerminalSession: NSObject {
 
         // Apply cursor style
         let swiftTermStyle = swiftTermCursorStyle(from: profile.cursorStyle, blink: profile.cursorBlink)
-        terminalView.getTerminal().setCursorStyle(swiftTermStyle)
+        terminalView.cursorStyle = swiftTermStyle
 
         // Force redraw
         terminalView.needsDisplay = true
