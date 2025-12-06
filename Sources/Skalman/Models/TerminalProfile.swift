@@ -113,9 +113,24 @@ final class ProfileStorage {
             currentProfiles.append(profile)
         }
         profiles = currentProfiles
+        NotificationCenter.default.post(name: .profileDidChange, object: profile)
     }
 
     func delete(_ profile: TerminalProfile) {
         profiles = profiles.filter { $0.name != profile.name }
     }
+
+    /// Update the theme for the default profile and notify terminals
+    func setTheme(_ theme: TerminalTheme) {
+        var profile = defaultProfile
+        profile.theme = theme
+        save(profile)
+        defaultProfile = profile
+    }
+}
+
+// MARK: - Notifications
+
+extension Notification.Name {
+    static let profileDidChange = Notification.Name("profileDidChange")
 }

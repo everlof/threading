@@ -1,6 +1,6 @@
 import AppKit
 
-/// View controller for profile preferences (font, colors, theme).
+/// View controller for profile preferences (font, cursor, scrollback).
 final class ProfilePreferencesViewController: NSViewController {
 
     // MARK: - Constants
@@ -31,22 +31,6 @@ final class ProfilePreferencesViewController: NSViewController {
         let button = NSButton(title: "SF Mono 13", target: self, action: #selector(showFontPanel))
         button.bezelStyle = .rounded
         return button
-    }()
-
-    private lazy var themeLabel: NSTextField = {
-        NSTextField(labelWithString: "Theme:")
-    }()
-
-    private lazy var themePopup: NSPopUpButton = {
-        let popup = NSPopUpButton()
-        popup.target = self
-        popup.action = #selector(themeChanged)
-
-        for theme in TerminalTheme.allThemes {
-            popup.addItem(withTitle: theme.name)
-        }
-
-        return popup
     }()
 
     private lazy var cursorStyleLabel: NSTextField = {
@@ -138,9 +122,6 @@ final class ProfilePreferencesViewController: NSViewController {
         // Font row
         let fontRow = createRow(label: fontNameLabel, control: fontButton)
 
-        // Theme row
-        let themeRow = createRow(label: themeLabel, control: themePopup)
-
         // Cursor row
         let cursorRow = createRow(label: cursorStyleLabel, control: cursorStylePopup)
 
@@ -165,7 +146,6 @@ final class ProfilePreferencesViewController: NSViewController {
         previewView.addSubview(previewLabel)
 
         stackView.addArrangedSubview(fontRow)
-        stackView.addArrangedSubview(themeRow)
         stackView.addArrangedSubview(cursorRow)
         stackView.addArrangedSubview(cursorBlinkCheckbox)
         stackView.addArrangedSubview(scrollbackRow)
@@ -215,11 +195,6 @@ final class ProfilePreferencesViewController: NSViewController {
         // Font button
         fontButton.title = "\(currentProfile.fontName) \(Int(currentProfile.fontSize))"
 
-        // Theme popup
-        if let index = TerminalTheme.allThemes.firstIndex(where: { $0.name == currentProfile.theme.name }) {
-            themePopup.selectItem(at: index)
-        }
-
         // Cursor style
         if let index = TerminalProfile.CursorStyle.allCases.firstIndex(of: currentProfile.cursorStyle) {
             cursorStylePopup.selectItem(at: index)
@@ -265,12 +240,6 @@ final class ProfilePreferencesViewController: NSViewController {
         let newFont = sender.convert(NSFont.systemFont(ofSize: currentProfile.fontSize))
         currentProfile.fontName = newFont.fontName
         currentProfile.fontSize = newFont.pointSize
-    }
-
-    @objc private func themeChanged() {
-        let index = themePopup.indexOfSelectedItem
-        guard index >= 0, index < TerminalTheme.allThemes.count else { return }
-        currentProfile.theme = TerminalTheme.allThemes[index]
     }
 
     @objc private func cursorStyleChanged() {

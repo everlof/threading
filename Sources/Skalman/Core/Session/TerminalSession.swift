@@ -45,13 +45,29 @@ final class TerminalSession: NSObject {
         terminalView.optionAsMetaKey = false
 
         applyProfile()
+
+        // Listen for profile changes to update colors live
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(profileDidChange(_:)),
+            name: .profileDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func profileDidChange(_ notification: Notification) {
+        // Update with the new profile
+        if let newProfile = notification.object as? TerminalProfile {
+            profile = newProfile
+            applyProfile()
+        }
     }
 
     private func applyProfile() {
         let font = NSFont.monospacedSystemFont(ofSize: profile.fontSize, weight: .regular)
         terminalView.font = font
 
-        // Install ANSI color palette first
+        // Install ANSI color palette
         let colors = profile.theme.asSwiftTermColors()
         terminalView.installColors(colors)
 
@@ -61,8 +77,23 @@ final class TerminalSession: NSObject {
         terminalView.selectedTextBackgroundColor = profile.theme.selection
         terminalView.caretColor = profile.theme.cursor
 
+        // Apply cursor style
+        let swiftTermStyle = swiftTermCursorStyle(from: profile.cursorStyle, blink: profile.cursorBlink)
+        terminalView.getTerminal().setCursorStyle(swiftTermStyle)
+
         // Force redraw
         terminalView.needsDisplay = true
+    }
+
+    private func swiftTermCursorStyle(from style: TerminalProfile.CursorStyle, blink: Bool) -> CursorStyle {
+        switch style {
+        case .block:
+            return blink ? .blinkBlock : .steadyBlock
+        case .underline:
+            return blink ? .blinkUnderline : .steadyUnderline
+        case .bar:
+            return blink ? .blinkBar : .steadyBar
+        }
     }
 
     // MARK: - Shell Management

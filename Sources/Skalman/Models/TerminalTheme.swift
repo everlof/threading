@@ -183,28 +183,29 @@ extension TerminalTheme {
         brightWhite: .white
     )
 
+    /// Pro theme - matches Terminal.app's Pro profile colors
     static let pro = TerminalTheme(
         name: "Pro",
-        foreground: NSColor(hex: "#F2F2F2")!,
-        background: NSColor(hex: "#1A1A1A")!,
+        foreground: NSColor(hex: "#5ADB57")!,  // Green text like Terminal Pro_DUP
+        background: NSColor(hex: "#20222B")!,  // Dark blue-gray background
         cursor: NSColor(hex: "#4D4D4D")!,
         selection: NSColor(hex: "#414141")!,
-        black: .black,
-        red: NSColor(hex: "#FF6B6B")!,
-        green: NSColor(hex: "#69FF94")!,
-        yellow: NSColor(hex: "#FFFFA5")!,
-        blue: NSColor(hex: "#6FB3D2")!,
-        magenta: NSColor(hex: "#D78CFF")!,
-        cyan: NSColor(hex: "#85E0FF")!,
-        white: NSColor(hex: "#F8F8F2")!,
-        brightBlack: NSColor(hex: "#545454")!,
-        brightRed: NSColor(hex: "#FF9494")!,
-        brightGreen: NSColor(hex: "#A0FFA0")!,
-        brightYellow: NSColor(hex: "#FFFFB3")!,
-        brightBlue: NSColor(hex: "#A0D0F0")!,
-        brightMagenta: NSColor(hex: "#E8B0FF")!,
-        brightCyan: NSColor(hex: "#B0F0FF")!,
-        brightWhite: .white
+        black: NSColor(hex: "#000000")!,
+        red: NSColor(hex: "#FF2600")!,
+        green: NSColor(hex: "#3AFF00")!,
+        yellow: NSColor(hex: "#FFFC00")!,
+        blue: NSColor(hex: "#1478FF")!,
+        magenta: NSColor(hex: "#FF00FF")!,
+        cyan: NSColor(hex: "#00FCFF")!,
+        white: NSColor(hex: "#F2F2F2")!,
+        brightBlack: NSColor(hex: "#808080")!,
+        brightRed: NSColor(hex: "#FF6B6B")!,   // Bright red matching Terminal.app
+        brightGreen: NSColor(hex: "#51C34E")!, // From Pro_DUP
+        brightYellow: NSColor(hex: "#FEFE67")!,
+        brightBlue: NSColor(hex: "#2943F1")!,  // From Pro_DUP
+        brightMagenta: NSColor(hex: "#FF77FF")!,
+        brightCyan: NSColor(hex: "#68FDFE")!,
+        brightWhite: NSColor(hex: "#FFFFFF")!
     )
 
     static let homebrew = TerminalTheme(
@@ -255,7 +256,13 @@ extension TerminalTheme {
         brightWhite: NSColor(hex: "#EFF1F5")!
     )
 
-    static let allThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean]
+    /// All available themes (use ThemeManager.shared.allThemes for the full list including custom themes)
+    static let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean]
+
+    /// Convenience accessor - prefer ThemeManager.shared.allThemes
+    static var allThemes: [TerminalTheme] {
+        ThemeManager.shared.allThemes
+    }
 
     /// Convert theme to SwiftTerm Color array (16 ANSI colors)
     func asSwiftTermColors() -> [Color] {

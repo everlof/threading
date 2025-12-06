@@ -8,12 +8,13 @@ final class PreferencesWindowController: NSWindowController {
     private enum TabIdentifiers {
         static let general = "general"
         static let profiles = "profiles"
+        static let themes = "themes"
         static let ai = "ai"
     }
 
     private enum WindowSize {
-        static let width: CGFloat = 500
-        static let height: CGFloat = 400
+        static let width: CGFloat = 650
+        static let height: CGFloat = 500
     }
 
     // MARK: - Properties
@@ -90,6 +91,13 @@ final class PreferencesWindowController: NSWindowController {
         profilesTab.identifier = TabIdentifiers.profiles
         profilesTab.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: "Profiles")
 
+        // Themes Tab
+        let themesVC = ThemePreferencesViewController()
+        let themesTab = NSTabViewItem(viewController: themesVC)
+        themesTab.label = "Themes"
+        themesTab.identifier = TabIdentifiers.themes
+        themesTab.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "Themes")
+
         // AI Tab
         let aiVC = AIPreferencesViewController()
         let aiTab = NSTabViewItem(viewController: aiVC)
@@ -99,6 +107,7 @@ final class PreferencesWindowController: NSWindowController {
 
         tabViewController.addTabViewItem(generalTab)
         tabViewController.addTabViewItem(profilesTab)
+        tabViewController.addTabViewItem(themesTab)
         tabViewController.addTabViewItem(aiTab)
 
         window?.contentViewController = tabViewController
