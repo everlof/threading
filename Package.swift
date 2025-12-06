@@ -17,7 +17,11 @@ let package = Package(
         .executableTarget(
             name: "Skalman",
             dependencies: ["SwiftTerm"],
-            path: "Sources/Skalman"
+            path: "Sources/Skalman",
+            exclude: ["Resources/Info.plist", "Resources/Skalman.entitlements"],
+            resources: [
+                .process("Resources/Assets.xcassets")
+            ]
         )
     ]
 )
