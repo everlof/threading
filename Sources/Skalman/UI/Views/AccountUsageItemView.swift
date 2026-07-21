@@ -2,8 +2,10 @@ import AppKit
 
 /// Toolbar pill showing how much of the current account's rate limit is spent.
 ///
-/// Sits at the window's trailing edge and follows the selected session's account. It shows
-/// the peak window as a small ring and percent, monochrome while usage is comfortable and
+/// Sits at the window's trailing edge and follows the selected session's account. A small
+/// ring gauges whichever window is closest to its limit; beside it every window is named
+/// with its value — `5h 43% · 7d 73%` — because the two limits answer different questions
+/// (can I keep going now, and will the week hold). Monochrome while usage is comfortable,
 /// tinted only as a window approaches its limit — the toolbar is glanced at, not read, so
 /// colour is reserved for the moment it means something. Clicking opens the detail popover.
 ///
@@ -14,7 +16,7 @@ final class AccountUsageItemView: NSView {
     // MARK: - Properties
 
     private let ringView = UsageRingView()
-    private let percentLabel = NSTextField(labelWithString: "")
+    private let summaryLabel = NSTextField(labelWithString: "")
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false { didSet { updateBackground() } }
@@ -52,12 +54,9 @@ final class AccountUsageItemView: NSView {
             radius: Design.Radius.pill(height: AccountUsageItemDefaults.height)
         )
 
-        percentLabel.font = Design.Typography.control()
-        percentLabel.textColor = .secondaryLabelColor
-
         ringView.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [ringView, percentLabel])
+        let stack = NSStackView(views: [ringView, summaryLabel])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = Design.Spacing.tight
@@ -136,19 +135,71 @@ final class AccountUsageItemView: NSView {
 
         isHidden = false
 
+        // The ring is the glance: one gauge, driven by whichever window is closest to its
+        // limit. The text beside it names every window, which is where the insight lives —
+        // a spent 5-hour window and a spent week mean different things.
         let peak = usage?.peakWindow()
         let severity = UsageSeverity.from(fraction: peak?.fraction)
 
         ringView.fraction = peak?.fraction
         ringView.tint = severity.glyphColor
 
-        percentLabel.stringValue = peak?.percent.map { "\($0)%" }
-            ?? AccountUsageItemDefaults.unknownValue
-        percentLabel.textColor = severity == .normal
-            ? .secondaryLabelColor
-            : severity.glyphColor
+        summaryLabel.attributedStringValue = Self.summary(windows: usage?.windows ?? [])
 
         toolTip = tooltip(account: account, usage: usage, errorMessage: errorMessage)
+    }
+
+    /// `5h 43% · 7d 73%`: each window as a quiet label and its value, the value tinted by
+    /// that window's own severity. The vocabulary is Claude's own status line, so the short
+    /// names read as familiar rather than cryptic.
+    private static func summary(windows: [AccountUsage.Window]) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+
+        func append(_ text: String, font: NSFont, color: NSColor) {
+            result.append(NSAttributedString(
+                string: text,
+                attributes: [.font: font, .foregroundColor: color]
+            ))
+        }
+
+        guard !windows.isEmpty else {
+            append(
+                AccountUsageItemDefaults.unknownValue,
+                font: Design.Typography.control(),
+                color: .secondaryLabelColor
+            )
+            return result
+        }
+
+        for (index, window) in windows.enumerated() {
+            if index > 0 {
+                append(
+                    AccountUsageItemDefaults.segmentSeparator,
+                    font: Design.Typography.control(),
+                    color: .tertiaryLabelColor
+                )
+            }
+
+            append(
+                "\(window.id) ",
+                font: Design.Typography.caption(),
+                color: .tertiaryLabelColor
+            )
+
+            let expired = window.isExpired()
+            let severity = UsageSeverity.from(fraction: expired ? nil : window.fraction)
+            let value = expired
+                ? AccountUsageItemDefaults.unknownValue
+                : window.percent.map { "\($0)%" } ?? AccountUsageItemDefaults.unknownValue
+
+            append(
+                value,
+                font: Design.Typography.control(),
+                color: severity == .normal ? .secondaryLabelColor : severity.glyphColor
+            )
+        }
+
+        return result
     }
 
     private func tooltip(
@@ -275,66 +326,6 @@ final class UsageRingView: NSView {
     }
 }
 
-// MARK: - Severity Colours
-
-extension UsageSeverity {
-
-    /// Tint for the ring, percent text and bars. Normal stays monochrome in glyph contexts
-    /// and takes the user's accent in bar fills; pressure escalates through the system's
-    /// own warning colours, so light and dark both work.
-    var glyphColor: NSColor {
-        switch self {
-        case .normal: return .secondaryLabelColor
-        case .warning: return .systemOrange
-        case .critical: return .systemRed
-        }
-    }
-
-    var barColor: NSColor {
-        switch self {
-        case .normal: return .controlAccentColor
-        case .warning: return .systemOrange
-        case .critical: return .systemRed
-        }
-    }
-}
-
-// MARK: - Usage Formatting
-
-enum UsageFormat {
-
-    /// Compact time until a reset: `47m`, `2h 14m`, `3d 4h`.
-    static func remaining(until date: Date, from now: Date = Date()) -> String {
-        let interval = max(0, date.timeIntervalSince(now))
-        let minutes = Int(interval / 60)
-
-        if minutes < 60 {
-            return "\(max(minutes, 1))m"
-        }
-
-        let hours = minutes / 60
-        if hours < 24 {
-            let rest = minutes % 60
-            return rest > 0 ? "\(hours)h \(rest)m" : "\(hours)h"
-        }
-
-        let days = hours / 24
-        let rest = hours % 24
-        return rest > 0 ? "\(days)d \(rest)h" : "\(days)d"
-    }
-
-    /// How stale a reading is: `just now`, `4m ago`.
-    static func age(of date: Date, at now: Date = Date()) -> String {
-        let minutes = Int(max(0, now.timeIntervalSince(date)) / 60)
-        if minutes < 1 { return "just now" }
-        if minutes < 60 { return "\(minutes)m ago" }
-
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)h ago" }
-        return "\(hours / 24)d ago"
-    }
-}
-
 // MARK: - Account Usage Item Defaults
 
 enum AccountUsageItemDefaults {
@@ -345,4 +336,7 @@ enum AccountUsageItemDefaults {
 
     /// Shown when a window's percentage is unknown, e.g. after its reset has passed.
     static let unknownValue = "—"
+
+    /// Between window segments in the pill's summary.
+    static let segmentSeparator = " · "
 }

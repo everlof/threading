@@ -251,11 +251,11 @@ The default account launches with `env -u CLAUDE_CONFIG_DIR` rather than a bare 
 override exported by your shell cannot silently route it to the wrong account.
 
 ### Usage in the toolbar
-The top-right of the toolbar shows how much of the current account's rate limit is spent — a
-small ring and percentage for whichever window is closest to its limit. It follows the
-selected session's account, and hides for shells and anything else without a metered login.
-The pill stays monochrome while usage is comfortable, turning orange past 75% and red past
-92%.
+The top-right of the toolbar shows how much of the current account's rate limit is spent —
+each window labelled with its value, like `5h 43% · 7d 73%`, beside a small ring gauging
+whichever window is closest to its limit. It follows the selected session's account, and
+hides for shells and anything else without a metered login. The pill stays monochrome while
+usage is comfortable; a value turns orange past 75% and red past 92% of its window.
 
 Click it for the full picture: every rate-limit window (the 5-hour session window and the
 weekly one), each with its own bar, percentage and reset countdown, plus how fresh the

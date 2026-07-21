@@ -100,38 +100,48 @@ final class EmojiPickerViewController: NSViewController {
 
     // MARK: - Input Row
 
-    /// The free-entry field, a button opening the system emoji picker, and — when there is an
-    /// icon — a quiet way to clear it.
+    /// A prominent button opening the system Emoji & Symbols picker — which searches by name,
+    /// so "coffee" finds ☕ — over a quiet field that also takes a pasted or typed emoji, with
+    /// removal beside it when there is an icon to clear.
     private func makeInputRow() -> NSView {
+        let browse = NSButton(
+            title: EmojiPickerStrings.browse,
+            image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)!,
+            target: self,
+            action: #selector(browseClicked)
+        )
+        browse.imagePosition = .imageLeading
+        browse.bezelStyle = .rounded
+        browse.controlSize = .large
+        browse.translatesAutoresizingMaskIntoConstraints = false
+
         field.placeholderString = EmojiPickerStrings.placeholder
         field.font = .systemFont(ofSize: EmojiPickerLayout.fieldFontSize)
         field.bezelStyle = .roundedBezel
         field.delegate = self
-        field.translatesAutoresizingMaskIntoConstraints = false
-        field.widthAnchor.constraint(greaterThanOrEqualToConstant: EmojiPickerLayout.fieldMinWidth).isActive = true
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let browse = NSButton(
-            image: NSImage(systemSymbolName: "face.smiling", accessibilityDescription: EmojiPickerStrings.browse)!,
-            target: self,
-            action: #selector(browseClicked)
-        )
-        browse.bezelStyle = .rounded
-        browse.toolTip = EmojiPickerStrings.browse
-        browse.setContentHuggingPriority(.required, for: .horizontal)
-
-        var views: [NSView] = [field, browse]
-
+        var fieldViews: [NSView] = [field]
         if showsRemove {
             let remove = NSButton(title: EmojiPickerStrings.remove, target: self, action: #selector(removeClicked))
             remove.bezelStyle = .rounded
             remove.setContentHuggingPriority(.required, for: .horizontal)
-            views.append(remove)
+            fieldViews.append(remove)
         }
 
-        let row = NSStackView(views: views)
-        row.orientation = .horizontal
-        row.spacing = Design.Spacing.small
-        return row
+        let fieldRow = NSStackView(views: fieldViews)
+        fieldRow.orientation = .horizontal
+        fieldRow.spacing = Design.Spacing.small
+
+        let stack = NSStackView(views: [browse, fieldRow])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        browse.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+        browse.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        fieldRow.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+        fieldRow.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        return stack
     }
 
     // MARK: - Actions
@@ -252,7 +262,7 @@ enum EmojiPickerLayout {
 // MARK: - Emoji Picker Strings
 
 enum EmojiPickerStrings {
-    static let placeholder = "Type emoji…"
-    static let browse = "Emoji & Symbols"
+    static let placeholder = "or paste an emoji"
+    static let browse = " Search Emoji…"
     static let remove = "Remove"
 }

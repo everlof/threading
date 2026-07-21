@@ -453,8 +453,10 @@ which is a separate, lossy feature.
 ### Account Usage
 
 The toolbar's trailing pill (`AccountUsageItemView`) shows the selected session's account
-rate-limit pressure: peak window as a ring and percent, monochrome until 75%, orange then red
-past 92%; clicking opens per-window bars with reset countdowns. `AccountUsageService` caches
+rate-limit pressure: a ring gauging the peak window beside every window's own value
+(`5h 43% · 7d 73%` — Claude's own status-line vocabulary), monochrome until 75%, orange then
+red past 92%, each value tinted by its own window's severity; clicking opens per-window bars
+with reset countdowns. `AccountUsageService` caches
 per account and keeps the last good reading through failed refreshes. The credential posture
 mirrors `~/repo/claudex`: read the short-lived tokens the official CLIs already keep, never
 refresh them, and **never read the Keychain** — its `Claude Code-credentials` items do not
