@@ -44,6 +44,21 @@ final class TerminalSession: NSObject {
         // Allow Option key to compose special characters (e.g., ~ on non-US keyboards)
         terminalView.optionAsMetaKey = false
 
+        terminalView.onOutput = { [weak self] byteCount in
+            guard let self else { return }
+            self.delegate?.terminalSession(self, didProduceOutputOf: byteCount)
+        }
+
+        terminalView.onBell = { [weak self] in
+            guard let self else { return }
+            self.delegate?.terminalSessionDidRingBell(self)
+        }
+
+        terminalView.onWheelForwarded = { [weak self] in
+            guard let self else { return }
+            self.delegate?.terminalSessionDidForwardScroll(self)
+        }
+
         applyProfile()
 
         // Listen for profile changes to update colors live
@@ -131,7 +146,7 @@ final class TerminalSession: NSObject {
         isRunning = true
 
         // Capture the new shell PID after a short delay to ensure the process is spawned
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + ShellDefaults.pidCaptureDelay) { [weak self] in
             self?.captureShellPid(existingChildren: existingChildren)
         }
 
@@ -151,15 +166,55 @@ final class TerminalSession: NSObject {
         }
     }
 
+    /// Starts an agent using a resolved launch plan.
+    ///
+    /// Unlike `startShell`, the plan already encodes the working directory and the agent
+    /// command, so the process is started verbatim.
+    func start(plan: AgentLaunchPlan) {
+        guard !isRunning else { return }
+
+        let existingChildren = Set(ProcessUtility.findAllChildProcesses())
+
+        terminalView.startProcess(
+            executable: plan.executable,
+            args: plan.arguments,
+            environment: buildEnvironment(),
+            execName: (plan.executable as NSString).lastPathComponent
+        )
+
+        isRunning = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + ShellDefaults.pidCaptureDelay) { [weak self] in
+            self?.captureShellPid(existingChildren: existingChildren)
+        }
+
+        delegate?.terminalSessionDidStart(self)
+    }
+
+    /// Terminates the child process and closes the PTY.
+    ///
+    /// This must actually tear the process down rather than wait for deallocation, so a
+    /// session going dormant releases its PTY and file descriptors immediately.
     func terminate() {
-        // SwiftTerm handles process termination when the view is deallocated
+        guard isRunning else { return }
+
+        terminalView.terminate()
         isRunning = false
+        shellPid = 0
     }
 
     private func buildEnvironment() -> [String] {
         var env = ProcessInfo.processInfo.environment
 
+        // Drop the launching process's own agent identity. These describe whoever started
+        // Skalman — if that was itself an agent session, every session spawned here would
+        // inherit its identifiers and believe it was a nested child of that conversation.
+        for key in env.keys where AgentEnvironment.isInheritedAgentIdentity(key) {
+            env.removeValue(forKey: key)
+        }
+
         env[EnvironmentKeys.term] = TerminalDefaults.terminalType
+        env[EnvironmentKeys.colorTerm] = TerminalDefaults.colorTerm
         env[EnvironmentKeys.shell] = profile.shellPath
         env["TERM_PROGRAM"] = "Skalman"
 
@@ -253,6 +308,9 @@ protocol TerminalSessionDelegate: AnyObject {
     func terminalSession(_ session: TerminalSession, directoryChangedTo directory: URL?)
     func terminalSession(_ session: TerminalSession, sizeChangedTo cols: Int, rows: Int)
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?)
+    func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int)
+    func terminalSessionDidRingBell(_ session: TerminalSession)
+    func terminalSessionDidForwardScroll(_ session: TerminalSession)
 }
 
 // MARK: - Default Delegate Implementation
@@ -263,4 +321,7 @@ extension TerminalSessionDelegate {
     func terminalSession(_ session: TerminalSession, directoryChangedTo directory: URL?) {}
     func terminalSession(_ session: TerminalSession, sizeChangedTo cols: Int, rows: Int) {}
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {}
+    func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {}
+    func terminalSessionDidRingBell(_ session: TerminalSession) {}
+    func terminalSessionDidForwardScroll(_ session: TerminalSession) {}
 }

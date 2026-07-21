@@ -1,0 +1,268 @@
+import Foundation
+
+// MARK: - Projects State Version
+
+enum ProjectsStateVersion {
+    static let current = 1
+}
+
+// MARK: - Agent Kind
+
+/// The kind of program a session hosts.
+enum AgentKind: String, Codable, CaseIterable {
+    case claude
+    case codex
+    case shell
+
+    /// Human-readable name shown in menus and the sidebar.
+    var displayName: String {
+        switch self {
+        case .claude: return "Claude Code"
+        case .codex: return "Codex"
+        case .shell: return "Shell"
+        }
+    }
+
+    /// The executable invoked on the user's PATH.
+    ///
+    /// Nil for shells, whose executable comes from the active profile at launch rather than
+    /// being fixed by the agent kind.
+    var executableName: String? {
+        switch self {
+        case .claude: return AgentDefaults.claudeExecutable
+        case .codex: return AgentDefaults.codexExecutable
+        case .shell: return nil
+        }
+    }
+
+    /// Whether sessions of this kind can be resumed by identifier after exiting.
+    var supportsResume: Bool {
+        switch self {
+        case .claude, .codex: return true
+        case .shell: return false
+        }
+    }
+
+    /// Whether the session identifier can be chosen by us before launch.
+    ///
+    /// Claude accepts `--session-id <uuid>`, so we mint it. Codex assigns its own,
+    /// which must be discovered afterwards via `CodexSessionDiscovery`.
+    var supportsPresetSessionID: Bool {
+        self == .claude
+    }
+
+    /// Whether this agent supports multiple logins.
+    var supportsAccounts: Bool {
+        self != .shell
+    }
+
+    /// Whether Skalman may render this agent's conversation itself, instead of a terminal.
+    ///
+    /// Claude is disabled **deliberately**: its streaming mode (`claude -p`) runs on the user's
+    /// subscription, and Anthropic's 2026 terms restrict subscription OAuth to Claude Code and
+    /// claude.ai — driving it headless from a third-party app is the pattern that policy
+    /// targets. Codex exposes supported headless JSONL output through `codex exec --json`, so
+    /// it can use the native surface without borrowing Claude's disabled transport.
+    var supportsNativeUI: Bool {
+        self == .codex
+    }
+
+    /// Environment variable redirecting this CLI to an alternate config directory.
+    var accountEnvironmentKey: String? {
+        switch self {
+        case .claude: return "CLAUDE_CONFIG_DIR"
+        case .codex: return "CODEX_HOME"
+        case .shell: return nil
+        }
+    }
+}
+
+// MARK: - Agent Session
+
+/// A single agent conversation or shell belonging to a project.
+///
+/// The session outlives its terminal: when the agent exits, the PTY is torn down but
+/// this record remains so the conversation can be resumed by `agentSessionID` later.
+struct AgentSession: Codable, Identifiable {
+    let id: UUID
+    var kind: AgentKind
+
+    /// The name assigned when the session was created, e.g. `Claude Code` or `claudedb`.
+    /// Used as the fallback when nothing better is known.
+    var title: String
+
+    /// An explicit rename by the user. Takes precedence over the terminal's own title,
+    /// so a deliberate name is never overwritten by agent activity.
+    var customTitle: String?
+
+    /// The most recent title reported by the terminal.
+    ///
+    /// Agents use this to report what they are working on. It is retained after the agent
+    /// exits so a dormant session still shows what it was last doing.
+    var terminalTitle: String?
+
+    let createdAt: Date
+    var lastActiveAt: Date
+
+    /// Identifier used to resume this conversation.
+    ///
+    /// For Claude this is minted by us and set at first launch. For Codex it is assigned
+    /// by the CLI and remains nil until discovery completes. Always nil for shells.
+    var agentSessionID: String?
+
+    /// Whether this session has been launched at least once, distinguishing a first
+    /// launch from a resume.
+    var hasLaunched: Bool
+
+    /// Exit code from the most recent run, if it has ended.
+    var lastExitCode: Int32?
+
+    /// Which agent login this session belongs to. Nil means the provider's default account.
+    ///
+    /// Conversations are stored per account, so this must be stable across resumes: the same
+    /// identifier resumed under a different account would not be found.
+    var accountHandle: String?
+
+    /// Model the session was started with, passed again on resume so it does not drift.
+    /// Nil uses whatever the CLI defaults to.
+    var model: String?
+
+    /// Stored optional so state written before archiving existed still decodes: synthesized
+    /// `Codable` throws on a missing key rather than falling back to a property's default.
+    private var archived: Bool?
+
+    /// Stored optional for the same reason as `archived`.
+    private var nativeUI: Bool?
+
+    /// Whether Skalman renders this conversation itself instead of showing the agent's
+    /// terminal. Experimental, and available only where the agent exposes a supported
+    /// structured-output transport.
+    ///
+    /// Fixed at creation rather than toggleable: the two surfaces drive the CLI in
+    /// incompatible ways, so switching mid-conversation would mean killing the process and
+    /// resuming it under a different interface.
+    var usesNativeUI: Bool {
+        get { nativeUI ?? false }
+        set { nativeUI = newValue }
+    }
+
+    /// Whether the session has been filed away.
+    ///
+    /// Archiving only affects where the session appears: its identifier and conversation are
+    /// untouched, so an archived session resumes exactly as it would have.
+    var isArchived: Bool {
+        get { archived ?? false }
+        set { archived = newValue }
+    }
+
+    init(
+        kind: AgentKind,
+        title: String,
+        accountHandle: String? = nil,
+        model: String? = nil,
+        usesNativeUI: Bool = false,
+        id: UUID = UUID()
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.customTitle = nil
+        self.terminalTitle = nil
+        self.createdAt = Date()
+        self.lastActiveAt = Date()
+        self.agentSessionID = nil
+        self.hasLaunched = false
+        self.lastExitCode = nil
+        self.accountHandle = accountHandle
+        self.model = model
+        self.archived = nil
+        self.nativeUI = usesNativeUI
+    }
+
+    /// Whether a previous conversation exists that can be resumed.
+    var isResumable: Bool {
+        kind.supportsResume && agentSessionID != nil
+    }
+
+    /// The name shown in the sidebar.
+    ///
+    /// An explicit rename wins, then the terminal's own title when that behaviour is
+    /// enabled, then the name the session was created with.
+    var displayTitle: String {
+        if let customTitle, !customTitle.isEmpty {
+            return customTitle
+        }
+
+        if AppSettings.shared.usesTerminalTitleInSidebar,
+           let terminalTitle, !terminalTitle.isEmpty {
+            return terminalTitle
+        }
+
+        return title
+    }
+
+    /// The name handed to the agent at launch.
+    ///
+    /// Deliberately excludes the terminal title, which the agent itself produces and which
+    /// would otherwise be fed back into the next launch.
+    var launchName: String {
+        if let customTitle, !customTitle.isEmpty {
+            return customTitle
+        }
+
+        return title
+    }
+}
+
+// MARK: - Project
+
+/// A folder the user has added, grouping the agent sessions started inside it.
+struct Project: Codable, Identifiable {
+    let id: UUID
+    var name: String
+    /// Stored as a path string for reliable encoding, matching `SessionSnapshot`.
+    var folderPath: String
+    var sessions: [AgentSession]
+    var isExpanded: Bool
+    let createdAt: Date
+
+    init(name: String, folderURL: URL, id: UUID = UUID()) {
+        self.id = id
+        self.name = name
+        self.folderPath = folderURL.path
+        self.sessions = []
+        self.isExpanded = true
+        self.createdAt = Date()
+    }
+
+    var folderURL: URL {
+        URL(fileURLWithPath: folderPath)
+    }
+
+    /// Looks up a session by identifier.
+    func session(withID sessionID: UUID) -> AgentSession? {
+        sessions.first { $0.id == sessionID }
+    }
+}
+
+// MARK: - Projects State
+
+/// The complete persisted state of the project sidebar.
+struct ProjectsState: Codable {
+    let version: Int
+    var projects: [Project]
+    var selectedSessionID: UUID?
+    var savedAt: Date
+
+    init(
+        version: Int = ProjectsStateVersion.current,
+        projects: [Project] = [],
+        selectedSessionID: UUID? = nil,
+        savedAt: Date = Date()
+    ) {
+        self.version = version
+        self.projects = projects
+        self.selectedSessionID = selectedSessionID
+        self.savedAt = savedAt
+    }
+}

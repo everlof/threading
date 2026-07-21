@@ -1,0 +1,118 @@
+import Foundation
+
+// MARK: - Account Usage
+
+/// A rate-limit snapshot for one agent account, normalized across providers.
+///
+/// Claude and Codex both meter subscriptions by rolling windows but report them in different
+/// shapes; everything downstream (the toolbar pill, its popover) reads this one model.
+struct AccountUsage: Equatable {
+
+    // MARK: - Window
+
+    /// One rolling rate-limit window, e.g. the 5-hour session limit.
+    struct Window: Equatable, Identifiable {
+        let id: String
+        let label: String
+
+        /// Fraction of the window consumed, 0…1. Nil when the value is unknown — a window
+        /// whose reset has passed keeps its identity but not its stale percentage.
+        let fraction: Double?
+
+        let resetsAt: Date?
+
+        /// Percent for display, or nil when the fraction is unknown.
+        var percent: Int? {
+            fraction.map { Int(($0 * 100).rounded()) }
+        }
+
+        /// Whether the reset moment has passed, making `fraction` a leftover from the
+        /// previous window rather than a current reading.
+        func isExpired(at now: Date = Date()) -> Bool {
+            guard let resetsAt else { return false }
+            return resetsAt <= now
+        }
+    }
+
+    // MARK: - Source
+
+    /// Where a reading came from, which sets how often re-reading is worthwhile: a local
+    /// cache costs a file read, an API call costs a network round trip.
+    enum Source: Equatable {
+        case api
+        case localCache
+    }
+
+    // MARK: - Properties
+
+    let windows: [Window]
+
+    /// Subscription tier, e.g. `Max`, when the provider reports one.
+    let planLabel: String?
+
+    /// When the values were true: the fetch time for a live API read, or the provider's own
+    /// observation stamp when the data came from a local cache.
+    let observedAt: Date
+
+    let source: Source
+
+    /// The window closest to its limit, which is the one worth a glance in the toolbar.
+    ///
+    /// Expired windows are skipped: their percentage describes the previous window, and
+    /// surfacing it would show pressure that no longer exists.
+    func peakWindow(at now: Date = Date()) -> Window? {
+        windows
+            .filter { !$0.isExpired(at: now) && $0.fraction != nil }
+            .max { ($0.fraction ?? 0) < ($1.fraction ?? 0) }
+    }
+}
+
+// MARK: - Usage Severity
+
+/// How close a window is to its limit, driving the pill and bar tint.
+enum UsageSeverity {
+    case normal
+    case warning
+    case critical
+
+    /// Thresholds shared with the sidebar's sensibilities: quiet until three quarters,
+    /// alarming only when the window is nearly spent.
+    static func from(fraction: Double?) -> UsageSeverity {
+        switch fraction ?? 0 {
+        case ..<UsageDefaults.warningFraction: return .normal
+        case ..<UsageDefaults.criticalFraction: return .warning
+        default: return .critical
+        }
+    }
+}
+
+// MARK: - Usage Defaults
+
+enum UsageDefaults {
+    static let warningFraction = 0.75
+    static let criticalFraction = 0.92
+
+    /// A fetched value is served from cache this long before another fetch is worthwhile.
+    static let refreshInterval: TimeInterval = 300
+
+    /// Re-read interval when the reading came from a local file rather than the network.
+    static let localCacheRefreshInterval: TimeInterval = 30
+
+    /// Floor between fetches for one account, however eagerly the UI asks.
+    static let minimumRefreshSpacing: TimeInterval = 60
+
+    /// Cadence of the timer that keeps the visible account's pill current. Each tick only
+    /// refetches once `refreshInterval` has elapsed, so this stays cheap.
+    static let refreshTimerInterval: TimeInterval = 60
+
+    static let requestTimeout: TimeInterval = 20
+
+    /// Window identifiers shared by both providers' normalizers.
+    static let fiveHourWindowID = "5h"
+    static let weeklyWindowID = "7d"
+    static let fiveHourLabel = "5-hour"
+    static let weeklyLabel = "Weekly"
+
+    static let fiveHourSeconds: TimeInterval = 5 * 60 * 60
+    static let sevenDaySeconds: TimeInterval = 7 * 24 * 60 * 60
+}

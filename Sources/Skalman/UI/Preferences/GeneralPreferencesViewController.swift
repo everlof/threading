@@ -1,131 +1,137 @@
 import AppKit
 
-/// View controller for general preferences (shell, startup behavior).
+/// General preferences: which agent new sessions use, startup behaviour, and the shell.
 final class GeneralPreferencesViewController: NSViewController {
 
-    // MARK: - Constants
+    // MARK: - Controls
 
-    private enum Layout {
-        static let padding: CGFloat = 20
-        static let spacing: CGFloat = 12
-        static let labelWidth: CGFloat = 120
-        static let controlWidth: CGFloat = 250
-    }
-
-    private enum UserDefaultsKeys {
-        static let defaultShell = "defaultShell"
-        static let openNewWindowOnLaunch = "openNewWindowOnLaunch"
-        static let closeWindowOnShellExit = "closeWindowOnShellExit"
-    }
-
-    // MARK: - UI Elements
-
-    private lazy var shellPathTextField: NSTextField = {
-        let field = NSTextField()
-        field.placeholderString = "/bin/bash"
-        field.stringValue = UserDefaults.standard.string(forKey: UserDefaultsKeys.defaultShell) ?? TerminalDefaults.defaultShell
-        field.target = self
-        field.action = #selector(shellPathChanged)
-        return field
-    }()
-
-    private lazy var browseButton: NSButton = {
-        let button = NSButton(title: "Browse...", target: self, action: #selector(browseForShell))
-        button.bezelStyle = .rounded
-        return button
-    }()
-
-    private lazy var openWindowOnLaunchCheckbox: NSButton = {
-        let button = NSButton(checkboxWithTitle: "Open new window on launch", target: self, action: #selector(openWindowOnLaunchChanged))
-        button.state = UserDefaults.standard.bool(forKey: UserDefaultsKeys.openNewWindowOnLaunch) ? .on : .off
-        return button
-    }()
-
-    private lazy var closeOnExitCheckbox: NSButton = {
-        let button = NSButton(checkboxWithTitle: "Close window when shell exits", target: self, action: #selector(closeOnExitChanged))
-        button.state = UserDefaults.standard.object(forKey: UserDefaultsKeys.closeWindowOnShellExit) == nil ? .on : (UserDefaults.standard.bool(forKey: UserDefaultsKeys.closeWindowOnShellExit) ? .on : .off)
-        return button
-    }()
+    private let defaultAgentPopUp = NSPopUpButton()
+    private let terminalTitleToggle = NSSwitch()
+    private let restoreSessionToggle = NSSwitch()
+    private let confirmCloseToggle = NSSwitch()
+    private let shellField = NSTextField()
 
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        setupUI()
+        view = NSView()
+        setupControls()
+        setupLayout()
     }
 
     // MARK: - Setup
 
-    private func setupUI() {
-        let stackView = NSStackView()
-        stackView.orientation = .vertical
-        stackView.alignment = .leading
-        stackView.spacing = Layout.spacing
-        stackView.translatesAutoresizingMaskIntoConstraints = false
+    private func setupControls() {
+        for kind in AgentKind.allCases {
+            defaultAgentPopUp.addItem(withTitle: kind.displayName)
+            defaultAgentPopUp.lastItem?.representedObject = kind
+        }
+        defaultAgentPopUp.selectItem(at: AgentKind.allCases.firstIndex(of: AppSettings.shared.defaultAgentKind) ?? 0)
+        defaultAgentPopUp.target = self
+        defaultAgentPopUp.action = #selector(defaultAgentChanged)
+        defaultAgentPopUp.translatesAutoresizingMaskIntoConstraints = false
+        defaultAgentPopUp.widthAnchor.constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
 
-        // Shell section
-        let shellLabel = createSectionLabel("Default Shell")
-        let shellRow = createShellRow()
+        configure(terminalTitleToggle, isOn: AppSettings.shared.usesTerminalTitleInSidebar, action: #selector(terminalTitleChanged))
+        configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
+        configure(confirmCloseToggle, isOn: AppSettings.shared.confirmsBeforeClosingRunningSession, action: #selector(confirmCloseChanged))
 
-        // Startup section
-        let startupLabel = createSectionLabel("Startup")
+        shellField.font = Design.Typography.body()
+        shellField.placeholderString = TerminalDefaults.defaultShell
+        shellField.stringValue = ProfileStorage.shared.defaultProfile.shellPath
+        shellField.target = self
+        shellField.action = #selector(shellPathChanged)
+    }
 
-        stackView.addArrangedSubview(shellLabel)
-        stackView.addArrangedSubview(shellRow)
-        stackView.addArrangedSubview(createSpacer())
-        stackView.addArrangedSubview(startupLabel)
-        stackView.addArrangedSubview(openWindowOnLaunchCheckbox)
-        stackView.addArrangedSubview(closeOnExitCheckbox)
+    private func configure(_ toggle: NSSwitch, isOn: Bool, action: Selector) {
+        toggle.state = isOn ? .on : .off
+        toggle.target = self
+        toggle.action = action
+    }
 
-        view.addSubview(stackView)
+    private func setupLayout() {
+        let sessions = SettingsCard(rows: [
+            SettingsUI.row(title: "New sessions use",
+                           subtitle: "Used by New Session (⌘N). Other agents stay available from the Project menu.",
+                           control: defaultAgentPopUp),
+            SettingsUI.row(title: "Name sessions after the terminal title",
+                           subtitle: "Agents report progress through the terminal title. Renaming a session keeps your name.",
+                           control: terminalTitleToggle)
+        ])
 
+        let startup = SettingsCard(rows: [
+            SettingsUI.row(title: "Reopen the last session at launch", control: restoreSessionToggle)
+        ])
+
+        let closing = SettingsCard(rows: [
+            SettingsUI.row(title: "Ask before closing a running session",
+                           subtitle: "Closing a session ends its agent but keeps it in the sidebar so it can be resumed.",
+                           control: confirmCloseToggle)
+        ])
+
+        let shell = SettingsCard(rows: [
+            SettingsUI.fullRow(shellRow())
+        ])
+
+        let page = SettingsUI.page([
+            SettingsUI.heading("General"),
+            SettingsUI.section("Sessions", sessions),
+            SettingsUI.section("Startup", startup),
+            SettingsUI.section("Closing", closing),
+            SettingsUI.section("Shell", shell),
+            SettingsUI.note("Shell path is used by shell sessions. Agent sessions launch through your login shell regardless.")
+        ])
+
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
         NSLayoutConstraint.activate([
-            stackView.topAnchor.constraint(equalTo: view.topAnchor, constant: Layout.padding),
-            stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Layout.padding),
-            stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Layout.padding)
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
     }
 
-    private func createSectionLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
-        return label
-    }
+    /// The shell field with its Choose button, filling the row.
+    private func shellRow() -> NSView {
+        let label = NSTextField(labelWithString: "Shell path")
+        label.font = Design.Typography.body()
+        label.textColor = .labelColor
+        label.setContentHuggingPriority(.required, for: .horizontal)
 
-    private func createShellRow() -> NSView {
-        let row = NSStackView()
+        let choose = SettingsUI.button("Choose…", target: self, action: #selector(browseForShell))
+
+        let row = NSStackView(views: [label, shellField, choose])
         row.orientation = .horizontal
-        row.spacing = 8
-
-        shellPathTextField.translatesAutoresizingMaskIntoConstraints = false
-        shellPathTextField.widthAnchor.constraint(equalToConstant: Layout.controlWidth).isActive = true
-
-        row.addArrangedSubview(shellPathTextField)
-        row.addArrangedSubview(browseButton)
-
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.medium
+        shellField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return row
-    }
-
-    private func createSpacer() -> NSView {
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.heightAnchor.constraint(equalToConstant: Layout.spacing).isActive = true
-        return spacer
     }
 
     // MARK: - Actions
 
-    @objc private func shellPathChanged() {
-        let path = shellPathTextField.stringValue
-        UserDefaults.standard.set(path, forKey: UserDefaultsKeys.defaultShell)
+    @objc private func defaultAgentChanged() {
+        guard let kind = defaultAgentPopUp.selectedItem?.representedObject as? AgentKind else { return }
+        AppSettings.shared.defaultAgentKind = kind
+    }
 
-        // Update default profile
+    @objc private func restoreSessionChanged() {
+        AppSettings.shared.restoresLastSession = restoreSessionToggle.state == .on
+    }
+
+    @objc private func confirmCloseChanged() {
+        AppSettings.shared.confirmsBeforeClosingRunningSession = confirmCloseToggle.state == .on
+    }
+
+    @objc private func terminalTitleChanged() {
+        AppSettings.shared.usesTerminalTitleInSidebar = terminalTitleToggle.state == .on
+        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+    }
+
+    @objc private func shellPathChanged() {
         var profile = ProfileStorage.shared.defaultProfile
-        profile.shellPath = path
+        profile.shellPath = shellField.stringValue
         ProfileStorage.shared.defaultProfile = profile
     }
 
@@ -134,22 +140,19 @@ final class GeneralPreferencesViewController: NSViewController {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: "/bin")
+        panel.directoryURL = URL(fileURLWithPath: GeneralPreferencesDefaults.shellBrowseDirectory)
         panel.message = "Select a shell executable"
 
         panel.begin { [weak self] response in
-            if response == .OK, let url = panel.url {
-                self?.shellPathTextField.stringValue = url.path
-                self?.shellPathChanged()
-            }
+            guard response == .OK, let url = panel.url, let self else { return }
+            self.shellField.stringValue = url.path
+            self.shellPathChanged()
         }
     }
+}
 
-    @objc private func openWindowOnLaunchChanged() {
-        UserDefaults.standard.set(openWindowOnLaunchCheckbox.state == .on, forKey: UserDefaultsKeys.openNewWindowOnLaunch)
-    }
+// MARK: - General Preferences Defaults
 
-    @objc private func closeOnExitChanged() {
-        UserDefaults.standard.set(closeOnExitCheckbox.state == .on, forKey: UserDefaultsKeys.closeWindowOnShellExit)
-    }
+enum GeneralPreferencesDefaults {
+    static let shellBrowseDirectory = "/bin"
 }

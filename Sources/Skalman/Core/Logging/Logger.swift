@@ -27,4 +27,14 @@ enum SkalmanLogger {
 
     /// Session management (lifecycle, state)
     static let session = Logger(subsystem: subsystem, category: "session")
+
+    // MARK: - Agent Loggers
+
+    /// Agent session lifecycle (launch, resume, exit, identifier discovery)
+    static let agent = Logger(subsystem: subsystem, category: "agent")
+
+    // MARK: - MCP Loggers
+
+    /// The MCP server Skalman exposes to agents (listener lifecycle, tool calls)
+    static let mcp = Logger(subsystem: subsystem, category: "mcp")
 }

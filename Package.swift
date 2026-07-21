@@ -22,6 +22,11 @@ let package = Package(
             resources: [
                 .process("Resources/Assets.xcassets")
             ]
+        ),
+        .testTarget(
+            name: "SkalmanTests",
+            dependencies: ["Skalman"],
+            path: "Tests/SkalmanTests"
         )
     ]
 )

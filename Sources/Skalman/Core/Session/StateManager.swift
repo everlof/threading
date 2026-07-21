@@ -26,59 +26,41 @@ final class StateManager {
         appSupportDirectory.appendingPathComponent("session-state.json")
     }
 
-    // MARK: - App State Persistence
+    private var projectsStateURL: URL {
+        appSupportDirectory.appendingPathComponent("projects.json")
+    }
 
-    func saveAppState(_ state: AppState) {
+    // MARK: - Projects State Persistence
+
+    func saveProjectsState(_ state: ProjectsState) {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(state)
-            try data.write(to: sessionStateURL, options: .atomic)
+            try data.write(to: projectsStateURL, options: .atomic)
         } catch {
-            print("Failed to save app state: \(error)")
+            SkalmanLogger.agent.error("Failed to save projects state: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    func loadAppState() -> AppState? {
-        guard FileManager.default.fileExists(atPath: sessionStateURL.path) else {
+    func loadProjectsState() -> ProjectsState? {
+        guard FileManager.default.fileExists(atPath: projectsStateURL.path) else {
             return nil
         }
 
         do {
-            let data = try Data(contentsOf: sessionStateURL)
-            let decoder = JSONDecoder()
-            return try decoder.decode(AppState.self, from: data)
+            let data = try Data(contentsOf: projectsStateURL)
+            return try JSONDecoder().decode(ProjectsState.self, from: data)
         } catch {
-            print("Failed to load app state: \(error)")
+            SkalmanLogger.agent.error("Failed to load projects state: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
 
-    func clearAppState() {
+    // MARK: - Legacy Cleanup
+
+    /// Removes the window-based state file left by the pre-project layout.
+    func clearLegacySessionState() {
         try? FileManager.default.removeItem(at: sessionStateURL)
-    }
-
-    // MARK: - Window State Persistence (for .anotherterm files)
-
-    func saveWindowState(_ state: WindowState, to url: URL) {
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(state)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            print("Failed to save window state: \(error)")
-        }
-    }
-
-    func loadWindowState(from url: URL) -> WindowState? {
-        do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            return try decoder.decode(WindowState.self, from: data)
-        } catch {
-            print("Failed to load window state: \(error)")
-            return nil
-        }
     }
 }

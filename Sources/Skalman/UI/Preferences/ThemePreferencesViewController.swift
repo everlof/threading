@@ -10,6 +10,7 @@ final class ThemePreferencesViewController: NSViewController {
         static let padding: CGFloat = 24
         static let spacing: CGFloat = 16
         static let listWidth: CGFloat = 180
+        static let listHeight: CGFloat = 200
         static let previewHeight: CGFloat = 100
         static let colorWellSize: CGFloat = 24
         static let thumbnailWidth: CGFloat = 32
@@ -22,13 +23,6 @@ final class ThemePreferencesViewController: NSViewController {
     private var selectedTheme: TerminalTheme?
 
     // MARK: - UI Elements
-
-    private lazy var splitView: NSSplitView = {
-        let split = NSSplitView()
-        split.isVertical = true
-        split.dividerStyle = .thin
-        return split
-    }()
 
     private lazy var themeTableView: NSTableView = {
         let table = NSTableView()
@@ -50,7 +44,8 @@ final class ThemePreferencesViewController: NSViewController {
         let scroll = NSScrollView()
         scroll.documentView = themeTableView
         scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
         return scroll
     }()
 
@@ -158,7 +153,7 @@ final class ThemePreferencesViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 420))
+        view = NSView()
     }
 
     override func viewDidLoad() {
@@ -196,107 +191,114 @@ final class ThemePreferencesViewController: NSViewController {
     // MARK: - Setup
 
     private func setupUI() {
-        // Left panel: theme list
-        let leftPanel = NSView()
-        leftPanel.translatesAutoresizingMaskIntoConstraints = false
-
-        themeScrollView.translatesAutoresizingMaskIntoConstraints = false
-        leftPanel.addSubview(themeScrollView)
-
-        let buttonBar = NSStackView(views: [addButton, removeButton, actionButton])
-        buttonBar.spacing = 0
-        buttonBar.translatesAutoresizingMaskIntoConstraints = false
-        leftPanel.addSubview(buttonBar)
-
-        NSLayoutConstraint.activate([
-            themeScrollView.topAnchor.constraint(equalTo: leftPanel.topAnchor),
-            themeScrollView.leadingAnchor.constraint(equalTo: leftPanel.leadingAnchor),
-            themeScrollView.trailingAnchor.constraint(equalTo: leftPanel.trailingAnchor),
-            themeScrollView.bottomAnchor.constraint(equalTo: buttonBar.topAnchor, constant: -4),
-
-            buttonBar.leadingAnchor.constraint(equalTo: leftPanel.leadingAnchor),
-            buttonBar.bottomAnchor.constraint(equalTo: leftPanel.bottomAnchor),
-            buttonBar.heightAnchor.constraint(equalToConstant: 24)
+        let page = SettingsUI.page([
+            SettingsUI.heading("Themes"),
+            SettingsUI.section("Theme", themeListSection()),
+            SettingsUI.section("Preview", previewSection()),
+            SettingsUI.section("Colors", colorsSection())
         ])
 
-        // Right panel: theme editor
-        let rightPanel = NSView()
-        rightPanel.translatesAutoresizingMaskIntoConstraints = false
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
 
-        // Preview
+    /// The theme list on its flat surface, with the add/remove/actions and Use Theme controls
+    /// below it.
+    private func themeListSection() -> NSView {
+        themeScrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        // A visible card holds the list, so the rows read as one contained group instead of
+        // floating on the page. The scroll itself is transparent; the card draws the surface.
+        let card = NSView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.applySurface(fill: Design.Surface.panel, radius: Design.Radius.panel, border: Design.Surface.border)
+        card.addSubview(themeScrollView)
+
+        NSLayoutConstraint.activate([
+            card.heightAnchor.constraint(equalToConstant: Layout.listHeight),
+            themeScrollView.topAnchor.constraint(equalTo: card.topAnchor, constant: Design.Spacing.tight),
+            themeScrollView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -Design.Spacing.tight),
+            themeScrollView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Design.Spacing.small),
+            themeScrollView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Design.Spacing.small)
+        ])
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let buttonRow = NSStackView(views: [addButton, removeButton, actionButton, spacer, useThemeButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = Design.Spacing.small
+
+        let stack = NSStackView(views: [card, buttonRow])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+
+        card.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+        card.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        buttonRow.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+        buttonRow.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+
+        return stack
+    }
+
+    private func previewSection() -> NSView {
         previewView.translatesAutoresizingMaskIntoConstraints = false
         previewLabel.translatesAutoresizingMaskIntoConstraints = false
         previewView.addSubview(previewLabel)
-        rightPanel.addSubview(previewView)
-
-        // Main colors section (foreground, background, cursor, selection)
-        let mainColorsLabel = NSTextField(labelWithString: "Main Colors")
-        mainColorsLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        mainColorsLabel.textColor = .secondaryLabelColor
-        mainColorsLabel.translatesAutoresizingMaskIntoConstraints = false
-        rightPanel.addSubview(mainColorsLabel)
-
-        setupMainColors()
-        mainColorsSection.translatesAutoresizingMaskIntoConstraints = false
-        rightPanel.addSubview(mainColorsSection)
-
-        // ANSI colors section
-        let ansiColorsLabel = NSTextField(labelWithString: "ANSI Colors")
-        ansiColorsLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        ansiColorsLabel.textColor = .secondaryLabelColor
-        ansiColorsLabel.translatesAutoresizingMaskIntoConstraints = false
-        rightPanel.addSubview(ansiColorsLabel)
-
-        setupANSIColors()
-        ansiColorsSection.translatesAutoresizingMaskIntoConstraints = false
-        rightPanel.addSubview(ansiColorsSection)
-
-        // Use Theme button
-        useThemeButton.translatesAutoresizingMaskIntoConstraints = false
-        rightPanel.addSubview(useThemeButton)
 
         NSLayoutConstraint.activate([
-            previewView.topAnchor.constraint(equalTo: rightPanel.topAnchor),
-            previewView.leadingAnchor.constraint(equalTo: rightPanel.leadingAnchor),
-            previewView.trailingAnchor.constraint(equalTo: rightPanel.trailingAnchor),
             previewView.heightAnchor.constraint(equalToConstant: Layout.previewHeight),
-
-            previewLabel.topAnchor.constraint(equalTo: previewView.topAnchor, constant: 10),
-            previewLabel.leadingAnchor.constraint(equalTo: previewView.leadingAnchor, constant: 10),
-            previewLabel.trailingAnchor.constraint(equalTo: previewView.trailingAnchor, constant: -10),
-
-            mainColorsLabel.topAnchor.constraint(equalTo: previewView.bottomAnchor, constant: 20),
-            mainColorsLabel.leadingAnchor.constraint(equalTo: rightPanel.leadingAnchor),
-
-            mainColorsSection.topAnchor.constraint(equalTo: mainColorsLabel.bottomAnchor, constant: 10),
-            mainColorsSection.leadingAnchor.constraint(equalTo: rightPanel.leadingAnchor),
-            mainColorsSection.trailingAnchor.constraint(lessThanOrEqualTo: rightPanel.trailingAnchor),
-
-            ansiColorsLabel.topAnchor.constraint(equalTo: mainColorsSection.bottomAnchor, constant: 20),
-            ansiColorsLabel.leadingAnchor.constraint(equalTo: rightPanel.leadingAnchor),
-
-            ansiColorsSection.topAnchor.constraint(equalTo: ansiColorsLabel.bottomAnchor, constant: 10),
-            ansiColorsSection.leadingAnchor.constraint(equalTo: rightPanel.leadingAnchor),
-            ansiColorsSection.trailingAnchor.constraint(lessThanOrEqualTo: rightPanel.trailingAnchor),
-
-            useThemeButton.topAnchor.constraint(equalTo: ansiColorsSection.bottomAnchor, constant: 20),
-            useThemeButton.leadingAnchor.constraint(equalTo: rightPanel.leadingAnchor)
+            previewLabel.topAnchor.constraint(equalTo: previewView.topAnchor, constant: Design.Spacing.inset),
+            previewLabel.leadingAnchor.constraint(equalTo: previewView.leadingAnchor, constant: Design.Spacing.inset),
+            previewLabel.trailingAnchor.constraint(equalTo: previewView.trailingAnchor, constant: -Design.Spacing.inset)
         ])
 
-        // Main layout
-        splitView.translatesAutoresizingMaskIntoConstraints = false
-        splitView.addArrangedSubview(leftPanel)
-        splitView.addArrangedSubview(rightPanel)
-        view.addSubview(splitView)
+        return previewView
+    }
+
+    /// Main and ANSI colour wells grouped on one flat card.
+    private func colorsSection() -> NSView {
+        setupMainColors()
+        setupANSIColors()
+
+        let panel = NSView()
+        panel.applySurface(fill: Design.Surface.panel, radius: Design.Radius.panel, border: Design.Surface.border)
+
+        let stack = NSStackView(views: [
+            colorGroup("Main", mainColorsSection),
+            colorGroup("ANSI", ansiColorsSection)
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.large
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            splitView.topAnchor.constraint(equalTo: view.topAnchor, constant: Layout.padding),
-            splitView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Layout.padding),
-            splitView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Layout.padding),
-            splitView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Layout.padding),
-
-            leftPanel.widthAnchor.constraint(equalToConstant: Layout.listWidth)
+            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: Design.Spacing.inset),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -Design.Spacing.inset),
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: Design.Spacing.inset),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: panel.trailingAnchor, constant: -Design.Spacing.inset)
         ])
+
+        return panel
+    }
+
+    private func colorGroup(_ title: String, _ content: NSView) -> NSView {
+        let label = SettingsUI.caption(title)
+        let stack = NSStackView(views: [label, content])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        return stack
     }
 
     private func setupMainColors() {

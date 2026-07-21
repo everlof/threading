@@ -1,14 +1,12 @@
 import AppKit
 
-/// View controller for profile preferences (font, cursor, scrollback).
+/// Profile preferences: font, cursor, scrollback, and a live terminal preview, built from the
+/// settings UI kit (`SettingsUI`, `SettingsCard`) so the page matches the rest of the app.
 final class ProfilePreferencesViewController: NSViewController {
 
     // MARK: - Constants
 
     private enum Layout {
-        static let padding: CGFloat = 20
-        static let spacing: CGFloat = 12
-        static let labelWidth: CGFloat = 80
         static let previewHeight: CGFloat = 100
     }
 
@@ -21,60 +19,38 @@ final class ProfilePreferencesViewController: NSViewController {
         }
     }
 
-    // MARK: - UI Elements
+    private var fontButtonTitle: String {
+        "\(currentProfile.fontName) \(Int(currentProfile.fontSize))"
+    }
 
-    private lazy var fontNameLabel: NSTextField = {
-        NSTextField(labelWithString: "Font:")
-    }()
+    // MARK: - Controls
 
-    private lazy var fontButton: NSButton = {
-        let button = NSButton(title: "SF Mono 13", target: self, action: #selector(showFontPanel))
-        button.bezelStyle = .rounded
-        return button
-    }()
-
-    private lazy var cursorStyleLabel: NSTextField = {
-        NSTextField(labelWithString: "Cursor:")
-    }()
+    private lazy var fontButton: NSButton =
+        SettingsUI.button(fontButtonTitle, target: self, action: #selector(showFontPanel))
 
     private lazy var cursorStylePopup: NSPopUpButton = {
-        let popup = NSPopUpButton()
-        popup.target = self
-        popup.action = #selector(cursorStyleChanged)
-
+        let popup = SettingsUI.popUp(target: self, action: #selector(cursorStyleChanged))
         for style in TerminalProfile.CursorStyle.allCases {
             popup.addItem(withTitle: style.displayName)
         }
-
         return popup
     }()
 
-    private lazy var cursorBlinkCheckbox: NSButton = {
-        let button = NSButton(checkboxWithTitle: "Blinking cursor", target: self, action: #selector(cursorBlinkChanged))
-        return button
-    }()
+    private lazy var cursorBlinkToggle: NSSwitch =
+        SettingsUI.toggle(isOn: currentProfile.cursorBlink, target: self, action: #selector(cursorBlinkChanged))
 
-    private lazy var scrollbackLabel: NSTextField = {
-        NSTextField(labelWithString: "Scrollback:")
-    }()
-
-    private lazy var scrollbackTextField: NSTextField = {
-        let field = NSTextField()
+    private lazy var scrollbackField: NSTextField = {
+        let field = SettingsUI.textField(target: self, action: #selector(scrollbackChanged))
         field.placeholderString = "10000"
         field.formatter = NumberFormatter()
-        field.target = self
-        field.action = #selector(scrollbackChanged)
         return field
-    }()
-
-    private lazy var scrollbackSuffix: NSTextField = {
-        NSTextField(labelWithString: "lines")
     }()
 
     private lazy var previewView: NSView = {
         let view = NSView()
         view.wantsLayer = true
-        view.layer?.cornerRadius = 6
+        view.layer?.cornerCurve = .continuous
+        view.layer?.cornerRadius = Design.Radius.control
         return view
     }()
 
@@ -101,118 +77,84 @@ final class ProfilePreferencesViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 350))
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        setupUI()
+        view = NSView()
+        setupLayout()
         updateUI()
     }
 
     // MARK: - Setup
 
-    private func setupUI() {
-        let stackView = NSStackView()
-        stackView.orientation = .vertical
-        stackView.alignment = .leading
-        stackView.spacing = Layout.spacing
-        stackView.translatesAutoresizingMaskIntoConstraints = false
+    private func setupLayout() {
+        let text = SettingsCard(rows: [
+            SettingsUI.row(title: "Font", control: fontButton)
+        ])
 
-        // Font row
-        let fontRow = createRow(label: fontNameLabel, control: fontButton)
+        let cursor = SettingsCard(rows: [
+            SettingsUI.row(title: "Style", control: cursorStylePopup),
+            SettingsUI.row(title: "Blinking cursor", control: cursorBlinkToggle)
+        ])
 
-        // Cursor row
-        let cursorRow = createRow(label: cursorStyleLabel, control: cursorStylePopup)
+        let scrollback = SettingsCard(rows: [
+            SettingsUI.row(title: "Lines kept",
+                           subtitle: "Number of output lines retained above the visible screen.",
+                           control: scrollbackField)
+        ])
 
-        // Scrollback row
-        let scrollbackRow = NSStackView()
-        scrollbackRow.orientation = .horizontal
-        scrollbackRow.spacing = 8
-        scrollbackLabel.translatesAutoresizingMaskIntoConstraints = false
-        scrollbackLabel.widthAnchor.constraint(equalToConstant: Layout.labelWidth).isActive = true
-        scrollbackTextField.translatesAutoresizingMaskIntoConstraints = false
-        scrollbackTextField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        scrollbackRow.addArrangedSubview(scrollbackLabel)
-        scrollbackRow.addArrangedSubview(scrollbackTextField)
-        scrollbackRow.addArrangedSubview(scrollbackSuffix)
+        let preview = SettingsCard(rows: [
+            SettingsUI.fullRow(previewContent())
+        ])
 
-        // Preview section
-        let previewSectionLabel = NSTextField(labelWithString: "Preview")
-        previewSectionLabel.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
+        let page = SettingsUI.page([
+            SettingsUI.heading("Profiles"),
+            SettingsUI.section("Text", text),
+            SettingsUI.section("Cursor", cursor),
+            SettingsUI.section("Scrollback", scrollback),
+            SettingsUI.section("Preview", preview)
+        ])
 
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
+
+    /// The terminal preview: a rounded panel painted in the theme's background, holding a
+    /// monospaced sample line in the theme's foreground.
+    private func previewContent() -> NSView {
         previewView.translatesAutoresizingMaskIntoConstraints = false
         previewLabel.translatesAutoresizingMaskIntoConstraints = false
         previewView.addSubview(previewLabel)
 
-        stackView.addArrangedSubview(fontRow)
-        stackView.addArrangedSubview(cursorRow)
-        stackView.addArrangedSubview(cursorBlinkCheckbox)
-        stackView.addArrangedSubview(scrollbackRow)
-        stackView.addArrangedSubview(createSpacer())
-        stackView.addArrangedSubview(previewSectionLabel)
-        stackView.addArrangedSubview(previewView)
-
-        view.addSubview(stackView)
-
         NSLayoutConstraint.activate([
-            stackView.topAnchor.constraint(equalTo: view.topAnchor, constant: Layout.padding),
-            stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Layout.padding),
-            stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Layout.padding),
-
             previewView.heightAnchor.constraint(equalToConstant: Layout.previewHeight),
-            previewView.widthAnchor.constraint(equalTo: stackView.widthAnchor),
-
-            previewLabel.leadingAnchor.constraint(equalTo: previewView.leadingAnchor, constant: 10),
-            previewLabel.topAnchor.constraint(equalTo: previewView.topAnchor, constant: 10)
+            previewLabel.leadingAnchor.constraint(equalTo: previewView.leadingAnchor, constant: Design.Spacing.medium),
+            previewLabel.topAnchor.constraint(equalTo: previewView.topAnchor, constant: Design.Spacing.medium)
         ])
-    }
 
-    private func createRow(label: NSTextField, control: NSView) -> NSStackView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.spacing = 8
-
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.widthAnchor.constraint(equalToConstant: Layout.labelWidth).isActive = true
-
-        row.addArrangedSubview(label)
-        row.addArrangedSubview(control)
-
-        return row
-    }
-
-    private func createSpacer() -> NSView {
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.heightAnchor.constraint(equalToConstant: Layout.spacing).isActive = true
-        return spacer
+        return previewView
     }
 
     // MARK: - Update UI
 
     private func updateUI() {
-        // Font button
-        fontButton.title = "\(currentProfile.fontName) \(Int(currentProfile.fontSize))"
+        fontButton.title = fontButtonTitle
 
-        // Cursor style
         if let index = TerminalProfile.CursorStyle.allCases.firstIndex(of: currentProfile.cursorStyle) {
             cursorStylePopup.selectItem(at: index)
         }
 
-        // Cursor blink
-        cursorBlinkCheckbox.state = currentProfile.cursorBlink ? .on : .off
+        cursorBlinkToggle.state = currentProfile.cursorBlink ? .on : .off
+        scrollbackField.integerValue = currentProfile.scrollbackLines
 
-        // Scrollback
-        scrollbackTextField.integerValue = currentProfile.scrollbackLines
-
-        // Preview
         updatePreview()
     }
 
     private func updatePreview() {
         previewView.layer?.backgroundColor = currentProfile.theme.background.cgColor
-
         previewLabel.textColor = currentProfile.theme.foreground
         previewLabel.font = NSFont.monospacedSystemFont(ofSize: currentProfile.fontSize, weight: .regular)
     }
@@ -249,10 +191,10 @@ final class ProfilePreferencesViewController: NSViewController {
     }
 
     @objc private func cursorBlinkChanged() {
-        currentProfile.cursorBlink = cursorBlinkCheckbox.state == .on
+        currentProfile.cursorBlink = cursorBlinkToggle.state == .on
     }
 
     @objc private func scrollbackChanged() {
-        currentProfile.scrollbackLines = max(100, scrollbackTextField.integerValue)
+        currentProfile.scrollbackLines = max(100, scrollbackField.integerValue)
     }
 }
