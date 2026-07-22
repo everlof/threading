@@ -796,6 +796,37 @@ next launch.
 ### Accounts
 Per-account icons and names. See [Accounts](#accounts).
 
+### Usage
+Where your tokens went, read from the agents' own transcripts — the question the toolbar's
+usage pill provokes and cannot answer. It says the week is 85% spent; this says what spent it.
+
+Grouped by **checkout** first, since a repository's worktrees are separate places doing
+separate work, then by day and by model:
+
+```
+300.0M                                    [Rebuild]
+56,594 turns · measured 20 min ago
+
+BY CHECKOUT
+  sonda                            113.8M   ████████████
+  inristo                           28.9M   ███
+  AnotherTerminal                   24.6M   ██▌
+```
+
+Counts input, output and cache writes — the tokens a plan is charged for. **Cache reads are
+excluded**, because they are the cheap path and would drown everything else.
+
+Two things it gets right that are easy to get wrong, and both were measured here rather than
+assumed. A turn copied forward by a resume, a compaction or a side chat is **counted once** —
+on this machine 52.9% of all turns were copies, and counting them made the total look 157%
+too big. And **subagent threads are counted**: a Task keeps its own transcript nested a level
+deeper, its turns appear in no other file, and missing them understated the total by 56%.
+
+The report is built in the background and remembered between launches, so the page opens on
+what is already known. **Rebuild** re-reads every transcript now, which takes about a minute.
+
+Claude only — Codex records its usage differently, and is not in these totals yet.
+
 ### Storage
 Build output your projects can make again, and a button that removes it. Also reachable from a
 project's own menu (**Reclaim Disk Space…**), though the page always reports every project —

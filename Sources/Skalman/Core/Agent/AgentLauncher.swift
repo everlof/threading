@@ -66,6 +66,18 @@ struct ShellCommand: Equatable {
         components.joined(separator: " ")
     }
 
+    /// Produces the fixed `cd <directory> && exec <command>` wrapper used by login-shell and
+    /// interactive-shell launches. Only `&&` is syntax; both commands and the directory remain
+    /// ordinary quoted words.
+    static func executing(_ command: ShellCommand, in directory: String) -> ShellCommand {
+        var source = ShellCommand(word: "cd")
+        source.append(word: directory)
+        source.append(operator: .and)
+        source.append(word: "exec")
+        source.append(contentsOf: command)
+        return source
+    }
+
     private static func quote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
@@ -561,11 +573,7 @@ enum AgentLauncher {
         in folder: String,
         resumeState: ResumeState
     ) -> AgentLaunchPlan {
-        var source = ShellCommand(word: "cd")
-        source.append(word: folder)
-        source.append(operator: .and)
-        source.append(word: "exec")
-        source.append(contentsOf: command)
+        let source = ShellCommand.executing(command, in: folder)
 
         return AgentLaunchPlan(
             executable: loginShellPath,

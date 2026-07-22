@@ -847,9 +847,26 @@ differs is the *vocabulary* inside: the tool is `apply_patch` and its argument i
 `*** Begin Patch` envelope, which is the same mismatch `TranscriptReplay.normalised` and
 `CodexPatch` already exist to absorb.
 
-`PermissionPolicy.readOnlyTools` names Claude's tools only, so every Codex tool prompts. That is
-the allowlist behaving as designed rather than a gap — a tool it does not recognise is treated
-as consequential.
+`ToolIdentity` knows **both vocabularies**, which is what the type is for — a behaviour,
+independent of the provider spelling that introduced it. Codex's names were taken from 1008 real
+rollouts rather than from a list, which is the only reason the long tail was found:
+`exec` / `exec_command` / `shell_command` / `write_stdin` → `.bash`, `apply_patch` → `.edit`
+(a patch has old *and* new text, so it feeds the same `DiffView`), `view_image` → `.read`,
+`update_plan` → `.plan`. Everything Codex-specific — spawning agents, goals, simulators — stays
+`.unknown` on purpose, because mapping a tool onto an identity also hands it that identity's
+permissions.
+
+**This fixes rendering, not prompting, and the difference is worth stating.** Measured across
+those rollouts: 59,335 of 64,785 calls (92%) previously drew as unrecognised tools and now carry
+the right glyph and diff — but only 204 (0.3%) become auto-allowed. 82% of all Codex tool calls
+are shell execution, which legitimately prompts.
+
+That asymmetry is Codex's, not ours: Claude has distinct `Read` / `Grep` / `Glob` tools that the
+allowlist can admit, while Codex reads files by shelling out to `cat`. So a Codex session
+prompts far more than a Claude one for the same work, and no amount of tool-name mapping changes
+it — the remaining fix is classifying the *command* rather than the tool, which is a security
+posture decision (it is what Codex's own `untrusted` approval policy does) rather than a
+translation, and is deliberately not taken here.
 
 The `PreToolUse` entry is written **unconditionally** and guarded on
 `MCPDefaults.brokerEnvironmentKey`, which only `streamPlan` exports. Installing it per-surface

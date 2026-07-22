@@ -477,6 +477,11 @@ struct ArtifactScanDidChange: AppEvent {
     static let name = Notification.Name("artifactScanDidChange")
 }
 
+/// The transcript usage report was rebuilt.
+struct TranscriptUsageDidChange: AppEvent {
+    static let name = Notification.Name("transcriptUsageDidChange")
+}
+
 struct AccountPreferencesDidChange: AppEvent {
     static let name = Notification.Name("accountPreferencesDidChange")
 }

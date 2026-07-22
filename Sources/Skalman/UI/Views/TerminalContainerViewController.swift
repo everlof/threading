@@ -437,8 +437,15 @@ final class TerminalContainerViewController: NSViewController {
         // Also paint the window itself, so the terminal's colour is the backdrop the whole
         // right side sits on: it fills the strip beneath the transparent toolbar and runs into
         // the window's rounded corners, instead of a neutral chrome meeting the terminal in a
-        // hard edge. The sidebar's own material floats on top of this, unaffected.
-        view.window?.backgroundColor = color
+        // hard edge. The sidebar's own material floats on top of this.
+        //
+        // **Resolved first, deliberately.** A themed role is a dynamic colour, and handing one
+        // to `NSWindow.backgroundColor` costs the window its opacity — AppKit cannot settle a
+        // catalog colour's alpha up front, so it assumes translucency. That in turn stops the
+        // sidebar's `.withinWindow` material sampling this backdrop, and the sidebar reverts
+        // from the terminal's near-black to the material's default grey. Measured: #0F0F0F
+        // became #212121 the moment the empty state started passing a role through here.
+        view.window?.backgroundColor = NSColor(cgColor: color.cgColor) ?? color
     }
 
     private func detachCurrentChild() {

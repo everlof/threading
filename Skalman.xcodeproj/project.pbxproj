@@ -48,6 +48,7 @@
 		5B143C2EEAF87161EAA77D67 /* AppThemeRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */; };
 		A34F41FB3D85E4A72F65D704 /* UsageRingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */; };
 		848FBC7336F4E1B9FE429A8A /* ModelNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9984539B5DEA19828534D5B4 /* ModelNameTests.swift */; };
+		82C90C7DE0F6E3D6EB660A66 /* ToolIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -103,6 +104,7 @@
 		E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppThemeRenderTests.swift; sourceTree = "<group>"; };
 		9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageRingTests.swift; sourceTree = "<group>"; };
 		9984539B5DEA19828534D5B4 /* ModelNameTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelNameTests.swift; sourceTree = "<group>"; };
+		4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolIdentityTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -201,6 +203,7 @@
 				E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */,
 				9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */,
 				9984539B5DEA19828534D5B4 /* ModelNameTests.swift */,
+				4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -375,6 +378,7 @@
 				5B143C2EEAF87161EAA77D67 /* AppThemeRenderTests.swift in Sources */,
 				A34F41FB3D85E4A72F65D704 /* UsageRingTests.swift in Sources */,
 				848FBC7336F4E1B9FE429A8A /* ModelNameTests.swift in Sources */,
+				82C90C7DE0F6E3D6EB660A66 /* ToolIdentityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -226,6 +226,21 @@ final class ShellCommandTests: XCTestCase {
         XCTAssertEqual(try run(first), "'; echo injected'")
     }
 
+    func testDirectoryWrapperPreservesAHostilePath() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("folder '; echo injected; $(whoami)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let pwd = ShellCommand(word: "/bin/pwd")
+        let command = ShellCommand.executing(pwd, in: directory.path)
+
+        XCTAssertEqual(
+            try run(command).trimmingCharacters(in: .newlines),
+            directory.path
+        )
+    }
+
     private func run(_ command: ShellCommand) throws -> String {
         let process = Process()
         let output = Pipe()

@@ -23,7 +23,16 @@ enum UsageFormat {
         return rest > 0 ? "\(days)d \(rest)h" : "\(days)d"
     }
 
-    /// How stale a reading is: `just now`, `4m ago`.
+    /// A token count at a glance: 45.5M rather than 45,491,203. The exact figure is never the
+    /// point on a page comparing one checkout against another.
+    static func tokens(_ count: Int64) -> String {
+        let value = Double(count)
+        if value >= 1_000_000_000 { return String(format: "%.2fB", value / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.1fM", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.0fK", value / 1_000) }
+        return "\(count)"
+    }
+
     /// Banked rate-limit resets, each of which clears a spent window early.
     ///
     /// Only ever shown when there are some: an account with none should say nothing rather

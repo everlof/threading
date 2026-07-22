@@ -13,6 +13,7 @@ enum SettingsPages {
     /// Named so the sidebar can find these pages without hardcoding their position, which
     /// moves whenever a page is added above them.
     static let storageTitle = "Storage"
+    static let usageTitle = "Usage"
     static let themesTitle = "Themes"
 
     static func index(ofTitle title: String) -> Int? {
@@ -25,6 +26,7 @@ enum SettingsPages {
         Page(title: "Profiles", symbol: "person.crop.circle") { ProfilePreferencesViewController() },
         Page(title: themesTitle, symbol: "paintpalette") { ThemePreferencesViewController() },
         Page(title: "Tools", symbol: "wrench.and.screwdriver") { ToolsPreferencesViewController() },
+        Page(title: usageTitle, symbol: "chart.bar") { UsagePreferencesViewController() },
         Page(title: storageTitle, symbol: "internaldrive") { StoragePreferencesViewController() },
         Page(title: "Archived", symbol: "archivebox") { ArchivedPreferencesViewController() }
     ]

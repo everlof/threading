@@ -78,6 +78,36 @@ enum ToolIdentity: Hashable {
         case "TodoRead": self = .todoRead
         case "ToolSearch": self = .toolSearch
         case "Plan": self = .plan
+
+        // Codex's spellings for the same behaviours. Taken from 1008 real rollouts on this
+        // machine rather than from a list, which is how the long tail below was found at all.
+        //
+        // Only tools whose *behaviour* matches an identity already here are mapped. Everything
+        // Codex-specific — spawning agents, goals, simulators — stays `.unknown` and therefore
+        // prompts, because mapping a tool onto an identity also hands it that identity's
+        // permissions.
+        case "exec", "exec_command", "shell_command", "shell", "local_shell":
+            self = .bash
+
+        // Writing to a running process's stdin is part of the same shell interaction, and is no
+        // less consequential than the command that opened it.
+        case "write_stdin":
+            self = .bash
+
+        // A patch carries old and new text, which is an edit rather than a whole-file write —
+        // and is what lets `CodexPatch` feed the same `DiffView`.
+        case "apply_patch":
+            self = .edit
+
+        case "view_image":
+            self = .read
+
+        case "update_plan":
+            self = .plan
+
+        case "web_search":
+            self = .webSearch
+
         case let name where name.hasPrefix("mcp__"): self = .mcp(name)
         default: self = .unknown(rawName)
         }

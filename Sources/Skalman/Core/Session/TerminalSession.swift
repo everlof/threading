@@ -118,11 +118,15 @@ final class TerminalSession: NSObject {
         let environment = buildEnvironment()
 
         if let dir = initialDirectory {
-            // Wrap shell invocation to cd to the directory first, then exec the real shell
-            let shellArgs = profile.shellArguments.joined(separator: " ")
+            var shell = ShellCommand(word: profile.shellPath)
+            for argument in profile.shellArguments {
+                shell.append(word: argument)
+            }
+            let source = ShellCommand.executing(shell, in: dir.path)
+
             terminalView.startProcess(
                 executable: "/bin/sh",
-                args: ["-c", "cd '\(dir.path)' && exec \(profile.shellPath) \(shellArgs)"],
+                args: ["-c", source.source],
                 environment: environment,
                 execName: (profile.shellPath as NSString).lastPathComponent
             )
