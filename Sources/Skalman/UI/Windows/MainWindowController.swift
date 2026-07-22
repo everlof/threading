@@ -13,9 +13,8 @@ final class MainWindowController: NSWindowController {
     /// Retained so the sidebar can be collapsed and restored directly.
     private var sidebarItem: NSSplitViewItem!
 
-    /// Opening prompt from the composer, handed to the next session that launches.
-    /// Consumed once, so a later resume of the same session does not repeat it.
-    private var pendingPrompt: String?
+    /// Owns session creation, import, worktree targeting, surface switches, and closing.
+    private var sessionCoordinator: SessionCoordinator!
 
     /// The session that was on screen before Settings opened, restored when it closes.
     private var preSettingsSessionID: SessionID?
@@ -27,6 +26,9 @@ final class MainWindowController: NSWindowController {
     private(set) var displayPaneController: DisplayPaneController!
     private var displayItem: NSSplitViewItem!
 
+    /// Owns agent-originated browser, display, storage, and theme requests.
+    private(set) var agentToolCoordinator: AgentToolCoordinator!
+
     /// Suppresses width recording while the panel is being revealed, so the transient
     /// thickness that pass produces is not mistaken for a width the user chose.
     private var isRestoringDisplayPaneWidth = false
@@ -36,11 +38,6 @@ final class MainWindowController: NSWindowController {
 
     /// Toolbar pill showing the current account's rate-limit usage.
     let accountUsageItemView = AccountUsageItemView()
-
-    /// The account the usage pill was last pointed at, so title churn does not re-run
-    /// account discovery — agents rewrite the terminal title constantly, and each rewrite
-    /// funnels through `updateSessionTitleItem`.
-    private var usageAccountKey: AccountID?
 
     /// Exposed to the toolbar delegate, which needs the split view for its tracking separator.
     var splitView: NSSplitView { splitViewController.splitView }
@@ -140,7 +137,13 @@ final class MainWindowController: NSWindowController {
 
         containerViewController = TerminalContainerViewController()
         containerViewController.delegate = self
-        containerViewController.composerViewController.delegate = self
+
+        sessionCoordinator = SessionCoordinator(
+            sidebar: sidebarViewController,
+            container: containerViewController,
+            onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() }
+        )
+        containerViewController.composerViewController.delegate = sessionCoordinator
 
         let contentItem = NSSplitViewItem(viewController: containerViewController)
         contentItem.canCollapse = false
@@ -148,6 +151,7 @@ final class MainWindowController: NSWindowController {
         splitViewController.addSplitViewItem(contentItem)
 
         setupDisplayPane()
+        setupAgentToolCoordinator()
 
         window?.contentViewController = splitViewController
 
@@ -160,6 +164,15 @@ final class MainWindowController: NSWindowController {
         window?.toolbarStyle = .unifiedCompact
 
         unifySidebarWithBackdrop()
+    }
+
+    private func setupAgentToolCoordinator() {
+        agentToolCoordinator = AgentToolCoordinator(
+            displayPaneController: displayPaneController,
+            visibleSessionID: { [weak self] in self?.currentSessionID },
+            setPaneVisible: { [weak self] visible in self?.setDisplayPaneVisible(visible) },
+            windowProvider: { [weak self] in self?.window }
+        )
     }
 
     /// Makes the sidebar's material sample the window's own backdrop rather than the desktop,
@@ -315,22 +328,22 @@ final class MainWindowController: NSWindowController {
     }
 
     /// Points the usage pill at the shown session's account, or clears it.
-    ///
-    /// Skipped when the account is unchanged: this runs on every terminal-title rewrite,
-    /// and account discovery reads the filesystem.
     private func updateAccountUsageItem(session: AgentSession?) {
-        let key = session.map { AccountID(provider: $0.kind, handle: $0.accountHandle) }
-        guard key != usageAccountKey else { return }
-        usageAccountKey = key
-
         guard let session else {
-            accountUsageItemView.configure(account: nil)
+            if accountUsageItemView.account != nil {
+                accountUsageItemView.configure(account: nil)
+            }
             return
         }
 
-        accountUsageItemView.configure(
-            account: AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle)
+        let accountID = AccountID(provider: session.kind, handle: session.accountHandle)
+        guard accountUsageItemView.account?.id != accountID else { return }
+
+        let account = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
         )
+        accountUsageItemView.configure(account: account)
     }
 
     /// Opens Settings, or does nothing if already open. Used by the menu and ⌘,.
@@ -415,66 +428,16 @@ final class MainWindowController: NSWindowController {
     /// four with defaults the user never saw. The composer is now the only way in, so every
     /// session starts from a choice.
     func newSession() {
-        let projectID: ProjectID?
-
-        if let currentSessionID {
-            projectID = ProjectStore.shared.project(forSessionID: currentSessionID)?.id
-        } else {
-            projectID = ProjectStore.shared.projects.first?.id
-        }
-
-        guard let projectID else {
-            addProject()
-            return
-        }
-
-        sidebarViewController.select(projectID: projectID)
+        sessionCoordinator.newSession()
     }
 
     func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        panel.message = "Choose a folder to add as a project."
-
-        panel.begin { [weak self] response in
-            guard response == .OK, let url = panel.url, let self else { return }
-
-            let project = ProjectStore.shared.addProject(folderURL: url)
-            self.sidebarViewController.reload()
-            self.sidebarViewController.select(projectID: project.id)
-        }
+        sessionCoordinator.addProject()
     }
 
     /// Closes the current session's terminal, leaving it dormant and resumable.
     func closeCurrentSession() {
-        guard let currentSessionID else { return }
-        guard confirmCloseIfRunning(sessionID: currentSessionID) else { return }
-
-        containerViewController.closeTerminal(for: currentSessionID)
-        sidebarViewController.refreshRows()
-    }
-
-    /// Asks before ending a running agent, when that preference is enabled.
-    ///
-    /// Returns true when closing should proceed.
-    private func confirmCloseIfRunning(sessionID: SessionID) -> Bool {
-        guard AppSettings.shared.confirmsBeforeClosingRunningSession,
-              AgentRuntime.shared.isRunning(sessionID: sessionID),
-              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
-
-        let alert = NSAlert()
-        alert.messageText = "Close \"\(session.displayTitle)\"?"
-        alert.informativeText = session.kind.supportsResume
-            ? "The agent will stop. The session stays in the sidebar and can be resumed."
-            : "The shell will stop. The session stays in the sidebar."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Close Session")
-        alert.addButton(withTitle: "Cancel")
-
-        return alert.runModal() == .alertFirstButtonReturn
+        sessionCoordinator.closeCurrentSession()
     }
 
     func increaseFontSize() {
@@ -568,13 +531,11 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID) {
         // Taken rather than read: an opening prompt belongs to the launch that follows it,
         // not to every later selection of the same session.
-        let prompt = pendingPrompt
-        pendingPrompt = nil
+        let prompt = sessionCoordinator.takePendingPrompt()
 
         containerViewController.show(sessionID: sessionID, initialPrompt: prompt)
         syncDisplayPane(to: sessionID)
         sidebar.refreshRows()
-        updateSessionTitleItem()
     }
 
     /// A project has no terminal of its own, so selecting one offers the composer: the
@@ -583,7 +544,6 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         containerViewController.showComposer(projectID: projectID)
         syncDisplayPane(to: nil)
         sidebar.refreshRows()
-        updateSessionTitleItem()
     }
 
     /// A folder dropped on the sidebar lands in its composer, like one added from the panel:
@@ -602,7 +562,6 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
         if archived, sessionID == currentSessionID {
             containerViewController.show(sessionID: nil)
-            updateSessionTitleItem()
         }
 
         sidebar.reload()
@@ -621,16 +580,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         setUsesNativeUI usesNative: Bool,
         for sessionID: SessionID
     ) {
-        guard confirmSurfaceSwitchIfRunning(sessionID: sessionID, toNative: usesNative) else {
-            return
-        }
-
-        AgentRuntime.shared.discard(sessionID: sessionID)
-        ProjectStore.shared.setUsesNativeUI(usesNative, for: sessionID)
-
-        containerViewController.reopenIfShowing(sessionID: sessionID)
-        sidebar.reload()
-        updateSessionTitleItem()
+        sessionCoordinator.setUsesNativeUI(usesNative, for: sessionID)
     }
 
     /// Forks a session into a side chat and opens it.
@@ -639,46 +589,14 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// lets the side chat run *beside* a live session instead of queueing behind it — the one
     /// constraint the surface switch has and this does not.
     ///
-    /// An opening question travels the same route the composer's does, through
-    /// `pendingPrompt`, so "Ask on the Side…" needs no launch path of its own.
+    /// An opening question travels the same one-shot coordinator route as the composer's,
+    /// so "Ask on the Side…" needs no launch path of its own.
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         createSideChatOf sessionID: SessionID,
         prompt: String?
     ) {
-        guard let session = ProjectStore.shared.addSideChat(of: sessionID) else { return }
-
-        EventLog.shared.record(.composer, "Side chat forked", [
-            "session": session.id.uuidString,
-            "parent": sessionID.uuidString,
-            "prompt": prompt ?? ""
-        ])
-
-        pendingPrompt = prompt
-
-        sidebar.reload()
-        sidebar.select(sessionID: session.id)
-    }
-
-    /// Asks before a switch ends a running agent, under the same preference that guards
-    /// closing one. The conversation survives either way; what is lost is the work in flight.
-    private func confirmSurfaceSwitchIfRunning(sessionID: SessionID, toNative: Bool) -> Bool {
-        guard AppSettings.shared.confirmsBeforeClosingRunningSession,
-              AgentRuntime.shared.isRunning(sessionID: sessionID),
-              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
-
-        let surface = toNative ? "Conversation" : "Terminal"
-        let alert = NSAlert()
-        alert.messageText = "Show \"\(session.displayTitle)\" as \(surface.lowercased())?"
-        alert.informativeText = """
-            The agent stops and starts again on the new surface, resuming this conversation \
-            where it left off. Anything it is working on right now is interrupted.
-            """
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Show as \(surface)")
-        alert.addButton(withTitle: "Cancel")
-
-        return alert.runModal() == .alertFirstButtonReturn
+        sessionCoordinator.createSideChat(of: sessionID, prompt: prompt)
     }
 
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController) {
@@ -695,7 +613,6 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         GitTurnBaselineStore.shared.retainOnly(sessionIDs: liveSessionIDs)
 
         syncDisplayPane(to: containerViewController.currentSessionID)
-        updateSessionTitleItem()
     }
 
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController) {
@@ -709,85 +626,15 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
 // MARK: - TerminalContainerViewControllerDelegate
 
-// MARK: - SessionComposerViewControllerDelegate
-
-extension MainWindowController: SessionComposerViewControllerDelegate {
-
-    func sessionComposer(
-        _ composer: SessionComposerViewController,
-        startSessionIn projectID: ProjectID,
-        kind: AgentKind,
-        accountHandle: AccountHandle,
-        model: String?,
-        branch: String?,
-        usesNativeUI: Bool,
-        prompt: String
-    ) {
-        // A branch other than this checkout's means the session belongs in the checkout
-        // standing on it, which is a project of its own — the branch menu only offers
-        // checkouts that exist, so this resolves unless one was removed since it opened.
-        let targetProjectID = branch.flatMap {
-            ProjectStore.shared.checkout(onBranch: $0, inRepositoryOf: projectID)
-        } ?? projectID
-
-        guard let session = ProjectStore.shared.addSession(
-            to: targetProjectID,
-            kind: kind,
-            accountHandle: accountHandle,
-            model: model,
-            usesNativeUI: usesNativeUI
-        ) else { return }
-
-        let opening = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Journalled before the draft is dropped, and before anything is launched. Between
-        // those two points the prompt would otherwise live only in memory and in a command
-        // line — which is precisely where it was when a crash took one.
-        EventLog.shared.record(.composer, "Session started from composer", [
-            "session": session.id.uuidString,
-            "project": targetProjectID.uuidString,
-            "agent": kind.rawValue,
-            "account": accountHandle.name,
-            "prompt": opening
-        ])
-
-        DraftStore.shared.clear(for: projectID)
-        pendingPrompt = opening
-
-        sidebarViewController.reload()
-        sidebarViewController.select(sessionID: session.id)
-    }
-
-    func sessionComposer(
-        _ composer: SessionComposerViewController,
-        importSession session: ImportableSession,
-        into projectID: ProjectID
-    ) {
-        guard let adopted = ProjectStore.shared.importSession(session, into: projectID) else {
-            return
-        }
-
-        // Selected rather than launched: the conversation already exists, so showing it is
-        // the resume, and the user decides when to reopen it.
-        sidebarViewController.reload()
-        sidebarViewController.select(sessionID: adopted.id)
-    }
-
-    func sessionComposer(
-        _ composer: SessionComposerViewController,
-        didCreateWorktreeAt url: URL,
-        branch: String
-    ) {
-        // Registering it as a project is what makes the new checkout selectable, and the
-        // repository grouping picks it up automatically.
-        let project = ProjectStore.shared.addProject(folderURL: url)
-        sidebarViewController.reload()
-        containerViewController.showComposer(projectID: project.id)
-    }
-
-}
-
 extension MainWindowController: TerminalContainerViewControllerDelegate {
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        visibleSessionDidChange sessionID: SessionID?
+    ) {
+        updateSessionTitleItem()
+        updateWindowTitle()
+    }
 
     func terminalContainer(
         _ container: TerminalContainerViewController,
@@ -798,7 +645,11 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         sidebarViewController.refreshRow(sessionID: sessionID)
 
         if sessionID == currentSessionID {
-            updateSessionTitleItem()
+            let session = ProjectStore.shared.session(withID: sessionID)
+            sessionTitleItemView.configure(
+                project: ProjectStore.shared.project(forSessionID: sessionID),
+                session: session
+            )
         }
     }
 

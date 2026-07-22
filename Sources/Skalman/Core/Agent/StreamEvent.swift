@@ -60,56 +60,47 @@ enum ToolIdentity: Hashable {
     case mcp(String)
     case unknown(String)
 
+    /// Every spelling either provider uses, mapped to the behaviour it denotes.
+    ///
+    /// A table rather than a `switch` because there are two vocabularies now and a third would
+    /// not fit in a readable one — and because a `switch` over this many names is a branch per
+    /// entry, which is complexity in the counted sense without being complexity in any sense a
+    /// reader cares about.
+    ///
+    /// Codex's names come from 1008 real rollouts on the machine this was built for rather than
+    /// from a published list, which is the only reason the long tail was found at all. Only
+    /// tools whose *behaviour* matches an identity already here appear: everything
+    /// Codex-specific — spawning agents, goals, simulators — is absent on purpose, because
+    /// mapping a tool onto an identity also hands it that identity's permissions.
+    private static let identitiesByName: [String: ToolIdentity] = [
+        // Claude
+        "Bash": .bash, "Read": .read, "Write": .write, "Edit": .edit,
+        "MultiEdit": .multiEdit, "NotebookEdit": .notebookEdit, "NotebookRead": .notebookRead,
+        "Glob": .glob, "Grep": .grep, "WebFetch": .webFetch, "WebSearch": .webSearch,
+        "Task": .task, "TodoWrite": .todoWrite, "TodoRead": .todoRead,
+        "ToolSearch": .toolSearch, "Plan": .plan,
+
+        // Codex. `write_stdin` writes into a process an earlier command opened, which is part
+        // of the same shell interaction and no less consequential than opening it.
+        "exec": .bash, "exec_command": .bash, "shell_command": .bash,
+        "shell": .bash, "local_shell": .bash, "write_stdin": .bash,
+
+        // A patch carries old *and* new text, so it is an edit rather than a whole-file
+        // write — which is what lets `CodexPatch` feed the same `DiffView`.
+        "apply_patch": .edit,
+
+        "view_image": .read,
+        "update_plan": .plan,
+        "web_search": .webSearch
+    ]
+
     init(_ rawName: String) {
-        switch rawName {
-        case "Bash": self = .bash
-        case "Read": self = .read
-        case "Write": self = .write
-        case "Edit": self = .edit
-        case "MultiEdit": self = .multiEdit
-        case "NotebookEdit": self = .notebookEdit
-        case "NotebookRead": self = .notebookRead
-        case "Glob": self = .glob
-        case "Grep": self = .grep
-        case "WebFetch": self = .webFetch
-        case "WebSearch": self = .webSearch
-        case "Task": self = .task
-        case "TodoWrite": self = .todoWrite
-        case "TodoRead": self = .todoRead
-        case "ToolSearch": self = .toolSearch
-        case "Plan": self = .plan
-
-        // Codex's spellings for the same behaviours. Taken from 1008 real rollouts on this
-        // machine rather than from a list, which is how the long tail below was found at all.
-        //
-        // Only tools whose *behaviour* matches an identity already here are mapped. Everything
-        // Codex-specific — spawning agents, goals, simulators — stays `.unknown` and therefore
-        // prompts, because mapping a tool onto an identity also hands it that identity's
-        // permissions.
-        case "exec", "exec_command", "shell_command", "shell", "local_shell":
-            self = .bash
-
-        // Writing to a running process's stdin is part of the same shell interaction, and is no
-        // less consequential than the command that opened it.
-        case "write_stdin":
-            self = .bash
-
-        // A patch carries old and new text, which is an edit rather than a whole-file write —
-        // and is what lets `CodexPatch` feed the same `DiffView`.
-        case "apply_patch":
-            self = .edit
-
-        case "view_image":
-            self = .read
-
-        case "update_plan":
-            self = .plan
-
-        case "web_search":
-            self = .webSearch
-
-        case let name where name.hasPrefix("mcp__"): self = .mcp(name)
-        default: self = .unknown(rawName)
+        if let known = Self.identitiesByName[rawName] {
+            self = known
+        } else if rawName.hasPrefix("mcp__") {
+            self = .mcp(rawName)
+        } else {
+            self = .unknown(rawName)
         }
     }
 

@@ -264,7 +264,7 @@ final class SessionComposerViewController: NSViewController {
         accountChip.isHidden = accounts.count < 2
         accountChip.configure(
             symbolName: ComposerDefaults.accountSymbol,
-            title: account?.displayName ?? ""
+            title: account.map(AccountName.display) ?? ""
         )
 
         let models = AgentModels.available(for: selectedAgent, account: account)
@@ -311,9 +311,10 @@ final class SessionComposerViewController: NSViewController {
         AccountUsageService.shared.refresh(account)
 
         usagePanel.show(
-            accountName: account.displayName,
+            accountName: AccountName.display(for: account),
             usage: AccountUsageService.shared.usage(for: account),
-            error: AccountUsageService.shared.errorMessage(for: account)
+            error: AccountUsageService.shared.errorMessage(for: account),
+            account: account
         )
     }
 
@@ -351,7 +352,11 @@ final class SessionComposerViewController: NSViewController {
         let menu = NSMenu()
 
         for account in AgentAccountDiscovery.accounts(for: selectedAgent) {
-            let item = NSMenuItem(title: account.displayName, action: nil, keyEquivalent: "")
+            let item = NSMenuItem(
+                title: AccountName.display(for: account),
+                action: nil,
+                keyEquivalent: ""
+            )
             item.representedObject = account.handle
             item.state = account.handle == selectedAccountHandle ? .on : .off
 
@@ -568,6 +573,7 @@ final class SessionComposerViewController: NSViewController {
 
 // MARK: - SessionComposerViewControllerDelegate
 
+@MainActor
 protocol SessionComposerViewControllerDelegate: AnyObject {
     func sessionComposer(
         _ composer: SessionComposerViewController,

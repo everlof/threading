@@ -862,11 +862,38 @@ the right glyph and diff — but only 204 (0.3%) become auto-allowed. 82% of all
 are shell execution, which legitimately prompts.
 
 That asymmetry is Codex's, not ours: Claude has distinct `Read` / `Grep` / `Glob` tools that the
-allowlist can admit, while Codex reads files by shelling out to `cat`. So a Codex session
-prompts far more than a Claude one for the same work, and no amount of tool-name mapping changes
-it — the remaining fix is classifying the *command* rather than the tool, which is a security
-posture decision (it is what Codex's own `untrusted` approval policy does) rather than a
-translation, and is deliberately not taken here.
+allowlist can admit, while Codex reads files by shelling out. So the *command* has to be read,
+which is what `ShellCommandPolicy` does — the same thing Codex's own `untrusted` approval policy
+does, and the only way one tool name covering both reading and writing can be judged at all.
+
+**It is built to be wrong in one direction only.** A missed approval costs a click; a wrong one
+runs something destructive unasked. So the allowlist is short and explicit, and anything that
+could reach a command the policy never sees is refused outright: redirection, substitution,
+backgrounding, a leading variable assignment, an absolute path in place of a bare name. Splitting
+on operators is deliberately naive, and that is safe *because* it is naive — a `;` inside a
+quoted argument splits into a segment whose first word is not allowlisted, so the line is refused
+rather than admitted.
+
+Three rules came from measuring 5,165 real Codex commands rather than from reasoning, and each
+was wrong first:
+
+- **`sed` had to be admitted, narrowly.** `sed -n '1,220p' file` is how Codex *reads* — 42% of
+  its shell calls — and refusing it left the classifier admitting 20% of real traffic. It is
+  also the one allowlisted command that can write (`-i`, `-f`, a `w` in the script), so the
+  *script itself* must be a bare line range ending in `p`. Of 2,650 real calls, none used `-i`
+  or `-f`.
+- **`&&` is a chain, not a hazard.** Banning the character outright made a chain of reads
+  prompt, which is most of them; every link is vetted independently instead, and a *lone* `&`
+  is still refused because it detaches what came before it.
+- **`sed -n '10,$p'` prompts anyway**, and is left prompting: the `$` ban runs first and cannot
+  tell `$p` inside single quotes from a variable without tracking shell quoting. Refusing a rare
+  legitimate form is the price of not having to be right about quoting.
+
+Together those take real-world coverage from 20% to **59%**, measured by
+`ShellCommandPolicyCorpusTests` running the policy over this machine's own rollouts — the unit
+tests pin the rules, that one pins the thing the rules exist for, and it fails if a change
+quietly undoes the measurement. A second corpus test asserts nothing destructive is ever
+admitted.
 
 The `PreToolUse` entry is written **unconditionally** and guarded on
 `MCPDefaults.brokerEnvironmentKey`, which only `streamPlan` exports. Installing it per-surface

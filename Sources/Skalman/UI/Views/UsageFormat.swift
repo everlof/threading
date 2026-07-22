@@ -119,3 +119,29 @@ extension UsageSeverity {
         }
     }
 }
+
+// MARK: - Forecast Text
+
+extension UsageFormat {
+
+    /// The projection as a sentence, or nil while there is nothing worth claiming.
+    ///
+    /// Silent on `.unknown` rather than saying "unknown": a line that appears only when it has
+    /// something to say is read when it appears, and one that is always there is not read at
+    /// all. Silent on a comfortable window too — being told you will not run out is noise.
+    static func forecast(_ outcome: UsageForecast.Outcome, window: AccountUsage.Window) -> String? {
+        switch outcome {
+        case .unknown, .withinBudget:
+            return nil
+        case let .exhausting(at, early):
+            let earlyBy = remaining(until: Date().addingTimeInterval(early), from: Date())
+            return "\(window.id) spent by \(clock.string(from: at)) · \(earlyBy) early"
+        }
+    }
+
+    private static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+}

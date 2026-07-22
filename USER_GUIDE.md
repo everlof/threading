@@ -796,6 +796,25 @@ next launch.
 ### Accounts
 Per-account icons and names. See [Accounts](#accounts).
 
+### Will it last?
+The usage panel above the composer, and the toolbar's pill popover, say how much of each
+window is spent. When Skalman has watched a window long enough to see a *rate*, it also says
+where that rate leads:
+
+```
+5h  ████████████░░░░░░  62%
+7d  ████████████████░░  85%
+    7d spent by 19:40 · 8h early · Updated just now
+```
+
+The line appears only when the projection matters — when the window will run out **before** it
+resets. A window that will comfortably outlast its own reset says nothing, because being told
+you are fine is noise.
+
+For Codex this works immediately: it records rate limits into its own transcripts, so Skalman
+recovers the past week from disk the first time it looks. Claude records none, so its
+projection appears after Skalman has watched the window for a while.
+
 ### Usage
 Where your tokens went, read from the agents' own transcripts — the question the toolbar's
 usage pill provokes and cannot answer. It says the week is 85% spent; this says what spent it.

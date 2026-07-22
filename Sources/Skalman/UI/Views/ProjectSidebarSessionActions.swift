@@ -110,7 +110,8 @@ extension ProjectSidebarViewController {
     }
 
     private func accountMenuLabel(_ account: AgentAccount) -> String {
-        account.emoji.map { "\($0)  \(account.displayName)" } ?? account.displayName
+        let name = AccountName.display(for: account)
+        return account.emoji.map { "\($0)  \(name)" } ?? name
     }
 
     // MARK: - Handlers

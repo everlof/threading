@@ -58,6 +58,10 @@ final class AccountUsageService {
     private var entries: [AccountID: Entry] = [:]
     private var inFlight: Set<AccountID> = []
 
+    /// Accounts whose history has already been recovered from disk this launch. The recovery is
+    /// a filesystem walk and its answer does not change between readings.
+    private var seededHistory: Set<AccountID> = []
+
     // MARK: - Initialization
 
     private init() {}
@@ -99,7 +103,7 @@ final class AccountUsageService {
             }
 
             await MainActor.run {
-                AccountUsageService.shared.finish(accountID: id, result: result)
+                AccountUsageService.shared.finish(account: account, result: result)
             }
         }
     }
@@ -117,7 +121,8 @@ final class AccountUsageService {
             : UsageDefaults.refreshInterval
     }
 
-    private func finish(accountID: AccountID, result: Result<AccountUsage, UsageFetchError>) {
+    private func finish(account: AgentAccount, result: Result<AccountUsage, UsageFetchError>) {
+        let accountID = account.id
         inFlight.remove(accountID)
 
         var entry = entries[accountID] ?? Entry()
@@ -125,6 +130,11 @@ final class AccountUsageService {
         case .success(let usage):
             entry.usage = usage
             entry.errorMessage = nil
+
+            // Every reading joins the history, which is the only place a *rate* can come
+            // from — a snapshot can say 85% and never say how fast it got there.
+            UsageHistoryStore.shared.record(usage, for: account)
+            seedHistoryIfThin(account, usage: usage)
         case .failure(let error):
             // The last good reading survives a failed refresh.
             entry.errorMessage = error.message
@@ -135,6 +145,34 @@ final class AccountUsageService {
         entries[accountID] = entry
 
         NotificationCenter.default.post(AccountUsageDidChange(accountID: accountID))
+    }
+
+    /// Recovers a Codex account's past week from its own rollouts, once, when the history is
+    /// too thin to project from.
+    ///
+    /// Only Codex: it writes rate limits into its transcripts, so its history exists before
+    /// Skalman ever looked. Claude's does not, and necessarily starts now.
+    private func seedHistoryIfThin(_ account: AgentAccount, usage: AccountUsage) {
+        guard account.provider == .codex,
+              let window = usage.peakWindow(),
+              !seededHistory.contains(account.id),
+              UsageHistoryStore.shared.samples(for: account, windowID: window.id).count
+                  < UsageHistoryDefaults.thinHistory else { return }
+
+        seededHistory.insert(account.id)
+
+        let configPath = account.configPath
+        let windowID = window.id
+
+        DispatchQueue.global(qos: .utility).async {
+            let samples = CodexUsageBackfill.samples(forAccountAt: configPath)
+            guard !samples.isEmpty else { return }
+
+            Task { @MainActor in
+                UsageHistoryStore.shared.seed(samples, for: account, windowID: windowID)
+                NotificationCenter.default.post(AccountUsageDidChange(accountID: account.id))
+            }
+        }
     }
 
     private static func fetchUsage(for account: AgentAccount) async throws -> AccountUsage {

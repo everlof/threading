@@ -237,6 +237,7 @@ struct MCPToolResult: Encodable {
 /// Implemented by whatever can actually show the content — in practice the main window.
 ///
 /// Called on the main queue, since the model layer and AppKit both require it.
+@MainActor
 protocol MCPToolHandling: AnyObject {
     func handle(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult
 

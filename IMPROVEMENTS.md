@@ -173,14 +173,20 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
 ## Tier 3 — Structure and tests
 
 ### 3.1 Decompose the window-controller hub
-- [ ] `MainWindowController` conforms to five delegate protocols plus `MCPToolHandling`
+- [x] `MainWindowController` conforms to five delegate protocols plus `MCPToolHandling`
       plus permission presentation (~800 lines + `MainWindowMCPTools.swift` 306 lines).
       Extract: `AgentToolCoordinator` (browser/display tool handling) and
       `SessionCoordinator` (create / close / import / worktree resolution). Chrome and
-      layout stay.
-- [ ] "Which session is visible" is tracked in three places (`TerminalContainerViewController.currentSessionID`,
+      layout stay. `AgentToolCoordinator` now owns MCP browser/display/storage/theme handling
+      behind narrow window capabilities, while `SessionCoordinator` owns composer delegation,
+      one-shot prompts, side chats, surface switches, and session lifecycle decisions. The main
+      window retains navigation, toolbar, layout, and terminal-container presentation. Focused
+      coordinator/MCP/UI tests pass (24 tests), and the strict-concurrency app build is clean.
+- [x] "Which session is visible" is tracked in three places (`TerminalContainerViewController.currentSessionID`,
       `AgentRuntime.setVisibleSession`, toolbar's account key) — make the container
-      authoritative, derive the rest.
+      authoritative, derive the rest. `currentSessionID` now drives runtime attention and a
+      single chrome delegate event; the toolbar resolves its account from that session and its
+      currently configured account instead of retaining another visibility key.
 - [ ] Settings pages are index-coupled (sidebar index → `SettingsPages.all[index]`) — give
       `Page` an identity enum.
 
@@ -207,8 +213,10 @@ these need no UI harness:
 ### 3.4 Smaller structural notes (fold into passing work)
 - [x] `ProjectStore.load()` fires `selectedSessionID.didSet` → redundant disk write during
       init; `removeSession` double-saves (`ProjectStore.swift:21-31,156-164`).
-- [ ] `TerminalSession.startShell` interpolates the directory into `sh -c` with hand-rolled
-      quoting (`TerminalSession.swift:133`) — route through 2.6's builder.
+- [x] `TerminalSession.startShell` now builds the configured shell and every argument as
+      `ShellCommand` words, then shares `ShellCommand.executing(_:in:)` with `AgentLauncher`
+      for the fixed `cd … && exec …` wrapper. A real-shell regression test enters a directory
+      containing quotes, semicolons, and command-substitution syntax without interpreting it.
 - [ ] PID capture is a timed guess with a "first child" fallback
       (`TerminalSession.swift:157-167`); wrong-PID risk under concurrent launches. At
       minimum, drop the fallback when the diff is empty.

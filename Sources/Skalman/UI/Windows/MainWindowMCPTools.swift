@@ -13,13 +13,34 @@ private struct PanelTabsPayload: Encodable {
     let tabs: [Tab]
 }
 
-// MARK: - MCPToolHandling
+// MARK: - Agent Tool Coordinator
 
 /// Serves the tool calls agents make against Skalman's own MCP server.
 ///
-/// Lives on the window controller because the tools are, by definition, requests to change
-/// what the window is showing. Called on the main queue by `MCPServer`.
-extension MainWindowController: MCPToolHandling {
+/// Owns tool behavior without owning the window: the window supplies the narrow capabilities
+/// tools actually need, while its chrome, layout, and navigation remain outside this type.
+/// Called on the main queue by `MCPServer`.
+@MainActor
+final class AgentToolCoordinator: MCPToolHandling {
+
+    private let displayPaneController: DisplayPaneController
+    private let visibleSessionID: () -> SessionID?
+    private let setPaneVisible: (Bool) -> Void
+    private let windowProvider: () -> NSWindow?
+
+    init(
+        displayPaneController: DisplayPaneController,
+        visibleSessionID: @escaping () -> SessionID?,
+        setPaneVisible: @escaping (Bool) -> Void,
+        windowProvider: @escaping () -> NSWindow?
+    ) {
+        self.displayPaneController = displayPaneController
+        self.visibleSessionID = visibleSessionID
+        self.setPaneVisible = setPaneVisible
+        self.windowProvider = windowProvider
+    }
+
+    var presentationWindow: NSWindow? { windowProvider() }
 
     func handle(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
         switch call {
@@ -135,17 +156,17 @@ extension MainWindowController: MCPToolHandling {
                 return
             }
 
-            // Fetched off the main queue; everything that touches the store hops back.
-            DispatchQueue.global(qos: .userInitiated).async {
-                let data = ProjectIconDiscovery.fetchImage(url)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    guard let data else {
-                        completion(.failure("\(address) did not serve a usable image."))
-                        return
-                    }
-                    completion(self.apply(iconData: data, to: project))
+            // Fetched off the main actor; everything that touches the store resumes here.
+            Task { @MainActor [weak self] in
+                let data = await Task.detached(priority: .userInitiated) {
+                    ProjectIconDiscovery.fetchImage(url)
+                }.value
+                guard let self else { return }
+                guard let data else {
+                    completion(.failure("\(address) did not serve a usable image."))
+                    return
                 }
+                completion(self.apply(iconData: data, to: project))
             }
             return
         }
@@ -361,10 +382,10 @@ extension MainWindowController: MCPToolHandling {
     /// session's panel waits until it is selected, exactly as its content does.
     @discardableResult
     private func revealDisplayPane(for sessionID: SessionID) -> Bool {
-        let isVisible = sessionID == currentSessionID
+        let isVisible = sessionID == visibleSessionID()
         if isVisible {
             displayPaneController.showSession(sessionID)
-            setDisplayPaneVisible(true)
+            setPaneVisible(true)
         }
         return isVisible
     }

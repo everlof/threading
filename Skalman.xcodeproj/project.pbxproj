@@ -22,6 +22,7 @@
 		A10000050000000000000002 /* AccountUsageSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000050000000000000001 /* AccountUsageSummaryTests.swift */; };
 		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
 		C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */; };
+		CB865BD84ED28745D2A4C294 /* UsageForecastTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 696D173B6C5410C69CC97BE3 /* UsageForecastTests.swift */; };
 		7B2722AEF9ED592DD011C293 /* TranscriptUsageIndexTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63B1299073D75E9C4A00C29E /* TranscriptUsageIndexTests.swift */; };
 		F1B216BA36D0993C9078732F /* DiskSpaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A7D8163AC93C023CE61034D /* DiskSpaceTests.swift */; };
 		83FA7B157AC55CF7B3F151C5 /* ArtifactScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */; };
@@ -49,6 +50,9 @@
 		A34F41FB3D85E4A72F65D704 /* UsageRingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */; };
 		848FBC7336F4E1B9FE429A8A /* ModelNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9984539B5DEA19828534D5B4 /* ModelNameTests.swift */; };
 		82C90C7DE0F6E3D6EB660A66 /* ToolIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */; };
+		A98028EC99612E6E18C2CB28 /* ShellCommandPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */; };
+		A1D70C8F3554C9C81F2DCF48 /* AccountNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F73C717F854436EAC372592 /* AccountNameTests.swift */; };
+		B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,6 +80,7 @@
 		A10000040000000000000001 /* PromptAttachmentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptAttachmentTests.swift; sourceTree = "<group>"; };
 		A10000050000000000000001 /* AccountUsageSummaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountUsageSummaryTests.swift; sourceTree = "<group>"; };
 		A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectIconTests.swift; sourceTree = "<group>"; };
+		696D173B6C5410C69CC97BE3 /* UsageForecastTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageForecastTests.swift; sourceTree = "<group>"; };
 		63B1299073D75E9C4A00C29E /* TranscriptUsageIndexTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptUsageIndexTests.swift; sourceTree = "<group>"; };
 		7A7D8163AC93C023CE61034D /* DiskSpaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiskSpaceTests.swift; sourceTree = "<group>"; };
 		0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtifactScannerTests.swift; sourceTree = "<group>"; };
@@ -105,6 +110,9 @@
 		9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageRingTests.swift; sourceTree = "<group>"; };
 		9984539B5DEA19828534D5B4 /* ModelNameTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelNameTests.swift; sourceTree = "<group>"; };
 		4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolIdentityTests.swift; sourceTree = "<group>"; };
+		06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyTests.swift; sourceTree = "<group>"; };
+		5F73C717F854436EAC372592 /* AccountNameTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountNameTests.swift; sourceTree = "<group>"; };
+		8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyCorpusTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -175,6 +183,7 @@
 				D12026070000000000000001 /* MCPSessionRegistryTests.swift */,
 				D12026070000000000000003 /* PermissionRequestViewTests.swift */,
 				A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */,
+				696D173B6C5410C69CC97BE3 /* UsageForecastTests.swift */,
 				63B1299073D75E9C4A00C29E /* TranscriptUsageIndexTests.swift */,
 				7A7D8163AC93C023CE61034D /* DiskSpaceTests.swift */,
 				0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */,
@@ -204,6 +213,9 @@
 				9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */,
 				9984539B5DEA19828534D5B4 /* ModelNameTests.swift */,
 				4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */,
+				06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */,
+				5F73C717F854436EAC372592 /* AccountNameTests.swift */,
+				8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -350,6 +362,7 @@
 				D12026070000000000000002 /* MCPSessionRegistryTests.swift in Sources */,
 				D12026070000000000000004 /* PermissionRequestViewTests.swift in Sources */,
 				C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */,
+				CB865BD84ED28745D2A4C294 /* UsageForecastTests.swift in Sources */,
 				7B2722AEF9ED592DD011C293 /* TranscriptUsageIndexTests.swift in Sources */,
 				F1B216BA36D0993C9078732F /* DiskSpaceTests.swift in Sources */,
 				83FA7B157AC55CF7B3F151C5 /* ArtifactScannerTests.swift in Sources */,
@@ -379,6 +392,9 @@
 				A34F41FB3D85E4A72F65D704 /* UsageRingTests.swift in Sources */,
 				848FBC7336F4E1B9FE429A8A /* ModelNameTests.swift in Sources */,
 				82C90C7DE0F6E3D6EB660A66 /* ToolIdentityTests.swift in Sources */,
+				A98028EC99612E6E18C2CB28 /* ShellCommandPolicyTests.swift in Sources */,
+				A1D70C8F3554C9C81F2DCF48 /* AccountNameTests.swift in Sources */,
+				B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

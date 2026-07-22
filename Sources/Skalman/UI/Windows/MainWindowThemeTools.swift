@@ -7,7 +7,7 @@ import AppKit
 /// Every one of them answers for the *calling* session, which is what makes them useful: the
 /// tool call already arrives attributed — the URL is the identity — so "set the theme" needs no
 /// argument saying which terminal, and the terminal that asked is the one that changes.
-extension MainWindowController {
+extension AgentToolCoordinator {
 
     // MARK: List
 

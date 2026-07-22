@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Session restore waits for the listener, because a launch reads the port to build the
         // session's `--mcp-config`. The callback runs whether the server came up or not, so a
         // failed listener costs the restored session its display panel and nothing else.
-        MCPServer.shared.handler = mainWindowController
+        MCPServer.shared.handler = mainWindowController.agentToolCoordinator
         mainWindowController.installPermissionPresenter()
 
         // Installed here rather than on the window, because a lifecycle report is about a

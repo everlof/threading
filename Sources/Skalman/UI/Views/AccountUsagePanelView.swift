@@ -83,7 +83,7 @@ final class AccountUsagePanelView: NSView {
     /// Hiding rather than showing an empty frame is the pill's rule applied here: an account
     /// with no usage source — every shell, and Claude without credentials — is not a thing to
     /// report an absence about.
-    func show(accountName: String, usage: AccountUsage?, error: String?) {
+    func show(accountName: String, usage: AccountUsage?, error: String?, account: AgentAccount? = nil) {
         windowStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         guard let usage, !usage.windows.isEmpty else {
@@ -108,7 +108,7 @@ final class AccountUsagePanelView: NSView {
             row.widthAnchor.constraint(equalTo: windowStack.widthAnchor).isActive = true
         }
 
-        footerLabel.stringValue = footer(for: usage)
+        footerLabel.stringValue = footer(for: usage, account: account)
     }
 
     /// The footer carries what the bars cannot: banked resets and any credit balance.
@@ -116,8 +116,20 @@ final class AccountUsagePanelView: NSView {
     /// Resets matter precisely when a window is spent — that is the moment the user is deciding
     /// whether to stop for the day, and "you have three of these" changes the answer. They are
     /// stated only when there are any, so an account without them says nothing.
-    private func footer(for usage: AccountUsage) -> String {
-        var parts = ["Updated \(UsageFormat.age(of: usage.observedAt))"]
+    private func footer(for usage: AccountUsage, account: AgentAccount?) -> String {
+        var parts: [String] = []
+
+        // The projection leads when there is one: "85% spent" is a level, and the question a
+        // level provokes is whether it will last, which only a rate can answer.
+        if let account, let peak = usage.peakWindow(),
+           let line = UsageFormat.forecast(
+               UsageHistoryStore.shared.forecast(for: account, window: peak),
+               window: peak
+           ) {
+            parts.append(line)
+        }
+
+        parts.append("Updated \(UsageFormat.age(of: usage.observedAt))")
 
         if let credits = usage.resetCredits, credits > 0 {
             parts.append(UsageFormat.resetCredits(credits))

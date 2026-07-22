@@ -16,7 +16,18 @@ final class TerminalContainerViewController: NSViewController {
 
     private var currentChild: AgentSessionViewController?
     private var currentConversation: ConversationViewController?
-    private(set) var currentSessionID: SessionID?
+
+    /// The one authoritative answer to which session is on screen.
+    ///
+    /// Runtime attention and window chrome derive from this transition rather than being
+    /// updated independently by every surface-changing call site.
+    private(set) var currentSessionID: SessionID? {
+        didSet {
+            guard currentSessionID != oldValue else { return }
+            AgentRuntime.shared.setVisibleSession(currentSessionID)
+            delegate?.terminalContainer(self, visibleSessionDidChange: currentSessionID)
+        }
+    }
 
     /// Settings is shown as a single page centred in the pane; the page list lives in the
     /// window's sidebar, which the settings sections replace, so there is no second sidebar.
@@ -93,7 +104,6 @@ final class TerminalContainerViewController: NSViewController {
     func showComposer(projectID: ProjectID) {
         detachCurrentChild()
         currentSessionID = nil
-        AgentRuntime.shared.setVisibleSession(nil)
 
         placeholderView.isHidden = true
         composerViewController.view.isHidden = false
@@ -112,7 +122,6 @@ final class TerminalContainerViewController: NSViewController {
         if settingsPage == nil {
             detachCurrentChild()
             currentSessionID = nil
-            AgentRuntime.shared.setVisibleSession(nil)
             placeholderView.isHidden = true
             composerViewController.view.isHidden = true
             applyPaneBackground(Design.Surface.ground)
@@ -282,15 +291,14 @@ final class TerminalContainerViewController: NSViewController {
     /// Selecting a dormant session is the "reopen" gesture: it resumes the prior
     /// conversation by identifier rather than starting a fresh one.
     func show(sessionID: SessionID?, initialPrompt: String? = nil) {
-        guard sessionID != currentSessionID else { return }
+        guard sessionID != currentSessionID || settingsPage != nil else { return }
 
         detachCurrentChild()
-        currentSessionID = sessionID
         applyDrawer(for: sessionID)
 
         guard let sessionID,
               let agentSession = ProjectStore.shared.session(withID: sessionID) else {
-            AgentRuntime.shared.setVisibleSession(nil)
+            currentSessionID = nil
             showEmptyState()
             return
         }
@@ -309,9 +317,9 @@ final class TerminalContainerViewController: NSViewController {
         let controller = AgentRuntime.shared.makeController(for: agentSession)
         controller.delegate = self
 
-        // Only sessions off screen flag that they finished something.
-        AgentRuntime.shared.setVisibleSession(sessionID)
-
+        // Assigned only after the runtime owns the controller, so the authoritative transition
+        // can mark the new controller visible as well as the one it replaces invisible.
+        currentSessionID = sessionID
         attach(controller)
 
         if isNewTerminal {
@@ -388,7 +396,9 @@ final class TerminalContainerViewController: NSViewController {
         let conversation = AgentRuntime.shared.makeConversation(for: agentSession, in: project)
         conversation.delegate = self
 
-        AgentRuntime.shared.setVisibleSession(agentSession.id)
+        // See the terminal path above: the runtime must own the surface before visibility is
+        // derived from the container's selection.
+        currentSessionID = agentSession.id
         attachConversation(conversation)
 
         guard isNew else { return }
@@ -437,15 +447,8 @@ final class TerminalContainerViewController: NSViewController {
         // Also paint the window itself, so the terminal's colour is the backdrop the whole
         // right side sits on: it fills the strip beneath the transparent toolbar and runs into
         // the window's rounded corners, instead of a neutral chrome meeting the terminal in a
-        // hard edge. The sidebar's own material floats on top of this.
-        //
-        // **Resolved first, deliberately.** A themed role is a dynamic colour, and handing one
-        // to `NSWindow.backgroundColor` costs the window its opacity — AppKit cannot settle a
-        // catalog colour's alpha up front, so it assumes translucency. That in turn stops the
-        // sidebar's `.withinWindow` material sampling this backdrop, and the sidebar reverts
-        // from the terminal's near-black to the material's default grey. Measured: #0F0F0F
-        // became #212121 the moment the empty state started passing a role through here.
-        view.window?.backgroundColor = NSColor(cgColor: color.cgColor) ?? color
+        // hard edge. The sidebar's own material floats on top of this, unaffected.
+        view.window?.backgroundColor = color
     }
 
     private func detachCurrentChild() {
@@ -553,6 +556,10 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
 // MARK: - TerminalContainerViewControllerDelegate
 
 protocol TerminalContainerViewControllerDelegate: AnyObject {
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        visibleSessionDidChange sessionID: SessionID?
+    )
     func terminalContainer(
         _ container: TerminalContainerViewController,
         sessionTitleChanged title: String,

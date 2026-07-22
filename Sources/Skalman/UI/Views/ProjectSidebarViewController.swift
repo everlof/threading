@@ -85,6 +85,7 @@ final class ProjectSidebarViewController: NSViewController {
         // The single column does not track the sidebar's width on its own, so names would
         // truncate while empty space remained beside them.
         outlineView.sizeLastColumnToFit()
+
     }
 
 }

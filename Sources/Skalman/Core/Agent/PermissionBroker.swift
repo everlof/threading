@@ -26,20 +26,31 @@ struct PermissionRequest {
     /// to parse a schema before deciding — which is how people learn to click Allow without
     /// reading.
     var summary: String {
+        // Each rule below names its *preferred* argument and then falls back to the generic
+        // search. The fallback is not belt-and-braces: `ToolIdentity` now maps Codex's tools
+        // onto these same identities, and Codex does not always spell the argument the way the
+        // rule does — an `exec` call whose command arrived under another key used to find its
+        // subject through the generic path and lost it the moment it became `.bash`.
         switch tool {
         case .bash:
-            return input["command"] as? String ?? ""
+            return input["command"] as? String ?? subject ?? ""
         case .write, .edit, .notebookEdit, .read, .notebookRead:
-            return (input["file_path"] as? String).map { abbreviate($0) } ?? ""
+            return (input["file_path"] as? String).map { abbreviate($0) } ?? subject ?? ""
         case .webFetch:
-            return input["url"] as? String ?? ""
+            return input["url"] as? String ?? subject ?? ""
         case .webSearch, .grep, .glob:
             // `Grep` and `Glob` name themselves by what they looked for, optionally where.
-            let subject = (input["query"] ?? input["pattern"]) as? String ?? ""
-            guard let path = (input["path"] as? String).map({ abbreviate($0) }), !path.isEmpty else {
-                return subject
+            // Named `term` rather than `subject` so it does not shadow the generic search
+            // below, which is what answers when a provider spells neither of these keys.
+            let term = (input["query"] ?? input["pattern"]) as? String ?? ""
+            let path = (input["path"] as? String).map { abbreviate($0) } ?? ""
+
+            switch (term.isEmpty, path.isEmpty) {
+            case (false, false): return "\(term)  in \(path)"
+            case (false, true): return term
+            case (true, false): return path
+            case (true, true): return subject ?? ""
             }
-            return subject.isEmpty ? path : "\(subject)  in \(path)"
         case .plan:
             // Codex's `update_plan` carries the whole list. The step in progress is the one
             // worth a row; the rest is a checklist nobody reads collapsed.
@@ -55,6 +66,21 @@ struct PermissionRequest {
             // Nearly every tool carries one field that reads as its subject. Take that.
             return subject ?? ""
         }
+    }
+
+    /// The command a shell call would run, under either provider's name for it.
+    ///
+    /// Not for display — `summary` handles that. This is what `ShellCommandPolicy` reads, so it
+    /// returns nil rather than a placeholder when no command can be found: an unreadable call
+    /// must fall through to asking the user, never to a policy decision made on nothing.
+    var shellCommand: String? {
+        for key in ["command", "cmd"] {
+            if let text = input[key] as? String,
+               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return text
+            }
+        }
+        return nil
     }
 
     /// The file a call would change, when it names one. Not for display — it is what says
@@ -198,6 +224,15 @@ enum PermissionBroker {
     ) {
         if PermissionPolicy.isAutoAllowed(request.tool) {
             completion(.allow(reason: "Read-only tool, allowed automatically by Skalman."))
+            return
+        }
+
+        // A shell call is judged by what it runs, because one tool name covers both reading and
+        // writing — and under Codex it is how files are read at all.
+        if request.tool == .bash,
+           let command = request.shellCommand,
+           ShellCommandPolicy.isReadOnly(command) {
+            completion(.allow(reason: "Read-only command, allowed automatically by Skalman."))
             return
         }
 

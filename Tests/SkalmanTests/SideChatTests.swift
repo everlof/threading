@@ -191,6 +191,36 @@ final class SideChatTests: XCTestCase {
     }
 }
 
+@MainActor
+final class SessionCoordinatorTests: XCTestCase {
+
+    func testBranchTargetsItsExistingCheckout() {
+        let original = ProjectID()
+        let checkout = ProjectID()
+
+        let resolved = SessionCoordinator.targetProjectID(
+            startingAt: original,
+            branch: "feature/safe-coordinator"
+        ) { branch, repositoryProjectID in
+            XCTAssertEqual(branch, "feature/safe-coordinator")
+            XCTAssertEqual(repositoryProjectID, original)
+            return checkout
+        }
+
+        XCTAssertEqual(resolved, checkout)
+    }
+
+    func testMissingCheckoutFallsBackToComposerProject() {
+        let original = ProjectID()
+        let resolved = SessionCoordinator.targetProjectID(
+            startingAt: original,
+            branch: "deleted-branch"
+        ) { _, _ in nil }
+
+        XCTAssertEqual(resolved, original)
+    }
+}
+
 final class ShellCommandTests: XCTestCase {
 
     /// Values representative of every dynamic launch field. Running them through a real shell

@@ -70,6 +70,46 @@ final class ToolIdentityTests: XCTestCase {
         }
     }
 
+    // MARK: - Subjects Survive The Mapping
+
+    private func summary(toolName: String, input: [String: Any]) -> String {
+        PermissionRequest(sessionID: SessionID(), toolName: toolName, input: input).summary
+    }
+
+    /// The regression this mapping caused, and the reason every rule now falls back.
+    ///
+    /// Recognising a tool must never make a row say *less* than not recognising it did. As
+    /// `.unknown`, a Codex `exec` found its subject through the generic search, which knows
+    /// `cmd` as well as `command`; the moment it became `.bash` it read only `command` and
+    /// rendered as a bare `$ Bash` with nothing beside it.
+    func testCodexShellCallKeepsItsSubjectUnderEitherArgumentName() {
+        XCTAssertEqual(summary(toolName: "exec", input: ["command": "ls -la"]), "ls -la")
+        XCTAssertEqual(summary(toolName: "exec", input: ["cmd": "ls -la"]), "ls -la")
+        XCTAssertEqual(summary(toolName: "exec_command", input: ["cmd": "git status"]), "git status")
+    }
+
+    /// Same rule for the file-shaped tools: `apply_patch` is an `.edit`, but it does not carry
+    /// a `file_path` the way Claude's `Edit` does.
+    func testMappedFileToolsFallBackToADescriptiveArgument() {
+        let summary = summary(
+            toolName: "apply_patch",
+            input: ["command": "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch"]
+        )
+        XCTAssertFalse(summary.isEmpty, "an apply_patch row must say something")
+    }
+
+    /// Recognising a tool must not lose a subject the generic path would have found — this is
+    /// the general form of the bug above, across every newly mapped name.
+    func testNoMappedToolRendersAnonymouslyWhenItCarriesASubject() {
+        for name in ["exec", "exec_command", "shell_command", "write_stdin",
+                     "apply_patch", "view_image", "web_search"] {
+            XCTAssertFalse(
+                summary(toolName: name, input: ["cmd": "something descriptive"]).isEmpty,
+                "\(name) rendered with no subject"
+            )
+        }
+    }
+
     // MARK: - Claude Spellings
 
     func testClaudeSpellingsAreUnchanged() {

@@ -15,7 +15,7 @@ import AppKit
 /// cleanup. Everything in that listing has passed both of `ArtifactScanner`'s gates — git
 /// ignores it, and a known command rebuilds it — and the gates are checked again at the moment
 /// of deletion.
-extension MainWindowController {
+extension AgentToolCoordinator {
 
     // MARK: - Listing
 
@@ -161,7 +161,7 @@ extension MainWindowController {
         alert.addButton(withTitle: StorageToolStrings.approve)
         alert.addButton(withTitle: StorageToolStrings.decline)
 
-        guard let window else {
+        guard let window = presentationWindow else {
             completion(.failure(StorageToolStrings.noWindow))
             return
         }
@@ -172,26 +172,26 @@ extension MainWindowController {
                 return
             }
 
-            DispatchQueue.global(qos: .userInitiated).async {
-                let removed = artifacts.filter { ArtifactScanner.remove($0) }
+            Task { @MainActor in
+                let removed = await Task.detached(priority: .userInitiated) {
+                    artifacts.filter { ArtifactScanner.remove($0) }
+                }.value
                 let reclaimed = removed.reduce(0) { $0 + $1.byteCount }
 
-                DispatchQueue.main.async {
-                    for project in ProjectStore.shared.projects {
-                        ArtifactScanService.shared.forget(removed, in: project.id)
-                    }
-
-                    SkalmanLogger.agent.info(
-                        "Agent cleanup approved: removed \(removed.count, privacy: .public) directories"
-                    )
-
-                    completion(.success(StorageToolStrings.approved(
-                        count: removed.count,
-                        size: Self.storageSize.string(fromByteCount: reclaimed),
-                        refused: artifacts.count - removed.count,
-                        unknown: unknown
-                    )))
+                for project in ProjectStore.shared.projects {
+                    ArtifactScanService.shared.forget(removed, in: project.id)
                 }
+
+                SkalmanLogger.agent.info(
+                    "Agent cleanup approved: removed \(removed.count, privacy: .public) directories"
+                )
+
+                completion(.success(StorageToolStrings.approved(
+                    count: removed.count,
+                    size: Self.storageSize.string(fromByteCount: reclaimed),
+                    refused: artifacts.count - removed.count,
+                    unknown: unknown
+                )))
             }
         }
     }
