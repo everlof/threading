@@ -22,11 +22,30 @@ final class HoverTintButton: NSButton {
         trackingArea = area
     }
 
+    /// Also tint the *title*, for the buttons that are text rather than a symbol.
+    ///
+    /// `contentTintColor` colours a template image and leaves a title at full strength, which
+    /// is how a quiet action ends up as loud as the content it sits beside. Setting this
+    /// applies the resting tint at once, so the button starts quiet.
+    var tintsTitle = false {
+        didSet { applyTint(.secondaryLabelColor) }
+    }
+
     override func mouseEntered(with event: NSEvent) {
-        contentTintColor = .labelColor
+        applyTint(.labelColor)
     }
 
     override func mouseExited(with event: NSEvent) {
-        contentTintColor = .secondaryLabelColor
+        applyTint(.secondaryLabelColor)
+    }
+
+    private func applyTint(_ color: NSColor) {
+        contentTintColor = color
+
+        guard tintsTitle, !title.isEmpty else { return }
+        attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: color,
+            .font: font ?? NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        ])
     }
 }

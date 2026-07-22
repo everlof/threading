@@ -79,6 +79,27 @@ struct AccountUsage: Equatable {
             .filter { !$0.isExpired(at: now) && $0.fraction != nil }
             .max { ($0.fraction ?? 0) < ($1.fraction ?? 0) }
     }
+
+    /// `5h 43% · 7d 73%` as plain text, for the places that cannot tint per window — a menu
+    /// item, a tooltip. The toolbar pill builds its own attributed version, where each value
+    /// carries its window's severity colour.
+    ///
+    /// Nil when there is nothing to say, so a caller shows no line rather than an empty one.
+    /// An expired window keeps its name and loses its number, for the same reason
+    /// `peakWindow` skips it: the percentage describes the window before it.
+    func compactSummary(at now: Date = Date()) -> String? {
+        guard !windows.isEmpty else { return nil }
+
+        return windows
+            .map { window in
+                let value = window.isExpired(at: now)
+                    ? UsageDefaults.unknownValue
+                    : window.percent.map { "\($0)%" } ?? UsageDefaults.unknownValue
+
+                return "\(window.id) \(value)"
+            }
+            .joined(separator: UsageDefaults.segmentSeparator)
+    }
 }
 
 // MARK: - Usage Severity
@@ -105,6 +126,12 @@ enum UsageSeverity {
 enum UsageDefaults {
     static let warningFraction = 0.75
     static let criticalFraction = 0.92
+
+    /// Between one window and the next in a written-out reading.
+    static let segmentSeparator = " · "
+
+    /// Stands in for a window whose number would be a leftover from the previous one.
+    static let unknownValue = "—"
 
     /// A fetched value is served from cache this long before another fetch is worthwhile.
     static let refreshInterval: TimeInterval = 300

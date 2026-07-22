@@ -35,6 +35,12 @@ an explicit folder so its loose PNGs land under `Contents/Resources/Icons/`, loa
 hosted in the app; `AppDelegate` skips its real startup under `XCTestCase` so tests spawn no
 agents or MCP server.
 
+**`Tests/SkalmanTests` is *not* a synchronized folder** — a new test file must be registered
+in `project.pbxproj` by hand (PBXFileReference, PBXBuildFile, the Tests group, and the test
+target's Sources phase; follow the `A1000000…1`/`…2` id convention already there). The failure
+mode is silent: an unregistered test file builds nothing and `xcodebuild test` reports
+"Executed 0 tests" for it.
+
 ## Dependencies
 
 - **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
@@ -183,17 +189,56 @@ The listener must be ready before any launch, since a launch reads the port — 
 whether the listener came up or not: a failed server costs sessions their panel, not their
 launch (`mcpFlags` returns "" and the command line is unchanged).
 
-### Native Conversations (experimental, Codex only)
+### Native Conversations (experimental)
 
 A session can be rendered by Skalman instead of shown as a terminal. `AgentSession.usesNativeUI`
-picks the surface, fixed at creation — the two drive the CLI in incompatible ways, so switching
-mid-conversation would mean killing the process and resuming under a different interface.
+picks the surface, chosen at creation and **switchable afterwards** from the session row's `⋯`
+menu ("Show as Conversation" / "Show as Terminal").
 
-The mode is gated behind `AgentKind.supportsNativeUI`, which returns true only for Codex.
-Claude is disabled *deliberately*: its streaming mode is `claude -p`, which runs on the user's
-subscription, and Anthropic's 2026 terms restrict subscription OAuth to Claude Code and
-claude.ai. The implementation remains in the tree but is unreachable. A session still flagged
-native for an unsupported kind falls back to its terminal.
+The switch was believed impossible for most of this project's life — the two surfaces were
+assumed to drive the CLI in incompatible ways — and the assumption was never tested. It is
+wrong. They drive *one* conversation: both resume by the session's own id, and both append to
+the same transcript. Measured on Claude 2.1.217, a session created by `-p --session-id`
+resumed in the interactive TUI with its context intact (the TUI redrew the headless turn
+itself), resumed back into `--print` quoting the terminal turn verbatim, and again into
+`--input-format stream-json` — the transport the native surface actually uses — echoing the
+same `session_id`. One file throughout, growing 14 KB → 21 KB → 26 KB, and every record
+carrying that one id: nothing in a transcript records which surface wrote a turn, so
+`TranscriptReplay` cannot tell and does not need to. `--fork-session` exists to opt *into* a
+new id, which is what makes plain `--resume` keeping it a guarantee rather than an accident.
+
+Two constraints survive, and the implementation is shaped by them:
+
+- **One live process per id.** Both surfaces append to the same transcript, so the switch
+  discards the running one before the new one resumes (`AgentRuntime.discard`, then
+  `ProjectStore.setUsesNativeUI`, then `TerminalContainerViewController.reopenIfShowing`).
+  A session that is not on screen is only flipped; it opens on its new surface when next
+  selected.
+- **The permission models differ**, which is the real asymmetry rather than the session id:
+  the terminal asks the user, while `--print` silently *blocks* tools unless the `PreToolUse`
+  hook brokers them. A session switched into the native surface therefore needs its hook
+  settings file in place at relaunch, which is the same file a natively-created session gets.
+
+Codex is *not* covered by that measurement — only Claude was probed — so its behaviour on a
+switch is inference from a shared design, not evidence.
+
+The mode is gated behind `AgentKind.supportsNativeUI`, which admits both agents and excludes
+only shells. A session flagged native for an unsupported kind falls back to its terminal.
+
+**Claude was gated off here for most of this project's life, and no longer is.** The reason it
+was disabled — `claude -p` runs on the user's subscription, and Anthropic's terms reserved
+subscription OAuth for Claude Code and claude.ai — described the February 2026 wording
+accurately and has since been overtaken. The current policy targets *routing requests through
+subscription credentials on behalf of users*: offering Claude.ai login inside your product, or
+lifting the OAuth token out of `~/.claude` and calling the API while impersonating Claude Code.
+Skalman does neither. It spawns the user's own installed `claude` binary, which authenticates
+itself from whatever `claude auth login` put on disk, and Anthropic's help centre now names
+`claude -p` and third-party apps built on that transport as subscription-drawing usage.
+
+The unresolved part is economic, not legal: a June 2026 plan to move `claude -p` and Agent SDK
+turns onto separate metered credits at API rates was withdrawn on the day it was to take effect,
+explicitly as a pause. If it returns, native Claude sessions cost differently from terminal ones
+— worth surfacing to the user then, but not a reason to keep the surface unreachable now.
 
 ```
                     ConversationStreamSession
@@ -201,7 +246,7 @@ native for an unsupported kind falls back to its terminal.
             ┌─────────────────┴─────────────────┐
             ▼                                   ▼
  CodexStreamSession                    ClaudeStreamSession
- one child per turn                    persistent stream (disabled)
+ one child per turn                    persistent stream
  codex exec --json                     claude --print --stream-json
             │
             ▼
@@ -219,9 +264,11 @@ later plan becomes `codex exec resume <id> --json -`. Plans are rebuilt per turn
 model. `agent_message` items become markdown, command/MCP/search/file items become the same
 collapsible tool rows as Claude calls, and `turn.completed` returns the composer to Ready.
 Codex does not emit agent-message deltas through `exec --json`, so its messages land complete;
-the streaming placeholder remains useful only to the disabled Claude transport.
+the streaming placeholder earns its keep only on the Claude transport.
 
-The disabled Claude transport was measured around four constraints before it was written:
+The Claude transport was measured around four constraints before it was written, and re-probed
+against CLI 2.1.217 before the gate was opened — the flags, the multi-turn persistence and the
+carried context all still hold:
 
 - **The process survives multiple turns.** One instance serves a whole conversation; it is not
   respawned per message.
@@ -239,7 +286,7 @@ contract — no helper script to install or keep in step with the app. It posts 
 MCP listener, and `session_id` routing was already solved, because for Claude sessions that
 identifier is the UUID Skalman minted.
 
-For that disabled Claude transport, the request is shown **inline in the conversation that
+For the Claude transport, the request is shown **inline in the conversation that
 raised it**, as a `PermissionRequestView` card (`ConversationViewController.presentPermission`),
 not a window-modal sheet. A sheet was the wrong shape: it seized the whole window for a decision
 belonging to one session and gave no clue which session asked when several were running. The card
@@ -285,6 +332,99 @@ to a Task run rather than this conversation), and everything that is not `user`/
 — what matters about a conversation being resumed is how it ended.
 
 ### Conversation Rendering
+
+Two things about the conversation's *appearance* were changed by looking at rendered fixtures
+rather than by reasoning about single rows, because both are properties of a page rather than
+of a row:
+
+- **A tool row has no fill at rest** (`Design.Chat.toolRowResting` is `.clear`; hover or
+  expansion raises `toolRowActive`). A working turn is mostly tool rows — a real rollout ran
+  twenty consecutively — and twenty filled slabs read as the conversation's content rather
+  than as the record of what was done, burying the sentences between them. This is the design
+  system's own "quiet until relevant" rule, applied where it was most needed. Hover matters
+  more than usual here: with no fill, it is the only thing saying the row can be clicked.
+- **A rule separates turns** (`ConversationRowView.turnDivider`, above each user turn but not
+  the first), and `turnSpacing` went 16 → 30. Spacing alone was tried first and was not
+  enough: the rows on either side of the gap are themselves separated by space, so a bigger
+  gap reads as a bigger gap rather than as a boundary.
+
+### The Turn Rail
+
+`ConversationMinimapView` is a contents page for the conversation: one mark per exchange down
+the gutter, hovering one previews what was asked and what came of it
+(`ConversationTurnPreview`), clicking jumps to it. Turns currently on screen brighten, so it
+answers "where am I" as well as "what is here". The idea, the fisheye taper and the
+disappear-rather-than-crowd rule are t3code's `MessagesTimeline` minimap, and Codex ships the
+same pattern.
+
+**The column cap is what makes it possible, and was worth doing anyway.** The conversation ran
+the full pane — 900pt of unbroken measure in a wide window, which `Design.Size.readableWidth`
+already exists to prevent and which the composer already respects. Capping it at 620 and
+centring it fixes the measure *and* leaves the gutter the rail lives in. Two problems, one
+change; the rail was blocked by a layout that was independently wrong.
+
+`ConversationMinimap` holds the arithmetic, separately from the view, because the two rules
+worth protecting are invisible in a screenshot of a wide window:
+
+- **It indexes, it does not scale.** Marks are evenly spaced — a turn that ran forty tool calls
+  and one that ran none are one exchange each, and spacing by length would give the long one a
+  stretch of rail that says nothing about how much was *said*.
+- **It vanishes rather than crowd the text.** `railWidth` returns zero when the pane is too
+  narrow for a gutter, and the view hides. Skalman is a three-pane window and the conversation
+  is routinely the narrow one, so this is the common case rather than the edge case — the same
+  rule t3code encodes, arrived at for the same reason.
+
+Marker spacing is 20, not t3code's 8: at three turns theirs is a 16pt smudge that reads as a
+rendering artefact. Measured off Codex's own rail — about twenty-five marks over five hundred
+points — and checked by rendering it.
+
+**The model is separate from the drawing.** `ConversationTimeline` folds `[StreamEvent]` into
+`[Row]` and reports what changed; `ConversationRowView` turns one row into one view;
+`ConversationRendering` places it. This is t3code's `MessagesTimeline.logic.ts` /
+`MessagesTimeline.tsx` split, in Swift — their idea, and worth naming as theirs.
+
+It is **incremental, not a fold**: `apply` takes one event and returns only the changes, because
+the same type serves a live stream and a replay, and recomputing every row per token would make
+streaming quadratic. Replay is `apply` in a loop.
+
+The split exists because the interesting decisions — what a tool call's one-line subject is,
+which result attaches to which call, when a streamed placeholder is discarded — were previously
+reachable only by standing up AppKit and reading a view tree, so none of them were tested and
+several were wrong.
+
+**Fixtures are real conversations, scrubbed** (`Tests/Fixtures/Transcripts`,
+`scripts/scrub_transcript.py`). The scrubber replaces content and preserves *shape*: JSON keys,
+markdown structure, patch envelopes, escape sequences, and argument names all survive, because
+those are what the parsers read. Substitution is a deterministic per-token map, so an `Edit`'s
+`old_string` and `new_string` still differ in exactly the lines they differed in and `EditDiff`
+sees a real diff. Windows are chosen by a **coverage score** rather than taken from the top — a
+conversation's tool variety is not evenly spread, and the first window that started on a user
+turn contained no `Edit` at all.
+
+Three scrubber bugs each produced a fixture that exercised a schema no CLI emits, and each was
+found by auditing output rather than by reading the writer: JSON object *keys* are sometimes
+file paths, arguments are sometimes a *string* of JSON, and Codex's `exec` wrapper is a line of
+JavaScript where argument names appear as identifiers and `\n` is an escape.
+
+`ConversationRenderTests` draws whole fixture conversations through the real views and writes
+them out as PNGs, light and dark (`SKALMAN_RENDER_OUT` to redirect). **This is what makes the
+appearance reviewable at all** — and it immediately paid for itself: rendering a Codex rollout
+showed twenty identical `$ Bash` rows with no command beside any of them. Codex names its
+arguments differently from Claude (`cmd`, not `command`; a patch instead of `old_string`), so
+`TranscriptReplay.normalised` now translates them, `CodexPatch` reads the `*** Begin Patch`
+envelope into `[DiffLine]`, and `PermissionRequest.summary` falls back to *any* descriptive
+argument rather than dumping JSON. Every one of those was a correct parser with the wrong
+vocabulary, which no parser test could see.
+
+**Claude's reasoning cannot be replayed.** The CLI writes a `thinking` block per reasoning turn
+but strips its text, keeping only the `signature` — measured at 4451 blocks across the 120 most
+recent transcripts here, of which 65 carried any text. Codex's `agent_reasoning` replays in
+full. The asymmetry is the CLIs', not ours, and is pinned by a test so that a release which
+starts persisting the text fails loudly rather than going unnoticed.
+
+The test target is **not** a synchronized folder — it carries an explicit file list, so a new
+test file compiles nowhere and reports nothing unless added to it. `scripts/add_test_file.py`
+does the four edits.
 
 The chat surface follows the shape of a modern chat client, not a log: the user's turns are
 right-aligned bubbles (`appendUserBubble`), the agent's are left-aligned markdown
@@ -364,6 +504,17 @@ A branch belongs to a *checkout*, not to a repository: two worktrees of one repo
 different branches simultaneously. It is re-read when a session stops working, which is when
 an agent is most likely to have just switched, rather than by polling.
 
+The composer's branch chip therefore offers **checkouts, not branches**
+(`ProjectStore.siblingCheckouts(of:)`): this checkout, any other added checkout of the same
+repository, then `New Worktree…`. It listed the repository's whole `git branch` output once,
+which invited picking a branch nothing was standing on — the session then ran in the origin
+checkout anyway while its record claimed the branch that was asked for. A branch with no
+checkout is not a place a session can run; making one is what the worktree item is for.
+
+That item lives *in the menu* rather than in a chip of its own, where it read as a state —
+one of the selected choices in the row — when it is an action. One control, one question:
+which checkout does this session run in.
+
 A *session*, though, carries its own branch record (`AgentSession.branch`): captured at
 creation, re-read by `ProjectStore.refreshBranch` at the same stopped-working moment, and
 frozen while dormant — a conversation happened on whatever was checked out at the time, and
@@ -393,6 +544,130 @@ short hover dwell so it does not flash while the pointer crosses rows, and it su
 constant reconfigures of a working session's row, dismissing only on exit or reuse for a
 different session.
 
+### Git Review
+
+A per-session **Review** tab in the display pane (`GitReviewViewController`, hosted as
+`DisplayTab.Body.review` — the browser's live-view-controller shape, reused). View menu ▸
+Git Review, ⇧⌘R.
+
+It was read-only for its first version and no longer is; what survives of that rule is the
+line between *reversible* and not. `GitIndexWriter` is the whole of the write half — stage,
+unstage, commit — and there is **no discard**, because every other action here is undone by
+the control beside it while throwing away a change an agent just made is undone by nothing.
+
+Six modes behind one chip, and the default is not one of opencode's five: **Uncommitted**
+(HEAD vs worktree, staged + unstaged + untracked) is what a user actually asks after an agent
+turn — agents rarely commit mid-task, and splitting that answer across Unstaged/Staged made
+the common case two reads. Unstaged, Staged, Last Turn, Branch and Commit complete the set.
+Branch diffs from `merge-base(default branch, HEAD)` **to the worktree**, so uncommitted work
+counts — a branch's `+362 −26` should not shrink when work is merely unstaged. On the default
+branch itself the merge-base is HEAD and the mode degrades to Uncommitted, which is honest.
+Commit mode is the history browser: a paged `git log --numstat` list (100 a page), one commit
+opened into its own diff with Back returning to the list.
+
+The data layer (`GitReviewReader`) shells out on a dedicated queue and completes on main —
+`GitWorktree`'s runner made async, following `ProjectIconResearch`'s shape. Every invocation
+passes `--no-optional-locks`, so a *read never takes `index.lock`* out from under the agent
+working in the same checkout, and `-c core.quotepath=false` so paths arrive literal. Diffs
+add `--no-color --no-ext-diff --no-textconv`; parsing git's porcelain and unified-diff output
+is `GitDiffParser`, pure functions with the fixture traps (C-quoted paths, the trailing tab
+after a path with spaces, `\ No newline` markers, `-z` rename records) pinned by unit tests.
+
+**`git diff` never mentions untracked files**, so the working-tree modes synthesize them:
+`status --porcelain=v2 -z -uall` lists them individually and each becomes an all-added file
+diff read in-process — not `diff --no-index` per file, which would spawn a process per file
+in a freshly scaffolded project. Size-capped (256 KB), binary-sniffed by git's own NUL
+heuristic.
+
+**Last Turn's baseline is `git stash create`** — an unreferenced commit that mutates no ref,
+no index, no worktree; empty output means clean, so HEAD is the baseline. Captured by
+`GitTurnBaselineStore` on the *entering-working* edge (fed from the same
+`sessionStateDidChange` hook that refreshes the branch), because a baseline taken at stop
+would fold the user's own between-turn edits into the next turn. In-memory only: the snapshot
+is gc-prunable, and a persisted hash whose object has vanished is a worse answer after
+relaunch than "No turn recorded yet" — a pruned baseline is detected by `rev-parse --verify`
+and reported as expired, not as an error. `stash create` omits untracked files, so the
+baseline records the untracked path *set*: files untracked then and still untracked now are
+not the turn's work. The residual gap — edits to a file already untracked at turn start —
+shows only in Uncommitted, and that is accepted.
+
+Rendering reuses the diff machinery: `DiffView` gained a second initializer for numbered
+`GitDiffLine`s (one number column, new side falling back to old — a dual gutter spends a
+narrow pane's width on bookkeeping) while the edit-tool path renders pixel-identically.
+`GitReviewFileRow` is `ToolCallView`'s collapse pattern per file, and **bodies build on first
+expand** — a collapsed file costs one header row, which is what bounds a multi-thousand-line
+branch diff. Small files auto-expand (≤200 lines each, ≤600 cumulative). The mode persists
+with the tab (`PersistedTab.mode`); restore builds the controller but runs no git until the
+tab is actually shown, the browser's deferred-load rule.
+
+**Staging is offered by two modes of six**, and the rule is not a UI preference: a patch
+applies to the index only when the index is what the diff was measured *from*. Unstaged
+(index → worktree) stages hunks, Staged (HEAD → index) unstages them by applying the same
+patch `--reverse`, and Uncommitted (HEAD → worktree) can speak about whole files but not
+hunks — its hunk offsets describe a baseline the index may already have moved past. Branch,
+Last Turn and Commit compare things that are not the index at all. `GitStaging.capability(for:)`
+holds it in one place; `GitPatch` rebuilds a one-hunk patch from the parsed model, since the
+pane no longer has the bytes, and passes `\ No newline at end of file` through unprefixed —
+dropping it silently re-adds a newline the file never had.
+
+Reads and writes share `GitProcess`, which is where the pipe handling, the timeout and the
+oversized-output guard live; the writes drop `--no-optional-locks`, because a write needs the
+lock it is about to take. Losing that lock to the agent's own git is its own failure case
+(`GitFailure.indexLocked`) rather than a generic error: the answer is to try again, not to
+fix anything. The commit composer is a `PromptView`, and the message lives on the controller
+rather than in it — staging re-reads the pane, which rebuilds the composer, so a message kept
+in the view would be lost with every stage.
+
+The tab **watches the checkout** (`GitCheckoutWatcher`, FSEvents) rather than polling. Two
+paths are watched, since a linked worktree's `index` and `HEAD` live in
+`<repo>/.git/worktrees/<name>` and its refs in `<repo>/.git/refs` — neither under the checkout.
+`GitWatchFilter` is where the traps are and is pure, so they are tested: nearly everything a
+git command writes is its own bookkeeping, `.lock` files are git announcing a write rather
+than making one, and only `index`, `HEAD`, `refs/` and their kin mean the diff changed. This
+is also the second reason `--no-optional-locks` matters: without it a read would refresh the
+index, the watcher would see it, and the pane would re-read itself forever.
+
+Auto-refresh forced two things that manual refresh never did. **The reader's place is kept** —
+the scroll offset survives a reload of the same surface (a mode switch or an opened commit is
+a different page and starts at the top), and `expansionOverrides` records what the user opened
+or closed by hand so a re-read does not close what is being read. And a paged-into history or
+an opened commit **does not follow the checkout** at all (`followsCheckout`): both are
+immutable or append-only, so re-reading them costs the reader their place for nothing.
+
+**Diffs are syntax highlighted** by `Syntax`, a hand-written lexer with a table of languages
+(`SyntaxLanguages`) — the same reasoning as `Markdown`: a diff row needs a string told from a
+comment, not a grammar, and the project depends only on SwiftTerm. An unknown extension
+renders plain rather than guessed at, because a wrong guess colours half a line and reads as a
+bug in the diff. State is carried down the **two sides separately**, since a diff interleaves
+two versions of a file and one running state would let a `/*` deleted from the old side comment
+out the new side. `Design.Syntax` has four hues and a dimming, and deliberately no red or
+green: both already mean removed and added here, and a red string literal inside a green added
+line says two contradictory things at once. Highlighting also changes the *base* colour —
+highlighted code is label-coloured and leaves the wash and the gutter to say what happened to
+the line — which is per view, not per row, so one file never mixes the two conventions. The
+tool rows and permission cards feed the same `DiffView` with the path they are editing, so an
+edit in a conversation is highlighted by the same table.
+
+**The history draws a graph** (`GitCommitGraph`, `GitGraphRailView`). Lanes are assigned from
+`%P` rather than by parsing `git log --graph`'s ASCII art, which is drawn for a fixed-width
+terminal — reading pixels back out of it to draw them again is a lossy round trip through
+someone else's renderer. A lane is a slot waiting for a particular commit: a commit takes the
+lane waiting for it, its first parent inherits that lane, and every further parent opens a new
+one, which is why a merge fans out downward and a branch converges upward. Free lanes are
+reused leftmost so the graph stays narrow, and lanes waiting for parents beyond the page run
+off the bottom honestly. The commit rows lost their fill and gained a hover to make room for
+it: a rail broken once per row reads as a history that stops and restarts, so the list closes
+its gaps, and a hundred filled slabs was the tool-row problem again anyway.
+
+`NSTextField.label(attributed:)` exists because of a bug this work surfaced: a field created
+empty measures itself empty, and assigning `attributedStringValue` afterwards changes what is
+drawn without changing what was measured — so every `+N −M` counter in the pane was laying out
+four points wide and drawing nothing. Assigning attributed text also turns wrapping back on,
+and a wrapping field has no intrinsic *width* at all, which is what let Auto Layout squash it.
+`GitReviewRenderTests` is what found it: the same fixture-to-PNG idea as the conversation
+renders, for the same reason — a claim about colour on a coloured wash cannot be checked by
+reading assertions about token ranges.
+
 ### Session Activity
 
 `SessionActivityTracker` derives `dormant` / `idle` / `working` / `needsAttention` from PTY
@@ -420,6 +695,97 @@ Four guards keep it honest:
 Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
 `DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
 
+### Diagnostics and Drafts
+
+Both exist because of one crash (22 July 2026), and each answers a different half of it.
+
+`SkalmanLogger` is `os.Logger` and is the *live* view — `log stream` while a bug reproduces.
+It is useless afterwards: `os_log` keeps `.debug` and `.info` in a memory ring buffer, and
+only `.error`/`.fault` reach disk. Measured after that crash, `log show --predicate
+'subsystem == "com.skalman"'` returned **not one line** for the minute the app died in.
+
+`EventLog` is the durable half: JSONL under `Logs/skalman-<date>.jsonl` in Application
+Support, a file per day, pruned at two weeks, surfaced by Help ▸ Reveal Diagnostics Log.
+Appends are **synchronous and unbuffered**, because the record that matters most is always
+the one written immediately before the process died — which is exactly what an async
+hand-off loses. Lifecycle only: app launch/quit, a composer submit, each agent's command
+line before it runs, each exit code.
+
+The two stay separate rather than becoming one wrapper. `Logger`'s privacy annotations
+(`\(id, privacy: .public)`) live inside the `OSLogMessage` literal and cannot be rendered
+back out as a string, so a type feeding both would have to drop them at every call site.
+
+A launch writes a marker that only `endLaunch` removes, so the *next* launch is what reports
+`Previous launch did not quit cleanly` — consumed on read, so one death is one record rather
+than a standing complaint, and it carries the path of the matching `.ips` from
+`~/Library/Logs/DiagnosticReports/`.
+
+`DraftStore` keeps composer text per project. That text is the one thing in the app that
+exists nowhere else while it is being written: no transcript (the agent has not launched), no
+scrollback (there is no terminal), no shell history (the login shell `exec`s the agent). It
+is written **on the keystroke, not on a timer** — the opposite of `ProjectStore`'s coalesced
+saves, and for the opposite reason: the file exists *for* the crash that lands between two
+keystrokes, so a coalescing window is the one interval it cannot afford.
+
+Submitting records the prompt to the journal *before* clearing the draft. Clearing first
+would reopen the original hole — the prompt would live only in memory and in a command line,
+which is precisely where it was when the crash took one.
+
+The crash itself was in the SwiftTerm fork: `LocalProcess.processTerminated()` reaps the
+child with `waitpid`, which destroys the kernel event its `DispatchSourceProcess` is
+registered for. Left active, that knote is reported `EV_VANISHED` the next time the workloop
+re-arms — which happens when an *unrelated* session starts a PTY — and libdispatch treats an
+unexpected `EV_VANISHED` as a fatal client bug. The source is cancelled where the child is
+reaped, and deliberately not in `terminate()`: cancelling before the exit event arrives would
+leave a zombie instead.
+
+### Side Chats
+
+A **side chat** is a session forked from another: it opens carrying the parent's context and
+keeps its own record, so a question can be asked without joining the conversation it asks
+about. `⋯` on a session row offers **New Side Chat** and **Ask on the Side…**, the second
+being the same fork with its question already asked, delivered through the composer's own
+`pendingPrompt`.
+
+The primitive is `--fork-session`, and every claim here was measured on Claude 2.1.217 rather
+than inferred:
+
+- It **copies the context into a new transcript** and leaves the parent's file untouched —
+  which is what lets a side chat run *beside* a live session instead of queueing behind it.
+  That is the difference from the surface switch, whose whole constraint is one live process
+  per identifier.
+- It **honours `--session-id` alongside it**, so the child's identifier is minted up front
+  like any other Claude session and never has to be discovered.
+- It records **no lineage**. The fork's copied records have their `sessionId` rewritten to the
+  child's; the only trace of the ancestor was a stale snake-case `session_id` left on a single
+  record. So `AgentSession.forkedFrom` is Skalman's own bookkeeping, not something read back.
+
+Claude only (`AgentKind.supportsForking`): `codex exec resume` takes an id and a prompt and
+offers nothing else. Forging a Codex fork by copying its rollout is plausible — `SessionMigration`
+already proves transcripts are portable client-side files — and unproven, so it is not offered.
+
+`AgentLauncher.forkParent(for:in:)` decides, and reads the **project's own** sessions rather
+than `ProjectStore.shared`: a fork resumes its parent's transcript, which is found through the
+project's folder and the parent's account, so `ProjectStore.addSideChat` puts the child in the
+parent's project and inherits both. The gate closes once `hasLaunched` — the fork is a birth,
+not a mode, and from the second launch the child owns a transcript and resumes like anything
+else. Without the parent's transcript on disk it falls through to an ordinary fresh launch,
+the same rule the plain resume applies to itself.
+
+In the sidebar a side chat nests under its parent (`SessionNode.childNodes`), and a session
+row is expandable only once something was forked from it — the earns-its-level rule, one
+level below branch grouping. The row takes a **fork glyph in place of the agent's mark**,
+which it can afford: a fork necessarily runs its parent's agent and account, and its parent is
+the row directly above, so the agent is the one thing there that cannot differ. The hover
+popover spells the lineage out. Two records are tolerated rather than trusted, because
+`projects.json` outlives any release: a **missing parent** leaves the row at the project level,
+and a **cycle** is refused outright, since the outline view asks for children lazily and would
+recurse forever.
+
+What fork does *not* give is a merge back. Transcripts do not merge; the honest operation is
+pasting a conclusion into the parent as a message, which is not built. And the first turn
+replays the whole copied context, so forking a large conversation costs real tokens.
+
 ### Session Names
 
 A session carries three names, resolved by `displayTitle`:
@@ -441,15 +807,34 @@ symbols is left intact rather than reduced to nothing.
 
 Two kinds of icon, resolved differently on purpose.
 
-**Agent marks** (`AgentBrandIcons`): sessions on a default account show the agent's own
+**Agent marks** (`AgentBrandIcons`): a session row's icon slot shows the agent's own
 favicon — Claude's coral starburst, OpenAI's knot — instead of an SF Symbol. Loose PNGs under
 `Resources/Icons`, loaded via `Bundle.main` (the folder is an explicit-folder resource, so it
 lands under `Contents/Resources/Icons/`), *not* the asset catalogue. The OpenAI knot is monochrome by design, so it
 ships as a **template image** and tints with its context like the symbols beside it — which
 is what makes it work in dark mode and dim for dormancy. Claude's mark keeps its brand
 colour; tinting cannot dim a non-template image, so dormancy dims it through the view's
-alpha instead (`SessionRowView.applyAgentIcon`). An account emoji still beats the mark —
-the icon slot's job is telling sessions apart, and the account is the bigger difference.
+alpha instead (`SessionRowView.applyAgentIcon`).
+
+**Account chips** (`AccountBadge`): the mark keeps the slot and an *alternate* account rides
+its bottom-trailing corner as a 9pt chip — the account's emoji, else its discovered avatar,
+else an initial on a hashed disc. The two facts a row carries, which agent and which account,
+had been competing for one 16pt slot and the account was winning: an alternate account
+replaced the mark with a flat `c.circle.fill`, so a sidebar of alternate accounts showed no
+agent at all. The chip is laid out as an **overlay** rather than a second arranged view, so
+rows with and without one still align, and it hangs `cornerOverhang` past the slot because
+flush inside it covered the middle of a 13pt mark.
+
+The initial comes from the **login email**, not the alias: aliases are named after the agent
+and collide on it (`claude-dblock` and `claude-vlundborg` are both `c`), while the addresses
+give `D` and `L`. Its disc hashes the whole address through `GeneratedProjectIcon.stableHash`,
+so two accounts sharing an initial still differ by colour, on a brighter ramp than the project
+tiles — a 9pt disc has far less area to carry a hue than a 16pt tile. The **default account
+gets no chip**: its agent's mark already says everything the row knows.
+
+`AccountAvatarStore.cachedEmail` memoizes the address, hit or miss. The badge asks on every
+row configure and rows reconfigure constantly while an agent works, where the uncached answer
+is a file read and a JWT decode for a value that cannot change while the app runs.
 
 **Project icons** (`ProjectIcon` on `Project`; files owned by `ProjectIconStore`): the
 project row shows the project's own mark, else a folder symbol. Every stored icon is
@@ -491,9 +876,11 @@ follows it. Rows retain the `ProjectIcon` and re-compose on
 `viewDidChangeEffectiveAppearance`, since the decision is per-appearance.
 
 `ProjectIconResearch` asks Codex to identify the mark — headless `codex exec`, read-only
-sandbox, low reasoning effort, default account. Codex-only for the same reason as
-`supportsNativeUI` (Claude's headless mode runs subscription OAuth outside Claude Code),
-and **manual-only** because it spends the user's own usage: each run is one explicit
+sandbox, low reasoning effort, default account. Codex-only for the *sandbox*, not for policy:
+the run reads an unfamiliar project's files and `--sandbox read-only` bounds it in one flag,
+where Claude's headless mode — permitted, see `supportsNativeUI` — would need its tool surface
+constrained explicitly for no gain here.
+It is **manual-only** because it spends the user's own usage: each run is one explicit
 "Research Icon with Codex" menu click, never a background default. A file path in its
 answer is admitted only from inside the project's own folder — the run is sandboxed, but
 our read of its answer is not.
@@ -509,18 +896,20 @@ run failed silently and nothing could say where.
 Agents can set the icon from inside a session via the `set_project_icon` MCP tool, its own
 group on the Tools page.
 
-**Account avatars** (`AccountAvatarStore`): a session's icon slot resolves emoji →
-discovered avatar → letter badge → brand mark. The avatar comes from the account's login
+**Account avatars** (`AccountAvatarStore`): a chip resolves emoji → discovered avatar →
+hashed initial. The avatar comes from the account's login
 email — Claude's `.claude.json` `oauthAccount.emailAddress`, the `email` claim of Codex's
 `id_token` (decoded locally; the token itself is never used) — probed against Gravatar
 (SHA-256, `d=404` so a miss is a status code) and then GitHub's public-email user search.
 The person-avatar ban on project rows *inverts* here on purpose: an account is a person,
-and different logins carry different faces, so the avatar distinguishes. It outranks even
-the default account's brand mark — a resolved face identifies harder than a logo, and the
-per-account emoji still overrides. Hits land in `AccountAvatars/` and refresh the sidebar
-through the same notification an emoji edit posts; behind
-`AppSettings.discoversAccountAvatars`, which is the only thing that lets an email hash
+and different logins carry different faces, so the avatar distinguishes. Hits land in
+`AccountAvatars/` and refresh the sidebar through the same notification an emoji edit posts;
+behind `AppSettings.discoversAccountAvatars`, which is the only thing that lets an email hash
 leave the machine.
+
+Coverage is honestly thin — of five logins on this machine only one resolved, so the hashed
+initial is the chip's working case rather than its fallback. The chip's cache key carries
+`hasAvatar`, so one landing later replaces a drawn initial instead of being ignored.
 
 ### Accounts
 
@@ -594,6 +983,30 @@ A window whose `resets_at` has passed keeps its identity but not its percentage 
 value describes the *previous* window, so it renders as `—`, never as pressure. The pill
 hides entirely for accounts with no usage source (shells always; Claude without either
 source): a control with nothing to say is noise in the always-visible corner.
+
+The same reading is put where an account is **chosen**, because that is the moment the number
+changes a decision; the pill speaks only after the session exists. Twice over, at two
+resolutions:
+
+- `AccountUsageMenu` writes each login's `compactSummary` onto its item in the account chip's
+  menu, so the accounts are compared *before* one is picked. It shows the *cached* value and
+  starts a refresh — a menu is built synchronously and a fetch is a network round trip, so
+  the alternative to what is known is nothing at all. `prefetch()` is therefore called where
+  the surface *appears* (launch, and each time the composer is shown) rather than where the
+  menu opens, which is already too late for that open.
+- `AccountUsagePanelView` draws the chosen account in full under the chips: a `UsageWindowRow`
+  per window, each with the **time mark** that makes the number legible — fill short of the
+  mark is under pace, past it is spending faster than the window refills.
+
+`UsageWindowRow` and `UsageBarView` are shared with the toolbar's popover rather than
+reimplemented: the composer and the popover ask the same question, so they draw the same
+answer. The panel takes a *reading*, not an account — the composer owns the fetch and the
+notification, the view owns the drawing, which is also what lets it be rendered from
+synthetic data in a harness.
+
+`AccountUsage.compactSummary` is plain text for menus and tooltips; the pill keeps its own
+attributed build, which the model cannot produce because each value carries its own window's
+severity colour.
 
 ```
 Select session → AgentLauncher.plan() → login shell → cd <project> && exec <agent>
@@ -679,7 +1092,25 @@ Components so far:
 | | |
 |---|---|
 | `ChipView` | A flat pill that opens a menu. The standard way to offer a choice. |
-| `PromptView` | A rounded container holding a text field and its submit control, as one input. |
+| `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
+
+`PromptView` is an `NSTextView`, not an `NSTextField`, for two things a single-line field
+cannot do: a task worth describing runs past one line, and what is dropped on a composer is
+as often an image as it is text. It grows with its content to `Design.Size.inputMaxHeight`
+and scrolls past it; Return submits and Shift/Option-Return breaks the line, which is the
+shape every chat composer has and is what lets it be multi-line without losing the one-key
+send.
+
+Height is re-measured in `layout()`, not only when the text is set. Text height depends on
+the width the box was given, which is unknown at assignment — a draft restored before layout
+measured against a container of the wrong width and opened at the wrong height, showing the
+*tail* of the prompt. Setting text also scrolls back to the top for the same reason.
+
+Drops and pastes both land in `readSelection(from:type:)`, so one implementation serves the
+pointer and the keyboard. Files become their own paths; raw image data is written to the
+temporary directory first (`PromptAttachment`) — a screenshot on the pasteboard has no path,
+and a path is the only form of an image either CLI can act on. This is what the agent CLIs do
+with their own pasted images.
 
 The vocabulary these encode, which new work should follow:
 
@@ -695,8 +1126,19 @@ The vocabulary these encode, which new work should follow:
 - **`.continuous` corners.** The default circular curve looks subtly wrong beside system
   controls at these radii; `applySurface(fill:radius:border:)` handles this.
 
-`SessionComposerViewController` is the reference implementation — heading, chips, prompt,
-anchored above centre and capped at `Design.Size.readableWidth`.
+`SessionComposerViewController` is the reference implementation, and **the only way a session
+is created**. Reading down its column is the decision in order: the project, the choices
+(agent, account, model, checkout), what those choices have left to spend, then the task.
+
+Every shortcut that created a session outright is gone — the project row's `+`, the per-agent
+and per-account items in the Project menu and the sidebar, `⌘N`'s old behaviour, and the
+session a newly added project used to get. Each answered four decisions with defaults the
+user never saw. `⌘N` and selecting a project now both land here. The composer is replaced by
+the conversation the moment it is used, so it costs a click and nothing else — which is also
+why it is laid out generously rather than compactly, and why its column is
+`ComposerDefaults.contentWidth` (720) rather than `Design.Size.readableWidth`: that measure
+paces prose, and squeezing a row of chips into it collapsed every one of them to an
+unlabelled icon.
 
 Preferences still use stock AppKit via `PreferencesFormBuilder`. That is deliberate: a
 settings window is one place where matching the platform beats matching the app.
@@ -767,7 +1209,8 @@ Sources/Skalman/
 │   ├── Constants/          # TerminalConstants.swift
 │   ├── Agent/              # AgentLauncher, AgentRuntime, CodexSessionDiscovery, GitInfo
 │   ├── MCP/                # MCPServer, MCPConnection, MCPSessionRegistry, MCPTools
-│   └── Session/            # TerminalSession, ProjectStore, StateManager
+│   ├── Logging/            # SkalmanLogger (os_log), EventLog (durable journal)
+│   └── Session/            # TerminalSession, ProjectStore, StateManager, DraftStore
 ├── UI/
 │   ├── Design/             # Design.swift tokens, ChipView, PromptView
 │   ├── Windows/            # MainWindowController

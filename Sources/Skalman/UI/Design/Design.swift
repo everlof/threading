@@ -56,6 +56,10 @@ enum Design {
         static let chipHeight: CGFloat = 26
         /// Height of the prompt box and anything else that reads as a primary input.
         static let inputHeight: CGFloat = 44
+
+        /// How far a growing input climbs before it scrolls instead. Roughly eight lines:
+        /// enough for a paragraph, short of taking the pane over.
+        static let inputMaxHeight: CGFloat = 180
         /// Widest a column of content grows before it becomes hard to scan.
         static let readableWidth: CGFloat = 620
     }
@@ -131,10 +135,57 @@ enum Design {
         }
 
         /// Vertical gap between one turn and the next.
-        static let turnSpacing: CGFloat = 16
+        ///
+        /// Wider than a gap between rows *within* a turn by enough to read as a boundary: a
+        /// conversation rendered at the old 16pt was one uniform column, and where an exchange
+        /// began could only be worked out by reading it.
+        static let turnSpacing: CGFloat = 30
 
         /// The fixed-width column a tool row's glyph sits in, so rows align down the edge.
         static let toolIconWidth: CGFloat = 16
+
+        /// A tool row at rest: **nothing**.
+        ///
+        /// A working turn is mostly tool rows — a real Codex rollout ran twenty consecutively —
+        /// and twenty filled slabs read as the conversation's content rather than as its
+        /// scaffolding, burying the sentences between them. They are the record of what was
+        /// done, not what was said. This is the design system's own "quiet until relevant" rule
+        /// applied to the row that needed it most.
+        static var toolRowResting: NSColor { .clear }
+
+        /// Under the pointer, or opened: now it is the thing being looked at.
+        static var toolRowActive: NSColor {
+            .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)
+        }
+
+        /// The rule above a user's turn.
+        ///
+        /// Spacing alone still left the eye hunting, because the rows above and below it are
+        /// themselves separated by space. A line is unambiguous, and at this weight it reads as
+        /// a fold in the page rather than as a border drawn around something.
+        static var turnDivider: NSColor { .separatorColor.withAlphaComponent(0.5) }
+
+        static let turnDividerHeight: CGFloat = 1
+    }
+
+    // MARK: - Syntax
+
+    /// Colours for highlighted code, in diffs and wherever else source is shown.
+    ///
+    /// Four hues and a dimming, not a full theme. A diff row already carries a coloured wash
+    /// and a gutter sign saying what happened to the line; a palette with a hue per grammar
+    /// rule competes with that, and the thing being read stops being the change.
+    ///
+    /// Two colours are deliberately *not* here: red and green. Both mean removed and added
+    /// throughout this app, and a red string literal inside a green added line says two
+    /// contradictory things at once. Comments take no hue at all — a dimmed label is the
+    /// design system's "quiet until relevant" applied to the code that was already annotation.
+    enum Syntax {
+        static var keyword: NSColor { .systemPurple }
+        static var type: NSColor { .systemTeal }
+        static var string: NSColor { .systemOrange }
+        static var number: NSColor { .systemBlue }
+        static var comment: NSColor { .tertiaryLabelColor }
     }
 
     // MARK: - Motion
@@ -143,6 +194,30 @@ enum Design {
         /// Long enough to read as movement, short enough not to be waited on.
         static let quick: TimeInterval = 0.15
         static let standard: TimeInterval = 0.2
+    }
+}
+
+// MARK: - Label Helpers
+
+extension NSTextField {
+
+    /// A label carrying pre-attributed text — a `+N −M` counter, or anything else whose runs
+    /// are coloured individually.
+    ///
+    /// Built from the string *first*, deliberately. A field created empty measures itself
+    /// empty, and Auto Layout keeps that measurement: assigning `attributedStringValue`
+    /// afterwards changes what is drawn without changing what was measured, so the label lays
+    /// out four points wide and draws nothing at all. Every review-pane counter did exactly
+    /// that until this existed.
+    static func label(attributed text: NSAttributedString) -> NSTextField {
+        let label = NSTextField(labelWithString: text.string)
+        label.attributedStringValue = text
+        // Assigning attributed text turns wrapping back on, and a wrapping field has no
+        // intrinsic *width* at all — it is a height-for-width view, which Auto Layout is free
+        // to squash to nothing. Single-line mode gives it a definite width again.
+        label.usesSingleLineMode = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
     }
 }
 

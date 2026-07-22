@@ -93,14 +93,19 @@ final class MCPServer {
     }
 
     func stop() {
-        for connection in connectionsByID.values {
-            connection.cancel()
-        }
-        connectionsByID.removeAll()
+        // Connections are accepted and removed on `queue`; perform shutdown there as well.
+        // Synchronous dispatch preserves the app-termination contract: when this returns, the
+        // listener and every tracked connection have received cancellation.
+        queue.sync {
+            for connection in connectionsByID.values {
+                connection.cancel()
+            }
+            connectionsByID.removeAll()
 
-        listener?.cancel()
-        listener = nil
-        port = nil
+            listener?.cancel()
+            listener = nil
+            port = nil
+        }
     }
 
     // MARK: - Private Methods
@@ -217,7 +222,7 @@ final class MCPServer {
     /// Dispatches one JSON-RPC message, calling back with the reply, or nil for notifications.
     private func handle(
         _ message: [String: Any],
-        for sessionID: UUID,
+        for sessionID: SessionID,
         completion: @escaping ([String: Any]?) -> Void
     ) {
         let method = message["method"] as? String ?? ""
@@ -233,12 +238,12 @@ final class MCPServer {
         case "initialize":
             let params = message["params"] as? [String: Any]
             let clientVersion = params?["protocolVersion"] as? String
-            let base = MCPToolCatalog.instructions
 
             // The panel-state addendum reads the display store through the handler, which is
-            // main-queue bound; everything else in the response is static. The connection is held
-            // until the hop returns, which the client already expects for `initialize`.
+            // main-queue bound; enabled-tool settings share that isolation. The connection is
+            // held until the hop returns, which the client already expects for `initialize`.
             DispatchQueue.main.async { [weak self] in
+                let base = MCPToolCatalog.instructions
                 let addendum = self?.handler?.panelState(for: sessionID) ?? ""
 
                 completion(Self.result(id: id, [
@@ -258,7 +263,9 @@ final class MCPServer {
             completion(Self.result(id: id, [:]))
 
         case "tools/list":
-            completion(Self.result(id: id, ["tools": MCPToolCatalog.enabledDefinitions]))
+            DispatchQueue.main.async {
+                completion(Self.result(id: id, ["tools": MCPToolCatalog.enabledDefinitions]))
+            }
 
         case "tools/call":
             callTool(message, id: id, for: sessionID, completion: completion)
@@ -271,7 +278,7 @@ final class MCPServer {
     private func callTool(
         _ message: [String: Any],
         id: Any,
-        for sessionID: UUID,
+        for sessionID: SessionID,
         completion: @escaping ([String: Any]?) -> Void
     ) {
         guard let params = message["params"] as? [String: Any],

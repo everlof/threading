@@ -24,13 +24,14 @@ final class ProjectIconDiscovery {
 
     /// Projects attempted this run, so a fruitless search is not repeated every time the
     /// store changes. A relaunch retries naturally.
-    private var attempted: Set<UUID> = []
+    private var attempted: Set<ProjectID> = []
 
     private let queue = DispatchQueue(label: "com.skalman.icon-discovery", qos: .utility)
 
     // MARK: - Public Methods
 
     /// Begins watching the store, and sweeps whatever it already holds. Called once at launch.
+    @MainActor
     func start() {
         NotificationCenter.default.addObserver(
             self,
@@ -43,7 +44,11 @@ final class ProjectIconDiscovery {
 
     /// Re-runs discovery for one project at the user's explicit request, replacing whatever
     /// icon it has if something is found. Reports whether anything was.
-    func rediscover(projectID: UUID, completion: @escaping (Bool) -> Void) {
+    @MainActor
+    func rediscover(
+        projectID: ProjectID,
+        completion: @escaping @MainActor @Sendable (Bool) -> Void
+    ) {
         guard let project = ProjectStore.shared.project(withID: projectID) else {
             completion(false)
             return
@@ -55,12 +60,14 @@ final class ProjectIconDiscovery {
 
     /// Forgets this run's attempts and sweeps again — the settings toggle's path, so
     /// switching discovery on always acts, even for projects already tried this run.
+    @MainActor
     func retryAll() {
         attempted.removeAll()
         sweep()
     }
 
     /// Sweeps every icon-less project not yet tried this run.
+    @MainActor
     func sweep() {
         guard AppSettings.shared.discoversProjectIcons else { return }
 
@@ -73,16 +80,18 @@ final class ProjectIconDiscovery {
 
     // MARK: - Private Methods
 
+    @MainActor
     @objc private func projectsDidChange() {
         // Catches newly added and imported projects. `attempted` keeps this from looping:
         // the sweep itself changes the store when it finds something.
         sweep()
     }
 
+    @MainActor
     private func discover(
         project: Project,
         replacesExisting: Bool,
-        completion: ((Bool) -> Void)?
+        completion: (@MainActor @Sendable (Bool) -> Void)?
     ) {
         let folder = project.folderURL
         let projectID = project.id

@@ -33,6 +33,9 @@ enum SkalmanLogger {
     /// Agent session lifecycle (launch, resume, exit, identifier discovery)
     static let agent = Logger(subsystem: subsystem, category: "agent")
 
+    /// Read-only git queries behind the review pane (command, duration, failures)
+    static let git = Logger(subsystem: subsystem, category: "git")
+
     // MARK: - MCP Loggers
 
     /// The MCP server Skalman exposes to agents (listener lifecycle, tool calls)

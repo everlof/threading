@@ -21,7 +21,7 @@ enum HistoryManager {
     }
 
     /// Returns the history file path for a given session identifier.
-    static func historyFilePath(for sessionID: UUID) -> URL {
+    static func historyFilePath(for sessionID: SessionID) -> URL {
         return historyDirectory
             .appendingPathComponent(sessionID.uuidString)
             .appendingPathExtension(historyFileExtension)
@@ -48,7 +48,7 @@ enum HistoryManager {
     /// Removes history files for sessions that no longer exist.
     ///
     /// Call this on app launch with the set of active session identifiers.
-    static func cleanupOrphanedHistoryFiles(activeSessionIDs: Set<UUID>) {
+    static func cleanupOrphanedHistoryFiles(activeSessionIDs: Set<SessionID>) {
         let fileManager = FileManager.default
         let directory = historyDirectory
 
@@ -64,7 +64,7 @@ enum HistoryManager {
                 // Extract UUID from filename (e.g., "ABC123.history" -> "ABC123")
                 let filename = fileURL.deletingPathExtension().lastPathComponent
 
-                if let fileSessionID = UUID(uuidString: filename) {
+                if let fileSessionID = SessionID(uuidString: filename) {
                     if !activeSessionIDs.contains(fileSessionID) {
                         try fileManager.removeItem(at: fileURL)
                     }
@@ -76,7 +76,7 @@ enum HistoryManager {
     }
 
     /// Removes the history file for a specific session.
-    static func removeHistoryFile(for sessionID: UUID) {
+    static func removeHistoryFile(for sessionID: SessionID) {
         let fileManager = FileManager.default
         let filePath = historyFilePath(for: sessionID)
 

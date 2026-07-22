@@ -4,9 +4,9 @@ import Foundation
 
 /// A conversation found on disk that Skalman does not yet track.
 struct ImportableSession: Identifiable {
-    let agentSessionID: String
+    let agentSessionID: TranscriptID
     let kind: AgentKind
-    let accountHandle: String?
+    let accountHandle: AccountHandle
     let title: String
     let lastActiveAt: Date
 
@@ -31,9 +31,15 @@ enum SessionImporter {
     ///
     /// Sessions already tracked by the project are excluded, so the list only ever offers
     /// something new.
-    static func discover(for project: Project, completion: @escaping ([ImportableSession]) -> Void) {
+    @MainActor
+    static func discover(
+        for project: Project,
+        completion: @escaping @MainActor @Sendable ([ImportableSession]) -> Void
+    ) {
         let folder = normalized(project.folderPath)
         let known = Set(project.sessions.compactMap { $0.agentSessionID })
+        let claudeAccounts = AgentAccountDiscovery.accounts(for: .claude)
+        let codexAccounts = AgentAccountDiscovery.accounts(for: .codex)
 
         DispatchQueue.global(qos: .userInitiated).async {
             // Resolve the project's worktree once, so a chat is attributed by which checkout
@@ -41,8 +47,16 @@ enum SessionImporter {
             // worktree nested inside the folder out of it — a different checkout, its own id.
             let worktree = GitInfo.worktreeIdentity(for: folder)
 
-            var found = claudeSessions(inFolder: folder, worktree: worktree)
-            found.append(contentsOf: codexSessions(inFolder: folder, worktree: worktree))
+            var found = claudeSessions(
+                inFolder: folder,
+                worktree: worktree,
+                accounts: claudeAccounts
+            )
+            found.append(contentsOf: codexSessions(
+                inFolder: folder,
+                worktree: worktree,
+                accounts: codexAccounts
+            ))
 
             let result = found
                 .filter { !known.contains($0.agentSessionID) }
@@ -71,13 +85,17 @@ enum SessionImporter {
     /// slug maps straight to it. Each transcript also records its own `cwd`, which is checked
     /// against the project's worktree — the directory name is a lossy encoding (two different
     /// paths can slug alike), so the recorded path is the authority on membership.
-    private static func claudeSessions(inFolder folder: String, worktree: String?) -> [ImportableSession] {
+    private static func claudeSessions(
+        inFolder folder: String,
+        worktree: String?,
+        accounts: [AgentAccount]
+    ) -> [ImportableSession] {
         let slug = folder.replacingOccurrences(
             of: "/",
             with: AgentDefaults.projectSlugSeparator
         )
 
-        return AgentAccountDiscovery.accounts(for: .claude).flatMap { account -> [ImportableSession] in
+        return accounts.flatMap { account -> [ImportableSession] in
             let directory = URL(fileURLWithPath: account.configPath)
                 .appendingPathComponent(AgentDefaults.claudeProjectsSubdirectory)
                 .appendingPathComponent(slug)
@@ -100,9 +118,9 @@ enum SessionImporter {
                 }
 
                 return ImportableSession(
-                    agentSessionID: url.deletingPathExtension().lastPathComponent,
+                    agentSessionID: TranscriptID(url.deletingPathExtension().lastPathComponent),
                     kind: .claude,
-                    accountHandle: account.isDefault ? nil : account.handle,
+                    accountHandle: account.handle,
                     title: title,
                     lastActiveAt: modificationDate(of: url)
                 )
@@ -148,8 +166,12 @@ enum SessionImporter {
 
     /// Codex files rollouts by date, recording the launch directory inside each, so matching
     /// means reading the header of every rollout.
-    private static func codexSessions(inFolder folder: String, worktree: String?) -> [ImportableSession] {
-        return AgentAccountDiscovery.accounts(for: .codex).flatMap { account -> [ImportableSession] in
+    private static func codexSessions(
+        inFolder folder: String,
+        worktree: String?,
+        accounts: [AgentAccount]
+    ) -> [ImportableSession] {
+        return accounts.flatMap { account -> [ImportableSession] in
             let root = URL(fileURLWithPath: account.configPath)
                 .appendingPathComponent(AgentAccountDefaults.sessionsSubdirectory)
 
@@ -182,7 +204,7 @@ enum SessionImporter {
                 return ImportableSession(
                     agentSessionID: header.id,
                     kind: .codex,
-                    accountHandle: account.isDefault ? nil : account.handle,
+                    accountHandle: account.handle,
                     title: title,
                     lastActiveAt: modificationDate(of: url)
                 )
@@ -195,8 +217,8 @@ enum SessionImporter {
     /// The header cannot be read with a fixed byte cap: `session_meta` carries the session's
     /// instructions, so the record runs to tens of kilobytes and varies per project. Reading
     /// whole records and stopping after the first keeps this correct whatever its length.
-    private static func codexHeader(at url: URL) -> (id: String, cwd: String)? {
-        var header: (id: String, cwd: String)?
+    private static func codexHeader(at url: URL) -> (id: TranscriptID, cwd: String)? {
+        var header: (id: TranscriptID, cwd: String)?
 
         JSONLReader.forEachRecord(at: url, limit: ImportDefaults.headerScanLimit) { record in
             guard record["type"] as? String == CodexDiscoveryDefaults.sessionMetaType,
@@ -205,7 +227,7 @@ enum SessionImporter {
                   let cwd = payload["cwd"] as? String
             else { return false }
 
-            header = (id, cwd)
+            header = (TranscriptID(id), cwd)
             return false
         }
 

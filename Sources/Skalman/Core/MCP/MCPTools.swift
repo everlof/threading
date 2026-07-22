@@ -45,24 +45,24 @@ struct MCPToolResult {
 ///
 /// Called on the main queue, since the model layer and AppKit both require it.
 protocol MCPToolHandling: AnyObject {
-    func handle(_ call: MCPToolCall, for sessionID: UUID) -> MCPToolResult
+    func handle(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult
 
     /// Async variant, for tools whose answer is not ready synchronously — a page load, a DOM
     /// query, a screenshot. Defaults to the synchronous form for handlers that need nothing.
-    func handle(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void)
+    func handle(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void)
 
     /// Text appended to the `initialize` instructions describing the session's current display
     /// panel — but only when it changed while the agent was away, so a resume does not re-state a
     /// panel the agent's own transcript already reflects. Empty when there is nothing to add.
-    func panelState(for sessionID: UUID) -> String
+    func panelState(for sessionID: SessionID) -> String
 }
 
 extension MCPToolHandling {
-    func handle(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void) {
+    func handle(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
         completion(handle(call, for: sessionID))
     }
 
-    func panelState(for sessionID: UUID) -> String { "" }
+    func panelState(for sessionID: SessionID) -> String { "" }
 }
 
 // MARK: - Tool Catalogue

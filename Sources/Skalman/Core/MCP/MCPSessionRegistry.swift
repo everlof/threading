@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Maps the MCP endpoints handed to agents back to the sessions that own them.
 ///
@@ -14,24 +15,32 @@ enum MCPSessionRegistry {
 
     // MARK: - Properties
 
-    private static var tokensBySession: [UUID: String] = [:]
-    private static var sessionsByToken: [String: UUID] = [:]
+    private struct Storage {
+        var tokensBySession: [SessionID: String] = [:]
+        var sessionsByToken: [String: SessionID] = [:]
+    }
+
+    /// Launch and deletion happen on main while requests resolve tokens on the MCP queue.
+    /// Both maps form one bidirectional invariant, so they share a single lock and mutation.
+    private static let storage = OSAllocatedUnfairLock(initialState: Storage())
 
     // MARK: - Public Methods
 
     /// The token for a session, minted on first use and stable for the app's lifetime.
-    static func token(for sessionID: UUID) -> String {
-        if let existing = tokensBySession[sessionID] { return existing }
+    static func token(for sessionID: SessionID) -> String {
+        storage.withLock { storage in
+            if let existing = storage.tokensBySession[sessionID] { return existing }
 
-        let token = UUID().uuidString.lowercased()
-        tokensBySession[sessionID] = token
-        sessionsByToken[token] = sessionID
-        return token
+            let token = UUID().uuidString.lowercased()
+            storage.tokensBySession[sessionID] = token
+            storage.sessionsByToken[token] = sessionID
+            return token
+        }
     }
 
     /// The session a request path belongs to, or nil if the token is unknown.
-    static func session(forToken token: String) -> UUID? {
-        sessionsByToken[token]
+    static func session(forToken token: String) -> SessionID? {
+        storage.withLock { $0.sessionsByToken[token] }
     }
 
     /// The Streamable HTTP endpoint for a session.
@@ -40,7 +49,7 @@ enum MCPSessionRegistry {
     /// CLI expects the same URL inside a JSON file, which `writeConfiguration` creates below.
     /// Returns nil when the server is not listening, which leaves the launch to proceed
     /// without MCP rather than failing outright.
-    static func endpointURL(for sessionID: UUID) -> String? {
+    static func endpointURL(for sessionID: SessionID) -> String? {
         guard let port = MCPServer.shared.port else { return nil }
 
         return "http://\(MCPDefaults.host):\(port)\(MCPDefaults.pathPrefix)\(token(for: sessionID))"
@@ -50,7 +59,7 @@ enum MCPSessionRegistry {
     ///
     /// Returns nil when the server is not listening, which leaves the launch to proceed
     /// without MCP rather than failing outright.
-    static func writeConfiguration(for sessionID: UUID) -> String? {
+    static func writeConfiguration(for sessionID: SessionID) -> String? {
         guard let url = endpointURL(for: sessionID) else { return nil }
 
         let configuration: [String: Any] = [
@@ -88,7 +97,7 @@ enum MCPSessionRegistry {
     /// `--max-time` is generous because the pause is a human reading a dialog. When it does
     /// expire, curl writes nothing, and a hook that says nothing leaves the tool blocked —
     /// the safe direction to fail.
-    static func writePermissionSettings(for sessionID: UUID) -> String? {
+    static func writePermissionSettings(for sessionID: SessionID) -> String? {
         guard let port = MCPServer.shared.port else { return nil }
 
         let url = "http://\(MCPDefaults.host):\(port)"
@@ -127,11 +136,24 @@ enum MCPSessionRegistry {
     ///
     /// Called when sessions are deleted, so a token cannot outlive the session it addressed
     /// and go on reaching a panel for something the user removed.
-    static func retainOnly(sessionIDs: Set<UUID>) {
-        for (sessionID, token) in tokensBySession where !sessionIDs.contains(sessionID) {
-            tokensBySession.removeValue(forKey: sessionID)
-            sessionsByToken.removeValue(forKey: token)
+    @MainActor
+    static func retainOnly(sessionIDs: Set<SessionID>) {
+        let removedSessionIDs = storage.withLock { storage in
+            let removed = storage.tokensBySession.keys.filter { !sessionIDs.contains($0) }
 
+            for sessionID in removed {
+                guard let token = storage.tokensBySession.removeValue(forKey: sessionID) else {
+                    continue
+                }
+                storage.sessionsByToken.removeValue(forKey: token)
+            }
+
+            return removed
+        }
+
+        // Disk cleanup and permission cancellation can call into other subsystems. Keeping them
+        // outside the registry lock prevents unrelated work from extending the critical section.
+        for sessionID in removedSessionIDs {
             for directory in MCPDefaults.cleanupDirectories {
                 try? FileManager.default.removeItem(at: supportFile(sessionID, in: directory))
             }
@@ -142,15 +164,15 @@ enum MCPSessionRegistry {
 
     // MARK: - Private Methods
 
-    private static func configurationFile(for sessionID: UUID) -> URL {
+    private static func configurationFile(for sessionID: SessionID) -> URL {
         supportFile(sessionID, in: MCPDefaults.configDirectoryName)
     }
 
-    private static func settingsFile(for sessionID: UUID) -> URL {
+    private static func settingsFile(for sessionID: SessionID) -> URL {
         supportFile(sessionID, in: MCPDefaults.settingsDirectoryName)
     }
 
-    private static func supportFile(_ sessionID: UUID, in directory: String) -> URL {
+    private static func supportFile(_ sessionID: SessionID, in directory: String) -> URL {
         let appSupport = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
 

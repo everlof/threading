@@ -30,11 +30,13 @@ final class ProjectRowView: NSTableCellView {
     /// The name behind the generated-tile fallback, kept alongside the record.
     private var shownProjectName = ""
 
-    /// Trailing controls revealed under the pointer, crossfaded with the count in the same
-    /// slot — the mechanism session rows use for their `⋯` button. A project row shows a `+`
-    /// (new session) beside a `⋯` (its other actions); a branch heading shows a lone gear for
-    /// its grouping options.
-    private let newSessionButton = NSButton()
+    /// The trailing control revealed under the pointer, crossfaded with the count in the same
+    /// slot — the mechanism session rows use for their `⋯` button. A project row shows `⋯`
+    /// for its actions; a branch heading shows a gear for its grouping options.
+    ///
+    /// A `+` sat beside it once, opening a menu that created a session with defaults for
+    /// agent, account, model and checkout. Selecting the row opens the composer, where those
+    /// are chosen — so the shortcut was a way to skip the only screen that asks.
     private let hoverButton = NSButton()
     private let hoverControls = NSStackView()
 
@@ -48,9 +50,6 @@ final class ProjectRowView: NSTableCellView {
     /// repository heading's name keeps its full width. Pinned to the stack, so it tracks
     /// whether one control shows or two.
     private var hoverNameTrailingConstraint: NSLayoutConstraint?
-
-    /// Invoked when the `+` (new session) is pressed, carrying the anchor to hang a menu from.
-    var onNewSession: ((NSView) -> Void)?
 
     /// Invoked when the `⋯`/gear is pressed, carrying the anchor to hang a menu from.
     var onHoverAction: ((NSView) -> Void)?
@@ -91,7 +90,6 @@ final class ProjectRowView: NSTableCellView {
     func configure(with project: Project, style: Style = .standalone, collapsedSessionCount: Int = 0) {
         isHeading = false
         setHoverControls(
-            showsNewSession: true,
             moreSymbol: SidebarRowDefaults.actionSymbol,
             moreAccessibility: "Project actions"
         )
@@ -118,7 +116,7 @@ final class ProjectRowView: NSTableCellView {
     func configureAsRepository(named name: String, count: Int = 0) {
         isHeading = true
         hideIcon()
-        setHoverControls(showsNewSession: false, moreSymbol: nil)
+        setHoverControls(moreSymbol: nil)
         nameLabel.font = .systemFont(ofSize: SidebarRowDefaults.headingFontSize, weight: .semibold)
         nameLabel.stringValue = name
         setCount(count)
@@ -133,7 +131,6 @@ final class ProjectRowView: NSTableCellView {
         isHeading = true
         hideIcon()
         setHoverControls(
-            showsNewSession: false,
             moreSymbol: SidebarRowDefaults.settingsSymbol,
             moreAccessibility: "Grouping options"
         )
@@ -144,14 +141,13 @@ final class ProjectRowView: NSTableCellView {
         applyTextColors()
     }
 
-    /// Configures the trailing hover controls for the row's role: `showsNewSession` toggles the
-    /// `+`, and a `nil` `moreSymbol` hides the `⋯`/gear. Hiding is done here at configure time,
-    /// never on hover, so the stack collapses without re-laying out under the pointer.
+    /// Configures the trailing hover control for the row's role: a `nil` `moreSymbol` hides
+    /// the `⋯`/gear. Hiding is done here at configure time, never on hover, so the stack
+    /// collapses without re-laying out under the pointer.
     ///
     /// The hover state is reasserted rather than reset: a row reconfigures under the pointer
     /// when its count badge changes with expansion.
-    private func setHoverControls(showsNewSession: Bool, moreSymbol: String?, moreAccessibility: String = "") {
-        newSessionButton.isHidden = !showsNewSession
+    private func setHoverControls(moreSymbol: String?, moreAccessibility: String = "") {
         hoverButton.isHidden = moreSymbol == nil
         if let moreSymbol {
             hoverButton.image = NSImage(
@@ -160,7 +156,7 @@ final class ProjectRowView: NSTableCellView {
             )
         }
 
-        showsHoverButton = showsNewSession || moreSymbol != nil
+        showsHoverButton = moreSymbol != nil
         hoverNameTrailingConstraint?.isActive = showsHoverButton
 
         if showsHoverButton {
@@ -279,16 +275,10 @@ final class ProjectRowView: NSTableCellView {
     /// Installs the trailing hover controls, dormant until a role enables them. Both buttons
     /// live in a stack so hiding one collapses it and the name reservation tracks the rest.
     private func setupHoverControls() {
-        newSessionButton.image = NSImage(
-            systemSymbolName: SidebarRowDefaults.newSessionSymbol,
-            accessibilityDescription: "New session"
-        )
-        newSessionButton.target = self
-        newSessionButton.action = #selector(newSessionButtonClicked)
         hoverButton.target = self
         hoverButton.action = #selector(hoverButtonClicked)
 
-        for button in [newSessionButton, hoverButton] {
+        for button in [hoverButton] {
             button.isBordered = false
             button.bezelStyle = .inline
             button.contentTintColor = .secondaryLabelColor
@@ -304,10 +294,7 @@ final class ProjectRowView: NSTableCellView {
         hoverControls.alignment = .centerY
         hoverControls.alphaValue = 0
         hoverControls.translatesAutoresizingMaskIntoConstraints = false
-        // `⋯` leads and `+` sits at the trailing edge — the new-session control is the row's
-        // primary action, so it takes the outermost, easiest-to-hit position.
         hoverControls.addArrangedSubview(hoverButton)
-        hoverControls.addArrangedSubview(newSessionButton)
 
         addSubview(hoverControls)
 
@@ -372,10 +359,6 @@ final class ProjectRowView: NSTableCellView {
             hoverControls.animator().alphaValue = visible ? 1 : 0
             countLabel.animator().alphaValue = visible ? 0 : 1
         }
-    }
-
-    @objc private func newSessionButtonClicked() {
-        onNewSession?(newSessionButton)
     }
 
     @objc private func hoverButtonClicked() {

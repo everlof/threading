@@ -11,7 +11,10 @@ enum CodexStreamEvent {
 
         switch type {
         case "thread.started":
-            return [.initialised(sessionID: object["thread_id"] as? String, model: nil)]
+            return [.initialised(
+                sessionID: (object["thread_id"] as? String).map(TranscriptID.init),
+                model: nil
+            )]
 
         case "turn.completed":
             return [.turnFinished(text: nil, isError: false)]

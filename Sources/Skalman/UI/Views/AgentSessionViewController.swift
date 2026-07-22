@@ -10,7 +10,7 @@ final class AgentSessionViewController: NSViewController {
 
     // MARK: - Properties
 
-    let sessionID: UUID
+    let sessionID: SessionID
     let session: TerminalSession
 
     private(set) var isRunning = false
@@ -169,6 +169,13 @@ final class AgentSessionViewController: NSViewController {
         isRunning = true
         activityTracker.markRunning()
 
+        // The command line, before it runs. A launch that takes the app down with it leaves
+        // this as the only account of what was being started.
+        EventLog.shared.record(.session, "Launching agent", [
+            "session": sessionID.uuidString,
+            "command": ([plan.executable] + plan.arguments).joined(separator: " ")
+        ])
+
         session.start(plan: plan)
         recordLaunch(plan: plan)
     }
@@ -258,6 +265,11 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {
         isRunning = false
         activityTracker.markDormant()
+
+        EventLog.shared.record(.session, "Agent exited", [
+            "session": sessionID.uuidString,
+            "exitCode": exitCode.map(String.init) ?? "unknown"
+        ])
 
         ProjectStore.shared.update(sessionID: sessionID) { stored in
             stored.lastExitCode = exitCode

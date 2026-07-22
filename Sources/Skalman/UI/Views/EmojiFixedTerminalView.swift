@@ -134,7 +134,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     /// Finds the session hosting this terminal by walking the responder chain, which
     /// includes the owning view controller.
-    private func owningSessionID() -> UUID? {
+    private func owningSessionID() -> SessionID? {
         var responder: NSResponder? = nextResponder
 
         while let current = responder {

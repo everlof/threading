@@ -24,11 +24,16 @@ final class SessionRowView: NSTableCellView {
     private var popover: NSPopover?
 
     /// Invoked when the row's action button is pressed, carrying the row's session.
-    var onAction: ((UUID, NSView) -> Void)?
-    private var sessionID: UUID?
+    var onAction: ((SessionID, NSView) -> Void)?
+    private var sessionID: SessionID?
 
     private let iconView = NSImageView()
-    private let emojiLabel = NSTextField(labelWithString: "")
+
+    /// The account's chip, overlaid on the mark's bottom-trailing corner. Deliberately not
+    /// an arranged subview: the stack would give it a slot of its own, when the whole point
+    /// is that it rides the mark rather than standing beside it.
+    private let accountChipView = NSImageView()
+
     private let titleLabel = NSTextField(labelWithString: "")
 
     /// Retained so colours can be reapplied when the selection state changes.
@@ -64,9 +69,8 @@ final class SessionRowView: NSTableCellView {
         )
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
-        emojiLabel.font = .systemFont(ofSize: SidebarRowDefaults.emojiFontSize)
-        emojiLabel.alignment = .center
-        emojiLabel.translatesAutoresizingMaskIntoConstraints = false
+        accountChipView.imageScaling = .scaleProportionallyDown
+        accountChipView.translatesAutoresizingMaskIntoConstraints = false
 
         titleLabel.font = .systemFont(ofSize: SidebarRowDefaults.sessionFontSize)
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -81,13 +85,14 @@ final class SessionRowView: NSTableCellView {
 
         setupTrailingSlot()
 
-        let stack = NSStackView(views: [iconView, emojiLabel, titleLabel, trailingSlot])
+        let stack = NSStackView(views: [iconView, titleLabel, trailingSlot])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = SidebarRowDefaults.horizontalSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(stack)
+        addSubview(accountChipView)
 
         // `textField` is deliberately left unset. Assigning it lets the table restyle the
         // label on selection, which tints an unemphasized source-list row with the accent
@@ -107,7 +112,25 @@ final class SessionRowView: NSTableCellView {
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
             iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
-            emojiLabel.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth)
+
+            // Hung off the slot's bottom-trailing corner into the gap before the title,
+            // rather than laid out beside the mark: no title shifts to make room for it, so
+            // rows with and without an alternate account still align. Flush inside the slot
+            // the chip covered the middle of a 13pt mark, which is what the overhang buys back.
+            accountChipView.widthAnchor.constraint(
+                equalToConstant: AccountBadgeDefaults.chipSize
+            ),
+            accountChipView.heightAnchor.constraint(
+                equalToConstant: AccountBadgeDefaults.chipSize
+            ),
+            accountChipView.trailingAnchor.constraint(
+                equalTo: iconView.trailingAnchor,
+                constant: AccountBadgeDefaults.cornerOverhang
+            ),
+            accountChipView.bottomAnchor.constraint(
+                equalTo: iconView.bottomAnchor,
+                constant: AccountBadgeDefaults.cornerOverhang
+            )
         ])
     }
 
@@ -259,61 +282,41 @@ final class SessionRowView: NSTableCellView {
         // duplicate it more slowly.
         toolTip = nil
 
-        // The icon slot identifies the account: its chosen emoji, else a letter badge from
-        // its name, else the agent's own symbol for the default account.
         let account = AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle)
-
-        if let emoji = account?.emoji {
-            emojiLabel.stringValue = emoji
-            emojiLabel.isHidden = false
-            iconView.isHidden = true
-        } else {
-            emojiLabel.isHidden = true
-            iconView.isHidden = false
-            applyAgentIcon(for: session, account: account)
-        }
+        applyAgentIcon(for: session, account: account)
     }
 
-    /// The icon slot's image for a session without an account emoji: the account's
-    /// discovered avatar, else a letter badge for an alternate account, else the agent's
-    /// own mark. The avatar outranks even the default account's brand mark — an account
-    /// that resolved to a real face is more identifying than the agent logo, and the
-    /// per-account emoji still overrides both.
+    /// The icon slot carries the *agent* — Claude's starburst, OpenAI's knot, a shell's
+    /// terminal symbol — and an alternate account rides its corner as an `AccountBadge`
+    /// chip. Both facts a row must carry are shown at once, at the weights they deserve:
+    /// an earlier design gave the account the whole slot, which hid the agent entirely on
+    /// every row that was not on the default login.
+    ///
+    /// A **side chat** breaks that rule and takes a fork glyph instead of the agent's mark.
+    /// It can afford to: a fork necessarily runs its parent's agent and account, and its
+    /// parent is the row it is nested under — so the agent is the one thing about that row
+    /// which cannot differ, and the lineage is what the slot is better spent saying.
     ///
     /// Symbols and template marks dim for dormancy through their tint. Claude's mark and
-    /// avatars keep their own colours — tinting does not touch a non-template image — so
-    /// they dim through the view's alpha instead.
+    /// the chip keep their own colours — tinting does not touch a non-template image — so
+    /// they dim through their view's alpha instead.
     private func applyAgentIcon(for session: AgentSession, account: AgentAccount?) {
-        let image: NSImage?
-        if let account, let avatar = AccountAvatarStore.avatar(for: account) {
-            image = avatar
-        } else if let badge = Self.accountBadgeSymbol(for: account) {
-            image = NSImage(
-                systemSymbolName: badge,
-                accessibilityDescription: account?.displayName
+        let image = session.isSideChat
+            ? NSImage(
+                systemSymbolName: SidebarRowDefaults.sideChatSymbol,
+                accessibilityDescription: SidebarRowDefaults.sideChatAccessibilityLabel
             )
-        } else {
-            image = session.kind.icon
-        }
-
+            : session.kind.icon
         iconView.image = image
         iconView.contentTintColor = isDormant ? .tertiaryLabelColor : .secondaryLabelColor
 
         let dimsThroughAlpha = image.map { !$0.isTemplate } ?? false
         iconView.alphaValue = (isDormant && dimsThroughAlpha) ? AgentIconDefaults.dormantAlpha : 1
-    }
 
-    /// A letter badge (`c.circle.fill`) for an alternate account with no emoji, or nil when
-    /// the agent's own mark should identify the row.
-    private static func accountBadgeSymbol(for account: AgentAccount?) -> String? {
-        guard let account, !account.isDefault,
-              let first = account.displayName.lowercased().first else { return nil }
-
-        let badge = "\(first)\(SidebarRowDefaults.accountBadgeSymbolSuffix)"
-        guard NSImage(systemSymbolName: badge, accessibilityDescription: nil) != nil else {
-            return nil
-        }
-        return badge
+        let chip = AccountBadge.chip(for: account)
+        accountChipView.image = chip
+        accountChipView.isHidden = chip == nil
+        accountChipView.alphaValue = isDormant ? AgentIconDefaults.dormantAlpha : 1
     }
 
     // MARK: - Private Methods

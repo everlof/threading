@@ -13,6 +13,7 @@ final class SessionInfoPopoverViewController: NSViewController {
 
     // MARK: - Info
 
+    @MainActor
     struct Info {
         let title: String
         let agentLine: String
@@ -33,11 +34,20 @@ final class SessionInfoPopoverViewController: NSViewController {
                 for: session.kind,
                 handle: session.accountHandle
             )
+            var line = session.kind.displayName
             if let account, !account.isDefault {
-                agentLine = "\(session.kind.displayName) · \(account.displayName)"
-            } else {
-                agentLine = session.kind.displayName
+                line += " · \(account.displayName)"
             }
+
+            // A side chat's row shows a fork glyph instead of its agent's mark, so this is
+            // where the agent is named — and where the lineage the glyph stands for is spelt
+            // out, since the parent's title is not otherwise on the row.
+            if let parentID = session.forkedFrom,
+               let parent = ProjectStore.shared.session(withID: parentID) {
+                line += " · \(SessionPopoverDefaults.sideChatPrefix) \(parent.displayTitle)"
+            }
+
+            agentLine = line
             agentIcon = session.kind.icon
 
             let folderPath = ProjectStore.shared.project(forSessionID: session.id)?.folderPath
@@ -192,6 +202,9 @@ enum SessionPopoverDefaults {
 
     static let folderSymbol = "folder"
     static let branchSymbol = "arrow.triangle.branch"
+
+    /// Precedes the parent's title on a side chat's agent line.
+    static let sideChatPrefix = "forked from"
 
     static let dormantState = "Dormant · resumable"
     static let dormantSymbol = "moon.zzz"

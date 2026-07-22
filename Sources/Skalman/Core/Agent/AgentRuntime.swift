@@ -5,6 +5,7 @@ import AppKit
 /// Controllers are cached per session so switching away in the sidebar and back does not
 /// restart the agent or lose scrollback. A session with no entry here is dormant: it exists
 /// in `ProjectStore` and can be resumed, but owns no PTY.
+@MainActor
 final class AgentRuntime {
 
     // MARK: - Singleton
@@ -14,23 +15,23 @@ final class AgentRuntime {
 
     // MARK: - Properties
 
-    private var controllers: [UUID: AgentSessionViewController] = [:]
+    private var controllers: [SessionID: AgentSessionViewController] = [:]
 
     /// Live conversation controllers, for sessions Skalman renders itself.
     ///
     /// Kept separate from `controllers` rather than behind a shared protocol: the two drive
     /// the CLI in different ways and share almost no surface beyond starting and stopping.
     /// A session appears in exactly one of the two.
-    private var conversations: [UUID: ConversationViewController] = [:]
+    private var conversations: [SessionID: ConversationViewController] = [:]
 
     /// Identifiers of every session currently holding a live terminal.
-    var liveSessionIDs: Set<UUID> {
+    var liveSessionIDs: Set<SessionID> {
         Set(controllers.keys)
     }
 
     // MARK: - Public Methods
 
-    func controller(for sessionID: UUID) -> AgentSessionViewController? {
+    func controller(for sessionID: SessionID) -> AgentSessionViewController? {
         controllers[sessionID]
     }
 
@@ -49,17 +50,17 @@ final class AgentRuntime {
     }
 
     /// Whether the session's agent process is currently running.
-    func isRunning(sessionID: UUID) -> Bool {
+    func isRunning(sessionID: SessionID) -> Bool {
         controllers[sessionID]?.isRunning ?? conversations[sessionID]?.isRunning ?? false
     }
 
     /// What the session is currently doing. Sessions with no terminal are dormant.
-    func activity(sessionID: UUID) -> SessionActivity {
+    func activity(sessionID: SessionID) -> SessionActivity {
         controllers[sessionID]?.activity ?? conversations[sessionID]?.activity ?? .dormant
     }
 
     /// Marks which session is on screen, so only the others flag finished work.
-    func setVisibleSession(_ sessionID: UUID?) {
+    func setVisibleSession(_ sessionID: SessionID?) {
         for (id, controller) in controllers {
             controller.isVisible = (id == sessionID)
         }
@@ -69,13 +70,13 @@ final class AgentRuntime {
     }
 
     /// Whether the session has a terminal allocated, running or exited.
-    func hasTerminal(sessionID: UUID) -> Bool {
+    func hasTerminal(sessionID: SessionID) -> Bool {
         controllers[sessionID] != nil || conversations[sessionID] != nil
     }
 
     // MARK: - Conversations
 
-    func conversation(for sessionID: UUID) -> ConversationViewController? {
+    func conversation(for sessionID: SessionID) -> ConversationViewController? {
         conversations[sessionID]
     }
 
@@ -94,13 +95,13 @@ final class AgentRuntime {
     }
 
     /// Terminates the agent but keeps the terminal so its final output stays visible.
-    func terminate(sessionID: UUID) {
+    func terminate(sessionID: SessionID) {
         controllers[sessionID]?.terminate()
         conversations[sessionID]?.terminate()
     }
 
     /// Terminates the agent and releases its terminal, returning the session to dormant.
-    func discard(sessionID: UUID) {
+    func discard(sessionID: SessionID) {
         if let conversation = conversations.removeValue(forKey: sessionID) {
             conversation.terminate()
             conversation.view.removeFromSuperview()

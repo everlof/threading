@@ -58,6 +58,7 @@ struct TerminalProfile: Codable, Equatable {
 
 // MARK: - Profile Storage
 
+@MainActor
 final class ProfileStorage {
 
     // MARK: - Keys

@@ -15,12 +15,23 @@ enum TranscriptReplay {
     ///
     /// `isTruncated` reports that older turns were dropped, so the view can say so rather than
     /// implying the conversation began where the replay does.
+    @MainActor
     static func load(
         for session: AgentSession,
         in project: Project,
-        completion: @escaping (_ events: [StreamEvent], _ isTruncated: Bool) -> Void
+        completion: @escaping @MainActor @Sendable (
+            _ events: [StreamEvent], _ isTruncated: Bool
+        ) -> Void
     ) {
         guard let agentSessionID = session.agentSessionID else {
+            completion([], false)
+            return
+        }
+
+        guard let account = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
+        ) else {
             completion([], false)
             return
         }
@@ -29,7 +40,8 @@ enum TranscriptReplay {
             guard let url = transcriptURL(
                 sessionID: agentSessionID,
                 for: session,
-                in: project
+                in: project,
+                account: account
             ), FileManager.default.fileExists(atPath: url.path) else {
                 DispatchQueue.main.async { completion([], false) }
                 return
@@ -43,21 +55,26 @@ enum TranscriptReplay {
     // MARK: - Private Methods
 
     private static func transcriptURL(
-        sessionID: String,
+        sessionID: TranscriptID,
         for session: AgentSession,
-        in project: Project
+        in project: Project,
+        account: AgentAccount
     ) -> URL? {
         switch session.kind {
         case .claude:
-            return ClaudeTranscript.url(sessionID: sessionID, for: session, in: project)
+            return ClaudeTranscript.url(sessionID: sessionID, account: account, in: project)
         case .codex:
-            return CodexTranscript.url(sessionID: sessionID, for: session)
+            return CodexTranscript.url(sessionID: sessionID, account: account)
         case .shell:
             return nil
         }
     }
 
-    private static func read(at url: URL, kind: AgentKind) -> ([StreamEvent], Bool) {
+    /// Reads one transcript file synchronously. Internal rather than private so the tests can
+    /// point it at a fixture: `load` needs a real session, a real project and the on-disk
+    /// layout of an installed CLI, none of which a test should have to fake to check that a
+    /// record maps to the right event.
+    static func read(at url: URL, kind: AgentKind) -> ([StreamEvent], Bool) {
         var events: [StreamEvent] = []
         var dropped = 0
 
@@ -204,24 +221,86 @@ enum TranscriptReplay {
         }
     }
 
-    /// Produces the arguments expected by `PermissionRequest.summary`, so replayed rows use the
-    /// same concise subject line as live ones rather than exposing the orchestration wrapper.
+    /// Produces the arguments expected by `PermissionRequest.summary` and `EditDiff`, so
+    /// replayed rows use the same concise subject line as live ones rather than exposing the
+    /// orchestration wrapper.
+    ///
+    /// **Codex and Claude do not name their arguments alike**, and passing Codex's through
+    /// unchanged is why every replayed `exec_command` rendered as a bare `$ Bash` with no
+    /// command beside it: the summary reads `command`, Codex writes `cmd`. Found by rendering
+    /// a real rollout and looking at it — no parser test could see it, because the parsing was
+    /// correct and only the vocabulary was wrong.
     private static func codexToolInput(persistedName: String, value: Any?) -> [String: Any] {
-        if let dictionary = value as? [String: Any] { return dictionary }
+        let raw: [String: Any]
 
-        guard let text = value as? String else { return [:] }
-        if let dictionary = jsonDictionary(text) { return dictionary }
-
-        if persistedName == "exec", codexNestedToolName(text) == "exec_command",
-           let command = javascriptStringProperty("cmd", in: text) {
-            return ["command": command]
+        if let dictionary = value as? [String: Any] {
+            raw = dictionary
+        } else if let text = value as? String, let dictionary = jsonDictionary(text) {
+            raw = dictionary
+        } else if let text = value as? String {
+            // `apply_patch` is not JSON at all: its argument is the patch itself.
+            if persistedName == "apply_patch" || persistedName == "file_change" {
+                return CodexPatch.toolInput(patch: text)
+            }
+            switch codexNestedToolName(text) {
+            case "exec_command" where persistedName == "exec":
+                if let command = javascriptStringProperty("cmd", in: text) {
+                    return ["command": command]
+                }
+            case "apply_patch", "file_change":
+                // The wrapper assigns the patch to a variable and passes it positionally —
+                // `const patch = "*** Begin Patch…"; text(await tools.apply_patch(patch))` —
+                // so there is no property to read it from. Found by the render harness: these
+                // edits drew no path and no diff, while `apply_patch` called directly did.
+                if let patch = javascriptPatchLiteral(in: text) {
+                    return CodexPatch.toolInput(patch: patch)
+                }
+            default:
+                break
+            }
+            return ["input": text]
+        } else {
+            return [:]
         }
 
-        return ["input": text]
+        return normalised(raw, persistedName: persistedName)
+    }
+
+    /// Renames Codex's arguments to the ones the renderer already understands, leaving the rest
+    /// in place so nothing is lost for tools with no rule.
+    private static func normalised(
+        _ input: [String: Any],
+        persistedName: String
+    ) -> [String: Any] {
+        var input = input
+
+        if let command = input["cmd"] as? String {
+            input["command"] = command
+        }
+        if let path = (input["path"] ?? input["file_path"]) as? String {
+            input["file_path"] = path
+        }
+        if let patch = input["patch"] as? String {
+            return CodexPatch.toolInput(patch: patch)
+        }
+        if let query = (input["query"] ?? input["q"]) as? String {
+            input["query"] = query
+        }
+
+        return input
     }
 
     private static func codexNestedToolName(_ source: String) -> String? {
         firstCapture(#"tools\.([A-Za-z0-9_]+)\s*\("#, in: source)
+    }
+
+    /// The patch inside a generated wrapper, found by what it *is* rather than by the name it
+    /// was bound to — the variable is arbitrary, but a patch always opens `*** Begin Patch`.
+    private static func javascriptPatchLiteral(in source: String) -> String? {
+        let pattern = #"("\*\*\* Begin Patch(?:\\.|[^"\\])*")"#
+        guard let literal = firstCapture(pattern, in: source),
+              let data = literal.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(String.self, from: data)
     }
 
     /// Extracts a JSON-style quoted string from the generated JavaScript and lets JSONDecoder

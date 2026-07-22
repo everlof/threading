@@ -41,7 +41,7 @@ final class ProjectSidebarViewController: NSViewController {
 
     /// The session a hover-menu action applies to, set when the menu is opened. Read by the
     /// row-action handlers, which live in `ProjectSidebarSessionActions.swift`.
-    var actionSessionID: UUID?
+    var actionSessionID: SessionID?
 
     /// Pins the row a hover-button menu targets, since a button click does not set the
     /// outline view's `clickedRow`. Non-nil only while such a menu is up.
@@ -51,6 +51,11 @@ final class ProjectSidebarViewController: NSViewController {
     /// Branch groups are transient — they come and go as sessions move — so persisting
     /// their expansion the way projects persist theirs would outlive the thing it describes.
     private var collapsedBranchKeys: Set<String> = []
+
+    /// Sessions whose side chats the user folded away, for this run only — kept transient
+    /// for the same reason as `collapsedBranchKeys`, and because a session with no side
+    /// chats has no disclosure triangle to remember a state for.
+    private var collapsedSideChatParents: Set<SessionID> = []
 
     // MARK: - Lifecycle
 
@@ -266,6 +271,15 @@ extension ProjectSidebarViewController {
             where !collapsedBranchKeys.contains(Self.branchKey(branchNode)) {
                 outlineView.expandItem(branchNode)
             }
+
+            // Side chats do the same beneath the session they were forked from. Read from
+            // the flat list, since a parent may sit under a branch group rather than the
+            // project itself.
+            for sessionNode in node.sessionNodes
+            where !sessionNode.childNodes.isEmpty
+                && !collapsedSideChatParents.contains(sessionNode.sessionID) {
+                outlineView.expandItem(sessionNode)
+            }
         }
 
         if let selectedSessionID {
@@ -280,7 +294,7 @@ extension ProjectSidebarViewController {
     /// Removes a session and its terminal. Shared by the row's context menu and its hover
     /// `⋯` actions (in `ProjectSidebarSessionActions.swift`), so it lives in the internal
     /// extension both files can reach.
-    func removeSession(_ sessionID: UUID) {
+    func removeSession(_ sessionID: SessionID) {
         AgentRuntime.shared.discard(sessionID: sessionID)
         ProjectStore.shared.removeSession(id: sessionID)
         reload()
@@ -298,12 +312,36 @@ extension ProjectSidebarViewController {
         allowsEmpty: Bool = false,
         completion: @escaping (String) -> Void
     ) {
+        promptForText(
+            title: title,
+            message: allowsEmpty
+                ? "Leave empty to use the name reported by the terminal."
+                : nil,
+            confirmTitle: "Rename",
+            current: current,
+            placeholder: placeholder,
+            allowsEmpty: allowsEmpty,
+            completion: completion
+        )
+    }
+
+    /// A one-field modal prompt, shared by every "type a short string" action on these rows —
+    /// the renames and the side chat's opening question — so they behave alike.
+    func promptForText(
+        title: String,
+        message: String? = nil,
+        confirmTitle: String,
+        current: String = "",
+        placeholder: String = "",
+        allowsEmpty: Bool = false,
+        completion: @escaping (String) -> Void
+    ) {
         let alert = NSAlert()
         alert.messageText = title
-        if allowsEmpty {
-            alert.informativeText = "Leave empty to use the name reported by the terminal."
+        if let message {
+            alert.informativeText = message
         }
-        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: confirmTitle)
         alert.addButton(withTitle: "Cancel")
 
         let textField = NSTextField(frame: NSRect(
@@ -324,7 +362,7 @@ extension ProjectSidebarViewController {
     }
 
     /// Refreshes a single session's row, used for frequent updates such as title changes.
-    func refreshRow(sessionID: UUID) {
+    func refreshRow(sessionID: SessionID) {
         guard let node = sessionNode(for: sessionID) else { return }
 
         let row = outlineView.row(forItem: node)
@@ -343,7 +381,7 @@ extension ProjectSidebarViewController {
     /// moment it is most likely to have just changed — rather than by polling. The branch
     /// itself now shows in the hover popover, whose data the reconfigure refreshes; a grouped
     /// checkout is also named by its branch, so its title follows too.
-    func refreshProjectRow(forSessionID sessionID: UUID) {
+    func refreshProjectRow(forSessionID sessionID: SessionID) {
         guard let node = sessionNode(for: sessionID),
               let project = allProjectNodes.first(where: { $0.sessionNodes.contains(node) })
         else { return }
@@ -364,11 +402,33 @@ extension ProjectSidebarViewController {
         outlineView.reloadData(forRowIndexes: allRows, columnIndexes: allColumns)
     }
 
+    /// Selects a project row, which is what puts its composer on screen.
+    ///
+    /// Starting a session goes through here rather than creating one outright: the composer
+    /// is the only place agent, account, model and checkout are actually chosen.
+    func select(projectID: ProjectID) {
+        guard let node = allProjectNodes.first(where: { $0.projectID == projectID }) else { return }
+
+        if let group = outlineView.parent(forItem: node) {
+            outlineView.expandItem(group)
+        }
+
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
+
+        suppressSelectionCallback = true
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        suppressSelectionCallback = false
+
+        ProjectStore.shared.selectedSessionID = nil
+        delegate?.projectSidebar(self, didSelectProject: projectID)
+    }
+
     /// Selects a session row, optionally without informing the delegate.
     ///
     /// The delegate is invoked directly rather than via the selection notification, which
     /// does not fire when the requested row is already selected.
-    func select(sessionID: UUID, notifyDelegate: Bool = true) {
+    func select(sessionID: SessionID, notifyDelegate: Bool = true) {
         guard let node = sessionNode(for: sessionID) else { return }
 
         // Expand the whole chain: a grouped checkout sits under a repository heading, and
@@ -470,27 +530,6 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebar(self, didAddProject: project)
     }
 
-    @objc private func newSessionClicked(_ sender: NSMenuItem) {
-        guard let request = sender.representedObject as? NewSessionRequest,
-              let projectID = contextProjectID() else { return }
-
-        createSession(request: request, in: projectID)
-    }
-
-    /// Creates a session and selects it, which starts the agent.
-    private func createSession(request: NewSessionRequest, in projectID: UUID) {
-        guard let session = ProjectStore.shared.addSession(
-            to: projectID,
-            kind: request.kind,
-            accountHandle: request.accountHandle
-        ) else { return }
-
-        ProjectStore.shared.setProject(id: projectID, expanded: true)
-
-        reload()
-        select(sessionID: session.id)
-    }
-
     @objc private func renameClicked() {
         guard let row = contextRow() else { return }
 
@@ -526,7 +565,7 @@ private extension ProjectSidebarViewController {
         }
     }
 
-    private func removeProject(_ projectID: UUID) {
+    private func removeProject(_ projectID: ProjectID) {
         guard let project = ProjectStore.shared.project(withID: projectID) else { return }
 
         let runningCount = project.sessions.filter {
@@ -574,7 +613,7 @@ private extension ProjectSidebarViewController {
         outlineView.item(atRow: outlineView.selectedRow) as? SessionNode
     }
 
-    private func sessionNode(for sessionID: UUID) -> SessionNode? {
+    private func sessionNode(for sessionID: SessionID) -> SessionNode? {
         allProjectNodes.flatMap(\.sessionNodes).first { $0.sessionID == sessionID }
     }
 
@@ -588,7 +627,7 @@ private extension ProjectSidebarViewController {
     }
 
     /// The project a context menu action applies to, whether a project or session was clicked.
-    private func contextProjectID() -> UUID? {
+    private func contextProjectID() -> ProjectID? {
         guard let row = contextRow() else { return nil }
 
         if let node = outlineView.item(atRow: row) as? ProjectNode {
@@ -606,19 +645,15 @@ private extension ProjectSidebarViewController {
     // MARK: - Project Actions
 
     /// The `+` button: the project's new-session choices, split out from its `⋯` menu.
-    private func showProjectNewSessionMenu(for projectID: UUID, from anchor: NSView) {
-        presentProjectMenu(for: projectID, from: anchor) { self.addNewSessionItems(to: $0) }
-    }
-
     /// The `⋯` button: everything a project offers but starting a session.
-    private func showProjectActions(for projectID: UUID, from anchor: NSView) {
+    private func showProjectActions(for projectID: ProjectID, from anchor: NSView) {
         presentProjectMenu(for: projectID, from: anchor) { self.addProjectManagementItems(to: $0) }
     }
 
     /// Pops a project's menu beneath the button that opened it, pinning the row so the
     /// handlers act on the right project rather than on whatever was last clicked.
     private func presentProjectMenu(
-        for projectID: UUID,
+        for projectID: ProjectID,
         from anchor: NSView,
         build: (NSMenu) -> Void
     ) {
@@ -699,6 +734,7 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
         if let group = item as? RepoGroupNode { return group.projectNodes.count }
         if let project = item as? ProjectNode { return project.childNodes.count }
         if let branch = item as? BranchGroupNode { return branch.sessionNodes.count }
+        if let session = item as? SessionNode { return session.childNodes.count }
         return 0
     }
 
@@ -708,11 +744,15 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
         if let group = item as? RepoGroupNode { return group.projectNodes[index] }
         if let project = item as? ProjectNode { return project.childNodes[index] }
         if let branch = item as? BranchGroupNode { return branch.sessionNodes[index] }
+        if let session = item as? SessionNode { return session.childNodes[index] }
         return rootNodes[index]
     }
 
+    /// A session is expandable only once something was forked from it, so the disclosure
+    /// triangle appears on the few rows that have side chats rather than on every row.
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        item is ProjectNode || item is RepoGroupNode || item is BranchGroupNode
+        if let session = item as? SessionNode { return !session.childNodes.isEmpty }
+        return item is ProjectNode || item is RepoGroupNode || item is BranchGroupNode
     }
 
     // Drag and drop lives in `ProjectSidebarDragDrop.swift`, split purely for size.
@@ -763,9 +803,6 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 style: isGrouped ? .checkout : .standalone,
                 collapsedSessionCount: hiddenSessions
             )
-            cell.onNewSession = { [weak self] anchor in
-                self?.showProjectNewSessionMenu(for: projectNode.projectID, from: anchor)
-            }
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
             }
@@ -864,6 +901,11 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return
         }
 
+        if let sessionNode = notification.userInfo?["NSObject"] as? SessionNode {
+            collapsedSideChatParents.remove(sessionNode.sessionID)
+            return
+        }
+
         guard let node = notification.userInfo?["NSObject"] as? ProjectNode else { return }
         ProjectStore.shared.setProject(id: node.projectID, expanded: true)
         reloadRow(for: node)
@@ -873,6 +915,11 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         if let branchNode = notification.userInfo?["NSObject"] as? BranchGroupNode {
             collapsedBranchKeys.insert(Self.branchKey(branchNode))
             reloadRow(for: branchNode)
+            return
+        }
+
+        if let sessionNode = notification.userInfo?["NSObject"] as? SessionNode {
+            collapsedSideChatParents.insert(sessionNode.sessionID)
             return
         }
 
@@ -907,14 +954,10 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         if item is ProjectNode {
             addProjectMenuItems(to: menu)
         } else if item is BranchGroupNode {
-            // The heading offers what it is: a way into the project it belongs to, and the
-            // display option that created it.
-            addNewSessionItems(to: menu)
-            menu.addItem(.separator())
+            // The heading offers the display option that created it, and nothing else — it
+            // is a grouping, not a place.
             menu.addItem(makeBranchGroupingItem())
         } else if item is SessionNode {
-            addNewSessionItems(to: menu)
-            menu.addItem(.separator())
             menu.addItem(withTitle: "Rename Session…", action: #selector(renameClicked), keyEquivalent: "")
             menu.addItem(.separator())
             menu.addItem(withTitle: "Delete Session", action: #selector(removeClicked), keyEquivalent: "")
@@ -925,24 +968,14 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         }
     }
 
-    private func addNewSessionItems(to menu: NSMenu) {
-        NewSessionMenuBuilder.addItems(
-            to: menu,
-            target: self,
-            action: #selector(newSessionClicked(_:))
-        )
-    }
-
-    /// The project row's full menu, used by its right-click. The hover buttons split it: the
-    /// `+` opens `addNewSessionItems`, the `⋯` opens `addProjectManagementItems`.
+    /// The project row's full menu, used by its right-click and by its `⋯` button alike:
+    /// starting a session is not in it, because that is what selecting the row does.
     private func addProjectMenuItems(to menu: NSMenu) {
-        addNewSessionItems(to: menu)
-        menu.addItem(.separator())
         addProjectManagementItems(to: menu)
     }
 
-    /// Everything a project offers except starting a session — behind the row's `⋯` button,
-    /// where the neighbouring `+` already covers new sessions.
+    /// Everything a project offers. Sessions are started by selecting the project, which
+    /// opens its composer.
     private func addProjectManagementItems(to menu: NSMenu) {
         menu.addItem(withTitle: "Rename Project…", action: #selector(renameClicked), keyEquivalent: "")
         menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealInFinderClicked), keyEquivalent: "")
@@ -1162,13 +1195,23 @@ enum SidebarIdentifiers {
 // MARK: - ProjectSidebarViewControllerDelegate
 
 protocol ProjectSidebarViewControllerDelegate: AnyObject {
-    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: UUID)
-    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: UUID)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didAddProject project: Project)
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         setArchived archived: Bool,
-        for sessionID: UUID
+        for sessionID: SessionID
+    )
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        setUsesNativeUI usesNative: Bool,
+        for sessionID: SessionID
+    )
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        createSideChatOf sessionID: SessionID,
+        prompt: String?
     )
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)

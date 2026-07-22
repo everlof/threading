@@ -62,7 +62,7 @@ extension MainWindowController {
         // the diff, the same one the conversation will. Other tools keep to the path or
         // command in the text above.
         if let diff = EditDiff.lines(forTool: request.toolName, input: request.input) {
-            alert.accessoryView = permissionDiffAccessory(diff)
+            alert.accessoryView = permissionDiffAccessory(diff, path: request.filePath)
         }
 
         alert.beginSheetModal(for: window) { response in
@@ -88,7 +88,7 @@ extension MainWindowController {
     ///
     /// `NSAlert` sizes an accessory view to its frame, so the diff is capped in both directions
     /// and allowed to scroll — a large edit must not push the buttons off the screen.
-    private func permissionDiffAccessory(_ diff: [DiffLine]) -> NSView {
+    private func permissionDiffAccessory(_ diff: [DiffLine], path: String?) -> NSView {
         let scroll = NSScrollView(frame: NSRect(
             x: 0, y: 0,
             width: PermissionDiffDefaults.width,
@@ -98,7 +98,7 @@ extension MainWindowController {
         scroll.drawsBackground = false
         scroll.borderType = .lineBorder
 
-        let diffView = DiffView(lines: diff)
+        let diffView = DiffView(lines: diff, path: path)
         let clip = FlippedClipView()
         clip.drawsBackground = false
         scroll.contentView = clip

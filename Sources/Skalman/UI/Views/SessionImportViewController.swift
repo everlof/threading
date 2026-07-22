@@ -278,8 +278,11 @@ extension SessionImportViewController: NSTableViewDelegate {
     private func detailText(for session: ImportableSession) -> String {
         let when = Self.relativeDate.localizedString(for: session.lastActiveAt, relativeTo: Date())
 
-        guard let handle = session.accountHandle,
-              let account = AgentAccountDiscovery.account(for: session.kind, handle: handle)
+        guard !session.accountHandle.isStandard,
+              let account = AgentAccountDiscovery.account(
+                  for: session.kind,
+                  handle: session.accountHandle
+              )
         else { return when }
 
         return "\(account.displayName) · \(when)"

@@ -32,7 +32,8 @@ when creating a session. See [Accounts](#accounts).
 - **Project > Add Project…** (Cmd+Shift+N)
 - Drag a folder onto the sidebar, or onto the app icon
 
-Adding a project immediately creates a first session in it.
+Adding a project selects it, opening its composer so the first session is configured like
+every other one.
 
 ### Repositories, worktrees and monorepos
 A project is a **folder**, not a repository — because a repository can have several checkouts
@@ -146,9 +147,8 @@ Agents can also set the icon from inside a session through the `set_project_icon
 Icons are stored small (64px) under Application Support and never touch the project folder.
 
 ### Managing
-**Hover a project row** — a **+** fades in at its trailing edge, opening the project's
+**Hover a project row** — a **⋯** fades in at its trailing edge, opening the project's
 actions. The same menu is on **right-click**. Either way it offers:
-- New session (Claude Code, Codex, or Shell)
 - Rename Project…
 - Reveal in Finder
 - Project Icon — see [Project icons](#project-icons)
@@ -161,11 +161,40 @@ collapsed project shows how many sessions it is hiding as a count at its trailin
 ## Sessions
 
 ### Creating
-- **Cmd+N**: new session in the current project, using the default agent (Claude Code)
-- **Project > New Claude Code / Codex / Shell Session**: pick the agent explicitly
-- Right-click a project in the sidebar
+**Select a project in the sidebar.** Its composer fills the pane, and starting a session from
+it is the only way to create one:
 
-A new session launches its agent in the project's folder.
+- Click the project row, or
+- **Cmd+N** — opens the composer for the project you are currently in
+
+There is no shortcut that starts a session for you. A session carries four decisions — agent,
+account, model, and which checkout it runs in — and the menu items that used to create one
+outright answered all four with defaults you never saw. The composer asks, and it is replaced
+by the conversation the moment you send the first message, so it costs nothing to pass through.
+
+The chips choose the agent, account, model and, in a git repository, **which checkout it runs
+in**. Beneath them, the chosen account's rate limits are drawn in full — see
+[Usage when picking an account](#usage-when-picking-an-account).
+
+The branch chip lists places, not branch names: this checkout (the default, always first),
+any other checkout of the same repository you have added, and **New Worktree…** at the
+bottom, which creates one on a new branch and adds it as its own project. A branch nothing is
+checked out on is not offered — there would be nowhere to run — so making a worktree is how
+you get one.
+
+The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return** starts
+the session; **Shift+Return** (or Option+Return) breaks the line.
+
+**Drop or paste a file** into it and its path is inserted, which is what the agent can act on.
+An image with no file of its own — a screenshot straight from the clipboard, a picture dragged
+out of a browser — is written to a temporary file first and its path inserted, so it can be
+opened by the session you are about to start.
+
+Whatever you type into the composer is kept as a **draft** for that project, saved as you
+type. Switch projects, quit, or lose the app to a crash, and the text is still there when you
+come back to it. Starting the session clears the draft — and writes the prompt to the
+diagnostics log first, so even a launch that goes wrong leaves the message recoverable.
+See [Diagnostics](#diagnostics).
 
 ### Status
 Running and dormant are told apart by the text itself: a **dormant** session — one whose agent
@@ -304,9 +333,17 @@ the row shows the full account name.
 the emoji picker — choose from the grid, type any other emoji into its field, or **Remove**
 the current one. The icon tells accounts apart at a glance in the sidebar.
 
-A session's icon slot resolves in order: your chosen **emoji**, then the account's
-**discovered avatar**, then a **letter badge** for alternate accounts, then the agent's own
-mark — Claude's starburst, OpenAI's knot. Shells keep the terminal symbol.
+A session row shows **both** the agent and the account. The icon is always the agent's own
+mark — Claude's starburst, OpenAI's knot, a terminal symbol for shells — and a session on an
+alternate account carries a small **chip** on its corner: your chosen emoji, else the
+account's discovered avatar, else its initial on a colour of its own. Sessions on the
+default login carry no chip, since the mark already says everything there is to say.
+
+The initial comes from the account's **login email**, not its alias, because aliases are
+named after the agent and collide: `claude-dblock` and `claude-vlundborg` are both `c`, while
+`daniel.block3@…` and `lundborg.viktor@…` are `D` and `L`. The colour is derived from the
+whole address, so two accounts sharing an initial still differ. Hover a session for the
+account's full name.
 
 The avatar is looked up from the account's login email (read from the CLI's own records):
 **Gravatar** first, then GitHub for accounts whose *public* profile email matches. Most
@@ -352,6 +389,24 @@ Click it for the full picture: every rate-limit window (the 5-hour session windo
 weekly one), each with its own bar, percentage and reset countdown, plus how fresh the
 reading is. Hovering the pill shows the same summary as a tooltip.
 
+### Usage when picking an account
+Choosing a login is when the number actually changes a decision — an account at 90% of its
+week is a poor place to start a long task — so the composer shows it twice over:
+
+- **In the account chip's menu**, each login carries its own `5h 43% · 7d 73%`, so the
+  accounts are compared before one is picked.
+- **Under the chips**, the chosen account's windows are drawn in full: a bar per window, its
+  percentage, and its reset countdown.
+
+Each bar carries a **time mark** — a thin line at the point the clock has reached in that
+window. Fill short of the mark means you are spending slower than the window refills; fill
+past it means faster. That comparison is the thing a bare percentage cannot tell you: 60%
+spent is comfortable an hour before a reset and alarming four hours before one.
+
+Values are the last ones fetched: the composer shows what is known and asks for a fresh
+reading, so a login never read before fills in shortly after. Accounts with no usage source
+show nothing at all, exactly as they show no pill.
+
 Where the numbers come from, per agent:
 
 - **Codex** — fetched from the account's own API login (`auth.json`), refreshed every few
@@ -370,41 +425,131 @@ Normally a session shows the agent's own terminal. A **Chat** session instead le
 draw the conversation itself — messages, tool calls and replies as native views rather than
 text painted by the CLI.
 
-Chat is available for **Codex sessions**. Choose **Chat (experimental)** from the surface chip
-when creating one. Skalman runs `codex exec --json` for each turn and resumes the same Codex
-thread for the next, using the account and model selected for the session.
+Chat is available for **Codex and Claude Code sessions** — not for shells. Choose
+**Chat (experimental)** from the surface chip when creating one. For Codex, Skalman runs
+`codex exec --json` for each turn and resumes the same thread for the next. For Claude, it
+keeps one `claude --print` process open for the whole conversation. Either way it uses the
+account and model selected for the session, running the same CLI you already signed into.
 
-Claude Code always uses its terminal. Its former native transport depended on subscription
-credentials in a third-party headless integration, so Skalman deliberately does not offer it.
+Chat runs the agent headlessly, so it draws on your subscription the same way the terminal
+does. Claude Chat was previously withheld while Anthropic's terms were read as excluding
+third-party headless use; they no longer are, and the surface is offered again.
 
-Your messages sit in bubbles on the right; Codex's replies run down the left as formatted
+Your messages sit in bubbles on the right; the agent's replies run down the left as formatted
 text — headings, lists, code blocks and inline `code` rendered rather than shown as raw
-markdown. A short instruction gets a small bubble; a long answer gets room to breathe.
+markdown. A short instruction gets a small bubble; a long answer gets room to breathe. The
+column stops widening past a comfortable reading measure, so a wide window gives you margins
+rather than very long lines, and a rule marks where each new exchange begins.
 
 Tool calls appear as a single collapsed line: a glyph, the tool, what it ran, and how much it
 returned — `$ Bash · ls -la · 42 lines`. Click to expand. A directory listing is usually
-longer than everything said around it, so it stays folded until you want it.
+longer than everything said around it, so it stays folded until you want it. The rows sit flat
+against the background until you point at one — a busy turn is mostly tool calls, and boxing
+each of them buries what was actually said.
+
+### Finding your way back
+
+A long conversation scrolls past the point where scrolling finds anything, so a **turn rail**
+runs down the left margin: one mark per exchange. Point at a mark to see what you asked and
+what the agent concluded; click it to jump there. Marks for the turns currently on screen are
+brighter, so the rail also shows where you are.
+
+It needs margin to live in, so it appears only when the pane is wide enough to spare some —
+in a narrow pane it stays out of the way entirely rather than crowding the text. It also needs
+at least two exchanges to index before it is worth drawing.
 
 Command executions, MCP calls, searches and file-change events use the same collapsed treatment,
-with their result attached when Codex finishes the item.
+with their result attached when the agent finishes the item. An edit shows the change itself as
+a diff rather than raw tool output.
 
-Reopening a chat session replays the conversation from Codex's own rollout transcript, so you
+Claude's text arrives word by word as it is written; Codex sends each message complete.
+
+Reopening a chat session replays the conversation from the agent's own transcript, so you
 come back to what was said rather than a blank pane. Very long conversations show only the most
 recent stretch, and say so.
 
+### Side chats
+
+Sometimes you want to ask something *about* a conversation without putting it *in* that
+conversation — "why is this slow?", "what would the other approach look like?". Asking
+directly costs you twice: the aside joins the transcript permanently and is replayed on every
+later turn, and you cannot ask at all while the session is busy.
+
+A **side chat** solves both. On a Claude session's `⋯` menu:
+
+- **New Side Chat** — opens a new session that already knows everything the original does
+- **Ask on the Side…** — the same thing with your question typed up front
+
+The side chat appears nested under the session it came from, marked with a fork glyph:
+
+```
+▾ sondalabs
+  ▾ main
+      ✻ Refactor the parser
+        ⑂ why is this slow?
+        ⑂ alternative approach
+      ✻ Claude Code 2
+```
+
+It runs **alongside** the original — you do not have to stop what the main session is doing,
+and nothing said in the side chat ever reaches it. The original's record is untouched.
+
+Worth knowing:
+
+- **It is a copy, not a link.** The side chat knows what the original knew *at the moment you
+  forked it*. Later turns on either side stay on their own side, and there is no way to merge
+  one back into the other — if a side chat reaches a conclusion worth keeping, tell the
+  original yourself.
+- **It costs tokens.** The first turn carries the whole copied conversation, so forking a long
+  one is not free.
+- **Claude only.** Codex has no equivalent, so the items do not appear on Codex sessions.
+- It inherits the original's account, model, project and surface — a side chat of a Chat
+  session is a Chat, of a terminal session a terminal.
+- The items appear only once a conversation has actually started. Before that there is nothing
+  to fork, and a plain new session is the same thing.
+
+### Switching surfaces mid-conversation
+
+A session is not stuck on the surface it was created with. The `⋯` menu on a session row
+offers **Show as Conversation** or **Show as Terminal**, and the conversation carries over —
+the agent picks up exactly where it left off, with everything that was said before still in
+its context.
+
+It works because both surfaces drive the same conversation: they resume the CLI by the
+session's own identifier and write to one transcript, so the surface is only how it is drawn.
+Ask Claude something in the terminal, switch to Chat, and it can quote you back verbatim.
+
+What the switch does cost is the running process — the agent stops and starts again on the
+new surface — so a session in the middle of something asks first (unless you have turned off
+**Ask before closing a running session**). Switching a session you are not looking at just
+changes where it will open next time.
+
+Two things to expect after switching **into** Chat: the terminal's scrollback is not
+transferred (Chat redraws the conversation from the transcript instead, so tool output and
+anything the CLI painted are summarised rather than reproduced), and Claude will start asking
+for tool permissions in cards rather than in the terminal.
+
 ### Permissions
 
-Codex Chat runs with the `workspace-write` sandbox, so it may read and edit the selected project.
-The non-interactive command has no terminal in which to present an approval prompt: operations
-that require leaving the sandbox or gaining additional access fail instead of being silently
+Neither agent has a terminal to ask in, and the two handle that differently.
+
+**Claude Chat asks you, in the conversation.** A tool that would change something raises a card
+in the thread — the command, or the diff for an edit — with Allow and Deny. Requests are shown
+one at a time, so a turn that fires several tools does not stack up cards to be answered out of
+context, and an answered card stays in place as a record of what was decided. Reading, searching
+and the agent's own bookkeeping pass without interrupting you; everything else asks, including
+tools added by future Claude releases. A pending request in a session you are not looking at raises that session's
+attention dot in the sidebar.
+
+**Codex Chat does not ask; it is sandboxed.** It runs with `workspace-write`, so it may read and
+edit the selected project, and operations needing more than that fail rather than being silently
 approved. Use the Terminal surface when a task needs Codex's full interactive approval flow.
 
 ### What is missing
 
-It is early. Compared to the terminal you lose slash commands, plan mode, interactive approval
-requests, interrupting a turn mid-flight, token-by-token text, and some of the agent's richer
-rendering. Use it where you want the conversation to read like a conversation; use the terminal
-when you need the complete Codex interface.
+It is early. Compared to the terminal you lose slash commands, plan mode, interrupting a turn
+mid-flight, and some of the agent's richer rendering. Use it where you want the conversation to
+read like a conversation; use the terminal when you need the complete agent interface.
 
 ## Display Panel
 
@@ -453,6 +598,67 @@ an oversight — the agent already has a shell, so a locked-down web view would 
 could not do more easily with `curl`. What is blocked is navigation, which is a usability
 problem rather than a security one.
 
+## Git Review
+
+**View ▸ Git Review** (Cmd+Shift+R) opens a Review tab in the display panel: a native diff
+viewer for the selected session's checkout, so you can watch what an agent is changing
+without leaving the terminal. You can stage and commit from it; **discarding is deliberately
+not offered** — everything the pane can do is reversible by the control beside it, and
+throwing away a change an agent just made is not.
+
+The chip at the top picks what is compared:
+
+- **Uncommitted** (the default) — everything since the last commit: staged, unstaged and
+  untracked files together. After an agent turn, this is "what did it do".
+- **Unstaged** — working tree against the index, plus untracked files.
+- **Staged** — what `git commit` would take right now.
+- **Last Turn** — what changed since the agent most recently started working. The baseline
+  is captured automatically each time a session goes busy; before the first turn of a launch
+  the mode reports that no turn has been recorded yet.
+- **Branch** — the whole branch against the repository's default branch (where it forked
+  from `main`), including uncommitted work.
+- **Commits** — the history: a scrolling list of commits with their `+/−` weight, drawn with
+  a branch graph down the left edge (a ring marks a merge, a colour marks a lane) and the
+  branch, tag and `HEAD` names that point at each commit. Click one to see its full diff, and
+  **‹** returns to the list.
+
+Each changed file is a collapsible row — its path, what happened to it (`+` added, `−`
+deleted, `±` modified, `→` renamed), and its `+/−` counts. Small files open expanded; click
+a row to open or close it. Untracked files appear as all-added diffs, binary files as a
+`binary` note. The `+N −M` beside the chip totals the whole diff. Diffs are **syntax
+highlighted** for the languages Skalman recognises by file extension; a file it does not
+recognise renders plain rather than guessed at.
+
+### Staging and committing
+
+Two modes offer staging, because only their diffs are measured against the index:
+
+- In **Unstaged**, each file row carries **Stage File** and each hunk a **Stage**.
+- In **Staged**, the same controls read **Unstage**, and a composer at the top of the list
+  commits what is staged — Return sends, Shift-Return breaks the line. Your message survives
+  the pane re-reading itself, so staging more while writing one does not lose it.
+- **Uncommitted** offers **Stage File** only: its diff is measured from the last commit, so
+  it can speak about whole files but not about individual hunks.
+- **Last Turn**, **Branch** and **Commits** stay read-only.
+
+If the agent is running a git command at that moment, the write can lose the race for the
+index; the pane says so in one line and the action can simply be repeated.
+
+### Refreshing
+
+The tab **watches the checkout** and re-reads a moment after the writes stop, so an agent's
+edits appear without being asked for. Your place is kept: the scroll position holds, and a
+file you opened or closed by hand stays that way. The ↻ button re-reads on demand, and a
+session that stops working refreshes too. Paged-into history and an opened commit are left
+alone — they do not change under you, and re-reading them would only lose your place.
+
+Like every display-panel tab it belongs to its session: each session keeps its own review, in
+its own mode, restored across relaunches.
+
+Reads use git's `--no-optional-locks`, so watching a checkout never contends with the agent's
+own git commands. Staging and committing do take the index lock, since a write cannot avoid
+it — which is the one case that can report "the index is in use".
+
 ## Find
 
 - **Cmd+F**: open find bar
@@ -492,7 +698,7 @@ Configure in **Preferences > Profiles**:
 Open with **Cmd+,**.
 
 ### General
-- **New sessions use** — the agent Cmd+N creates. Other agents stay on the Project menu
+- **New sessions use** — the agent the composer opens on; any other can be picked there
 - **Name sessions after the terminal title** — see [Names](#names)
 - **Group sessions by branch** — see [Grouping sessions by branch](#grouping-sessions-by-branch)
 - **Discover project icons** — see [Project icons](#project-icons)
@@ -507,12 +713,31 @@ Per-account icons and names. See [Accounts](#accounts).
 ### Profiles, Themes, AI
 Terminal font and cursor, colour schemes, and AI provider configuration.
 
+## Diagnostics
+
+**Help > Reveal Diagnostics Log** opens the folder holding Skalman's own journal, one file per
+day, kept for two weeks:
+
+```
+~/Library/Application Support/Skalman/Logs/skalman-<date>.jsonl
+```
+
+Each line is one event — the app launching and quitting, a session being started from the
+composer (including the prompt), the command line each agent was launched with, and the exit
+code it came back with. It is written as things happen rather than buffered, so the last line
+before an unexpected quit is on disk.
+
+A launch that never reaches its quit leaves its marker behind, and the next launch records
+`Previous launch did not quit cleanly`, pointing at the macOS crash report from that run in
+`~/Library/Logs/DiagnosticReports/`. That pair — what Skalman was doing, and what macOS
+recorded about it dying — is what a crash needs explaining.
+
 ## Keyboard Shortcuts
 
 ### Projects & Sessions
 | Action | Shortcut |
 |--------|----------|
-| New Session | Cmd+N |
+| New Session (opens the composer) | Cmd+N |
 | Add Project | Cmd+Shift+N |
 | Close Session | Cmd+W |
 
@@ -531,6 +756,8 @@ Terminal font and cursor, colour schemes, and AI provider configuration.
 | Action | Shortcut |
 |--------|----------|
 | Toggle Sidebar | Cmd+Ctrl+S |
+| Browser | Cmd+Shift+B |
+| Git Review | Cmd+Shift+R |
 | Bigger Font | Cmd++ |
 | Smaller Font | Cmd+- |
 | Full Screen | Cmd+Ctrl+F |

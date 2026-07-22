@@ -169,20 +169,24 @@ enum MCPToolCatalog {
 
     /// Whether a group is currently switched on. Absent from the disabled set means enabled, so a
     /// group added in a future release is on by default rather than silently missing.
+    @MainActor
     static func isEnabled(_ group: MCPToolGroup) -> Bool {
         AppSettings.shared.isToolGroupEnabled(group.id)
     }
 
+    @MainActor
     static var enabledGroups: [MCPToolGroup] {
         groups.filter(isEnabled)
     }
 
     /// The bare tool names an enabled launch advertises and pre-approves.
+    @MainActor
     static var enabledToolNames: [String] {
         enabledGroups.flatMap { $0.tools.map(\.name) }
     }
 
     /// The `tools/list` payload, filtered to the enabled groups.
+    @MainActor
     static var enabledDefinitions: [[String: Any]] {
         let names = Set(enabledToolNames)
         return MCPTools.definitions.filter { definition in
@@ -192,6 +196,7 @@ enum MCPToolCatalog {
 
     /// The `initialize` instructions, assembled from the enabled groups so the model is told about
     /// exactly the tools it has. Empty when everything is off — the server then advertises nothing.
+    @MainActor
     static var instructions: String {
         let enabled = enabledGroups
         guard !enabled.isEmpty else { return "" }

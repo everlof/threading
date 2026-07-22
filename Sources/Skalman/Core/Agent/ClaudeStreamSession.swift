@@ -14,7 +14,7 @@ final class ClaudeStreamSession: ConversationStreamSession {
 
     // MARK: - Properties
 
-    let sessionID: UUID
+    let sessionID: SessionID
 
     private let plan: () -> AgentLaunchPlan
 
@@ -33,9 +33,12 @@ final class ClaudeStreamSession: ConversationStreamSession {
     /// than not, so lines are only parsed once their newline has arrived.
     private var buffer = Data()
 
+    /// Diagnostic fallback for a child that exits before stream-json can explain why.
+    private var errorBuffer = Data()
+
     // MARK: - Initialization
 
-    init(sessionID: UUID, plan: @escaping () -> AgentLaunchPlan) {
+    init(sessionID: SessionID, plan: @escaping () -> AgentLaunchPlan) {
         self.sessionID = sessionID
         self.plan = plan
     }
@@ -51,6 +54,7 @@ final class ClaudeStreamSession: ConversationStreamSession {
         let process = Process()
         let input = Pipe()
         let output = Pipe()
+        let error = Pipe()
 
         process.executableURL = URL(fileURLWithPath: plan.executable)
         process.arguments = plan.arguments
@@ -60,12 +64,25 @@ final class ClaudeStreamSession: ConversationStreamSession {
 
         // Merged into the same pipe would corrupt the JSON stream, so diagnostics are read
         // separately and only surfaced when the process dies unexpectedly.
-        process.standardError = Pipe()
+        process.standardError = error
+
+        buffer.removeAll(keepingCapacity: true)
+        errorBuffer.removeAll(keepingCapacity: true)
 
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            self?.received(chunk)
+            DispatchQueue.main.async {
+                self?.received(chunk)
+            }
+        }
+
+        error.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            DispatchQueue.main.async {
+                self?.receivedError(chunk)
+            }
         }
 
         process.terminationHandler = { [weak self] process in
@@ -78,7 +95,11 @@ final class ClaudeStreamSession: ConversationStreamSession {
             try process.run()
         } catch {
             SkalmanLogger.agent.error("Stream session failed to start: \(error.localizedDescription)")
-            onExit?(-1)
+            output.fileHandleForReading.readabilityHandler = nil
+            (process.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+            DispatchQueue.main.async { [weak self] in
+                self?.onExit?(-1)
+            }
             return
         }
 
@@ -141,10 +162,14 @@ final class ClaudeStreamSession: ConversationStreamSession {
             guard let line = String(data: lineData, encoding: .utf8),
                   let event = StreamEvent.parse(line) else { continue }
 
-            DispatchQueue.main.async { [weak self] in
-                self?.onEvent?(event)
-            }
+            onEvent?(event)
         }
+    }
+
+    private func receivedError(_ chunk: Data) {
+        guard errorBuffer.count < ClaudeStreamDefaults.maximumErrorBytes else { return }
+        let remaining = ClaudeStreamDefaults.maximumErrorBytes - errorBuffer.count
+        errorBuffer.append(chunk.prefix(remaining))
     }
 
     private func handleTermination(status: Int32) {
@@ -152,9 +177,23 @@ final class ClaudeStreamSession: ConversationStreamSession {
 
         isRunning = false
         (process?.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+        (process?.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
         process = nil
         inputPipe = nil
 
+        if status != 0 {
+            let diagnostics = String(decoding: errorBuffer, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !diagnostics.isEmpty {
+                onEvent?(.turnFinished(text: diagnostics, isError: true))
+            }
+        }
+
         onExit?(status)
     }
+}
+
+enum ClaudeStreamDefaults {
+    /// Stderr is diagnostic fallback only, so a broken child cannot grow memory without bound.
+    static let maximumErrorBytes = 64 * 1024
 }

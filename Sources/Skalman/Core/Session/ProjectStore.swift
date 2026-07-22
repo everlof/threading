@@ -4,6 +4,7 @@ import Foundation
 ///
 /// This is the model layer only: it knows nothing about running processes. Live terminals
 /// are managed by `AgentRuntime`, keyed by the session identifiers stored here.
+@MainActor
 final class ProjectStore {
 
     // MARK: - Singleton
@@ -14,20 +15,31 @@ final class ProjectStore {
 
     private(set) var projects: [Project] = []
 
+    /// False for the rest of a launch after a corrupt or unsupported state file was found.
+    /// Consumers must not interpret the resulting empty project list as authoritative.
+    private(set) var didLoadStateSuccessfully = true
+
+    /// A failed quarantine leaves the original file in place, so no write may replace it.
+    private var stateWritesAllowed = true
+
+    private let stateManager: StateManager
+    private var isRestoringState = false
+
     /// Pending coalesced write, see `scheduleSave()`.
     private var saveTimer: Timer?
 
     /// The session currently shown in the terminal pane.
-    var selectedSessionID: UUID? {
+    var selectedSessionID: SessionID? {
         didSet {
-            guard selectedSessionID != oldValue else { return }
+            guard !isRestoringState, selectedSessionID != oldValue else { return }
             save()
         }
     }
 
     // MARK: - Initialization
 
-    private init() {
+    init(stateManager: StateManager = .shared) {
+        self.stateManager = stateManager
         load()
     }
 
@@ -56,24 +68,26 @@ final class ProjectStore {
         return project
     }
 
-    func removeProject(id: UUID) {
+    func removeProject(id: ProjectID) {
         if let icon = project(withID: id)?.icon {
             ProjectIconStore.remove(fileName: icon.fileName)
         }
+
+        DraftStore.shared.clear(for: id)
 
         projects.removeAll { $0.id == id }
         save()
         notifyChanged()
     }
 
-    func renameProject(id: UUID, to name: String) {
+    func renameProject(id: ProjectID, to name: String) {
         guard let index = index(ofProject: id) else { return }
         projects[index].name = name
         save()
         notifyChanged()
     }
 
-    func setProject(id: UUID, expanded: Bool) {
+    func setProject(id: ProjectID, expanded: Bool) {
         guard let index = index(ofProject: id) else { return }
         projects[index].isExpanded = expanded
         save()
@@ -81,7 +95,7 @@ final class ProjectStore {
 
     /// Records a project's sidebar icon, or clears it. The icon's image file is owned by
     /// `ProjectIconStore`; this only records which file and where it came from.
-    func setIcon(_ icon: ProjectIcon?, for projectID: UUID) {
+    func setIcon(_ icon: ProjectIcon?, for projectID: ProjectID) {
         guard let index = index(ofProject: projectID),
               projects[index].icon != icon else { return }
 
@@ -101,9 +115,9 @@ final class ProjectStore {
     /// Creates a new session inside a project and returns it.
     @discardableResult
     func addSession(
-        to projectID: UUID,
+        to projectID: ProjectID,
         kind: AgentKind,
-        accountHandle: String? = nil,
+        accountHandle: AccountHandle = .standard,
         model: String? = nil,
         usesNativeUI: Bool = false,
         title: String? = nil
@@ -130,6 +144,40 @@ final class ProjectStore {
         return session
     }
 
+    /// Creates a **side chat**: a session that starts from a copy of another's context, so a
+    /// question can be asked without joining the conversation it asks about.
+    ///
+    /// It lands in the parent's own project and inherits its agent, account, model and
+    /// surface — none of those are choices here. A fork resumes the parent's transcript,
+    /// which lives under the parent's account and is found through the parent's folder, so
+    /// changing either would simply fail to find the conversation.
+    ///
+    /// Refused when the parent has no `agentSessionID`: there is no conversation yet, and a
+    /// fork of nothing is just an ordinary new session.
+    @discardableResult
+    func addSideChat(of parentID: SessionID, title: String? = nil) -> AgentSession? {
+        guard let location = locate(sessionID: parentID) else { return nil }
+
+        let parent = projects[location.projectIndex].sessions[location.sessionIndex]
+        guard parent.agentSessionID != nil else { return nil }
+
+        var session = AgentSession(
+            kind: parent.kind,
+            title: title ?? AgentDefaults.sideChatTitle,
+            accountHandle: parent.accountHandle,
+            model: parent.model,
+            usesNativeUI: parent.usesNativeUI,
+            forkedFrom: parentID
+        )
+        session.branch = parent.branch
+
+        projects[location.projectIndex].sessions.append(session)
+        save()
+        notifyChanged()
+
+        return session
+    }
+
     /// Adopts a conversation found on disk, so it can be resumed like any other session.
     ///
     /// The session is created already launched and carrying its identifier: it exists because
@@ -137,7 +185,7 @@ final class ProjectStore {
     /// a new one. Adopting the same conversation twice is refused, since both entries would
     /// resume the same transcript.
     @discardableResult
-    func importSession(_ found: ImportableSession, into projectID: UUID) -> AgentSession? {
+    func importSession(_ found: ImportableSession, into projectID: ProjectID) -> AgentSession? {
         guard let index = index(ofProject: projectID) else { return nil }
 
         guard !projects[index].sessions.contains(where: { $0.agentSessionID == found.agentSessionID })
@@ -161,8 +209,17 @@ final class ProjectStore {
     }
 
     /// Files a session away, or restores it. Its conversation is untouched either way.
-    func setArchived(_ archived: Bool, for sessionID: UUID) {
+    func setArchived(_ archived: Bool, for sessionID: SessionID) {
         update(sessionID: sessionID) { $0.isArchived = archived }
+        notifyChanged()
+    }
+
+    /// Switches which surface renders a session: Skalman's own conversation view, or the
+    /// agent's terminal. The conversation itself is untouched — both surfaces resume it by
+    /// the same id. Stopping whatever is running belongs to the caller, since this store
+    /// knows nothing about live processes.
+    func setUsesNativeUI(_ usesNative: Bool, for sessionID: SessionID) {
+        update(sessionID: sessionID) { $0.usesNativeUI = usesNative }
         notifyChanged()
     }
 
@@ -174,21 +231,23 @@ final class ProjectStore {
             .sorted { $0.1.lastActiveAt > $1.1.lastActiveAt }
     }
 
-    func removeSession(id sessionID: UUID) {
+    func removeSession(id sessionID: SessionID) {
         guard let location = locate(sessionID: sessionID) else { return }
         projects[location.projectIndex].sessions.remove(at: location.sessionIndex)
 
         if selectedSessionID == sessionID {
+            // The property's observer persists the removal together with the selection change.
             selectedSessionID = nil
+        } else {
+            save()
         }
 
-        save()
         notifyChanged()
     }
 
     /// Applies an explicit name to a session. Pass nil or blank to fall back to the
     /// terminal's own title again.
-    func renameSession(id sessionID: UUID, to title: String?) {
+    func renameSession(id sessionID: SessionID, to title: String?) {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         update(sessionID: sessionID) { $0.customTitle = (trimmed?.isEmpty ?? true) ? nil : trimmed }
         notifyChanged()
@@ -198,7 +257,7 @@ final class ProjectStore {
     ///
     /// Agents update this frequently, so the write is coalesced rather than hitting disk on
     /// every change.
-    func updateTerminalTitle(_ title: String, for sessionID: UUID) {
+    func updateTerminalTitle(_ title: String, for sessionID: SessionID) {
         guard let location = locate(sessionID: sessionID) else { return }
 
         let cleaned = Self.strippingDecoration(from: title)
@@ -237,10 +296,12 @@ final class ProjectStore {
     /// branches; dormant sessions keep the branch they last ran on, which is the whole
     /// point of recording it per session. Saves and notifies only on an actual change,
     /// since a change can regroup the sidebar.
-    func refreshBranch(forSessionID sessionID: UUID) {
+    func refreshBranch(forSessionID sessionID: SessionID) {
         guard let location = locate(sessionID: sessionID) else { return }
 
-        let branch = GitInfo.currentBranch(for: projects[location.projectIndex].folderPath)
+        let folderPath = projects[location.projectIndex].folderPath
+        GitInfo.invalidateCache(for: folderPath)
+        let branch = GitInfo.currentBranch(for: folderPath)
         guard projects[location.projectIndex].sessions[location.sessionIndex].branch != branch
         else { return }
 
@@ -250,7 +311,7 @@ final class ProjectStore {
     }
 
     /// Applies a mutation to a stored session and persists the result.
-    func update(sessionID: UUID, _ mutate: (inout AgentSession) -> Void) {
+    func update(sessionID: SessionID, _ mutate: (inout AgentSession) -> Void) {
         guard let location = locate(sessionID: sessionID) else { return }
         mutate(&projects[location.projectIndex].sessions[location.sessionIndex])
         save()
@@ -258,28 +319,28 @@ final class ProjectStore {
 
     // MARK: - Lookup
 
-    func project(withID projectID: UUID) -> Project? {
+    func project(withID projectID: ProjectID) -> Project? {
         projects.first { $0.id == projectID }
     }
 
-    func session(withID sessionID: UUID) -> AgentSession? {
+    func session(withID sessionID: SessionID) -> AgentSession? {
         guard let location = locate(sessionID: sessionID) else { return nil }
         return projects[location.projectIndex].sessions[location.sessionIndex]
     }
 
     /// Returns the project that owns a session.
-    func project(forSessionID sessionID: UUID) -> Project? {
+    func project(forSessionID sessionID: SessionID) -> Project? {
         guard let location = locate(sessionID: sessionID) else { return nil }
         return projects[location.projectIndex]
     }
 
     // MARK: - Private Methods
 
-    private func index(ofProject projectID: UUID) -> Int? {
+    private func index(ofProject projectID: ProjectID) -> Int? {
         projects.firstIndex { $0.id == projectID }
     }
 
-    private func locate(sessionID: UUID) -> (projectIndex: Int, sessionIndex: Int)? {
+    private func locate(sessionID: SessionID) -> (projectIndex: Int, sessionIndex: Int)? {
         for (projectIndex, project) in projects.enumerated() {
             if let sessionIndex = project.sessions.firstIndex(where: { $0.id == sessionID }) {
                 return (projectIndex, sessionIndex)
@@ -294,7 +355,7 @@ final class ProjectStore {
     /// knows it by that name and the account is the meaningful distinction between them.
     private func defaultSessionTitle(
         for kind: AgentKind,
-        accountHandle: String?,
+        accountHandle: AccountHandle,
         in project: Project
     ) -> String {
         let account = AgentAccountDiscovery.account(for: kind, handle: accountHandle)
@@ -325,7 +386,9 @@ final class ProjectStore {
             withTimeInterval: ProjectStoreDefaults.saveCoalescingInterval,
             repeats: false
         ) { [weak self] _ in
-            self?.save()
+            Task { @MainActor [weak self] in
+                self?.save()
+            }
         }
     }
 
@@ -341,16 +404,32 @@ final class ProjectStore {
         saveTimer?.invalidate()
         saveTimer = nil
 
+        guard stateWritesAllowed else {
+            SkalmanLogger.agent.error(
+                "Refusing to save projects state because its failed load could not be quarantined"
+            )
+            return
+        }
+
         let state = ProjectsState(
             projects: projects,
             selectedSessionID: selectedSessionID
         )
-        StateManager.shared.saveProjectsState(state)
+        stateManager.saveProjectsState(state)
     }
 
     private func load() {
-        guard let state = StateManager.shared.loadProjectsState() else { return }
-        projects = state.projects
-        selectedSessionID = state.selectedSessionID
+        switch stateManager.loadProjectsState() {
+        case .missing:
+            return
+        case .loaded(let state):
+            isRestoringState = true
+            projects = state.projects
+            selectedSessionID = state.selectedSessionID
+            isRestoringState = false
+        case .failed(let quarantinedAt):
+            didLoadStateSuccessfully = false
+            stateWritesAllowed = quarantinedAt != nil
+        }
     }
 }

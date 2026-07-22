@@ -17,7 +17,7 @@ enum CodexSessionDiscovery {
         let payload: Payload
 
         struct Payload: Decodable {
-            let id: String
+            let id: TranscriptID
             let cwd: String
         }
     }
@@ -33,7 +33,7 @@ enum CodexSessionDiscovery {
         projectPath: String,
         codexHome: String,
         launchedAt: Date,
-        completion: @escaping (String?) -> Void
+        completion: @escaping (TranscriptID?) -> Void
     ) {
         let sessionsDirectory = URL(fileURLWithPath: codexHome)
             .appendingPathComponent(AgentAccountDefaults.sessionsSubdirectory)
@@ -70,7 +70,7 @@ enum CodexSessionDiscovery {
         projectPath: String,
         sessionsDirectory: URL,
         launchedAt: Date
-    ) -> String? {
+    ) -> TranscriptID? {
         let cutoff = launchedAt.addingTimeInterval(-CodexDiscoveryDefaults.clockSlack)
         let normalizedProjectPath = normalized(projectPath)
 

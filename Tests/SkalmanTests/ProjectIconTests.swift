@@ -50,7 +50,7 @@ final class ProjectIconTests: XCTestCase {
     // MARK: - Store
 
     func testStoreNormalizesRoundTripsAndRemoves() throws {
-        let projectID = UUID()
+        let projectID = ProjectID()
         let fileName = try XCTUnwrap(
             ProjectIconStore.store(imageData: pngData(size: 256), for: projectID)
         )
@@ -76,7 +76,7 @@ final class ProjectIconTests: XCTestCase {
     }
 
     func testStoreDoesNotUpscaleSmallIcons() throws {
-        let projectID = UUID()
+        let projectID = ProjectID()
         let fileName = try XCTUnwrap(
             ProjectIconStore.store(imageData: pngData(size: 32), for: projectID)
         )
@@ -117,7 +117,7 @@ final class ProjectIconTests: XCTestCase {
     }
 
     func testLuminanceReflectsIconTone() throws {
-        let projectID = UUID()
+        let projectID = ProjectID()
         let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
         let fileName = try XCTUnwrap(
             ProjectIconStore.store(imageData: pngData(size: 64, color: white), for: projectID)
@@ -191,6 +191,68 @@ final class ProjectIconTests: XCTestCase {
 
     private static func sha256(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - Account Badges
+
+    /// The reason the badge reads the email at all: aliases are named after the *agent*, so
+    /// `claude-dblock` and `claude-vlundborg` both reduce to `C` and identify nothing, while
+    /// their addresses reduce to `D` and `L`.
+    @MainActor
+    func testBadgeInitialPrefersEmailOverAlias() throws {
+        let dblock = try claudeAccount(
+            handle: .named("claude-dblock"),
+            email: "daniel.block3@example.com"
+        )
+        let vlundborg = try claudeAccount(
+            handle: .named("claude-vlundborg"),
+            email: "lundborg.viktor@example.com"
+        )
+
+        XCTAssertEqual(AccountBadge.initial(for: dblock), "D")
+        XCTAssertEqual(AccountBadge.initial(for: vlundborg), "L")
+    }
+
+    /// An account whose config carries no address still has to render something, and its
+    /// name is all that is left.
+    @MainActor
+    func testBadgeInitialFallsBackToNameWithoutEmail() throws {
+        let account = try claudeAccount(handle: .named("claude-nameless"), email: nil)
+        XCTAssertEqual(AccountBadge.initial(for: account), "C")
+    }
+
+    /// The chip marks an *alternate* account. On the default one the agent's own mark is
+    /// already the whole answer, so a badge there would be chrome on every row.
+    @MainActor
+    func testDefaultAccountHasNoChip() throws {
+        let account = try claudeAccount(
+            handle: .standard,
+            email: "developer@example.com"
+        )
+        XCTAssertNil(AccountBadge.chip(for: account))
+        XCTAssertNil(AccountBadge.chip(for: nil))
+    }
+
+    /// A Claude account backed by a real config directory, since the badge reads the email
+    /// from the CLI's own file rather than from the account record.
+    private func claudeAccount(handle: AccountHandle, email: String?) throws -> AgentAccount {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("skalman-account-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+
+        let object: [String: Any] = email.map { ["oauthAccount": ["emailAddress": $0]] } ?? [:]
+        try JSONSerialization.data(withJSONObject: object)
+            .write(to: directory.appendingPathComponent(".claude.json"))
+
+        // Handles differ per test, since `cachedEmail` keys its memo on the account id and
+        // would otherwise answer one account's lookup from another's entry.
+        return AgentAccount(
+            provider: .claude,
+            handle: handle,
+            configPath: directory.path,
+            displayName: handle.name
+        )
     }
 
     // MARK: - Git Remote

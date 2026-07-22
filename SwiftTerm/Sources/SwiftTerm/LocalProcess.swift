@@ -213,10 +213,28 @@ public class LocalProcess {
     {
         var n: Int32 = 0
         waitpid (shellPid, &n, WNOHANG)
+
+        // Reaping the child destroys the kernel event this source is registered for. Left
+        // active, the knote is reported as EV_VANISHED the next time the workloop re-arms
+        // its sources — which happens when an unrelated session starts a PTY of its own —
+        // and libdispatch treats an unexpected EV_VANISHED as a fatal client bug. The source
+        // is cancelled here rather than in `terminate()` because it is what reaps the child:
+        // cancelling before the exit event arrives would leave a zombie behind instead.
+        cancelChildMonitor()
+
         delegate?.processTerminated(self, exitCode: n)
         running = false
     }
-    
+
+    /// Releases the child's exit source. Idempotent, since the exit event fires at most once.
+    private func cancelChildMonitor ()
+    {
+#if os(macOS)
+        childMonitor?.cancel()
+        childMonitor = nil
+#endif
+    }
+
     /// Indicates if the child process is currently running
     public private(set) var running: Bool = false
     

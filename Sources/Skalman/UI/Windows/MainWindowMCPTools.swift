@@ -8,7 +8,7 @@ import AppKit
 /// what the window is showing. Called on the main queue by `MCPServer`.
 extension MainWindowController: MCPToolHandling {
 
-    func handle(_ call: MCPToolCall, for sessionID: UUID) -> MCPToolResult {
+    func handle(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
         switch call.name {
         case MCPTools.displayImage:
             return displayImage(call, for: sessionID)
@@ -21,7 +21,7 @@ extension MainWindowController: MCPToolHandling {
 
     /// Async entry point: the browser tools finish on a page load, a DOM query, or a snapshot;
     /// everything else answers synchronously and is forwarded to `handle(_:for:)`.
-    func handle(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void) {
+    func handle(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
         // A tool that reads or changes the panel means the agent's transcript now reflects it, so
         // record that: a later resume only re-describes the panel if the user changed it in between.
         let observed: (MCPToolResult) -> Void = { [weak self] result in
@@ -53,7 +53,7 @@ extension MainWindowController: MCPToolHandling {
 
     /// Describes the session's display panel for the `initialize` instructions — but only when it
     /// changed since the agent last saw it, so a resume does not repeat what the transcript shows.
-    func panelState(for sessionID: UUID) -> String {
+    func panelState(for sessionID: SessionID) -> String {
         guard let panel = DisplayPaneStore.shared.loadLayout(for: sessionID), !panel.tabs.isEmpty else {
             return ""
         }
@@ -69,7 +69,7 @@ extension MainWindowController: MCPToolHandling {
         return "\n\n" + panel.agentDescription
     }
 
-    private func markPanelObserved(_ sessionID: UUID) {
+    private func markPanelObserved(_ sessionID: SessionID) {
         DisplayPaneStore.shared.setObserved(
             DisplayPaneStore.shared.signature(for: sessionID),
             for: sessionID
@@ -81,7 +81,7 @@ extension MainWindowController: MCPToolHandling {
     /// Async because the icon may arrive over the network; the file form answers at once.
     private func setProjectIcon(
         _ call: MCPToolCall,
-        for sessionID: UUID,
+        for sessionID: SessionID,
         completion: @escaping (MCPToolResult) -> Void
     ) {
         guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
@@ -143,7 +143,7 @@ extension MainWindowController: MCPToolHandling {
 
     // MARK: Browser Tools
 
-    private func browserNavigate(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void) {
+    private func browserNavigate(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
         guard let input = call.string("url"), !input.isEmpty else {
             completion(.failure("Missing required argument: url"))
             return
@@ -167,7 +167,7 @@ extension MainWindowController: MCPToolHandling {
         }
     }
 
-    private func browserQuery(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void) {
+    private func browserQuery(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
         guard let selector = call.string("selector"), !selector.isEmpty else {
             completion(.failure("Missing required argument: selector"))
             return
@@ -188,7 +188,7 @@ extension MainWindowController: MCPToolHandling {
         }
     }
 
-    private func browserClick(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void) {
+    private func browserClick(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
         guard let selector = call.string("selector"), !selector.isEmpty else {
             completion(.failure("Missing required argument: selector"))
             return
@@ -211,7 +211,7 @@ extension MainWindowController: MCPToolHandling {
         }
     }
 
-    private func browserScreenshot(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void) {
+    private func browserScreenshot(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
         guard let browser = loadedBrowser(for: sessionID), let url = browser.currentURL else {
             completion(.failure("No page is loaded. Use browser_navigate first."))
             return
@@ -241,7 +241,7 @@ extension MainWindowController: MCPToolHandling {
 
     /// The session's browser tab, but only once it actually has a page — so the DOM tools fail
     /// with a clear instruction rather than acting on a blank browser.
-    private func loadedBrowser(for sessionID: UUID) -> BrowserViewController? {
+    private func loadedBrowser(for sessionID: SessionID) -> BrowserViewController? {
         guard let browser = displayPaneController.browser(for: sessionID), browser.currentURL != nil else {
             return nil
         }
@@ -250,7 +250,7 @@ extension MainWindowController: MCPToolHandling {
 
     // MARK: Panel Tabs
 
-    private func panelListTabs(for sessionID: UUID) -> MCPToolResult {
+    private func panelListTabs(for sessionID: SessionID) -> MCPToolResult {
         let tabs = displayPaneController.tabs(for: sessionID)
         guard !tabs.isEmpty else {
             return .success("No tabs are open in this session's display panel.")
@@ -261,6 +261,8 @@ extension MainWindowController: MCPToolHandling {
             var kind = "document"
             if tab.browser != nil {
                 kind = "browser"
+            } else if tab.review != nil {
+                kind = "git review"
             } else if case .image? = tab.content?.body {
                 kind = "image"
             }
@@ -281,7 +283,7 @@ extension MainWindowController: MCPToolHandling {
         return .success(text)
     }
 
-    private func panelActivateTab(_ call: MCPToolCall, for sessionID: UUID) -> MCPToolResult {
+    private func panelActivateTab(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
         let raw = call.arguments["tab"]
 
         // A number (or numeric string) is a strip index; anything else is a tab id.
@@ -309,7 +311,7 @@ extension MainWindowController: MCPToolHandling {
     /// Opens the display pane if the request came from the session on screen; a background
     /// session's panel waits until it is selected, exactly as its content does.
     @discardableResult
-    private func revealDisplayPane(for sessionID: UUID) -> Bool {
+    private func revealDisplayPane(for sessionID: SessionID) -> Bool {
         let isVisible = sessionID == currentSessionID
         if isVisible {
             displayPaneController.showSession(sessionID)
@@ -368,7 +370,7 @@ extension MainWindowController: MCPToolHandling {
 
     // MARK: Tools
 
-    private func displayImage(_ call: MCPToolCall, for sessionID: UUID) -> MCPToolResult {
+    private func displayImage(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
         guard let path = call.string("path"), !path.isEmpty else {
             return .failure("Missing required argument: path")
         }
@@ -404,7 +406,7 @@ extension MainWindowController: MCPToolHandling {
         )
     }
 
-    private func displayHTML(_ call: MCPToolCall, for sessionID: UUID) -> MCPToolResult {
+    private func displayHTML(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
         guard let html = call.string("html"), !html.isEmpty else {
             return .failure("Missing required argument: html")
         }
@@ -437,7 +439,7 @@ extension MainWindowController: MCPToolHandling {
     /// the user can currently see it.
     private func present(
         _ content: DisplayContent,
-        for sessionID: UUID,
+        for sessionID: SessionID,
         describedAs description: String
     ) -> MCPToolResult {
         // Each shown artefact is a new tab that coexists with what was there before, rather than
@@ -460,7 +462,7 @@ extension MainWindowController: MCPToolHandling {
     // MARK: Helpers
 
     /// Resolves a tool's path argument, which may be relative to the session's project.
-    private func resolve(path: String, for sessionID: UUID) -> URL? {
+    private func resolve(path: String, for sessionID: SessionID) -> URL? {
         let expanded = (path as NSString).expandingTildeInPath
 
         var candidates = [URL(fileURLWithPath: expanded)]

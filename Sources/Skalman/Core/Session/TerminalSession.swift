@@ -6,7 +6,7 @@ final class TerminalSession: NSObject {
 
     // MARK: - Properties
 
-    let identifier: UUID
+    let identifier: SessionID
     let terminalView: EmojiFixedTerminalView
     private(set) var title: String
     private(set) var currentDirectory: URL?
@@ -26,8 +26,8 @@ final class TerminalSession: NSObject {
 
     // MARK: - Initialization
 
-    init(profile: TerminalProfile = .default, frame: NSRect = .zero, identifier: UUID? = nil) {
-        self.identifier = identifier ?? UUID()
+    init(profile: TerminalProfile = .default, frame: NSRect = .zero, identifier: SessionID? = nil) {
+        self.identifier = identifier ?? SessionID()
         self.profile = profile
         self.title = profile.shellPath
         self.terminalView = EmojiFixedTerminalView(frame: frame)

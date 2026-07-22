@@ -11,8 +11,8 @@ struct AgentAccount: Equatable, Identifiable {
 
     let provider: AgentKind
 
-    /// Directory name minus its leading dot, or `default` for the CLI's standard location.
-    let handle: String
+    /// Directory name minus its leading dot, or `.standard` for the CLI's standard location.
+    let handle: AccountHandle
 
     /// Absolute path of the config directory backing this account.
     let configPath: String
@@ -23,16 +23,16 @@ struct AgentAccount: Equatable, Identifiable {
     /// Emoji shown in place of the agent's symbol, when the user has chosen one.
     let emoji: String?
 
-    var id: String { "\(provider.rawValue):\(handle)" }
+    var id: AccountID { AccountID(provider: provider, handle: handle) }
 
     /// Whether this is the CLI's standard config location rather than an alternate home.
-    var isDefault: Bool { handle == AgentAccountDefaults.defaultHandle }
+    var isDefault: Bool { handle.isStandard }
 
     // MARK: - Initialization
 
     init(
         provider: AgentKind,
-        handle: String,
+        handle: AccountHandle,
         configPath: String,
         displayName: String? = nil,
         emoji: String? = nil
@@ -40,15 +40,10 @@ struct AgentAccount: Equatable, Identifiable {
         self.provider = provider
         self.handle = handle
         self.configPath = configPath
-        self.displayName = displayName ?? handle
+        self.displayName = displayName ?? handle.name
         self.emoji = emoji
     }
 
-    /// Identifier for an account before one has been constructed, used to read stored
-    /// preferences during discovery.
-    static func identifier(provider: AgentKind, handle: String) -> String {
-        "\(provider.rawValue):\(handle)"
-    }
 }
 
 // MARK: - Session Account Display
@@ -59,6 +54,7 @@ extension AgentSession {
     ///
     /// Only alternate accounts are labelled: the default account needs no badge, and a
     /// session already titled after its account would only repeat itself.
+    @MainActor
     var accountLineText: String? {
         guard let account = AgentAccountDiscovery.account(for: kind, handle: accountHandle),
               !account.isDefault,
@@ -72,9 +68,6 @@ extension AgentSession {
 // MARK: - Agent Account Defaults
 
 enum AgentAccountDefaults {
-    /// Handle reserved for the CLI's standard config directory.
-    static let defaultHandle = "default"
-
     /// Label shown for the standard account when no alias names it.
     static let defaultDisplayName = "Default"
 

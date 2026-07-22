@@ -18,7 +18,7 @@ final class MainWindowController: NSWindowController {
     private var pendingPrompt: String?
 
     /// The session that was on screen before Settings opened, restored when it closes.
-    private var preSettingsSessionID: UUID?
+    private var preSettingsSessionID: SessionID?
 
     /// The panel agents display content in, and its split item, retained so it can be
     /// revealed when content arrives.
@@ -40,7 +40,7 @@ final class MainWindowController: NSWindowController {
     /// The account the usage pill was last pointed at, so title churn does not re-run
     /// account discovery — agents rewrite the terminal title constantly, and each rewrite
     /// funnels through `updateSessionTitleItem`.
-    private var usageAccountKey: String?
+    private var usageAccountKey: AccountID?
 
     /// Exposed to the toolbar delegate, which needs the split view for its tracking separator.
     var splitView: NSSplitView { splitViewController.splitView }
@@ -49,7 +49,7 @@ final class MainWindowController: NSWindowController {
     private var findBarTopConstraint: NSLayoutConstraint?
 
     /// The session currently shown, if any.
-    var currentSessionID: UUID? {
+    var currentSessionID: SessionID? {
         containerViewController.currentSessionID
     }
 
@@ -269,7 +269,7 @@ final class MainWindowController: NSWindowController {
     ///
     /// Content belongs to a session, so switching sessions switches what the panel shows,
     /// and a session with nothing to show closes it rather than leaving the last image up.
-    private func syncDisplayPane(to sessionID: UUID?) {
+    private func syncDisplayPane(to sessionID: SessionID?) {
         displayPaneController.showSession(sessionID)
 
         guard let sessionID, displayPaneController.hasContent(for: sessionID) else {
@@ -319,7 +319,7 @@ final class MainWindowController: NSWindowController {
     /// Skipped when the account is unchanged: this runs on every terminal-title rewrite,
     /// and account discovery reads the filesystem.
     private func updateAccountUsageItem(session: AgentSession?) {
-        let key = session.map { "\($0.kind.rawValue):\($0.accountHandle ?? "")" }
+        let key = session.map { AccountID(provider: $0.kind, handle: $0.accountHandle) }
         guard key != usageAccountKey else { return }
         usageAccountKey = key
 
@@ -358,6 +358,21 @@ final class MainWindowController: NSWindowController {
         setDisplayPaneVisible(true)
     }
 
+    /// Opens the git review as a tab in the selected session's display panel — the same
+    /// per-session shape as the browser, and the same beep when no session is selected.
+    func showReview() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard let sessionID = containerViewController.currentSessionID else {
+            NSSound.beep()
+            return
+        }
+
+        displayPaneController.activateReview(for: sessionID)
+        displayPaneController.showSession(sessionID)
+        setDisplayPaneVisible(true)
+    }
+
     /// Opens Settings in the content pane, or closes it and returns to what was on screen. The
     /// sidebar itself swaps to the section list rather than a second sidebar appearing.
     func toggleSettings() {
@@ -381,11 +396,14 @@ final class MainWindowController: NSWindowController {
         updateSessionTitleItem()
     }
 
-    /// Creates a session in the project owning the current selection, or the first project.
+    /// Opens the composer for the project owning the current selection, or the first project.
     ///
-    /// Passing no kind uses the agent chosen in preferences.
-    func newSession(kind: AgentKind? = nil, accountHandle: String? = nil) {
-        let projectID: UUID?
+    /// It does not create anything. A session carries four decisions — agent, account, model
+    /// and which checkout it runs in — and the paths that created one outright answered all
+    /// four with defaults the user never saw. The composer is now the only way in, so every
+    /// session starts from a choice.
+    func newSession() {
+        let projectID: ProjectID?
 
         if let currentSessionID {
             projectID = ProjectStore.shared.project(forSessionID: currentSessionID)?.id
@@ -398,7 +416,7 @@ final class MainWindowController: NSWindowController {
             return
         }
 
-        newSession(in: projectID, kind: kind, accountHandle: accountHandle)
+        sidebarViewController.select(projectID: projectID)
     }
 
     func addProject() {
@@ -414,7 +432,7 @@ final class MainWindowController: NSWindowController {
 
             let project = ProjectStore.shared.addProject(folderURL: url)
             self.sidebarViewController.reload()
-            self.newSession(in: project.id)
+            self.sidebarViewController.select(projectID: project.id)
         }
     }
 
@@ -430,7 +448,7 @@ final class MainWindowController: NSWindowController {
     /// Asks before ending a running agent, when that preference is enabled.
     ///
     /// Returns true when closing should proceed.
-    private func confirmCloseIfRunning(sessionID: UUID) -> Bool {
+    private func confirmCloseIfRunning(sessionID: SessionID) -> Bool {
         guard AppSettings.shared.confirmsBeforeClosingRunningSession,
               AgentRuntime.shared.isRunning(sessionID: sessionID),
               let session = ProjectStore.shared.session(withID: sessionID) else { return true }
@@ -509,21 +527,6 @@ final class MainWindowController: NSWindowController {
 
     // MARK: - Private Methods
 
-    private func newSession(
-        in projectID: UUID,
-        kind: AgentKind? = nil,
-        accountHandle: String? = nil
-    ) {
-        guard let session = ProjectStore.shared.addSession(
-            to: projectID,
-            kind: kind ?? AppSettings.shared.defaultAgentKind,
-            accountHandle: accountHandle
-        ) else { return }
-
-        sidebarViewController.reload()
-        sidebarViewController.select(sessionID: session.id)
-    }
-
     private func currentAgentController() -> AgentSessionViewController? {
         guard let currentSessionID else { return nil }
         return AgentRuntime.shared.controller(for: currentSessionID)
@@ -550,7 +553,7 @@ final class MainWindowController: NSWindowController {
 
 extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
-    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: UUID) {
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID) {
         // Taken rather than read: an opening prompt belongs to the launch that follows it,
         // not to every later selection of the same session.
         let prompt = pendingPrompt
@@ -564,22 +567,24 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
     /// A project has no terminal of its own, so selecting one offers the composer: the
     /// choices that are only made when a session starts.
-    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: UUID) {
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID) {
         containerViewController.showComposer(projectID: projectID)
         syncDisplayPane(to: nil)
         sidebar.refreshRows()
         updateSessionTitleItem()
     }
 
+    /// A folder dropped on the sidebar lands in its composer, like one added from the panel:
+    /// a project's first session is still a session, and still worth choosing.
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didAddProject project: Project) {
-        newSession(in: project.id)
+        sidebar.select(projectID: project.id)
     }
 
     /// Archives or restores a session, and clears the pane if the archived one was showing.
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         setArchived archived: Bool,
-        for sessionID: UUID
+        for sessionID: SessionID
     ) {
         ProjectStore.shared.setArchived(archived, for: sessionID)
 
@@ -589,6 +594,79 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         }
 
         sidebar.reload()
+    }
+
+    /// Switches a session between the terminal and the native conversation, and reopens it
+    /// there.
+    ///
+    /// This is a relaunch, not a new conversation: both surfaces resume the CLI by the
+    /// session's own id and append to the same transcript, so the agent picks up where it
+    /// left off under the other interface. The old process is discarded *first* and
+    /// deliberately — two live processes sharing one id would interleave their writes into
+    /// that single transcript.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        setUsesNativeUI usesNative: Bool,
+        for sessionID: SessionID
+    ) {
+        guard confirmSurfaceSwitchIfRunning(sessionID: sessionID, toNative: usesNative) else {
+            return
+        }
+
+        AgentRuntime.shared.discard(sessionID: sessionID)
+        ProjectStore.shared.setUsesNativeUI(usesNative, for: sessionID)
+
+        containerViewController.reopenIfShowing(sessionID: sessionID)
+        sidebar.reload()
+        updateSessionTitleItem()
+    }
+
+    /// Forks a session into a side chat and opens it.
+    ///
+    /// Nothing here stops the parent: a fork writes its own transcript, which is exactly what
+    /// lets the side chat run *beside* a live session instead of queueing behind it — the one
+    /// constraint the surface switch has and this does not.
+    ///
+    /// An opening question travels the same route the composer's does, through
+    /// `pendingPrompt`, so "Ask on the Side…" needs no launch path of its own.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        createSideChatOf sessionID: SessionID,
+        prompt: String?
+    ) {
+        guard let session = ProjectStore.shared.addSideChat(of: sessionID) else { return }
+
+        EventLog.shared.record(.composer, "Side chat forked", [
+            "session": session.id.uuidString,
+            "parent": sessionID.uuidString,
+            "prompt": prompt ?? ""
+        ])
+
+        pendingPrompt = prompt
+
+        sidebar.reload()
+        sidebar.select(sessionID: session.id)
+    }
+
+    /// Asks before a switch ends a running agent, under the same preference that guards
+    /// closing one. The conversation survives either way; what is lost is the work in flight.
+    private func confirmSurfaceSwitchIfRunning(sessionID: SessionID, toNative: Bool) -> Bool {
+        guard AppSettings.shared.confirmsBeforeClosingRunningSession,
+              AgentRuntime.shared.isRunning(sessionID: sessionID),
+              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
+
+        let surface = toNative ? "Conversation" : "Terminal"
+        let alert = NSAlert()
+        alert.messageText = "Show \"\(session.displayTitle)\" as \(surface.lowercased())?"
+        alert.informativeText = """
+            The agent stops and starts again on the new surface, resuming this conversation \
+            where it left off. Anything it is working on right now is interrupted.
+            """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Show as \(surface)")
+        alert.addButton(withTitle: "Cancel")
+
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController) {
@@ -602,6 +680,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         let liveSessionIDs = Set(ProjectStore.shared.projects.flatMap { $0.sessions.map(\.id) })
         displayPaneController.retainOnly(sessionIDs: liveSessionIDs)
         MCPSessionRegistry.retainOnly(sessionIDs: liveSessionIDs)
+        GitTurnBaselineStore.shared.retainOnly(sessionIDs: liveSessionIDs)
 
         syncDisplayPane(to: containerViewController.currentSessionID)
         updateSessionTitleItem()
@@ -624,18 +703,19 @@ extension MainWindowController: SessionComposerViewControllerDelegate {
 
     func sessionComposer(
         _ composer: SessionComposerViewController,
-        startSessionIn projectID: UUID,
+        startSessionIn projectID: ProjectID,
         kind: AgentKind,
-        accountHandle: String?,
+        accountHandle: AccountHandle,
         model: String?,
         branch: String?,
         usesNativeUI: Bool,
         prompt: String
     ) {
-        // A branch other than this checkout's means the session belongs in a worktree for it,
-        // which becomes its own project so it groups with the repository's other checkouts.
+        // A branch other than this checkout's means the session belongs in the checkout
+        // standing on it, which is a project of its own — the branch menu only offers
+        // checkouts that exist, so this resolves unless one was removed since it opened.
         let targetProjectID = branch.flatMap {
-            resolveCheckout(forBranch: $0, in: projectID)
+            ProjectStore.shared.checkout(onBranch: $0, inRepositoryOf: projectID)
         } ?? projectID
 
         guard let session = ProjectStore.shared.addSession(
@@ -646,7 +726,21 @@ extension MainWindowController: SessionComposerViewControllerDelegate {
             usesNativeUI: usesNativeUI
         ) else { return }
 
-        pendingPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opening = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Journalled before the draft is dropped, and before anything is launched. Between
+        // those two points the prompt would otherwise live only in memory and in a command
+        // line — which is precisely where it was when a crash took one.
+        EventLog.shared.record(.composer, "Session started from composer", [
+            "session": session.id.uuidString,
+            "project": targetProjectID.uuidString,
+            "agent": kind.rawValue,
+            "account": accountHandle.name,
+            "prompt": opening
+        ])
+
+        DraftStore.shared.clear(for: projectID)
+        pendingPrompt = opening
 
         sidebarViewController.reload()
         sidebarViewController.select(sessionID: session.id)
@@ -655,7 +749,7 @@ extension MainWindowController: SessionComposerViewControllerDelegate {
     func sessionComposer(
         _ composer: SessionComposerViewController,
         importSession session: ImportableSession,
-        into projectID: UUID
+        into projectID: ProjectID
     ) {
         guard let adopted = ProjectStore.shared.importSession(session, into: projectID) else {
             return
@@ -679,16 +773,6 @@ extension MainWindowController: SessionComposerViewControllerDelegate {
         containerViewController.showComposer(projectID: project.id)
     }
 
-    /// Finds the project whose checkout is on `branch`, if one has been added.
-    private func resolveCheckout(forBranch branch: String, in projectID: UUID) -> UUID? {
-        guard let origin = ProjectStore.shared.project(withID: projectID),
-              let identity = GitInfo.repositoryIdentity(for: origin.folderPath) else { return nil }
-
-        return ProjectStore.shared.projects.first { candidate in
-            GitInfo.repositoryIdentity(for: candidate.folderPath) == identity
-                && GitInfo.currentBranch(for: candidate.folderPath) == branch
-        }?.id
-    }
 }
 
 extension MainWindowController: TerminalContainerViewControllerDelegate {
@@ -696,7 +780,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
     func terminalContainer(
         _ container: TerminalContainerViewController,
         sessionTitleChanged title: String,
-        for sessionID: UUID
+        for sessionID: SessionID
     ) {
         // The sidebar row carries the session name; the window stays named after the app.
         sidebarViewController.refreshRow(sessionID: sessionID)
@@ -708,7 +792,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
     func terminalContainer(
         _ container: TerminalContainerViewController,
-        sessionDidExit sessionID: UUID,
+        sessionDidExit sessionID: SessionID,
         exitCode: Int32?
     ) {
         sidebarViewController.refreshRows()
@@ -717,10 +801,17 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
     func terminalContainer(
         _ container: TerminalContainerViewController,
-        sessionStateDidChange sessionID: UUID
+        sessionStateDidChange sessionID: SessionID
     ) {
         // Only the affected row, so a working session does not rebuild the whole list.
         sidebarViewController.refreshRow(sessionID: sessionID)
+
+        // The review's Last Turn baseline is captured on the entering-working edge; the store
+        // watches every change and finds that edge itself.
+        GitTurnBaselineStore.shared.noteActivity(
+            AgentRuntime.shared.activity(sessionID: sessionID),
+            sessionID: sessionID
+        )
 
         // An agent that just stopped working may have switched branches on the way.
         if AgentRuntime.shared.activity(sessionID: sessionID) != .working {
@@ -729,6 +820,9 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
             // The session's own branch record follows the same moment; a change regroups
             // the sidebar through the store's change notification.
             ProjectStore.shared.refreshBranch(forSessionID: sessionID)
+
+            // The tree probably changed too; an on-screen review tab refreshes itself.
+            displayPaneController.noteSessionStoppedWorking(sessionID)
 
             // It also just spent tokens, so the finish is the moment the pill is most
             // likely stale. The service's spacing keeps a chatty session polite.

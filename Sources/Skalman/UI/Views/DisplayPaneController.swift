@@ -28,15 +28,18 @@ struct DisplayContent {
 // MARK: - Display Tab
 
 /// One tab in the display pane. A tab is either a piece of rendered content — an image or an HTML
-/// document — or a live browser, which is a whole view controller rather than a value.
+/// document — or a live surface (the browser, the git review), which is a whole view controller
+/// rather than a value.
 ///
-/// A reference type, because a browser tab owns a `BrowserViewController` whose page and history
-/// must survive the tab being switched off screen and back.
+/// A reference type, because a live tab owns a view controller whose state — a browser's page
+/// and history, a review's mode and scroll position — must survive the tab being switched off
+/// screen and back.
 final class DisplayTab {
 
     enum Body {
         case content(DisplayContent)
         case browser(BrowserViewController)
+        case review(GitReviewViewController)
     }
 
     let id: UUID
@@ -61,6 +64,20 @@ final class DisplayTab {
         return nil
     }
 
+    var review: GitReviewViewController? {
+        if case .review(let review) = body { return review }
+        return nil
+    }
+
+    /// The tab's view controller, when its body is a live surface rather than rendered content.
+    var hostedController: NSViewController? {
+        switch body {
+        case .content: return nil
+        case .browser(let browser): return browser
+        case .review(let review): return review
+        }
+    }
+
     /// The glyph the tab strip draws — the terminal-familiar vocabulary of the surface kind.
     var symbolName: String {
         switch body {
@@ -69,6 +86,8 @@ final class DisplayTab {
             return "doc.richtext"
         case .browser:
             return "globe"
+        case .review:
+            return "plus.forwardslash.minus"
         }
     }
 
@@ -83,6 +102,8 @@ final class DisplayTab {
         case .browser(let browser):
             if let title = browser.currentTitle, !title.isEmpty { return title }
             return browser.currentURL?.host ?? "Browser"
+        case .review:
+            return "Review"
         }
     }
 }
@@ -106,20 +127,20 @@ final class DisplayPaneController: NSViewController {
     private var tabBarHeight: NSLayoutConstraint!
     private var imageView: NSImageView!
     private var webView: WKWebView!
-    private var browserHost: NSView!
+    private var hostedView: NSView!
     private var captionLabel: NSTextField!
     private var contentMenuButton: NSButton!
     private var placeholderLabel: NSTextField!
 
-    /// The browser view controller currently parented into `browserHost`, so switching tabs can
-    /// swap it out without rebuilding the page.
-    private weak var installedBrowser: BrowserViewController?
+    /// The live tab's view controller currently parented into `hostedView` — the browser or a
+    /// review — so switching tabs can swap it out without rebuilding its state.
+    private weak var installedController: NSViewController?
 
-    private var tabsBySession: [UUID: [DisplayTab]] = [:]
-    private var activeTabIDBySession: [UUID: UUID] = [:]
+    private var tabsBySession: [SessionID: [DisplayTab]] = [:]
+    private var activeTabIDBySession: [SessionID: UUID] = [:]
 
     /// Not private: the actions in `DisplayPaneMenu` name the session they write files for.
-    private(set) var currentSessionID: UUID?
+    private(set) var currentSessionID: SessionID?
 
     /// The content of the active tab, if it is an image or a document. Read by `DisplayPaneMenu`,
     /// which acts on the file behind it — a browser tab has no such file, so this is nil for it.
@@ -207,12 +228,12 @@ final class DisplayPaneController: NSViewController {
         // white, which is jarring against a dark terminal.
         webView.underPageBackgroundColor = .windowBackgroundColor
 
-        // The browser tab's full view controller is parented into this on activation; empty and
-        // hidden otherwise.
-        browserHost = NSView()
-        browserHost.translatesAutoresizingMaskIntoConstraints = false
-        browserHost.wantsLayer = true
-        browserHost.isHidden = true
+        // A live tab's full view controller — browser or review — is parented into this on
+        // activation; empty and hidden otherwise.
+        hostedView = NSView()
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        hostedView.wantsLayer = true
+        hostedView.isHidden = true
 
         captionLabel = NSTextField(labelWithString: "")
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -250,7 +271,7 @@ final class DisplayPaneController: NSViewController {
         view.addSubview(placeholderLabel)
 
         // Added last so it layers above the image/web surfaces; it is opaque when shown.
-        view.addSubview(browserHost)
+        view.addSubview(hostedView)
     }
 
     private func setupConstraints() {
@@ -298,12 +319,12 @@ final class DisplayPaneController: NSViewController {
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             webView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -padding),
 
-            // The browser fills the whole content region, over the caption footer, since it
+            // A live surface fills the whole content region, over the caption footer, since it
             // carries its own chrome and needs no caption beneath it.
-            browserHost.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            browserHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            browserHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            browserHost.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            hostedView.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            hostedView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
             // Caption and its actions button sit together as one footer, right-aligned so the
             // button lands under the image's edge rather than floating in the middle.
@@ -341,7 +362,7 @@ final class DisplayPaneController: NSViewController {
 
     /// Adds an image or document as a new tab and brings it to the front. Existing tabs stay, so
     /// the pane accumulates what the agent shows; the oldest content tab is dropped past the cap.
-    func addContentTab(_ content: DisplayContent, for sessionID: UUID) {
+    func addContentTab(_ content: DisplayContent, for sessionID: SessionID) {
         restoreIfNeeded(sessionID)
         var tabs = tabsBySession[sessionID] ?? []
 
@@ -374,7 +395,7 @@ final class DisplayPaneController: NSViewController {
     /// Returns the session's browser tab, creating and activating one if it has none. The agent's
     /// navigate tool calls this so a page always has a tab to land in.
     @discardableResult
-    func activateBrowser(for sessionID: UUID) -> BrowserViewController {
+    func activateBrowser(for sessionID: SessionID) -> BrowserViewController {
         restoreIfNeeded(sessionID)
         var tabs = tabsBySession[sessionID] ?? []
 
@@ -398,7 +419,7 @@ final class DisplayPaneController: NSViewController {
 
     /// Builds a browser view controller wired to persist and re-render when its page changes, so a
     /// navigation — the agent's or the user's — is saved and reflected in the tab strip.
-    private func makeBrowser(for sessionID: UUID) -> BrowserViewController {
+    private func makeBrowser(for sessionID: SessionID) -> BrowserViewController {
         let controller = BrowserViewController()
         addChild(controller)
         controller.onPageChange = { [weak self] in
@@ -411,27 +432,77 @@ final class DisplayPaneController: NSViewController {
 
     /// The session's browser tab if it has one, without creating it — for tools that should fail
     /// rather than silently open a blank page.
-    func browser(for sessionID: UUID) -> BrowserViewController? {
+    func browser(for sessionID: SessionID) -> BrowserViewController? {
         restoreIfNeeded(sessionID)
         return tabsBySession[sessionID]?.first(where: { $0.browser != nil })?.browser
+    }
+
+    // MARK: - Public — Review Tab
+
+    /// Returns the session's git review tab, creating and activating one if it has none — the
+    /// same one-per-session shape as the browser.
+    @discardableResult
+    func activateReview(for sessionID: SessionID) -> GitReviewViewController? {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+
+        if let existing = tabs.first(where: { $0.review != nil }) {
+            activeTabIDBySession[sessionID] = existing.id
+            persist(sessionID)
+            if sessionID == currentSessionID { render() }
+            return existing.review
+        }
+
+        guard let controller = makeReview(for: sessionID, mode: .uncommitted) else { return nil }
+        let tab = DisplayTab(body: .review(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+        persist(sessionID)
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// A session that just stopped working probably changed the tree; its review, if on
+    /// screen, should say so without being asked.
+    func noteSessionStoppedWorking(_ sessionID: SessionID) {
+        guard sessionID == currentSessionID,
+              let review = activeTab(for: sessionID)?.review else { return }
+        review.refresh(force: false)
+    }
+
+    /// Builds a review view controller for the session's project folder, wired to persist its
+    /// mode. Returns nil for a session with no project — nothing to diff.
+    private func makeReview(for sessionID: SessionID, mode: GitReviewMode) -> GitReviewViewController? {
+        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+
+        let controller = GitReviewViewController(
+            sessionID: sessionID,
+            folderPath: project.folderPath,
+            mode: mode
+        )
+        addChild(controller)
+        controller.onModeChange = { [weak self] in self?.persist(sessionID) }
+        return controller
     }
 
     // MARK: - Public — Tab List (for the agent)
 
     /// The session's tabs in strip order, so the agent can list them and pick one.
-    func tabs(for sessionID: UUID) -> [DisplayTab] {
+    func tabs(for sessionID: SessionID) -> [DisplayTab] {
         restoreIfNeeded(sessionID)
         return tabsBySession[sessionID] ?? []
     }
 
-    func activeTabID(for sessionID: UUID) -> UUID? {
+    func activeTabID(for sessionID: SessionID) -> UUID? {
         restoreIfNeeded(sessionID)
         return activeTab(for: sessionID)?.id
     }
 
     /// Activates a tab by id. Returns false if the session has no such tab.
     @discardableResult
-    func activateTab(id: UUID, for sessionID: UUID) -> Bool {
+    func activateTab(id: UUID, for sessionID: SessionID) -> Bool {
         restoreIfNeeded(sessionID)
         guard let tabs = tabsBySession[sessionID], tabs.contains(where: { $0.id == id }) else {
             return false
@@ -444,7 +515,7 @@ final class DisplayPaneController: NSViewController {
 
     /// Activates a tab by its position in the strip.
     @discardableResult
-    func activateTab(index: Int, for sessionID: UUID) -> Bool {
+    func activateTab(index: Int, for sessionID: SessionID) -> Bool {
         restoreIfNeeded(sessionID)
         guard let tabs = tabsBySession[sessionID], tabs.indices.contains(index) else { return false }
         return activateTab(id: tabs[index].id, for: sessionID)
@@ -453,23 +524,23 @@ final class DisplayPaneController: NSViewController {
     // MARK: - Public — Session Lifecycle
 
     /// Switches the panel to a session's tabs. Passing nil empties it.
-    func showSession(_ sessionID: UUID?) {
+    func showSession(_ sessionID: SessionID?) {
         currentSessionID = sessionID
         if let sessionID { restoreIfNeeded(sessionID) }
         render()
     }
 
     /// Whether a session has any tab, which is what decides if the panel opens.
-    func hasContent(for sessionID: UUID) -> Bool {
+    func hasContent(for sessionID: SessionID) -> Bool {
         restoreIfNeeded(sessionID)
         return !(tabsBySession[sessionID]?.isEmpty ?? true)
     }
 
-    /// Drops every session not in the given set, tearing down any browser it held, so deleted
-    /// sessions do not keep their tabs — and their web content processes — alive forever.
-    func retainOnly(sessionIDs: Set<UUID>) {
+    /// Drops every session not in the given set, tearing down any live surface it held, so
+    /// deleted sessions do not keep their tabs — and their web content processes — alive forever.
+    func retainOnly(sessionIDs: Set<SessionID>) {
         for (sessionID, tabs) in tabsBySession where !sessionIDs.contains(sessionID) {
-            tabs.forEach { teardownBrowser($0) }
+            tabs.forEach { teardownHosted($0) }
         }
 
         tabsBySession = tabsBySession.filter { sessionIDs.contains($0.key) }
@@ -498,7 +569,7 @@ final class DisplayPaneController: NSViewController {
               let index = tabs.firstIndex(where: { $0.id == id }) else { return }
 
         let removed = tabs.remove(at: index)
-        teardownBrowser(removed)
+        teardownHosted(removed)
         if let cacheFile = removed.cacheFile {
             DisplayPaneStore.shared.removeCachedImage(cacheFile, for: sessionID)
         }
@@ -517,17 +588,17 @@ final class DisplayPaneController: NSViewController {
         if tabs.isEmpty { onClose?() }
     }
 
-    /// Detaches a browser tab's view controller. Content tabs need nothing.
-    private func teardownBrowser(_ tab: DisplayTab) {
-        guard let browser = tab.browser else { return }
-        if installedBrowser === browser { installBrowser(nil) }
-        browser.view.removeFromSuperview()
-        browser.removeFromParent()
+    /// Detaches a live tab's view controller. Content tabs need nothing.
+    private func teardownHosted(_ tab: DisplayTab) {
+        guard let controller = tab.hostedController else { return }
+        if installedController === controller { installHosted(nil) }
+        controller.view.removeFromSuperview()
+        controller.removeFromParent()
     }
 
     // MARK: - Rendering
 
-    private func activeTab(for sessionID: UUID?) -> DisplayTab? {
+    private func activeTab(for sessionID: SessionID?) -> DisplayTab? {
         guard let sessionID, let tabs = tabsBySession[sessionID], !tabs.isEmpty else { return nil }
         if let id = activeTabIDBySession[sessionID], let tab = tabs.first(where: { $0.id == id }) {
             return tab
@@ -565,7 +636,7 @@ final class DisplayPaneController: NSViewController {
     private func renderContent(active: DisplayTab?) {
         switch active?.body {
         case .content(let content):
-            installBrowser(nil)
+            installHosted(nil)
             switch content.body {
             case .image(let image, _):
                 imageView.image = image
@@ -587,10 +658,20 @@ final class DisplayPaneController: NSViewController {
             hideHTML()
             captionLabel.isHidden = true
             contentMenuButton.isHidden = true
-            installBrowser(browser)
+            installHosted(browser)
+
+        case .review(let review):
+            imageView.image = nil
+            imageView.isHidden = true
+            hideHTML()
+            captionLabel.isHidden = true
+            contentMenuButton.isHidden = true
+            installHosted(review)
+            // Loads only when actually shown, the same deferred rule as the browser's page.
+            review.refresh(force: false)
 
         case nil:
-            installBrowser(nil)
+            installHosted(nil)
             imageView.image = nil
             imageView.isHidden = true
             hideHTML()
@@ -606,36 +687,37 @@ final class DisplayPaneController: NSViewController {
         webView.loadHTMLString("", baseURL: nil)
     }
 
-    /// Parents (or clears) the browser tab's view controller into the host, reusing the live one
-    /// so switching tabs never reloads the page.
-    private func installBrowser(_ browser: BrowserViewController?) {
-        guard installedBrowser !== browser else {
-            browserHost.isHidden = browser == nil
+    /// Parents (or clears) a live tab's view controller into the host, reusing the installed one
+    /// so switching tabs never rebuilds its state.
+    private func installHosted(_ controller: NSViewController?) {
+        guard installedController !== controller else {
+            hostedView.isHidden = controller == nil
             return
         }
 
-        installedBrowser?.view.removeFromSuperview()
-        installedBrowser = browser
+        installedController?.view.removeFromSuperview()
+        installedController = controller
 
-        guard let browser else {
-            browserHost.isHidden = true
+        guard let controller else {
+            hostedView.isHidden = true
             return
         }
 
-        browser.view.translatesAutoresizingMaskIntoConstraints = false
-        browserHost.addSubview(browser.view)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        hostedView.addSubview(controller.view)
         NSLayoutConstraint.activate([
-            browser.view.topAnchor.constraint(equalTo: browserHost.topAnchor),
-            browser.view.bottomAnchor.constraint(equalTo: browserHost.bottomAnchor),
-            browser.view.leadingAnchor.constraint(equalTo: browserHost.leadingAnchor),
-            browser.view.trailingAnchor.constraint(equalTo: browserHost.trailingAnchor)
+            controller.view.topAnchor.constraint(equalTo: hostedView.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: hostedView.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: hostedView.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: hostedView.trailingAnchor)
         ])
-        browserHost.isHidden = false
+        hostedView.isHidden = false
 
         // A restored browser carries its page URL but has not loaded it — the load is deferred to
         // the moment it is actually shown, so a background session's browser costs nothing until
         // selected.
-        if browser.currentURL == nil, let url = browser.restoredURL {
+        if let browser = controller as? BrowserViewController,
+           browser.currentURL == nil, let url = browser.restoredURL {
             browser.restoredURL = nil
             browser.navigate(to: url)
         }
@@ -646,7 +728,7 @@ final class DisplayPaneController: NSViewController {
     /// Rebuilds a session's tabs from disk the first time it is touched this run, so the panel
     /// comes back after a relaunch. A no-op once loaded; an empty marker is left for a session with
     /// nothing stored, so its layout file is not re-read on every access.
-    private func restoreIfNeeded(_ sessionID: UUID) {
+    private func restoreIfNeeded(_ sessionID: SessionID) {
         guard tabsBySession[sessionID] == nil else { return }
         guard let panel = DisplayPaneStore.shared.loadLayout(for: sessionID) else {
             tabsBySession[sessionID] = []
@@ -675,6 +757,12 @@ final class DisplayPaneController: NSViewController {
                 let tab = DisplayTab(id: id, body: .content(content))
                 tab.cacheFile = cacheFile
                 tabs.append(tab)
+
+            case .review:
+                // Restored in its saved mode; no git runs until the tab is actually shown.
+                let mode = persisted.mode.flatMap(GitReviewMode.init(rawValue:)) ?? .uncommitted
+                guard let controller = makeReview(for: sessionID, mode: mode) else { continue }
+                tabs.append(DisplayTab(id: id, body: .review(controller)))
             }
         }
 
@@ -690,7 +778,7 @@ final class DisplayPaneController: NSViewController {
     }
 
     /// Writes the session's current tabs and selection to disk.
-    private func persist(_ sessionID: UUID) {
+    private func persist(_ sessionID: SessionID) {
         let tabs = tabsBySession[sessionID] ?? []
         let persistedTabs = tabs.compactMap(persisted)
         let active = activeTabIDBySession[sessionID]?.uuidString
@@ -704,6 +792,14 @@ final class DisplayPaneController: NSViewController {
             return PersistedTab(
                 id: tab.id.uuidString, kind: .browser, title: tab.title,
                 subtitle: "", url: url, html: nil, cacheFile: nil
+            )
+        }
+
+        if let review = tab.review {
+            return PersistedTab(
+                id: tab.id.uuidString, kind: .review, title: tab.title,
+                subtitle: "", url: nil, html: nil, cacheFile: nil,
+                mode: review.mode.rawValue
             )
         }
 

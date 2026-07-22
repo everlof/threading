@@ -2,100 +2,103 @@ import AppKit
 
 // MARK: - Rendering
 
-/// Drawing the conversation, split from the controller that drives it. Same file, so the
-/// private state these read stays private.
+/// Applying timeline changes to the view tree, split from the controller that drives it. Same
+/// type, separate file for length, so the private state these read stays private.
 ///
-/// The user's turns are bubbles on the right; the agent's replies are markdown down the left,
-/// the way a modern chat client reads. A bubble suits a short instruction; flowing text suits
-/// a long answer, and forcing either into the other's shape is what makes agent UIs feel like
-/// log viewers.
-///
-/// A separate file, so these are `internal` rather than `private`; the controller and this
-/// extension are one type split for length, not two.
+/// What a row *is* now lives in `ConversationTimeline`, and what one *looks like* in
+/// `ConversationRowView`. What is left here is placement: which view goes where, what gets
+/// space above it, and which existing view a late-arriving tool result belongs to.
 extension ConversationViewController {
 
-    /// The user's turn: a right-aligned bubble, capped so a short reply is not a full-width
-    /// banner.
-    func appendUserBubble(_ text: String) {
-        let bubble = NSView()
-        bubble.translatesAutoresizingMaskIntoConstraints = false
-        bubble.applySurface(fill: Design.Chat.bubbleFill, radius: Design.Radius.panel)
+    // MARK: - Changes
 
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = Design.Typography.body()
-        label.textColor = .labelColor
-        label.isSelectable = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        bubble.addSubview(label)
+    /// Brings the view tree in line with one change the timeline reported.
+    func apply(_ change: ConversationTimeline.Change) {
+        switch change {
+        case .appended(let index):
+            let row = timeline.rows[index]
+            let (view, startsTurn) = ConversationRowView.make(for: row)
 
-        let pad = Design.Spacing.medium
-        NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: bubble.topAnchor, constant: pad),
-            label.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -pad),
-            label.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: pad),
-            label.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -pad)
-        ])
+            // Not before the first turn: a rule at the very top of the pane separates the
+            // conversation from nothing.
+            if startsTurn, !stack.arrangedSubviews.isEmpty {
+                addRow(ConversationRowView.turnDivider(), newTurn: true)
+            }
 
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(bubble)
-        NSLayoutConstraint.activate([
-            bubble.topAnchor.constraint(equalTo: row.topAnchor),
-            bubble.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-            bubble.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            bubble.leadingAnchor.constraint(greaterThanOrEqualTo: row.leadingAnchor),
-            bubble.widthAnchor.constraint(
-                lessThanOrEqualTo: row.widthAnchor,
-                multiplier: Design.Chat.bubbleMaxWidthFraction
-            )
-        ])
+            // Kept for the rows something later needs to find: a tool call, so its result can
+            // be attached, and a user message, because the turn rail scrolls to it. Everything
+            // else is drawn once and never addressed again.
+            switch row {
+            case .toolCall, .userMessage: rowViews[index] = view
+            default: break
+            }
 
-        addRow(row, newTurn: true)
+            addRow(view, newTurn: startsTurn)
+
+            // The rail indexes user turns, so it only ever changes when one is added.
+            if case .userMessage = row { refreshMinimap() }
+
+        case .resultAttached(let index):
+            guard case .toolCall(let call) = timeline.rows[index],
+                  let toolView = rowViews[index] as? ToolCallView,
+                  let result = call.result else { return }
+
+            toolView.setResult(result.text, isError: result.isError)
+            rowViews[index] = nil
+            scrollToBottom()
+
+        case .streaming(let text):
+            guard let text else { return clearStreaming() }
+            showStreaming(text)
+
+        case .status(let status):
+            setStatus(describe(status))
+
+        case .adoptedSessionID(let agentSessionID):
+            // The CLI's own identifier wins: a resume can settle on one other than the
+            // identifier we asked for, and resuming again must use what it actually used.
+            ProjectStore.shared.update(sessionID: agentSession.id) {
+                $0.agentSessionID = agentSessionID
+            }
+        }
     }
 
-    /// The agent's reply, rendered as markdown so headings, lists and code read as written.
-    func appendAssistant(markdown: String) {
-        addRow(MarkdownView(markdown: markdown))
+    /// Appends a note the view raises itself — the replay banner, an unexpected exit — through
+    /// the timeline, so it takes its place in the row list rather than being a loose view the
+    /// model does not know about.
+    func appendNotice(_ text: String, kind: ConversationTimeline.NoticeKind) {
+        apply(timeline.appendNotice(text, kind: kind))
     }
 
-    /// Reasoning, shown quieter than the reply it precedes — an aside, not the answer.
-    func appendThinking(_ text: String) {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = Design.Typography.body()
-        label.textColor = .tertiaryLabelColor
-        label.isSelectable = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addRow(label)
+    private func describe(_ status: ConversationTimeline.Status) -> String {
+        switch status {
+        case .loading:
+            return "Loading conversation…"
+        case .ready(let model):
+            // A reported model names the status; otherwise the session may still be starting,
+            // in which case saying Ready would invite a message the CLI cannot yet receive.
+            guard let model else { return stream.canSend ? "Ready" : "Starting…" }
+            return "Ready · \(model)"
+        case .working:
+            return "Working…"
+        case .thinking:
+            return "Thinking…"
+        case .ended(let code):
+            return code == 0 ? "Session ended" : "Session ended (\(code))"
+        }
     }
 
-    /// A standalone line that is neither said nor tool output — a truncation note, an error.
-    func appendNotice(_ text: String, color: NSColor) {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = Design.Typography.subheading()
-        label.textColor = color
-        label.isSelectable = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addRow(label)
-    }
+    // MARK: - Streaming
 
-    /// The reply as it streams, plain text replaced by the rendered markdown once the message
-    /// finishes. Rendering markdown per token would reflow the whole block on every keystroke;
-    /// the raw text costs nothing and the finished copy is authoritative anyway.
-    func appendStreaming(_ text: String) {
-        streamingText += text
-
+    private func showStreaming(_ text: String) {
         guard let streamingLabel else {
-            let label = NSTextField(wrappingLabelWithString: streamingText)
-            label.font = Design.Typography.body()
-            label.textColor = .labelColor
-            label.isSelectable = true
-            label.translatesAutoresizingMaskIntoConstraints = false
+            let label = ConversationRowView.streaming(text)
             addRow(label)
             self.streamingLabel = label
             return
         }
 
-        streamingLabel.stringValue = streamingText
+        streamingLabel.stringValue = text
         scrollToBottom()
     }
 
@@ -103,7 +106,6 @@ extension ConversationViewController {
     func clearStreaming() {
         streamingLabel?.removeFromSuperview()
         streamingLabel = nil
-        streamingText = ""
     }
 
     // MARK: - Layout

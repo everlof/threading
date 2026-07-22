@@ -1,4 +1,51 @@
 import Foundation
+import os
+
+/// Short-lived discovery results, separated from presentation preferences so editing an
+/// account name or emoji is reflected immediately without forcing another filesystem scan.
+final class AgentAccountDiscoveryCache {
+
+    private struct Entry {
+        let accounts: [AgentAccount]
+        let expiresAt: Date
+    }
+
+    private let lifetime: TimeInterval
+    private let entries = OSAllocatedUnfairLock(initialState: [AgentKind: Entry]())
+
+    init(lifetime: TimeInterval) {
+        self.lifetime = lifetime
+    }
+
+    func accounts(
+        for provider: AgentKind,
+        at now: Date = Date(),
+        discover: () -> [AgentAccount]
+    ) -> [AgentAccount] {
+        if let cached = entries.withLock({ $0[provider] }), cached.expiresAt > now {
+            return cached.accounts
+        }
+
+        // Discovery performs disk I/O, so do it outside the lock. Two callers can race into
+        // the first scan, but either complete result is valid and later reads are lock-cheap.
+        let discovered = discover()
+        return entries.withLock { entries in
+            if let cached = entries[provider], cached.expiresAt > now {
+                return cached.accounts
+            }
+
+            entries[provider] = Entry(
+                accounts: discovered,
+                expiresAt: now.addingTimeInterval(lifetime)
+            )
+            return discovered
+        }
+    }
+
+    func invalidate() {
+        entries.withLock { $0.removeAll() }
+    }
+}
 
 /// Discovers the agent accounts configured on this machine.
 ///
@@ -9,26 +56,31 @@ import Foundation
 /// Directories are admitted only when they carry proof of a real login, which keeps
 /// agent-shaped state that is not an account — notably Claude Science's data root — out of
 /// the list.
+@MainActor
 enum AgentAccountDiscovery {
+
+    private static let cache = AgentAccountDiscoveryCache(
+        lifetime: AgentAccountDiscoveryDefaults.cacheLifetime
+    )
 
     // MARK: - Public Methods
 
     /// All accounts for a provider, the default account first.
     static func accounts(for provider: AgentKind) -> [AgentAccount] {
-        switch provider {
-        case .claude: return claudeAccounts()
-        case .codex: return codexAccounts()
-        case .shell: return []
+        let discovered = cache.accounts(for: provider) {
+            switch provider {
+            case .claude: return claudeAccounts()
+            case .codex: return codexAccounts()
+            case .shell: return []
+            }
         }
+
+        return discovered.map(applyingPreferences)
     }
 
     /// Looks up an account by handle, falling back to the provider's default.
-    static func account(for provider: AgentKind, handle: String?) -> AgentAccount? {
+    static func account(for provider: AgentKind, handle: AccountHandle) -> AgentAccount? {
         let available = accounts(for: provider)
-
-        guard let handle else {
-            return available.first { $0.isDefault } ?? available.first
-        }
 
         if let match = available.first(where: { $0.handle == handle }) {
             return match
@@ -53,7 +105,7 @@ enum AgentAccountDiscovery {
         if isDirectory(defaultDirectory) {
             accounts.append(makeAccount(
                 provider: .claude,
-                handle: AgentAccountDefaults.defaultHandle,
+                handle: .standard,
                 directory: defaultDirectory,
                 aliases: aliases
             ))
@@ -106,7 +158,7 @@ enum AgentAccountDiscovery {
         var accounts: [AgentAccount] = []
         var seen = Set<String>()
 
-        func admit(handle: String, directory: URL) {
+        func admit(handle: AccountHandle, directory: URL) {
             let path = directory.standardizedFileURL.path
             guard !seen.contains(path),
                   isFile(directory.appendingPathComponent(AgentAccountDefaults.codexAuthMarker))
@@ -123,12 +175,12 @@ enum AgentAccountDiscovery {
 
         if let override = ProcessInfo.processInfo.environment["CODEX_HOME"], !override.isEmpty {
             admit(
-                handle: AgentAccountDefaults.defaultHandle,
+                handle: .standard,
                 directory: URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
             )
         } else {
             admit(
-                handle: AgentAccountDefaults.defaultHandle,
+                handle: .standard,
                 directory: home.appendingPathComponent(AgentAccountDefaults.codexDefaultDirectory)
             )
         }
@@ -159,33 +211,39 @@ enum AgentAccountDiscovery {
 
     private static func makeAccount(
         provider: AgentKind,
-        handle: String,
+        handle: AccountHandle,
         directory: URL,
         aliases: [String: String]
     ) -> AgentAccount {
         let path = directory.standardizedFileURL.path
-        let isDefault = handle == AgentAccountDefaults.defaultHandle
-        let accountID = AgentAccount.identifier(provider: provider, handle: handle)
-        let preferences = AccountPreferencesStore.shared
-
-        // Naming precedence: an explicit override, then the user's own shell alias, then
-        // the directory-derived handle.
-        let displayName = preferences.displayNameOverride(for: accountID)
-            ?? aliases[path]
-            ?? (isDefault ? AgentAccountDefaults.defaultDisplayName : handle)
+        let isDefault = handle.isStandard
+        // The cached value contains only discovery-derived presentation. Explicit user
+        // preferences are layered onto it after every cache read.
+        let displayName = aliases[path]
+            ?? (isDefault ? AgentAccountDefaults.defaultDisplayName : handle.name)
 
         return AgentAccount(
             provider: provider,
             handle: handle,
             configPath: path,
-            displayName: displayName,
-            emoji: preferences.emoji(for: accountID)
+            displayName: displayName
+        )
+    }
+
+    private static func applyingPreferences(to account: AgentAccount) -> AgentAccount {
+        let preferences = AccountPreferencesStore.shared
+        return AgentAccount(
+            provider: account.provider,
+            handle: account.handle,
+            configPath: account.configPath,
+            displayName: preferences.displayNameOverride(for: account.id) ?? account.displayName,
+            emoji: preferences.emoji(for: account.id)
         )
     }
 
     /// The directory name minus its leading dot, e.g. `.claude-dblock` becomes `claude-dblock`.
-    private static func handle(for directory: URL) -> String {
-        String(directory.lastPathComponent.dropFirst())
+    private static func handle(for directory: URL) -> AccountHandle {
+        .named(String(directory.lastPathComponent.dropFirst()))
     }
 
     private static func isDirectory(_ url: URL) -> Bool {
@@ -199,4 +257,8 @@ enum AgentAccountDiscovery {
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         return exists && !isDirectory.boolValue
     }
+}
+
+enum AgentAccountDiscoveryDefaults {
+    static let cacheLifetime: TimeInterval = 7
 }

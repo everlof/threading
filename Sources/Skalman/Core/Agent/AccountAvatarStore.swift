@@ -25,13 +25,19 @@ enum AccountAvatarStore {
     // MARK: - Properties
 
     /// Composed, rounded avatars keyed by account id, for the sidebar's frequent configures.
-    private static let composedCache = NSCache<NSString, NSImage>()
+    @MainActor private static let composedCache = NSCache<NSString, NSImage>()
 
     /// Accounts tried this run, hit or miss, so rows do not re-trigger lookups.
-    private static var attempted: Set<String> = []
+    @MainActor private static var attempted: Set<AccountID> = []
+
+    /// Login addresses resolved this run, keyed by account id. The optional is stored
+    /// rather than dropped, so an account with no readable email is answered from memory
+    /// too instead of re-reading the file on every row configure.
+    @MainActor private static var emailCache: [AccountID: String?] = [:]
 
     private static let queue = DispatchQueue(label: "com.skalman.account-avatars", qos: .utility)
 
+    @MainActor
     private static var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
@@ -45,10 +51,11 @@ enum AccountAvatarStore {
     /// Cheap enough for row configure: memory cache, then disk. The first miss primes one
     /// background lookup; a hit lands on disk and refreshes the sidebar through the same
     /// notification an emoji change uses. Main-thread only, like the stores.
+    @MainActor
     static func avatar(for account: AgentAccount) -> NSImage? {
         guard AppSettings.shared.discoversAccountAvatars else { return nil }
 
-        let key = account.id as NSString
+        let key = account.id.rawValue as NSString
         if let cached = composedCache.object(forKey: key) {
             return cached
         }
@@ -64,6 +71,7 @@ enum AccountAvatarStore {
     }
 
     /// Forgets this run's attempts, for the settings toggle switching back on.
+    @MainActor
     static func retryAll() {
         attempted.removeAll()
     }
@@ -75,6 +83,22 @@ enum AccountAvatarStore {
         case .codex: return codexEmail(configPath: account.configPath)
         case .shell: return nil
         }
+    }
+
+    /// The same address, memoized. `AccountBadge` asks for it on every row configure — and
+    /// rows reconfigure constantly while an agent works — where the uncached answer is a
+    /// file read and a JWT decode for a value that does not change while the app runs.
+    /// A miss is cached too, since a missing address is just as stable as a present one.
+    /// Main-thread only, like `avatar(for:)`.
+    @MainActor
+    static func cachedEmail(for account: AgentAccount) -> String? {
+        if let cached = emailCache[account.id] {
+            return cached
+        }
+
+        let resolved = email(for: account)
+        emailCache[account.id] = resolved
+        return resolved
     }
 
     /// A JWT's payload claims, decoded locally. No verification and no use of the token —
@@ -104,11 +128,13 @@ enum AccountAvatarStore {
 
     // MARK: - Private Methods
 
+    @MainActor
     private static func fileURL(for account: AgentAccount) -> URL {
-        let name = account.id.replacingOccurrences(of: ":", with: "-")
+        let name = account.id.rawValue.replacingOccurrences(of: ":", with: "-")
         return directory.appendingPathComponent(name + "." + ProjectIconDefaults.storedExtension)
     }
 
+    @MainActor
     private static func discoverIfNeeded(_ account: AgentAccount) {
         guard !attempted.contains(account.id) else { return }
         attempted.insert(account.id)

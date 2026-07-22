@@ -1,0 +1,203 @@
+import XCTest
+@testable import Skalman
+
+final class StateManagerTests: XCTestCase {
+
+    private var testDirectory: URL!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        testDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("skalman-state-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: testDirectory,
+            withIntermediateDirectories: true
+        )
+    }
+
+    override func tearDownWithError() throws {
+        if let testDirectory {
+            try? FileManager.default.removeItem(at: testDirectory)
+        }
+        testDirectory = nil
+        try super.tearDownWithError()
+    }
+
+    func testVersionOneStateRoundTrips() throws {
+        let manager = makeManager()
+        let project = Project(name: "Fixture", folderURL: URL(fileURLWithPath: "/tmp/fixture"))
+        let selectedSessionID = SessionID()
+        let state = ProjectsState(
+            projects: [project],
+            selectedSessionID: selectedSessionID
+        )
+
+        XCTAssertTrue(manager.saveProjectsState(state))
+
+        guard case .loaded(let restored) = manager.loadProjectsState() else {
+            return XCTFail("Expected the version-one state to load")
+        }
+        XCTAssertEqual(restored.version, ProjectsStateVersion.current)
+        XCTAssertEqual(restored.projects.map(\.id), [project.id])
+        XCTAssertEqual(restored.projects.map(\.name), ["Fixture"])
+        XCTAssertEqual(restored.selectedSessionID, selectedSessionID)
+    }
+
+    func testTypedIdentifiersPreserveLegacyEncoding() throws {
+        let rawProjectID = UUID()
+        let rawSessionID = UUID()
+        let rawTranscriptID = "provider-issued-resume-id"
+        let accountID = AccountID(provider: .claude, handle: .named("claude-work"))
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        XCTAssertEqual(
+            try encoder.encode(ProjectID(rawProjectID)),
+            try encoder.encode(rawProjectID)
+        )
+        XCTAssertEqual(
+            try encoder.encode(SessionID(rawSessionID)),
+            try encoder.encode(rawSessionID)
+        )
+        XCTAssertEqual(
+            try encoder.encode(TranscriptID(rawTranscriptID)),
+            try encoder.encode(rawTranscriptID)
+        )
+        XCTAssertEqual(
+            try encoder.encode(accountID),
+            try encoder.encode("claude:claude-work")
+        )
+        XCTAssertEqual(
+            try decoder.decode(ProjectID.self, from: encoder.encode(rawProjectID)),
+            ProjectID(rawProjectID)
+        )
+        XCTAssertEqual(
+            try decoder.decode(SessionID.self, from: encoder.encode(rawSessionID)),
+            SessionID(rawSessionID)
+        )
+        XCTAssertEqual(
+            try decoder.decode(TranscriptID.self, from: encoder.encode(rawTranscriptID)),
+            TranscriptID(rawTranscriptID)
+        )
+        XCTAssertEqual(
+            try decoder.decode(AccountID.self, from: encoder.encode("claude:claude-work")),
+            accountID
+        )
+        XCTAssertEqual(AccountID(rawValue: "codex:default")?.handle, .standard)
+    }
+
+    func testAccountHandlePreservesLegacySessionJSON() throws {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        let standard = AgentSession(kind: .claude, title: "Standard")
+        let standardData = try encoder.encode(standard)
+        let standardObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: standardData) as? [String: Any]
+        )
+        XCTAssertNil(standardObject["accountHandle"])
+        XCTAssertEqual(
+            try decoder.decode(AgentSession.self, from: standardData).accountHandle,
+            .standard
+        )
+
+        let named = AgentSession(
+            kind: .claude,
+            title: "Named",
+            accountHandle: .named("claude-work")
+        )
+        let namedData = try encoder.encode(named)
+        let namedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: namedData) as? [String: Any]
+        )
+        XCTAssertEqual(namedObject["accountHandle"] as? String, "claude-work")
+        XCTAssertEqual(
+            try decoder.decode(AgentSession.self, from: namedData).accountHandle,
+            .named("claude-work")
+        )
+    }
+
+    func testMissingStateStartsFresh() {
+        guard case .missing = makeManager().loadProjectsState() else {
+            return XCTFail("Expected a missing state file to be distinct from a failed load")
+        }
+    }
+
+    func testSaveRollsPreviousStateIntoBackup() throws {
+        let manager = makeManager()
+        let first = ProjectsState(projects: [
+            Project(name: "First", folderURL: URL(fileURLWithPath: "/tmp/first"))
+        ])
+        let second = ProjectsState(projects: [
+            Project(name: "Second", folderURL: URL(fileURLWithPath: "/tmp/second"))
+        ])
+
+        XCTAssertTrue(manager.saveProjectsState(first))
+        XCTAssertTrue(manager.saveProjectsState(second))
+
+        let backupData = try Data(contentsOf: testDirectory.appendingPathComponent("projects.json.bak"))
+        let backup = try JSONDecoder().decode(ProjectsState.self, from: backupData)
+        XCTAssertEqual(backup.projects.map(\.name), ["First"])
+
+        guard case .loaded(let current) = manager.loadProjectsState() else {
+            return XCTFail("Expected the replacement state to load")
+        }
+        XCTAssertEqual(current.projects.map(\.name), ["Second"])
+    }
+
+    @MainActor
+    func testCorruptStateIsQuarantinedAndFreshStateDoesNotOverwriteIt() throws {
+        let corruptData = Data("{ definitely-not-json".utf8)
+        let liveURL = testDirectory.appendingPathComponent("projects.json")
+        try corruptData.write(to: liveURL)
+
+        let manager = makeManager()
+        let store = ProjectStore(stateManager: manager)
+
+        XCTAssertFalse(store.didLoadStateSuccessfully)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL.path))
+
+        let quarantineURL = try XCTUnwrap(
+            try FileManager.default.contentsOfDirectory(
+                at: testDirectory,
+                includingPropertiesForKeys: nil
+            ).first { $0.lastPathComponent.hasPrefix("projects.json.corrupt-") }
+        )
+        XCTAssertEqual(try Data(contentsOf: quarantineURL), corruptData)
+
+        let projectDirectory = testDirectory.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: projectDirectory,
+            withIntermediateDirectories: true
+        )
+        store.addProject(folderURL: projectDirectory)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: liveURL.path))
+        XCTAssertEqual(try Data(contentsOf: quarantineURL), corruptData)
+        guard case .loaded(let freshState) = manager.loadProjectsState() else {
+            return XCTFail("Expected a fresh state after an explicit structural change")
+        }
+        XCTAssertEqual(freshState.projects.count, 1)
+    }
+
+    func testNewerStateVersionIsQuarantined() throws {
+        let futureState = ProjectsState(version: ProjectsStateVersion.current + 1)
+        let data = try JSONEncoder().encode(futureState)
+        let liveURL = testDirectory.appendingPathComponent("projects.json")
+        try data.write(to: liveURL)
+
+        guard case .failed(let quarantineURL) = makeManager().loadProjectsState() else {
+            return XCTFail("Expected newer state to be refused")
+        }
+        XCTAssertNotNil(quarantineURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL.path))
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(quarantineURL)), data)
+    }
+
+    private func makeManager() -> StateManager {
+        StateManager(
+            appSupportDirectory: testDirectory,
+            now: { Date(timeIntervalSince1970: 1_750_000_000) }
+        )
+    }
+}

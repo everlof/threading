@@ -22,6 +22,7 @@ struct AccountPreference: Codable, Equatable {
 /// Preferences are keyed by the account's stable identifier rather than its path, so they
 /// survive a config directory being moved, and are kept separate from discovery so an
 /// account that temporarily disappears does not lose its icon.
+@MainActor
 final class AccountPreferencesStore {
 
     // MARK: - Singleton
@@ -42,41 +43,41 @@ final class AccountPreferencesStore {
 
     // MARK: - Public Methods
 
-    func preference(for accountID: String) -> AccountPreference {
-        preferences[accountID] ?? AccountPreference()
+    func preference(for accountID: AccountID) -> AccountPreference {
+        preferences[accountID.rawValue] ?? AccountPreference()
     }
 
-    func emoji(for accountID: String) -> String? {
-        preferences[accountID]?.emoji
+    func emoji(for accountID: AccountID) -> String? {
+        preferences[accountID.rawValue]?.emoji
     }
 
-    func displayNameOverride(for accountID: String) -> String? {
-        preferences[accountID]?.displayNameOverride
+    func displayNameOverride(for accountID: AccountID) -> String? {
+        preferences[accountID.rawValue]?.displayNameOverride
     }
 
     /// Sets the emoji for an account. Pass nil or blank to clear it.
-    func setEmoji(_ emoji: String?, for accountID: String) {
+    func setEmoji(_ emoji: String?, for accountID: AccountID) {
         update(accountID) { $0.emoji = normalized(emoji) }
     }
 
     /// Sets the display name for an account. Pass nil or blank to fall back to discovery.
-    func setDisplayNameOverride(_ name: String?, for accountID: String) {
+    func setDisplayNameOverride(_ name: String?, for accountID: AccountID) {
         update(accountID) { $0.displayNameOverride = normalized(name) }
     }
 
-    func clear(accountID: String) {
-        preferences[accountID] = nil
+    func clear(accountID: AccountID) {
+        preferences[accountID.rawValue] = nil
         save()
     }
 
     // MARK: - Private Methods
 
-    private func update(_ accountID: String, _ mutate: (inout AccountPreference) -> Void) {
-        var preference = preferences[accountID] ?? AccountPreference()
+    private func update(_ accountID: AccountID, _ mutate: (inout AccountPreference) -> Void) {
+        var preference = preferences[accountID.rawValue] ?? AccountPreference()
         mutate(&preference)
 
         // Drop empty entries rather than persisting placeholders.
-        preferences[accountID] = preference.isEmpty ? nil : preference
+        preferences[accountID.rawValue] = preference.isEmpty ? nil : preference
 
         save()
     }

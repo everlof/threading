@@ -88,6 +88,9 @@ enum AgentDefaults {
     static let defaultKind: AgentKind = .claude
     static let untitledSessionName = "New Session"
 
+    /// Name a side chat carries until the agent reports a terminal title of its own.
+    static let sideChatTitle = "Side Chat"
+
     static let claudeExecutable = "claude"
     static let codexExecutable = "codex"
 
@@ -315,19 +318,18 @@ enum SidebarRowDefaults {
     static let projectFontSize: CGFloat = 13
     static let headingFontSize: CGFloat = 11
     static let sessionFontSize: CGFloat = 12
-    static let emojiFontSize: CGFloat = 12
     static let countFontSize: CGFloat = 11
-
-    /// Completes a letter into its SF Symbol badge, e.g. `c` → `c.circle.fill`.
-    static let accountBadgeSymbolSuffix = ".circle.fill"
 
     /// Hugging low enough that a stack unambiguously stretches this view over its siblings.
     static let stretchableHugging = NSLayoutConstraint.Priority(rawValue: 1)
 
+    /// Marks a session forked from the one it is nested under.
+    static let sideChatSymbol = "arrow.triangle.branch"
+    static let sideChatAccessibilityLabel = "Side chat"
+
     /// Revealed on hover, opening the row's actions.
     static let actionSymbol = "ellipsis"
     /// The `+` on a project row's hover, opening its new-session choices.
-    static let newSessionSymbol = "plus"
     /// Revealed on hover over a branch heading, opening the grouping options.
     static let settingsSymbol = "gearshape"
     /// Applied to secondary text when inverted on an emphasized selection.

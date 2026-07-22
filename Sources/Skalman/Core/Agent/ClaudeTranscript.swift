@@ -9,16 +9,21 @@ import Foundation
 enum ClaudeTranscript {
 
     /// The transcript for a session, whether or not it exists yet.
-    static func url(sessionID: String, for session: AgentSession, in project: Project) -> URL? {
+    @MainActor
+    static func url(sessionID: TranscriptID, for session: AgentSession, in project: Project) -> URL? {
         guard let account = AgentAccountDiscovery.account(
             for: session.kind,
             handle: session.accountHandle
         ) else { return nil }
 
+        return url(sessionID: sessionID, account: account, in: project)
+    }
+
+    static func url(sessionID: TranscriptID, account: AgentAccount, in project: Project) -> URL {
         return URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.claudeProjectsSubdirectory)
             .appendingPathComponent(projectSlug(for: project))
-            .appendingPathComponent(sessionID)
+            .appendingPathComponent(sessionID.rawValue)
             .appendingPathExtension(AgentDefaults.transcriptExtension)
     }
 
@@ -26,7 +31,8 @@ enum ClaudeTranscript {
     ///
     /// An identifier alone is not enough: Claude's is minted before the conversation exists,
     /// so a session that exited without exchanging anything has an id and no transcript.
-    static func exists(sessionID: String, for session: AgentSession, in project: Project) -> Bool {
+    @MainActor
+    static func exists(sessionID: TranscriptID, for session: AgentSession, in project: Project) -> Bool {
         guard let url = url(sessionID: sessionID, for: session, in: project) else { return false }
         return FileManager.default.fileExists(atPath: url.path)
     }

@@ -9,7 +9,7 @@ final class CodexStreamSession: ConversationStreamSession {
 
     // MARK: - Properties
 
-    let sessionID: UUID
+    let sessionID: SessionID
 
     var onEvent: ((StreamEvent) -> Void)?
     var onExit: ((Int32) -> Void)?
@@ -26,7 +26,7 @@ final class CodexStreamSession: ConversationStreamSession {
 
     // MARK: - Initialization
 
-    init(sessionID: UUID, plan: @escaping () -> AgentLaunchPlan) {
+    init(sessionID: SessionID, plan: @escaping () -> AgentLaunchPlan) {
         self.sessionID = sessionID
         self.plan = plan
     }
@@ -65,13 +65,17 @@ final class CodexStreamSession: ConversationStreamSession {
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            self?.received(chunk)
+            DispatchQueue.main.async {
+                self?.received(chunk)
+            }
         }
 
         error.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            self?.receivedError(chunk)
+            DispatchQueue.main.async {
+                self?.receivedError(chunk)
+            }
         }
 
         process.terminationHandler = { [weak self] child in
@@ -96,6 +100,10 @@ final class CodexStreamSession: ConversationStreamSession {
             return true
         } catch {
             SkalmanLogger.agent.error("Codex prompt write failed: \(error.localizedDescription)")
+            // `handleTermination` must treat this as deliberate teardown. Otherwise it also
+            // synthesizes a failed turn for the child exit after send() has already failed.
+            isTerminating = true
+            isRunning = false
             process.terminate()
             return false
         }
@@ -133,7 +141,7 @@ final class CodexStreamSession: ConversationStreamSession {
 
             for event in CodexStreamEvent.parse(line) {
                 if case .turnFinished = event { receivedTurnFinished = true }
-                DispatchQueue.main.async { [weak self] in self?.onEvent?(event) }
+                onEvent?(event)
             }
         }
     }
@@ -162,9 +170,9 @@ final class CodexStreamSession: ConversationStreamSession {
         // the failure visible instead of leaving the status stuck on Working.
         guard !receivedTurnFinished else { return }
 
-        let diagnostics = String(data: errorBuffer, encoding: .utf8)?
+        let diagnostics = String(decoding: errorBuffer, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let message = diagnostics?.isEmpty == false
+        let message = !diagnostics.isEmpty
             ? diagnostics
             : (status == 0 ? nil : "Codex exited with status \(status).")
 

@@ -96,8 +96,10 @@ final class AccountUsageItemView: NSView {
             withTimeInterval: UsageDefaults.refreshTimerInterval,
             repeats: true
         ) { [weak self] _ in
-            guard let self, let account = self.account, self.window != nil else { return }
-            AccountUsageService.shared.refresh(account)
+            Task { @MainActor [weak self] in
+                guard let self, let account = self.account, self.window != nil else { return }
+                AccountUsageService.shared.refresh(account)
+            }
         }
         refreshTimer.map { RunLoop.main.add($0, forMode: .common) }
     }
@@ -118,7 +120,7 @@ final class AccountUsageItemView: NSView {
     // MARK: - Private Methods
 
     @objc private func usageDidChange(_ notification: Notification) {
-        guard let account, notification.object as? String == account.id else { return }
+        guard let account, notification.object as? AccountID == account.id else { return }
         render()
     }
 
@@ -149,8 +151,6 @@ final class AccountUsageItemView: NSView {
         ringView.tint = severity.glyphColor
 
         summaryLabel.attributedStringValue = Self.summary(windows: usage?.windows ?? [])
-
-        toolTip = tooltip(account: account, usage: usage, errorMessage: errorMessage)
     }
 
     /// `5h 43% · 7d 73%`: each window as a quiet label and its value, the value tinted by
@@ -204,35 +204,6 @@ final class AccountUsageItemView: NSView {
         }
 
         return result
-    }
-
-    private func tooltip(
-        account: AgentAccount,
-        usage: AccountUsage?,
-        errorMessage: String?
-    ) -> String {
-        var lines = ["\(account.provider.displayName) — \(account.displayName)"]
-
-        for window in usage?.windows ?? [] {
-            let value: String
-            if window.isExpired() || window.percent == nil {
-                value = AccountUsageItemDefaults.unknownValue
-            } else {
-                value = "\(window.percent ?? 0)%"
-            }
-
-            var line = "\(window.label): \(value)"
-            if let resetsAt = window.resetsAt, !window.isExpired() {
-                line += " · resets in \(UsageFormat.remaining(until: resetsAt))"
-            }
-            lines.append(line)
-        }
-
-        if let errorMessage {
-            lines.append(errorMessage)
-        }
-
-        return lines.joined(separator: "\n")
     }
 
     // MARK: - Interaction

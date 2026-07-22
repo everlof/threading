@@ -5,9 +5,11 @@ import Foundation
 /// Asks Codex — headless, read-only, on the default account — which image best represents
 /// a project, and stores what it names as the project's icon.
 ///
-/// Deliberately **Codex-only**, for the same reason as `AgentKind.supportsNativeUI`:
-/// Claude's headless mode runs on subscription OAuth, which Anthropic's terms reserve for
-/// Claude Code and claude.ai. And deliberately **manual**: a run spends the user's own
+/// **Codex-only** because a sandbox is the point: the run reads an unfamiliar project's files
+/// to name its mark, and `--sandbox read-only` is one flag that guarantees it cannot do more.
+/// Claude's headless mode is permitted (see `AgentKind.supportsNativeUI`) but would need its
+/// tool surface constrained explicitly rather than by a single switch, which buys nothing here.
+/// And deliberately **manual**: a run spends the user's own
 /// usage, so it happens only from the explicit "Research Icon with Codex" menu action —
 /// never automatically. The free `ProjectIconDiscovery` chain is what runs unattended.
 ///
@@ -54,7 +56,7 @@ enum ProjectIconResearch {
 
     /// Projects with a run in flight, read by the sidebar to show "Researching…" instead of
     /// offering a second run. Main-thread only, like the stores.
-    private(set) static var runningProjectIDs: Set<UUID> = []
+    @MainActor private(set) static var runningProjectIDs: Set<ProjectID> = []
 
     private static let queue = DispatchQueue(label: "com.skalman.icon-research", qos: .userInitiated)
 
@@ -62,7 +64,7 @@ enum ProjectIconResearch {
 
     /// Where a project's last run record lives — the child's combined output, kept for
     /// exactly the "what did it actually do?" question.
-    static func recordURL(for projectID: UUID) -> URL {
+    static func recordURL(for projectID: ProjectID) -> URL {
         recordDirectory.appendingPathComponent(
             projectID.uuidString + "." + IconResearchDefaults.recordExtension
         )
@@ -70,9 +72,10 @@ enum ProjectIconResearch {
 
     /// Runs one research pass for a project. The completion arrives on the main queue with
     /// the stored icon, which has already been recorded on the project.
+    @MainActor
     static func run(
         for project: Project,
-        completion: @escaping (Result<ProjectIcon, ResearchError>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<ProjectIcon, ResearchError>) -> Void
     ) {
         guard !runningProjectIDs.contains(project.id) else {
             completion(.failure(.alreadyRunning))
@@ -131,7 +134,7 @@ enum ProjectIconResearch {
 
     private static func performResearch(
         plan: AgentLaunchPlan,
-        projectID: UUID,
+        projectID: ProjectID,
         folderURL: URL
     ) -> Result<Data, ResearchError> {
         let run = execute(plan)
@@ -166,7 +169,7 @@ enum ProjectIconResearch {
         return .failure(.nothingFound)
     }
 
-    private static func writeRecord(_ output: String, for projectID: UUID) {
+    private static func writeRecord(_ output: String, for projectID: ProjectID) {
         do {
             try FileManager.default.createDirectory(
                 at: recordDirectory,

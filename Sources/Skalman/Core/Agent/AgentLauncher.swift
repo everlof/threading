@@ -11,7 +11,7 @@ struct AgentLaunchPlan {
     ///
     /// Set for Claude (we mint it) and for any resume. Nil for a fresh Codex launch,
     /// whose identifier must be discovered afterwards.
-    let agentSessionID: String?
+    let agentSessionID: TranscriptID?
 }
 
 // MARK: - Agent Launcher
@@ -21,6 +21,7 @@ struct AgentLaunchPlan {
 /// Launches are wrapped in a login shell because a GUI app does not inherit the
 /// user's interactive `PATH`, and the agent CLIs typically live in `~/.local/bin`
 /// or a Node prefix that only a login shell resolves.
+@MainActor
 enum AgentLauncher {
 
     // MARK: - Public Methods
@@ -33,7 +34,7 @@ enum AgentLauncher {
         initialPrompt: String? = nil
     ) -> AgentLaunchPlan {
         let command: String
-        let sessionID: String?
+        let sessionID: TranscriptID?
 
         switch session.kind {
         case .claude:
@@ -86,15 +87,19 @@ enum AgentLauncher {
             + " --include-partial-messages"
             + " --verbose"
 
-        let agentSessionID: String?
+        let agentSessionID: TranscriptID?
 
-        if session.isResumable,
+        if let fork = claudeForkFlags(for: session, in: project) {
+            command += fork.flags
+            agentSessionID = fork.sessionID
+        } else if session.isResumable,
            let existingID = session.agentSessionID,
            ClaudeTranscript.exists(sessionID: existingID, for: session, in: project) {
             command += " --resume \(quoted(existingID))"
             agentSessionID = existingID
         } else {
-            let mintedID = session.agentSessionID ?? session.id.uuidString.lowercased()
+            let mintedID = session.agentSessionID
+                ?? TranscriptID(session.id.uuidString.lowercased())
             command += " --session-id \(quoted(mintedID))"
             agentSessionID = mintedID
         }
@@ -272,9 +277,16 @@ enum AgentLauncher {
         for session: AgentSession,
         in project: Project,
         prompt: String?
-    ) -> (String, String?) {
+    ) -> (String, TranscriptID?) {
         let executable = AgentDefaults.claudeExecutable
         let model = modelFlag(for: session, flag: AgentDefaults.claudeModelFlag)
+
+        if let fork = claudeForkFlags(for: session, in: project) {
+            let command = "\(executable)\(model)\(fork.flags)"
+                + " --name \(quoted(session.launchName))"
+                + trailingPrompt(prompt)
+            return (command, fork.sessionID)
+        }
 
         if session.isResumable,
            let existingID = session.agentSessionID,
@@ -283,12 +295,65 @@ enum AgentLauncher {
             return ("\(executable)\(model) --resume \(quoted(existingID))", existingID)
         }
 
-        let mintedID = session.agentSessionID ?? session.id.uuidString.lowercased()
+        let mintedID = session.agentSessionID
+            ?? TranscriptID(session.id.uuidString.lowercased())
         let command = "\(executable)\(model) --session-id \(quoted(mintedID))"
             + " --name \(quoted(session.launchName))"
             + trailingPrompt(prompt)
 
         return (command, mintedID)
+    }
+
+    /// The launch that makes a **side chat**: resume the *parent's* conversation, but write
+    /// the turns somewhere new.
+    ///
+    /// `--fork-session` copies the parent's context into a fresh transcript and leaves the
+    /// parent's own file untouched, which is what lets a side chat run *beside* a live
+    /// session rather than fighting it for one transcript. `--session-id` is honoured
+    /// alongside it (measured), so the child's identifier is minted here exactly like any
+    /// other Claude session and never has to be discovered afterwards.
+    ///
+    /// Returns nil — leaving the caller's ordinary resume-or-fresh path to run — unless this
+    /// is a side chat's *first* launch and the parent really has a conversation to fork. The
+    /// fork happens once: from the second launch the child owns its own transcript and is
+    /// resumed like anything else, which is why `hasLaunched` gates it.
+    /// The session a side chat should fork from, or nil when this launch is an ordinary one.
+    ///
+    /// Read from the project's own records rather than the store, which is both the smaller
+    /// dependency and the true one: `ProjectStore.addSideChat` puts a fork in its parent's
+    /// project, because a fork resumes the parent's transcript and that is found through the
+    /// project's folder.
+    ///
+    /// Nil once the child `hasLaunched`, since the fork is a birth rather than a mode — from
+    /// its second launch a side chat owns a transcript of its own and resumes like anything
+    /// else.
+    static func forkParent(for session: AgentSession, in project: Project) -> AgentSession? {
+        guard session.kind.supportsForking,
+              !session.hasLaunched,
+              let parentID = session.forkedFrom else { return nil }
+
+        return project.sessions.first { $0.id == parentID && $0.agentSessionID != nil }
+    }
+
+    /// Returns the flags and the child's identifier, so both surfaces can compose them into
+    /// their own command — the terminal adds `--name` and an opening prompt, the stream adds
+    /// its transport flags.
+    private static func claudeForkFlags(
+        for session: AgentSession,
+        in project: Project
+    ) -> (flags: String, sessionID: TranscriptID)? {
+        guard let parent = forkParent(for: session, in: project),
+              let parentAgentID = parent.agentSessionID,
+              ClaudeTranscript.exists(sessionID: parentAgentID, for: parent, in: project)
+        else { return nil }
+
+        let mintedID = session.agentSessionID
+            ?? TranscriptID(session.id.uuidString.lowercased())
+        let flags = " --resume \(quoted(parentAgentID))"
+            + " --fork-session"
+            + " --session-id \(quoted(mintedID))"
+
+        return (flags, mintedID)
     }
 
     /// The model flag, or "" when the session takes the CLI's default.
@@ -310,7 +375,7 @@ enum AgentLauncher {
     private static func codexCommand(
         for session: AgentSession,
         prompt: String?
-    ) -> (String, String?) {
+    ) -> (String, TranscriptID?) {
         let executable = AgentDefaults.codexExecutable
         let model = modelFlag(for: session, flag: AgentDefaults.codexModelFlag)
 
@@ -339,5 +404,9 @@ enum AgentLauncher {
     /// login shell unchanged.
     private static func quoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func quoted(_ value: TranscriptID) -> String {
+        quoted(value.rawValue)
     }
 }

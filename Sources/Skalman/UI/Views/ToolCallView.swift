@@ -28,6 +28,7 @@ final class ToolCallView: NSView {
 
     private var isExpanded = false
     private var canExpand = false
+    private var isHovered = false
 
     // MARK: - Initialization
 
@@ -46,7 +47,7 @@ final class ToolCallView: NSView {
 
     private func setupViews(summary: String) {
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: Design.Surface.controlResting, radius: Design.Radius.control)
+        applySurface(fill: Design.Chat.toolRowResting, radius: Design.Radius.control)
 
         let glyph = ToolGlyph.forTool(toolName)
 
@@ -60,6 +61,10 @@ final class ToolCallView: NSView {
         detailLabel = makeLabel(summary, font: monospace(weight: .regular))
         detailLabel.textColor = .tertiaryLabelColor
         detailLabel.lineBreakMode = .byTruncatingMiddle
+        // The subject arrives already flattened, but a label that *can* grow on a newline is a
+        // row whose height depends on its content — belt and braces, since the whole treatment
+        // rests on every collapsed row being the same height.
+        detailLabel.usesSingleLineMode = true
         detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Reads while a call is still running, so the row is not blank until the result lands.
@@ -73,7 +78,7 @@ final class ToolCallView: NSView {
         chevron.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold)
         chevron.isHidden = true
 
-        bodyView = makeBody()
+        bodyView = makeBody(summary: summary)
         bodyView.isHidden = true
 
         [glyphLabel, titleLabel, detailLabel, metaLabel, chevron, bodyView].forEach(addSubview)
@@ -91,9 +96,12 @@ final class ToolCallView: NSView {
     }
 
     /// The body is decided by the tool: a diff for an edit, a scrollable text field otherwise.
-    private func makeBody() -> NSView {
+    private func makeBody(summary: String) -> NSView {
         if let diffLines {
-            return DiffView(lines: diffLines)
+            // For an editing tool the one-line subject *is* the path, which is what says which
+            // language the diff is in. Anything else fails the extension lookup and renders
+            // plain, so a subject that is not a path costs nothing.
+            return DiffView(lines: diffLines, path: summary)
         }
 
         let field = makeLabel("", font: monospace(weight: .regular))
@@ -203,6 +211,38 @@ final class ToolCallView: NSView {
             systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
             accessibilityDescription: nil
         )
+        updateSurface()
+    }
+
+    // MARK: - Hover
+
+    /// The row has no fill at rest, so hover is the only thing that says it can be clicked.
+    /// Without it a collapsed row reads as text rather than as a control.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateSurface()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateSurface()
+    }
+
+    private func updateSurface() {
+        // An open row keeps its fill: it is holding content, which needs a surface to sit on
+        // whether or not the pointer is still over it.
+        let isActive = isHovered || isExpanded
+        layer?.backgroundColor = (isActive ? Design.Chat.toolRowActive : Design.Chat.toolRowResting).cgColor
     }
 }
 

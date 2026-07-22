@@ -4,7 +4,7 @@ import Foundation
 
 extension Notification.Name {
     /// Posted on the main queue when an account's usage entry changes; `object` is the
-    /// account id string.
+    /// typed account identifier.
     static let accountUsageDidChange = Notification.Name("SkalmanAccountUsageDidChange")
 }
 
@@ -48,6 +48,7 @@ enum UsageFetchError: Error {
 ///
 /// State is touched only on the main queue, like everything else stateful in the app.
 /// Fetches run detached and hop back to publish.
+@MainActor
 final class AccountUsageService {
 
     // MARK: - Properties
@@ -62,8 +63,8 @@ final class AccountUsageService {
         var lastAttemptAt: Date?
     }
 
-    private var entries: [String: Entry] = [:]
-    private var inFlight: Set<String> = []
+    private var entries: [AccountID: Entry] = [:]
+    private var inFlight: Set<AccountID> = []
 
     // MARK: - Initialization
 
@@ -118,7 +119,7 @@ final class AccountUsageService {
     /// How long the current entry satisfies requests before another fetch runs. A local
     /// file re-reads cheaply and often; a network reading is held longer; `force` only
     /// tightens either to the shared floor.
-    private func spacing(for accountID: String, force: Bool) -> TimeInterval {
+    private func spacing(for accountID: AccountID, force: Bool) -> TimeInterval {
         if force { return UsageDefaults.minimumRefreshSpacing }
 
         return entries[accountID]?.usage?.source == .localCache
@@ -126,7 +127,7 @@ final class AccountUsageService {
             : UsageDefaults.refreshInterval
     }
 
-    private func finish(accountID: String, result: Result<AccountUsage, UsageFetchError>) {
+    private func finish(accountID: AccountID, result: Result<AccountUsage, UsageFetchError>) {
         inFlight.remove(accountID)
 
         var entry = entries[accountID] ?? Entry()

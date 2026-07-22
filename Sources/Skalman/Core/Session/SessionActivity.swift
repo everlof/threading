@@ -25,6 +25,7 @@ enum SessionActivity {
 /// happening, and it holds for any program rather than just one agent. Two details keep it
 /// honest: a byte threshold, so echoed keystrokes are not mistaken for work, and a quiet
 /// period, so the brief gaps within a burst of output do not flicker the state.
+@MainActor
 final class SessionActivityTracker {
 
     // MARK: - Properties
@@ -133,7 +134,9 @@ final class SessionActivityTracker {
             withTimeInterval: ActivityDefaults.quietInterval,
             repeats: false
         ) { [weak self] _ in
-            self?.finishWorking()
+            Task { @MainActor [weak self] in
+                self?.finishWorking()
+            }
         }
     }
 

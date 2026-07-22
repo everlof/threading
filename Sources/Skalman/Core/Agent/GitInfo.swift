@@ -1,10 +1,27 @@
 import Foundation
+import os
 
 /// Reads git metadata for a project folder.
 ///
 /// Values are read directly from the `.git` directory rather than by shelling out, so
 /// they can be refreshed cheaply without spawning a process per project.
 enum GitInfo {
+
+    private enum CachedWorktreeLocation {
+        case found(WorktreeLocation)
+        case missing
+
+        var value: WorktreeLocation? {
+            switch self {
+            case .found(let location): return location
+            case .missing: return nil
+            }
+        }
+    }
+
+    private static let worktreeLocations = OSAllocatedUnfairLock(
+        initialState: [String: CachedWorktreeLocation]()
+    )
 
     // MARK: - Public Methods
 
@@ -27,10 +44,10 @@ enum GitInfo {
     /// Reads `HEAD`, which holds either a `ref:` line naming the branch or a bare commit
     /// hash when the head is detached.
     static func currentBranch(for path: String) -> String? {
-        guard let root = repositoryRoot(for: path),
-              let gitDirectory = gitDirectory(for: root) else { return nil }
+        guard let location = worktreeLocation(for: path) else { return nil }
 
-        let headURL = gitDirectory.appendingPathComponent(GitDefaults.headFile)
+        let headURL = URL(fileURLWithPath: location.worktreeIdentity)
+            .appendingPathComponent(GitDefaults.headFile)
         guard let contents = try? String(contentsOf: headURL, encoding: .utf8) else { return nil }
 
         let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -88,6 +105,33 @@ enum GitInfo {
 
     /// Resolves a path's worktree and repository, or nil when it is not inside a repository.
     static func worktreeLocation(for path: String) -> WorktreeLocation? {
+        let key = cacheKey(for: path)
+        if let cached = worktreeLocations.withLock({ $0[key] }) {
+            return cached.value
+        }
+
+        let location = resolveWorktreeLocation(for: path)
+        worktreeLocations.withLock {
+            $0[key] = location.map(CachedWorktreeLocation.found) ?? .missing
+        }
+        return location
+    }
+
+    /// Drops the checkout memo before a stopped session refreshes its git state. Every cached
+    /// path known to resolve to the same worktree is removed together.
+    static func invalidateCache(for path: String) {
+        let key = cacheKey(for: path)
+        worktreeLocations.withLock { entries in
+            let identity = entries[key]?.value?.worktreeIdentity
+            entries = entries.filter { candidateKey, entry in
+                guard candidateKey != key else { return false }
+                guard let identity else { return true }
+                return entry.value?.worktreeIdentity != identity
+            }
+        }
+    }
+
+    private static func resolveWorktreeLocation(for path: String) -> WorktreeLocation? {
         guard let root = repositoryRoot(for: path),
               let gitDirectory = gitDirectory(for: root) else { return nil }
 
@@ -176,6 +220,10 @@ enum GitInfo {
     }
 
     // MARK: - Private Methods
+
+    private static func cacheKey(for path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
 
     /// Resolves the directory holding a checkout's git metadata.
     ///

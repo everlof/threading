@@ -6,9 +6,74 @@ import AppKit
 /// runs the full width of the row — not just the width of the text — is what reads as a diff.
 /// Long lines wrap rather than scroll; the pane is often narrow, and hiding half a changed line
 /// off the right edge is worse than a wrapped one.
+///
+/// Two callers, one renderer: edit-tool rows feed `[DiffLine]` and draw exactly as they always
+/// have, while the review pane feeds `[GitDiffLine]` and gains a line-number column. One
+/// number, not two — the new side, falling back to the old for removed lines — because the
+/// pane is narrow and a dual gutter spends its width on bookkeeping.
 final class DiffView: NSStackView {
 
-    init(lines: [DiffLine]) {
+    /// What one row draws, whichever model it came from.
+    private struct Row {
+        let kind: DiffLine.Kind
+        let text: String
+        let number: String?
+        /// Coloured runs into `text`, empty when the file's language is unknown.
+        let tokens: [SyntaxToken]
+    }
+
+    private let showsNumbers: Bool
+
+    /// Whether this view resolved a language. It decides the *base* colour of every row, not
+    /// just the coloured runs: highlighted code is drawn in label colour and left to the wash
+    /// and the gutter to say what happened to it, where an unhighlighted diff still tints the
+    /// whole line. Per view, not per row, so one file never mixes the two.
+    private let isHighlighted: Bool
+
+    // MARK: - Initialization
+
+    /// An edit tool's diff: unnumbered, capped at the tool-row default. `path` is the file the
+    /// tool is editing, which is the only thing that says what language its lines are in.
+    convenience init(lines: [DiffLine], path: String? = nil) {
+        let language = path.flatMap { Syntax.language(forPath: $0) }
+        let tokens = Self.tokenize(lines.map { ($0.kind, $0.text) }, language: language)
+
+        self.init(
+            rows: zip(lines, tokens).map { line, tokens in
+                Row(kind: line.kind, text: line.text, number: nil, tokens: tokens)
+            },
+            displayCap: DiffDefaults.displayCap,
+            showsNumbers: false,
+            isHighlighted: language != nil
+        )
+    }
+
+    /// A git diff's lines: numbered, with the cap owned by the caller — the review pane
+    /// budgets lines per file, not per hunk.
+    convenience init(gitLines: [GitDiffLine], displayCap: Int, path: String? = nil) {
+        let language = path.flatMap { Syntax.language(forPath: $0) }
+        // Tokens index into the *capped* text, so the cap is applied before they are found.
+        let texts = gitLines.map { Self.cappedText($0.text) }
+        let tokens = Self.tokenize(zip(gitLines, texts).map { ($0.kind, $1) }, language: language)
+
+        self.init(
+            rows: zip(zip(gitLines, texts), tokens).map { pair, tokens in
+                Row(
+                    kind: pair.0.kind,
+                    text: pair.1,
+                    number: Self.number(for: pair.0),
+                    tokens: tokens
+                )
+            },
+            displayCap: displayCap,
+            showsNumbers: true,
+            isHighlighted: language != nil
+        )
+    }
+
+    private init(rows: [Row], displayCap: Int, showsNumbers: Bool, isHighlighted: Bool) {
+        self.showsNumbers = showsNumbers
+        self.isHighlighted = isHighlighted
         super.init(frame: .zero)
 
         orientation = .vertical
@@ -16,16 +81,16 @@ final class DiffView: NSStackView {
         spacing = 0
         translatesAutoresizingMaskIntoConstraints = false
 
-        let shown = lines.prefix(DiffDefaults.displayCap)
-        for line in shown {
-            let row = makeRow(line)
-            addArrangedSubview(row)
-            row.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
-            row.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+        let shown = rows.prefix(max(displayCap, 0))
+        for row in shown {
+            let view = makeRow(row)
+            addArrangedSubview(view)
+            view.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
+            view.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
         }
 
-        if lines.count > shown.count {
-            let more = makeNote("… \(lines.count - shown.count) more lines")
+        if rows.count > shown.count {
+            let more = makeNote("… \(rows.count - shown.count) more lines")
             addArrangedSubview(more)
             more.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
             more.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
@@ -38,41 +103,61 @@ final class DiffView: NSStackView {
 
     // MARK: - Rows
 
-    private func makeRow(_ line: DiffLine) -> NSView {
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.wantsLayer = true
-        row.layer?.backgroundColor = background(for: line.kind).cgColor
+    private func makeRow(_ row: Row) -> NSView {
+        let view = NSView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.wantsLayer = true
+        view.layer?.backgroundColor = background(for: row.kind).cgColor
 
-        let gutter = NSTextField(labelWithString: sign(for: line.kind))
+        let gutter = NSTextField(labelWithString: sign(for: row.kind))
         gutter.font = font()
-        gutter.textColor = foreground(for: line.kind)
+        gutter.textColor = foreground(for: row.kind)
         gutter.alignment = .center
         gutter.translatesAutoresizingMaskIntoConstraints = false
 
-        let text = NSTextField(wrappingLabelWithString: line.text.isEmpty ? " " : line.text)
+        let text = NSTextField(wrappingLabelWithString: row.text.isEmpty ? " " : row.text)
         text.font = font()
-        text.textColor = line.kind == .context ? .secondaryLabelColor : foreground(for: line.kind)
+        text.textColor = baseColor(for: row.kind)
         text.isSelectable = true
         text.lineBreakMode = .byCharWrapping
         text.maximumNumberOfLines = 0
         text.translatesAutoresizingMaskIntoConstraints = false
+        if !row.tokens.isEmpty {
+            text.attributedStringValue = attributed(row)
+        }
 
-        row.addSubview(gutter)
-        row.addSubview(text)
+        view.addSubview(gutter)
+        view.addSubview(text)
+
+        var gutterLeading = view.leadingAnchor
+        if showsNumbers {
+            let number = NSTextField(labelWithString: row.number ?? "")
+            number.font = font()
+            number.textColor = .tertiaryLabelColor
+            number.alignment = .right
+            number.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(number)
+
+            NSLayoutConstraint.activate([
+                number.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                number.topAnchor.constraint(equalTo: view.topAnchor, constant: 1),
+                number.widthAnchor.constraint(equalToConstant: GitReviewDefaults.lineNumberWidth)
+            ])
+            gutterLeading = number.trailingAnchor
+        }
 
         NSLayoutConstraint.activate([
-            gutter.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            gutter.topAnchor.constraint(equalTo: row.topAnchor, constant: 1),
+            gutter.leadingAnchor.constraint(equalTo: gutterLeading),
+            gutter.topAnchor.constraint(equalTo: view.topAnchor, constant: 1),
             gutter.widthAnchor.constraint(equalToConstant: DiffDefaults.gutterWidth),
 
             text.leadingAnchor.constraint(equalTo: gutter.trailingAnchor, constant: Design.Spacing.tight),
-            text.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -Design.Spacing.tight),
-            text.topAnchor.constraint(equalTo: row.topAnchor, constant: 1),
-            text.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -1)
+            text.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.tight),
+            text.topAnchor.constraint(equalTo: view.topAnchor, constant: 1),
+            text.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -1)
         ])
 
-        return row
+        return view
     }
 
     private func makeNote(_ text: String) -> NSView {
@@ -83,7 +168,83 @@ final class DiffView: NSStackView {
         return label
     }
 
+    // MARK: - Highlighting
+
+    /// Tokenizes a whole diff, carrying block-comment state down each side separately.
+    ///
+    /// A diff interleaves the two versions of a file, so one running state would let a `/*`
+    /// deleted from the old side comment out the new side's lines. Context lines belong to
+    /// both and advance both.
+    private static func tokenize(
+        _ lines: [(DiffLine.Kind, String)],
+        language: SyntaxLanguage?
+    ) -> [[SyntaxToken]] {
+        guard let language else { return Array(repeating: [], count: lines.count) }
+
+        var newSide = Syntax.State()
+        var oldSide = Syntax.State()
+
+        return lines.map { kind, text in
+            switch kind {
+            case .added:
+                return Syntax.tokens(in: text, language: language, state: &newSide)
+            case .removed:
+                return Syntax.tokens(in: text, language: language, state: &oldSide)
+            case .context:
+                var state = newSide
+                let tokens = Syntax.tokens(in: text, language: language, state: &state)
+                newSide = state
+                oldSide = state
+                return tokens
+            }
+        }
+    }
+
+    /// The line drawn as code: label colour underneath, the tokens' hues over it. The wrapping
+    /// mode has to be restated, since an attributed value replaces the field's own paragraph
+    /// style along with its text.
+    private func attributed(_ row: Row) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byCharWrapping
+
+        let string = NSMutableAttributedString(string: row.text, attributes: [
+            .font: font(),
+            .foregroundColor: baseColor(for: row.kind),
+            .paragraphStyle: paragraph
+        ])
+
+        for token in row.tokens {
+            string.addAttribute(
+                .foregroundColor,
+                value: color(for: token.role),
+                range: NSRange(token.range, in: row.text)
+            )
+        }
+        return string
+    }
+
+    private func color(for role: SyntaxRole) -> NSColor {
+        switch role {
+        case .keyword: return Design.Syntax.keyword
+        case .type: return Design.Syntax.type
+        case .string: return Design.Syntax.string
+        case .number: return Design.Syntax.number
+        case .comment: return Design.Syntax.comment
+        }
+    }
+
     // MARK: - Style
+
+    /// The new-side number names where the line lives now; a removed line only has an old home.
+    private static func number(for line: GitDiffLine) -> String? {
+        (line.newNumber ?? line.oldNumber).map(String.init)
+    }
+
+    /// A minified single-line source would wrap for screens; it is cut instead.
+    private static func cappedText(_ text: String) -> String {
+        guard text.count > GitReviewDefaults.lineCharacterCap else { return text }
+        return text.prefix(GitReviewDefaults.lineCharacterCap) + "…"
+    }
 
     private func font() -> NSFont {
         .monospacedSystemFont(ofSize: DiffDefaults.fontSize, weight: .regular)
@@ -103,6 +264,16 @@ final class DiffView: NSStackView {
         case .removed: return .systemRed.withAlphaComponent(DiffDefaults.removedAlpha)
         case .context: return .clear
         }
+    }
+
+    /// What a row's text is drawn in before any token colours it. Highlighted code reads as
+    /// code; an unhighlighted diff keeps tinting the whole line, which is what every caller
+    /// drew before there was a highlighter.
+    private func baseColor(for kind: DiffLine.Kind) -> NSColor {
+        guard isHighlighted else {
+            return kind == .context ? .secondaryLabelColor : foreground(for: kind)
+        }
+        return kind == .context ? .secondaryLabelColor : .labelColor
     }
 
     private func foreground(for kind: DiffLine.Kind) -> NSColor {

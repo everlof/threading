@@ -8,9 +8,31 @@
 
 /* Begin PBXBuildFile section */
 		33E3632E648F76FBA596F672 /* TranscriptReplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */; };
+		D12026070000000000000006 /* StreamSessionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000005 /* StreamSessionLifecycleTests.swift */; };
+		D12026070000000000000004 /* PermissionRequestViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000003 /* PermissionRequestViewTests.swift */; };
+		D12026070000000000000002 /* MCPSessionRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000001 /* MCPSessionRegistryTests.swift */; };
+		A10000010000000000000002 /* StateManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000000001 /* StateManagerTests.swift */; };
+		A10000020000000000000002 /* DraftStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000001 /* DraftStoreTests.swift */; };
+		A10000030000000000000002 /* EventLogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000030000000000000001 /* EventLogTests.swift */; };
+		A10000060000000000000002 /* GitDiffParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000060000000000000001 /* GitDiffParserTests.swift */; };
+		A10000070000000000000002 /* GitStatusParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000070000000000000001 /* GitStatusParserTests.swift */; };
+		A10000080000000000000002 /* GitReviewCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000080000000000000001 /* GitReviewCommandsTests.swift */; };
+		A10000090000000000000002 /* GitReviewViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000090000000000000001 /* GitReviewViewTests.swift */; };
+		A10000040000000000000002 /* PromptAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000040000000000000001 /* PromptAttachmentTests.swift */; };
+		A10000050000000000000002 /* AccountUsageSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000050000000000000001 /* AccountUsageSummaryTests.swift */; };
 		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
 		C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */; };
+		49022923B31CFED2F032E6EC /* SideChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */; };
 		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
+		2A84B6880DED3F071BEF4857 /* ConversationTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */; };
+		8CDE135AB43AE5B76A4E2CBD /* ConversationRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */; };
+		E15000010000000000000002 /* HotPathCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15000010000000000000001 /* HotPathCacheTests.swift */; };
+		5952B9612FE334718FFF91F1 /* ConversationMinimapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6351D65718BB714AF03F855E /* ConversationMinimapTests.swift */; };
+		52FE6DECCC10EF3C290A449A /* GitCheckoutWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97CBF23D6F1E81467057C62E /* GitCheckoutWatcherTests.swift */; };
+		E0F2A94B880869D0B3ABF95A /* SyntaxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A033866F2A5F56AB0B49A8BF /* SyntaxTests.swift */; };
+		3B329452E55225EB2B8BB7DA /* GitReviewRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */; };
+		4CC29E6CBEE5E72D3B78DCBD /* GitCommitGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */; };
+		287B00D68004042D190D2F68 /* GitStagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3779521669E4E149E1C77B10 /* GitStagingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,10 +47,32 @@
 
 /* Begin PBXFileReference section */
 		72E4FC8EDC79F143EA49545C /* SkalmanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SkalmanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D12026070000000000000005 /* StreamSessionLifecycleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamSessionLifecycleTests.swift; sourceTree = "<group>"; };
+		D12026070000000000000003 /* PermissionRequestViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PermissionRequestViewTests.swift; sourceTree = "<group>"; };
+		D12026070000000000000001 /* MCPSessionRegistryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MCPSessionRegistryTests.swift; sourceTree = "<group>"; };
+		A10000010000000000000001 /* StateManagerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StateManagerTests.swift; sourceTree = "<group>"; };
+		A10000020000000000000001 /* DraftStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DraftStoreTests.swift; sourceTree = "<group>"; };
+		A10000060000000000000001 /* GitDiffParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitDiffParserTests.swift; sourceTree = "<group>"; };
+		A10000070000000000000001 /* GitStatusParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitStatusParserTests.swift; sourceTree = "<group>"; };
+		A10000080000000000000001 /* GitReviewCommandsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitReviewCommandsTests.swift; sourceTree = "<group>"; };
+		A10000090000000000000001 /* GitReviewViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitReviewViewTests.swift; sourceTree = "<group>"; };
+		A10000030000000000000001 /* EventLogTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EventLogTests.swift; sourceTree = "<group>"; };
+		A10000040000000000000001 /* PromptAttachmentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptAttachmentTests.swift; sourceTree = "<group>"; };
+		A10000050000000000000001 /* AccountUsageSummaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountUsageSummaryTests.swift; sourceTree = "<group>"; };
 		A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectIconTests.swift; sourceTree = "<group>"; };
+		5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SideChatTests.swift; sourceTree = "<group>"; };
 		B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptReplayTests.swift; sourceTree = "<group>"; };
 		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		F2000001000000000000038 /* Skalman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Skalman.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationTimelineTests.swift; sourceTree = "<group>"; };
+		343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationRenderTests.swift; sourceTree = "<group>"; };
+		E15000010000000000000001 /* HotPathCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HotPathCacheTests.swift; sourceTree = "<group>"; };
+		6351D65718BB714AF03F855E /* ConversationMinimapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationMinimapTests.swift; sourceTree = "<group>"; };
+		97CBF23D6F1E81467057C62E /* GitCheckoutWatcherTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitCheckoutWatcherTests.swift; sourceTree = "<group>"; };
+		A033866F2A5F56AB0B49A8BF /* SyntaxTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SyntaxTests.swift; sourceTree = "<group>"; };
+		D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitReviewRenderTests.swift; sourceTree = "<group>"; };
+		20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitCommitGraphTests.swift; sourceTree = "<group>"; };
+		3779521669E4E149E1C77B10 /* GitStagingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitStagingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -88,8 +132,30 @@
 		B1792448FB880E01F5D9086C /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				A10000020000000000000001 /* DraftStoreTests.swift */,
+				A10000030000000000000001 /* EventLogTests.swift */,
+				A10000060000000000000001 /* GitDiffParserTests.swift */,
+				A10000070000000000000001 /* GitStatusParserTests.swift */,
+				A10000080000000000000001 /* GitReviewCommandsTests.swift */,
+				A10000090000000000000001 /* GitReviewViewTests.swift */,
+				A10000040000000000000001 /* PromptAttachmentTests.swift */,
+				A10000050000000000000001 /* AccountUsageSummaryTests.swift */,
+				D12026070000000000000001 /* MCPSessionRegistryTests.swift */,
+				D12026070000000000000003 /* PermissionRequestViewTests.swift */,
 				A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */,
+				5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */,
+				A10000010000000000000001 /* StateManagerTests.swift */,
+				D12026070000000000000005 /* StreamSessionLifecycleTests.swift */,
 				B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */,
+				A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */,
+				343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */,
+				E15000010000000000000001 /* HotPathCacheTests.swift */,
+				6351D65718BB714AF03F855E /* ConversationMinimapTests.swift */,
+				97CBF23D6F1E81467057C62E /* GitCheckoutWatcherTests.swift */,
+				A033866F2A5F56AB0B49A8BF /* SyntaxTests.swift */,
+				D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */,
+				20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */,
+				3779521669E4E149E1C77B10 /* GitStagingTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -225,8 +291,30 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000020000000000000002 /* DraftStoreTests.swift in Sources */,
+				A10000030000000000000002 /* EventLogTests.swift in Sources */,
+				A10000060000000000000002 /* GitDiffParserTests.swift in Sources */,
+				A10000070000000000000002 /* GitStatusParserTests.swift in Sources */,
+				A10000080000000000000002 /* GitReviewCommandsTests.swift in Sources */,
+				A10000090000000000000002 /* GitReviewViewTests.swift in Sources */,
+				A10000040000000000000002 /* PromptAttachmentTests.swift in Sources */,
+				A10000050000000000000002 /* AccountUsageSummaryTests.swift in Sources */,
+				D12026070000000000000002 /* MCPSessionRegistryTests.swift in Sources */,
+				D12026070000000000000004 /* PermissionRequestViewTests.swift in Sources */,
 				C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */,
+				49022923B31CFED2F032E6EC /* SideChatTests.swift in Sources */,
+				A10000010000000000000002 /* StateManagerTests.swift in Sources */,
+				D12026070000000000000006 /* StreamSessionLifecycleTests.swift in Sources */,
 				33E3632E648F76FBA596F672 /* TranscriptReplayTests.swift in Sources */,
+				2A84B6880DED3F071BEF4857 /* ConversationTimelineTests.swift in Sources */,
+				8CDE135AB43AE5B76A4E2CBD /* ConversationRenderTests.swift in Sources */,
+				E15000010000000000000002 /* HotPathCacheTests.swift in Sources */,
+				5952B9612FE334718FFF91F1 /* ConversationMinimapTests.swift in Sources */,
+				52FE6DECCC10EF3C290A449A /* GitCheckoutWatcherTests.swift in Sources */,
+				E0F2A94B880869D0B3ABF95A /* SyntaxTests.swift in Sources */,
+				3B329452E55225EB2B8BB7DA /* GitReviewRenderTests.swift in Sources */,
+				4CC29E6CBEE5E72D3B78DCBD /* GitCommitGraphTests.swift in Sources */,
+				287B00D68004042D190D2F68 /* GitStagingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -265,6 +353,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Skalman.app/Contents/MacOS/Skalman";
 			};
@@ -286,6 +375,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Skalman.app/Contents/MacOS/Skalman";
 			};
@@ -441,6 +531,7 @@
 				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = YES;
 				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -474,6 +565,7 @@
 				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = YES;
 				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;

@@ -4,6 +4,7 @@ import Foundation
 ///
 /// Terminal appearance lives in `TerminalProfile` and per-account customisation in
 /// `AccountPreferencesStore`; this covers the behavioural settings shown on the General tab.
+@MainActor
 final class AppSettings {
 
     // MARK: - Singleton
@@ -52,17 +53,33 @@ final class AppSettings {
 
     /// Whether the sidebar follows the title reported by the terminal.
     var usesTerminalTitleInSidebar: Bool {
-        get { defaults.bool(forKey: Keys.usesTerminalTitleInSidebar) }
+        get { Self.usesTerminalTitleInSidebar }
         set {
             defaults.set(newValue, forKey: Keys.usesTerminalTitleInSidebar)
             notifyChanged()
         }
     }
 
+    /// The same flag, readable off the main actor.
+    ///
+    /// `AgentSession.displayTitle` is a plain computed property on a value type, read wherever
+    /// a session is — including from the transcript scan and the importer, neither of which is
+    /// main-actor isolated. `UserDefaults` is thread-safe, so the isolation buys nothing for a
+    /// read; only the setter needs it, because it posts a notification the UI observes.
+    nonisolated static var usesTerminalTitleInSidebar: Bool {
+        UserDefaults.standard.bool(forKey: Keys.usesTerminalTitleInSidebar)
+    }
+
+    /// Likewise for the sidebar's branch grouping, which `SidebarTreeBuilder` consults while
+    /// building nodes from plain model values.
+    nonisolated static var groupsSessionsByBranch: Bool {
+        UserDefaults.standard.bool(forKey: Keys.groupsSessionsByBranch)
+    }
+
     /// Whether the sidebar gathers a project's sessions under the branch they ran on,
     /// where a branch has more than one.
     var groupsSessionsByBranch: Bool {
-        get { defaults.bool(forKey: Keys.groupsSessionsByBranch) }
+        get { Self.groupsSessionsByBranch }
         set {
             defaults.set(newValue, forKey: Keys.groupsSessionsByBranch)
             notifyChanged()

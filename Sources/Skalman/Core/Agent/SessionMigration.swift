@@ -11,6 +11,7 @@ import Foundation
 /// Same agent only. Claude→Claude and Codex→Codex share a transcript format and a resume path;
 /// moving *across* agents is a different, lossy operation (a re-seed, not a resume) and is not
 /// this.
+@MainActor
 enum SessionMigration {
 
     struct MoveError: LocalizedError {
@@ -58,7 +59,7 @@ enum SessionMigration {
     /// next launch resumes there. Non-destructive: the original transcript is left in place, so
     /// a move can be undone by moving back.
     @discardableResult
-    static func move(sessionID: UUID, to account: AgentAccount) -> Result<Void, MoveError> {
+    static func move(sessionID: SessionID, to account: AgentAccount) -> Result<Void, MoveError> {
         guard let session = ProjectStore.shared.session(withID: sessionID),
               let project = ProjectStore.shared.project(forSessionID: sessionID) else {
             return .failure(MoveError(message: "The session no longer exists."))
@@ -102,7 +103,7 @@ enum SessionMigration {
         }
 
         ProjectStore.shared.update(sessionID: sessionID) {
-            $0.accountHandle = account.isDefault ? nil : account.handle
+            $0.accountHandle = account.handle
         }
 
         SkalmanLogger.agent.info("Migrated session \(sessionID) to account \(account.handle, privacy: .public)")
@@ -111,9 +112,7 @@ enum SessionMigration {
 
     // MARK: - Private Methods
 
-    /// A session stores nil for the default account; an `AgentAccount` names it explicitly.
-    /// Normalising lets the two be compared without treating "default" and nil as different.
-    private static func normalizedHandle(_ account: AgentAccount) -> String? {
-        account.isDefault ? nil : account.handle
+    private static func normalizedHandle(_ account: AgentAccount) -> AccountHandle {
+        account.handle
     }
 }

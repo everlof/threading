@@ -41,7 +41,7 @@ enum ProjectIconStore {
     ///
     /// The file is named after the project, so replacing a project's icon overwrites in
     /// place rather than accumulating orphans.
-    static func store(imageData: Data, for projectID: UUID) -> String? {
+    static func store(imageData: Data, for projectID: ProjectID) -> String? {
         guard let png = normalizedPNGData(from: imageData) else { return nil }
 
         let fileName = projectID.uuidString + "." + ProjectIconDefaults.storedExtension

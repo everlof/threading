@@ -32,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         ownsSingleInstanceLock = true
 
+        // After the lock, so only the instance that owns the state writes the journal — and
+        // early, because the first thing it reports is how the *previous* launch ended.
+        EventLog.shared.beginLaunch()
+
         setupMenuBar()
 
         mainWindowController = MainWindowController()
@@ -43,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Fills empty icon slots in the background; it observes the store from here on, so
         // projects added later are swept as they appear.
         ProjectIconDiscovery.shared.start()
+
+        // One throttled sweep, so the first account menu opened in a launch already carries
+        // each login's usage rather than filling in only on a second look.
+        AccountUsageMenu.prefetch()
 
         // Session restore waits for the listener, because a launch reads the port to build the
         // session's `--mcp-config`. The callback runs whether the server came up or not, so a
@@ -65,6 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ProjectStore.shared.flushPendingSave()
         AgentRuntime.shared.terminateAll()
         MCPServer.shared.stop()
+
+        // Last, and only on this path: the marker it removes is what distinguishes a quit
+        // from a launch that never came back.
+        EventLog.shared.endLaunch()
+
         return .terminateNow
     }
 
@@ -108,7 +121,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Removes history files belonging to sessions that no longer exist.
+    @MainActor
     private func cleanupOrphanedHistoryFiles() {
+        // An empty project list caused by a failed load is not evidence that every history
+        // file is orphaned. Preserve all histories for this launch so recovery stays possible.
+        guard ProjectStore.shared.didLoadStateSuccessfully else {
+            SkalmanLogger.agent.error(
+                "Skipping orphaned history cleanup because project state failed to load"
+            )
+            return
+        }
+
         let activeSessionIDs = Set(
             ProjectStore.shared.projects.flatMap { $0.sessions.map(\.id) }
         )
@@ -182,14 +205,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeProjectMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: MenuIdentifiers.projectMenu)
 
+        // Opens the project's composer rather than creating anything: agent, account, model
+        // and checkout are chosen there. The per-agent entries that used to sit here answered
+        // all four silently, which is the friction this menu should not remove.
         menu.addItem(withTitle: "New Session", action: #selector(newSession), keyEquivalent: "n")
-
-        // Explicit per-agent entries, so the default kind and account can be bypassed.
-        NewSessionMenuBuilder.addItems(
-            to: menu,
-            target: self,
-            action: #selector(newSessionFromMenu(_:))
-        )
 
         menu.addItem(.separator())
 
@@ -246,6 +265,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         browserItem.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(browserItem)
 
+        // ⇧⌘R, deliberately not ⇧⌘G — that is the platform's Find Previous.
+        let reviewItem = NSMenuItem(
+            title: "Git Review",
+            action: #selector(openReview),
+            keyEquivalent: "r"
+        )
+        reviewItem.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(reviewItem)
+
         menu.addItem(.separator())
 
         let fullScreenItem = NSMenuItem(
@@ -296,6 +324,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: "?"
         )
 
+        menu.addItem(.separator())
+
+        let logItem = NSMenuItem(
+            title: "Reveal Diagnostics Log",
+            action: #selector(revealDiagnosticsLog),
+            keyEquivalent: ""
+        )
+        logItem.target = self
+        menu.addItem(logItem)
+
         let item = NSMenuItem()
         item.submenu = menu
         return item
@@ -307,17 +345,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController.showSettings()
     }
 
+    /// Reveals today's journal rather than opening it: `.jsonl` has no owning app, and what
+    /// is usually wanted is the folder, where the previous days sit alongside it.
+    @objc private func revealDiagnosticsLog() {
+        let journal = EventLog.shared.currentJournalURL
+
+        guard FileManager.default.fileExists(atPath: journal.path) else {
+            NSWorkspace.shared.open(EventLog.shared.directory)
+            return
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([journal])
+    }
+
     @objc private func openBrowser() {
         mainWindowController.showBrowser()
     }
 
-    @objc private func newSession() {
-        mainWindowController.newSession()
+    @objc private func openReview() {
+        mainWindowController.showReview()
     }
 
-    @objc private func newSessionFromMenu(_ sender: NSMenuItem) {
-        guard let request = sender.representedObject as? NewSessionRequest else { return }
-        mainWindowController.newSession(kind: request.kind, accountHandle: request.accountHandle)
+    @objc private func newSession() {
+        mainWindowController.newSession()
     }
 
     @objc private func addProject() {

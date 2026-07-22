@@ -12,7 +12,7 @@ final class PermissionRequestView: NSView {
     // MARK: - Properties
 
     private let request: PermissionRequest
-    private let onDecision: (PermissionDecision) -> Void
+    private var onDecision: ((PermissionDecision) -> Void)?
 
     private var buttonRow: NSStackView!
     private var resolvedLabel: NSTextField!
@@ -68,7 +68,7 @@ final class PermissionRequestView: NSView {
         // An edit is approved on what it changes, so its diff sits between the summary and the
         // buttons — the same view the tool row and the old sheet used.
         if let diff = EditDiff.lines(forTool: request.toolName, input: request.input) {
-            column.addArrangedSubview(makeDiffPreview(diff))
+            column.addArrangedSubview(makeDiffPreview(diff, path: request.filePath))
         }
 
         addSubview(column)
@@ -115,14 +115,14 @@ final class PermissionRequestView: NSView {
 
     /// The diff, bounded so a large edit scrolls inside the card rather than growing it without
     /// limit — the buttons must stay reachable.
-    private func makeDiffPreview(_ diff: [DiffLine]) -> NSView {
+    private func makeDiffPreview(_ diff: [DiffLine], path: String?) -> NSView {
         let scroll = NSScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
 
-        let diffView = DiffView(lines: diff)
+        let diffView = DiffView(lines: diff, path: path)
         let clip = FlippedClipView()
         clip.drawsBackground = false
         scroll.contentView = clip
@@ -175,7 +175,12 @@ final class PermissionRequestView: NSView {
 
         layer?.borderColor = Design.Surface.border.cgColor
 
-        onDecision(decision)
+        // The controller's closure refers back to this card while it advances the queue.
+        // Release it before invoking it so a settled card keeps only its visual record, not
+        // the callback, the card itself, or the MCP response continuation behind the callback.
+        let callback = onDecision
+        onDecision = nil
+        callback?(decision)
     }
 }
 

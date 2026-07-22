@@ -58,13 +58,33 @@ enum AgentKind: String, Codable, CaseIterable {
 
     /// Whether Skalman may render this agent's conversation itself, instead of a terminal.
     ///
-    /// Claude is disabled **deliberately**: its streaming mode (`claude -p`) runs on the user's
-    /// subscription, and Anthropic's 2026 terms restrict subscription OAuth to Claude Code and
-    /// claude.ai — driving it headless from a third-party app is the pattern that policy
-    /// targets. Codex exposes supported headless JSONL output through `codex exec --json`, so
-    /// it can use the native surface without borrowing Claude's disabled transport.
+    /// Both agents qualify: each exposes a supported headless transport — `codex exec --json`
+    /// and `claude -p --output-format stream-json` — that Skalman drives by spawning the
+    /// user's own installed CLI, authenticated by whatever `claude auth login` / `codex login`
+    /// already put on disk. No token is read, and no request is routed on the user's behalf,
+    /// which is the line Anthropic's policy actually draws.
+    ///
+    /// Claude was excluded here for most of this project's life on the belief that `claude -p`
+    /// on a subscription was off-limits to third-party apps. That was true of the February 2026
+    /// terms as they read at the time, and is no longer: Anthropic's help centre now lists
+    /// `claude -p` and "third-party apps that authenticate with your Claude subscription" as
+    /// subscription-drawing usage, and the June 2026 attempt to move them onto separate metered
+    /// credits was withdrawn on the day it was to take effect. That withdrawal was explicitly
+    /// a pause, so this may become an economic choice — headless turns billed at API rates
+    /// rather than against the plan — but it is a *permitted* one either way.
     var supportsNativeUI: Bool {
-        self == .codex
+        self != .shell
+    }
+
+    /// Whether a conversation of this agent can be forked into a side chat.
+    ///
+    /// Claude only, and measured rather than assumed: `--fork-session` resumes a
+    /// conversation into a *new* transcript, leaving the original untouched, and honours a
+    /// `--session-id` given alongside it — so the child's identifier is minted up front like
+    /// any other Claude session. Codex has no equivalent (`codex exec resume` takes an id and
+    /// a prompt, nothing more), and forging one by copying its rollout is unproven.
+    var supportsForking: Bool {
+        self == .claude
     }
 
     /// Environment variable redirecting this CLI to an alternate config directory.
@@ -84,7 +104,7 @@ enum AgentKind: String, Codable, CaseIterable {
 /// The session outlives its terminal: when the agent exits, the PTY is torn down but
 /// this record remains so the conversation can be resumed by `agentSessionID` later.
 struct AgentSession: Codable, Identifiable {
-    let id: UUID
+    let id: SessionID
     var kind: AgentKind
 
     /// The name assigned when the session was created, e.g. `Claude Code` or `claudedb`.
@@ -108,7 +128,7 @@ struct AgentSession: Codable, Identifiable {
     ///
     /// For Claude this is minted by us and set at first launch. For Codex it is assigned
     /// by the CLI and remains nil until discovery completes. Always nil for shells.
-    var agentSessionID: String?
+    var agentSessionID: TranscriptID?
 
     /// Whether this session has been launched at least once, distinguishing a first
     /// launch from a resume.
@@ -117,11 +137,11 @@ struct AgentSession: Codable, Identifiable {
     /// Exit code from the most recent run, if it has ended.
     var lastExitCode: Int32?
 
-    /// Which agent login this session belongs to. Nil means the provider's default account.
+    /// Which agent login this session belongs to. `.standard` means the provider's default.
     ///
     /// Conversations are stored per account, so this must be stable across resumes: the same
     /// identifier resumed under a different account would not be found.
-    var accountHandle: String?
+    @PersistedAccountHandle var accountHandle: AccountHandle
 
     /// Model the session was started with, passed again on resume so it does not drift.
     /// Nil uses whatever the CLI defaults to.
@@ -143,13 +163,44 @@ struct AgentSession: Codable, Identifiable {
     /// Stored optional for the same reason as `archived`.
     private var nativeUI: Bool?
 
+    /// Stored optional for the same reason as `archived`.
+    private var forkParent: SessionID?
+
+    /// The session this one was forked from, for a **side chat** — a conversation started
+    /// with a copy of another's context so a question can be asked without joining the
+    /// record it asks about.
+    ///
+    /// Skalman's own bookkeeping, because the CLI keeps none: a forked transcript carries no
+    /// reference to its ancestor (measured — the only trace was a stale `session_id` left on
+    /// one copied record, while every `sessionId` was rewritten to the fork's).
+    ///
+    /// It is read at *launch* rather than being a lasting mode: the fork happens once, when
+    /// the child first runs, and afterwards this is lineage rather than behaviour. See
+    /// `AgentLauncher.claudeForkCommand`.
+    var forkedFrom: SessionID? {
+        get { forkParent }
+        set { forkParent = newValue }
+    }
+
+    /// Whether this session began as a fork of another.
+    var isSideChat: Bool { forkParent != nil }
+
     /// Whether Skalman renders this conversation itself instead of showing the agent's
     /// terminal. Experimental, and available only where the agent exposes a supported
     /// structured-output transport.
     ///
-    /// Fixed at creation rather than toggleable: the two surfaces drive the CLI in
-    /// incompatible ways, so switching mid-conversation would mean killing the process and
-    /// resuming it under a different interface.
+    /// Switchable mid-conversation, because the two surfaces turn out to drive *one*
+    /// conversation rather than incompatible ones: both resume the CLI by this session's own
+    /// id, and both append to the same transcript. Measured on Claude 2.1.217 — a session
+    /// created by `-p --session-id` resumed in the interactive TUI with its context intact,
+    /// resumed back into `--print` (and into `--input-format stream-json`, the transport the
+    /// native surface actually uses) quoting the terminal turn verbatim, one file and one id
+    /// throughout. `--fork-session` exists to opt *into* a new id, which is what makes plain
+    /// `--resume` keeping it a documented guarantee rather than an accident.
+    ///
+    /// The switch still costs a relaunch: the old process must be gone before the new one
+    /// resumes the same id, since two live processes would interleave writes into that one
+    /// transcript.
     var usesNativeUI: Bool {
         get { nativeUI ?? false }
         set { nativeUI = newValue }
@@ -167,10 +218,11 @@ struct AgentSession: Codable, Identifiable {
     init(
         kind: AgentKind,
         title: String,
-        accountHandle: String? = nil,
+        accountHandle: AccountHandle = .standard,
         model: String? = nil,
         usesNativeUI: Bool = false,
-        id: UUID = UUID()
+        forkedFrom: SessionID? = nil,
+        id: SessionID = SessionID()
     ) {
         self.id = id
         self.kind = kind
@@ -187,6 +239,7 @@ struct AgentSession: Codable, Identifiable {
         self.branch = nil
         self.archived = nil
         self.nativeUI = usesNativeUI
+        self.forkParent = forkedFrom
     }
 
     /// Whether a previous conversation exists that can be resumed.
@@ -198,12 +251,13 @@ struct AgentSession: Codable, Identifiable {
     ///
     /// An explicit rename wins, then the terminal's own title when that behaviour is
     /// enabled, then the name the session was created with.
+    @MainActor
     var displayTitle: String {
         if let customTitle, !customTitle.isEmpty {
             return customTitle
         }
 
-        if AppSettings.shared.usesTerminalTitleInSidebar,
+        if AppSettings.usesTerminalTitleInSidebar,
            let terminalTitle, !terminalTitle.isEmpty {
             return terminalTitle
         }
@@ -255,7 +309,7 @@ struct ProjectIcon: Codable, Equatable {
 
 /// A folder the user has added, grouping the agent sessions started inside it.
 struct Project: Codable, Identifiable {
-    let id: UUID
+    let id: ProjectID
     var name: String
     /// Stored as a path string for reliable encoding, matching `SessionSnapshot`.
     var folderPath: String
@@ -267,7 +321,7 @@ struct Project: Codable, Identifiable {
     /// existed still decodes.
     var icon: ProjectIcon?
 
-    init(name: String, folderURL: URL, id: UUID = UUID()) {
+    init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
         self.id = id
         self.name = name
         self.folderPath = folderURL.path
@@ -282,7 +336,7 @@ struct Project: Codable, Identifiable {
     }
 
     /// Looks up a session by identifier.
-    func session(withID sessionID: UUID) -> AgentSession? {
+    func session(withID sessionID: SessionID) -> AgentSession? {
         sessions.first { $0.id == sessionID }
     }
 }
@@ -293,13 +347,13 @@ struct Project: Codable, Identifiable {
 struct ProjectsState: Codable {
     let version: Int
     var projects: [Project]
-    var selectedSessionID: UUID?
+    var selectedSessionID: SessionID?
     var savedAt: Date
 
     init(
         version: Int = ProjectsStateVersion.current,
         projects: [Project] = [],
-        selectedSessionID: UUID? = nil,
+        selectedSessionID: SessionID? = nil,
         savedAt: Date = Date()
     ) {
         self.version = version

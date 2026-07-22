@@ -20,6 +20,7 @@ struct PersistedTab: Codable {
         case browser
         case html
         case image
+        case review
     }
 
     var id: String
@@ -32,6 +33,9 @@ struct PersistedTab: Codable {
     var html: String?
     /// Image: the PNG filename in the session's cache directory.
     var cacheFile: String?
+    /// Review: the selected `GitReviewMode` raw value. Optional so older layouts still decode;
+    /// defaulted so the other kinds' call sites need not mention it.
+    var mode: String? = nil
 }
 
 extension PersistedPanel {
@@ -44,6 +48,7 @@ extension PersistedPanel {
             case .browser: return "b:\(tab.url ?? "")"
             case .html: return "h:\(tab.title ?? "")·\(tab.subtitle)"
             case .image: return "i:\(tab.title ?? tab.url ?? "")"
+            case .review: return "r:\(tab.mode ?? "")"
             }
         }
         return parts.joined(separator: "|") + "#" + (activeTabID ?? "")
@@ -67,6 +72,8 @@ extension PersistedPanel {
             case .image:
                 let name = tab.title ?? tab.url.flatMap { URL(string: $0)?.lastPathComponent } ?? "image"
                 detail = "image \"\(name)\""
+            case .review:
+                detail = "git review panel (the user's diff view; they may stage and commit from it)"
             }
             lines.append("\(index). \(detail)\(active)")
         }
@@ -103,35 +110,35 @@ final class DisplayPaneStore {
 
     // MARK: Layout
 
-    func loadLayout(for sessionID: UUID) -> PersistedPanel? {
+    func loadLayout(for sessionID: SessionID) -> PersistedPanel? {
         guard let data = try? Data(contentsOf: layoutFile(sessionID)) else { return nil }
         return try? decoder.decode(PersistedPanel.self, from: data)
     }
 
     /// Replaces the stored tabs and selection, preserving the observed signature (which tracks the
     /// agent's awareness, not the layout).
-    func saveLayout(tabs: [PersistedTab], activeID: String?, for sessionID: UUID) {
+    func saveLayout(tabs: [PersistedTab], activeID: String?, for sessionID: SessionID) {
         var panel = loadLayout(for: sessionID) ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
         panel.tabs = tabs
         panel.activeTabID = activeID
         write(panel, for: sessionID)
     }
 
-    func signature(for sessionID: UUID) -> String? {
+    func signature(for sessionID: SessionID) -> String? {
         loadLayout(for: sessionID)?.signature
     }
 
-    func observedSignature(for sessionID: UUID) -> String? {
+    func observedSignature(for sessionID: SessionID) -> String? {
         loadLayout(for: sessionID)?.observedSignature
     }
 
-    func setObserved(_ signature: String?, for sessionID: UUID) {
+    func setObserved(_ signature: String?, for sessionID: SessionID) {
         guard var panel = loadLayout(for: sessionID) else { return }
         panel.observedSignature = signature
         write(panel, for: sessionID)
     }
 
-    private func write(_ panel: PersistedPanel, for sessionID: UUID) {
+    private func write(_ panel: PersistedPanel, for sessionID: SessionID) {
         do {
             try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
             let data = try encoder.encode(panel)
@@ -145,7 +152,7 @@ final class DisplayPaneStore {
 
     /// Writes an image tab's PNG to the session cache, returning the filename to persist. Named by
     /// the tab id so it lines up with the tab and is trivially removed when the tab closes.
-    func cacheImage(_ image: NSImage, tabID: UUID, for sessionID: UUID) -> String? {
+    func cacheImage(_ image: NSImage, tabID: UUID, for sessionID: SessionID) -> String? {
         guard let data = image.pngRepresentation else { return nil }
         let name = tabID.uuidString + "." + DisplayPaneStoreDefaults.imageExtension
         do {
@@ -158,11 +165,11 @@ final class DisplayPaneStore {
         }
     }
 
-    func loadImage(_ name: String, for sessionID: UUID) -> NSImage? {
+    func loadImage(_ name: String, for sessionID: SessionID) -> NSImage? {
         NSImage(contentsOf: cacheDirectory(sessionID).appendingPathComponent(name))
     }
 
-    func removeCachedImage(_ name: String, for sessionID: UUID) {
+    func removeCachedImage(_ name: String, for sessionID: SessionID) {
         try? fileManager.removeItem(at: cacheDirectory(sessionID).appendingPathComponent(name))
     }
 
@@ -170,7 +177,7 @@ final class DisplayPaneStore {
 
     /// Drops the stored layout and cache of every session not in the set, called when sessions are
     /// deleted so a removed session leaves nothing behind on disk.
-    func retainOnly(sessionIDs: Set<UUID>) {
+    func retainOnly(sessionIDs: Set<SessionID>) {
         let keep = Set(sessionIDs.map(\.uuidString))
         guard let entries = try? fileManager.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil
@@ -193,11 +200,11 @@ final class DisplayPaneStore {
             .appendingPathComponent(DisplayPaneStoreDefaults.rootDirectory, isDirectory: true)
     }
 
-    private func layoutFile(_ sessionID: UUID) -> URL {
+    private func layoutFile(_ sessionID: SessionID) -> URL {
         root.appendingPathComponent(sessionID.uuidString).appendingPathExtension(DisplayPaneStoreDefaults.layoutExtension)
     }
 
-    private func cacheDirectory(_ sessionID: UUID) -> URL {
+    private func cacheDirectory(_ sessionID: SessionID) -> URL {
         root.appendingPathComponent(sessionID.uuidString, isDirectory: true)
     }
 }

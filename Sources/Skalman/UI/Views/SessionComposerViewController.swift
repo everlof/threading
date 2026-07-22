@@ -8,7 +8,7 @@ final class SessionComposerViewController: NSViewController {
 
     // MARK: - Properties
 
-    private(set) var projectID: UUID?
+    private(set) var projectID: ProjectID?
 
     private let headingLabel = NSTextField(labelWithString: "")
     private let subheadingLabel = NSTextField(labelWithString: "")
@@ -17,7 +17,6 @@ final class SessionComposerViewController: NSViewController {
     private let accountChip = ChipView()
     private let modelChip = ChipView()
     private let branchChip = ChipView()
-    private let newWorktreeChip = ChipView()
     private let surfaceChip = ChipView()
     private let importChip = ChipView()
 
@@ -32,8 +31,11 @@ final class SessionComposerViewController: NSViewController {
     private var usesNativeUI = false
     private let promptView = PromptView()
 
+    /// What is left of the account the chips currently name.
+    private let usagePanel = AccountUsagePanelView()
+
     private var selectedAgent: AgentKind = AgentDefaults.defaultKind
-    private var selectedAccountHandle: String?
+    private var selectedAccountHandle: AccountHandle = .standard
     private var selectedModel: String?
     private var selectedBranch: String?
 
@@ -60,31 +62,33 @@ final class SessionComposerViewController: NSViewController {
         headings.alignment = .leading
         headings.spacing = Design.Spacing.hairline
 
-        newWorktreeChip.configure(
-            symbolName: ComposerDefaults.newWorktreeSymbol,
-            title: ComposerDefaults.newWorktreeTitle
-        )
-        newWorktreeChip.menuProvider = nil
-
         importChip.menuProvider = nil
 
+        // The choices, then what they will cost, then the task. Reading down the column is
+        // the decision in order — which is the whole reason a session starts here rather than
+        // from a menu item that picked all four defaults silently.
         let chips = NSStackView(views: [
-            agentChip, accountChip, modelChip, branchChip, newWorktreeChip, surfaceChip, importChip
+            agentChip, accountChip, modelChip, branchChip, surfaceChip
         ])
         chips.orientation = .horizontal
         chips.alignment = .centerY
         chips.spacing = Design.Spacing.small
 
-        promptView.placeholder = ComposerDefaults.promptPlaceholder
-        promptView.onSubmit = { [weak self] prompt in
-            self?.start(with: prompt)
+        // Chips shrink their labels to fit a tight row, which with six of them left a row of
+        // bare icons naming nothing. They hold their size here and the row stays short.
+        for chip in [agentChip, accountChip, modelChip, branchChip, surfaceChip] {
+            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
 
-        let stack = NSStackView(views: [headings, chips, promptView])
+        wirePrompt()
+
+        let stack = NSStackView(views: [headings, chips, usagePanel, promptView, importChip])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
         stack.setCustomSpacing(Design.Spacing.large, after: headings)
+        stack.setCustomSpacing(Design.Spacing.large, after: usagePanel)
+        stack.setCustomSpacing(Design.Spacing.large, after: promptView)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(stack)
@@ -94,10 +98,10 @@ final class SessionComposerViewController: NSViewController {
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stack.topAnchor.constraint(
-                equalTo: view.topAnchor,
+                equalTo: view.safeAreaLayoutGuide.topAnchor,
                 constant: ComposerDefaults.topOffset
             ),
-            stack.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
+            stack.widthAnchor.constraint(lessThanOrEqualToConstant: ComposerDefaults.contentWidth),
             stack.leadingAnchor.constraint(
                 greaterThanOrEqualTo: view.leadingAnchor,
                 constant: Design.Spacing.pane
@@ -106,10 +110,44 @@ final class SessionComposerViewController: NSViewController {
                 lessThanOrEqualTo: view.trailingAnchor,
                 constant: -Design.Spacing.pane
             ),
-            promptView.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            promptView.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            usagePanel.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
 
         wireChips()
+        observeUsage()
+    }
+
+    /// A reading arriving after the composer is on screen redraws the panel in place, rather
+    /// than waiting for the next time an account is picked.
+    private func observeUsage() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(usageDidChange),
+            name: .accountUsageDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func usageDidChange() {
+        refreshUsagePanel()
+    }
+
+    private func wirePrompt() {
+        promptView.placeholder = ComposerDefaults.promptPlaceholder
+        promptView.minimumHeight = ComposerDefaults.promptHeight
+
+        promptView.onSubmit = { [weak self] prompt in
+            self?.start(with: prompt)
+        }
+
+        // Kept on disk as it is typed. Until the session starts, this text exists nowhere
+        // else — no transcript, no terminal, no shell history — so an unexpected quit is
+        // otherwise the end of it.
+        promptView.onChange = { [weak self] text in
+            guard let self, let projectID = self.projectID else { return }
+            DraftStore.shared.setDraft(text, for: projectID)
+        }
     }
 
     /// Each chip rebuilds its menu when opened, so a change of agent is reflected everywhere.
@@ -117,14 +155,14 @@ final class SessionComposerViewController: NSViewController {
         agentChip.menuProvider = { [weak self] in self?.agentMenu() ?? NSMenu() }
         agentChip.onSelect = { [weak self] item in
             self?.selectedAgent = item.representedObject as? AgentKind ?? AgentDefaults.defaultKind
-            self?.selectedAccountHandle = nil
+            self?.selectedAccountHandle = .standard
             self?.selectedModel = nil
             self?.refreshChips()
         }
 
         accountChip.menuProvider = { [weak self] in self?.accountMenu() ?? NSMenu() }
         accountChip.onSelect = { [weak self] item in
-            self?.selectedAccountHandle = item.representedObject as? String
+            self?.selectedAccountHandle = item.representedObject as? AccountHandle ?? .standard
             self?.selectedModel = nil
             self?.refreshChips()
         }
@@ -143,13 +181,20 @@ final class SessionComposerViewController: NSViewController {
 
         branchChip.menuProvider = { [weak self] in self?.branchMenu() ?? NSMenu() }
         branchChip.onSelect = { [weak self] item in
-            self?.selectedBranch = item.representedObject as? String
-            self?.refreshChips()
-        }
+            guard let self else { return }
 
-        newWorktreeChip.menuProvider = { [weak self] in
-            self?.createWorktree()
-            return NSMenu()
+            switch item.representedObject as? BranchSelection {
+            case .checkout(let branch):
+                self.selectedBranch = branch
+            case .newWorktree:
+                // Leaves the selection alone: creating a worktree adds a project and moves
+                // the composer to it, so this composer's branch never applies.
+                self.createWorktree()
+            case .thisCheckout, .none:
+                self.selectedBranch = nil
+            }
+
+            self.refreshChips()
         }
 
         importChip.menuProvider = { [weak self] in
@@ -161,7 +206,7 @@ final class SessionComposerViewController: NSViewController {
     // MARK: - Public Methods
 
     /// Points the composer at a project, resetting every choice for it.
-    func show(projectID: UUID?) {
+    func show(projectID: ProjectID?) {
         self.projectID = projectID
 
         guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
@@ -169,10 +214,18 @@ final class SessionComposerViewController: NSViewController {
         }
 
         selectedAgent = AppSettings.shared.defaultAgentKind
-        selectedAccountHandle = nil
+        selectedAccountHandle = .standard
         selectedModel = nil
         selectedBranch = nil
-        promptView.stringValue = ""
+
+        // The choices reset per project; what was typed does not. A half-written prompt is
+        // the user's work, and it is restored whether it was left behind by switching
+        // projects or by the app going away underneath it.
+        promptView.stringValue = DraftStore.shared.draft(for: projectID)
+
+        // Warmed as the composer appears, not as its account menu opens: a fetch started on
+        // the click lands after the menu has been read and dismissed.
+        AccountUsageMenu.prefetch()
 
         headingLabel.stringValue = project.name
         subheadingLabel.stringValue = subheading(for: project)
@@ -227,9 +280,8 @@ final class SessionComposerViewController: NSViewController {
             title: selectedModel ?? ComposerDefaults.defaultModelTitle
         )
 
-        // Offered only for agents whose conversation Skalman may render itself. See
-        // `AgentKind.supportsNativeUI` for why Codex is supported and Claude is deliberately
-        // excluded.
+        // Offered only for agents whose conversation Skalman may render itself — both real
+        // agents, not shells. See `AgentKind.supportsNativeUI`.
         surfaceChip.isHidden = !selectedAgent.supportsNativeUI
         if surfaceChip.isHidden { usesNativeUI = false }
         surfaceChip.configure(
@@ -237,12 +289,37 @@ final class SessionComposerViewController: NSViewController {
             title: usesNativeUI ? ComposerDefaults.nativeTitle : ComposerDefaults.terminalTitle
         )
 
+        refreshUsagePanel(account: account)
+
         let isRepository = projectFolder.map { GitInfo.repositoryRoot(for: $0) != nil } ?? false
         branchChip.isHidden = !isRepository
-        newWorktreeChip.isHidden = !isRepository
         branchChip.configure(
             symbolName: ComposerDefaults.branchSymbol,
             title: selectedBranch ?? currentBranchTitle
+        )
+    }
+
+    /// Draws the chosen account's usage, fetching when the reading has aged out.
+    ///
+    /// The account is passed in when the caller has already resolved it, since resolving one
+    /// scans the filesystem and `refreshChips` runs on every chip change.
+    private func refreshUsagePanel(account: AgentAccount? = nil) {
+        let account = account ?? AgentAccountDiscovery.account(
+            for: selectedAgent,
+            handle: selectedAccountHandle
+        )
+
+        guard let account else {
+            usagePanel.isHidden = true
+            return
+        }
+
+        AccountUsageService.shared.refresh(account)
+
+        usagePanel.show(
+            accountName: account.displayName,
+            usage: AccountUsageService.shared.usage(for: account),
+            error: AccountUsageService.shared.errorMessage(for: account)
         )
     }
 
@@ -283,6 +360,11 @@ final class SessionComposerViewController: NSViewController {
             let item = NSMenuItem(title: account.displayName, action: nil, keyEquivalent: "")
             item.representedObject = account.handle
             item.state = account.handle == selectedAccountHandle ? .on : .off
+
+            // Which login to start on is decided here, so this is where what is left of each
+            // one belongs — not only in the toolbar, which speaks after the choice is made.
+            AccountUsageMenu.decorate(item, for: account)
+
             menu.addItem(item)
         }
 
@@ -312,6 +394,13 @@ final class SessionComposerViewController: NSViewController {
         return menu
     }
 
+    /// Where the session will run: this checkout, another checkout already added, or one
+    /// created now.
+    ///
+    /// Only checkouts are listed, not branches. A branch with nothing standing on it is not a
+    /// place a session can run — offering the repository's whole `git branch` output invited
+    /// picking one that resolved to nothing, and the session then ran here anyway while its
+    /// record claimed otherwise.
     private func branchMenu() -> NSMenu {
         let menu = NSMenu()
         guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
@@ -321,24 +410,30 @@ final class SessionComposerViewController: NSViewController {
         let current = GitInfo.currentBranch(for: project.folderPath)
 
         let thisCheckout = NSMenuItem(
-            title: current.map { "\($0) — this checkout" } ?? project.name,
+            title: current.map { "\($0) — \(ComposerDefaults.thisCheckoutSuffix)" } ?? project.name,
             action: nil,
             keyEquivalent: ""
         )
-        thisCheckout.representedObject = nil
+        thisCheckout.representedObject = BranchSelection.thisCheckout
         thisCheckout.state = selectedBranch == nil ? .on : .off
         menu.addItem(thisCheckout)
 
-        let others = GitWorktree.branches(in: project).filter { $0 != current }
-        guard !others.isEmpty else { return menu }
-
-        menu.addItem(.separator())
-        for branch in others {
-            let item = NSMenuItem(title: branch, action: nil, keyEquivalent: "")
-            item.representedObject = branch
-            item.state = branch == selectedBranch ? .on : .off
+        for sibling in ProjectStore.shared.siblingCheckouts(of: projectID) {
+            let item = NSMenuItem(title: sibling.branch, action: nil, keyEquivalent: "")
+            item.representedObject = BranchSelection.checkout(sibling.branch)
+            item.state = sibling.branch == selectedBranch ? .on : .off
             menu.addItem(item)
         }
+
+        menu.addItem(.separator())
+
+        let newWorktree = NSMenuItem(
+            title: ComposerDefaults.newWorktreeTitle,
+            action: nil,
+            keyEquivalent: ""
+        )
+        newWorktree.representedObject = BranchSelection.newWorktree
+        menu.addItem(newWorktree)
 
         return menu
     }
@@ -459,9 +554,9 @@ final class SessionComposerViewController: NSViewController {
 protocol SessionComposerViewControllerDelegate: AnyObject {
     func sessionComposer(
         _ composer: SessionComposerViewController,
-        startSessionIn projectID: UUID,
+        startSessionIn projectID: ProjectID,
         kind: AgentKind,
-        accountHandle: String?,
+        accountHandle: AccountHandle,
         model: String?,
         branch: String?,
         usesNativeUI: Bool,
@@ -477,8 +572,21 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
     func sessionComposer(
         _ composer: SessionComposerViewController,
         importSession session: ImportableSession,
-        into projectID: UUID
+        into projectID: ProjectID
     )
+}
+
+// MARK: - Branch Selection
+
+/// What the branch chip's menu offers: a place to run, or the action that makes one.
+///
+/// The worktree action lived in a chip of its own, which read as a *state* — one of the
+/// choices in the row, seemingly selected — when it is a thing that happens. Folded in here,
+/// one control answers one question: which checkout does this session run in.
+private enum BranchSelection {
+    case thisCheckout
+    case checkout(String)
+    case newWorktree
 }
 
 // MARK: - Composer Defaults
@@ -486,14 +594,28 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
 /// Only what is specific to this screen. Everything visual comes from `Design`.
 enum ComposerDefaults {
     /// Placed a little above centre, so the composer reads as the start of the work.
-    static let topOffset: CGFloat = 120
+    static let topOffset: CGFloat = 72
+
+    /// Wider than `readableWidth`, which paces prose. This column holds a row of controls
+    /// and two usage bars, and squeezing those to a reading measure is what shrank the chips
+    /// to unlabelled icons.
+    static let contentWidth: CGFloat = 720
+
+    /// The prompt opens several lines tall. The composer owns the whole pane and is replaced
+    /// by the conversation the moment it is used, so there is nothing to be compact for — and
+    /// the size of the box is what says how much of a description is wanted.
+    static let promptHeight: CGFloat = 116
 
     static let branchFieldWidth: CGFloat = 260
     static let branchFieldHeight: CGFloat = 24
 
     static let defaultModelTitle = "Default model"
     static let noBranchTitle = "No branch"
-    static let newWorktreeTitle = "New worktree"
+    static let newWorktreeTitle = "New Worktree…"
+
+    /// Marks the project's own folder in the branch menu, so the default reads as a place
+    /// rather than as one branch name among several.
+    static let thisCheckoutSuffix = "this checkout"
 
     /// Named for what the user sees rather than how it works: "Terminal" and "Chat" describe
     /// the surface, where "PTY" and "stream-json" would describe the plumbing.
@@ -512,5 +634,4 @@ enum ComposerDefaults {
     static let accountSymbol = "person.crop.circle"
     static let modelSymbol = "cpu"
     static let branchSymbol = "arrow.trianglehead.branch"
-    static let newWorktreeSymbol = "plus"
 }

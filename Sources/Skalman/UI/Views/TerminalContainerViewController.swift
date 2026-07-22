@@ -15,7 +15,7 @@ final class TerminalContainerViewController: NSViewController {
 
     private var currentChild: AgentSessionViewController?
     private var currentConversation: ConversationViewController?
-    private(set) var currentSessionID: UUID?
+    private(set) var currentSessionID: SessionID?
 
     /// Settings is shown as a single page centred in the pane; the page list lives in the
     /// window's sidebar, which the settings sections replace, so there is no second sidebar.
@@ -73,7 +73,7 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     /// Shows the composer for a project, replacing whatever session was on screen.
-    func showComposer(projectID: UUID) {
+    func showComposer(projectID: ProjectID) {
         detachCurrentChild()
         currentSessionID = nil
         AgentRuntime.shared.setVisibleSession(nil)
@@ -151,7 +151,7 @@ final class TerminalContainerViewController: NSViewController {
     ///
     /// Selecting a dormant session is the "reopen" gesture: it resumes the prior
     /// conversation by identifier rather than starting a fresh one.
-    func show(sessionID: UUID?, initialPrompt: String? = nil) {
+    func show(sessionID: SessionID?, initialPrompt: String? = nil) {
         guard sessionID != currentSessionID else { return }
 
         detachCurrentChild()
@@ -198,8 +198,21 @@ final class TerminalContainerViewController: NSViewController {
         show(sessionID: sessionID)
     }
 
+    /// Reopens a session on whichever surface it now uses, when it is the one on screen.
+    ///
+    /// The surface switch calls this after tearing the old process down: a session that is
+    /// *not* showing needs nothing, since it opens on its new surface the next time it is
+    /// selected. Clearing `currentSessionID` first is what lets `show` do its work — it
+    /// early-returns for the session already on screen, which is exactly this one.
+    func reopenIfShowing(sessionID: SessionID) {
+        guard sessionID == currentSessionID else { return }
+
+        currentSessionID = nil
+        show(sessionID: sessionID)
+    }
+
     /// Drops the session's terminal if it is showing, returning the pane to a placeholder.
-    func closeTerminal(for sessionID: UUID) {
+    func closeTerminal(for sessionID: SessionID) {
         AgentRuntime.shared.discard(sessionID: sessionID)
 
         guard sessionID == currentSessionID else { return }
@@ -326,7 +339,7 @@ final class TerminalContainerViewController: NSViewController {
         )
     }
 
-    private func showDormantState(for sessionID: UUID) {
+    private func showDormantState(for sessionID: SessionID) {
         guard let agentSession = ProjectStore.shared.session(withID: sessionID) else {
             showEmptyState()
             return
@@ -402,16 +415,16 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     func terminalContainer(
         _ container: TerminalContainerViewController,
         sessionTitleChanged title: String,
-        for sessionID: UUID
+        for sessionID: SessionID
     )
     func terminalContainer(
         _ container: TerminalContainerViewController,
-        sessionDidExit sessionID: UUID,
+        sessionDidExit sessionID: SessionID,
         exitCode: Int32?
     )
     func terminalContainer(
         _ container: TerminalContainerViewController,
-        sessionStateDidChange sessionID: UUID
+        sessionStateDidChange sessionID: SessionID
     )
 }
 

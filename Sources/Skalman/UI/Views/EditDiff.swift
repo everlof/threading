@@ -26,6 +26,15 @@ enum EditDiff {
 
     /// The diff for a tool call, or nil when the tool does not edit a file.
     static func lines(forTool name: String, input: [String: Any]) -> [DiffLine]? {
+        // Codex states its change as a patch rather than as two strings, and a patch already
+        // *is* a diff — reconstructing both sides only to align them again would discard the
+        // alignment it states. Checked before the tool name, since `apply_patch` arrives here
+        // renamed to `Edit`.
+        if let patch = input["patch"] as? String {
+            let lines = CodexPatch.lines(in: patch)
+            return lines.isEmpty ? nil : lines
+        }
+
         switch name {
         case "Edit":
             guard let old = input["old_string"] as? String,

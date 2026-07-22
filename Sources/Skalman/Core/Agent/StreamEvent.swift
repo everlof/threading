@@ -11,7 +11,7 @@ enum StreamEvent {
 
     /// Session established. Carries the identifier the CLI settled on, which for a resume is
     /// not necessarily the one we asked for.
-    case initialised(sessionID: String?, model: String?)
+    case initialised(sessionID: TranscriptID?, model: String?)
 
     /// A block of the in-progress assistant message grew. Used only to show text as it
     /// arrives — the authoritative copy comes in `assistantMessage`.
@@ -69,7 +69,7 @@ extension StreamEvent {
         case "system":
             guard object["subtype"] as? String == "init" else { return .other(type: "system") }
             return .initialised(
-                sessionID: object["session_id"] as? String,
+                sessionID: (object["session_id"] as? String).map(TranscriptID.init),
                 model: object["model"] as? String
             )
 
