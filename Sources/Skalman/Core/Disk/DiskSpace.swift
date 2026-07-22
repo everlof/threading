@@ -4,10 +4,16 @@ import Foundation
 
 /// How much room is left on the volume the projects live on, and whether that is now a problem.
 ///
-/// Exists because an agent has no way to notice a full disk until something fails on it. Telling
-/// it about a cleanup tool it *might* want is close to useless — the tool is only worth thinking
-/// about when the disk is nearly full, which is precisely the fact the agent lacks. So the
-/// pressure is measured here and stated in the session's opening instructions, and only then.
+/// Read for the **Storage page**, not for an agent's instructions. That was tried the other way
+/// round first: the session's opening instructions stated the pressure, so an agent would know
+/// the disk was short. It is the wrong place twice over — the reading is a snapshot taken at
+/// `initialize` and a session that fills the disk does so an hour later, and an agent that runs
+/// out of room learns it from the write that failed, which is a better signal than anything this
+/// could have told it in advance. What the agent needs at that moment is to know a tool exists,
+/// which is static.
+///
+/// The number is worth stating to the *user*, though — "87 GB reclaimable" means something
+/// different beside 14 GB free than beside 800 GB free.
 enum DiskSpace {
 
     /// A volume's room, as the system reports it to an app deciding whether to write.

@@ -248,11 +248,6 @@ protocol MCPToolHandling: AnyObject {
     /// panel — but only when it changed while the agent was away, so a resume does not re-state a
     /// panel the agent's own transcript already reflects. Empty when there is nothing to add.
     func panelState(for sessionID: SessionID) -> String
-
-    /// Text appended to the `initialize` instructions when the disk is short — the one fact that
-    /// turns a cleanup tool from a capability into a suggestion worth acting on. Empty whenever
-    /// there is room, so an ordinary session is told nothing about storage at all.
-    func storagePressure() -> String
 }
 
 extension MCPToolHandling {
@@ -261,7 +256,6 @@ extension MCPToolHandling {
     }
 
     func panelState(for sessionID: SessionID) -> String { "" }
-    func storagePressure() -> String { "" }
 }
 
 // MARK: - Tool Schema

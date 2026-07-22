@@ -185,7 +185,18 @@ enum MCPToolCatalog {
             )
         ],
         instruction: """
-            list_reclaimable_storage reports build output across the user's projects that can             be deleted and rebuilt, with sizes. Reach for it when disk space is short or the             user asks what is taking up space. To act on any of it, call             propose_storage_cleanup with paths taken from that listing: it asks the user, who             approves or declines, and only then does Skalman remove anything. Never delete             these directories yourself with shell commands — the proposal exists so the user             sees what is going and what rebuilding it costs.
+            If a command fails for lack of disk space — "No space left on device", ENOSPC, a \
+            build or install dying partway with a write error — call list_reclaimable_storage \
+            before reporting failure or asking the user to free space by hand. It reports build \
+            output across their projects that can be deleted and rebuilt, with sizes, and their \
+            worktrees are usually holding far more of it than they realise. Also reach for it \
+            when they ask what is taking up space.
+
+            To act on any of it, call propose_storage_cleanup with paths taken from that listing \
+            and a sentence saying what it buys and what has to be rebuilt. It asks the user, who \
+            approves or declines; only then does Skalman remove anything. Never delete these \
+            directories yourself with shell commands — the proposal exists so the user sees what \
+            is going before it goes.
             """
     )
 

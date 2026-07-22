@@ -393,8 +393,7 @@ final class MCPServer {
             // held until the hop returns, which the client already expects for `initialize`.
             DispatchQueue.main.async { [weak self] in
                 let base = MCPToolCatalog.instructions
-                let addendum = (self?.handler?.panelState(for: sessionID) ?? "")
-                    + (self?.handler?.storagePressure() ?? "")
+                let addendum = self?.handler?.panelState(for: sessionID) ?? ""
 
                 completion(Self.result(
                     id: id,

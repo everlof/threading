@@ -18,7 +18,7 @@ There is no title bar — the window controls sit over the top of the sidebar.
 **Project** — a folder you've added. Named after its git repository when there is one, with
 the current branch shown beneath.
 
-**Session** — one Claude Code, Codex, or shell session running inside a project. A session
+**Session** — one Claude Code or Codex conversation running inside a project. A session
 outlives its terminal: when the agent exits, the terminal closes but the session stays in the
 sidebar so you can resume the same conversation later.
 
@@ -238,11 +238,30 @@ Resuming works by session id:
 |-------|--------------|--------|
 | Claude Code | `claude --session-id <uuid> --name <title>` | `claude --resume <uuid>` |
 | Codex | `codex` (id discovered after launch) | `codex resume <uuid>` |
-| Shell | your login shell | starts a new shell |
 
 Claude Code accepts an id chosen up front, so Skalman assigns one. Codex assigns its own,
-which Skalman reads back from the rollout file Codex writes on launch. Shells have no
-conversation to resume, so restarting one opens a fresh shell.
+which Skalman reads back from the rollout file Codex writes on launch.
+
+### The shell drawer
+
+**⌃`** (Control-backtick), or **View ▸ Shell**, opens a shell underneath the session you are
+reading. Drag the strip above it to resize.
+
+It is not a session of its own — shells used to be, and it was the wrong shape: there was no
+conversation to resume, no transcript, and nothing to come back to. It belongs to the session
+instead, and every session has one.
+
+- It opens **where the agent currently is**, not where the session started — a terminal
+  session reports its directory, so a shell opened while the agent is deep in a subpackage
+  starts there. Sessions Skalman renders natively open in the project folder.
+- It uses the **session's theme and font**, so it matches the surface above it.
+- Each session keeps its own shell, and its own answer to whether the drawer is open. The
+  process stays alive while you work elsewhere, so your directory and history are still there
+  when you come back, and it is closed with the session.
+
+Shell sessions from earlier versions are removed when your state is upgraded. They held
+nothing — no conversation, no transcript, and no saved scrollback — and every session gains a
+shell of its own in exchange.
 
 ### Importing
 Conversations you started outside Skalman — in a plain terminal, say — can be adopted into a
@@ -580,7 +599,7 @@ switching sessions switches what the panel shows, and a session that has display
 leaves it closed. A background session that displays an image does not interrupt what you are
 looking at — its image is waiting when you select it, the same way its scrollback is.
 
-Available in Claude Code and Codex sessions. Shell sessions have no agent to call the tool.
+Available in every session, since every session is an agent conversation.
 
 ### How it works
 
@@ -745,7 +764,7 @@ Open with **Cmd+,**.
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
 - **Ask before closing a running session**
-- **Shell path** — used by shell sessions; agent sessions always launch via your login shell
+- **Shell path** — used by the shell drawer (⌃`); agents always launch via your login shell
 
 ### Accounts
 Per-account icons and names. See [Accounts](#accounts).
@@ -847,6 +866,7 @@ recorded about it dying — is what a crash needs explaining.
 | Toggle Sidebar | Cmd+Ctrl+S |
 | Browser | Cmd+Shift+B |
 | Git Review | Cmd+Shift+R |
+| Shell drawer | Ctrl+` |
 | Bigger Font | Cmd++ |
 | Smaller Font | Cmd+- |
 | Full Screen | Cmd+Ctrl+F |

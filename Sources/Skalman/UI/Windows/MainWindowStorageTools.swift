@@ -82,41 +82,6 @@ extension MainWindowController {
         return parts.joined(separator: " · ")
     }
 
-    // MARK: - Pressure
-
-    /// Told to the agent at `initialize`, and **only when the disk is actually short**.
-    ///
-    /// Advertising a cleanup tool is not the same as making it useful. An agent has no way to
-    /// notice a full disk until something fails on it, so a capability it might want is close
-    /// to useless — what it lacks is the fact. This supplies exactly that fact, at the one
-    /// moment it changes what a reasonable agent would do, and says nothing at all otherwise:
-    /// the same "quiet until relevant" rule the rest of the app's surfaces follow.
-    ///
-    /// Silent too when the tools are switched off, since describing a capability a session
-    /// cannot reach only invites it to try.
-    func storagePressure() -> String {
-        guard MCPToolCatalog.isEnabled(MCPToolCatalog.storage),
-              let reading = DiskSpace.homeReading(),
-              reading.isUnderPressure else { return "" }
-
-        let reclaimable = ProjectStore.shared.projects
-            .flatMap { ArtifactScanService.shared.artifacts(for: $0.id) }
-            .reduce(0) { $0 + $1.byteCount }
-
-        let free = Self.storageSize.string(fromByteCount: reading.available)
-        let capacity = Self.storageSize.string(fromByteCount: reading.capacity)
-
-        guard reclaimable > 0 else {
-            return StorageToolStrings.pressureOnly(free: free, capacity: capacity)
-        }
-
-        return StorageToolStrings.pressureWithReclaimable(
-            free: free,
-            capacity: capacity,
-            reclaimable: Self.storageSize.string(fromByteCount: reclaimable)
-        )
-    }
-
     // MARK: - Proposing
 
     /// Puts an agent's proposal to the user, and removes what they approve.
@@ -278,28 +243,6 @@ enum StorageToolStrings {
 
     static func measured(_ relative: String) -> String {
         " · measured \(relative)"
-    }
-
-    /// Stated only while the disk is short. Leads with the number, since that is the part the
-    /// agent could not have known, and names the tool second.
-    static func pressureWithReclaimable(free: String, capacity: String, reclaimable: String) -> String {
-        """
-
-
-        Disk space is low: \(free) free of \(capacity). Skalman has already identified \
-        \(reclaimable) of build output that can be deleted and rebuilt. If a task is short of \
-        room, or the user hits a disk-full error, call list_reclaimable_storage and suggest \
-        what is worth removing — then propose_storage_cleanup to ask them.
-        """
-    }
-
-    static func pressureOnly(free: String, capacity: String) -> String {
-        """
-
-
-        Disk space is low: \(free) free of \(capacity). list_reclaimable_storage reports build \
-        output across the user's projects that can be deleted and rebuilt, if room is needed.
-        """
     }
 
     static func inUse(_ relative: String) -> String {

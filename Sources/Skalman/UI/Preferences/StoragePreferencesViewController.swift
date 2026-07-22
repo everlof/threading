@@ -220,11 +220,22 @@ final class StoragePreferencesViewController: NSViewController {
             return StorageStrings.reclaimable(count: count)
         }
 
-        return StorageStrings.reclaimable(count: count)
+        var caption = StorageStrings.reclaimable(count: count)
             + " · "
             + StorageStrings.measured(
                 Self.relativeDate.localizedString(for: measured, relativeTo: Date())
             )
+
+        // What the total is worth depends entirely on the room left: 87 GB reclaimable means
+        // something different beside 14 GB free than beside 800 GB.
+        if let disk = DiskSpace.homeReading() {
+            caption += " · " + StorageStrings.free(
+                Self.size.string(fromByteCount: disk.available),
+                pressured: disk.isUnderPressure
+            )
+        }
+
+        return caption
     }
 
     /// One checkout: its artifacts largest first, closed by a row that removes the lot.
@@ -442,6 +453,12 @@ private enum StorageStrings {
     /// When the reading was taken. A cached number that does not say its age claims to be live.
     static func measured(_ relative: String) -> String {
         "measured \(relative)"
+    }
+
+    /// Room left on the disk, marked when it is short — the context that turns the total from a
+    /// number into a decision.
+    static func free(_ size: String, pressured: Bool) -> String {
+        pressured ? "only \(size) free" : "\(size) free"
     }
 
     static func built(_ relative: String) -> String {

@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Skalman is a native macOS app for organizing coding-agent sessions, built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+**.
 
 A single window pairs a project sidebar with the selected session's terminal. Each session
-hosts a Claude Code, Codex, or shell process inside a project folder. Sessions outlive their
+hosts a Claude Code or Codex process inside a project folder, with a shell available under it
+on demand. Sessions outlive their
 terminals: when the agent exits, the PTY is torn down but the session record remains so the
 conversation can be resumed later by its agent-assigned identifier.
 
@@ -130,7 +131,7 @@ and already owns the routing table.
 `AgentLauncher` passes a URL embedding it through Claude's `--mcp-config` file or Codex's
 one-run `mcp_servers` overrides, so a tool call arrives already attributed — the URL *is* the
 identity. `AgentSession.id` is the key, not
-`agentSessionID`, which is nil for Codex until discovery and always nil for shells.
+`agentSessionID`, which is nil for Codex until discovery.
 
 Three deliberate choices in the launch line:
 
@@ -222,8 +223,9 @@ Two constraints survive, and the implementation is shaped by them:
 Codex is *not* covered by that measurement — only Claude was probed — so its behaviour on a
 switch is inference from a shared design, not evidence.
 
-The mode is gated behind `AgentKind.supportsNativeUI`, which admits both agents and excludes
-only shells. A session flagged native for an unsupported kind falls back to its terminal.
+The mode is gated behind `AgentKind.supportsNativeUI`, which now admits every kind — it stayed
+a property rather than being deleted with its call sites, because an agent without a structured
+transport would need it back and the branches reading it are the honest place to notice.
 
 **Claude was gated off here for most of this project's life, and no longer is.** The reason it
 was disabled — `claude -p` runs on the user's subscription, and Anthropic's terms reserved
@@ -527,8 +529,15 @@ only what they approve. The gate that keeps this from being an arbitrary-delete 
 **a proposal can only name paths already in the findings** — everything there has passed both of
 the scanner's gates, and they are checked again at the moment of deletion. The tool answers only
 once the user has decided, so the agent's next turn knows the outcome rather than assuming it.
-The instruction tells the agent not to delete these directories with shell commands itself, since
-the whole value of the proposal is that the user sees what is going and what rebuilding it costs.
+
+**The instruction keys on the failure, not on a measurement.** An earlier version stated the disk's
+free space in the `initialize` instructions, so an agent would know it was short. Wrong twice: the
+reading is a snapshot taken at session start, while a session that fills the disk does so an hour
+later — and an agent that runs out of room learns it from the write that failed, which is a better
+signal than any advance warning. What it lacks at that moment is not the fact but the tool, which
+is static. So the group's instruction triggers on the symptom ("No space left on device", ENOSPC,
+a build dying partway) and tells it to look before reporting failure. `DiskSpace` survives for the
+Storage page, where free space is the context that turns "87 GB reclaimable" into a decision.
 
 The page groups **by checkout, not by project**, because six of one project's checkouts hold a
 `web/node_modules` and a row reading `web/node_modules` under a heading reading `sonda` names
@@ -928,6 +937,44 @@ What fork does *not* give is a merge back. Transcripts do not merge; the honest 
 pasting a conclusion into the parent as a message, which is not built. And the first turn
 replays the whole copied context, so forking a large conversation costs real tokens.
 
+### The Shell
+
+A shell is **not a kind of session**. It was one for most of this project's life — a sidebar row
+beside the chats, with a title, a launch record, a branch field and an account slot it could
+never use — for something with no conversation to resume, no transcript, nothing to import and
+no scrollback that was ever persisted. Every one of those fields was a hole, and the code around
+them was a run of branches saying *not for shells*: in the launcher, the replayer, the account
+discovery, the usage service, the brand icons, the migration.
+
+It is now a **drawer under the conversation** (`ShellDrawerViewController`, ⌃`), which is what
+it always was in practice: a place to run a command *about* the conversation you are reading.
+`AgentKind` is down to `.claude` and `.codex`, and `supportsResume`, `supportsAccounts` and
+`supportsNativeUI` collapsed to `true` — that is the measure of how much of the model existed to
+describe the absence.
+
+Three decisions worth keeping:
+
+- **It opens where the agent is**, not where the session started. A terminal session reports its
+  directory over OSC 7, so `TerminalSession.effectiveWorkingDirectory` is asked at the moment the
+  shell starts — an agent that has spent ten minutes inside a subpackage hands its shell that
+  subpackage. The project folder is the fallback, which is also exactly right for a natively
+  rendered conversation: no PTY to ask, and the CLI was launched there anyway.
+- **It takes the session's resolved profile** (`ThemeAssignments.profile(for:)`) — the same call
+  the agent's own terminal makes — so a themed session's drawer matches the surface above it.
+- **The process is the feature.** One shell per session, started on first reveal (a drawer never
+  opened costs nothing), kept alive across session switches, and terminated with the session. A
+  shell that forgot its directory and history on every switch would be worse than the terminal
+  beside it.
+
+The pane is not a split view: the conversation fills it and the drawer is a strip taken off the
+bottom, always installed and zero-high when closed, so every session surface pins its bottom to
+the drawer's top and opening one is a change of constant. A split view would have brought its own
+collapse behaviour, delegate and priorities, all of which would need arguing out of the way.
+
+**Existing shell sessions were dropped, not converted** — there was nothing to convert. The
+version-1 → 2 state migration strips them before decoding, which it must: a kind the model no
+longer has does not decode, and one undecodable session would otherwise fail the whole document.
+
 ### Session Names
 
 A session carries three names, resolved by `displayTitle`:
@@ -1216,7 +1263,7 @@ Sources, per provider:
 
 A window whose `resets_at` has passed keeps its identity but not its percentage — the stale
 value describes the *previous* window, so it renders as `—`, never as pressure. The pill
-hides entirely for accounts with no usage source (shells always; Claude without either
+hides entirely for accounts with no usage source (Claude without either
 source): a control with nothing to say is noise in the always-visible corner.
 
 The same reading is put where an account is **chosen**, because that is the moment the number
