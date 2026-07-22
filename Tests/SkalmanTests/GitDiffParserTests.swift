@@ -240,6 +240,34 @@ final class GitDiffParserTests: XCTestCase {
         XCTAssertTrue(GitDiffParser.files(fromUnifiedDiff: "").isEmpty)
     }
 
+    // MARK: - Numstat Summary
+
+    func testNumstatSummarySumsFilesAndLines() {
+        let numstat = "12\t3\tSources/Foo.swift\n0\t20\tREADME.md\n5\t0\tnew file.txt\n"
+
+        let summary = GitDiffParser.summary(fromNumstat: Data(numstat.utf8))
+
+        XCTAssertEqual(summary.files, 3)
+        XCTAssertEqual(summary.added, 17)
+        XCTAssertEqual(summary.removed, 23)
+        XCTAssertFalse(summary.isClean)
+    }
+
+    func testNumstatSummaryCountsBinaryAsFileWithoutLines() {
+        let numstat = "-\t-\tImage.png\n4\t1\tSources/Foo.swift\n"
+
+        let summary = GitDiffParser.summary(fromNumstat: Data(numstat.utf8))
+
+        XCTAssertEqual(summary.files, 2)
+        XCTAssertEqual(summary.added, 4)
+        XCTAssertEqual(summary.removed, 1)
+    }
+
+    func testNumstatSummaryOfEmptyOutputIsClean() {
+        XCTAssertEqual(GitDiffParser.summary(fromNumstat: Data()), .clean)
+        XCTAssertTrue(GitChangeSummary.clean.isClean)
+    }
+
     // MARK: - Unquote
 
     func testUnquoteOctalEscapes() {

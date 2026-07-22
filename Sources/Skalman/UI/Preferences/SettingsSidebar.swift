@@ -186,8 +186,11 @@ private final class SettingsSidebarRow: NSView {
         let foreground: NSColor
 
         if isSelected {
-            fill = Design.Surface.controlHover
-            foreground = Design.Text.label
+            // A style's accent, so the chosen page is the one thing on the page wearing it.
+            // System keeps the neutral fill it always had.
+            let themed = !AppThemeLibrary.current.isSystem
+            fill = themed ? Design.Surface.accent : Design.Surface.controlHover
+            foreground = themed ? AppThemePalette.color(.ground) : Design.Text.label
         } else if isHovered {
             fill = Design.Surface.controlResting
             foreground = Design.Text.label

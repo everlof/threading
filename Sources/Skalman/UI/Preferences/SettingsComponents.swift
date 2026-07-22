@@ -194,7 +194,12 @@ final class SettingsCard: NSView {
     init(rows: [NSView]) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: Design.Surface.panel, radius: Design.Radius.panel, border: Design.Surface.border)
+        applySurface(
+            fill: Design.Surface.panel,
+            radius: Design.Radius.panel,
+            border: Design.Surface.border,
+            glow: true
+        )
 
         let stack = NSStackView()
         stack.orientation = .vertical

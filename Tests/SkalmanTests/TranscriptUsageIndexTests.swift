@@ -115,6 +115,24 @@ final class TranscriptUsageIndexTests: XCTestCase {
         XCTAssertEqual(total.billedTokens, 20)
     }
 
+    // MARK: - Buckets
+
+    /// Quarter-hours are what let a five-hour window be measured at all; a day-resolution
+    /// series cannot say what a window starting at 14:37 has consumed.
+    func testTimestampsFallIntoQuarterHours() {
+        XCTAssertEqual(TranscriptUsageIndex.quarterHour(of: "2026-07-22T14:37:02.000Z"), "2026-07-22T14:30")
+        XCTAssertEqual(TranscriptUsageIndex.quarterHour(of: "2026-07-22T14:00:00.000Z"), "2026-07-22T14:00")
+        XCTAssertEqual(TranscriptUsageIndex.quarterHour(of: "2026-07-22T14:14:59.000Z"), "2026-07-22T14:00")
+        XCTAssertEqual(TranscriptUsageIndex.quarterHour(of: "2026-07-22T14:59:59.000Z"), "2026-07-22T14:45")
+        XCTAssertEqual(TranscriptUsageIndex.quarterHour(of: "2026-07-22T14:09:00.000Z"), "2026-07-22T14:00")
+    }
+
+    /// A timestamp that is not a timestamp must not crash the scan or invent a bucket.
+    func testMalformedTimestampsAreLeftAlone() {
+        XCTAssertEqual(TranscriptUsageIndex.quarterHour(of: ""), "")
+        XCTAssertEqual(TranscriptUsageIndex.quarterHour(of: "nope"), "nope")
+    }
+
     // MARK: - Grouping
 
     func testSplitsByDayModelAndCheckout() throws {

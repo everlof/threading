@@ -120,6 +120,20 @@ struct GitCommitSummary {
     let refs: [String]
 }
 
+// MARK: - Change Summary
+
+/// A diff reduced to its totals — what the floating status card draws, and all it needs:
+/// producing the hunks to throw them away would spend the parse on every checkout write.
+struct GitChangeSummary: Equatable {
+    let files: Int
+    let added: Int
+    let removed: Int
+
+    var isClean: Bool { files == 0 }
+
+    static let clean = GitChangeSummary(files: 0, added: 0, removed: 0)
+}
+
 // MARK: - Status
 
 /// The checkout's `git status`, reduced to what the review pane needs: which paths changed

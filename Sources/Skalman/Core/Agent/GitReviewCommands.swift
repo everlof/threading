@@ -51,6 +51,18 @@ enum GitReviewCommands {
         ]
     }
 
+    /// Totals only, for the status card: per-file counts with no hunks to parse or cap.
+    /// Index vs worktree when `ref` is nil; `ref` vs worktree otherwise.
+    static func diffNumstat(against ref: String?) -> [String] {
+        var arguments = ["diff", "--numstat", "--no-color", "--no-ext-diff", "--no-textconv"]
+        if let ref { arguments.append(ref) }
+        return arguments
+    }
+
+    static func diffNumstatStaged() -> [String] {
+        ["diff", "--cached", "--numstat", "--no-color", "--no-ext-diff", "--no-textconv"]
+    }
+
     static func stashCreate() -> [String] {
         ["stash", "create"]
     }

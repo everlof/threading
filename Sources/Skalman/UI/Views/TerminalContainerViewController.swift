@@ -26,8 +26,14 @@ final class TerminalContainerViewController: NSViewController {
             guard currentSessionID != oldValue else { return }
             AgentRuntime.shared.setVisibleSession(currentSessionID)
             delegate?.terminalContainer(self, visibleSessionDidChange: currentSessionID)
+            updateGitChangeMonitor()
         }
     }
+
+    /// The floating branch-and-changes card, and the watcher feeding it. The monitor follows
+    /// `currentSessionID`: it exists only while a session's checkout is on screen.
+    private let gitStatusOverlay = GitStatusOverlayView()
+    private var gitChangeMonitor: GitChangeMonitor?
 
     /// Settings is shown as a single page centred in the pane; the page list lives in the
     /// window's sidebar, which the settings sections replace, so there is no second sidebar.
@@ -64,6 +70,7 @@ final class TerminalContainerViewController: NSViewController {
         setupDrawer()
         setupPlaceholder()
         setupComposer()
+        setupGitStatusOverlay()
         showEmptyState()
 
         // A theme change repaints the terminal but not the pane behind it, so the seam would
@@ -365,7 +372,7 @@ final class TerminalContainerViewController: NSViewController {
     private func attach(_ controller: AgentSessionViewController) {
         addChild(controller)
         controller.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(controller.view)
+        view.addSubview(controller.view, positioned: .below, relativeTo: gitStatusOverlay)
 
         // Pinned to the safe area, which the toolbar insets for us.
         NSLayoutConstraint.activate([
@@ -415,7 +422,7 @@ final class TerminalContainerViewController: NSViewController {
     private func attachConversation(_ conversation: ConversationViewController) {
         addChild(conversation)
         conversation.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(conversation.view)
+        view.addSubview(conversation.view, positioned: .below, relativeTo: gitStatusOverlay)
 
         NSLayoutConstraint.activate([
             conversation.view.topAnchor.constraint(equalTo: view.topAnchor),
@@ -517,6 +524,50 @@ final class TerminalContainerViewController: NSViewController {
     }
 }
 
+// MARK: - Git Status Overlay
+
+/// Split from the class body purely for size, like the sidebar's action extension.
+private extension TerminalContainerViewController {
+
+    /// Floats at the pane's top-right corner, above every session surface — installed after
+    /// the static views, and the surfaces attach `positioned: .below` it, so nothing added
+    /// later ever covers it. Clicking is the same gesture as View ▸ Git Review.
+    func setupGitStatusOverlay() {
+        gitStatusOverlay.onOpen = { [weak self] in
+            guard let self else { return }
+            self.delegate?.terminalContainerDidRequestGitReview(self)
+        }
+        view.addSubview(gitStatusOverlay)
+
+        NSLayoutConstraint.activate([
+            gitStatusOverlay.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor,
+                constant: Design.Spacing.inset
+            ),
+            gitStatusOverlay.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor,
+                constant: -Design.Spacing.inset
+            )
+        ])
+    }
+
+    /// Follows the selection: the card and its watcher serve the checkout on screen, and a
+    /// pane showing no session — composer, settings, nothing — shows no card either.
+    func updateGitChangeMonitor() {
+        gitChangeMonitor?.stop()
+        gitChangeMonitor = nil
+        gitStatusOverlay.clear()
+
+        guard let sessionID = currentSessionID,
+              let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
+
+        gitChangeMonitor = GitChangeMonitor(root: project.folderURL) { [weak self] reading in
+            self?.gitStatusOverlay.update(with: reading)
+        }
+        gitChangeMonitor?.start()
+    }
+}
+
 // MARK: - AgentSessionViewControllerDelegate
 
 extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
@@ -574,6 +625,8 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
         _ container: TerminalContainerViewController,
         sessionStateDidChange sessionID: SessionID
     )
+    /// The floating git status card was clicked; the window opens the review tab.
+    func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController)
 }
 
 // MARK: - ConversationViewControllerDelegate

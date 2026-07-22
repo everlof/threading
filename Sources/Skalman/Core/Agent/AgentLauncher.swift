@@ -583,7 +583,11 @@ enum AgentLauncher {
     }
 
     /// The user's login shell, used so agent launches inherit the interactive `PATH`.
-    private static var loginShellPath: String {
+    ///
+    /// Internal rather than private: anything that runs a CLI has the same problem — a GUI app
+    /// does not inherit the interactive `PATH`, and `claude` lives in `~/.local/bin`. See
+    /// `AccountEmailProbe`.
+    static var loginShellPath: String {
         ProcessInfo.processInfo.environment[EnvironmentKeys.shell]
             ?? ProfileStorage.shared.defaultProfile.shellPath
     }

@@ -63,7 +63,11 @@ final class UsagePreferencesViewController: NSViewController {
         ]
 
         if let report, !report.checkouts.isEmpty {
+            sections.append(contentsOf: windowSections(report))
             sections.append(checkoutSection(report))
+            if report.accounts.count > 1 {
+                sections.append(accountSection(report))
+            }
             sections.append(daySection(report))
             sections.append(modelSection(report))
         } else if !TranscriptUsageService.shared.isBuilding {
@@ -117,11 +121,98 @@ final class UsagePreferencesViewController: NSViewController {
         if TranscriptUsageService.shared.isBuilding { return UsageStrings.building }
         guard let report else { return UsageStrings.notBuilt }
 
-        return UsageStrings.turns(Self.number.string(from: NSNumber(value: report.turns)) ?? "")
-            + " · "
-            + UsageStrings.measured(
-                Self.relativeDate.localizedString(for: report.builtAt, relativeTo: Date())
+        var parts = [UsageStrings.turns(Self.number.string(from: NSNumber(value: report.turns)) ?? "")]
+
+        if report.turns > 0 {
+            parts.append(UsageStrings.perTurn(
+                UsageFormat.tokens(report.billedTokens / Int64(report.turns))
+            ))
+        }
+
+        // The cache ratio is the one number that says whether the spend was *avoidable*: reads
+        // are the cheap path, and a high ratio means the conversation was mostly served from
+        // cache rather than re-sent.
+        if report.cachedTokens > 0 {
+            let served = Double(report.cachedTokens)
+                / Double(report.cachedTokens + report.billedTokens)
+            parts.append(UsageStrings.cached(Int((served * 100).rounded())))
+        }
+
+        parts.append(UsageStrings.measured(
+            Self.relativeDate.localizedString(for: report.builtAt, relativeTo: Date())
+        ))
+
+        return parts.joined(separator: " · ")
+    }
+
+    /// The windows the account is actually metered on, with what each has cost.
+    ///
+    /// This is the join the page existed without: the pill says a window is 85% spent, and the
+    /// transcripts say what 85% *was* — 42.3M tokens over 1,204 turns. Neither source can state
+    /// that alone, since the rate-limit API reports no tokens and the transcripts know nothing
+    /// about windows.
+    ///
+    /// Per account, because windows are per account, and only for accounts that report any.
+    private func windowSections(_ report: TranscriptUsageReport) -> [NSView] {
+        AgentAccountDiscovery.accounts(for: .claude).compactMap { account in
+            guard let usage = AccountUsageService.shared.usage(for: account),
+                  !usage.windows.isEmpty else { return nil }
+
+            let rows = usage.windows.compactMap { window -> NSView? in
+                guard let started = windowStart(of: window) else { return nil }
+
+                let spend = report.spend(since: started)
+                let percent = window.percent.map { "\($0)%" } ?? UsageDefaults.unknownValue
+                let resets = window.resetsAt.map {
+                    UsageStrings.resets(UsageFormat.remaining(until: $0))
+                } ?? ""
+
+                return UsageBarRow(
+                    title: "\(window.label) · \(percent)",
+                    detail: [
+                        UsageStrings.turns(
+                            Self.number.string(from: NSNumber(value: spend.turns)) ?? ""
+                        ),
+                        resets
+                    ]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " · "),
+                    value: UsageFormat.tokens(spend.billedTokens),
+                    fraction: window.fraction ?? 0
+                )
+            }
+
+            guard !rows.isEmpty else { return nil }
+
+            return SettingsUI.section(
+                UsageStrings.windows(AccountName.display(for: account)),
+                SettingsCard(rows: rows)
             )
+        }
+    }
+
+    /// When a window opened, worked back from its reset and its length — the reset is reported,
+    /// the start is not.
+    private func windowStart(of window: AccountUsage.Window) -> Date? {
+        guard let resetsAt = window.resetsAt, let duration = window.windowDuration else {
+            return nil
+        }
+        return resetsAt.addingTimeInterval(-duration)
+    }
+
+    private func accountSection(_ report: TranscriptUsageReport) -> NSView {
+        let largest = report.accounts.first?.billedTokens ?? 1
+
+        let rows = report.accounts.map { account in
+            UsageBarRow(
+                title: account.name,
+                detail: nil,
+                value: UsageFormat.tokens(account.billedTokens),
+                fraction: Double(account.billedTokens) / Double(max(largest, 1))
+            )
+        }
+
+        return SettingsUI.section(UsageStrings.byAccount, SettingsCard(rows: rows))
     }
 
     /// Checkouts, largest first, each with a bar so the shares read without arithmetic.
@@ -205,6 +296,10 @@ private enum UsageStrings {
     static let rebuild = "Rebuild"
 
     static let byCheckout = "By checkout"
+    static let byAccount = "By account"
+
+    static func windows(_ account: String) -> String { "Rate limits · \(account)" }
+    static func resets(_ remaining: String) -> String { "resets in \(remaining)" }
     static let byDay = "By day"
     static let byModel = "By model"
 
@@ -212,5 +307,7 @@ private enum UsageStrings {
     static let modelLimit = 8
 
     static func turns(_ count: String) -> String { "\(count) turns" }
+    static func perTurn(_ tokens: String) -> String { "\(tokens)/turn" }
+    static func cached(_ percent: Int) -> String { "\(percent)% served from cache" }
     static func measured(_ relative: String) -> String { "measured \(relative)" }
 }

@@ -435,6 +435,10 @@ final class MainWindowController: NSWindowController {
         sessionCoordinator.addProject()
     }
 
+    func newProject() {
+        sessionCoordinator.newProject()
+    }
+
     /// Closes the current session's terminal, leaving it dormant and resumable.
     func closeCurrentSession() {
         sessionCoordinator.closeCurrentSession()
@@ -660,6 +664,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
     ) {
         sidebarViewController.refreshRows()
         NotificationCenter.default.post(TerminalSessionDidEnd(sessionID: sessionID))
+    }
+
+    func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController) {
+        showReview()
     }
 
     func terminalContainer(

@@ -48,14 +48,19 @@ enum JSONLReader {
             consumed += chunk.count
             buffer.append(chunk)
 
-            while let index = buffer.firstIndex(of: newline) {
-                let line = buffer.prefix(upTo: index)
-
-                // Re-based, because slicing `Data` keeps the original indices.
-                buffer = Data(buffer.suffix(from: buffer.index(after: index)))
+            // Lines are handed out as slices and the buffer is compacted **once per chunk**,
+            // not once per line. Rebuilding `Data` after every line is quadratic in the chunk's
+            // length, which is invisible on a short head-read and ruinous over a gigabyte: it
+            // was the difference between four seconds and five minutes across this corpus.
+            var lineStart = buffer.startIndex
+            while let index = buffer[lineStart...].firstIndex(of: newline) {
+                let line = buffer[lineStart..<index]
+                lineStart = buffer.index(after: index)
 
                 if !line.isEmpty, !handle(line) { return }
             }
+
+            buffer.removeSubrange(buffer.startIndex..<lineStart)
         }
 
         // A trailing record with no newline is still a record.

@@ -564,16 +564,43 @@ extension ProjectSidebarViewController {
 /// menu commands, and the per-row hover menu. Split from the class body purely for size.
 private extension ProjectSidebarViewController {
 
+    /// The `+` button offers both ways in: a folder that exists, or one made on the spot.
     @objc private func addProjectClicked() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        panel.message = "Choose a folder to add as a project."
+        let menu = NSMenu()
 
-        panel.begin { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }
+        let scratch = NSMenuItem(
+            title: "Start from Scratch…",
+            action: #selector(startFromScratchClicked),
+            keyEquivalent: ""
+        )
+        scratch.target = self
+        scratch.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        menu.addItem(scratch)
+
+        let existing = NSMenuItem(
+            title: "Use an Existing Folder…",
+            action: #selector(useExistingFolderClicked),
+            keyEquivalent: ""
+        )
+        existing.target = self
+        existing.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        menu.addItem(existing)
+
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: addButton.bounds.maxY),
+            in: addButton
+        )
+    }
+
+    @objc private func startFromScratchClicked() {
+        ProjectFolderPrompt.createNewFolder { [weak self] url in
+            self?.addProject(folderURL: url)
+        }
+    }
+
+    @objc private func useExistingFolderClicked() {
+        ProjectFolderPrompt.chooseExistingFolder { [weak self] url in
             self?.addProject(folderURL: url)
         }
     }

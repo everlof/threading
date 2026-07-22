@@ -61,6 +61,58 @@ final class AppThemeTests: XCTestCase {
         }
     }
 
+    // MARK: - Material
+
+    /// The System theme's geometry is the geometry the app always had. These are the literals
+    /// `Design.Radius` held before it read a theme.
+    func testSystemGeometryIsUnchanged() {
+        AppThemePalette.set(.system)
+
+        XCTAssertEqual(Design.Radius.panel, 12)
+        XCTAssertEqual(Design.Radius.control, 8)
+        XCTAssertEqual(Design.Radius.border, 1)
+        XCTAssertEqual(Design.Radius.pill(height: 26), 13, "a System pill is still fully rounded")
+    }
+
+    /// The point of the material layer: two themes that differ only in hue read as one app in
+    /// two tints. A style has to change the *silhouette* as well.
+    func testEveryStyleHasItsOwnSilhouette() {
+        for theme in AppThemeStyles.all {
+            XCTAssertNotEqual(
+                theme.material, AppTheme.Material.system,
+                "\(theme.name) has the same geometry as System, so it is only a tint"
+            )
+        }
+    }
+
+    func testAStyleSquaresItsPillsWhenItSquaresEverythingElse() {
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        XCTAssertEqual(Design.Radius.pill(height: 26), 0, "Swiss left its chips rounded")
+
+        AppThemePalette.set(.system)
+        XCTAssertEqual(Design.Radius.pill(height: 26), 13)
+    }
+
+    /// A glow is opt-in per theme; a style without one must not inherit a halo from the last.
+    func testOnlyThemesThatAskForAGlowHaveOne() {
+        XCTAssertNotNil(AppThemeStyles.cyberpunk.material.glow)
+        XCTAssertNil(AppThemeStyles.swissMinimalist.material.glow)
+        XCTAssertNil(AppTheme.system.material.glow)
+    }
+
+    /// The accent has to be *stated* for the surfaces that carry a style's identity — the
+    /// selected row, the chips, the focus. Derived-from-label greys are what made the first
+    /// pass read as the same app in a different tint.
+    func testStylesStateTheirOwnControlFills() {
+        for theme in AppThemeStyles.all {
+            XCTAssertNotNil(
+                theme.roles[.controlResting],
+                "\(theme.name) leaves its controls to the grey derivation"
+            )
+            XCTAssertNotNil(theme.roles[.accent], "\(theme.name) states no accent")
+        }
+    }
+
     // MARK: - Dynamic Resolution
 
     /// The measured fact the whole refactor rests on: a themed colour re-resolves when the

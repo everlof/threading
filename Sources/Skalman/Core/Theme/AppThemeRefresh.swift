@@ -16,10 +16,46 @@ import ObjectiveC
 private final class RecordedSurface {
     let fill: NSColor
     let border: NSColor?
+    /// Recorded because a theme changes a surface's *shape* as well as its colour, and a layer
+    /// keeps whatever radius it was last given.
+    let radius: RecordedRadius
+    let glow: Bool
 
-    init(fill: NSColor, border: NSColor?) {
+    init(fill: NSColor, border: NSColor?, radius: CGFloat, glow: Bool) {
         self.fill = fill
         self.border = border
+        self.radius = RecordedRadius(matching: radius)
+        self.glow = glow
+    }
+}
+
+/// *Which token* a caller asked for, not the number it resolved to.
+///
+/// A call site passes `Design.Radius.panel`, which is already a `CGFloat` by the time it
+/// arrives — so replaying the recorded number would re-apply the previous theme's geometry
+/// forever. Classifying it at record time is what lets the re-apply ask the *current* theme
+/// again. A radius matching neither token is a deliberate literal and is kept as given.
+private enum RecordedRadius {
+    case panel
+    case control
+    case fixed(CGFloat)
+
+    init(matching value: CGFloat) {
+        if value == Design.Radius.panel {
+            self = .panel
+        } else if value == Design.Radius.control {
+            self = .control
+        } else {
+            self = .fixed(value)
+        }
+    }
+
+    var current: CGFloat {
+        switch self {
+        case .panel: return Design.Radius.panel
+        case .control: return Design.Radius.control
+        case .fixed(let value): return value
+        }
     }
 }
 
@@ -35,14 +71,21 @@ extension NSView {
     /// Re-applies whatever `applySurface` last set, resolving its colours again.
     fileprivate func reapplyRecordedSurface() {
         guard let recorded = recordedSurface else { return }
-        layer?.backgroundColor = recorded.fill.cgColor
-        if let border = recorded.border { layer?.borderColor = border.cgColor }
+        // Re-run the whole application rather than only the fill: radius, border weight and the
+        // halo are all theme-derived, and a style that changed only the colours would leave
+        // every card wearing the previous theme's silhouette.
+        applySurface(
+            fill: recorded.fill,
+            radius: recorded.radius.current,
+            border: recorded.border,
+            glow: recorded.glow
+        )
     }
 
     /// Remembers the colours a surface was drawn with. Called by `applySurface`, so its
     /// eighteen call sites need no change of their own.
-    func recordSurface(fill: NSColor, border: NSColor?) {
-        recordedSurface = RecordedSurface(fill: fill, border: border)
+    func recordSurface(fill: NSColor, border: NSColor?, radius: CGFloat, glow: Bool) {
+        recordedSurface = RecordedSurface(fill: fill, border: border, radius: radius, glow: glow)
     }
 
     /// The re-apply on its own, for the test that pins the `CGColor` freeze this exists to fix.

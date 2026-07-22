@@ -54,6 +54,36 @@ struct AppTheme: Codable, Equatable {
     /// The roles this theme states. Everything absent is derived — see `resolved`.
     let roles: [AppThemeRole: NSColor]
 
+    /// How surfaces are *shaped*, as opposed to coloured.
+    ///
+    /// Added because two themes that differ only in hue read as one app in two tints — which
+    /// is what the first pass was. A style's identity is carried as much by its silhouette as
+    /// its palette: Swiss Minimalist is hard edges and hairline rules, Cyberpunk is a tight
+    /// radius with a neon halo, and Neumorphism is *nothing but* material. Colour alone cannot
+    /// tell those apart.
+    let material: Material
+
+    /// Radii, border weight and an optional glow.
+    struct Material: Codable, Equatable {
+        /// Containers holding content — cards, the prompt box.
+        var panelRadius: CGFloat = 12
+        /// Smaller things nested inside them — chips, swatches.
+        var controlRadius: CGFloat = 8
+        var borderWidth: CGFloat = 1
+
+        /// A halo behind panels, in one of the theme's own colours. Nil for most styles: a
+        /// glow is a strong statement and reads as a mistake anywhere it is not deliberate.
+        var glow: Glow?
+
+        static let system = Material()
+    }
+
+    struct Glow: Codable, Equatable {
+        let role: AppThemeRole
+        let radius: CGFloat
+        let opacity: Double
+    }
+
     enum Mode: String, Codable {
         case light, dark
 
@@ -71,7 +101,8 @@ struct AppTheme: Codable, Equatable {
         name: "System",
         mode: .light,
         summary: "Follows macOS — light, dark, and your accent colour.",
-        roles: [:]
+        roles: [:],
+        material: .system
     )
 
     var isSystem: Bool { id == .system }
@@ -129,7 +160,7 @@ struct AppTheme: Codable, Equatable {
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, mode, summary, roles
+        case id, name, mode, summary, roles, material
     }
 
     init(
@@ -137,13 +168,15 @@ struct AppTheme: Codable, Equatable {
         name: String,
         mode: Mode,
         summary: String?,
-        roles: [AppThemeRole: NSColor]
+        roles: [AppThemeRole: NSColor],
+        material: Material = .system
     ) {
         self.id = id
         self.name = name
         self.mode = mode
         self.summary = summary
         self.roles = roles
+        self.material = material
     }
 
     /// Roles are written as a hex map keyed by the role's own name, so a theme document is
@@ -164,6 +197,7 @@ struct AppTheme: Codable, Equatable {
             parsed[role] = color
         }
         roles = parsed
+        material = try container.decodeIfPresent(Material.self, forKey: .material) ?? .system
     }
 
     func encode(to encoder: Encoder) throws {
@@ -176,6 +210,7 @@ struct AppTheme: Codable, Equatable {
         var hexes: [String: String] = [:]
         for (role, color) in roles { hexes[role.rawValue] = color.hexString }
         try container.encode(hexes, forKey: .roles)
+        try container.encode(material, forKey: .material)
     }
 }
 

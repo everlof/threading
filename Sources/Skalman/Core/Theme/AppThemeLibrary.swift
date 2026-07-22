@@ -65,6 +65,17 @@ enum AppThemeLibrary {
         let restored = stored.flatMap { theme(withID: AppThemeID($0)) } ?? AppTheme.system
         current = restored
         AppThemePalette.set(restored)
+        applyAppearance(for: restored)
+    }
+
+    /// Pins the system appearance to the theme's own mode.
+    ///
+    /// Shared by `restore` and `apply`, because leaving it out of the launch path is a bug that
+    /// hides: a dark style launched under a dark system looks correct by luck, and the same
+    /// build launches a *light* style as a white app wearing dark scrollers, dark menus and a
+    /// dark switch. Every system-drawn control follows this and nothing else.
+    private static func applyAppearance(for theme: AppTheme) {
+        NSApp.appearance = theme.isSystem ? nil : theme.mode.appearance
     }
 
     /// Switches the app's theme and repaints everything already on screen.
@@ -78,7 +89,7 @@ enum AppThemeLibrary {
         // A dark theme under the light system appearance gets light scrollers, menus and text
         // selection drawn over it, which is the give-away that a theme is a paint job. Setting
         // the app's appearance is what makes the system-drawn parts follow.
-        NSApp.appearance = theme.isSystem ? nil : theme.mode.appearance
+        applyAppearance(for: theme)
 
         AppThemeRefresh.repaintEverything()
         NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))

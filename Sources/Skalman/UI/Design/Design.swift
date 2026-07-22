@@ -41,12 +41,28 @@ enum Design {
 
     enum Radius {
         /// Panels, prompt boxes, anything holding content.
-        static let panel: CGFloat = 12
+        ///
+        /// Read from the current theme rather than fixed, because a style's silhouette carries
+        /// as much of its identity as its palette — Swiss Minimalist is hard edges, and two
+        /// themes sharing one geometry read as one app in two tints. The System theme returns
+        /// exactly the values these were.
+        static var panel: CGFloat { AppThemePalette.current.material.panelRadius }
         /// Smaller containers nested inside a panel.
-        static let control: CGFloat = 8
+        static var control: CGFloat { AppThemePalette.current.material.controlRadius }
+
+        /// Hairline in most themes; a style may draw heavier rules.
+        static var border: CGFloat { AppThemePalette.current.material.borderWidth }
 
         /// Fully rounded, for pill-shaped controls of a known height.
-        static func pill(height: CGFloat) -> CGFloat { height / 2 }
+        /// Fully rounded — unless a style says otherwise.
+        ///
+        /// A pill is a shape decision, and a theme that squares every panel and leaves five
+        /// pills floating on it has two conventions on one screen. Swiss Minimalist squares
+        /// its chips for the same reason it squares its cards: the grid is the idea. System
+        /// keeps `height / 2` exactly.
+        static func pill(height: CGFloat) -> CGFloat {
+            AppThemePalette.current.isSystem ? height / 2 : min(height / 2, control)
+        }
     }
 
     // MARK: - Size
@@ -264,17 +280,41 @@ extension NSView {
     /// The remembering is here rather than at the call sites because a `CGColor` is frozen at
     /// assignment: a themed colour handed to a layer stops being themed the moment it lands.
     /// Every one of this method's callers gets the re-apply for free.
-    func applySurface(fill: NSColor, radius: CGFloat, border: NSColor? = nil) {
+    /// `glow: true` marks a surface as a *panel* — the theme's halo, if it has one, is drawn
+    /// behind it. Off by default, because a glow on twenty colour swatches is a mistake and on
+    /// a settings card is the point.
+    func applySurface(
+        fill: NSColor,
+        radius: CGFloat,
+        border: NSColor? = nil,
+        glow: Bool = false
+    ) {
         wantsLayer = true
         layer?.cornerCurve = .continuous
         layer?.cornerRadius = radius
         layer?.backgroundColor = fill.cgColor
 
         if let border {
-            layer?.borderWidth = 1
+            layer?.borderWidth = Design.Radius.border
             layer?.borderColor = border.cgColor
         }
 
-        recordSurface(fill: fill, border: border)
+        applyThemeGlow(glow)
+        recordSurface(fill: fill, border: border, radius: radius, glow: glow)
+    }
+
+    private func applyThemeGlow(_ wantsGlow: Bool) {
+        guard wantsGlow, let spec = AppThemePalette.current.material.glow else {
+            // Cleared rather than skipped: switching *away* from a glowing theme has to take
+            // the halo with it, and a layer keeps its shadow until told otherwise.
+            layer?.shadowOpacity = 0
+            return
+        }
+
+        layer?.masksToBounds = false
+        layer?.shadowColor = AppThemePalette.current.resolved(spec.role).cgColor
+        layer?.shadowRadius = spec.radius
+        layer?.shadowOpacity = Float(spec.opacity)
+        layer?.shadowOffset = .zero
     }
 }

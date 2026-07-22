@@ -76,7 +76,8 @@ final class PromptView: NSView {
         applySurface(
             fill: Design.Surface.panel,
             radius: Design.Radius.panel,
-            border: Design.Surface.border
+            border: Design.Surface.border,
+            glow: true
         )
 
         setupTextView()

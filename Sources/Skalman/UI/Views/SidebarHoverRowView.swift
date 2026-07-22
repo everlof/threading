@@ -45,6 +45,38 @@ final class SidebarHoverRowView: NSTableRowView {
 
     // MARK: - Drawing
 
+    /// Fills a selected row with the theme's accent.
+    ///
+    /// This is the single most identity-carrying surface in the window, and the first pass left
+    /// it to AppKit — so a Swiss Minimalist app whose whole identity is "one red accent" showed
+    /// a grey selection, and Cyberpunk's neon appeared nowhere at all. A style that recolours
+    /// the backdrop and leaves every foreground cue neutral reads as the same app in a
+    /// different tint, which is exactly what it was.
+    ///
+    /// Under **System** this defers to `super` entirely, so the stock source-list selection —
+    /// the user's own accent, its vibrancy, its unemphasised grey — is untouched.
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard !AppThemeLibrary.current.isSystem else {
+            return super.drawSelection(in: dirtyRect)
+        }
+        guard isSelected else { return }
+
+        // Full accent while the sidebar has focus, muted when it does not — the same two
+        // strengths AppKit distinguishes, so a background window does not shout.
+        let fill = isEmphasized ? Design.Surface.accent : AppThemePalette.color(.accentMuted)
+        fill.setFill()
+
+        let shape = bounds.insetBy(
+            dx: SidebarRowDefaults.hoverHighlightInsetX,
+            dy: SidebarRowDefaults.hoverHighlightInsetY
+        )
+        NSBezierPath(
+            roundedRect: shape,
+            xRadius: Design.Radius.control,
+            yRadius: Design.Radius.control
+        ).fill()
+    }
+
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
 

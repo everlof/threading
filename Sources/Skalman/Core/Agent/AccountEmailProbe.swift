@@ -48,10 +48,14 @@ enum AccountEmailProbe {
 
         guard !pending.isEmpty else { return }
 
+        // Read on the main actor and carried in: the shell path comes from the profile store,
+        // which the background work must not reach into.
+        let shell = AgentLauncher.loginShellPath
+
         DispatchQueue.global(qos: .utility).async {
             var found: [String: String] = [:]
             for account in pending {
-                if let email = probe(account) { found[account.id.rawValue] = email }
+                if let email = probe(account, shell: shell) { found[account.id.rawValue] = email }
             }
 
             guard !found.isEmpty else { return }
@@ -67,9 +71,9 @@ enum AccountEmailProbe {
     ///
     /// The account is selected the same way a launch selects one — `CLAUDE_CONFIG_DIR`, unset
     /// for the default — so this asks about exactly the login a session would run as.
-    private static func probe(_ account: AgentAccount) -> String? {
+    private static func probe(_ account: AgentAccount, shell: String) -> String? {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: AgentLauncher.loginShellPath)
+        process.executableURL = URL(fileURLWithPath: shell)
 
         let redirect = account.isDefault
             ? "env -u \(AgentKind.claude.accountEnvironmentKey)"

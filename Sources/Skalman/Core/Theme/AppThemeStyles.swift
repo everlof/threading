@@ -19,20 +19,31 @@ enum AppThemeStyles {
 
     static let all: [AppTheme] = [cyberpunk, swissMinimalist]
 
-    /// High-contrast neon on near-black. The most demanding palette-only style: if this reads
-    /// as Cyberpunk with no glow, no glitch and no monospace display face, the approach works.
+    /// High-contrast neon on near-black.
+    ///
+    /// States its own `controlResting`/`controlHover` rather than letting them derive from the
+    /// label: the derivation is `label` at 8%, which is a grey, and a grey control on a neon
+    /// theme is how the first pass ended up looking like the same app in a different tint.
+    /// Here they are the accent, held far down — so every hoverable thing glows faintly green
+    /// instead of going pale.
     static let cyberpunk = AppTheme(
         id: AppThemeID("cyberpunk"),
         name: "Cyberpunk",
         mode: .dark,
         summary: "Neon on black, high contrast, terminal-forward.",
         roles: [
-            .ground: hex("#0A0A0F"),
-            .surface: hex("#12121A"),
-            .panel: hex("#1C1C2E"),
-            .border: hex("#2A2A3A"),
-            .label: hex("#E0E0E0"),
+            .ground: hex("#07070B"),
+            .surface: hex("#0D0D14"),
+            .panel: hex("#14142A"),
+            .elevated: hex("#1B1B36"),
+            .border: hex("#2E2E5A"),
+            .divider: hex("#1F1F3A"),
+            .label: hex("#E6FFF4"),
             .accent: hex("#00FF88"),
+            .accentMuted: hex("#00FF88").withAlphaComponent(0.18),
+            .controlResting: hex("#00FF88").withAlphaComponent(0.10),
+            .controlHover: hex("#00FF88").withAlphaComponent(0.20),
+            .selection: hex("#00FF88").withAlphaComponent(0.30),
             .statusPositive: hex("#00FF88"),
             .statusWarning: hex("#FFB000"),
             .statusNegative: hex("#FF3366"),
@@ -40,7 +51,15 @@ enum AppThemeStyles {
             .syntaxType: hex("#00D4FF"),
             .syntaxString: hex("#00FF88"),
             .syntaxNumber: hex("#FFB000")
-        ]
+        ],
+        // Tight corners and a neon halo behind every panel — the one thing that makes this read
+        // as Cyberpunk rather than as "a dark theme".
+        material: AppTheme.Material(
+            panelRadius: 3,
+            controlRadius: 2,
+            borderWidth: 1,
+            glow: AppTheme.Glow(role: .accent, radius: 10, opacity: 0.28)
+        )
     )
 
     /// International Typographic Style: paper white, black text, one red accent, nothing else.
@@ -53,19 +72,31 @@ enum AppThemeStyles {
         summary: "Paper white, black type, a single red accent.",
         roles: [
             .ground: hex("#FFFFFF"),
-            .surface: hex("#F4F4F4"),
-            .panel: hex("#FFFFFF"),
-            .border: hex("#D4D4D4"),
+            .surface: hex("#FFFFFF"),
+            .panel: hex("#FAFAFA"),
+            .elevated: hex("#FFFFFF"),
+            // A rule you can actually see. The style is built from black lines on white, so a
+            // pale system-grey hairline is the one thing it cannot have.
+            .border: hex("#111111"),
+            .divider: hex("#111111").withAlphaComponent(0.18),
             .label: hex("#111111"),
-            .accent: hex("#DC2626"),
-            .statusPositive: hex("#15803D"),
+            .accent: hex("#D6180B"),
+            .accentMuted: hex("#D6180B").withAlphaComponent(0.14),
+            .controlResting: hex("#111111").withAlphaComponent(0.05),
+            .controlHover: hex("#111111").withAlphaComponent(0.10),
+            .selection: hex("#D6180B").withAlphaComponent(0.22),
+            .statusPositive: hex("#0F7A34"),
             .statusWarning: hex("#B45309"),
-            .statusNegative: hex("#DC2626"),
+            .statusNegative: hex("#D6180B"),
+            // Type over colour: the International Style sets information in weight and
+            // position, not in six hues, so code is black with one red for strings.
             .syntaxKeyword: hex("#111111"),
-            .syntaxType: hex("#525252"),
-            .syntaxString: hex("#DC2626"),
-            .syntaxNumber: hex("#525252")
-        ]
+            .syntaxType: hex("#4A4A4A"),
+            .syntaxString: hex("#D6180B"),
+            .syntaxNumber: hex("#4A4A4A")
+        ],
+        // Square. The grid is the whole idea, and a 12pt radius rounds it away.
+        material: AppTheme.Material(panelRadius: 0, controlRadius: 0, borderWidth: 1, glow: nil)
     )
 
     /// Force-unwrapped deliberately: these are literals in this file, so a bad one is a build

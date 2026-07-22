@@ -28,12 +28,15 @@ when creating a session. See [Accounts](#accounts).
 ## Projects
 
 ### Adding
-- **Add Project** button at the bottom of the sidebar
-- **Project > Add Project…** (Cmd+Shift+N)
+- **Add Project** button at the bottom of the sidebar — offers **Start from Scratch…**
+  (name a new folder and Skalman creates it) and **Use an Existing Folder…**
+- **Project > New Project…** — create the folder from scratch
+- **Project > Add Existing Project…** (Cmd+Shift+N) — choose a folder that already exists
 - Drag a folder onto the sidebar, or onto the app icon
 
 Adding a project selects it, opening its composer so the first session is configured like
-every other one.
+every other one. Starting from scratch never replaces anything: if a folder with the chosen
+name already exists, it is adopted as-is.
 
 ### Repositories, worktrees and monorepos
 A project is a **folder**, not a repository — because a repository can have several checkouts
@@ -175,6 +178,11 @@ by the conversation the moment you send the first message, so it costs nothing t
 The chips choose the agent, account, model and, in a git repository, **which checkout it runs
 in**. Beneath them, the chosen account's rate limits are drawn in full — see
 [Usage when picking an account](#usage-when-picking-an-account).
+
+The model chip names the model the session will **actually run on** — `Fable 5 · 1M`, not
+"Default" — read from whatever the selected account is configured to use. Its menu marks that
+one *(account default)*, so choosing it explicitly and leaving it alone are the same thing. It
+only says "Default model" when the account states no model at all.
 
 The branch chip lists places, not branch names: this checkout (the default, always first),
 any other checkout of the same repository you have added, and **New Worktree…** at the
@@ -331,6 +339,24 @@ directory. Skalman finds these automatically and offers each one when you create
 
 If an agent has only one login, nothing changes — it stays a single menu item. With more than
 one, **New … Session** becomes a submenu listing the accounts.
+
+### How accounts are named
+
+Where you *pick* an account — the composer's chip and its menu, and **Move to Account** — each
+login is named after the person, derived from the address the CLI is signed in as:
+`daniel.block3@example.com` shows as **Daniel Block**. Aliases are named after the agent
+(`claude-dblock`, `claude-vlundborg`), which makes two logins differ by a few letters in the
+middle of a word; the address is what actually tells them apart. Two logins belonging to the
+same person fall back to showing the addresses, since that is the one thing guaranteed to
+differ.
+
+Your alias still names sessions started on that account, and is still what you edit in
+**Settings ▸ Accounts**.
+
+Each account in that menu also carries a **ring** showing how much of its most-pressed window
+is spent — grey while there is room, orange past three quarters, red when it is nearly gone.
+The percentages are still written out beside it; the ring is there so three accounts can be
+compared at a glance instead of by reading six numbers.
 
 ### Naming
 If you have a shell alias pointing at an account, Skalman uses your name for it. Given:
@@ -643,6 +669,15 @@ without leaving the terminal. You can stage and commit from it; **discarding is 
 not offered** — everything the pane can do is reversible by the control beside it, and
 throwing away a change an agent just made is not.
 
+### The status card
+
+Whenever the selected session's project is a git checkout, a small floating card sits at the
+session pane's top-right corner showing the current branch and the uncommitted totals
+(`+N −M`, untracked files included). It updates live as the agent writes — the same watcher
+the Review tab uses — and **clicking it opens Git Review**, so the diff is one click away
+without asking the agent for it. A clean checkout shows just the branch; a project that is
+not a repository shows no card at all.
+
 The chip at the top picks what is compared:
 
 - **Uncommitted** (the default) — everything since the last commit: staged, unstaged and
@@ -819,8 +854,18 @@ projection appears after Skalman has watched the window for a while.
 Where your tokens went, read from the agents' own transcripts — the question the toolbar's
 usage pill provokes and cannot answer. It says the week is 85% spent; this says what spent it.
 
-Grouped by **checkout** first, since a repository's worktrees are separate places doing
-separate work, then by day and by model:
+It opens with the windows you are actually metered on — the join neither source can make
+alone, since the rate-limit API reports no tokens and the transcripts know nothing about
+windows:
+
+```
+RATE LIMITS · EVERLOF
+  5 hours · 62%        4.0M      513 turns · resets in 1h 48m
+  7 days · 85%        62.0M   10,865 turns · resets in 17h
+```
+
+Then by **checkout**, since a repository's worktrees are separate places doing separate work,
+and by account, day and model:
 
 ```
 300.0M                                    [Rebuild]
@@ -923,7 +968,7 @@ recorded about it dying — is what a crash needs explaining.
 | Action | Shortcut |
 |--------|----------|
 | New Session (opens the composer) | Cmd+N |
-| Add Project | Cmd+Shift+N |
+| Add Existing Project | Cmd+Shift+N |
 | Close Session | Cmd+W |
 
 ### Editing

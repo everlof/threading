@@ -46,19 +46,21 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     }
 
     func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        panel.message = "Choose a folder to add as a project."
-
-        panel.begin { [weak self] response in
-            guard response == .OK, let url = panel.url, let self else { return }
-            let project = ProjectStore.shared.addProject(folderURL: url)
-            self.sidebar.reload()
-            self.sidebar.select(projectID: project.id)
+        ProjectFolderPrompt.chooseExistingFolder { [weak self] url in
+            self?.adoptProject(at: url)
         }
+    }
+
+    func newProject() {
+        ProjectFolderPrompt.createNewFolder { [weak self] url in
+            self?.adoptProject(at: url)
+        }
+    }
+
+    private func adoptProject(at url: URL) {
+        let project = ProjectStore.shared.addProject(folderURL: url)
+        sidebar.reload()
+        sidebar.select(projectID: project.id)
     }
 
     func closeCurrentSession() {

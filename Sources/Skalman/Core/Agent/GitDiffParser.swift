@@ -274,6 +274,26 @@ enum GitDiffParser {
         return String(fields[10])
     }
 
+    // MARK: - Numstat
+
+    /// Sums `--numstat` output — `added<TAB>removed<TAB>path` per line — into one total.
+    /// Binary files report `-` in both columns, which counts the file and no lines.
+    static func summary(fromNumstat data: Data) -> GitChangeSummary {
+        var files = 0
+        var added = 0
+        var removed = 0
+
+        for line in decode(data).split(separator: "\n") {
+            let columns = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard columns.count == 3 else { continue }
+            files += 1
+            added += Int(columns[0]) ?? 0
+            removed += Int(columns[1]) ?? 0
+        }
+
+        return GitChangeSummary(files: files, added: added, removed: removed)
+    }
+
     // MARK: - Log
 
     /// Parses `git log` in the reader's control-character format: records begin with 0x01,

@@ -51,6 +51,31 @@ enum GitReviewReader {
         }
     }
 
+    /// The uncommitted totals for the floating status card: numstat against HEAD plus
+    /// untracked line counts, without producing a single hunk. Completion arrives on main.
+    static func uncommittedSummary(
+        in root: URL,
+        completion: @escaping @MainActor (Result<GitChangeSummary, Failure>) -> Void
+    ) {
+        perform(completion) {
+            // The same unborn-HEAD rule as the full uncommitted diff: with nothing to diff
+            // against, the index against the empty tree is everything staged so far.
+            let tracked = GitDiffParser.summary(fromNumstat: try run(
+                hasCommits(in: root)
+                    ? GitReviewCommands.diffNumstat(against: GitReviewCommands.head)
+                    : GitReviewCommands.diffNumstatStaged(),
+                in: root
+            ))
+            let untracked = try untrackedSummary(in: root)
+
+            return GitChangeSummary(
+                files: tracked.files + untracked.files,
+                added: tracked.added + untracked.added,
+                removed: tracked.removed
+            )
+        }
+    }
+
     /// Captures the checkout's current state as a Last Turn baseline. Completion arrives on main.
     static func createSnapshot(
         in root: URL,
@@ -168,6 +193,35 @@ enum GitReviewReader {
         return status.untracked
             .filter { !excluding.contains($0) }
             .map { synthesizedDiff(path: $0, root: root) }
+    }
+
+    /// Untracked files as the summary counts them: one file each, its lines as additions.
+    /// The synthesis caps apply here too — an over-cap or binary file counts as a file
+    /// carrying no lines rather than being read whole.
+    private static func untrackedSummary(in root: URL) throws -> GitChangeSummary {
+        let status = GitDiffParser.status(fromPorcelainV2: try run(GitReviewCommands.status(), in: root))
+
+        var added = 0
+        for path in status.untracked {
+            let url = root.appendingPathComponent(path)
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int ?? 0
+            guard size <= GitReviewDefaults.untrackedByteCap,
+                  let data = try? Data(contentsOf: url),
+                  !data.prefix(GitReviewDefaults.binarySniffBytes).contains(0) else { continue }
+            added += lineCount(of: data)
+        }
+
+        return GitChangeSummary(files: status.untracked.count, added: added, removed: 0)
+    }
+
+    /// Newline count, with an unterminated final line counting as a line — the same total the
+    /// synthesized diff would report, without materialising its rows.
+    private static func lineCount(of data: Data) -> Int {
+        guard !data.isEmpty else { return 0 }
+        let newlines = data.reduce(into: 0) { count, byte in
+            if byte == UInt8(ascii: "\n") { count += 1 }
+        }
+        return data.last == UInt8(ascii: "\n") ? newlines : newlines + 1
     }
 
     private static func synthesizedDiff(path: String, root: URL) -> GitFileDiff {

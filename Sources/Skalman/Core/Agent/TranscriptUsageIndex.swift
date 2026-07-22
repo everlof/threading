@@ -36,7 +36,16 @@ struct TranscriptUsageEntry: Equatable {
     let workingDirectory: String
 
     let model: String
-    let day: String
+
+    /// `2026-07-22T14:15` — the quarter-hour the turns fell in.
+    ///
+    /// Quarter-hours rather than days because the windows that meter an account are five hours
+    /// long, and a day-resolution series cannot say what a five-hour window has consumed. Cut
+    /// from the timestamp's own characters rather than parsed into a `Date`: there are tens of
+    /// thousands of these per scan and none of them need calendar arithmetic.
+    let bucket: String
+
+    var day: String { String(bucket.prefix(10)) }
     var usage: TranscriptUsage
 }
 
@@ -96,12 +105,12 @@ enum TranscriptUsageIndex {
     ) -> [TranscriptUsageEntry] {
         let transcriptID = url.deletingPathExtension().lastPathComponent
         var byKey: [String: TranscriptUsageEntry] = [:]
-        let marker = Data(UsageIndexDefaults.usageMarker.utf8)
+        let marker = Array(UsageIndexDefaults.usageMarker.utf8)
 
         JSONLReader.forEachLine(at: url, limit: .max) { line in
             // The cheap gate first: most records carry no usage at all, and parsing them is
             // the whole cost of this scan.
-            guard line.range(of: marker) != nil,
+            guard contains(marker, in: line),
                   let record = try? JSONSerialization.jsonObject(with: line),
                   let object = record as? [String: Any],
                   let message = object[UsageIndexDefaults.messageKey] as? [String: Any],
@@ -117,16 +126,16 @@ enum TranscriptUsageIndex {
                 guard seen.insert(identity).inserted else { return true }
             }
 
-            let day = String((object[UsageIndexDefaults.timestampKey] as? String ?? "").prefix(10))
+            let bucket = quarterHour(of: object[UsageIndexDefaults.timestampKey] as? String ?? "")
             let model = message[UsageIndexDefaults.modelKey] as? String ?? UsageIndexDefaults.unknownModel
             let cwd = object[UsageIndexDefaults.cwdKey] as? String ?? ""
 
-            let key = "\(day)|\(model)|\(cwd)"
+            let key = "\(bucket)|\(model)|\(cwd)"
             var entry = byKey[key] ?? TranscriptUsageEntry(
                 transcriptID: transcriptID,
                 workingDirectory: cwd,
                 model: model,
-                day: day,
+                bucket: bucket,
                 usage: TranscriptUsage()
             )
 
@@ -136,6 +145,41 @@ enum TranscriptUsageIndex {
         }
 
         return Array(byKey.values)
+    }
+
+    /// Whether `needle` appears in `haystack`, through `memmem`.
+    ///
+    /// `Data.range(of:)` is the obvious way to write this and is far too slow to run once per
+    /// line across a gigabyte — this gate is the only thing standing between the scan and
+    /// parsing every record in every transcript, so it has to cost almost nothing.
+    static func contains(_ needle: [UInt8], in haystack: Data) -> Bool {
+        guard !needle.isEmpty, haystack.count >= needle.count else { return false }
+
+        return haystack.withUnsafeBytes { raw -> Bool in
+            guard let base = raw.baseAddress else { return false }
+            return needle.withUnsafeBytes { pattern -> Bool in
+                guard let patternBase = pattern.baseAddress else { return false }
+                return memmem(base, raw.count, patternBase, pattern.count) != nil
+            }
+        }
+    }
+
+    /// `2026-07-22T14:37:02.000Z` → `2026-07-22T14:30`.
+    ///
+    /// String surgery on a format both CLIs write identically, because a `DateFormatter` here
+    /// would run tens of thousands of times per scan to answer a question that is four
+    /// characters wide. `String(format:)` is avoided for the same reason — it is not cheap, and
+    /// this runs once per priced turn.
+    static func quarterHour(of timestamp: String) -> String {
+        guard timestamp.count >= 16 else { return timestamp }
+
+        let hour = String(timestamp.prefix(13))
+        let minuteStart = timestamp.index(timestamp.startIndex, offsetBy: 14)
+        let minuteEnd = timestamp.index(minuteStart, offsetBy: 2)
+        let minute = Int(timestamp[minuteStart..<minuteEnd]) ?? 0
+
+        let quarter = (minute / 15) * 15
+        return hour + (quarter < 10 ? ":0" : ":") + String(quarter)
     }
 
     /// One record's tokens.

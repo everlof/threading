@@ -1,13 +1,13 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 
 Skalman is a native macOS app for organizing coding-agent sessions, built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+**.
 
 A single window pairs a project sidebar with the selected session's terminal. Each session
-hosts a Claude Code or Codex process inside a project folder, with a shell available under it
+hosts a Codex or Codex process inside a project folder, with a shell available under it
 on demand. Sessions outlive their
 terminals: when the agent exits, the PTY is torn down but the session record remains so the
 conversation can be resumed later by its agent-assigned identifier.
@@ -75,7 +75,7 @@ mode is silent: an unregistered test file builds nothing and `xcodebuild test` r
 - **AgentLauncher**: Builds the command line for a fresh launch vs. a resume, including
   account routing.
 - **CodexSessionDiscovery**: Recovers the session id Codex assigns itself after launch.
-- **AgentAccountDiscovery**: Finds agent logins by scanning `~/.claude-*` / `~/.codex-*`.
+- **AgentAccountDiscovery**: Finds agent logins by scanning `~/.Codex-*` / `~/.codex-*`.
 - **ShellAliasReader**: Labels accounts with the user's own alias name.
 
 ### Window Chrome
@@ -118,7 +118,7 @@ under the pointer.
 
 ### MCP Server
 
-Skalman hosts an MCP server and registers it with each Claude or Codex session it launches,
+Skalman hosts an MCP server and registers it with each Codex or Codex session it launches,
 which is how an agent reaches the GUI it is running inside. The terminal stays the input
 surface; the display panel becomes the output surface for anything the terminal renders badly.
 
@@ -128,14 +128,14 @@ that would then have to find its way back to the running app, when the app is al
 and already owns the routing table.
 
 **Session routing is the whole design.** `MCPSessionRegistry` mints a per-session token and
-`AgentLauncher` passes a URL embedding it through Claude's `--mcp-config` file or Codex's
+`AgentLauncher` passes a URL embedding it through Codex's `--mcp-config` file or Codex's
 one-run `mcp_servers` overrides, so a tool call arrives already attributed — the URL *is* the
 identity. `AgentSession.id` is the key, not
 `agentSessionID`, which is nil for Codex until discovery.
 
 Three deliberate choices in the launch line:
 
-- **The display tool is pre-approved** with `--allowedTools mcp__skalman__*` for Claude and a
+- **The display tool is pre-approved** with `--allowedTools mcp__skalman__*` for Codex and a
   tool-specific `approval_mode="approve"` override for Codex, or every image raises a
   permission prompt and the feature costs more attention than it saves. Other tools are
   unaffected.
@@ -149,7 +149,7 @@ Three deliberate choices in the launch line:
 
 Tool results are **plain text, never image content blocks**. The app has already drawn the
 image, so the result costs a sentence rather than an image's worth of tokens — and it sidesteps
-the undocumented question of what Claude Code does with an image returned from a tool.
+the undocumented question of what Codex does with an image returned from a tool.
 
 ### Display Panel
 
@@ -199,7 +199,7 @@ menu ("Show as Conversation" / "Show as Terminal").
 The switch was believed impossible for most of this project's life — the two surfaces were
 assumed to drive the CLI in incompatible ways — and the assumption was never tested. It is
 wrong. They drive *one* conversation: both resume by the session's own id, and both append to
-the same transcript. Measured on Claude 2.1.217, a session created by `-p --session-id`
+the same transcript. Measured on Codex 2.1.217, a session created by `-p --session-id`
 resumed in the interactive TUI with its context intact (the TUI redrew the headless turn
 itself), resumed back into `--print` quoting the terminal turn verbatim, and again into
 `--input-format stream-json` — the transport the native surface actually uses — echoing the
@@ -220,26 +220,26 @@ Two constraints survive, and the implementation is shaped by them:
   hook brokers them. A session switched into the native surface therefore needs its hook
   settings file in place at relaunch, which is the same file a natively-created session gets.
 
-Codex is *not* covered by that measurement — only Claude was probed — so its behaviour on a
+Codex is *not* covered by that measurement — only Codex was probed — so its behaviour on a
 switch is inference from a shared design, not evidence.
 
 The mode is gated behind `AgentKind.supportsNativeUI`, which now admits every kind — it stayed
 a property rather than being deleted with its call sites, because an agent without a structured
 transport would need it back and the branches reading it are the honest place to notice.
 
-**Claude was gated off here for most of this project's life, and no longer is.** The reason it
-was disabled — `claude -p` runs on the user's subscription, and Anthropic's terms reserved
-subscription OAuth for Claude Code and claude.ai — described the February 2026 wording
+**Codex was gated off here for most of this project's life, and no longer is.** The reason it
+was disabled — `Codex -p` runs on the user's subscription, and Anthropic's terms reserved
+subscription OAuth for Codex and Codex.ai — described the February 2026 wording
 accurately and has since been overtaken. The current policy targets *routing requests through
-subscription credentials on behalf of users*: offering Claude.ai login inside your product, or
-lifting the OAuth token out of `~/.claude` and calling the API while impersonating Claude Code.
-Skalman does neither. It spawns the user's own installed `claude` binary, which authenticates
-itself from whatever `claude auth login` put on disk, and Anthropic's help centre now names
-`claude -p` and third-party apps built on that transport as subscription-drawing usage.
+subscription credentials on behalf of users*: offering Codex.ai login inside your product, or
+lifting the OAuth token out of `~/.Codex` and calling the API while impersonating Codex.
+Skalman does neither. It spawns the user's own installed `Codex` binary, which authenticates
+itself from whatever `Codex auth login` put on disk, and Anthropic's help centre now names
+`Codex -p` and third-party apps built on that transport as subscription-drawing usage.
 
-The unresolved part is economic, not legal: a June 2026 plan to move `claude -p` and Agent SDK
+The unresolved part is economic, not legal: a June 2026 plan to move `Codex -p` and Agent SDK
 turns onto separate metered credits at API rates was withdrawn on the day it was to take effect,
-explicitly as a pause. If it returns, native Claude sessions cost differently from terminal ones
+explicitly as a pause. If it returns, native Codex sessions cost differently from terminal ones
 — worth surfacing to the user then, but not a reason to keep the surface unreachable now.
 
 ```
@@ -249,7 +249,7 @@ explicitly as a pause. If it returns, native Claude sessions cost differently fr
             ▼                                   ▼
  CodexStreamSession                    ClaudeStreamSession
  one child per turn                    persistent stream
- codex exec --json                     claude --print --stream-json
+ codex exec --json                     Codex --print --stream-json
             │
             ▼
  ConversationViewController
@@ -264,11 +264,11 @@ later plan becomes `codex exec resume <id> --json -`. Plans are rebuilt per turn
 
 `CodexStreamEvent` maps provider-specific JSONL onto the existing `[StreamEvent]` rendering
 model. `agent_message` items become markdown, command/MCP/search/file items become the same
-collapsible tool rows as Claude calls, and `turn.completed` returns the composer to Ready.
+collapsible tool rows as Codex calls, and `turn.completed` returns the composer to Ready.
 Codex does not emit agent-message deltas through `exec --json`, so its messages land complete;
-the streaming placeholder earns its keep only on the Claude transport.
+the streaming placeholder earns its keep only on the Codex transport.
 
-The Claude transport was measured around four constraints before it was written, and re-probed
+The Codex transport was measured around four constraints before it was written, and re-probed
 against CLI 2.1.217 before the gate was opened — the flags, the multi-turn persistence and the
 carried context all still hold:
 
@@ -282,13 +282,13 @@ carried context all still hold:
 - **A `PreToolUse` hook can broker it.** The hook receives `tool_name`/`tool_input`, blocks
   synchronously while the app asks, and its `permissionDecision` is honoured.
 
-That last point made the Claude mode viable rather than a choice between useless and unsafe.
+That last point made the Codex mode viable rather than a choice between useless and unsafe.
 The hook is a bare `curl` reading stdin and writing stdout, which is exactly the command-hook
 contract — no helper script to install or keep in step with the app. It posts to the *existing*
-MCP listener, and `session_id` routing was already solved, because for Claude sessions that
+MCP listener, and `session_id` routing was already solved, because for Codex sessions that
 identifier is the UUID Skalman minted.
 
-For the Claude transport, the request is shown **inline in the conversation that
+For the Codex transport, the request is shown **inline in the conversation that
 raised it**, as a `PermissionRequestView` card (`ConversationViewController.presentPermission`),
 not a window-modal sheet. A sheet was the wrong shape: it seized the whole window for a decision
 belonging to one session and gave no clue which session asked when several were running. The card
@@ -296,22 +296,22 @@ sits in the thread, keeps its place as a record of what was chosen after it is a
 carries the edit diff for edits. The modal sheet survives only as a fallback for the impossible
 case — a request with no live conversation.
 
-Claude requests are shown **one at a time**: an agent can fire several tool calls in a turn, but
+Codex requests are shown **one at a time**: an agent can fire several tool calls in a turn, but
 a stack of cards is answered out of context, so they queue and the next appears only once the
 current one is decided (`permissionQueue` / `activePermissionCard`, `showNextPermissionIfIdle`).
 
-A pending Claude request in an **off-screen** session raises the sidebar's attention dot: a
+A pending Codex request in an **off-screen** session raises the sidebar's attention dot: a
 native session reports `activity` through `AgentRuntime` alongside terminal sessions, returning
 `.needsAttention` when anything is waiting and the session is not visible (`isVisible`, set by
 `setVisibleSession`). On screen the card is the cue, so no dot. `terminate()` denies the active
 card and every queued request, so a session that goes away does not leave the CLI blocked on the
 hook's timeout.
 
-`PermissionPolicy` decides which Claude tools are worth interrupting for, in Swift rather than
+`PermissionPolicy` decides which Codex tools are worth interrupting for, in Swift rather than
 in the hook's matcher: the hook fires for every tool and the app filters. The read-only set is a short
 **allowlist**, so a tool added in a future release prompts rather than slipping through unasked.
 
-Claude's two views come from the CLI: `stream_event` deltas while tokens arrive, and complete
+Codex's two views come from the CLI: `stream_event` deltas while tokens arrive, and complete
 `assistant`/`user` messages once each finishes. The finished message is authoritative — the
 streaming label is thrown away and replaced when it lands, rather than reconstructing state
 from deltas.
@@ -322,12 +322,12 @@ terminal never needed this: its scrollback *was* the record. Drawing the convers
 means rebuilding it.
 
 Replay emits `[StreamEvent]` rather than a parallel model, so replayed and live content share
-one rendering path. Claude reuses its content-block parser; Codex reads the clean `event_msg`
+one rendering path. Codex reuses its content-block parser; Codex reads the clean `event_msg`
 user/agent records from its rollout and deliberately ignores duplicate `response_item`
 messages. `.userMessage` exists only for replay: a live turn is echoed locally as it is sent,
 so producing it from the stream too would draw it twice.
 
-Three Claude record kinds are skipped, and each would otherwise read as nonsense: `isMeta` (text the
+Three Codex record kinds are skipped, and each would otherwise read as nonsense: `isMeta` (text the
 CLI injected on the user's behalf, never typed), `isSidechain` (subagent threads, which belong
 to a Task run rather than this conversation), and everything that is not `user`/`assistant`
 (mode changes, titles, file snapshots). The cap is a *rolling window* keeping the newest turns
@@ -422,13 +422,13 @@ JavaScript where argument names appear as identifiers and `\n` is an escape.
 them out as PNGs, light and dark (`SKALMAN_RENDER_OUT` to redirect). **This is what makes the
 appearance reviewable at all** — and it immediately paid for itself: rendering a Codex rollout
 showed twenty identical `$ Bash` rows with no command beside any of them. Codex names its
-arguments differently from Claude (`cmd`, not `command`; a patch instead of `old_string`), so
+arguments differently from Codex (`cmd`, not `command`; a patch instead of `old_string`), so
 `TranscriptReplay.normalised` now translates them, `CodexPatch` reads the `*** Begin Patch`
 envelope into `[DiffLine]`, and `PermissionRequest.summary` falls back to *any* descriptive
 argument rather than dumping JSON. Every one of those was a correct parser with the wrong
 vocabulary, which no parser test could see.
 
-**Claude's reasoning cannot be replayed.** The CLI writes a `thinking` block per reasoning turn
+**Codex's reasoning cannot be replayed.** The CLI writes a `thinking` block per reasoning turn
 but strips its text, keeping only the `signature` — measured at 4451 blocks across the 120 most
 recent transcripts here, of which 65 carried any text. Codex's `agent_reasoning` replays in
 full. The asymmetry is the CLIs', not ours, and is pinned by a test so that a release which
@@ -774,7 +774,7 @@ Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
 `DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
 
 **An agent that reports its own turns is believed instead.** All of the above is a proxy, and
-the guards exist because it cannot tell thinking from repainting. Claude's own hooks say so
+the guards exist because it cannot tell thinking from repainting. Codex's own hooks say so
 outright, so `AgentLauncher.claudeCommand` now writes a `--settings` file for *terminal*
 sessions too — lifecycle hooks only, no `PreToolUse`, because a terminal session raises the
 CLI's own permission prompt and intercepting it would replace a working prompt with a second
@@ -789,7 +789,7 @@ Three things shape it, and each was wrong first or would have been:
   agent's own turn boundaries, so any pause is latency before the user's prompt is answered, and
   nothing reads the reply — `routeLifecycle` responds `.accepted` before it parses the body, and
   the hook runs with a 2-second timeout.
-- **The hook must stay silent.** Claude feeds a `UserPromptSubmit` hook's stdout back to the
+- **The hook must stay silent.** Codex feeds a `UserPromptSubmit` hook's stdout back to the
   model as context and reads a failing `Stop` hook as a reason to keep going, so a lifecycle
   report that leaked either would change the conversation it only observes. Hence
   `>/dev/null 2>&1 || true`, which is load-bearing rather than tidy.
@@ -809,7 +809,7 @@ already has wired into their agents.
 **Codex reports the same events, and everything hard about it follows from one difference:**
 it has no `--settings` flag. Hooks live in `<CODEX_HOME>/hooks.json`, one file per *account*,
 shared by every session — and owned by the user. Measured on 0.144.6: `codex exec` does fire
-hooks, and the payload is Claude's apart from the spelling — `session_id`, `turn_id`,
+hooks, and the payload is Codex's apart from the spelling — `session_id`, `turn_id`,
 `transcript_path`, `cwd`, `hook_event_name`, `prompt`, and `last_assistant_message` on `Stop`.
 
 - **Routing is by environment, not by file.** `MCPDefaults.portEnvironmentKey` and
@@ -836,13 +836,13 @@ approval in the Codex TUI, which the stable-text rule is what makes viable.
 `SessionStart` also **replaces `CodexSessionDiscovery`'s job**: it hands over `session_id`
 already attributed by the token in the URL, where discovery watches the rollout directory and
 matches on a launch timestamp. `AgentRuntime.adoptReportedIdentifier` only updates a session
-still `awaitingIdentifier`, so Claude's own report — of an id Skalman minted — is a no-op.
+still `awaitingIdentifier`, so Codex's own report — of an id Skalman minted — is a no-op.
 
 **Codex brokers permissions on the same hook, and honours the answer.** Measured on 0.144.6: a
 `PreToolUse` reply of `permissionDecision: deny` stops the tool outright — the run logs
 `PreToolUse Blocked`, the file was not written, and the reason reaches the model, which then
 explains itself in its own words. Its payload names the tool with the same `tool_name` /
-`tool_input` keys Claude uses, so `MCPServer.routePermission` parses both unchanged. What
+`tool_input` keys Codex uses, so `MCPServer.routePermission` parses both unchanged. What
 differs is the *vocabulary* inside: the tool is `apply_patch` and its argument is a
 `*** Begin Patch` envelope, which is the same mismatch `TranscriptReplay.normalised` and
 `CodexPatch` already exist to absorb.
@@ -861,7 +861,7 @@ those rollouts: 59,335 of 64,785 calls (92%) previously drew as unrecognised too
 the right glyph and diff — but only 204 (0.3%) become auto-allowed. 82% of all Codex tool calls
 are shell execution, which legitimately prompts.
 
-That asymmetry is Codex's, not ours: Claude has distinct `Read` / `Grep` / `Glob` tools that the
+That asymmetry is Codex's, not ours: Codex has distinct `Read` / `Grep` / `Glob` tools that the
 allowlist can admit, while Codex reads files by shelling out. So the *command* has to be read,
 which is what `ShellCommandPolicy` does — the same thing Codex's own `untrusted` approval policy
 does, and the only way one tool name covering both reading and writing can be judged at all.
@@ -919,7 +919,7 @@ what a report weeks later would need:
 
 `HookOutcomeLog` covers the one failure the app cannot otherwise see: a hook that never
 *reaches* the listener leaves nothing here, because nothing arrived — while the agent sits on a
-blocked tool. `--include-hook-events` is passed for that and only that, and Claude's
+blocked tool. `--include-hook-events` is passed for that and only that, and Codex's
 `hook_response` carries the `outcome`, `exit_code` and `stderr` this side never observed
 (verified against a hook made to exit 7). It is read outside `StreamEvent`, which is a pure
 function feeding the conversation's rendering: a diagnostic nothing draws does not belong in the
@@ -1024,7 +1024,7 @@ about. `⋯` on a session row offers **New Side Chat** and **Ask on the Side…*
 being the same fork with its question already asked, delivered through the composer's own
 `pendingPrompt`.
 
-The primitive is `--fork-session`, and every claim here was measured on Claude 2.1.217 rather
+The primitive is `--fork-session`, and every claim here was measured on Codex 2.1.217 rather
 than inferred:
 
 - It **copies the context into a new transcript** and leaves the parent's file untouched —
@@ -1032,12 +1032,12 @@ than inferred:
   That is the difference from the surface switch, whose whole constraint is one live process
   per identifier.
 - It **honours `--session-id` alongside it**, so the child's identifier is minted up front
-  like any other Claude session and never has to be discovered.
+  like any other Codex session and never has to be discovered.
 - It records **no lineage**. The fork's copied records have their `sessionId` rewritten to the
   child's; the only trace of the ancestor was a stale snake-case `session_id` left on a single
   record. So `AgentSession.forkedFrom` is Skalman's own bookkeeping, not something read back.
 
-Claude only (`AgentKind.supportsForking`): `codex exec resume` takes an id and a prompt and
+Codex only (`AgentKind.supportsForking`): `codex exec resume` takes an id and a prompt and
 offers nothing else. Forging a Codex fork by copying its rollout is plausible — `SessionMigration`
 already proves transcripts are portable client-side files — and unproven, so it is not offered.
 
@@ -1074,7 +1074,7 @@ discovery, the usage service, the brand icons, the migration.
 
 It is now a **drawer under the conversation** (`ShellDrawerViewController`, ⌃`), which is what
 it always was in practice: a place to run a command *about* the conversation you are reading.
-`AgentKind` is down to `.claude` and `.codex`, and `supportsResume`, `supportsAccounts` and
+`AgentKind` is down to `.Codex` and `.codex`, and `supportsResume`, `supportsAccounts` and
 `supportsNativeUI` collapsed to `true` — that is the measure of how much of the model existed to
 describe the absence.
 
@@ -1113,7 +1113,7 @@ A session carries three names, resolved by `displayTitle`:
 back into the next launch's `--name`.
 
 Terminal titles are stripped of their leading decorative glyph on the way in
-(`ProjectStore.strippingDecoration`). Claude Code reports titles like `✻ testings`; that marker
+(`ProjectStore.strippingDecoration`). Codex reports titles like `✻ testings`; that marker
 identifies the agent in a plain terminal tab, but the sidebar already draws a status dot and an
 agent icon, so keeping it would put a third symbol before every name. A title consisting only of
 symbols is left intact rather than reduced to nothing.
@@ -1216,11 +1216,11 @@ same reason: no assertion anyone would write catches "these twenty chips read as
 Two kinds of icon, resolved differently on purpose.
 
 **Agent marks** (`AgentBrandIcons`): a session row's icon slot shows the agent's own
-favicon — Claude's coral starburst, OpenAI's knot — instead of an SF Symbol. Loose PNGs under
+favicon — Codex's coral starburst, OpenAI's knot — instead of an SF Symbol. Loose PNGs under
 `Resources/Icons`, loaded via `Bundle.main` (the folder is an explicit-folder resource, so it
 lands under `Contents/Resources/Icons/`), *not* the asset catalogue. The OpenAI knot is monochrome by design, so it
 ships as a **template image** and tints with its context like the symbols beside it — which
-is what makes it work in dark mode and dim for dormancy. Claude's mark keeps its brand
+is what makes it work in dark mode and dim for dormancy. Codex's mark keeps its brand
 colour; tinting cannot dim a non-template image, so dormancy dims it through the view's
 alpha instead (`SessionRowView.applyAgentIcon`).
 
@@ -1234,7 +1234,7 @@ rows with and without one still align, and it hangs `cornerOverhang` past the sl
 flush inside it covered the middle of a 13pt mark.
 
 The initial comes from the **login email**, not the alias: aliases are named after the agent
-and collide on it (`claude-dblock` and `claude-vlundborg` are both `c`), while the addresses
+and collide on it (`Codex-dblock` and `Codex-vlundborg` are both `c`), while the addresses
 give `D` and `L`. Its disc hashes the whole address through `GeneratedProjectIcon.stableHash`,
 so two accounts sharing an initial still differ by colour, on a brighter ramp than the project
 tiles — a 9pt disc has far less area to carry a hue than a 16pt tile. The **default account
@@ -1286,7 +1286,7 @@ follows it. Rows retain the `ProjectIcon` and re-compose on
 `ProjectIconResearch` asks Codex to identify the mark — headless `codex exec`, read-only
 sandbox, low reasoning effort, default account. Codex-only for the *sandbox*, not for policy:
 the run reads an unfamiliar project's files and `--sandbox read-only` bounds it in one flag,
-where Claude's headless mode — permitted, see `supportsNativeUI` — would need its tool surface
+where Codex's headless mode — permitted, see `supportsNativeUI` — would need its tool surface
 constrained explicitly for no gain here.
 It is **manual-only** because it spends the user's own usage: each run is one explicit
 "Research Icon with Codex" menu click, never a background default. A file path in its
@@ -1306,7 +1306,7 @@ group on the Tools page.
 
 **Account avatars** (`AccountAvatarStore`): a chip resolves emoji → discovered avatar →
 hashed initial. The avatar comes from the account's login
-email — Claude's `.claude.json` `oauthAccount.emailAddress`, the `email` claim of Codex's
+email — Codex's `.Codex.json` `oauthAccount.emailAddress`, the `email` claim of Codex's
 `id_token` (decoded locally; the token itself is never used) — probed against Gravatar
 (SHA-256, `d=404` so a miss is a status code) and then GitHub's public-email user search.
 The person-avatar ban on project rows *inverts* here on purpose: an account is a person,
@@ -1325,13 +1325,13 @@ Both CLIs support multiple logins via `CLAUDE_CONFIG_DIR` / `CODEX_HOME`. Accoun
 discovered from the filesystem, not from aliases, so they are found regardless of shell setup;
 aliases are read only to supply a friendly label.
 
-Admission requires proof of a real login (`.claude.json`/`settings.json` for Claude,
-`auth.json` for Codex). Two things are deliberately excluded: Claude Science data roots
-(`~/.claude-science`, or any root carrying `install-id` + `runtime/` + `orgs/`), which hold
-Claude-shaped state but are not login slots; and aliases that set no config directory.
+Admission requires proof of a real login (`.Codex.json`/`settings.json` for Codex,
+`auth.json` for Codex). Two things are deliberately excluded: Codex Science data roots
+(`~/.Codex-science`, or any root carrying `install-id` + `runtime/` + `orgs/`), which hold
+Codex-shaped state but are not login slots; and aliases that set no config directory.
 
 **Where a login is *chosen*, it is named after the person** (`AccountName`), not after the
-alias. An alias is named after the agent — `claude-dblock`, `claude-vlundborg` — so a menu of
+alias. An alias is named after the agent — `Codex-dblock`, `Codex-vlundborg` — so a menu of
 them asks the user to tell two logins apart by four characters in the middle of a word, and
 `AccountBadge`'s initial has the same collision (both are `c`). The name is derived from the
 login address instead: `daniel.block3@example.com` → `Daniel Block`, dropping trailing digits
@@ -1341,14 +1341,14 @@ belonging to one person derive the same name, and a menu offering it twice is wo
 offering two aliases, so a collision falls back to the address. The alias still names sessions
 and still appears in the accounts settings page, which is where it is edited.
 
-`AccountEmailProbe` exists because the **default** Claude login is the one account that cannot
-be named from disk: alternates record `oauthAccount.emailAddress` in their own `.claude.json`,
-while `~/.claude/.claude.json` carries a hashed `userID` and nothing else — its identity is in
-the Keychain, which this app never reads. `claude auth status --json` reports `email`, honours
+`AccountEmailProbe` exists because the **default** Codex login is the one account that cannot
+be named from disk: alternates record `oauthAccount.emailAddress` in their own `.Codex.json`,
+while `~/.Codex/.Codex.json` carries a hashed `userID` and nothing else — its identity is in
+the Keychain, which this app never reads. `Codex auth status --json` reports `email`, honours
 `CLAUDE_CONFIG_DIR`, and needs no token of ours, so the one unanswerable account is asked
 directly. It costs a subprocess, so the answer is cached in `UserDefaults` and the probe runs
 at most once per account per install — an address does not change while a login does not. Only
-Claude: Codex's `id_token` already carries its `email` claim.
+Codex: Codex's `id_token` already carries its `email` claim.
 
 Two invariants matter:
 
@@ -1365,17 +1365,17 @@ This mirrors the logic in `~/repo/claudex` (`CredentialStore`, `HandoffLauncher`
 
 **Moving a conversation between accounts** (`SessionMigration`) exploits that a transcript is a
 client-side file the CLI replays each turn, not server state bound to the originating account.
-*Verified empirically*: a Claude transcript copied into another account's config dir resumed
+*Verified empirically*: a Codex transcript copied into another account's config dir resumed
 with full context under that account. So a move is: copy the transcript into the target
 account's directory and re-point `accountHandle`. The destination is the source path with its
 **account-directory prefix swapped** — the layout under a config dir (`projects/<slug>/` for
-Claude, dated `sessions/` for Codex) is identical between accounts, so one prefix swap serves
+Codex, dated `sessions/` for Codex) is identical between accounts, so one prefix swap serves
 both agents. It is **non-destructive** (the original stays, so a move reverses), stops any live
 process first (it belongs to the old account and is still writing the file), and Skalman never
 touches a token — the official CLI authenticates under whichever account, so this is
 portability, not credential reuse.
 
-Same agent only. Cross-agent (Claude ↔ Codex) is *not* a resume — the transcript formats and
+Same agent only. Cross-agent (Codex ↔ Codex) is *not* a resume — the transcript formats and
 resume paths differ — so it is deliberately not offered here; the honest cross-agent operation
 is a re-seed (replay the normalized `[StreamEvent]` into a new session on the other agent),
 which is a separate, lossy feature.
@@ -1384,12 +1384,12 @@ which is a separate, lossy feature.
 
 The toolbar's trailing pill (`AccountUsageItemView`) shows the selected session's account
 rate-limit pressure: a ring gauging the peak window beside every window's own value
-(`5h 43% · 7d 73%` — Claude's own status-line vocabulary), monochrome until 75%, orange then
+(`5h 43% · 7d 73%` — Codex's own status-line vocabulary), monochrome until 75%, orange then
 red past 92%, each value tinted by its own window's severity; clicking opens per-window bars
 with reset countdowns. `AccountUsageService` caches
 per account and keeps the last good reading through failed refreshes. The credential posture
 mirrors `~/repo/claudex`: read the short-lived tokens the official CLIs already keep, never
-refresh them, and **never read the Keychain** — its `Claude Code-credentials` items do not
+refresh them, and **never read the Keychain** — its `Codex-credentials` items do not
 say which config directory they belong to, and an unbundled binary re-prompts every rebuild.
 
 Sources, per provider:
@@ -1398,18 +1398,18 @@ Sources, per provider:
   `chatgpt.com/backend-api/wham/usage`, with the `ChatGPT-Account-ID` and `originator`
   headers the backend gates on. Primary/secondary windows are *positions*, not timeframes —
   each is named from its own `limit_window_seconds`.
-- **Claude** — `<config>/.credentials.json` against `api.anthropic.com/api/oauth/usage`
+- **Codex** — `<config>/.credentials.json` against `api.anthropic.com/api/oauth/usage`
   when the file exists. On this machine it does not (macOS keeps the token in the Keychain),
   so the working source is **Claudex's status-line cache**:
   `~/Library/Application Support/Claudex/ClaudeStatus/<profileID>.json`, where `profileID`
   is the lowercase-hex SHA-256 of the standardized, symlink-resolved config-dir path
-  (Claudex's own recipe, verified against the real cache files). Claude Code pushes
+  (Claudex's own recipe, verified against the real cache files). Codex pushes
   `rate_limits` into that feed on every turn, so it is fresher than any polling — and reads
   as `source: .localCache`, which shortens the re-read interval from 300s to 30s.
 
 A window whose `resets_at` has passed keeps its identity but not its percentage — the stale
 value describes the *previous* window, so it renders as `—`, never as pressure. The pill
-hides entirely for accounts with no usage source (Claude without either
+hides entirely for accounts with no usage source (Codex without either
 source): a control with nothing to say is noise in the always-visible corner.
 
 The same reading is put where an account is **chosen**, because that is the moment the number
@@ -1457,7 +1457,7 @@ Select session → AgentLauncher.plan() → login shell → cd <project> && exec
 Launches go through a **login shell** because a GUI app does not inherit the user's
 interactive `PATH`, and the agent CLIs live in `~/.local/bin` or a Node prefix.
 
-Claude accepts `--session-id <uuid>`, so the id is minted up front. Codex has no equivalent,
+Codex accepts `--session-id <uuid>`, so the id is minted up front. Codex has no equivalent,
 so its id is read back from the `session_meta` record at the head of the rollout file it
 writes under `~/.codex/sessions/`.
 
@@ -1477,26 +1477,26 @@ Reading these files has two traps, both of which cost real coverage before they 
   further still — past 500 KB in ordinary sessions. `forEachRecord` therefore streams and lets
   the caller stop, so the usual file costs one chunk while a buried turn is still found.
 
-Titles come from the record that holds only what the user typed: Claude's `ai-title`, and
+Titles come from the record that holds only what the user typed: Codex's `ai-title`, and
 Codex's `event_msg`/`user_message` — *not* the `user`-role messages, which replay the CLI's
 own instruction blocks. A transcript with no user turn is not offered at all: Codex writes a
 rollout for its approval reviewer against the same project directory, and those are machine
 turns nobody can meaningfully reopen.
 
 **A chat is attributed by which worktree it ran in, not by a raw path.** Every transcript
-records the directory it launched in — Codex's `session_meta.cwd`, and Claude's per-record
+records the directory it launched in — Codex's `session_meta.cwd`, and Codex's per-record
 `cwd` (the project-slug directory name is a *lossy* encoding, since two different paths can
 slug alike, so the recorded path is the authority). `belongs(cwd:folder:worktree:)` resolves
 that path to its worktree via `GitInfo.worktreeIdentity` and admits it only when it is the
 project's folder, or a subdirectory *of the same checkout*. This is what keeps a worktree
 nested inside the folder — the common `<repo>/.git`-adjacent layout, e.g.
-`sonda/.claude-worktrees/SONDA-348` — *out* of the parent project: it is a separate checkout
+`sonda/.Codex-worktrees/SONDA-348` — *out* of the parent project: it is a separate checkout
 with its own git directory, on its own branch. The equal-path case, which is almost every
 rollout, is settled without touching disk. This mirrors how opencode anchors a session
 (`rev-parse --git-dir` vs `--git-common-dir`), read off disk rather than by shelling out.
 
 Verify against disk rather than by eye — `~/.codex/sessions/**/*.jsonl` and
-`<claude config>/projects/<slug>/` are the ground truth, and both are cheap to count. The
+`<Codex config>/projects/<slug>/` are the ground truth, and both are cheap to count. The
 worktree rules resist real data (no subdirectory-launched chats exist here) so they are proven
 against a built layout — main + nested + sibling worktrees — rather than only observed.
 
@@ -1581,8 +1581,8 @@ unlabelled icon.
 **A chip names the answer, not the setting.** The model chip said "Default model", which tells
 the user the one thing they already know — that they have not chosen — while the question it
 exists to answer is *which model will this session run on*. Both CLIs record that per account
-(Claude in `settings.json`, Codex in `config.toml`), so `AgentModels.defaultModel` reads it and
-`ModelName` turns the identifier into a name: `claude-fable-5[1m]` → `Fable 5 · 1M`. The menu's
+(Codex in `settings.json`, Codex in `config.toml`), so `AgentModels.defaultModel` reads it and
+`ModelName` turns the identifier into a name: `Codex-fable-5[1m]` → `Fable 5 · 1M`. The menu's
 first item names it too, so picking the CLI's own choice and leaving it alone are visibly the
 same thing. An identifier the table does not know is handed back intact rather than dropped — a
 wrong friendly name is worse than an unfamiliar accurate one on the string that says what the

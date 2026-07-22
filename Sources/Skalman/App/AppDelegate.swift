@@ -56,6 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // each login's usage rather than filling in only on a second look.
         AccountUsageMenu.prefetch()
 
+        // The same idea for *who* each login is. Only accounts whose address is not already on
+        // disk are asked, and the answer is cached across launches, so this is normally a
+        // no-op — the default Claude login is the one it exists for.
+        AccountEmailProbe.prefetch(AgentAccountDiscovery.accounts(for: .claude)) {
+            NotificationCenter.default.post(AccountPreferencesDidChange())
+        }
+
         // Session restore waits for the listener, because a launch reads the port to build the
         // session's `--mcp-config`. The callback runs whether the server came up or not, so a
         // failed listener costs the restored session its display panel and nothing else.
@@ -240,8 +247,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        // Two ways to a project, matching the sidebar's `+` menu: create the folder, or
+        // adopt one that exists. Add Project keeps its shortcut and its meaning.
+        menu.addItem(withTitle: "New Project…", action: #selector(newProject), keyEquivalent: "")
+
         let addProjectItem = NSMenuItem(
-            title: "Add Project…",
+            title: "Add Existing Project…",
             action: #selector(addProject),
             keyEquivalent: "n"
         )
@@ -410,6 +421,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func addProject() {
         mainWindowController.addProject()
+    }
+
+    @objc private func newProject() {
+        mainWindowController.newProject()
     }
 
     @objc private func closeSession() {
