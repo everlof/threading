@@ -46,6 +46,23 @@ struct MCPToolResult {
 /// Called on the main queue, since the model layer and AppKit both require it.
 protocol MCPToolHandling: AnyObject {
     func handle(_ call: MCPToolCall, for sessionID: UUID) -> MCPToolResult
+
+    /// Async variant, for tools whose answer is not ready synchronously — a page load, a DOM
+    /// query, a screenshot. Defaults to the synchronous form for handlers that need nothing.
+    func handle(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void)
+
+    /// Text appended to the `initialize` instructions describing the session's current display
+    /// panel — but only when it changed while the agent was away, so a resume does not re-state a
+    /// panel the agent's own transcript already reflects. Empty when there is nothing to add.
+    func panelState(for sessionID: UUID) -> String
+}
+
+extension MCPToolHandling {
+    func handle(_ call: MCPToolCall, for sessionID: UUID, completion: @escaping (MCPToolResult) -> Void) {
+        completion(handle(call, for: sessionID))
+    }
+
+    func panelState(for sessionID: UUID) -> String { "" }
 }
 
 // MARK: - Tool Catalogue
@@ -57,31 +74,27 @@ enum MCPTools {
     static let displayHTML = "display_html"
     static let displayTools = [displayImage, displayHTML]
 
-    /// Sent in the `initialize` response, where Claude Code and Codex surface it to the model.
-    ///
-    /// This is the load-bearing half of the feature. An agent running in a terminal has no
-    /// reason to believe anything it emits can be seen as an image, so it has to be told that
-    /// the surrounding app has a panel and that using it is preferred over describing a file.
-    static let instructions = """
-        You are running inside Skalman, a native macOS app, in a terminal pane beside a \
-        display panel that can render what the terminal itself cannot.
+    static let browserNavigate = "browser_navigate"
+    static let browserScreenshot = "browser_screenshot"
+    static let browserQuery = "browser_query"
+    static let browserClick = "browser_click"
+    static let browserTools = [browserNavigate, browserScreenshot, browserQuery, browserClick]
 
-        Use display_image whenever an image is the point: a screenshot you just captured, a \
-        chart or diagram you generated, a design asset you were asked to inspect, or a visual \
-        diff. Prefer showing the image over describing it or printing its path — the user is \
-        looking at the same window and the panel is right there.
+    static let panelListTabs = "panel_list_tabs"
+    static let panelActivateTab = "panel_activate_tab"
+    static let panelTools = [panelListTabs, panelActivateTab]
 
-        Use display_html when structure is the point and ASCII would mangle it: tables with \
-        more than a few columns, charts, Mermaid or graphviz diagrams, side-by-side diffs, \
-        rendered reports. It is a real browser engine, so scripts run and CDN libraries load.
+    static let setProjectIcon = "set_project_icon"
+    static let projectTools = [setProjectIcon]
 
-        Neither replaces talking to the user. Show the artefact, then say what it means — the \
-        panel carries the picture, your reply carries the point.
+    /// Every tool the server serves, all pre-approved together: each only calls back into the app
+    /// the user is already looking at, and an agent with a shell already outreaches a browser
+    /// click. `MCPToolCatalog` groups these and decides — from the user's Tools settings — which
+    /// are actually advertised and pre-approved on a launch.
+    static let allTools = displayTools + browserTools + panelTools + projectTools
 
-        The panel belongs to this session alone; other sessions have their own.
-        """
-
-    /// The `tools/list` payload.
+    /// The full `tools/list` payload. `MCPToolCatalog.enabledDefinitions` filters this to the
+    /// groups the user has switched on before it is served.
     static let definitions: [[String: Any]] = [
         [
             "name": displayImage,
@@ -148,6 +161,132 @@ enum MCPTools {
                     ]
                 ],
                 "required": ["html"]
+            ]
+        ],
+        [
+            "name": browserNavigate,
+            "description": """
+                Open a URL in Skalman's browser (a full pane beside this terminal), or run a \
+                search if the text is not a URL. Waits for the page to load and reports its \
+                title and address. Use this before browser_query, browser_click, or \
+                browser_screenshot to put the page on screen.
+                """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "url": [
+                        "type": "string",
+                        "description": "A URL, a bare domain, or a search query."
+                    ]
+                ],
+                "required": ["url"]
+            ]
+        ],
+        [
+            "name": browserQuery,
+            "description": """
+                Return the elements in the current page matching a CSS selector — their tag, \
+                id, classes, visible text, key attributes (href, src, value, aria-label), and \
+                on-screen rectangle. This reads the live DOM directly, so prefer it over \
+                fetching and parsing HTML. Returns at most a few dozen matches.
+                """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "selector": [
+                        "type": "string",
+                        "description": "A CSS selector, e.g. \"a.button\", \"#main h2\", \"input[name=q]\"."
+                    ]
+                ],
+                "required": ["selector"]
+            ]
+        ],
+        [
+            "name": browserClick,
+            "description": """
+                Click the first element matching a CSS selector in the current page. Useful for \
+                following a link, submitting a form, or opening a menu. Reports what was clicked \
+                and the page's address afterwards, since a click may navigate.
+                """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "selector": [
+                        "type": "string",
+                        "description": "A CSS selector for the element to click."
+                    ]
+                ],
+                "required": ["selector"]
+            ]
+        ],
+        [
+            "name": browserScreenshot,
+            "description": """
+                Capture the current browser page and show it to the user as a new image tab in \
+                the display panel. Use it to let the user see the page you are working with, or \
+                to record how it looked at a point in time.
+                """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [:] as [String: Any],
+                "required": [] as [String]
+            ]
+        ],
+        [
+            "name": panelListTabs,
+            "description": """
+                List the tabs open in this session's display panel — their index, id, kind \
+                (image, document, or browser), title, and which one is active. Use it to see \
+                what you have shown the user and to get a tab's index or id for \
+                panel_activate_tab.
+                """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [:] as [String: Any],
+                "required": [] as [String]
+            ]
+        ],
+        [
+            "name": setProjectIcon,
+            "description": """
+                Set the icon Skalman shows for this session's project in its sidebar. Use \
+                the project's own mark — a favicon or logo file from the repository, or an \
+                image URL such as the GitHub owner avatar. Square images read best; the \
+                icon is drawn at 16pt. PNG, JPEG, GIF, HEIC and ICO work; SVG does not.
+                """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "path": [
+                        "type": "string",
+                        "description": """
+                            Path to an image file. Absolute, or relative to the session's \
+                            project folder. Provide this or url, not both.
+                            """
+                    ],
+                    "url": [
+                        "type": "string",
+                        "description": "An https image URL, when the icon is not a local file."
+                    ]
+                ],
+                "required": [] as [String]
+            ]
+        ],
+        [
+            "name": panelActivateTab,
+            "description": """
+                Bring one of the display panel's tabs to the front, so the user is looking at it. \
+                Identify the tab by its index (from panel_list_tabs) or its id.
+                """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "tab": [
+                        "type": ["integer", "string"],
+                        "description": "The tab's index (0-based, from panel_list_tabs) or its id."
+                    ]
+                ],
+                "required": ["tab"]
             ]
         ]
     ]

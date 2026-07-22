@@ -270,24 +270,48 @@ final class SessionRowView: NSTableCellView {
         } else {
             emojiLabel.isHidden = true
             iconView.isHidden = false
-            iconView.image = NSImage(
-                systemSymbolName: Self.iconSymbolName(for: session, account: account),
-                accessibilityDescription: account?.displayName ?? session.kind.displayName
-            )
-            iconView.contentTintColor = isDormant ? .tertiaryLabelColor : .secondaryLabelColor
+            applyAgentIcon(for: session, account: account)
         }
     }
 
-    /// A letter badge (`c.circle.fill`) for an alternate account with no emoji, falling
-    /// back to the agent symbol when the name's first character has no such symbol.
-    private static func iconSymbolName(for session: AgentSession, account: AgentAccount?) -> String {
+    /// The icon slot's image for a session without an account emoji: the account's
+    /// discovered avatar, else a letter badge for an alternate account, else the agent's
+    /// own mark. The avatar outranks even the default account's brand mark — an account
+    /// that resolved to a real face is more identifying than the agent logo, and the
+    /// per-account emoji still overrides both.
+    ///
+    /// Symbols and template marks dim for dormancy through their tint. Claude's mark and
+    /// avatars keep their own colours — tinting does not touch a non-template image — so
+    /// they dim through the view's alpha instead.
+    private func applyAgentIcon(for session: AgentSession, account: AgentAccount?) {
+        let image: NSImage?
+        if let account, let avatar = AccountAvatarStore.avatar(for: account) {
+            image = avatar
+        } else if let badge = Self.accountBadgeSymbol(for: account) {
+            image = NSImage(
+                systemSymbolName: badge,
+                accessibilityDescription: account?.displayName
+            )
+        } else {
+            image = session.kind.icon
+        }
+
+        iconView.image = image
+        iconView.contentTintColor = isDormant ? .tertiaryLabelColor : .secondaryLabelColor
+
+        let dimsThroughAlpha = image.map { !$0.isTemplate } ?? false
+        iconView.alphaValue = (isDormant && dimsThroughAlpha) ? AgentIconDefaults.dormantAlpha : 1
+    }
+
+    /// A letter badge (`c.circle.fill`) for an alternate account with no emoji, or nil when
+    /// the agent's own mark should identify the row.
+    private static func accountBadgeSymbol(for account: AgentAccount?) -> String? {
         guard let account, !account.isDefault,
-              let first = account.displayName.lowercased().first
-        else { return session.kind.symbolName }
+              let first = account.displayName.lowercased().first else { return nil }
 
         let badge = "\(first)\(SidebarRowDefaults.accountBadgeSymbolSuffix)"
         guard NSImage(systemSymbolName: badge, accessibilityDescription: nil) != nil else {
-            return session.kind.symbolName
+            return nil
         }
         return badge
     }

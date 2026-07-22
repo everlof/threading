@@ -103,6 +103,10 @@ enum AgentDefaults {
     static let codexConfigFile = "config.toml"
     static let codexModelKey = "model"
 
+    /// One-run override keys for background research launches.
+    static let codexReasoningEffortKey = "model_reasoning_effort"
+    static let codexResearchReasoningEffort = "low"
+
     /// Where Claude records transcripts, relative to an account's config directory.
     static let claudeProjectsSubdirectory = "projects"
     static let transcriptExtension = "jsonl"
@@ -210,6 +214,17 @@ enum DisplayPaneDefaults {
     static let buttonSize: CGFloat = 20
     static let titleFontSize: CGFloat = 11
     static let captionFontSize: CGFloat = 10
+
+    /// The tab strip appears only once surfaces coexist — a lone image keeps the cleaner
+    /// header-titled look, and the strip earns its row only when there is a choice to make.
+    static let tabBarMinimumTabs = 2
+    static let tabBarHeight: CGFloat = 30
+    static let tabChipMaxWidth: CGFloat = 140
+    static let tabChipFontSize: CGFloat = 11
+
+    /// Content tabs an agent stacks up are capped so a session that keeps displaying charts
+    /// does not grow an unbounded strip; the oldest content tab is dropped, never the browser.
+    static let maximumContentTabs = 8
 }
 
 // MARK: - Codex Discovery Defaults
@@ -311,6 +326,10 @@ enum SidebarRowDefaults {
 
     /// Revealed on hover, opening the row's actions.
     static let actionSymbol = "ellipsis"
+    /// The `+` on a project row's hover, opening its new-session choices.
+    static let newSessionSymbol = "plus"
+    /// Revealed on hover over a branch heading, opening the grouping options.
+    static let settingsSymbol = "gearshape"
     /// Applied to secondary text when inverted on an emphasized selection.
     static let secondaryTextAlpha: CGFloat = 0.7
     static let horizontalSpacing: CGFloat = 7
@@ -323,6 +342,8 @@ enum SidebarRowDefaults {
     /// clipped at the slot's edges.
     static let iconSlotWidth: CGFloat = 16
     static let trailingSlotSize: CGFloat = 16
+    /// Gap between the `+` and `⋯` when a project row shows both on hover.
+    static let hoverButtonSpacing: CGFloat = 2
 
     static let hoverFadeDuration: TimeInterval = 0.15
     /// Matches the inset and radius of the source list's own selection shape.

@@ -21,6 +21,10 @@ struct AccountUsage: Equatable {
 
         let resetsAt: Date?
 
+        /// The window's full length, when known. Lets the popover mark how far through the
+        /// window's *time* we are — the pace line the spent fraction is read against.
+        let windowDuration: TimeInterval?
+
         /// Percent for display, or nil when the fraction is unknown.
         var percent: Int? {
             fraction.map { Int(($0 * 100).rounded()) }
@@ -31,6 +35,16 @@ struct AccountUsage: Equatable {
         func isExpired(at now: Date = Date()) -> Bool {
             guard let resetsAt else { return false }
             return resetsAt <= now
+        }
+
+        /// How far through the window's time we are, 0…1 — the linear mark the bar draws so the
+        /// spent fraction reads against the clock. Fill left of the mark is under pace; fill past
+        /// it is burning faster than time. Nil when the window's length is unknown.
+        func elapsedFraction(at now: Date = Date()) -> Double? {
+            guard let resetsAt, let windowDuration, windowDuration > 0 else { return nil }
+            let remaining = resetsAt.timeIntervalSince(now)
+            let elapsed = windowDuration - remaining
+            return min(max(elapsed / windowDuration, 0), 1)
         }
     }
 
@@ -115,4 +129,17 @@ enum UsageDefaults {
 
     static let fiveHourSeconds: TimeInterval = 5 * 60 * 60
     static let sevenDaySeconds: TimeInterval = 7 * 24 * 60 * 60
+
+    /// The length of a window from its identifier, for the providers whose feed does not name it
+    /// outright: the shared 5h/7d ids, and the `12h`/`3d`-style ids derived for other windows.
+    static func duration(forWindowID id: String) -> TimeInterval? {
+        switch id {
+        case fiveHourWindowID: return fiveHourSeconds
+        case weeklyWindowID: return sevenDaySeconds
+        default:
+            if id.hasSuffix("h"), let hours = Int(id.dropLast()) { return TimeInterval(hours) * 3600 }
+            if id.hasSuffix("d"), let days = Int(id.dropLast()) { return TimeInterval(days) * 86400 }
+            return nil
+        }
+    }
 }

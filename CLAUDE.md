@@ -13,16 +13,27 @@ conversation can be resumed later by its agent-assigned identifier.
 
 ## Build & Run Commands
 
+The project is **Xcode-only** — a single `Skalman.xcodeproj`, no SwiftPM manifest. (SwiftTerm
+stays a local Swift package that the Xcode project references; the app's own `Package.swift` was
+removed so there is one build system, not two.)
+
 ```bash
-# Build the project
-swift build
+# Build the app
+xcodebuild -project Skalman.xcodeproj -scheme Skalman -configuration Debug build
 
-# Build for release
-swift build -c release
+# Run the tests (SkalmanTests target, hosted in the app)
+xcodebuild -project Skalman.xcodeproj -scheme Skalman -destination 'platform=macOS' test
 
-# Run after building
-.build/debug/Skalman
+# Run the built app (never the bare binary — build with xcodebuild, then open the bundle)
+open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Skalman-*/Build/Products/Debug/Skalman.app | head -1)"
 ```
+
+Resources: files under `Sources/` are members of the app target automatically (Xcode 16
+synchronized folders). The asset catalogue compiles to `Assets.car`; `Resources/Icons` is marked
+an explicit folder so its loose PNGs land under `Contents/Resources/Icons/`, loaded via
+`Bundle.main` (`AgentBrandIcon`). Unit tests `@testable import Skalman`, so the test bundle is
+hosted in the app; `AppDelegate` skips its real startup under `XCTestCase` so tests spawn no
+agents or MCP server.
 
 ## Dependencies
 
@@ -353,6 +364,23 @@ A branch belongs to a *checkout*, not to a repository: two worktrees of one repo
 different branches simultaneously. It is re-read when a session stops working, which is when
 an agent is most likely to have just switched, rather than by polling.
 
+A *session*, though, carries its own branch record (`AgentSession.branch`): captured at
+creation, re-read by `ProjectStore.refreshBranch` at the same stopped-working moment, and
+frozen while dormant — a conversation happened on whatever was checked out at the time, and
+that stays true after the checkout moves on. It drives the sidebar's **branch grouping**
+(`SidebarTreeBuilder`, `BranchGroupNode`): inside a project, sessions sharing a branch gather
+under a heading, but **only when that branch has more than one session** — the same
+earns-its-level rule as repository grouping, applied one level down. Sessions on lone
+branches or with no recorded branch stay directly under the project, and a group takes its
+first session's position so the list keeps its order. Toggleable via
+`AppSettings.groupsSessionsByBranch` (on by default; Settings > General), and also from where
+the grouping is *seen*: a checked menu item in the project-row and branch-heading context
+menus, and a gear that fades into a branch heading's trailing slot on hover (the session
+rows' `⋯` crossfade mechanism, reused) opening the toggle plus an "All Settings…" door.
+Branch headings are not selectable, collapse like projects (state kept in-memory only — the
+groups themselves are transient), and the hover popover prefers the session's recorded branch
+over the checkout's current one for the same reason the record exists.
+
 The branch is **not shown on the project row** — it lived there once as a subtitle, which read
 as though the project *were* that branch, when a checkout's branch changes and one repo can
 have several checkouts at once. It surfaces instead in the **session rows' hover popover**
@@ -408,6 +436,91 @@ Terminal titles are stripped of their leading decorative glyph on the way in
 identifies the agent in a plain terminal tab, but the sidebar already draws a status dot and an
 agent icon, so keeping it would put a third symbol before every name. A title consisting only of
 symbols is left intact rather than reduced to nothing.
+
+### Icons
+
+Two kinds of icon, resolved differently on purpose.
+
+**Agent marks** (`AgentBrandIcons`): sessions on a default account show the agent's own
+favicon — Claude's coral starburst, OpenAI's knot — instead of an SF Symbol. Loose PNGs under
+`Resources/Icons`, loaded via `Bundle.main` (the folder is an explicit-folder resource, so it
+lands under `Contents/Resources/Icons/`), *not* the asset catalogue. The OpenAI knot is monochrome by design, so it
+ships as a **template image** and tints with its context like the symbols beside it — which
+is what makes it work in dark mode and dim for dormancy. Claude's mark keeps its brand
+colour; tinting cannot dim a non-template image, so dormancy dims it through the view's
+alpha instead (`SessionRowView.applyAgentIcon`). An account emoji still beats the mark —
+the icon slot's job is telling sessions apart, and the account is the bigger difference.
+
+**Project icons** (`ProjectIcon` on `Project`; files owned by `ProjectIconStore`): the
+project row shows the project's own mark, else a folder symbol. Every stored icon is
+normalised through ImageIO — largest frame (`.ico` carries several), capped at 64px,
+re-encoded PNG — so the sidebar never holds a 1024px app icon per row, and an HTML error
+page served with a 200 fails the same decode gate that admits real images.
+
+`ProjectIconDiscovery` fills empty slots free of any agent, and **probes known paths rather
+than walking the tree**: a recursive scan would surface `node_modules/<lib>/favicon.ico` as
+the project's mark. Only the `AppIcon.appiconset` search enumerates, bounded and skipping
+dependency directories. Then the GitHub owner avatar (read from the *shared* git config via
+`GitInfo.remoteOriginURL` — remotes belong to the repository, not a checkout), then the
+favicon of the `package.json` homepage; the network sources only contact hosts the project
+itself points at, plus one GitHub API call gating the avatar. Automatic discovery only ever
+fills an **empty** slot; a user's explicit choice (`.custom`) is never displaced.
+
+The avatar is admitted **only for organisation owners** (`isOrganization`, via
+`api.github.com/users/<owner>`): a person's avatar puts the same face on every repo they
+own, which distinguishes nothing — and any doubt (API error, rate limit) refuses rather
+than guesses, because the failure mode of guessing is a face on every project. A project
+with no discovered mark renders `GeneratedProjectIcon` at *draw time* — its initial on a
+colour from a stable djb2 hash of the name (`hashValue` is process-salted and would
+recolour the sidebar per launch) — never persisted, so the slot stays genuinely empty for
+later discovery.
+
+`SingleInstanceLock` (`flock`, held for the process lifetime) refuses a second instance at
+launch, before anything touches the stores: two live instances share `projects.json`
+last-writer-wins, and even *instantiating* `ProjectStore` writes it once — a relaunch
+handoff between overlapping instances is how three projects lost their icon records. The
+losing instance's quit path skips store teardown for the same reason.
+
+The sidebar draws the *composed* rendition (`ProjectIconStore.displayImage`): rounded-rect
+clipped, and set on a small **backplate** of the opposing tone when the icon's own
+alpha-weighted mean luminance would vanish against the current appearance — a dark mark on
+the dark sidebar gets a light plate, measured from the icon's pixels rather than guessed
+from its source. The plate colours are fixed neutrals *on purpose*, an exception to the
+system-colours rule: a plate exists to oppose the appearance, and every system colour
+follows it. Rows retain the `ProjectIcon` and re-compose on
+`viewDidChangeEffectiveAppearance`, since the decision is per-appearance.
+
+`ProjectIconResearch` asks Codex to identify the mark — headless `codex exec`, read-only
+sandbox, low reasoning effort, default account. Codex-only for the same reason as
+`supportsNativeUI` (Claude's headless mode runs subscription OAuth outside Claude Code),
+and **manual-only** because it spends the user's own usage: each run is one explicit
+"Research Icon with Codex" menu click, never a background default. A file path in its
+answer is admitted only from inside the project's own folder — the run is sandboxed, but
+our read of its answer is not.
+
+**A headless child is invisible by construction, so every run leaves a record**: the
+child's stdout and stderr — merged into one pipe, so a single reader can never deadlock
+and the record holds the whole story — land in `IconResearch/<projectID>.jsonl` under
+Application Support, written *before* the verdict so failed runs are exactly the ones
+whose record survives. Stages log through `SkalmanLogger.agent`, and the sidebar exposes
+the record as "Open Last Research Log". This observability exists because the first real
+run failed silently and nothing could say where.
+
+Agents can set the icon from inside a session via the `set_project_icon` MCP tool, its own
+group on the Tools page.
+
+**Account avatars** (`AccountAvatarStore`): a session's icon slot resolves emoji →
+discovered avatar → letter badge → brand mark. The avatar comes from the account's login
+email — Claude's `.claude.json` `oauthAccount.emailAddress`, the `email` claim of Codex's
+`id_token` (decoded locally; the token itself is never used) — probed against Gravatar
+(SHA-256, `d=404` so a miss is a status code) and then GitHub's public-email user search.
+The person-avatar ban on project rows *inverts* here on purpose: an account is a person,
+and different logins carry different faces, so the avatar distinguishes. It outranks even
+the default account's brand mark — a resolved face identifies harder than a logo, and the
+per-account emoji still overrides. Hits land in `AccountAvatars/` and refresh the sidebar
+through the same notification an emoji edit posts; behind
+`AppSettings.discoversAccountAvatars`, which is the only thing that lets an email hash
+leave the machine.
 
 ### Accounts
 
@@ -673,6 +786,13 @@ Sources/Skalman/
 - UI tests for keyboard input handling
 
 ## Documentation
+
+### IMPROVEMENTS.md
+
+The prioritized reliability/type-safety roadmap from the July 2026 architectural review,
+kept as a working checklist. When fixing anything it lists, check the item off there; when
+touching a subsystem it covers, read its entry first — several items (persistence
+quarantine, `@MainActor` adoption, typed IDs) change the rules new code should follow.
 
 ### USER_GUIDE.md
 

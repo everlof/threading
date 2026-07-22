@@ -69,11 +69,90 @@ one repository apart.
 The branch is re-read whenever a session finishes working, so an agent switching branches is
 reflected the next time you hover, without you refreshing anything.
 
+### Grouping sessions by branch
+Within a project, sessions that ran on the same branch gather under a quiet branch heading —
+but only when that branch has more than one session, so the extra level never appears
+without earning its place:
+
+```
+▾ sonda
+  ▾ feature-auth
+      ✦ Claude Code
+      ✦ Claude Code 2
+    ✦ Codex              ← alone on its branch, stays at the project level
+```
+
+Each session remembers the branch the checkout was on when it last ran: it is recorded when
+the session is created and updated each time it finishes working, then kept while the
+session is dormant. So after the checkout moves on, old conversations stay filed under the
+branch they actually happened on — which is also what the hover popover shows.
+
+Branch headings collapse like projects do, showing a count of what they hide.
+
+The grouping can be toggled from wherever you notice it, not only from Settings:
+
+- **Hover a branch heading** — a small gear fades in at its trailing edge, opening a menu
+  with **Group Sessions by Branch** (checked when on) and **All Settings…**
+- **Right-click a project row or a branch heading** — the same toggle sits in the context
+  menu, with a checkmark showing the current state
+- **Settings > General > Group sessions by branch** — the persistent home of the setting
+
+### Project icons
+Every project row carries an icon: the project's own mark when one is known, a **generated
+tile** — the project's initial on a colour hashed from its name — until then, so projects
+tell apart at a glance from the moment they are added. Skalman finds the real mark itself —
+no agent involved, no usage spent — by looking, in order, at:
+
+1. **The checkout's own files** — `favicon.*`, `apple-touch-icon*`, `icon.png`, `logo.png`
+   at the root or in conventional folders (`public`, `static`, `assets`, …), and an Xcode
+   project's `AppIcon.appiconset`. Dependency folders such as `node_modules`, `vendor` and
+   `Pods` are deliberately skipped — their favicons belong to other people's projects.
+2. **The GitHub organisation avatar**, when the repository's `origin` remote points at a
+   GitHub org. A **person's avatar is never used**: every repo a person owns would wear the
+   same face, which distinguishes nothing — person-owned repos keep their generated tile.
+3. **The homepage favicon**, when `package.json` declares a homepage.
+
+Discovery runs in the background for projects that have no icon yet, and only ever fills an
+empty slot. The network sources contact only hosts the project itself points at, and the
+whole thing can be switched off with **Settings > General > Discover project icons**.
+
+An icon whose tone would vanish against the sidebar — a dark mark in dark mode, a light one
+in light mode — is drawn on a small rounded **backplate** of the opposite tone, decided from
+the icon's own pixels per appearance. Icons are also clipped to a slightly rounded rect, so
+square avatars sit naturally in the list.
+
+The **Project Icon** submenu (right-click a project, or its hover buttons) offers:
+- **Choose Icon…** — pick any image file; your choice is never replaced automatically
+- **Use Website Favicon…** — type a domain or URL and take that site's touch icon or
+  favicon; counts as your choice, like a picked file
+- **Find Icon Automatically** — re-run the free discovery, replacing the current icon
+- **Research Icon with Codex** — shown when a Codex login exists: asks Codex (headless,
+  read-only, low reasoning effort) to identify the project's mark. **This spends your own
+  Codex usage, so it never runs on its own** — each run is one explicit menu click, and a
+  run in flight shows as a disabled *Researching…*
+- **Open Last Research Log** — the full record of the last research run
+- **Remove Icon** — back to the generated tile
+
+**Understanding a research run.** Every run writes its complete output — the JSONL event
+stream plus the CLI's own diagnostics — to
+`~/Library/Application Support/Skalman/IconResearch/<project>.jsonl`, openable from the menu
+above. Each stage also logs live, viewable with
+`log stream --predicate 'subsystem == "com.skalman" AND category == "agent"'`. Codex itself
+keeps its usual rollout under `~/.codex/sessions/`, like any other run.
+
+Agents can also set the icon from inside a session through the `set_project_icon` MCP tool
+(Settings > Tools > Project icon), e.g. "use our logo as this project's icon".
+
+Icons are stored small (64px) under Application Support and never touch the project folder.
+
 ### Managing
-Right-click a project for:
+**Hover a project row** — a **+** fades in at its trailing edge, opening the project's
+actions. The same menu is on **right-click**. Either way it offers:
 - New session (Claude Code, Codex, or Shell)
 - Rename Project…
 - Reveal in Finder
+- Project Icon — see [Project icons](#project-icons)
+- Group Sessions by Branch (checked when on)
 - Remove Project — removes it from the sidebar only; saved conversations are never deleted
 
 Click the disclosure triangle to collapse a project. Expansion state is remembered, and a
@@ -223,7 +302,19 @@ the row shows the full account name.
 ### Icons and names
 **Settings > Accounts** lists every account that was found. Click an account's icon to open
 the emoji picker — choose from the grid, type any other emoji into its field, or **Remove**
-the current one. The icon tells accounts apart at a glance in the sidebar. Rename an account
+the current one. The icon tells accounts apart at a glance in the sidebar.
+
+A session's icon slot resolves in order: your chosen **emoji**, then the account's
+**discovered avatar**, then a **letter badge** for alternate accounts, then the agent's own
+mark — Claude's starburst, OpenAI's knot. Shells keep the terminal symbol.
+
+The avatar is looked up from the account's login email (read from the CLI's own records):
+**Gravatar** first, then GitHub for accounts whose *public* profile email matches. Most
+emails resolve nowhere, and a miss just leaves the rest of the chain in place. Unlike
+project icons, a face is exactly right here — an account is a person, and different logins
+mean different faces. Only a hash of the email (Gravatar) or the email as a search query
+(GitHub) ever leaves the machine, and **Settings > General > Discover account avatars**
+turns the whole thing off. Rename an account
 if the discovered name is not what you call it; clearing a name restores the one from your
 shell alias, and **Reset Selected** clears both.
 
@@ -403,6 +494,9 @@ Open with **Cmd+,**.
 ### General
 - **New sessions use** — the agent Cmd+N creates. Other agents stay on the Project menu
 - **Name sessions after the terminal title** — see [Names](#names)
+- **Group sessions by branch** — see [Grouping sessions by branch](#grouping-sessions-by-branch)
+- **Discover project icons** — see [Project icons](#project-icons)
+- **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
 - **Ask before closing a running session**
 - **Shell path** — used by shell sessions; agent sessions always launch via your login shell

@@ -7,7 +7,7 @@ import AppKit
 /// with its value — `5h 43% · 7d 73%` — because the two limits answer different questions
 /// (can I keep going now, and will the week hold). Monochrome while usage is comfortable,
 /// tinted only as a window approaches its limit — the toolbar is glanced at, not read, so
-/// colour is reserved for the moment it means something. Clicking opens the detail popover.
+/// colour is reserved for the moment it means something. Hovering opens the detail popover.
 ///
 /// Hidden outright for sessions with no metered account (shells, nothing selected): a pill
 /// with nothing to say is noise in the one corner that is always visible.
@@ -28,6 +28,10 @@ final class AccountUsageItemView: NSView {
     private var refreshTimer: Timer?
 
     private weak var popover: NSPopover?
+
+    /// Pending close of the hover popover, cancelled when the pointer returns to the pill or moves
+    /// into the popover before it fires.
+    private var closeWorkItem: DispatchWorkItem?
 
     // MARK: - Initialization
 
@@ -249,26 +253,54 @@ final class AccountUsageItemView: NSView {
         trackingArea = area
     }
 
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        cancelScheduledClose()
+        showPopover()
+    }
 
-    override func mouseDown(with event: NSEvent) {
-        guard let account else { return }
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        scheduleClose()
+    }
 
-        if let popover, popover.isShown {
-            popover.close()
-            return
-        }
+    /// Opens the detail popover on hover. A short close delay plus the popover's own hover
+    /// tracking let the pointer cross the gap between pill and popover without it vanishing.
+    private func showPopover() {
+        guard let account, popover?.isShown != true else { return }
 
-        // The open is the moment the user cares; the service's floor keeps it polite.
+        // Hovering is the moment the user cares; the service's floor keeps it polite.
         AccountUsageService.shared.refresh(account, force: true)
 
         let controller = AccountUsagePopoverViewController(account: account)
+        controller.onHoverChange = { [weak self] hovering in
+            if hovering { self?.cancelScheduledClose() } else { self?.scheduleClose() }
+        }
+
         let popover = NSPopover()
         popover.contentViewController = controller
         popover.behavior = .transient
+        popover.animates = false
         popover.show(relativeTo: bounds, of: self, preferredEdge: .minY)
         self.popover = popover
+    }
+
+    private func scheduleClose() {
+        cancelScheduledClose()
+        let item = DispatchWorkItem { [weak self] in
+            self?.popover?.close()
+            self?.popover = nil
+        }
+        closeWorkItem = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + AccountUsageItemDefaults.hoverCloseDelay,
+            execute: item
+        )
+    }
+
+    private func cancelScheduledClose() {
+        closeWorkItem?.cancel()
+        closeWorkItem = nil
     }
 
     private func updateBackground() {
@@ -339,4 +371,8 @@ enum AccountUsageItemDefaults {
 
     /// Between window segments in the pill's summary.
     static let segmentSeparator = " · "
+
+    /// Grace period after the pointer leaves the pill before the hover popover closes, long enough
+    /// to cross the gap into the popover itself.
+    static let hoverCloseDelay: TimeInterval = 0.35
 }

@@ -94,14 +94,19 @@ final class ChipView: NSView {
 
     /// Sets what the chip currently shows.
     func configure(symbolName: String?, title: String) {
-        if let symbolName {
-            iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-                .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
-            iconView.isHidden = false
-        } else {
-            iconView.isHidden = true
-        }
+        configure(
+            icon: symbolName.flatMap {
+                NSImage(systemSymbolName: $0, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+            },
+            title: title
+        )
+    }
 
+    /// The image variant, for marks that are not SF Symbols — an agent's brand icon.
+    func configure(icon: NSImage?, title: String) {
+        iconView.image = icon
+        iconView.isHidden = icon == nil
         titleLabel.stringValue = title
         toolTip = title
     }

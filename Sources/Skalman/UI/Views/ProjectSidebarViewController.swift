@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 // MARK: - Project Sidebar View Controller
 
@@ -38,8 +39,18 @@ final class ProjectSidebarViewController: NSViewController {
     /// Suppresses the selection delegate callback during programmatic selection.
     private var suppressSelectionCallback = false
 
-    /// The session a hover-menu action applies to, set when the menu is opened.
-    private var actionSessionID: UUID?
+    /// The session a hover-menu action applies to, set when the menu is opened. Read by the
+    /// row-action handlers, which live in `ProjectSidebarSessionActions.swift`.
+    var actionSessionID: UUID?
+
+    /// Pins the row a hover-button menu targets, since a button click does not set the
+    /// outline view's `clickedRow`. Non-nil only while such a menu is up.
+    private var overrideContextRow: Int?
+
+    /// Branch groups the user collapsed, keyed `projectID:branch`, kept for this run only.
+    /// Branch groups are transient — they come and go as sessions move — so persisting
+    /// their expansion the way projects persist theirs would outlive the thing it describes.
+    private var collapsedBranchKeys: Set<String> = []
 
     // MARK: - Lifecycle
 
@@ -234,7 +245,7 @@ extension ProjectSidebarViewController {
     func reload() {
         let selectedSessionID = selectedNode()?.sessionID ?? ProjectStore.shared.selectedSessionID
 
-        rootNodes = Self.buildRootNodes(from: ProjectStore.shared.projects)
+        rootNodes = SidebarTreeBuilder.rootNodes(from: ProjectStore.shared.projects)
 
         emptyStateView.isHidden = !rootNodes.isEmpty
 
@@ -249,6 +260,12 @@ extension ProjectSidebarViewController {
             if project?.isExpanded ?? true {
                 outlineView.expandItem(node)
             }
+
+            // Branch groups open with their project; only ones collapsed by hand stay shut.
+            for case let branchNode as BranchGroupNode in node.childNodes
+            where !collapsedBranchKeys.contains(Self.branchKey(branchNode)) {
+                outlineView.expandItem(branchNode)
+            }
         }
 
         if let selectedSessionID {
@@ -256,46 +273,54 @@ extension ProjectSidebarViewController {
         }
     }
 
-    /// Arranges projects into the tree, grouping only where a repository has more than one
-    /// checkout added. A single-checkout repository stays a plain project row, so the extra
-    /// level never appears without cause.
-    private static func buildRootNodes(from projects: [Project]) -> [NSObject] {
-        let identities = projects.map { GitInfo.repositoryIdentity(for: $0.folderPath) }
+    private static func branchKey(_ node: BranchGroupNode) -> String {
+        "\(node.projectID):\(node.branch)"
+    }
 
-        var checkoutCounts: [String: Int] = [:]
-        for identity in identities.compactMap({ $0 }) {
-            checkoutCounts[identity, default: 0] += 1
+    /// Removes a session and its terminal. Shared by the row's context menu and its hover
+    /// `⋯` actions (in `ProjectSidebarSessionActions.swift`), so it lives in the internal
+    /// extension both files can reach.
+    func removeSession(_ sessionID: UUID) {
+        AgentRuntime.shared.discard(sessionID: sessionID)
+        ProjectStore.shared.removeSession(id: sessionID)
+        reload()
+        delegate?.projectSidebarDidRemoveSessions(self)
+    }
+
+    /// Prompts for a new name.
+    ///
+    /// When `allowsEmpty` is set, clearing the field is meaningful — it drops a custom name
+    /// so the automatic one applies again — and is passed through rather than ignored.
+    func promptRename(
+        title: String,
+        current: String,
+        placeholder: String = "",
+        allowsEmpty: Bool = false,
+        completion: @escaping (String) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = title
+        if allowsEmpty {
+            alert.informativeText = "Leave empty to use the name reported by the terminal."
         }
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
 
-        var roots: [NSObject] = []
-        var groupsByIdentity: [String: RepoGroupNode] = [:]
+        let textField = NSTextField(frame: NSRect(
+            x: 0, y: 0,
+            width: SidebarDefaults.renameFieldWidth,
+            height: SidebarDefaults.renameFieldHeight
+        ))
+        textField.stringValue = current
+        textField.placeholderString = placeholder
+        alert.accessoryView = textField
+        alert.window.initialFirstResponder = textField
 
-        for (project, identity) in zip(projects, identities) {
-            let node = ProjectNode(projectID: project.id)
-            // Archived sessions are gathered separately, below the projects.
-            node.sessionNodes = project.sessions
-                .filter { !$0.isArchived }
-                .map { SessionNode(sessionID: $0.id) }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-            guard let identity, checkoutCounts[identity, default: 0] > 1 else {
-                roots.append(node)
-                continue
-            }
-
-            if let group = groupsByIdentity[identity] {
-                group.projectNodes.append(node)
-                continue
-            }
-
-            let group = RepoGroupNode(name: GitInfo.repositoryName(forIdentity: identity))
-            group.projectNodes.append(node)
-            groupsByIdentity[identity] = group
-            roots.append(group)
-        }
-
-        // Archived sessions are not shown here at all — they live in Settings, so the sidebar
-        // stays a list of what is active.
-        return roots
+        let trimmed = textField.stringValue.trimmingCharacters(in: .whitespaces)
+        guard allowsEmpty || !trimmed.isEmpty else { return }
+        completion(trimmed)
     }
 
     /// Refreshes a single session's row, used for frequent updates such as title changes.
@@ -346,12 +371,18 @@ extension ProjectSidebarViewController {
     func select(sessionID: UUID, notifyDelegate: Bool = true) {
         guard let node = sessionNode(for: sessionID) else { return }
 
-        // Expand the whole chain: a grouped checkout sits under a repository heading.
+        // Expand the whole chain: a grouped checkout sits under a repository heading, and
+        // the session itself may sit under a branch heading.
         if let project = allProjectNodes.first(where: { $0.sessionNodes.contains(node) }) {
             if let group = outlineView.parent(forItem: project) {
                 outlineView.expandItem(group)
             }
             outlineView.expandItem(project)
+
+            for case let branchNode as BranchGroupNode in project.childNodes
+            where branchNode.sessionNodes.contains(node) {
+                outlineView.expandItem(branchNode)
+            }
         }
 
         let row = outlineView.row(forItem: node)
@@ -522,13 +553,6 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebarDidRemoveSessions(self)
     }
 
-    private func removeSession(_ sessionID: UUID) {
-        AgentRuntime.shared.discard(sessionID: sessionID)
-        ProjectStore.shared.removeSession(id: sessionID)
-        reload()
-        delegate?.projectSidebarDidRemoveSessions(self)
-    }
-
     @objc private func revealInFinderClicked() {
         guard let row = contextRow(),
               let node = outlineView.item(atRow: row) as? ProjectNode,
@@ -554,8 +578,10 @@ private extension ProjectSidebarViewController {
         allProjectNodes.flatMap(\.sessionNodes).first { $0.sessionID == sessionID }
     }
 
-    /// The row a context menu action applies to: the clicked row, else the selected row.
+    /// The row a context menu action applies to: a hover button's pinned row, else the
+    /// clicked row, else the selected row.
     private func contextRow() -> Int? {
+        if let overrideContextRow { return overrideContextRow }
         let clicked = outlineView.clickedRow
         let row = clicked >= 0 ? clicked : outlineView.selectedRow
         return row >= 0 ? row : nil
@@ -568,73 +594,66 @@ private extension ProjectSidebarViewController {
         if let node = outlineView.item(atRow: row) as? ProjectNode {
             return node.projectID
         }
+        if let node = outlineView.item(atRow: row) as? BranchGroupNode {
+            return node.projectID
+        }
         if let node = outlineView.item(atRow: row) as? SessionNode {
             return ProjectStore.shared.project(forSessionID: node.sessionID)?.id
         }
         return nil
     }
 
-    /// Prompts for a new name.
-    ///
-    /// When `allowsEmpty` is set, clearing the field is meaningful — it drops a custom name
-    /// so the automatic one applies again — and is passed through rather than ignored.
-    private func promptRename(
-        title: String,
-        current: String,
-        placeholder: String = "",
-        allowsEmpty: Bool = false,
-        completion: @escaping (String) -> Void
-    ) {
-        let alert = NSAlert()
-        alert.messageText = title
-        if allowsEmpty {
-            alert.informativeText = "Leave empty to use the name reported by the terminal."
-        }
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+    // MARK: - Project Actions
 
-        let textField = NSTextField(frame: NSRect(
-            x: 0, y: 0,
-            width: SidebarDefaults.renameFieldWidth,
-            height: SidebarDefaults.renameFieldHeight
-        ))
-        textField.stringValue = current
-        textField.placeholderString = placeholder
-        alert.accessoryView = textField
-        alert.window.initialFirstResponder = textField
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        let trimmed = textField.stringValue.trimmingCharacters(in: .whitespaces)
-        guard allowsEmpty || !trimmed.isEmpty else { return }
-        completion(trimmed)
+    /// The `+` button: the project's new-session choices, split out from its `⋯` menu.
+    private func showProjectNewSessionMenu(for projectID: UUID, from anchor: NSView) {
+        presentProjectMenu(for: projectID, from: anchor) { self.addNewSessionItems(to: $0) }
     }
 
-    /// Shows a row's actions beneath its hover button.
-    ///
-    /// Archiving is offered rather than deletion, since a session's conversation outlives the
-    /// app and filing it away should not destroy anything.
-    private func showRowActions(for sessionID: UUID, from anchor: NSView) {
-        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+    /// The `⋯` button: everything a project offers but starting a session.
+    private func showProjectActions(for projectID: UUID, from anchor: NSView) {
+        presentProjectMenu(for: projectID, from: anchor) { self.addProjectManagementItems(to: $0) }
+    }
+
+    /// Pops a project's menu beneath the button that opened it, pinning the row so the
+    /// handlers act on the right project rather than on whatever was last clicked.
+    private func presentProjectMenu(
+        for projectID: UUID,
+        from anchor: NSView,
+        build: (NSMenu) -> Void
+    ) {
+        guard let node = allProjectNodes.first(where: { $0.projectID == projectID }) else { return }
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
 
         let menu = NSMenu()
-        actionSessionID = sessionID
-
-        // The sidebar only ever lists unarchived sessions, so this is always "Archive";
-        // restoring one happens from Settings, where the archived sessions live.
-        menu.addItem(withTitle: "Archive", action: #selector(archiveClicked), keyEquivalent: "")
-
-        if AgentRuntime.shared.isRunning(sessionID: sessionID) {
-            menu.addItem(withTitle: "Close Session", action: #selector(closeSessionClicked), keyEquivalent: "")
-        }
-
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Rename Session…", action: #selector(renameSessionClicked), keyEquivalent: "")
-        addMoveToAccountItem(to: menu, for: session)
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Delete Session", action: #selector(deleteSessionClicked), keyEquivalent: "")
-
+        build(menu)
         for item in menu.items { item.target = self }
+
+        // A button click leaves `clickedRow` at whatever was last clicked, so the row this
+        // menu targets is pinned while it is open. `popUp` is modal and the handlers read
+        // `contextRow()` before it returns, so the pin is cleared immediately afterwards.
+        overrideContextRow = row
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.maxY), in: anchor)
+        overrideContextRow = nil
+    }
+
+    // MARK: - Branch Grouping Options
+
+    /// The menu behind a branch heading's hover gear: the grouping toggle itself — the one
+    /// setting that governs the row it hangs from — and the door to the rest of Settings.
+    private func showBranchGroupingOptions(from anchor: NSView) {
+        let menu = NSMenu()
+        menu.addItem(makeBranchGroupingItem())
+        menu.addItem(.separator())
+
+        let settings = NSMenuItem(
+            title: "All Settings…",
+            action: #selector(settingsClicked),
+            keyEquivalent: ""
+        )
+        settings.target = self
+        menu.addItem(settings)
 
         menu.popUp(
             positioning: nil,
@@ -643,84 +662,22 @@ private extension ProjectSidebarViewController {
         )
     }
 
-    /// Adds a "Move to Account" submenu when the conversation can move — it resumes by id, has
-    /// a transcript recorded, and there is another account of the same agent to move it to.
-    private func addMoveToAccountItem(to menu: NSMenu, for session: AgentSession) {
-        guard let project = ProjectStore.shared.project(forSessionID: session.id),
-              SessionMigration.canMigrate(session, in: project) else { return }
-
-        let submenu = NSMenu()
-        for account in SessionMigration.destinations(for: session) {
-            let item = NSMenuItem(
-                title: accountMenuLabel(account),
-                action: #selector(moveToAccountClicked(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = account
-            submenu.addItem(item)
-        }
-
-        let moveItem = NSMenuItem(title: "Move to Account", action: nil, keyEquivalent: "")
-        moveItem.submenu = submenu
-        menu.addItem(moveItem)
+    /// The grouping toggle as a menu item, its check showing the current state.
+    private func makeBranchGroupingItem() -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "Group Sessions by Branch",
+            action: #selector(toggleBranchGroupingClicked),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.state = AppSettings.shared.groupsSessionsByBranch ? .on : .off
+        return item
     }
 
-    private func accountMenuLabel(_ account: AgentAccount) -> String {
-        account.emoji.map { "\($0)  \(account.displayName)" } ?? account.displayName
-    }
-
-    // MARK: - Row Actions
-
-    @objc private func moveToAccountClicked(_ sender: NSMenuItem) {
-        guard let sessionID = actionSessionID,
-              let account = sender.representedObject as? AgentAccount else { return }
-
-        switch SessionMigration.move(sessionID: sessionID, to: account) {
-        case .success:
-            reload()
-        case .failure(let error):
-            presentMigrationError(error)
-        }
-    }
-
-    private func presentMigrationError(_ error: SessionMigration.MoveError) {
-        let alert = NSAlert()
-        alert.messageText = "Couldn't move the conversation"
-        alert.informativeText = error.message
-        alert.alertStyle = .warning
-        alert.runModal()
-    }
-
-    @objc private func archiveClicked() {
-        guard let sessionID = actionSessionID else { return }
-        delegate?.projectSidebar(self, setArchived: true, for: sessionID)
-    }
-
-    @objc private func closeSessionClicked() {
-        guard let sessionID = actionSessionID else { return }
-        AgentRuntime.shared.discard(sessionID: sessionID)
-        reload()
-    }
-
-    @objc private func renameSessionClicked() {
-        guard let sessionID = actionSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return }
-
-        promptRename(
-            title: "Rename Session",
-            current: session.customTitle ?? "",
-            placeholder: session.displayTitle,
-            allowsEmpty: true
-        ) { newTitle in
-            ProjectStore.shared.renameSession(id: sessionID, to: newTitle)
-            self.reload()
-        }
-    }
-
-    @objc private func deleteSessionClicked() {
-        guard let sessionID = actionSessionID else { return }
-        removeSession(sessionID)
+    @objc private func toggleBranchGroupingClicked() {
+        AppSettings.shared.groupsSessionsByBranch.toggle()
+        // The sidebar rebuilds its tree on this, which is what adds or removes the level.
+        NotificationCenter.default.post(name: .projectsDidChange, object: self)
     }
 
     // MARK: - Context Menu
@@ -740,7 +697,8 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
         guard let item else { return rootNodes.count }
 
         if let group = item as? RepoGroupNode { return group.projectNodes.count }
-        if let project = item as? ProjectNode { return project.sessionNodes.count }
+        if let project = item as? ProjectNode { return project.childNodes.count }
+        if let branch = item as? BranchGroupNode { return branch.sessionNodes.count }
         return 0
     }
 
@@ -748,56 +706,16 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
         guard let item else { return rootNodes[index] }
 
         if let group = item as? RepoGroupNode { return group.projectNodes[index] }
-        if let project = item as? ProjectNode { return project.sessionNodes[index] }
+        if let project = item as? ProjectNode { return project.childNodes[index] }
+        if let branch = item as? BranchGroupNode { return branch.sessionNodes[index] }
         return rootNodes[index]
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        item is ProjectNode || item is RepoGroupNode
+        item is ProjectNode || item is RepoGroupNode || item is BranchGroupNode
     }
 
-    // MARK: Drag and Drop
-
-    func outlineView(
-        _ outlineView: NSOutlineView,
-        validateDrop info: NSDraggingInfo,
-        proposedItem item: Any?,
-        proposedChildIndex index: Int
-    ) -> NSDragOperation {
-        // Only folders dropped onto the list background become new projects.
-        guard item == nil, droppedFolderURLs(from: info).isEmpty == false else { return [] }
-        return .copy
-    }
-
-    func outlineView(
-        _ outlineView: NSOutlineView,
-        acceptDrop info: NSDraggingInfo,
-        item: Any?,
-        childIndex index: Int
-    ) -> Bool {
-        let folders = droppedFolderURLs(from: info)
-        guard !folders.isEmpty else { return false }
-
-        for folder in folders {
-            ProjectStore.shared.addProject(folderURL: folder)
-        }
-        reload()
-        return true
-    }
-
-    /// Extracts directory URLs from a drag, ignoring dropped files.
-    private func droppedFolderURLs(from info: NSDraggingInfo) -> [URL] {
-        guard let urls = info.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL] else { return [] }
-
-        return urls.filter { url in
-            var isDirectory: ObjCBool = false
-            let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-            return exists && isDirectory.boolValue
-        }
-    }
+    // Drag and drop lives in `ProjectSidebarDragDrop.swift`, split purely for size.
 }
 
 // MARK: - NSOutlineViewDelegate
@@ -845,6 +763,29 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 style: isGrouped ? .checkout : .standalone,
                 collapsedSessionCount: hiddenSessions
             )
+            cell.onNewSession = { [weak self] anchor in
+                self?.showProjectNewSessionMenu(for: projectNode.projectID, from: anchor)
+            }
+            cell.onHoverAction = { [weak self] anchor in
+                self?.showProjectActions(for: projectNode.projectID, from: anchor)
+            }
+            return cell
+        }
+
+        if let branchNode = item as? BranchGroupNode {
+            let cell = dequeueCell(SidebarIdentifiers.branchCell) { ProjectRowView() }
+
+            let hiddenSessions = outlineView.isItemExpanded(branchNode)
+                ? 0
+                : branchNode.sessionNodes.count
+
+            cell.configureAsBranch(
+                named: branchNode.branch,
+                collapsedSessionCount: hiddenSessions
+            )
+            cell.onHoverAction = { [weak self] anchor in
+                self?.showBranchGroupingOptions(from: anchor)
+            }
             return cell
         }
 
@@ -885,6 +826,12 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return SidebarDefaults.headingRowHeight
         }
 
+        // A branch heading sits inside a project, so it takes the compact height rather
+        // than the between-groups one.
+        if item is BranchGroupNode {
+            return SidebarDefaults.projectCompactRowHeight
+        }
+
         return SidebarDefaults.rowHeight
     }
 
@@ -911,12 +858,24 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
+        if let branchNode = notification.userInfo?["NSObject"] as? BranchGroupNode {
+            collapsedBranchKeys.remove(Self.branchKey(branchNode))
+            reloadRow(for: branchNode)
+            return
+        }
+
         guard let node = notification.userInfo?["NSObject"] as? ProjectNode else { return }
         ProjectStore.shared.setProject(id: node.projectID, expanded: true)
         reloadRow(for: node)
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
+        if let branchNode = notification.userInfo?["NSObject"] as? BranchGroupNode {
+            collapsedBranchKeys.insert(Self.branchKey(branchNode))
+            reloadRow(for: branchNode)
+            return
+        }
+
         guard let node = notification.userInfo?["NSObject"] as? ProjectNode else { return }
         ProjectStore.shared.setProject(id: node.projectID, expanded: false)
         reloadRow(for: node)
@@ -946,12 +905,13 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         let item = outlineView.item(atRow: row)
 
         if item is ProjectNode {
+            addProjectMenuItems(to: menu)
+        } else if item is BranchGroupNode {
+            // The heading offers what it is: a way into the project it belongs to, and the
+            // display option that created it.
             addNewSessionItems(to: menu)
             menu.addItem(.separator())
-            menu.addItem(withTitle: "Rename Project…", action: #selector(renameClicked), keyEquivalent: "")
-            menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealInFinderClicked), keyEquivalent: "")
-            menu.addItem(.separator())
-            menu.addItem(withTitle: "Remove Project", action: #selector(removeClicked), keyEquivalent: "")
+            menu.addItem(makeBranchGroupingItem())
         } else if item is SessionNode {
             addNewSessionItems(to: menu)
             menu.addItem(.separator())
@@ -972,38 +932,220 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             action: #selector(newSessionClicked(_:))
         )
     }
-}
 
-// MARK: - Hover Tint Button
+    /// The project row's full menu, used by its right-click. The hover buttons split it: the
+    /// `+` opens `addNewSessionItems`, the `⋯` opens `addProjectManagementItems`.
+    private func addProjectMenuItems(to menu: NSMenu) {
+        addNewSessionItems(to: menu)
+        menu.addItem(.separator())
+        addProjectManagementItems(to: menu)
+    }
 
-/// Borderless footer button that brightens under the pointer, so it reads as interactive
-/// without carrying a bezel.
-private final class HoverTintButton: NSButton {
+    /// Everything a project offers except starting a session — behind the row's `⋯` button,
+    /// where the neighbouring `+` already covers new sessions.
+    private func addProjectManagementItems(to menu: NSMenu) {
+        menu.addItem(withTitle: "Rename Project…", action: #selector(renameClicked), keyEquivalent: "")
+        menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealInFinderClicked), keyEquivalent: "")
+        menu.addItem(makeProjectIconItem())
+        menu.addItem(.separator())
+        menu.addItem(makeBranchGroupingItem())
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Remove Project", action: #selector(removeClicked), keyEquivalent: "")
+    }
 
-    private var trackingArea: NSTrackingArea?
+    /// The icon submenu: choose one, take a site's favicon, re-run the free discovery,
+    /// optionally spend a Codex run on it, and clear it. Research appears only when a Codex
+    /// login exists, and is menu-only on purpose — each run costs the user's own usage, so
+    /// each is an explicit click, never a background default. A run in flight shows as a
+    /// disabled "Researching…", and the last run's full output stays openable from here.
+    private func makeProjectIconItem() -> NSMenuItem {
+        let project = contextProjectID().flatMap { ProjectStore.shared.project(withID: $0) }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
+        let submenu = NSMenu()
+        submenu.addItem(
+            withTitle: "Choose Icon…",
+            action: #selector(chooseProjectIconClicked),
+            keyEquivalent: ""
+        )
+        submenu.addItem(
+            withTitle: "Use Website Favicon…",
+            action: #selector(useWebsiteFaviconClicked),
+            keyEquivalent: ""
+        )
+        submenu.addItem(
+            withTitle: "Find Icon Automatically",
+            action: #selector(findProjectIconClicked),
+            keyEquivalent: ""
+        )
 
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
+        let isResearching = project.map {
+            ProjectIconResearch.runningProjectIDs.contains($0.id)
+        } ?? false
+
+        if isResearching {
+            // Action-less, so the menu's auto-enabling leaves it disabled.
+            submenu.addItem(withTitle: "Researching…", action: nil, keyEquivalent: "")
+        } else if !AgentAccountDiscovery.accounts(for: .codex).isEmpty {
+            submenu.addItem(
+                withTitle: "Research Icon with Codex",
+                action: #selector(researchProjectIconClicked),
+                keyEquivalent: ""
+            )
         }
 
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
+        if let project, FileManager.default.fileExists(
+            atPath: ProjectIconResearch.recordURL(for: project.id).path
+        ) {
+            submenu.addItem(
+                withTitle: "Open Last Research Log",
+                action: #selector(openResearchLogClicked),
+                keyEquivalent: ""
+            )
+        }
+
+        if project?.icon != nil {
+            submenu.addItem(.separator())
+            submenu.addItem(
+                withTitle: "Remove Icon",
+                action: #selector(removeProjectIconClicked),
+                keyEquivalent: ""
+            )
+        }
+
+        for item in submenu.items { item.target = self }
+
+        let iconItem = NSMenuItem(title: "Project Icon", action: nil, keyEquivalent: "")
+        iconItem.submenu = submenu
+        return iconItem
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        contentTintColor = .labelColor
+    // MARK: - Project Icon Actions
+
+    @objc private func chooseProjectIconClicked() {
+        guard let projectID = contextProjectID() else { return }
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.image]
+        panel.message = "Choose an image to use as the project's icon."
+
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+
+            guard let data = try? Data(contentsOf: url),
+                  let fileName = ProjectIconStore.store(imageData: data, for: projectID) else {
+                self?.presentIconNotice("The file could not be read as an image.")
+                return
+            }
+
+            ProjectStore.shared.setIcon(
+                ProjectIcon(source: .custom, fileName: fileName),
+                for: projectID
+            )
+        }
     }
 
-    override func mouseExited(with event: NSEvent) {
-        contentTintColor = .secondaryLabelColor
+    @objc private func findProjectIconClicked() {
+        guard let projectID = contextProjectID() else { return }
+
+        ProjectIconDiscovery.shared.rediscover(projectID: projectID) { [weak self] found in
+            if !found {
+                self?.presentIconNotice("No icon was found for this project.")
+            }
+        }
+    }
+
+    @objc private func researchProjectIconClicked() {
+        guard let projectID = contextProjectID(),
+              let project = ProjectStore.shared.project(withID: projectID) else { return }
+
+        ProjectIconResearch.run(for: project) { [weak self] result in
+            guard case .failure(let error) = result else { return }
+
+            // The record answers "what did it actually do?" — point at it when there is one.
+            var message = error.message
+            let record = ProjectIconResearch.recordURL(for: projectID)
+            if FileManager.default.fileExists(atPath: record.path) {
+                message += "\n\nThe run's full output: Project Icon > Open Last Research Log."
+            }
+            self?.presentIconNotice(message)
+        }
+    }
+
+    @objc private func useWebsiteFaviconClicked() {
+        guard let projectID = contextProjectID() else { return }
+
+        promptForWebsite { [weak self] input in
+            guard let origin = ProjectIconDiscovery.origin(fromWebsite: input) else {
+                self?.presentIconNotice("\"\(input)\" is not a usable web address.")
+                return
+            }
+
+            // Fetched off the main queue; everything that touches the store hops back.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let data = ProjectIconDiscovery.websiteIcon(atOrigin: origin)
+
+                DispatchQueue.main.async {
+                    guard let data,
+                          let fileName = ProjectIconStore.store(imageData: data, for: projectID) else {
+                        self?.presentIconNotice("No favicon was found at \(origin.absoluteString).")
+                        return
+                    }
+
+                    // The user named the site, so this is their choice — never replaced
+                    // automatically, exactly like a file they picked.
+                    ProjectStore.shared.setIcon(
+                        ProjectIcon(source: .custom, fileName: fileName),
+                        for: projectID
+                    )
+                }
+            }
+        }
+    }
+
+    @objc private func openResearchLogClicked() {
+        guard let projectID = contextProjectID() else { return }
+        NSWorkspace.shared.open(ProjectIconResearch.recordURL(for: projectID))
+    }
+
+    /// Asks for the site whose favicon to take, e.g. `sonda.io`.
+    private func promptForWebsite(completion: @escaping (String) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Use Website Favicon"
+        alert.informativeText = "The site's touch icon or favicon becomes the project's icon."
+        alert.addButton(withTitle: "Use Favicon")
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(
+            x: 0, y: 0,
+            width: SidebarDefaults.renameFieldWidth,
+            height: SidebarDefaults.renameFieldHeight
+        ))
+        field.placeholderString = "example.com"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        completion(trimmed)
+    }
+
+    @objc private func removeProjectIconClicked() {
+        guard let projectID = contextProjectID() else { return }
+        ProjectStore.shared.setIcon(nil, for: projectID)
+    }
+
+    /// A quiet informational alert; icon actions have no state worth a warning style.
+    private func presentIconNotice(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Project Icon"
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.runModal()
     }
 }
 
@@ -1013,6 +1155,7 @@ enum SidebarIdentifiers {
     static let mainColumn = NSUserInterfaceItemIdentifier("SidebarMainColumn")
     static let projectCell = NSUserInterfaceItemIdentifier("SidebarProjectCell")
     static let repoCell = NSUserInterfaceItemIdentifier("SidebarRepoCell")
+    static let branchCell = NSUserInterfaceItemIdentifier("SidebarBranchCell")
     static let sessionCell = NSUserInterfaceItemIdentifier("SidebarSessionCell")
 }
 

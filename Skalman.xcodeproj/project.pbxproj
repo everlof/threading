@@ -7,15 +7,32 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		33E3632E648F76FBA596F672 /* TranscriptReplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */; };
+		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
+		C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */; };
 		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		95814D89024CC2AED2A443AC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F6000001000000000000001;
+			remoteInfo = Skalman;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		72E4FC8EDC79F143EA49545C /* SkalmanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SkalmanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectIconTests.swift; sourceTree = "<group>"; };
+		B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptReplayTests.swift; sourceTree = "<group>"; };
+		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		F2000001000000000000038 /* Skalman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Skalman.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		63D8F4BA2EE47C9A007F49BD /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		63D8F4BA2EE47C9A007F49BD /* Exceptions for "Sources" folder in "Skalman" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Skalman/Resources/Info.plist,
@@ -25,10 +42,30 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		63D8F4952EE47C9A007F49BD /* Sources */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (63D8F4BA2EE47C9A007F49BD /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = Sources; sourceTree = "<group>"; };
+		63D8F4952EE47C9A007F49BD /* Sources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				63D8F4BA2EE47C9A007F49BD /* Exceptions for "Sources" folder in "Skalman" target */,
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+				Skalman/Resources/Icons,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		56FF87A7554976846335914F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F3000001000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -40,11 +77,39 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		25B0E33ED576F9158763F7B2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D99AEB234BECE87FAD063CB3 /* OS X */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B1792448FB880E01F5D9086C /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */,
+				B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */,
+			);
+			name = Tests;
+			path = Tests/SkalmanTests;
+			sourceTree = "<group>";
+		};
+		D99AEB234BECE87FAD063CB3 /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
 		F5000001000000000000001 = {
 			isa = PBXGroup;
 			children = (
 				63D8F4952EE47C9A007F49BD /* Sources */,
 				F5000001000000000000020 /* Products */,
+				25B0E33ED576F9158763F7B2 /* Frameworks */,
+				B1792448FB880E01F5D9086C /* Tests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -52,6 +117,7 @@
 			isa = PBXGroup;
 			children = (
 				F2000001000000000000038 /* Skalman.app */,
+				72E4FC8EDC79F143EA49545C /* SkalmanTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -59,6 +125,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		20A00C033DC1347FA758CD10 /* SkalmanTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 61DA317B0D969A1DC194B4C8 /* Build configuration list for PBXNativeTarget "SkalmanTests" */;
+			buildPhases = (
+				2B94BD9027B7FD53BB982AFA /* Sources */,
+				56FF87A7554976846335914F /* Frameworks */,
+				C995024E6F941ADF45C13130 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				44883DEA7DCAA5EAADC3CD6A /* PBXTargetDependency */,
+			);
+			name = SkalmanTests;
+			productName = SkalmanTests;
+			productReference = 72E4FC8EDC79F143EA49545C /* SkalmanTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		F6000001000000000000001 /* Skalman */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = F7000001000000000000003 /* Build configuration list for PBXNativeTarget "Skalman" */;
@@ -114,11 +198,19 @@
 			projectRoot = "";
 			targets = (
 				F6000001000000000000001 /* Skalman */,
+				20A00C033DC1347FA758CD10 /* SkalmanTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		C995024E6F941ADF45C13130 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F6000001000000000000003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -129,6 +221,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		2B94BD9027B7FD53BB982AFA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */,
+				33E3632E648F76FBA596F672 /* TranscriptReplayTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F6000001000000000000002 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -138,7 +239,58 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		44883DEA7DCAA5EAADC3CD6A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Skalman;
+			target = F6000001000000000000001 /* Skalman */;
+			targetProxy = 95814D89024CC2AED2A443AC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		749F6BEEACCEE7D0BB1D2F91 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.mjukis.SkalmanTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Skalman.app/Contents/MacOS/Skalman";
+			};
+			name = Release;
+		};
+		C663059E0D7D5F7C061F7848 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.mjukis.SkalmanTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Skalman.app/Contents/MacOS/Skalman";
+			};
+			name = Debug;
+		};
 		F7000001000000000000004 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -329,6 +481,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		61DA317B0D969A1DC194B4C8 /* Build configuration list for PBXNativeTarget "SkalmanTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				749F6BEEACCEE7D0BB1D2F91 /* Release */,
+				C663059E0D7D5F7C061F7848 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		F7000001000000000000001 /* Build configuration list for PBXProject "Skalman" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

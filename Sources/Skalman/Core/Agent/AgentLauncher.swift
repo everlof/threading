@@ -138,6 +138,31 @@ enum AgentLauncher {
         )
     }
 
+    /// Builds a one-shot, headless `codex exec` run used for background research — icon
+    /// discovery today.
+    ///
+    /// Routed to the default account (research belongs to a project, not any session — the
+    /// same `env -u` rule as `accountPrefix`), sandboxed read-only because research must
+    /// not write, and with reasoning effort turned down: the answer is a look-up, not a
+    /// plan. No MCP flags — a run with no terminal has no panel to reach.
+    static func codexResearchPlan(in folder: String, prompt: String) -> AgentLaunchPlan {
+        let environmentKey = AgentKind.codex.accountEnvironmentKey ?? ""
+        let accountPrefix = environmentKey.isEmpty ? "" : "env -u \(environmentKey) "
+
+        let command = accountPrefix + AgentDefaults.codexExecutable
+            + codexConfigOverride(
+                AgentDefaults.codexReasoningEffortKey,
+                string: AgentDefaults.codexResearchReasoningEffort
+            )
+            + " --sandbox read-only exec --json \(quoted(prompt))"
+
+        return AgentLaunchPlan(
+            executable: loginShellPath,
+            arguments: ["-l", "-c", "cd \(quoted(folder)) && exec \(command)"],
+            agentSessionID: nil
+        )
+    }
+
     /// Flags registering Skalman's own MCP server for this session, or "" when unavailable.
     ///
     /// Each launch receives a URL carrying the session's token — that URL is what lets a tool
@@ -147,10 +172,17 @@ enum AgentLauncher {
     /// Deliberately not `--strict-mcp-config`: that would suppress the user's own MCP servers
     /// for every session Skalman launches, which is a much larger change than adding one.
     ///
-    /// Display tools are pre-approved because they call back into the app the user is already
-    /// looking at. Without this, showing panel content raises a permission prompt every time,
-    /// which costs more attention than the action it is guarding.
+    /// Skalman's own tools are pre-approved because they call back into the app the user is
+    /// already looking at. Without this, showing panel content or driving the browser raises a
+    /// permission prompt every time, which costs more attention than the action it is guarding.
     private static func mcpFlags(for session: AgentSession) -> String {
+        // Which tools are exposed is the user's choice on the Tools settings page. With every
+        // group switched off there is nothing to register — and an empty `enabled_tools` list is
+        // ambiguous to Codex (it can read as "all"), so the server is skipped outright rather than
+        // handed an empty allowlist.
+        let enabledTools = MCPToolCatalog.enabledToolNames
+        guard !enabledTools.isEmpty else { return "" }
+
         switch session.kind {
         case .claude:
             guard let configPath = MCPSessionRegistry.writeConfiguration(for: session.id) else {
@@ -166,17 +198,17 @@ enum AgentLauncher {
             }
 
             let server = "mcp_servers.\(MCPDefaults.serverName)"
-            let enabledTools = MCPTools.displayTools
+            let toolList = enabledTools
                 .map(tomlString)
                 .joined(separator: ",")
 
             var flags = codexConfigOverride("\(server).url", string: url)
                 + codexConfigOverride(
                     "\(server).enabled_tools",
-                    tomlValue: "[\(enabledTools)]"
+                    tomlValue: "[\(toolList)]"
                 )
 
-            for tool in MCPTools.displayTools {
+            for tool in enabledTools {
                 flags += codexConfigOverride(
                     "\(server).tools.\(tool).approval_mode",
                     string: "approve"

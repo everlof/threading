@@ -12,9 +12,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var mainWindowController: MainWindowController!
 
+    /// Whether this process won the single-instance lock and therefore owns the state.
+    private var ownsSingleInstanceLock = false
+
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Unit tests host their bundle in this app, so `main()` runs before them. Skip the real
+        // startup then: the tests exercise types directly and must not spawn agents, start the MCP
+        // server, or touch the user's stores.
+        if NSClassFromString("XCTestCase") != nil { return }
+
+        // Before anything can touch the stores: a second instance must never get far enough
+        // to write projects.json, or the two silently overwrite each other's state.
+        guard SingleInstanceLock.acquire() else {
+            presentAlreadyRunningAlert()
+            NSApp.terminate(nil)
+            return
+        }
+        ownsSingleInstanceLock = true
+
         setupMenuBar()
 
         mainWindowController = MainWindowController()
@@ -22,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         cleanupOrphanedHistoryFiles()
         StateManager.shared.clearLegacySessionState()
+
+        // Fills empty icon slots in the background; it observes the store from here on, so
+        // projects added later are swept as they appear.
+        ProjectIconDiscovery.shared.start()
 
         // Session restore waits for the listener, because a launch reads the port to build the
         // session's `--mcp-config`. The callback runs whether the server came up or not, so a
@@ -34,6 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // A lock-losing instance quits without touching the stores: even *instantiating*
+        // ProjectStore writes projects.json once, which is the exact clobber the lock exists
+        // to prevent.
+        guard ownsSingleInstanceLock else { return .terminateNow }
+
         // Projects are persisted by ProjectStore as they change, but a coalesced write may
         // still be pending, so it is flushed before the agents are torn down.
         ProjectStore.shared.flushPendingSave()
@@ -69,6 +95,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Private Methods
+
+    private func presentAlreadyRunningAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Skalman is already running"
+        alert.informativeText = """
+            Another Skalman is open and owns the session state. Running two at once would \
+            silently overwrite each other's projects, so this one will quit.
+            """
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
 
     /// Removes history files belonging to sessions that no longer exist.
     private func cleanupOrphanedHistoryFiles() {
@@ -201,6 +238,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleSidebarItem.keyEquivalentModifierMask = [.command, .control]
         menu.addItem(toggleSidebarItem)
 
+        let browserItem = NSMenuItem(
+            title: "Browser",
+            action: #selector(openBrowser),
+            keyEquivalent: "b"
+        )
+        browserItem.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(browserItem)
+
         menu.addItem(.separator())
 
         let fullScreenItem = NSMenuItem(
@@ -260,6 +305,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showPreferences() {
         mainWindowController.showSettings()
+    }
+
+    @objc private func openBrowser() {
+        mainWindowController.showBrowser()
     }
 
     @objc private func newSession() {

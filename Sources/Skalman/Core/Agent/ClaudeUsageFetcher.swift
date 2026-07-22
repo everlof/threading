@@ -107,7 +107,8 @@ enum ClaudeUsageFetcher {
             id: id,
             label: label,
             fraction: window.utilization.map { min(max($0 / 100, 0), 1) },
-            resetsAt: window.resetsAt.flatMap(UsageHTTP.parseISO8601)
+            resetsAt: window.resetsAt.flatMap(UsageHTTP.parseISO8601),
+            windowDuration: UsageDefaults.duration(forWindowID: id)
         )
     }
 

@@ -16,7 +16,7 @@ final class SessionInfoPopoverViewController: NSViewController {
     struct Info {
         let title: String
         let agentLine: String
-        let agentSymbol: String
+        let agentIcon: NSImage?
         let path: String
         let branch: String?
         /// The linked worktree's name, or nil for an ordinary checkout.
@@ -38,11 +38,13 @@ final class SessionInfoPopoverViewController: NSViewController {
             } else {
                 agentLine = session.kind.displayName
             }
-            agentSymbol = session.kind.symbolName
+            agentIcon = session.kind.icon
 
             let folderPath = ProjectStore.shared.project(forSessionID: session.id)?.folderPath
             path = folderPath ?? ""
-            branch = folderPath.flatMap { GitInfo.currentBranch(for: $0) }
+            // The session's own record first: a dormant session belongs to the branch it
+            // ran on, not whatever the checkout has moved to since.
+            branch = session.branch ?? folderPath.flatMap { GitInfo.currentBranch(for: $0) }
             worktree = folderPath.flatMap { GitInfo.worktreeName(for: $0) }
 
             switch activity {
@@ -117,7 +119,7 @@ final class SessionInfoPopoverViewController: NSViewController {
 
         var rows: [NSView] = [title]
 
-        rows.append(row(symbol: info.agentSymbol, text: info.agentLine, emphasis: .secondary))
+        rows.append(row(icon: info.agentIcon, text: info.agentLine, emphasis: .secondary))
 
         if !info.path.isEmpty {
             rows.append(row(
@@ -146,8 +148,16 @@ final class SessionInfoPopoverViewController: NSViewController {
     }
 
     private func row(symbol: String, text: String, emphasis: Emphasis) -> NSView {
+        row(
+            icon: NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+            text: text,
+            emphasis: emphasis
+        )
+    }
+
+    private func row(icon image: NSImage?, text: String, emphasis: Emphasis) -> NSView {
         let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        icon.image = image
         icon.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
         icon.contentTintColor = .secondaryLabelColor
         icon.setContentHuggingPriority(.required, for: .horizontal)

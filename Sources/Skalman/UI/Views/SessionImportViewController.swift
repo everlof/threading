@@ -243,10 +243,8 @@ extension SessionImportViewController: NSTableViewDelegate {
     /// last touched — which together are what distinguishes one past conversation from another.
     private func makeRow(for session: ImportableSession) -> NSView {
         let icon = NSImageView()
-        icon.image = NSImage(
-            systemSymbolName: session.kind.symbolName,
-            accessibilityDescription: session.kind.displayName
-        )
+        icon.image = session.kind.icon
+        icon.imageScaling = .scaleProportionallyDown
         icon.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
         icon.contentTintColor = .secondaryLabelColor
 

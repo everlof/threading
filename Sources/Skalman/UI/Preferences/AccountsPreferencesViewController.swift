@@ -195,7 +195,11 @@ final class AccountsPreferencesViewController: NSViewController {
         }
 
         let popover = NSPopover()
-        popover.behavior = .transient
+        // Semi-transient, not transient: the system Emoji & Symbols picker opens as its own
+        // panel, and a transient popover would close the moment it appears — taking the field
+        // that panel inserts into with it. Semi-transient survives that and still dismisses on
+        // a click back in the main window.
+        popover.behavior = .semitransient
         popover.contentViewController = picker
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
         iconPopover = popover

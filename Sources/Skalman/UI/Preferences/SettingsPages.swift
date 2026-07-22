@@ -15,6 +15,7 @@ enum SettingsPages {
         Page(title: "Accounts", symbol: "person.2") { AccountsPreferencesViewController() },
         Page(title: "Profiles", symbol: "person.crop.circle") { ProfilePreferencesViewController() },
         Page(title: "Themes", symbol: "paintpalette") { ThemePreferencesViewController() },
+        Page(title: "Tools", symbol: "wrench.and.screwdriver") { ToolsPreferencesViewController() },
         Page(title: "Archived", symbol: "archivebox") { ArchivedPreferencesViewController() }
     ]
 

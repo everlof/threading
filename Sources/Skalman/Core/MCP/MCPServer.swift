@@ -233,24 +233,32 @@ final class MCPServer {
         case "initialize":
             let params = message["params"] as? [String: Any]
             let clientVersion = params?["protocolVersion"] as? String
+            let base = MCPToolCatalog.instructions
 
-            completion(Self.result(id: id, [
-                // Echoed back when the client names one, so a client on an older revision is
-                // not refused over a difference this server does not actually depend on.
-                "protocolVersion": clientVersion ?? MCPDefaults.protocolVersion,
-                "capabilities": ["tools": [:] as [String: Any]],
-                "serverInfo": [
-                    "name": MCPDefaults.serverName,
-                    "version": MCPDefaults.serverVersion
-                ],
-                "instructions": MCPTools.instructions
-            ]))
+            // The panel-state addendum reads the display store through the handler, which is
+            // main-queue bound; everything else in the response is static. The connection is held
+            // until the hop returns, which the client already expects for `initialize`.
+            DispatchQueue.main.async { [weak self] in
+                let addendum = self?.handler?.panelState(for: sessionID) ?? ""
+
+                completion(Self.result(id: id, [
+                    // Echoed back when the client names one, so a client on an older revision is
+                    // not refused over a difference this server does not actually depend on.
+                    "protocolVersion": clientVersion ?? MCPDefaults.protocolVersion,
+                    "capabilities": ["tools": [:] as [String: Any]],
+                    "serverInfo": [
+                        "name": MCPDefaults.serverName,
+                        "version": MCPDefaults.serverVersion
+                    ],
+                    "instructions": base + addendum
+                ]))
+            }
 
         case "ping":
             completion(Self.result(id: id, [:]))
 
         case "tools/list":
-            completion(Self.result(id: id, ["tools": MCPTools.definitions]))
+            completion(Self.result(id: id, ["tools": MCPToolCatalog.enabledDefinitions]))
 
         case "tools/call":
             callTool(message, id: id, for: sessionID, completion: completion)
@@ -287,12 +295,14 @@ final class MCPServer {
                 return
             }
 
-            let result = handler.handle(call, for: sessionID)
-            SkalmanLogger.mcp.info("tools/call \(name) for \(sessionID): isError=\(result.isError)")
+            // Completion-based, since some tools (a page load, a DOM query) finish asynchronously.
+            handler.handle(call, for: sessionID) { result in
+                SkalmanLogger.mcp.info("tools/call \(name) for \(sessionID): isError=\(result.isError)")
 
-            // A failing tool reports through `isError` in the result, not a protocol error:
-            // the call itself succeeded, and the agent should see why it did not work.
-            completion(Self.result(id: id, result.payload))
+                // A failing tool reports through `isError` in the result, not a protocol error:
+                // the call itself succeeded, and the agent should see why it did not work.
+                completion(Self.result(id: id, result.payload))
+            }
         }
     }
 

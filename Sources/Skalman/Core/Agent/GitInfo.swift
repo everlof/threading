@@ -129,6 +129,39 @@ enum GitInfo {
         worktreeLocation(for: path)?.repositoryIdentity
     }
 
+    /// The URL of the repository's `origin` remote, or nil when there is none.
+    ///
+    /// Read from the *shared* git directory's config — remotes belong to the repository,
+    /// not a checkout — so every worktree of a repo answers the same.
+    static func remoteOriginURL(for path: String) -> String? {
+        guard let identity = repositoryIdentity(for: path) else { return nil }
+
+        let configURL = URL(fileURLWithPath: identity)
+            .appendingPathComponent(GitDefaults.configFile)
+        guard let contents = try? String(contentsOf: configURL, encoding: .utf8) else { return nil }
+
+        var inOriginSection = false
+        for rawLine in contents.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+
+            if line.hasPrefix("[") {
+                inOriginSection = line == GitDefaults.originSectionHeader
+                continue
+            }
+
+            guard inOriginSection else { continue }
+            let parts = line.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2,
+                  parts[0].trimmingCharacters(in: .whitespaces) == GitDefaults.remoteURLKey
+            else { continue }
+
+            let url = parts[1].trimmingCharacters(in: .whitespaces)
+            return url.isEmpty ? nil : url
+        }
+
+        return nil
+    }
+
     /// Display name for a repository identity, e.g. `/Users/me/sonda/.git` becomes `sonda`.
     static func repositoryName(forIdentity identity: String) -> String {
         let url = URL(fileURLWithPath: identity)
@@ -194,4 +227,9 @@ enum GitDefaults {
     /// Path components git uses for linked worktrees and submodules respectively.
     static let worktreesComponent = "/worktrees/"
     static let modulesComponent = "/modules/"
+
+    /// The repository-level config file, holding among other things its remotes.
+    static let configFile = "config"
+    static let originSectionHeader = "[remote \"origin\"]"
+    static let remoteURLKey = "url"
 }

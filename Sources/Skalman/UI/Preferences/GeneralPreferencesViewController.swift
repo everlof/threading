@@ -7,6 +7,9 @@ final class GeneralPreferencesViewController: NSViewController {
 
     private let defaultAgentPopUp = NSPopUpButton()
     private let terminalTitleToggle = NSSwitch()
+    private let branchGroupingToggle = NSSwitch()
+    private let projectIconToggle = NSSwitch()
+    private let accountAvatarToggle = NSSwitch()
     private let restoreSessionToggle = NSSwitch()
     private let confirmCloseToggle = NSSwitch()
     private let shellField = NSTextField()
@@ -33,6 +36,15 @@ final class GeneralPreferencesViewController: NSViewController {
         defaultAgentPopUp.widthAnchor.constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
 
         configure(terminalTitleToggle, isOn: AppSettings.shared.usesTerminalTitleInSidebar, action: #selector(terminalTitleChanged))
+        configure(branchGroupingToggle,
+                  isOn: AppSettings.shared.groupsSessionsByBranch,
+                  action: #selector(branchGroupingChanged))
+        configure(projectIconToggle,
+                  isOn: AppSettings.shared.discoversProjectIcons,
+                  action: #selector(projectIconChanged))
+        configure(accountAvatarToggle,
+                  isOn: AppSettings.shared.discoversAccountAvatars,
+                  action: #selector(accountAvatarChanged))
         configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
         configure(confirmCloseToggle, isOn: AppSettings.shared.confirmsBeforeClosingRunningSession, action: #selector(confirmCloseChanged))
 
@@ -56,7 +68,25 @@ final class GeneralPreferencesViewController: NSViewController {
                            control: defaultAgentPopUp),
             SettingsUI.row(title: "Name sessions after the terminal title",
                            subtitle: "Agents report progress through the terminal title. Renaming a session keeps your name.",
-                           control: terminalTitleToggle)
+                           control: terminalTitleToggle),
+            SettingsUI.row(
+                title: "Group sessions by branch",
+                subtitle: "Sessions that ran on the same branch gather under it, "
+                    + "when a branch has more than one.",
+                control: branchGroupingToggle
+            ),
+            SettingsUI.row(
+                title: "Discover project icons",
+                subtitle: "Projects without an icon use their own favicon or app icon, "
+                    + "else their GitHub avatar or homepage favicon.",
+                control: projectIconToggle
+            ),
+            SettingsUI.row(
+                title: "Discover account avatars",
+                subtitle: "Sessions show their account's Gravatar or GitHub avatar, "
+                    + "found by its login email. A chosen emoji still wins.",
+                control: accountAvatarToggle
+            )
         ])
 
         let startup = SettingsCard(rows: [
@@ -126,6 +156,26 @@ final class GeneralPreferencesViewController: NSViewController {
 
     @objc private func terminalTitleChanged() {
         AppSettings.shared.usesTerminalTitleInSidebar = terminalTitleToggle.state == .on
+        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+    }
+
+    @objc private func projectIconChanged() {
+        AppSettings.shared.discoversProjectIcons = projectIconToggle.state == .on
+        // Sweeps immediately, so switching this on does not wait for a relaunch.
+        ProjectIconDiscovery.shared.retryAll()
+    }
+
+    @objc private func accountAvatarChanged() {
+        AppSettings.shared.discoversAccountAvatars = accountAvatarToggle.state == .on
+        // Forgotten attempts plus a sidebar rebuild, so re-enabling acts immediately —
+        // rows re-prime lookups as they reconfigure.
+        AccountAvatarStore.retryAll()
+        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+    }
+
+    @objc private func branchGroupingChanged() {
+        AppSettings.shared.groupsSessionsByBranch = branchGroupingToggle.state == .on
+        // The sidebar rebuilds its tree on this, which is what adds or removes the level.
         NotificationCenter.default.post(name: .projectsDidChange, object: self)
     }
 

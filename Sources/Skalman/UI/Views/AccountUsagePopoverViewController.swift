@@ -13,6 +13,10 @@ final class AccountUsagePopoverViewController: NSViewController {
     private let account: AgentAccount
     private let contentStack = NSStackView()
 
+    /// Fired as the pointer enters and leaves the popover, so the owning pill can keep a
+    /// hover-opened popover alive while the pointer is inside it.
+    var onHoverChange: ((Bool) -> Void)?
+
     // MARK: - Initialization
 
     init(account: AgentAccount) {
@@ -31,7 +35,8 @@ final class AccountUsagePopoverViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        let container = NSView()
+        let container = HoverTrackingView()
+        container.onHoverChange = { [weak self] hovering in self?.onHoverChange?(hovering) }
 
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
@@ -156,6 +161,9 @@ final class AccountUsagePopoverViewController: NSViewController {
         let bar = UsageBarView()
         bar.fraction = expired ? 0 : (window.fraction ?? 0)
         bar.tint = severity.barColor
+        // The linear time mark: where the clock is in this window, so the fill can be read as
+        // ahead of or behind the pace.
+        bar.timeMark = expired ? nil : window.elapsedFraction()
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.heightAnchor.constraint(
             equalToConstant: UsagePopoverDefaults.barHeight
@@ -165,7 +173,8 @@ final class AccountUsagePopoverViewController: NSViewController {
         if expired {
             resetText = "Reset passed — awaiting a fresh reading"
         } else if let resetsAt = window.resetsAt {
-            resetText = "Resets in \(UsageFormat.remaining(until: resetsAt))"
+            // Both the countdown and the absolute local time — "in 3h 12m · 3:45 PM".
+            resetText = "Resets in \(UsageFormat.remaining(until: resetsAt)) · \(UsageFormat.absolute(resetsAt))"
         } else {
             resetText = ""
         }
@@ -200,6 +209,32 @@ final class AccountUsagePopoverViewController: NSViewController {
     }
 }
 
+// MARK: - Hover Tracking View
+
+/// A container that reports pointer enter and exit, so a hover-opened popover can stay open while
+/// the pointer is over its contents rather than closing the instant it leaves the pill.
+final class HoverTrackingView: NSView {
+
+    var onHoverChange: ((Bool) -> Void)?
+
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
+    override func mouseExited(with event: NSEvent) { onHoverChange?(false) }
+}
+
 // MARK: - Usage Bar View
 
 /// A flat horizontal gauge: quiet full-width track, tinted fill for the spent fraction.
@@ -210,7 +245,12 @@ final class UsageBarView: NSView {
     var fraction: Double = 0 { didSet { needsLayout = true } }
     var tint: NSColor = .controlAccentColor { didSet { needsLayout = true } }
 
+    /// The linear time position within the window, 0…1, drawn as a thin vertical mark so the
+    /// spent fill can be read against the clock. Nil hides it.
+    var timeMark: Double? { didSet { needsLayout = true } }
+
     private let fillView = NSView()
+    private let markView = NSView()
 
     // MARK: - Initialization
 
@@ -219,7 +259,10 @@ final class UsageBarView: NSView {
 
         wantsLayer = true
         fillView.wantsLayer = true
+        markView.wantsLayer = true
         addSubview(fillView)
+        // Above the fill, so the pace line stays visible even where usage has passed it.
+        addSubview(markView)
     }
 
     required init?(coder: NSCoder) {
@@ -242,6 +285,24 @@ final class UsageBarView: NSView {
         fillView.layer?.cornerRadius = radius
         fillView.layer?.backgroundColor = tint.cgColor
         fillView.isHidden = width <= 0
+
+        if let timeMark {
+            let markWidth = UsagePopoverDefaults.timeMarkWidth
+            let x = bounds.width * min(max(timeMark, 0), 1)
+            markView.frame = NSRect(
+                x: min(max(x - markWidth / 2, 0), bounds.width - markWidth),
+                y: 0, width: markWidth, height: bounds.height
+            )
+            markView.layer?.cornerCurve = .continuous
+            markView.layer?.cornerRadius = markWidth / 2
+            // labelColor adapts to light/dark, so the mark reads against both the track and any
+            // tint fill it overlaps.
+            markView.layer?.backgroundColor = NSColor.labelColor
+                .withAlphaComponent(UsagePopoverDefaults.timeMarkAlpha).cgColor
+            markView.isHidden = false
+        } else {
+            markView.isHidden = true
+        }
     }
 }
 
@@ -249,5 +310,7 @@ final class UsageBarView: NSView {
 
 enum UsagePopoverDefaults {
     static let contentWidth: CGFloat = 240
-    static let barHeight: CGFloat = 4
+    static let barHeight: CGFloat = 6
+    static let timeMarkWidth: CGFloat = 2
+    static let timeMarkAlpha: CGFloat = 0.85
 }

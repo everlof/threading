@@ -272,7 +272,12 @@ final class TerminalContainerViewController: NSViewController {
         currentConversation = conversation
         placeholderView.isHidden = true
         composerViewController.view.isHidden = true
-        applyPaneBackground(.windowBackgroundColor)
+
+        // A native conversation has no terminal, but it should read like one: the backdrop is
+        // the default terminal theme's background, so it — and the sidebar sampling it — match a
+        // Claude or shell session rather than the flatter `windowBackgroundColor`, which shows
+        // through the sidebar's material as a subtly different tone.
+        applyPaneBackground(ProfileStorage.shared.defaultProfile.theme.background)
         conversation.focusPrompt()
     }
 

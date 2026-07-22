@@ -101,7 +101,8 @@ enum ClaudeUsageCache {
             id: id,
             label: label,
             fraction: min(max(percentage / 100, 0), 1),
-            resetsAt: window.resetsAt.map { Date(timeIntervalSince1970: $0) }
+            resetsAt: window.resetsAt.map { Date(timeIntervalSince1970: $0) },
+            windowDuration: UsageDefaults.duration(forWindowID: id)
         )
     }
 

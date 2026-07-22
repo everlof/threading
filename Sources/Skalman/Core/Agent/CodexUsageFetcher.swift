@@ -83,7 +83,8 @@ enum CodexUsageFetcher {
             id: id,
             label: label,
             fraction: window.usedPercent.map { min(max($0 / 100, 0), 1) },
-            resetsAt: resetsAt
+            resetsAt: resetsAt,
+            windowDuration: window.limitWindowSeconds
         )
     }
 

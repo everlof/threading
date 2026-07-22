@@ -127,6 +127,15 @@ struct AgentSession: Codable, Identifiable {
     /// Nil uses whatever the CLI defaults to.
     var model: String?
 
+    /// The branch the checkout was on when this session last ran.
+    ///
+    /// A branch belongs to a checkout, not a session — but a *conversation* happened on
+    /// whatever branch was checked out at the time, and that is what this records: captured
+    /// at creation and re-read each time the session stops working, then frozen while
+    /// dormant. It drives the sidebar's optional branch grouping. Nil for non-git projects
+    /// and for sessions recorded before this existed.
+    var branch: String?
+
     /// Stored optional so state written before archiving existed still decodes: synthesized
     /// `Codable` throws on a missing key rather than falling back to a property's default.
     private var archived: Bool?
@@ -175,6 +184,7 @@ struct AgentSession: Codable, Identifiable {
         self.lastExitCode = nil
         self.accountHandle = accountHandle
         self.model = model
+        self.branch = nil
         self.archived = nil
         self.nativeUI = usesNativeUI
     }
@@ -214,6 +224,33 @@ struct AgentSession: Codable, Identifiable {
     }
 }
 
+// MARK: - Project Icon
+
+/// How a project's sidebar icon was obtained, which decides what may replace it: automatic
+/// discovery only ever fills an empty slot, while a user's explicit choice is never
+/// overwritten by anything automatic.
+enum ProjectIconSource: String, Codable {
+    /// Chosen by the user.
+    case custom
+    /// Found in the checkout itself — a favicon, touch icon, or app icon set.
+    case repoFile
+    /// The avatar of the repository's GitHub owner.
+    case remoteAvatar
+    /// The favicon of the homepage the project declares.
+    case homepage
+    /// Set by an agent, through the MCP tool or icon research.
+    case agent
+}
+
+/// A project's sidebar icon: where its image lives and how it was obtained.
+struct ProjectIcon: Codable, Equatable {
+    let source: ProjectIconSource
+
+    /// File name inside `ProjectIconStore`'s cache directory — not a path, so the record
+    /// survives the cache directory moving with the user's home.
+    let fileName: String
+}
+
 // MARK: - Project
 
 /// A folder the user has added, grouping the agent sessions started inside it.
@@ -226,6 +263,10 @@ struct Project: Codable, Identifiable {
     var isExpanded: Bool
     let createdAt: Date
 
+    /// The sidebar icon, discovered or chosen. Optional, so state written before icons
+    /// existed still decodes.
+    var icon: ProjectIcon?
+
     init(name: String, folderURL: URL, id: UUID = UUID()) {
         self.id = id
         self.name = name
@@ -233,6 +274,7 @@ struct Project: Codable, Identifiable {
         self.sessions = []
         self.isExpanded = true
         self.createdAt = Date()
+        self.icon = nil
     }
 
     var folderURL: URL {

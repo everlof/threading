@@ -208,7 +208,7 @@ final class SessionComposerViewController: NSViewController {
     // MARK: - Chip State
 
     private func refreshChips() {
-        agentChip.configure(symbolName: selectedAgent.symbolName, title: selectedAgent.displayName)
+        agentChip.configure(icon: selectedAgent.icon, title: selectedAgent.displayName)
 
         let accounts = AgentAccountDiscovery.accounts(for: selectedAgent)
         let account = AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)

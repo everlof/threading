@@ -340,6 +340,24 @@ final class MainWindowController: NSWindowController {
         toggleSettings()
     }
 
+    /// Opens the browser as a tab in the selected session's display panel, beside the terminal.
+    ///
+    /// The browser is per-session — it is one of that session's display tabs, so the agent
+    /// running there and the user drive the same page. With no session selected there is nowhere
+    /// for it to live, so the gesture just beeps.
+    func showBrowser() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard let sessionID = containerViewController.currentSessionID else {
+            NSSound.beep()
+            return
+        }
+
+        displayPaneController.activateBrowser(for: sessionID)
+        displayPaneController.showSession(sessionID)
+        setDisplayPaneVisible(true)
+    }
+
     /// Opens Settings in the content pane, or closes it and returns to what was on screen. The
     /// sidebar itself swaps to the section list rather than a second sidebar appearing.
     func toggleSettings() {
@@ -707,6 +725,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         // An agent that just stopped working may have switched branches on the way.
         if AgentRuntime.shared.activity(sessionID: sessionID) != .working {
             sidebarViewController.refreshProjectRow(forSessionID: sessionID)
+
+            // The session's own branch record follows the same moment; a change regroups
+            // the sidebar through the store's change notification.
+            ProjectStore.shared.refreshBranch(forSessionID: sessionID)
 
             // It also just spent tokens, so the finish is the moment the pill is most
             // likely stale. The service's spacing keeps a chatty session polite.

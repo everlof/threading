@@ -33,6 +33,50 @@ enum UsageFormat {
         if hours < 24 { return "\(hours)h ago" }
         return "\(hours / 24)d ago"
     }
+
+    /// The reset as an absolute local moment, to sit beside the countdown so a reset reads as both
+    /// "in 3h" and "at 3:45": the time alone when it is today, `tomorrow 3:45 PM`, a weekday within
+    /// the week, else a dated form. Respects the user's 12/24-hour locale.
+    static func absolute(_ date: Date, from now: Date = Date()) -> String {
+        let calendar = Calendar.current
+        let time = timeFormatter.string(from: date)
+
+        if calendar.isDate(date, inSameDayAs: now) {
+            return time
+        }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now),
+           calendar.isDate(date, inSameDayAs: tomorrow) {
+            return "tomorrow \(time)"
+        }
+
+        // Within the coming week, name the weekday; beyond that, a dated form.
+        let days = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)
+        ).day ?? 0
+        if (2...6).contains(days) {
+            return "\(weekdayFormatter.string(from: date)) \(time)"
+        }
+        return "\(dayFormatter.string(from: date)), \(time)"
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        return formatter
+    }()
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
 }
 
 // MARK: - Severity Colours

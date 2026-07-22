@@ -59,6 +59,60 @@ final class AppSettings {
         }
     }
 
+    /// Whether the sidebar gathers a project's sessions under the branch they ran on,
+    /// where a branch has more than one.
+    var groupsSessionsByBranch: Bool {
+        get { defaults.bool(forKey: Keys.groupsSessionsByBranch) }
+        set {
+            defaults.set(newValue, forKey: Keys.groupsSessionsByBranch)
+            notifyChanged()
+        }
+    }
+
+    /// Whether projects without an icon look for one automatically — the checkout's own
+    /// favicon or app icon, then the repository's GitHub avatar or homepage favicon.
+    /// The network sources only ever contact hosts the project itself points at.
+    var discoversProjectIcons: Bool {
+        get { defaults.bool(forKey: Keys.discoversProjectIcons) }
+        set {
+            defaults.set(newValue, forKey: Keys.discoversProjectIcons)
+            notifyChanged()
+        }
+    }
+
+    /// Whether sessions show their account's avatar, looked up from its login email via
+    /// Gravatar or GitHub's public-email search. Off sends nothing anywhere.
+    var discoversAccountAvatars: Bool {
+        get { defaults.bool(forKey: Keys.discoversAccountAvatars) }
+        set {
+            defaults.set(newValue, forKey: Keys.discoversAccountAvatars)
+            notifyChanged()
+        }
+    }
+
+    // MARK: - MCP Tool Groups
+
+    /// The tool groups the user has switched *off* on the Tools page. Stored as the disabled set,
+    /// not the enabled one, so a group added in a future release is on by default rather than
+    /// absent — an omitted id reads as enabled.
+    var disabledToolGroupIDs: Set<String> {
+        get { Set(defaults.stringArray(forKey: Keys.disabledToolGroupIDs) ?? []) }
+        set {
+            defaults.set(Array(newValue), forKey: Keys.disabledToolGroupIDs)
+            notifyChanged()
+        }
+    }
+
+    func isToolGroupEnabled(_ id: String) -> Bool {
+        !disabledToolGroupIDs.contains(id)
+    }
+
+    func setToolGroup(_ id: String, enabled: Bool) {
+        var disabled = disabledToolGroupIDs
+        if enabled { disabled.remove(id) } else { disabled.insert(id) }
+        disabledToolGroupIDs = disabled
+    }
+
     // MARK: - Private Methods
 
     /// Opt-in settings default to off; the rest are seeded so first launch behaves sensibly.
@@ -67,7 +121,10 @@ final class AppSettings {
             Keys.defaultAgentKind: AgentDefaults.defaultKind.rawValue,
             Keys.restoresLastSession: true,
             Keys.confirmsBeforeClosingRunningSession: true,
-            Keys.usesTerminalTitleInSidebar: true
+            Keys.usesTerminalTitleInSidebar: true,
+            Keys.groupsSessionsByBranch: true,
+            Keys.discoversProjectIcons: true,
+            Keys.discoversAccountAvatars: true
         ])
     }
 
@@ -82,5 +139,9 @@ final class AppSettings {
         static let restoresLastSession = "restoresLastSession"
         static let confirmsBeforeClosingRunningSession = "confirmsBeforeClosingRunningSession"
         static let usesTerminalTitleInSidebar = "usesTerminalTitleInSidebar"
+        static let groupsSessionsByBranch = "groupsSessionsByBranch"
+        static let discoversProjectIcons = "discoversProjectIcons"
+        static let discoversAccountAvatars = "discoversAccountAvatars"
+        static let disabledToolGroupIDs = "disabledToolGroupIDs"
     }
 }

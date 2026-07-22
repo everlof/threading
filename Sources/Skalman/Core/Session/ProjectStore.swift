@@ -57,6 +57,10 @@ final class ProjectStore {
     }
 
     func removeProject(id: UUID) {
+        if let icon = project(withID: id)?.icon {
+            ProjectIconStore.remove(fileName: icon.fileName)
+        }
+
         projects.removeAll { $0.id == id }
         save()
         notifyChanged()
@@ -75,6 +79,23 @@ final class ProjectStore {
         save()
     }
 
+    /// Records a project's sidebar icon, or clears it. The icon's image file is owned by
+    /// `ProjectIconStore`; this only records which file and where it came from.
+    func setIcon(_ icon: ProjectIcon?, for projectID: UUID) {
+        guard let index = index(ofProject: projectID),
+              projects[index].icon != icon else { return }
+
+        // Replacement rewrites the same file (it is named after the project), so only a
+        // record pointing at a *different* file leaves one to clean up.
+        if let old = projects[index].icon, old.fileName != icon?.fileName {
+            ProjectIconStore.remove(fileName: old.fileName)
+        }
+
+        projects[index].icon = icon
+        save()
+        notifyChanged()
+    }
+
     // MARK: - Session Management
 
     /// Creates a new session inside a project and returns it.
@@ -89,7 +110,7 @@ final class ProjectStore {
     ) -> AgentSession? {
         guard let index = index(ofProject: projectID) else { return nil }
 
-        let session = AgentSession(
+        var session = AgentSession(
             kind: kind,
             title: title ?? defaultSessionTitle(
                 for: kind,
@@ -100,6 +121,7 @@ final class ProjectStore {
             model: model,
             usesNativeUI: usesNativeUI
         )
+        session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
 
         projects[index].sessions.append(session)
         save()
@@ -129,6 +151,7 @@ final class ProjectStore {
         session.agentSessionID = found.agentSessionID
         session.hasLaunched = true
         session.lastActiveAt = found.lastActiveAt
+        session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
 
         projects[index].sessions.append(session)
         save()
@@ -206,6 +229,24 @@ final class ProjectStore {
 
         let result = String(stripped).trimmingCharacters(in: .whitespaces)
         return result.isEmpty ? trimmed : result
+    }
+
+    /// Re-reads the checkout's branch for a session that just stopped working.
+    ///
+    /// Called at that moment because it is when an agent is most likely to have switched
+    /// branches; dormant sessions keep the branch they last ran on, which is the whole
+    /// point of recording it per session. Saves and notifies only on an actual change,
+    /// since a change can regroup the sidebar.
+    func refreshBranch(forSessionID sessionID: UUID) {
+        guard let location = locate(sessionID: sessionID) else { return }
+
+        let branch = GitInfo.currentBranch(for: projects[location.projectIndex].folderPath)
+        guard projects[location.projectIndex].sessions[location.sessionIndex].branch != branch
+        else { return }
+
+        projects[location.projectIndex].sessions[location.sessionIndex].branch = branch
+        save()
+        notifyChanged()
     }
 
     /// Applies a mutation to a stored session and persists the result.
