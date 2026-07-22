@@ -108,6 +108,11 @@ enum AgentDefaults {
     /// latest of each family rather than pinning a dated name.
     static let claudeModels = ["opus", "sonnet", "fable"]
 
+    /// Where Claude records the model an account runs on, so the composer can name it rather
+    /// than calling it "Default".
+    static let claudeSettingsFile = "settings.json"
+    static let claudeModelKey = "model"
+
     /// Codex publishes no alias list, so its options come from the user's own
     /// `~/.codex/config.toml` instead of names invented here.
     static let codexConfigFile = "config.toml"

@@ -271,7 +271,7 @@ final class SessionComposerViewController: NSViewController {
         modelChip.isHidden = models.isEmpty
         modelChip.configure(
             symbolName: ComposerDefaults.modelSymbol,
-            title: selectedModel ?? ComposerDefaults.defaultModelTitle
+            title: modelChipTitle(for: account)
         )
 
         // Offered only for agents whose conversation Skalman may render itself — both real
@@ -365,21 +365,44 @@ final class SessionComposerViewController: NSViewController {
         return menu
     }
 
+    /// What the chip says: the chosen model, else the one the account is configured to use,
+    /// else "Default".
+    ///
+    /// Naming the resolved model is the point. "Default model" answers a question nobody asked
+    /// — the user knows they have not chosen one — while the thing they actually want to know
+    /// is what this session will run on, which the account's own settings already state.
+    private func modelChipTitle(for account: AgentAccount?) -> String {
+        if let selectedModel { return ModelName.display(for: selectedModel) }
+
+        guard let configured = AgentModels.defaultModel(for: selectedAgent, account: account) else {
+            return ComposerDefaults.defaultModelTitle
+        }
+        return ModelName.display(for: configured)
+    }
+
     private func modelMenu() -> NSMenu {
         let menu = NSMenu()
 
-        let defaultItem = NSMenuItem(
-            title: ComposerDefaults.defaultModelTitle,
-            action: nil,
-            keyEquivalent: ""
-        )
+        let account = AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
+        let configured = AgentModels.defaultModel(for: selectedAgent, account: account)
+
+        // The first item is "leave it to the CLI", so it names what the CLI would pick rather
+        // than leaving the user to find out by starting a session.
+        let defaultTitle = configured.map {
+            "\(ModelName.display(for: $0))\(ComposerDefaults.accountDefaultSuffix)"
+        } ?? ComposerDefaults.defaultModelTitle
+
+        let defaultItem = NSMenuItem(title: defaultTitle, action: nil, keyEquivalent: "")
         defaultItem.representedObject = nil
         defaultItem.state = selectedModel == nil ? .on : .off
         menu.addItem(defaultItem)
 
-        let account = AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
         for model in AgentModels.available(for: selectedAgent, account: account) {
-            let item = NSMenuItem(title: model, action: nil, keyEquivalent: "")
+            let item = NSMenuItem(
+                title: ModelName.display(for: model),
+                action: nil,
+                keyEquivalent: ""
+            )
             item.representedObject = model
             item.state = model == selectedModel ? .on : .off
             menu.addItem(item)
@@ -603,7 +626,13 @@ enum ComposerDefaults {
     static let branchFieldWidth: CGFloat = 260
     static let branchFieldHeight: CGFloat = 24
 
+    /// Only shown when the account states no model of its own — otherwise the chip names the
+    /// model the session will actually run on.
     static let defaultModelTitle = "Default model"
+
+    /// Marks the CLI's own choice in the model menu, so picking it explicitly and leaving it
+    /// alone are visibly the same thing.
+    static let accountDefaultSuffix = "  (account default)"
     static let noBranchTitle = "No branch"
     static let newWorktreeTitle = "New Worktree…"
 

@@ -18,6 +18,22 @@ enum JSONLReader {
 
     /// Calls `handle` for each record until it returns false or `limit` bytes have been read.
     static func forEachRecord(at url: URL, limit: Int, _ handle: ([String: Any]) -> Bool) {
+        forEachLine(at: url, limit: limit) { line in
+            deliver(line, to: handle)
+        }
+    }
+
+    /// The same stream, **unparsed**.
+    ///
+    /// Exists for the one caller that reads whole conversations rather than the head of one:
+    /// the usage index walks every transcript on the disk, and most records in them carry no
+    /// usage at all. Parsing each into a dictionary before deciding that is the entire cost of
+    /// the scan, and skipping it on a substring test is the difference between seconds and
+    /// minutes over a gigabyte.
+    ///
+    /// The chunking, the newline handling and the never-truncate-a-record rule stay here, so
+    /// the two views cannot drift apart.
+    static func forEachLine(at url: URL, limit: Int, _ handle: (Data) -> Bool) {
         guard let file = try? FileHandle(forReadingFrom: url) else { return }
         defer { try? file.close() }
 
@@ -38,12 +54,12 @@ enum JSONLReader {
                 // Re-based, because slicing `Data` keeps the original indices.
                 buffer = Data(buffer.suffix(from: buffer.index(after: index)))
 
-                if !deliver(line, to: handle) { return }
+                if !line.isEmpty, !handle(line) { return }
             }
         }
 
         // A trailing record with no newline is still a record.
-        _ = deliver(buffer, to: handle)
+        if !buffer.isEmpty { _ = handle(buffer) }
     }
 
     /// Parses one line and passes it on, reporting whether reading should continue.

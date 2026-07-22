@@ -26,7 +26,7 @@ enum UsageRingImage {
         guard let window = usage.peakWindow(at: now), let fraction = window.fraction else {
             return nil
         }
-        return make(fraction: fraction, tint: window.severity.glyphColor)
+        return make(fraction: fraction, tint: UsageSeverity.from(fraction: fraction).glyphColor)
     }
 
     static func make(fraction: Double, tint: NSColor) -> NSImage {
