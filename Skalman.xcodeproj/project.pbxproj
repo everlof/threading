@@ -22,6 +22,7 @@
 		A10000050000000000000002 /* AccountUsageSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000050000000000000001 /* AccountUsageSummaryTests.swift */; };
 		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
 		C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */; };
+		83FA7B157AC55CF7B3F151C5 /* ArtifactScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */; };
 		49022923B31CFED2F032E6EC /* SideChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */; };
 		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
 		2A84B6880DED3F071BEF4857 /* ConversationTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */; };
@@ -33,6 +34,7 @@
 		3B329452E55225EB2B8BB7DA /* GitReviewRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */; };
 		4CC29E6CBEE5E72D3B78DCBD /* GitCommitGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */; };
 		287B00D68004042D190D2F68 /* GitStagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3779521669E4E149E1C77B10 /* GitStagingTests.swift */; };
+		FD8F1D30E29CF4F0EB06D000 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,6 +62,7 @@
 		A10000040000000000000001 /* PromptAttachmentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptAttachmentTests.swift; sourceTree = "<group>"; };
 		A10000050000000000000001 /* AccountUsageSummaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountUsageSummaryTests.swift; sourceTree = "<group>"; };
 		A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectIconTests.swift; sourceTree = "<group>"; };
+		0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtifactScannerTests.swift; sourceTree = "<group>"; };
 		5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SideChatTests.swift; sourceTree = "<group>"; };
 		B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptReplayTests.swift; sourceTree = "<group>"; };
 		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
@@ -73,6 +76,7 @@
 		D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitReviewRenderTests.swift; sourceTree = "<group>"; };
 		20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitCommitGraphTests.swift; sourceTree = "<group>"; };
 		3779521669E4E149E1C77B10 /* GitStagingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitStagingTests.swift; sourceTree = "<group>"; };
+		B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -143,6 +147,7 @@
 				D12026070000000000000001 /* MCPSessionRegistryTests.swift */,
 				D12026070000000000000003 /* PermissionRequestViewTests.swift */,
 				A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */,
+				0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */,
 				5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */,
 				A10000010000000000000001 /* StateManagerTests.swift */,
 				D12026070000000000000005 /* StreamSessionLifecycleTests.swift */,
@@ -156,6 +161,7 @@
 				D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */,
 				20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */,
 				3779521669E4E149E1C77B10 /* GitStagingTests.swift */,
+				B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -302,6 +308,7 @@
 				D12026070000000000000002 /* MCPSessionRegistryTests.swift in Sources */,
 				D12026070000000000000004 /* PermissionRequestViewTests.swift in Sources */,
 				C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */,
+				83FA7B157AC55CF7B3F151C5 /* ArtifactScannerTests.swift in Sources */,
 				49022923B31CFED2F032E6EC /* SideChatTests.swift in Sources */,
 				A10000010000000000000002 /* StateManagerTests.swift in Sources */,
 				D12026070000000000000006 /* StreamSessionLifecycleTests.swift in Sources */,
@@ -315,6 +322,7 @@
 				3B329452E55225EB2B8BB7DA /* GitReviewRenderTests.swift in Sources */,
 				4CC29E6CBEE5E72D3B78DCBD /* GitCommitGraphTests.swift in Sources */,
 				287B00D68004042D190D2F68 /* GitStagingTests.swift in Sources */,
+				FD8F1D30E29CF4F0EB06D000 /* AppDelegateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

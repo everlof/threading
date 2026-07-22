@@ -141,7 +141,7 @@ struct AgentSession: Codable, Identifiable {
     ///
     /// Conversations are stored per account, so this must be stable across resumes: the same
     /// identifier resumed under a different account would not be found.
-    @PersistedAccountHandle var accountHandle: AccountHandle
+    var accountHandle: AccountHandle
 
     /// Model the session was started with, passed again on resume so it does not drift.
     /// Nil uses whatever the CLI defaults to.
@@ -156,16 +156,6 @@ struct AgentSession: Codable, Identifiable {
     /// and for sessions recorded before this existed.
     var branch: String?
 
-    /// Stored optional so state written before archiving existed still decodes: synthesized
-    /// `Codable` throws on a missing key rather than falling back to a property's default.
-    private var archived: Bool?
-
-    /// Stored optional for the same reason as `archived`.
-    private var nativeUI: Bool?
-
-    /// Stored optional for the same reason as `archived`.
-    private var forkParent: SessionID?
-
     /// The session this one was forked from, for a **side chat** — a conversation started
     /// with a copy of another's context so a question can be asked without joining the
     /// record it asks about.
@@ -177,13 +167,10 @@ struct AgentSession: Codable, Identifiable {
     /// It is read at *launch* rather than being a lasting mode: the fork happens once, when
     /// the child first runs, and afterwards this is lineage rather than behaviour. See
     /// `AgentLauncher.claudeForkCommand`.
-    var forkedFrom: SessionID? {
-        get { forkParent }
-        set { forkParent = newValue }
-    }
+    var forkedFrom: SessionID?
 
     /// Whether this session began as a fork of another.
-    var isSideChat: Bool { forkParent != nil }
+    var isSideChat: Bool { forkedFrom != nil }
 
     /// Whether Skalman renders this conversation itself instead of showing the agent's
     /// terminal. Experimental, and available only where the agent exposes a supported
@@ -201,19 +188,13 @@ struct AgentSession: Codable, Identifiable {
     /// The switch still costs a relaunch: the old process must be gone before the new one
     /// resumes the same id, since two live processes would interleave writes into that one
     /// transcript.
-    var usesNativeUI: Bool {
-        get { nativeUI ?? false }
-        set { nativeUI = newValue }
-    }
+    var usesNativeUI: Bool
 
     /// Whether the session has been filed away.
     ///
     /// Archiving only affects where the session appears: its identifier and conversation are
     /// untouched, so an archived session resumes exactly as it would have.
-    var isArchived: Bool {
-        get { archived ?? false }
-        set { archived = newValue }
-    }
+    var isArchived: Bool
 
     init(
         kind: AgentKind,
@@ -237,9 +218,62 @@ struct AgentSession: Codable, Identifiable {
         self.accountHandle = accountHandle
         self.model = model
         self.branch = nil
-        self.archived = nil
-        self.nativeUI = usesNativeUI
-        self.forkParent = forkedFrom
+        self.isArchived = false
+        self.usesNativeUI = usesNativeUI
+        self.forkedFrom = forkedFrom
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, title, customTitle, terminalTitle, createdAt, lastActiveAt
+        case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, branch
+        case archived, nativeUI, forkParent
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedCreatedAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+
+        id = try container.decodeIfPresent(SessionID.self, forKey: .id) ?? SessionID()
+        kind = try container.decodeIfPresent(AgentKind.self, forKey: .kind)
+            ?? AgentDefaults.defaultKind
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+            ?? AgentDefaults.untitledSessionName
+        customTitle = try container.decodeIfPresent(String.self, forKey: .customTitle)
+        terminalTitle = try container.decodeIfPresent(String.self, forKey: .terminalTitle)
+        createdAt = decodedCreatedAt ?? Date()
+        lastActiveAt = try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
+            ?? createdAt
+        agentSessionID = try container.decodeIfPresent(TranscriptID.self, forKey: .agentSessionID)
+        hasLaunched = try container.decodeIfPresent(Bool.self, forKey: .hasLaunched) ?? false
+        lastExitCode = try container.decodeIfPresent(Int32.self, forKey: .lastExitCode)
+        accountHandle = AccountHandle(
+            storedName: try container.decodeIfPresent(String.self, forKey: .accountHandle)
+        )
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        branch = try container.decodeIfPresent(String.self, forKey: .branch)
+        isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
+        forkedFrom = try container.decodeIfPresent(SessionID.self, forKey: .forkParent)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(customTitle, forKey: .customTitle)
+        try container.encodeIfPresent(terminalTitle, forKey: .terminalTitle)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(lastActiveAt, forKey: .lastActiveAt)
+        try container.encodeIfPresent(agentSessionID, forKey: .agentSessionID)
+        try container.encode(hasLaunched, forKey: .hasLaunched)
+        try container.encodeIfPresent(lastExitCode, forKey: .lastExitCode)
+        try container.encodeIfPresent(accountHandle.persistedSessionName, forKey: .accountHandle)
+        try container.encodeIfPresent(model, forKey: .model)
+        try container.encodeIfPresent(branch, forKey: .branch)
+        try container.encode(isArchived, forKey: .archived)
+        try container.encode(usesNativeUI, forKey: .nativeUI)
+        try container.encodeIfPresent(forkedFrom, forKey: .forkParent)
     }
 
     /// Whether a previous conversation exists that can be resumed.
@@ -329,6 +363,36 @@ struct Project: Codable, Identifiable {
         self.isExpanded = true
         self.createdAt = Date()
         self.icon = nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, folderPath, sessions, isExpanded, createdAt, icon
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedFolderPath = try container.decodeIfPresent(String.self, forKey: .folderPath)
+            ?? ""
+
+        id = try container.decodeIfPresent(ProjectID.self, forKey: .id) ?? ProjectID()
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+            ?? URL(fileURLWithPath: decodedFolderPath).lastPathComponent
+        folderPath = decodedFolderPath
+        sessions = try container.decodeIfPresent([AgentSession].self, forKey: .sessions) ?? []
+        isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        icon = try container.decodeIfPresent(ProjectIcon.self, forKey: .icon)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(folderPath, forKey: .folderPath)
+        try container.encode(sessions, forKey: .sessions)
+        try container.encode(isExpanded, forKey: .isExpanded)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(icon, forKey: .icon)
     }
 
     var folderURL: URL {

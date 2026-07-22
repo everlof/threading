@@ -34,7 +34,7 @@ pattern the rest of the model should adopt).
       empty-because-failed project list currently deletes **every** history file
       (`AppDelegate.cleanupOrphanedHistoryFiles` → `HistoryManager`).
 - [x] Fixture tests: v1 file round-trip; corrupt file → quarantined, not overwritten.
-- [ ] Missing-key fixture (schema drift) → decodes with defaults once 2.3 lands.
+- [x] Missing-key fixture (schema drift) decodes with explicit model defaults.
 
 ~~Evidence: `StateManager.swift:46-58` (nil on decode error), `ProjectStore.swift:319-334`
 (eager save on ~every mutation; `load()` leaves `projects = []`), `Project.swift:262-276`
@@ -122,11 +122,10 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
       preferences, usage state, avatar caches, and visible-session account tracking.
 
 ### 2.3 One meaning per nil in the model
-- [ ] Hand-written `init(from:)` for `AgentSession`/`Project` using
-      `decodeIfPresent … ?? default` (the `AISettings.swift:62-69` pattern). This retires
-      the stored-`Bool?` workaround (`archived`, `nativeUI`) and makes future field
-      additions decode-safe by default — the constraint is currently enforced by a comment
-      (`Project.swift:141`).
+- [x] Hand-written `init(from:)` for `AgentSession`/`Project` uses
+      `decodeIfPresent … ?? default` and explicit legacy-key encoding. The stored-`Bool?`
+      and account property-wrapper workarounds are retired; missing-key and non-default
+      round-trip fixtures lock in both sides of the contract.
 - [ ] Replace overloaded optionals with enums where nil has two meanings today:
       `agentSessionID` (shell vs not-yet-discovered vs resumable) → `ResumeState`;
       `branch` (non-git vs pre-feature record) can stay `String?` once recorded-at is
@@ -187,7 +186,7 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
 ### 3.3 Tests where the code is already pure
 Currently: 3 tests (TranscriptReplay). The architecture has already extracted its logic —
 these need no UI harness:
-- [ ] Persistence: round-trip, corrupt-file quarantine, old-schema fixtures (locks in 1.1).
+- [x] Persistence: round-trip, corrupt-file quarantine, old-schema fixtures (locks in 1.1).
 - [ ] `AgentLauncher` plan snapshots, including hostile strings (locks in 2.6).
 - [ ] Stream-event golden files from real Claude/Codex transcripts (locks in 2.4).
 - [ ] `SessionImporter.belongs` worktree fixtures — CLAUDE.md says the rules were "proven

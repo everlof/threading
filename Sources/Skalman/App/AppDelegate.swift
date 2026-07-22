@@ -90,6 +90,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // There is a window only in an instance that actually started up — and two that never
+        // do still run a real `NSApplication` with a real delegate: a hosted test bundle, and a
+        // second instance that lost the single-instance lock. The system sends this whenever the
+        // Dock icon is clicked, so the force-unwrap that used to be here was a crash waiting for
+        // a click. It found one, in the middle of a test run that was pumping the main run loop.
+        guard let mainWindowController else { return true }
+
         if !flag {
             mainWindowController.showWindow(nil)
         }
@@ -98,6 +105,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Folders dropped on the app icon are added as projects.
     func application(_ application: NSApplication, open urls: [URL]) {
+        // Same reachability, worse consequence: *instantiating* `ProjectStore` writes
+        // projects.json, which is the exact clobber the lock exists to prevent — so an instance
+        // that does not own the state does not adopt folders into it either.
+        guard ownsSingleInstanceLock else { return }
+
         for url in urls {
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),

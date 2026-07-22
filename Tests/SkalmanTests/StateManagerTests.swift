@@ -43,6 +43,82 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(restored.selectedSessionID, selectedSessionID)
     }
 
+    func testMissingKeyFixtureDecodesWithModelDefaults() throws {
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/Projects/missing-fields-v1.json")
+        let data = try Data(contentsOf: fixtureURL)
+        let state = try JSONDecoder().decode(ProjectsState.self, from: data)
+
+        let project = try XCTUnwrap(state.projects.first)
+        XCTAssertEqual(project.id, ProjectID(UUID(uuidString: "11111111-1111-1111-1111-111111111111")!))
+        XCTAssertEqual(project.name, "Legacy Project")
+        XCTAssertTrue(project.isExpanded)
+        XCTAssertNil(project.icon)
+
+        let session = try XCTUnwrap(project.sessions.first)
+        XCTAssertEqual(session.id, SessionID(UUID(uuidString: "22222222-2222-2222-2222-222222222222")!))
+        XCTAssertEqual(session.kind, .claude)
+        XCTAssertEqual(session.title, "Legacy Conversation")
+        XCTAssertEqual(session.lastActiveAt, session.createdAt)
+        XCTAssertFalse(session.hasLaunched)
+        XCTAssertEqual(session.accountHandle, .standard)
+        XCTAssertFalse(session.isArchived)
+        XCTAssertFalse(session.usesNativeUI)
+        XCTAssertNil(session.forkedFrom)
+        XCTAssertNil(session.agentSessionID)
+        XCTAssertNil(session.model)
+        XCTAssertNil(session.branch)
+    }
+
+    func testExplicitModelEncodingPreservesNonDefaultFields() throws {
+        let parentID = SessionID()
+        var session = AgentSession(
+            kind: .codex,
+            title: "Original",
+            accountHandle: .named("codex-work"),
+            model: "gpt-test",
+            usesNativeUI: true,
+            forkedFrom: parentID
+        )
+        session.customTitle = "Renamed"
+        session.terminalTitle = "Terminal title"
+        session.agentSessionID = TranscriptID("thread-test")
+        session.hasLaunched = true
+        session.lastExitCode = 7
+        session.branch = "feature/test"
+        session.isArchived = true
+
+        var project = Project(
+            name: "Round Trip",
+            folderURL: URL(fileURLWithPath: "/tmp/round-trip")
+        )
+        project.sessions = [session]
+        project.isExpanded = false
+        project.icon = ProjectIcon(source: .custom, fileName: "icon.png")
+
+        let data = try JSONEncoder().encode(project)
+        let restored = try JSONDecoder().decode(Project.self, from: data)
+        let restoredSession = try XCTUnwrap(restored.sessions.first)
+
+        XCTAssertEqual(restored.id, project.id)
+        XCTAssertFalse(restored.isExpanded)
+        XCTAssertEqual(restored.icon, project.icon)
+        XCTAssertEqual(restoredSession.id, session.id)
+        XCTAssertEqual(restoredSession.customTitle, "Renamed")
+        XCTAssertEqual(restoredSession.terminalTitle, "Terminal title")
+        XCTAssertEqual(restoredSession.agentSessionID, TranscriptID("thread-test"))
+        XCTAssertEqual(restoredSession.accountHandle, .named("codex-work"))
+        XCTAssertEqual(restoredSession.model, "gpt-test")
+        XCTAssertEqual(restoredSession.branch, "feature/test")
+        XCTAssertEqual(restoredSession.lastExitCode, 7)
+        XCTAssertEqual(restoredSession.forkedFrom, parentID)
+        XCTAssertTrue(restoredSession.hasLaunched)
+        XCTAssertTrue(restoredSession.isArchived)
+        XCTAssertTrue(restoredSession.usesNativeUI)
+    }
+
     func testTypedIdentifiersPreserveLegacyEncoding() throws {
         let rawProjectID = UUID()
         let rawSessionID = UUID()
