@@ -37,13 +37,13 @@ final class AccountUsagePanelView: NSView {
         // everything else is aligned to, and `Surface.panel` is nearly invisible against the
         // pane anyway — so it read as a misalignment rather than as a group.
         titleLabel.font = Design.Typography.caption()
-        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.textColor = Design.Text.secondary
 
         planLabel.font = Design.Typography.caption()
-        planLabel.textColor = .tertiaryLabelColor
+        planLabel.textColor = Design.Text.tertiary
 
         footerLabel.font = Design.Typography.caption()
-        footerLabel.textColor = .tertiaryLabelColor
+        footerLabel.textColor = Design.Text.tertiary
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -101,11 +101,31 @@ final class AccountUsagePanelView: NSView {
         footerLabel.stringValue = "Updated \(UsageFormat.age(of: usage.observedAt))"
         toolTip = error
 
-        for window in usage.windows {
+        for window in usage.windows + usage.modelWindows {
             let row = UsageWindowRow(window: window)
             row.translatesAutoresizingMaskIntoConstraints = false
             windowStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: windowStack.widthAnchor).isActive = true
         }
+
+        footerLabel.stringValue = footer(for: usage)
+    }
+
+    /// The footer carries what the bars cannot: banked resets and any credit balance.
+    ///
+    /// Resets matter precisely when a window is spent — that is the moment the user is deciding
+    /// whether to stop for the day, and "you have three of these" changes the answer. They are
+    /// stated only when there are any, so an account without them says nothing.
+    private func footer(for usage: AccountUsage) -> String {
+        var parts = ["Updated \(UsageFormat.age(of: usage.observedAt))"]
+
+        if let credits = usage.resetCredits, credits > 0 {
+            parts.append(UsageFormat.resetCredits(credits))
+        }
+        if let balance = usage.creditBalance {
+            parts.append("\(balance) credits")
+        }
+
+        return parts.joined(separator: UsageDefaults.segmentSeparator)
     }
 }

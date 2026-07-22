@@ -29,6 +29,11 @@ final class EventLog {
         case session
         case composer
         case mcp
+
+        /// Agent hooks. Its own category because a hook is invisible by construction — a curl
+        /// in a subprocess whose output is discarded — so when one stops working there is
+        /// nothing on screen, and nothing in the agent's own output, to say so.
+        case hooks
     }
 
     // MARK: - Singleton

@@ -152,11 +152,11 @@ final class ThemeColorEditor: NSView {
         let columns = ThemeColorKey.main.map { key -> NSView in
             let name = NSTextField(labelWithString: key.displayName)
             name.font = Design.Typography.subheading()
-            name.textColor = .secondaryLabelColor
+            name.textColor = Design.Text.secondary
 
             let hex = NSTextField(labelWithString: "")
             hex.font = .monospacedSystemFont(ofSize: ThemeEditorLayout.hexFontSize, weight: .regular)
-            hex.textColor = .tertiaryLabelColor
+            hex.textColor = Design.Text.tertiary
             hexLabels[key] = hex
 
             let column = NSStackView(views: [name, makeSwatch(key), hex])
@@ -189,7 +189,7 @@ final class ThemeColorEditor: NSView {
             .map { title, keys -> NSView in
                 let label = NSTextField(labelWithString: title)
                 label.font = Design.Typography.subheading()
-                label.textColor = .secondaryLabelColor
+                label.textColor = Design.Text.secondary
                 label.translatesAutoresizingMaskIntoConstraints = false
                 label.widthAnchor.constraint(equalToConstant: ThemeEditorLayout.rowLabelWidth)
                     .isActive = true

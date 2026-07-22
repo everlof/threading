@@ -201,6 +201,15 @@ final class AgentSessionViewController: NSViewController {
         delegate?.agentSessionDidChangeState(self)
     }
 
+    /// Tells the delegate this session's stored record changed underneath it.
+    ///
+    /// Used where something outside the controller updates the session — adopting the
+    /// identifier an agent reports through `SessionStart`, for one — and the sidebar still has
+    /// to redraw.
+    func noteStateChanged() {
+        delegate?.agentSessionDidChangeState(self)
+    }
+
     /// Codex assigns its own identifier, so it is recovered from the rollout file it writes
     /// shortly after launch and stored for future resumes.
     ///

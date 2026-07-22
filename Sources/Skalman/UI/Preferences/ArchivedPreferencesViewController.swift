@@ -80,13 +80,13 @@ final class ArchivedPreferencesViewController: NSViewController {
     private func makeRow(entry: (project: Project, session: AgentSession), index: Int) -> NSView {
         let titleLabel = NSTextField(labelWithString: entry.session.displayTitle)
         titleLabel.font = Design.Typography.body()
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingTail
 
         let when = Self.relativeDate.localizedString(for: entry.session.lastActiveAt, relativeTo: Date())
         let captionLabel = NSTextField(labelWithString: "\(entry.project.name) · \(when)")
         captionLabel.font = Design.Typography.subheading()
-        captionLabel.textColor = .secondaryLabelColor
+        captionLabel.textColor = Design.Text.secondary
         captionLabel.lineBreakMode = .byTruncatingTail
 
         let labels = NSStackView(views: [titleLabel, captionLabel])

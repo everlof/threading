@@ -42,12 +42,12 @@ final class ConversationTurnPreview: NSView {
         layer?.shadowOffset = .zero
 
         userLabel.font = Design.Typography.body()
-        userLabel.textColor = .labelColor
+        userLabel.textColor = Design.Text.label
         userLabel.lineBreakMode = .byTruncatingTail
         userLabel.maximumNumberOfLines = PreviewDefaults.userLines
 
         assistantLabel.font = Design.Typography.subheading()
-        assistantLabel.textColor = .secondaryLabelColor
+        assistantLabel.textColor = Design.Text.secondary
         assistantLabel.lineBreakMode = .byTruncatingTail
         assistantLabel.maximumNumberOfLines = PreviewDefaults.assistantLines
 
@@ -76,7 +76,7 @@ final class ConversationTurnPreview: NSView {
         // A turn still in flight has no conclusion yet, and an empty second line would read as
         // the agent having said nothing rather than as not having finished.
         assistantLabel.stringValue = assistantText ?? PreviewDefaults.pending
-        assistantLabel.textColor = assistantText == nil ? .tertiaryLabelColor : .secondaryLabelColor
+        assistantLabel.textColor = assistantText == nil ? Design.Text.tertiary : Design.Text.secondary
     }
 }
 

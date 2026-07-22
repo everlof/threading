@@ -78,18 +78,18 @@ final class ToolsPreferencesViewController: NSViewController {
     private func toolRow(_ tool: MCPToolInfo) -> NSView {
         let icon = NSImageView()
         icon.image = NSImage(systemSymbolName: tool.symbol, accessibilityDescription: nil)
-        icon.contentTintColor = .secondaryLabelColor
+        icon.contentTintColor = Design.Text.secondary
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.setContentHuggingPriority(.required, for: .horizontal)
         icon.widthAnchor.constraint(equalToConstant: ToolsPreferencesDefaults.iconWidth).isActive = true
 
         let title = NSTextField(labelWithString: tool.title)
         title.font = Design.Typography.body()
-        title.textColor = .labelColor
+        title.textColor = Design.Text.label
 
         let detail = NSTextField(labelWithString: tool.detail)
         detail.font = Design.Typography.subheading()
-        detail.textColor = .secondaryLabelColor
+        detail.textColor = Design.Text.secondary
         detail.lineBreakMode = .byTruncatingTail
 
         let labels = NSStackView(views: [title, detail])
@@ -99,7 +99,7 @@ final class ToolsPreferencesViewController: NSViewController {
 
         let name = NSTextField(labelWithString: tool.name)
         name.font = .monospacedSystemFont(ofSize: ToolsPreferencesDefaults.toolNameFontSize, weight: .regular)
-        name.textColor = .tertiaryLabelColor
+        name.textColor = Design.Text.tertiary
         name.setContentHuggingPriority(.required, for: .horizontal)
         name.setContentCompressionResistancePriority(.required, for: .horizontal)
 

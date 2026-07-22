@@ -65,12 +65,12 @@ final class ProcessTreePaneController: NSViewController {
         headerView = NSView()
         headerView.translatesAutoresizingMaskIntoConstraints = false
         headerView.wantsLayer = true
-        headerView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        headerView.layer?.backgroundColor = Design.Surface.ground.cgColor
 
         titleLabel = NSTextField(labelWithString: "Process Tree")
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = Design.Text.label
 
         refreshButton = NSButton(image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")!, target: self, action: #selector(refreshTree))
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
@@ -100,7 +100,7 @@ final class ProcessTreePaneController: NSViewController {
         detailView = NSView()
         detailView.translatesAutoresizingMaskIntoConstraints = false
         detailView.wantsLayer = true
-        detailView.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        detailView.layer?.backgroundColor = Design.Surface.elevated.cgColor
 
         // Create detail labels
         let labels = ["PID:", "Command:", "Age:", "CPU Time:", "Memory:", "CWD:"]
@@ -108,7 +108,7 @@ final class ProcessTreePaneController: NSViewController {
             let label = NSTextField(labelWithString: "-")
             label.translatesAutoresizingMaskIntoConstraints = false
             label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-            label.textColor = .tertiaryLabelColor
+            label.textColor = Design.Text.tertiary
             label.lineBreakMode = .byTruncatingMiddle
             label.tag = index
             detailView.addSubview(label)
@@ -133,7 +133,7 @@ final class ProcessTreePaneController: NSViewController {
         summaryLabel = NSTextField(labelWithString: "")
         summaryLabel.translatesAutoresizingMaskIntoConstraints = false
         summaryLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-        summaryLabel.textColor = .tertiaryLabelColor
+        summaryLabel.textColor = Design.Text.tertiary
         summaryLabel.alignment = .left
         view.addSubview(summaryLabel)
     }
@@ -209,7 +209,7 @@ final class ProcessTreePaneController: NSViewController {
             detailLabels[5].stringValue = "CWD: \(node.workingDirectory ?? "N/A")"
 
             for label in detailLabels {
-                label.textColor = .secondaryLabelColor
+                label.textColor = Design.Text.secondary
             }
         } else {
             detailLabels[0].stringValue = "PID: -"
@@ -220,7 +220,7 @@ final class ProcessTreePaneController: NSViewController {
             detailLabels[5].stringValue = "CWD: -"
 
             for label in detailLabels {
-                label.textColor = .tertiaryLabelColor
+                label.textColor = Design.Text.tertiary
             }
         }
     }

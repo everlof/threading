@@ -764,7 +764,34 @@ Open with **Cmd+,**.
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
 - **Ask before closing a running session**
+- **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
+- **Skip Codex hook review** — see [Codex hooks](#codex-hooks)
 - **Shell path** — used by the shell drawer (⌃`); agents always launch via your login shell
+
+#### Codex hooks
+
+Skalman knows when a Claude session starts and finishes a turn because Claude reports it, which
+is how a session's status dot stays accurate without guessing from terminal output. Codex can
+report the same thing, but only from entries in `~/.codex/hooks.json` — a file you own, and one
+another tool may already be using.
+
+Both settings are **off by default** and do different jobs:
+
+- **Report Codex turn boundaries** adds Skalman's entries to each Codex account's `hooks.json`.
+  Anything already in that file is kept, and switching the setting off removes only what Skalman
+  put there.
+- **Skip Codex hook review** decides how those entries get permission to run. Codex refuses to
+  run any hook until its exact text has been approved once, and that approval happens in the
+  Codex terminal app — which a session Skalman launches never shows.
+
+Leaving the second setting **off** is recommended. Open `codex` in a terminal once, approve the
+hooks when it asks, and they work from then on: Skalman's entries are written so their text never
+changes between launches, so one approval holds.
+
+Switching it **on** means Skalman passes `--dangerously-bypass-hook-trust`, which runs *every*
+hook in that config folder without review — not only Skalman's. Since an agent can write to
+`hooks.json` itself, that would let an agent arrange for its own code to run unreviewed on the
+next launch.
 
 ### Accounts
 Per-account icons and names. See [Accounts](#accounts).

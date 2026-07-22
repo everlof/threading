@@ -21,8 +21,15 @@ enum AccountUsageMenu {
     static func decorate(_ item: NSMenuItem, for account: AgentAccount) {
         AccountUsageService.shared.refresh(account)
 
-        guard let summary = AccountUsageService.shared.usage(for: account)?.compactSummary()
-        else { return }
+        guard let usage = AccountUsageService.shared.usage(for: account) else { return }
+
+        // The ring first, because it is what makes three accounts comparable without reading
+        // twelve numbers. The text stays: it is the precise answer, and the ring is the glance.
+        if let ring = UsageRingImage.make(for: usage) {
+            item.image = ring
+        }
+
+        guard let summary = usage.compactSummary() else { return }
 
         // An account with no usage source says nothing rather than "—": see the toolbar
         // pill, which hides for the same accounts for the same reason.

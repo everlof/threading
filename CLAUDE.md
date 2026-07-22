@@ -806,6 +806,88 @@ already has wired into their agents.
 `Notification` is the one event with no Codex equivalent in 0.144.6, which is why
 `HookLifecycleEvent.codexEventName` is optional and pinned by a test.
 
+**Codex reports the same events, and everything hard about it follows from one difference:**
+it has no `--settings` flag. Hooks live in `<CODEX_HOME>/hooks.json`, one file per *account*,
+shared by every session — and owned by the user. Measured on 0.144.6: `codex exec` does fire
+hooks, and the payload is Claude's apart from the spelling — `session_id`, `turn_id`,
+`transcript_path`, `cwd`, `hook_event_name`, `prompt`, and `last_assistant_message` on `Stop`.
+
+- **Routing is by environment, not by file.** `MCPDefaults.portEnvironmentKey` and
+  `sessionTokenEnvironmentKey` are exported by `routed(_:for:)` and read by the hook command,
+  which is what lets one shared file attribute every session correctly. Verified that a hook
+  inherits the launch environment.
+- **Which is also what keeps the file *stable*.** Codex pins a trusted hook by hashing its text,
+  so a URL carrying today's port would revoke the user's trust on every app launch.
+  `CodexHookInstaller` therefore rewrites only on a real change, and a second install returns
+  false.
+- **`CodexHookInstaller` merges rather than replaces**, marks its own entries with
+  `MCPDefaults.hookMarker`, and removes only those on uninstall. This machine's own
+  `~/.codex/hooks.json` was written by another tool, which is why that is a rule and not a
+  nicety.
+- **The command guards on the token** (`[ -n "$SKALMAN_SESSION_TOKEN" ]`), because the file is
+  read by every Codex run under that account, including the ones the user starts themselves.
+
+Both halves are opt-in and separate (`AppSettings.installsCodexHooks`,
+`bypassesCodexHookTrust`), because only the second has a security cost: installing writes to a
+file the user owns, while `--dangerously-bypass-hook-trust` un-gates *every* hook in that folder
+rather than only ours — and an agent can write to `hooks.json`. The safe path is one manual
+approval in the Codex TUI, which the stable-text rule is what makes viable.
+
+`SessionStart` also **replaces `CodexSessionDiscovery`'s job**: it hands over `session_id`
+already attributed by the token in the URL, where discovery watches the rollout directory and
+matches on a launch timestamp. `AgentRuntime.adoptReportedIdentifier` only updates a session
+still `awaitingIdentifier`, so Claude's own report — of an id Skalman minted — is a no-op.
+
+**Codex brokers permissions on the same hook, and honours the answer.** Measured on 0.144.6: a
+`PreToolUse` reply of `permissionDecision: deny` stops the tool outright — the run logs
+`PreToolUse Blocked`, the file was not written, and the reason reaches the model, which then
+explains itself in its own words. Its payload names the tool with the same `tool_name` /
+`tool_input` keys Claude uses, so `MCPServer.routePermission` parses both unchanged. What
+differs is the *vocabulary* inside: the tool is `apply_patch` and its argument is a
+`*** Begin Patch` envelope, which is the same mismatch `TranscriptReplay.normalised` and
+`CodexPatch` already exist to absorb.
+
+`PermissionPolicy.readOnlyTools` names Claude's tools only, so every Codex tool prompts. That is
+the allowlist behaving as designed rather than a gap — a tool it does not recognise is treated
+as consequential.
+
+The `PreToolUse` entry is written **unconditionally** and guarded on
+`MCPDefaults.brokerEnvironmentKey`, which only `streamPlan` exports. Installing it per-surface
+was the obvious alternative and is wrong: `hooks.json` would be rewritten every time a session
+changed surface, and every rewrite costs the user's trust decision. An entry that is inert
+until an environment variable appears is how one shared file serves two surfaces.
+
+**A hook is invisible by construction**, which is the same problem `ProjectIconResearch` has and
+is answered the same way: every run leaves a record. `EventLog.Category.hooks` is the durable
+half, and it is deliberately *not* fed per turn — the boundaries themselves go to
+`SkalmanLogger` at `.debug`, which is the live `log stream` view, while the journal keeps only
+what a report weeks later would need:
+
+- **The one transition that matters** — a session going from inferring its state to being told
+  (`AgentRuntime.applyLifecycle`). "Did the hooks reach this session at all" is the first
+  question any bug report raises, and this is the only line that answers it.
+- **Every rejected report** — an unknown token, an unnamed event, an empty body. A report that
+  arrived and was refused looks exactly like a hook that never ran, and the causes are
+  unrelated.
+- **A rewritten `hooks.json`**, because a rewrite is the moment the user's Codex trust decision
+  stopped applying. It is the answer to "these worked yesterday".
+- **A launch with no listener port**, which silently disables the whole feature.
+
+`HookOutcomeLog` covers the one failure the app cannot otherwise see: a hook that never
+*reaches* the listener leaves nothing here, because nothing arrived — while the agent sits on a
+blocked tool. `--include-hook-events` is passed for that and only that, and Claude's
+`hook_response` carries the `outcome`, `exit_code` and `stderr` this side never observed
+(verified against a hook made to exit 7). It is read outside `StreamEvent`, which is a pure
+function feeding the conversation's rendering: a diagnostic nothing draws does not belong in the
+model the views are built from. The parsing is split from the logging so the decisions are
+testable, and a *missing* `outcome` counts as a failure — the schema belongs to the CLI, and a
+renamed field should make the journal noisy rather than quietly stop reporting.
+
+One bug worth keeping: every command reads stdin **before** its guard
+(`skalman_payload=$(cat)`). A guard that returns without reading leaves Codex writing the event
+into a pipe nobody drains, and it is the *unrouted* runs — the user's own terminal sessions —
+that would pay for it. Found by a probe whose hook posted an empty body, and pinned by a test.
+
 ### The Store
 
 Projects and sessions live in **SQLite** (`skalman.db`), not in `projects.json`. The system

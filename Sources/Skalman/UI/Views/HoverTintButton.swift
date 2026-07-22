@@ -28,15 +28,15 @@ final class HoverTintButton: NSButton {
     /// is how a quiet action ends up as loud as the content it sits beside. Setting this
     /// applies the resting tint at once, so the button starts quiet.
     var tintsTitle = false {
-        didSet { applyTint(.secondaryLabelColor) }
+        didSet { applyTint(Design.Text.secondary) }
     }
 
     override func mouseEntered(with event: NSEvent) {
-        applyTint(.labelColor)
+        applyTint(Design.Text.label)
     }
 
     override func mouseExited(with event: NSEvent) {
-        applyTint(.secondaryLabelColor)
+        applyTint(Design.Text.secondary)
     }
 
     private func applyTint(_ color: NSColor) {

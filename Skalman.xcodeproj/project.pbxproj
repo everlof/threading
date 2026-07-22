@@ -42,6 +42,9 @@
 		3225059D746FD431CFD65034 /* ThemeToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0D73705B6A31DE5CE62C91 /* ThemeToolTests.swift */; };
 		A25FE88323D6293DF6D2471F /* ThemeMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8AE2406CB7A2AD5CF7F25D6 /* ThemeMenuTests.swift */; };
 		3B6276B7453B5ECEC77CCD48 /* HookLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 044987FD479F2BCE41800DB0 /* HookLifecycleTests.swift */; };
+		A2A96560939503EE66F0F61A /* CodexHookInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52404767F8E6E3FD5655E1D /* CodexHookInstallerTests.swift */; };
+		10A7C6FBD9C60BFA180B1238 /* AppThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04F521EABA85E9D423CC483 /* AppThemeTests.swift */; };
+		5B143C2EEAF87161EAA77D67 /* AppThemeRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -91,6 +94,9 @@
 		AC0D73705B6A31DE5CE62C91 /* ThemeToolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeToolTests.swift; sourceTree = "<group>"; };
 		F8AE2406CB7A2AD5CF7F25D6 /* ThemeMenuTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeMenuTests.swift; sourceTree = "<group>"; };
 		044987FD479F2BCE41800DB0 /* HookLifecycleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HookLifecycleTests.swift; sourceTree = "<group>"; };
+		D52404767F8E6E3FD5655E1D /* CodexHookInstallerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodexHookInstallerTests.swift; sourceTree = "<group>"; };
+		F04F521EABA85E9D423CC483 /* AppThemeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppThemeTests.swift; sourceTree = "<group>"; };
+		E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppThemeRenderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -183,6 +189,9 @@
 				AC0D73705B6A31DE5CE62C91 /* ThemeToolTests.swift */,
 				F8AE2406CB7A2AD5CF7F25D6 /* ThemeMenuTests.swift */,
 				044987FD479F2BCE41800DB0 /* HookLifecycleTests.swift */,
+				D52404767F8E6E3FD5655E1D /* CodexHookInstallerTests.swift */,
+				F04F521EABA85E9D423CC483 /* AppThemeTests.swift */,
+				E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -351,6 +360,9 @@
 				3225059D746FD431CFD65034 /* ThemeToolTests.swift in Sources */,
 				A25FE88323D6293DF6D2471F /* ThemeMenuTests.swift in Sources */,
 				3B6276B7453B5ECEC77CCD48 /* HookLifecycleTests.swift in Sources */,
+				A2A96560939503EE66F0F61A /* CodexHookInstallerTests.swift in Sources */,
+				10A7C6FBD9C60BFA180B1238 /* AppThemeTests.swift in Sources */,
+				5B143C2EEAF87161EAA77D67 /* AppThemeRenderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

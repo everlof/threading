@@ -42,14 +42,14 @@ final class SessionPlaceholderView: NSView {
         stack.setCustomSpacing(PlaceholderDefaults.buttonSpacing, after: detailLabel)
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
-        iconView.contentTintColor = .tertiaryLabelColor
+        iconView.contentTintColor = Design.Text.tertiary
 
         titleLabel.font = .systemFont(ofSize: PlaceholderDefaults.titleFontSize, weight: .medium)
-        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.textColor = Design.Text.secondary
         titleLabel.alignment = .center
 
         detailLabel.font = .systemFont(ofSize: PlaceholderDefaults.detailFontSize)
-        detailLabel.textColor = .tertiaryLabelColor
+        detailLabel.textColor = Design.Text.tertiary
         detailLabel.alignment = .center
 
         actionButton.bezelStyle = .rounded

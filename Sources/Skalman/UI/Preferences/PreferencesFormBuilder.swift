@@ -51,7 +51,7 @@ final class PreferencesFormBuilder {
     func addRow(label: String, control: NSView, help: String? = nil) -> Self {
         let labelField = NSTextField(labelWithString: label.isEmpty ? "" : "\(label):")
         labelField.alignment = .right
-        labelField.textColor = .labelColor
+        labelField.textColor = Design.Text.label
 
         grid.addRow(with: [labelField, control])
         addHelpIfNeeded(help)
@@ -123,7 +123,7 @@ final class PreferencesFormBuilder {
     private func makeHelpLabel(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        label.textColor = .secondaryLabelColor
+        label.textColor = Design.Text.secondary
         label.preferredMaxLayoutWidth = PreferencesLayout.helpWidth
         label.isSelectable = false
 

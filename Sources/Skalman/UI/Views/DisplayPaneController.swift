@@ -176,7 +176,7 @@ final class DisplayPaneController: NSViewController {
         titleLabel = NSTextField(labelWithString: "Display")
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .systemFont(ofSize: DisplayPaneDefaults.titleFontSize, weight: .semibold)
-        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.textColor = Design.Text.secondary
         titleLabel.lineBreakMode = .byTruncatingTail
 
         closeButton = NSButton(
@@ -226,7 +226,7 @@ final class DisplayPaneController: NSViewController {
 
         // Overscroll and the gap before the page paints match the panel rather than flashing
         // white, which is jarring against a dark terminal.
-        webView.underPageBackgroundColor = .windowBackgroundColor
+        webView.underPageBackgroundColor = Design.Surface.ground
 
         // A live tab's full view controller — browser or review — is parented into this on
         // activation; empty and hidden otherwise.
@@ -241,7 +241,7 @@ final class DisplayPaneController: NSViewController {
             ofSize: DisplayPaneDefaults.captionFontSize,
             weight: .regular
         )
-        captionLabel.textColor = .tertiaryLabelColor
+        captionLabel.textColor = Design.Text.tertiary
         captionLabel.lineBreakMode = .byTruncatingMiddle
         captionLabel.alignment = .right
 
@@ -261,7 +261,7 @@ final class DisplayPaneController: NSViewController {
         placeholderLabel = NSTextField(labelWithString: "Nothing to show yet.")
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         placeholderLabel.font = .systemFont(ofSize: DisplayPaneDefaults.titleFontSize)
-        placeholderLabel.textColor = .tertiaryLabelColor
+        placeholderLabel.textColor = Design.Text.tertiary
         placeholderLabel.alignment = .center
 
         view.addSubview(imageView)

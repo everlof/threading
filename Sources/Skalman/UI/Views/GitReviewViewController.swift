@@ -178,7 +178,7 @@ final class GitReviewViewController: NSViewController {
         placeholderLabel = NSTextField(labelWithString: "")
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         placeholderLabel.font = Design.Typography.body()
-        placeholderLabel.textColor = .tertiaryLabelColor
+        placeholderLabel.textColor = Design.Text.tertiary
         placeholderLabel.alignment = .center
         placeholderLabel.lineBreakMode = .byWordWrapping
         placeholderLabel.maximumNumberOfLines = 0

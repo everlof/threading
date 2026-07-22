@@ -64,6 +64,24 @@ struct AccountUsage: Equatable {
     /// Subscription tier, e.g. `Max`, when the provider reports one.
     let planLabel: String?
 
+    /// Limits belonging to one model rather than the account as a whole — Codex reports these
+    /// separately, each with its own window and reset.
+    ///
+    /// Kept apart from `windows` on purpose: the toolbar's peak must stay the *account's*
+    /// pressure. A model-specific limit at 100% says one model is spent, not that the plan is,
+    /// and folding it into the peak would put the pill in the red over a model the session is
+    /// not even using.
+    var modelWindows: [Window] = []
+
+    /// Rate-limit resets the account has banked — Codex grants a few, each clearing a spent
+    /// window early. Worth surfacing precisely when a window is spent, which is the moment the
+    /// user is deciding whether to stop for the day.
+    var resetCredits: Int?
+
+    /// Purchased credits that carry on past the plan's included usage, when the provider
+    /// reports a balance.
+    var creditBalance: String?
+
     /// When the values were true: the fetch time for a live API read, or the provider's own
     /// observation stamp when the data came from a local cache.
     let observedAt: Date

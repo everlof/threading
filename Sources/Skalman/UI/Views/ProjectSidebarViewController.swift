@@ -20,6 +20,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// The settings section list, shown in place of the projects when settings is open — so
     /// the window never grows a second sidebar.
     private var settingsSidebar: SettingsSidebar?
+
+    /// Covers the sidebar's system material while a style is in force. Absent under System,
+    /// where the material is what should be seen — see `applySidebarSurface`.
+    private var themeBackdrop: NSView?
     private(set) var isSettingsMode = false
 
     /// Top level of the tree: a `RepoGroupNode` for repositories with several checkouts,
@@ -70,6 +74,7 @@ final class ProjectSidebarViewController: NSViewController {
         setupEmptyState()
         setupFooter()
         observeStoreChanges()
+        applySidebarSurface()
         reload()
         // Selection is restored by the window controller once the terminal pane exists.
     }
@@ -136,12 +141,12 @@ private extension ProjectSidebarViewController {
     private func setupEmptyState() {
         let title = NSTextField(labelWithString: SidebarStrings.emptyTitle)
         title.font = .systemFont(ofSize: SidebarDefaults.emptyTitleFontSize, weight: .semibold)
-        title.textColor = .secondaryLabelColor
+        title.textColor = Design.Text.secondary
         title.alignment = .center
 
         let subtitle = NSTextField(wrappingLabelWithString: SidebarStrings.emptySubtitle)
         subtitle.font = .systemFont(ofSize: SidebarDefaults.emptySubtitleFontSize)
-        subtitle.textColor = .tertiaryLabelColor
+        subtitle.textColor = Design.Text.tertiary
         subtitle.alignment = .center
 
         let stack = NSStackView(views: [title, subtitle])
@@ -181,7 +186,7 @@ private extension ProjectSidebarViewController {
         addButton.bezelStyle = .inline
         addButton.isBordered = false
         addButton.font = .systemFont(ofSize: SidebarRowDefaults.sessionFontSize)
-        addButton.contentTintColor = .secondaryLabelColor
+        addButton.contentTintColor = Design.Text.secondary
         addButton.target = self
         addButton.action = #selector(addProjectClicked)
         addButton.translatesAutoresizingMaskIntoConstraints = false
@@ -193,7 +198,7 @@ private extension ProjectSidebarViewController {
         settingsButton.imagePosition = .imageOnly
         settingsButton.bezelStyle = .inline
         settingsButton.isBordered = false
-        settingsButton.contentTintColor = .secondaryLabelColor
+        settingsButton.contentTintColor = Design.Text.secondary
         settingsButton.toolTip = "Settings"
         settingsButton.target = self
         settingsButton.action = #selector(settingsClicked)
@@ -236,6 +241,56 @@ private extension ProjectSidebarViewController {
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.projectsDidChange()
         }
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.applySidebarSurface()
+        }
+    }
+
+    /// Paints the sidebar's own ground — or deliberately does not.
+    ///
+    /// The split item wraps the sidebar in a system `NSVisualEffectView`, which is why a theme
+    /// otherwise reached everything on screen except the largest surface on it. Under **System**
+    /// that material is the right answer: it samples the window's backdrop, so the terminal's
+    /// colour tints the sidebar and there is no seam where the two meet.
+    ///
+    /// Under a **style** the material is what stops the theme meaning anything, so an opaque
+    /// backdrop covers it. That trade is the point of picking a style: translucency sampling a
+    /// colour the theme did not choose reads as a bug rather than as depth.
+    ///
+    /// **The backdrop is a subview, and under System it is removed rather than made clear.**
+    /// Filling the controller's own view was the obvious approach and was measured to be wrong:
+    /// `applySurface` makes a view layer-backed, and a layer-backed child inside the material
+    /// stops `.withinWindow` blending from sampling through it — the System sidebar went from
+    /// the terminal's near-black to the material's default grey. Adding and removing a subview
+    /// leaves the view hierarchy exactly as it was when no style is in force.
+    ///
+    /// Its own observer rather than part of `AppThemeRefresh`'s sweep, because the *decision*
+    /// changes with the theme, not just the colour — and a recorded surface carries a colour.
+    private func applySidebarSurface() {
+        guard !AppThemeLibrary.current.isSystem else {
+            themeBackdrop?.removeFromSuperview()
+            themeBackdrop = nil
+            return
+        }
+
+        let backdrop = themeBackdrop ?? makeThemeBackdrop()
+        backdrop.applySurface(fill: Design.Surface.background, radius: 0)
+    }
+
+    private func makeThemeBackdrop() -> NSView {
+        let backdrop = NSView()
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(backdrop, positioned: .below, relativeTo: nil)
+
+        NSLayoutConstraint.activate([
+            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+
+        themeBackdrop = backdrop
+        return backdrop
     }
 
 }
@@ -468,13 +523,13 @@ extension ProjectSidebarViewController {
             scrollView.isHidden = true
             emptyStateView.isHidden = true
             addButton.isHidden = true
-            settingsButton.contentTintColor = .controlAccentColor
+            settingsButton.contentTintColor = Design.Surface.accent
         } else {
             settingsSidebar?.isHidden = true
             scrollView.isHidden = false
             emptyStateView.isHidden = !rootNodes.isEmpty
             addButton.isHidden = false
-            settingsButton.contentTintColor = .secondaryLabelColor
+            settingsButton.contentTintColor = Design.Text.secondary
         }
     }
 

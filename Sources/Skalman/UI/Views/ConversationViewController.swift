@@ -164,7 +164,7 @@ final class ConversationViewController: NSViewController {
         statusLabel = NSTextField(labelWithString: "Starting…")
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.font = Design.Typography.subheading()
-        statusLabel.textColor = .tertiaryLabelColor
+        statusLabel.textColor = Design.Text.tertiary
 
         view.addSubview(scrollView)
         view.addSubview(minimap)

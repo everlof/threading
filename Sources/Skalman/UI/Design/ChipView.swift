@@ -55,18 +55,18 @@ final class ChipView: NSView {
         )
 
         iconView.imageScaling = .scaleProportionallyDown
-        iconView.contentTintColor = .secondaryLabelColor
+        iconView.contentTintColor = Design.Text.secondary
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         titleLabel.font = Design.Typography.control()
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingTail
 
         chevronView.image = NSImage(
             systemSymbolName: DesignSymbols.chevron,
             accessibilityDescription: nil
         )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold))
-        chevronView.contentTintColor = .tertiaryLabelColor
+        chevronView.contentTintColor = Design.Text.tertiary
         chevronView.translatesAutoresizingMaskIntoConstraints = false
 
         let stack = NSStackView(views: [iconView, titleLabel, chevronView])

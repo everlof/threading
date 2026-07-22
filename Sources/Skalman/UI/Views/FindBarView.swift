@@ -35,7 +35,7 @@ final class FindBarView: NSView {
     private lazy var resultsLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.font = NSFont.systemFont(ofSize: 11)
-        label.textColor = .secondaryLabelColor
+        label.textColor = Design.Text.secondary
         return label
     }()
 
@@ -76,7 +76,7 @@ final class FindBarView: NSView {
 
     private func setupUI() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        layer?.backgroundColor = Design.Surface.ground.cgColor
 
         let stackView = NSStackView()
         stackView.orientation = .horizontal

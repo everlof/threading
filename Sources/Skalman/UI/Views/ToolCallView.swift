@@ -52,14 +52,14 @@ final class ToolCallView: NSView {
         let glyph = ToolGlyph.forTool(tool)
 
         glyphLabel = makeLabel(glyph.symbol, font: monospace(weight: .medium))
-        glyphLabel.textColor = .secondaryLabelColor
+        glyphLabel.textColor = Design.Text.secondary
         glyphLabel.alignment = .center
 
         titleLabel = makeLabel(glyph.label, font: Design.Typography.caption())
-        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.textColor = Design.Text.secondary
 
         detailLabel = makeLabel(summary, font: monospace(weight: .regular))
-        detailLabel.textColor = .tertiaryLabelColor
+        detailLabel.textColor = Design.Text.tertiary
         detailLabel.lineBreakMode = .byTruncatingMiddle
         // The subject arrives already flattened, but a label that *can* grow on a newline is a
         // row whose height depends on its content — belt and braces, since the whole treatment
@@ -69,12 +69,12 @@ final class ToolCallView: NSView {
 
         // Reads while a call is still running, so the row is not blank until the result lands.
         metaLabel = makeLabel("running…", font: Design.Typography.caption())
-        metaLabel.textColor = .tertiaryLabelColor
+        metaLabel.textColor = Design.Text.tertiary
 
         chevron = NSImageView()
         chevron.translatesAutoresizingMaskIntoConstraints = false
         chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
-        chevron.contentTintColor = .quaternaryLabelColor
+        chevron.contentTintColor = Design.Text.quaternary
         chevron.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold)
         chevron.isHidden = true
 
@@ -105,7 +105,7 @@ final class ToolCallView: NSView {
         }
 
         let field = makeLabel("", font: monospace(weight: .regular))
-        field.textColor = .secondaryLabelColor
+        field.textColor = Design.Text.secondary
         field.isSelectable = true
         textBody = field
         return field
@@ -167,7 +167,7 @@ final class ToolCallView: NSView {
     /// Attaches the result once the tool has run.
     func setResult(_ text: String, isError: Bool) {
         let label = ToolGlyph.forTool(tool).label
-        let tint: NSColor = isError ? .systemRed : .secondaryLabelColor
+        let tint: NSColor = isError ? Design.Status.negative : Design.Text.secondary
         glyphLabel.textColor = tint
         titleLabel.textColor = tint
         titleLabel.stringValue = isError ? "\(label) · failed" : label
@@ -180,7 +180,7 @@ final class ToolCallView: NSView {
         }
 
         textBody?.stringValue = text
-        textBody?.textColor = isError ? .systemRed : .secondaryLabelColor
+        textBody?.textColor = isError ? Design.Status.negative : Design.Text.secondary
 
         let hasText = !text.isEmpty
         metaLabel.stringValue = hasText ? sizeSummary(text) : (isError ? "failed" : "done")

@@ -31,11 +31,11 @@ final class UsageWindowRow: NSView {
 
         let nameLabel = NSTextField(labelWithString: window.label)
         nameLabel.font = Design.Typography.control()
-        nameLabel.textColor = .secondaryLabelColor
+        nameLabel.textColor = Design.Text.secondary
 
         let valueLabel = NSTextField(labelWithString: Self.value(for: window, expired: expired))
         valueLabel.font = Design.Typography.control()
-        valueLabel.textColor = severity == .normal ? .labelColor : severity.glyphColor
+        valueLabel.textColor = severity == .normal ? Design.Text.label : severity.glyphColor
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -52,7 +52,7 @@ final class UsageWindowRow: NSView {
 
         let resetLabel = NSTextField(labelWithString: Self.reset(for: window, expired: expired))
         resetLabel.font = Design.Typography.caption()
-        resetLabel.textColor = .tertiaryLabelColor
+        resetLabel.textColor = Design.Text.tertiary
 
         let column = NSStackView(views: [titleRow, bar, resetLabel])
         column.orientation = .vertical

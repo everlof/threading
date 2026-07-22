@@ -43,12 +43,12 @@ final class PermissionRequestView: NSView {
 
         let title = NSTextField(labelWithString: "Allow \(request.toolName)?")
         title.font = Design.Typography.caption()
-        title.textColor = .labelColor
+        title.textColor = Design.Text.label
         title.translatesAutoresizingMaskIntoConstraints = false
 
         let detail = NSTextField(wrappingLabelWithString: request.summary)
         detail.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
-        detail.textColor = .secondaryLabelColor
+        detail.textColor = Design.Text.secondary
         detail.isSelectable = true
         detail.translatesAutoresizingMaskIntoConstraints = false
 
@@ -171,7 +171,7 @@ final class PermissionRequestView: NSView {
         buttonRow.isHidden = true
         resolvedLabel.isHidden = false
         resolvedLabel.stringValue = note
-        resolvedLabel.textColor = note.hasPrefix("Denied") ? .systemRed : .secondaryLabelColor
+        resolvedLabel.textColor = note.hasPrefix("Denied") ? Design.Status.negative : Design.Text.secondary
 
         layer?.borderColor = Design.Surface.border.cgColor
 

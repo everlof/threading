@@ -71,7 +71,7 @@ enum ThemeSwatchImage {
                 ))
             }
 
-            NSColor.separatorColor.setStroke()
+            Design.Surface.border.setStroke()
             path.lineWidth = 1
             path.stroke()
 

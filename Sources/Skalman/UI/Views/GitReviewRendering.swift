@@ -92,7 +92,7 @@ extension GitReviewViewController {
     func makeNotice(_ text: String, isError: Bool) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = Design.Typography.caption()
-        label.textColor = isError ? .systemRed : .secondaryLabelColor
+        label.textColor = isError ? Design.Status.negative : Design.Text.secondary
         label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -105,11 +105,11 @@ extension GitReviewViewController {
 
         let text = NSMutableAttributedString()
         text.append(NSAttributedString(string: "+\(added)", attributes: [
-            .foregroundColor: NSColor.systemGreen,
+            .foregroundColor: Design.Diff.added,
             .font: Design.Typography.caption()
         ]))
         text.append(NSAttributedString(string: " −\(removed)", attributes: [
-            .foregroundColor: NSColor.systemRed,
+            .foregroundColor: Design.Diff.removed,
             .font: Design.Typography.caption()
         ]))
         // The plain value first, so the field re-measures; the attributed one then recolours
@@ -173,7 +173,7 @@ extension GitReviewViewController {
             more.bezelStyle = .accessoryBarAction
             more.isBordered = false
             more.font = Design.Typography.caption()
-            more.contentTintColor = .secondaryLabelColor
+            more.contentTintColor = Design.Text.secondary
             more.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(more)
         }
@@ -182,7 +182,7 @@ extension GitReviewViewController {
     func renderDetailHeader(_ commit: GitCommitSummary) {
         let label = NSTextField(labelWithString: "\(commit.shortHash)  \(commit.subject)")
         label.font = Design.Typography.caption()
-        label.textColor = .secondaryLabelColor
+        label.textColor = Design.Text.secondary
         label.lineBreakMode = .byTruncatingTail
         label.usesSingleLineMode = true
         label.toolTip = "\(commit.subject) — \(commit.author)"

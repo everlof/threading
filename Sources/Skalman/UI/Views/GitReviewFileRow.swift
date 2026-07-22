@@ -65,13 +65,13 @@ final class GitReviewFileRow: NSView {
 
         let glyphLabel = NSTextField(labelWithString: glyph)
         glyphLabel.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .medium)
-        glyphLabel.textColor = .secondaryLabelColor
+        glyphLabel.textColor = Design.Text.secondary
         glyphLabel.alignment = .center
         glyphLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let pathLabel = NSTextField(labelWithString: pathText)
         pathLabel.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
-        pathLabel.textColor = .secondaryLabelColor
+        pathLabel.textColor = Design.Text.secondary
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.usesSingleLineMode = true
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -92,7 +92,7 @@ final class GitReviewFileRow: NSView {
         chevron = NSImageView()
         chevron.translatesAutoresizingMaskIntoConstraints = false
         chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
-        chevron.contentTintColor = .quaternaryLabelColor
+        chevron.contentTintColor = Design.Text.quaternary
         chevron.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold)
         chevron.isHidden = !canExpand
 
@@ -207,7 +207,7 @@ final class GitReviewFileRow: NSView {
     private func makeHunkHeader(_ text: String, index: Int) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
-        label.textColor = .tertiaryLabelColor
+        label.textColor = Design.Text.tertiary
         label.lineBreakMode = .byTruncatingTail
         label.usesSingleLineMode = true
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -264,7 +264,7 @@ final class GitReviewFileRow: NSView {
     private func makeNote(_ text: String) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
-        label.textColor = .tertiaryLabelColor
+        label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }
@@ -293,24 +293,24 @@ final class GitReviewFileRow: NSView {
     private var metaText: NSAttributedString {
         if file.change == .binary {
             return NSAttributedString(string: "binary", attributes: [
-                .foregroundColor: NSColor.tertiaryLabelColor,
+                .foregroundColor: Design.Text.tertiary,
                 .font: Design.Typography.caption()
             ])
         }
         if !canExpand {
             return NSAttributedString(string: "no preview", attributes: [
-                .foregroundColor: NSColor.tertiaryLabelColor,
+                .foregroundColor: Design.Text.tertiary,
                 .font: Design.Typography.caption()
             ])
         }
 
         let text = NSMutableAttributedString()
         text.append(NSAttributedString(string: "+\(file.added)", attributes: [
-            .foregroundColor: NSColor.systemGreen,
+            .foregroundColor: Design.Diff.added,
             .font: Design.Typography.caption()
         ]))
         text.append(NSAttributedString(string: " −\(file.removed)", attributes: [
-            .foregroundColor: NSColor.systemRed,
+            .foregroundColor: Design.Diff.removed,
             .font: Design.Typography.caption()
         ]))
         return text

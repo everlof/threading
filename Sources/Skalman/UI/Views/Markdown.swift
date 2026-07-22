@@ -19,12 +19,12 @@ struct MarkdownStyle {
     static var assistant: MarkdownStyle {
         MarkdownStyle(
             font: Design.Typography.body(),
-            textColor: .labelColor,
-            secondaryColor: .secondaryLabelColor,
+            textColor: Design.Text.label,
+            secondaryColor: Design.Text.secondary,
             codeFont: .monospacedSystemFont(ofSize: MarkdownDefaults.codeFontSize, weight: .regular),
-            codeColor: .labelColor,
+            codeColor: Design.Text.label,
             codeBackground: Design.Surface.panel,
-            linkColor: .linkColor
+            linkColor: Design.Surface.accent
         )
     }
 }

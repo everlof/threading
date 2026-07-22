@@ -65,7 +65,25 @@ final class AgentRuntime {
     /// boundaries from the stream it is already reading — it sent the message and it sees the
     /// result — so a hook would tell it something it knows, one process later.
     func applyLifecycle(_ report: HookLifecycleReport) {
-        guard let tracker = controllers[report.sessionID]?.activityTracker else { return }
+        if report.event == .sessionStarted {
+            adoptReportedIdentifier(report)
+        }
+
+        guard let tracker = controllers[report.sessionID]?.activityTracker else {
+            // Ordinary for a rendered conversation, which learns its boundaries from the stream
+            // and has no terminal controller. Recorded at debug because it is also what a
+            // report for an already-closed session looks like.
+            SkalmanLogger.agent.debug(
+                "Lifecycle report for a session with no terminal: \(report.sessionID.uuidString, privacy: .public)"
+            )
+            return
+        }
+
+        // The one transition worth a durable record. Before it, a session's status is inferred
+        // from output; after it, the agent is saying so. "Did the hooks actually reach this
+        // session" is the first question any report about this feature raises, and this is the
+        // only line that answers it.
+        let wasInferring = !tracker.reportsOwnActivity
 
         switch report.event {
         case .turnStarted: tracker.noteTurnStarted()
@@ -73,6 +91,42 @@ final class AgentRuntime {
         case .awaitingUser: tracker.noteAwaitingUser()
         case .sessionStarted: break
         }
+
+        if wasInferring, tracker.reportsOwnActivity {
+            SkalmanLogger.agent.info(
+                "Session reports its own activity: \(report.sessionID.uuidString, privacy: .public)"
+            )
+            EventLog.shared.record(.hooks, "Session began reporting its own activity", [
+                "session": report.sessionID.uuidString,
+                "event": report.event.rawValue
+            ])
+        }
+    }
+
+    /// Adopts the identifier an agent reports for itself at launch.
+    ///
+    /// This is what `CodexSessionDiscovery` recovers by watching the rollout directory and
+    /// matching on a launch timestamp. `SessionStart` simply hands it over, already attributed
+    /// to the session by the token in the hook's URL — so there is nothing to match and no
+    /// window in which two sessions launched together can be confused.
+    ///
+    /// Only a session still `awaitingIdentifier` is updated. Claude reports one too, but it
+    /// reports the identifier Skalman minted and already stored, and a resumed Codex session
+    /// reports the one it was resumed with — in both cases writing it back is a no-op worth
+    /// skipping rather than a correction.
+    private func adoptReportedIdentifier(_ report: HookLifecycleReport) {
+        guard let reported = report.agentSessionID, !reported.isEmpty,
+              let stored = ProjectStore.shared.session(withID: report.sessionID),
+              stored.resumeState == .awaitingIdentifier else {
+            return
+        }
+
+        ProjectStore.shared.update(sessionID: report.sessionID) { session in
+            session.resumeState = .resumable(TranscriptID(reported))
+        }
+
+        SkalmanLogger.agent.info("Adopted reported session \(reported, privacy: .public)")
+        controllers[report.sessionID]?.noteStateChanged()
     }
 
     /// Marks which session is on screen, so only the others flag finished work.

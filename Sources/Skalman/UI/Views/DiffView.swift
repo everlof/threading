@@ -133,7 +133,7 @@ final class DiffView: NSStackView {
         if showsNumbers {
             let number = NSTextField(labelWithString: row.number ?? "")
             number.font = font()
-            number.textColor = .tertiaryLabelColor
+            number.textColor = Design.Text.tertiary
             number.alignment = .right
             number.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(number)
@@ -163,7 +163,7 @@ final class DiffView: NSStackView {
     private func makeNote(_ text: String) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = font()
-        label.textColor = .tertiaryLabelColor
+        label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }
@@ -260,8 +260,8 @@ final class DiffView: NSStackView {
 
     private func background(for kind: DiffLine.Kind) -> NSColor {
         switch kind {
-        case .added: return .systemGreen.withAlphaComponent(DiffDefaults.addedAlpha)
-        case .removed: return .systemRed.withAlphaComponent(DiffDefaults.removedAlpha)
+        case .added: return Design.Diff.added.withAlphaComponent(DiffDefaults.addedAlpha)
+        case .removed: return Design.Diff.removed.withAlphaComponent(DiffDefaults.removedAlpha)
         case .context: return .clear
         }
     }
@@ -271,16 +271,16 @@ final class DiffView: NSStackView {
     /// drew before there was a highlighter.
     private func baseColor(for kind: DiffLine.Kind) -> NSColor {
         guard isHighlighted else {
-            return kind == .context ? .secondaryLabelColor : foreground(for: kind)
+            return kind == .context ? Design.Text.secondary : foreground(for: kind)
         }
-        return kind == .context ? .secondaryLabelColor : .labelColor
+        return kind == .context ? Design.Text.secondary : Design.Text.label
     }
 
     private func foreground(for kind: DiffLine.Kind) -> NSColor {
         switch kind {
-        case .added: return .systemGreen
-        case .removed: return .systemRed
-        case .context: return .secondaryLabelColor
+        case .added: return Design.Diff.added
+        case .removed: return Design.Diff.removed
+        case .context: return Design.Text.secondary
         }
     }
 }

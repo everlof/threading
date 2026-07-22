@@ -53,7 +53,7 @@ enum ConversationRowView {
 
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = Design.Typography.body()
-        label.textColor = .labelColor
+        label.textColor = Design.Text.label
         label.isSelectable = true
         label.translatesAutoresizingMaskIntoConstraints = false
         bubble.addSubview(label)
@@ -100,7 +100,7 @@ enum ConversationRowView {
 
     /// Reasoning, quieter than the reply it precedes — an aside, not the answer.
     static func thinking(_ text: String) -> NSView {
-        label(text, font: Design.Typography.body(), color: .tertiaryLabelColor)
+        label(text, font: Design.Typography.body(), color: Design.Text.tertiary)
     }
 
     /// Neither said nor tool output: a truncation banner, a failed turn, an orphan result.
@@ -108,7 +108,7 @@ enum ConversationRowView {
         label(
             text,
             font: Design.Typography.subheading(),
-            color: kind == .error ? .systemRed : .tertiaryLabelColor
+            color: kind == .error ? Design.Status.negative : Design.Text.tertiary
         )
     }
 
@@ -116,7 +116,7 @@ enum ConversationRowView {
     /// finishes: rendering markdown per token would reflow the whole block on every keystroke,
     /// and the finished message is authoritative anyway.
     static func streaming(_ text: String) -> NSTextField {
-        label(text, font: Design.Typography.body(), color: .labelColor)
+        label(text, font: Design.Typography.body(), color: Design.Text.label)
     }
 
     // MARK: - Private Methods

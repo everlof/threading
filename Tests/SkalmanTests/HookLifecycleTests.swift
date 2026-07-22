@@ -103,6 +103,72 @@ final class HookLifecycleTests: XCTestCase {
         }
     }
 
+    // MARK: - Hook Failure Diagnostics
+
+    /// The fixture is a real line, copied from a `--include-hook-events` run whose hook exited 7.
+    private static let failingHookLine = """
+        {"type":"system","subtype":"hook_response","hook_id":"abc","hook_name":"PreToolUse:Read",\
+        "hook_event":"PreToolUse","output":"","stdout":"","stderr":"connection refused\\n",\
+        "exit_code":7,"outcome":"error","uuid":"def","session_id":"ghi"}
+        """
+
+    func testFailingHookIsReported() throws {
+        let failure = try XCTUnwrap(HookOutcomeLog.failure(inLine: Self.failingHookLine))
+
+        XCTAssertEqual(failure.hookName, "PreToolUse:Read")
+        XCTAssertEqual(failure.outcome, "error")
+        XCTAssertEqual(failure.exitCode, "7")
+        XCTAssertEqual(failure.stderr, "connection refused\n")
+    }
+
+    func testSuccessfulHookIsNotReported() {
+        let line = """
+            {"type":"system","subtype":"hook_response","hook_name":"Stop","output":"",\
+            "stdout":"","stderr":"","exit_code":0,"outcome":"success"}
+            """
+        XCTAssertNil(HookOutcomeLog.failure(inLine: line))
+    }
+
+    /// This runs on every line of every stream, so everything that is not a hook response must
+    /// fall out before anything is decoded.
+    func testOrdinaryStreamLinesAreIgnored() {
+        let lines = [
+            #"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#,
+            #"{"type":"system","subtype":"init","tools":["Read"]}"#,
+            #"{"type":"result","subtype":"success"}"#,
+            "",
+            "not json at all",
+            #"{"type":"system","subtype":"hook_started","hook_name":"Stop"}"#
+        ]
+
+        for line in lines {
+            XCTAssertNil(HookOutcomeLog.failure(inLine: line), "should ignore: \(line)")
+        }
+    }
+
+    /// The schema belongs to the CLI. A renamed `outcome` should make the journal noisy rather
+    /// than quietly stop reporting failures.
+    func testMissingOutcomeIsTreatedAsAFailure() throws {
+        let line = """
+            {"type":"system","subtype":"hook_response","hook_name":"PreToolUse:Bash",\
+            "exit_code":1}
+            """
+        let failure = try XCTUnwrap(HookOutcomeLog.failure(inLine: line))
+        XCTAssertEqual(failure.outcome, "unknown")
+    }
+
+    /// The journal is appended synchronously, so one pathological hook must not be able to
+    /// bury every record written after it.
+    func testStderrIsCapped() throws {
+        let noisy = String(repeating: "x", count: 5_000)
+        let line = """
+            {"type":"system","subtype":"hook_response","hook_name":"Stop",\
+            "outcome":"error","exit_code":1,"stderr":"\(noisy)"}
+            """
+        let failure = try XCTUnwrap(HookOutcomeLog.failure(inLine: line))
+        XCTAssertEqual(failure.stderr.count, HookOutcomeDefaults.maximumStderrCharacters)
+    }
+
     // MARK: - Activity Reporting
 
     @MainActor

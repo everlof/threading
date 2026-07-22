@@ -168,6 +168,8 @@ final class ClaudeStreamSession: ConversationStreamSession {
                 continue
             }
 
+            HookOutcomeLog.note(line: line, sessionID: sessionID)
+
             switch StreamEvent.parse(line) {
             case .events(let events):
                 for event in events { onEvent?(event) }

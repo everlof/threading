@@ -187,13 +187,13 @@ private final class SettingsSidebarRow: NSView {
 
         if isSelected {
             fill = Design.Surface.controlHover
-            foreground = .labelColor
+            foreground = Design.Text.label
         } else if isHovered {
             fill = Design.Surface.controlResting
-            foreground = .labelColor
+            foreground = Design.Text.label
         } else {
             fill = .clear
-            foreground = .secondaryLabelColor
+            foreground = Design.Text.secondary
         }
 
         layer?.backgroundColor = fill.cgColor

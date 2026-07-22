@@ -100,24 +100,57 @@ enum Design {
     /// the accent colour is the user's own.
     enum Surface {
         /// A control at rest. Below full opacity so a row of them stays quiet.
-        static var controlResting: NSColor {
-            .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)
-        }
+        static var controlResting: NSColor { AppThemePalette.color(.controlResting) }
 
         /// The same control under the pointer.
-        static var controlHover: NSColor {
-            .unemphasizedSelectedContentBackgroundColor
-        }
+        static var controlHover: NSColor { AppThemePalette.color(.controlHover) }
 
         /// A container holding content, such as the prompt box.
-        static var panel: NSColor {
-            .textBackgroundColor.withAlphaComponent(0.4)
-        }
+        static var panel: NSColor { AppThemePalette.color(.panel) }
 
-        static var border: NSColor { .separatorColor }
+        /// A container above a panel — a popover, a floating card.
+        static var elevated: NSColor { AppThemePalette.color(.elevated) }
+
+        static var border: NSColor { AppThemePalette.color(.border) }
+
+        /// The window's own backdrop.
+        static var ground: NSColor { AppThemePalette.color(.ground) }
+
+        /// Large structural areas — the sidebar.
+        static var background: NSColor { AppThemePalette.color(.surface) }
 
         /// Draws attention to the one control that is ready to act.
-        static var accent: NSColor { .controlAccentColor }
+        static var accent: NSColor { AppThemePalette.color(.accent) }
+    }
+
+    // MARK: - Text
+
+    /// The four label tiers, as roles rather than as system colours.
+    ///
+    /// These exist because the app made 150 direct calls to `NSColor.secondaryLabelColor` and
+    /// friends — more than ten times the number of surface tokens — so a theme that reached
+    /// only the surfaces would have repainted the containers and left every word in them alone.
+    enum Text {
+        static var label: NSColor { AppThemePalette.color(.label) }
+        static var secondary: NSColor { AppThemePalette.color(.secondaryLabel) }
+        static var tertiary: NSColor { AppThemePalette.color(.tertiaryLabel) }
+        static var quaternary: NSColor { AppThemePalette.color(.quaternaryLabel) }
+    }
+
+    // MARK: - Status
+
+    /// What a session's state is drawn in, and what a result that went wrong is drawn in.
+    enum Status {
+        static var positive: NSColor { AppThemePalette.color(.statusPositive) }
+        static var warning: NSColor { AppThemePalette.color(.statusWarning) }
+        static var negative: NSColor { AppThemePalette.color(.statusNegative) }
+    }
+
+    // MARK: - Diff
+
+    enum Diff {
+        static var added: NSColor { AppThemePalette.color(.diffAdded) }
+        static var removed: NSColor { AppThemePalette.color(.diffRemoved) }
     }
 
     // MARK: - Chat
@@ -130,9 +163,7 @@ enum Design {
 
         /// The bubble fill: the user's accent, dropped well below full so its own text stays
         /// legible and it does not compete with the agent's reply for attention.
-        static var bubbleFill: NSColor {
-            .controlAccentColor.withAlphaComponent(0.22)
-        }
+        static var bubbleFill: NSColor { AppThemePalette.color(.accentMuted) }
 
         /// Vertical gap between one turn and the next.
         ///
@@ -154,16 +185,14 @@ enum Design {
         static var toolRowResting: NSColor { .clear }
 
         /// Under the pointer, or opened: now it is the thing being looked at.
-        static var toolRowActive: NSColor {
-            .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)
-        }
+        static var toolRowActive: NSColor { AppThemePalette.color(.controlResting) }
 
         /// The rule above a user's turn.
         ///
         /// Spacing alone still left the eye hunting, because the rows above and below it are
         /// themselves separated by space. A line is unambiguous, and at this weight it reads as
         /// a fold in the page rather than as a border drawn around something.
-        static var turnDivider: NSColor { .separatorColor.withAlphaComponent(0.5) }
+        static var turnDivider: NSColor { AppThemePalette.color(.divider) }
 
         static let turnDividerHeight: CGFloat = 1
     }
@@ -181,11 +210,11 @@ enum Design {
     /// contradictory things at once. Comments take no hue at all — a dimmed label is the
     /// design system's "quiet until relevant" applied to the code that was already annotation.
     enum Syntax {
-        static var keyword: NSColor { .systemPurple }
-        static var type: NSColor { .systemTeal }
-        static var string: NSColor { .systemOrange }
-        static var number: NSColor { .systemBlue }
-        static var comment: NSColor { .tertiaryLabelColor }
+        static var keyword: NSColor { AppThemePalette.color(.syntaxKeyword) }
+        static var type: NSColor { AppThemePalette.color(.syntaxType) }
+        static var string: NSColor { AppThemePalette.color(.syntaxString) }
+        static var number: NSColor { AppThemePalette.color(.syntaxNumber) }
+        static var comment: NSColor { AppThemePalette.color(.syntaxComment) }
     }
 
     // MARK: - Motion
@@ -229,6 +258,12 @@ extension NSView {
     ///
     /// Uses `.continuous` corners, which is what macOS itself draws; the default circular
     /// curve looks subtly wrong beside system controls at these radii.
+    /// Applies a rounded, filled surface using the design tokens — and remembers what it was
+    /// given, so `AppThemeRefresh` can resolve the same colours again when the theme changes.
+    ///
+    /// The remembering is here rather than at the call sites because a `CGColor` is frozen at
+    /// assignment: a themed colour handed to a layer stops being themed the moment it lands.
+    /// Every one of this method's callers gets the re-apply for free.
     func applySurface(fill: NSColor, radius: CGFloat, border: NSColor? = nil) {
         wantsLayer = true
         layer?.cornerCurve = .continuous
@@ -239,5 +274,7 @@ extension NSView {
             layer?.borderWidth = 1
             layer?.borderColor = border.cgColor
         }
+
+        recordSurface(fill: fill, border: border)
     }
 }

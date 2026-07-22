@@ -51,7 +51,7 @@ final class ThemePreviewView: NSView {
 
     func show(_ theme: TerminalTheme?) {
         guard let theme else {
-            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            layer?.backgroundColor = Design.Surface.ground.cgColor
             label.stringValue = ""
             return
         }

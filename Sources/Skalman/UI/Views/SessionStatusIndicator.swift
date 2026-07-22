@@ -41,7 +41,7 @@ final class SessionStatusIndicator: NSView {
 
         attentionDot.wantsLayer = true
         attentionDot.layer?.cornerRadius = StatusIndicatorDefaults.dotSize / 2
-        attentionDot.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        attentionDot.layer?.backgroundColor = Design.Surface.accent.cgColor
         attentionDot.isHidden = true
         attentionDot.translatesAutoresizingMaskIntoConstraints = false
 
@@ -106,7 +106,7 @@ final class SessionStatusIndicator: NSView {
     /// way an `NSColor`-backed view would, so it is refreshed here.
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        attentionDot.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        attentionDot.layer?.backgroundColor = Design.Surface.accent.cgColor
     }
 }
 

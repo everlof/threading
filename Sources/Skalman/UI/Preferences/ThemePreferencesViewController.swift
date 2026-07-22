@@ -100,6 +100,8 @@ final class ThemePreferencesViewController: NSViewController {
     private let previewView = ThemePreviewView()
     private let colorEditor = ThemeColorEditor()
 
+    private weak var appThemePopUp: NSPopUpButton?
+
     /// Explains why the palette below it is read-only, and offers the way out. Hidden for a
     /// custom theme, where the palette simply works.
     private lazy var builtInNote = SettingsUI.note(Strings.builtInNote)
@@ -150,7 +152,8 @@ final class ThemePreferencesViewController: NSViewController {
     private func setupUI() {
         let page = SettingsUI.page([
             SettingsUI.heading("Themes"),
-            SettingsUI.section("Theme", themeListSection()),
+            SettingsUI.section("App", appThemeSection()),
+            SettingsUI.section("Terminal", themeListSection()),
             SettingsUI.section("Preview", previewView),
             SettingsUI.section("Colors", colorsSection())
         ])
@@ -163,6 +166,40 @@ final class ThemePreferencesViewController: NSViewController {
             page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
+    }
+
+    /// The app's own theme — the window, sidebar, panels and text — chosen for the whole app.
+    ///
+    /// App-wide rather than per-session, unlike the terminal palette below it: there is one
+    /// window, and a sidebar cannot be two colours at once. "System" is the default and is not
+    /// a compromise — it resolves every role to the system colour the app always used, so the
+    /// design system's light/dark and accent behaviour is intact for anyone who never picks a
+    /// style.
+    private func appThemeSection() -> NSView {
+        let popUp = SettingsUI.popUp(target: self, action: #selector(appThemeChanged))
+        for theme in AppThemeLibrary.stock {
+            let item = NSMenuItem(title: theme.name, action: nil, keyEquivalent: "")
+            item.representedObject = theme.id.rawValue
+            popUp.menu?.addItem(item)
+        }
+        popUp.selectItem(at: AppThemeLibrary.stock.firstIndex { $0.id == AppThemeLibrary.current.id } ?? 0)
+        appThemePopUp = popUp
+
+        let card = SettingsCard(rows: [
+            SettingsUI.row(
+                title: "App theme",
+                subtitle: AppThemeLibrary.current.summary,
+                control: popUp
+            )
+        ])
+        return card
+    }
+
+    @objc private func appThemeChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
+
+        AppThemeLibrary.apply(theme)
     }
 
     /// The theme list on its flat surface, the list-editing controls beneath it, and a note
@@ -506,7 +543,7 @@ private final class ThemeListRowView: NSTableCellView {
         name.font = Design.Typography.body()
         name.lineBreakMode = .byTruncatingTail
         badge.font = Design.Typography.caption()
-        badge.textColor = .secondaryLabelColor
+        badge.textColor = Design.Text.secondary
 
         let stack = NSStackView(views: [swatch, name, NSView(), badge])
         stack.orientation = .horizontal

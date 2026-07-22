@@ -32,7 +32,7 @@ final class GitReviewCommitRow: NSView {
 
         let hashLabel = NSTextField(labelWithString: commit.shortHash)
         hashLabel.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
-        hashLabel.textColor = .tertiaryLabelColor
+        hashLabel.textColor = Design.Text.tertiary
         hashLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         // The hash and the refs are one group: both name the commit, and neither compresses.
@@ -46,7 +46,7 @@ final class GitReviewCommitRow: NSView {
 
         let subjectLabel = NSTextField(labelWithString: commit.subject)
         subjectLabel.font = Design.Typography.control()
-        subjectLabel.textColor = .labelColor
+        subjectLabel.textColor = Design.Text.label
         subjectLabel.lineBreakMode = .byTruncatingTail
         subjectLabel.usesSingleLineMode = true
         subjectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -54,11 +54,11 @@ final class GitReviewCommitRow: NSView {
 
         let counts = NSMutableAttributedString()
         counts.append(NSAttributedString(string: "+\(commit.added)", attributes: [
-            .foregroundColor: NSColor.systemGreen,
+            .foregroundColor: Design.Diff.added,
             .font: Design.Typography.caption()
         ]))
         counts.append(NSAttributedString(string: " −\(commit.removed)", attributes: [
-            .foregroundColor: NSColor.systemRed,
+            .foregroundColor: Design.Diff.removed,
             .font: Design.Typography.caption()
         ]))
         let countsLabel = NSTextField.label(attributed: counts)
@@ -67,7 +67,7 @@ final class GitReviewCommitRow: NSView {
         let when = Self.relativeFormatter.localizedString(for: commit.date, relativeTo: Date())
         let byline = NSTextField(labelWithString: "\(commit.author) · \(when)")
         byline.font = .systemFont(ofSize: GitReviewCommitRowDefaults.bylineFontSize, weight: .regular)
-        byline.textColor = .tertiaryLabelColor
+        byline.textColor = Design.Text.tertiary
         byline.lineBreakMode = .byTruncatingTail
         byline.usesSingleLineMode = true
 
@@ -129,7 +129,7 @@ final class GitReviewCommitRow: NSView {
 
         let label = NSTextField(labelWithString: name)
         label.font = Design.Typography.caption()
-        label.textColor = ref == GitReviewCommitRowDefaults.headRef ? .labelColor : .secondaryLabelColor
+        label.textColor = ref == GitReviewCommitRowDefaults.headRef ? Design.Text.label : Design.Text.secondary
         label.translatesAutoresizingMaskIntoConstraints = false
 
         let badge = NSView()

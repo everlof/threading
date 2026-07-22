@@ -141,6 +141,11 @@ enum AgentLauncher {
         command.append(flag: "--include-partial-messages")
         command.append(flag: "--verbose")
 
+        // Purely diagnostic, and the only view of the one failure this app cannot see: a hook
+        // that never reaches the listener leaves nothing here, while the agent silently waits
+        // on a blocked tool. `HookOutcomeLog` reads what this adds; nothing renders it.
+        command.append(flag: "--include-hook-events")
+
         let resumeState: ResumeState
 
         if let fork = claudeForkFlags(for: session, in: project) {
@@ -167,7 +172,7 @@ enum AgentLauncher {
         }
 
         return launchPlan(
-            command: routed(command, for: session),
+            command: routed(command, for: session, brokersPermissions: true),
             in: project.folderPath,
             resumeState: resumeState
         )
@@ -182,6 +187,7 @@ enum AgentLauncher {
         var command = ShellCommand(word: AgentDefaults.codexExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
         command.append(flag: "--sandbox", value: "workspace-write")
+        appendCodexHookFlags(for: session, to: &command)
         command.append(word: "exec")
 
         if let existingID = session.resumeState.transcriptID {
@@ -192,7 +198,7 @@ enum AgentLauncher {
         command.append(word: "-")
 
         return launchPlan(
-            command: routed(command, for: session),
+            command: routed(command, for: session, brokersPermissions: true),
             in: project.folderPath,
             resumeState: session.resumeState
         )
@@ -315,7 +321,11 @@ enum AgentLauncher {
     /// The default account explicitly *clears* the variable rather than leaving it unset:
     /// the login shell may export an override, and a bare invocation would then silently
     /// run against the wrong account.
-    private static func routed(_ command: ShellCommand, for session: AgentSession) -> ShellCommand {
+    private static func routed(
+        _ command: ShellCommand,
+        for session: AgentSession,
+        brokersPermissions: Bool = false
+    ) -> ShellCommand {
         var routed = ShellCommand()
 
         let environmentKey = session.kind.accountEnvironmentKey
@@ -323,6 +333,12 @@ enum AgentLauncher {
                   for: session.kind,
                   handle: session.accountHandle
               ) else {
+            routed.append(word: "env")
+            appendHookEnvironment(
+                for: session,
+                brokersPermissions: brokersPermissions,
+                to: &routed
+            )
             routed.append(contentsOf: command)
             appendMCPFlags(for: session, to: &routed)
             return routed
@@ -334,9 +350,42 @@ enum AgentLauncher {
         } else {
             routed.append(word: "\(environmentKey)=\(account.configPath)")
         }
+        appendHookEnvironment(
+            for: session,
+            brokersPermissions: brokersPermissions,
+            to: &routed
+        )
         routed.append(contentsOf: command)
         appendMCPFlags(for: session, to: &routed)
         return routed
+    }
+
+    /// Exports the listener's port and the session's token, which is how a hook finds its way
+    /// back to the right session.
+    ///
+    /// Codex needs this: its `hooks.json` is shared by every session under an account, so the
+    /// routing cannot live in the file. Claude is given the same variables even though its
+    /// per-session settings file already embeds them, because a user's *own* hooks then work
+    /// the same way under both agents.
+    private static func appendHookEnvironment(
+        for session: AgentSession,
+        brokersPermissions: Bool,
+        to command: inout ShellCommand
+    ) {
+        guard let port = MCPServer.shared.port else { return }
+
+        command.append(word: "\(MCPDefaults.portEnvironmentKey)=\(port)")
+        command.append(
+            word: "\(MCPDefaults.sessionTokenEnvironmentKey)="
+                + MCPSessionRegistry.token(for: session.id)
+        )
+
+        // Exported only for the surface that needs brokering, which is what scopes Codex's
+        // shared `hooks.json` to a single surface. Absent, its `PreToolUse` entry says nothing
+        // and Codex's own approval flow runs untouched.
+        if brokersPermissions {
+            command.append(word: "\(MCPDefaults.brokerEnvironmentKey)=1")
+        }
     }
 
     // MARK: - Private Methods
@@ -468,6 +517,7 @@ enum AgentLauncher {
     ) -> (ShellCommand, ResumeState) {
         var command = ShellCommand(word: AgentDefaults.codexExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
+        appendCodexHookFlags(for: session, to: &command)
 
         if let existingID = session.resumeState.transcriptID {
             command.append(word: "resume")
@@ -477,6 +527,32 @@ enum AgentLauncher {
 
         appendPrompt(prompt, to: &command)
         return (command, .awaitingIdentifier)
+    }
+
+    /// Installs the account's lifecycle hooks and, if the user asked for it, skips the review
+    /// that would otherwise stop them running.
+    ///
+    /// Both halves are opt-in and separate, because they are different decisions. Installing
+    /// writes to a file the user owns; bypassing review lowers a security gate on *every* hook
+    /// in that directory, not only ours. Installing alone is the useful safe default: the
+    /// entries sit there inert until the user trusts them once in the Codex TUI, and because
+    /// their text never changes, that one review holds.
+    private static func appendCodexHookFlags(
+        for session: AgentSession,
+        to command: inout ShellCommand
+    ) {
+        guard AppSettings.shared.installsCodexHooks else { return }
+
+        if let account = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
+        ) {
+            CodexHookInstaller.install(inCodexHome: account.configPath)
+        }
+
+        if AppSettings.shared.bypassesCodexHookTrust {
+            command.append(flag: AgentDefaults.codexBypassHookTrustFlag)
+        }
     }
 
     /// Wraps a command invocation in the login-shell source shared by every launch surface.

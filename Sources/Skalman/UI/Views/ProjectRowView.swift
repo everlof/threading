@@ -281,7 +281,7 @@ final class ProjectRowView: NSTableCellView {
         for button in [hoverButton] {
             button.isBordered = false
             button.bezelStyle = .inline
-            button.contentTintColor = .secondaryLabelColor
+            button.contentTintColor = Design.Text.secondary
             button.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 button.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
@@ -382,8 +382,8 @@ final class ProjectRowView: NSTableCellView {
             return
         }
 
-        nameLabel.textColor = isHeading ? .secondaryLabelColor : .labelColor
-        countLabel.textColor = .secondaryLabelColor
-        iconView.contentTintColor = .secondaryLabelColor
+        nameLabel.textColor = isHeading ? Design.Text.secondary : Design.Text.label
+        countLabel.textColor = Design.Text.secondary
+        iconView.contentTintColor = Design.Text.secondary
     }
 }

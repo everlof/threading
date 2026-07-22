@@ -97,7 +97,7 @@ final class TerminalContainerViewController: NSViewController {
 
         placeholderView.isHidden = true
         composerViewController.view.isHidden = false
-        applyPaneBackground(.windowBackgroundColor)
+        applyPaneBackground(Design.Surface.ground)
         composerViewController.show(projectID: projectID)
     }
 
@@ -115,7 +115,7 @@ final class TerminalContainerViewController: NSViewController {
             AgentRuntime.shared.setVisibleSession(nil)
             placeholderView.isHidden = true
             composerViewController.view.isHidden = true
-            applyPaneBackground(.windowBackgroundColor)
+            applyPaneBackground(Design.Surface.ground)
         } else if let current = settingsPage {
             current.view.removeFromSuperview()
             current.removeFromParent()
@@ -464,7 +464,7 @@ final class TerminalContainerViewController: NSViewController {
     private func showEmptyState() {
         composerViewController.view.isHidden = true
         placeholderView.isHidden = false
-        applyPaneBackground(.windowBackgroundColor)
+        applyPaneBackground(Design.Surface.ground)
         placeholderView.onAction = nil
         placeholderView.configure(
             symbolName: "terminal",
@@ -481,7 +481,7 @@ final class TerminalContainerViewController: NSViewController {
 
         composerViewController.view.isHidden = true
         placeholderView.isHidden = false
-        applyPaneBackground(.windowBackgroundColor)
+        applyPaneBackground(Design.Surface.ground)
         placeholderView.configure(
             symbolName: "arrow.clockwise.circle",
             title: "\(agentSession.title) ended",
@@ -596,7 +596,7 @@ final class ShellDrawerDivider: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        NSColor.separatorColor.setFill()
+        Design.Surface.border.setFill()
         NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
     }
 

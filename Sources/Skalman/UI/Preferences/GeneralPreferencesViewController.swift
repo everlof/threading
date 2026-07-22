@@ -12,6 +12,8 @@ final class GeneralPreferencesViewController: NSViewController {
     private let accountAvatarToggle = NSSwitch()
     private let restoreSessionToggle = NSSwitch()
     private let confirmCloseToggle = NSSwitch()
+    private let codexHookToggle = NSSwitch()
+    private let codexHookTrustToggle = NSSwitch()
     private let shellField = NSTextField()
 
     // MARK: - Lifecycle
@@ -47,6 +49,13 @@ final class GeneralPreferencesViewController: NSViewController {
                   action: #selector(accountAvatarChanged))
         configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
         configure(confirmCloseToggle, isOn: AppSettings.shared.confirmsBeforeClosingRunningSession, action: #selector(confirmCloseChanged))
+        configure(codexHookToggle,
+                  isOn: AppSettings.shared.installsCodexHooks,
+                  action: #selector(codexHookChanged))
+        configure(codexHookTrustToggle,
+                  isOn: AppSettings.shared.bypassesCodexHookTrust,
+                  action: #selector(codexHookTrustChanged))
+        codexHookTrustToggle.isEnabled = AppSettings.shared.installsCodexHooks
 
         shellField.font = Design.Typography.body()
         shellField.placeholderString = TerminalDefaults.defaultShell
@@ -108,6 +117,7 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.section("Sessions", sessions),
             SettingsUI.section("Startup", startup),
             SettingsUI.section("Closing", closing),
+            SettingsUI.section("Codex Hooks", codexHooksCard()),
             SettingsUI.section("Shell", shell),
             SettingsUI.note("Shell path is used by shell sessions. Agent sessions launch through your login shell regardless.")
         ])
@@ -122,11 +132,35 @@ final class GeneralPreferencesViewController: NSViewController {
         ])
     }
 
+    /// The two Codex hook settings.
+    ///
+    /// Two switches rather than one, because they are separate decisions and only the second
+    /// has a security cost: installing writes entries to a file the user owns, while skipping
+    /// review un-gates every hook in that folder rather than only ours.
+    private func codexHooksCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Report Codex turn boundaries",
+                subtitle: "Adds Skalman's entries to each Codex account's hooks.json, "
+                    + "so sessions show exact activity instead of guessing from output. "
+                    + "Your existing entries are kept.",
+                control: codexHookToggle
+            ),
+            SettingsUI.row(
+                title: "Skip Codex hook review",
+                subtitle: "Codex will not run a hook until you approve its text once. "
+                    + "Skipping that runs every hook in the config folder unreviewed, "
+                    + "including any an agent adds later. Leave off and approve once in Codex.",
+                control: codexHookTrustToggle
+            )
+        ])
+    }
+
     /// The shell field with its Choose button, filling the row.
     private func shellRow() -> NSView {
         let label = NSTextField(labelWithString: "Shell path")
         label.font = Design.Typography.body()
-        label.textColor = .labelColor
+        label.textColor = Design.Text.label
         label.setContentHuggingPriority(.required, for: .horizontal)
 
         let choose = SettingsUI.button("Choose…", target: self, action: #selector(browseForShell))
@@ -177,6 +211,26 @@ final class GeneralPreferencesViewController: NSViewController {
         AppSettings.shared.groupsSessionsByBranch = branchGroupingToggle.state == .on
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
         NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    /// Switching off also removes what was installed, rather than leaving inert entries in a
+    /// file the user owns — an off switch that leaves its traces behind is not off.
+    @objc private func codexHookChanged() {
+        let isOn = codexHookToggle.state == .on
+        AppSettings.shared.installsCodexHooks = isOn
+        codexHookTrustToggle.isEnabled = isOn
+
+        for account in AgentAccountDiscovery.accounts(for: .codex) {
+            if isOn {
+                CodexHookInstaller.install(inCodexHome: account.configPath)
+            } else {
+                CodexHookInstaller.uninstall(fromCodexHome: account.configPath)
+            }
+        }
+    }
+
+    @objc private func codexHookTrustChanged() {
+        AppSettings.shared.bypassesCodexHookTrust = codexHookTrustToggle.state == .on
     }
 
     @objc private func shellPathChanged() {

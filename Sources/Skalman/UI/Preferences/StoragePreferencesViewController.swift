@@ -162,11 +162,11 @@ final class StoragePreferencesViewController: NSViewController {
     private func summarySection() -> NSView {
         let total = NSTextField(labelWithString: Self.size.string(fromByteCount: totalBytes))
         total.font = Design.Typography.heading()
-        total.textColor = totalBytes > 0 ? .labelColor : .secondaryLabelColor
+        total.textColor = totalBytes > 0 ? Design.Text.label : Design.Text.secondary
 
         let caption = NSTextField(labelWithString: summaryCaption())
         caption.font = Design.Typography.subheading()
-        caption.textColor = .secondaryLabelColor
+        caption.textColor = Design.Text.secondary
 
         let labels = NSStackView(views: [total, caption])
         labels.orientation = .vertical
@@ -278,7 +278,7 @@ final class StoragePreferencesViewController: NSViewController {
         let size = NSTextField(labelWithString: Self.size.string(fromByteCount: artifact.byteCount))
         // Monospaced digits so the sizes form a column instead of jittering row to row.
         size.font = .monospacedDigitSystemFont(ofSize: StorageDefaults.sizeFontSize, weight: .regular)
-        size.textColor = .secondaryLabelColor
+        size.textColor = Design.Text.secondary
         size.alignment = .right
 
         let trailing = NSStackView(views: [size, button])

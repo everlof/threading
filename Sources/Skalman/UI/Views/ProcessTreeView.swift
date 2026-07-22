@@ -237,19 +237,19 @@ extension ProcessTreeView: NSOutlineViewDelegate {
         switch identifier {
         case Column.pid:
             textField.stringValue = "\(node.pid)"
-            textField.textColor = .secondaryLabelColor
+            textField.textColor = Design.Text.secondary
         case Column.command:
             textField.stringValue = node.command
-            textField.textColor = .labelColor
+            textField.textColor = Design.Text.label
         case Column.age:
             textField.stringValue = node.formattedAge
-            textField.textColor = .tertiaryLabelColor
+            textField.textColor = Design.Text.tertiary
         case Column.cpu:
             textField.stringValue = node.formattedCpuTime
-            textField.textColor = .tertiaryLabelColor
+            textField.textColor = Design.Text.tertiary
         case Column.memory:
             textField.stringValue = node.formattedMemory
-            textField.textColor = .tertiaryLabelColor
+            textField.textColor = Design.Text.tertiary
         default:
             textField.stringValue = ""
         }

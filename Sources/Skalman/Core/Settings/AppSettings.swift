@@ -107,6 +107,45 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Agent Hooks
+
+    /// Whether Skalman installs its lifecycle hooks into each Codex account's `hooks.json`.
+    ///
+    /// Off by default because it writes to a file the user owns and may already be using —
+    /// this machine's own `~/.codex/hooks.json` was written by another tool. Installation
+    /// merges rather than replaces, but the honest default for touching someone else's config
+    /// is to ask first.
+    var installsCodexHooks: Bool {
+        get { defaults.bool(forKey: Keys.installsCodexHooks) }
+        set {
+            defaults.set(newValue, forKey: Keys.installsCodexHooks)
+            notifyChanged()
+        }
+    }
+
+    /// Whether Codex sessions launch with `--dangerously-bypass-hook-trust`.
+    ///
+    /// Codex refuses to run a hook until its exact text has been reviewed, and review happens
+    /// in the interactive TUI — which a session Skalman launches never shows. The flag skips
+    /// that gate.
+    ///
+    /// Off by default, and the wording on the settings page says why rather than leaving it to
+    /// the name: the flag un-gates **every** hook in that config directory, not only Skalman's.
+    /// Since an agent can write to `hooks.json`, turning this on means an agent could arrange
+    /// for its own code to run unreviewed on the next launch. Trusting once in the TUI costs a
+    /// single step and keeps the gate.
+    ///
+    /// Skalman's own entries are built to survive that one review: the port and session token
+    /// reach the hook through the environment, so the text in `hooks.json` never changes and a
+    /// trust decision is not invalidated by the next app launch.
+    var bypassesCodexHookTrust: Bool {
+        get { defaults.bool(forKey: Keys.bypassesCodexHookTrust) }
+        set {
+            defaults.set(newValue, forKey: Keys.bypassesCodexHookTrust)
+            notifyChanged()
+        }
+    }
+
     // MARK: - MCP Tool Groups
 
     /// The tool groups the user has switched *off* on the Tools page. Stored as the disabled set,
@@ -160,5 +199,7 @@ final class AppSettings {
         static let discoversProjectIcons = "discoversProjectIcons"
         static let discoversAccountAvatars = "discoversAccountAvatars"
         static let disabledToolGroupIDs = "disabledToolGroupIDs"
+        static let installsCodexHooks = "installsCodexHooks"
+        static let bypassesCodexHookTrust = "bypassesCodexHookTrust"
     }
 }

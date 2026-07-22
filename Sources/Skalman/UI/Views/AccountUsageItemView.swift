@@ -167,7 +167,7 @@ final class AccountUsageItemView: NSView {
             append(
                 AccountUsageItemDefaults.unknownValue,
                 font: Design.Typography.control(),
-                color: .secondaryLabelColor
+                color: Design.Text.secondary
             )
             return result
         }
@@ -177,14 +177,14 @@ final class AccountUsageItemView: NSView {
                 append(
                     AccountUsageItemDefaults.segmentSeparator,
                     font: Design.Typography.control(),
-                    color: .tertiaryLabelColor
+                    color: Design.Text.tertiary
                 )
             }
 
             append(
                 "\(window.id) ",
                 font: Design.Typography.caption(),
-                color: .tertiaryLabelColor
+                color: Design.Text.tertiary
             )
 
             let expired = window.isExpired()
@@ -196,7 +196,7 @@ final class AccountUsageItemView: NSView {
             append(
                 value,
                 font: Design.Typography.control(),
-                color: severity == .normal ? .secondaryLabelColor : severity.glyphColor
+                color: severity == .normal ? Design.Text.secondary : severity.glyphColor
             )
         }
 
@@ -286,7 +286,7 @@ final class UsageRingView: NSView {
     // MARK: - Properties
 
     var fraction: Double? { didSet { needsDisplay = true } }
-    var tint: NSColor = .secondaryLabelColor { didSet { needsDisplay = true } }
+    var tint: NSColor = Design.Text.secondary { didSet { needsDisplay = true } }
 
     // MARK: - Drawing
 
@@ -305,7 +305,7 @@ final class UsageRingView: NSView {
             endAngle: 360
         )
         track.lineWidth = lineWidth
-        NSColor.quaternaryLabelColor.setStroke()
+        Design.Text.quaternary.setStroke()
         track.stroke()
 
         guard let fraction, fraction > 0 else { return }

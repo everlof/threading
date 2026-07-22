@@ -108,7 +108,7 @@ final class GitGraphRailView: NSView {
         if row.isMerge {
             // The pane's own background shows through the ring, so the fill is the surface
             // under it rather than a colour of its own.
-            NSColor.textBackgroundColor.setFill()
+            Design.Surface.ground.setFill()
             path.fill()
             tint.setStroke()
             path.lineWidth = GitGraphDefaults.lineWidth

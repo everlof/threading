@@ -127,7 +127,7 @@ final class AccountsPreferencesViewController: NSViewController {
     private func makeLabelStack(for account: AgentAccount, row index: Int) -> NSView {
         let field = NSTextField(string: account.displayName)
         field.font = Design.Typography.body()
-        field.textColor = .labelColor
+        field.textColor = Design.Text.label
         field.isBordered = false
         field.isBezeled = false
         field.drawsBackground = false
@@ -144,7 +144,7 @@ final class AccountsPreferencesViewController: NSViewController {
         let caption = NSTextField(labelWithString:
             "\(account.provider.displayName) · \(abbreviated(account.configPath))")
         caption.font = Design.Typography.subheading()
-        caption.textColor = .secondaryLabelColor
+        caption.textColor = Design.Text.secondary
         caption.lineBreakMode = .byTruncatingMiddle
         caption.setContentHuggingPriority(.defaultLow, for: .horizontal)
         caption.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -160,7 +160,7 @@ final class AccountsPreferencesViewController: NSViewController {
     private func makeEmptyRow() -> NSView {
         let label = NSTextField(labelWithString: AccountsPreferencesStrings.emptyMessage)
         label.font = Design.Typography.body()
-        label.textColor = .secondaryLabelColor
+        label.textColor = Design.Text.secondary
         return padded(label)
     }
 

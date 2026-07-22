@@ -186,8 +186,8 @@ final class DisplayTabChip: NSView {
 
     private func applyColours() {
         let emphasised = item.isActive || hovered
-        titleLabel.textColor = item.isActive ? .labelColor : .secondaryLabelColor
-        iconView.contentTintColor = item.isActive ? .labelColor : .secondaryLabelColor
+        titleLabel.textColor = item.isActive ? Design.Text.label : Design.Text.secondary
+        iconView.contentTintColor = item.isActive ? Design.Text.label : Design.Text.secondary
 
         let fill: NSColor = item.isActive
             ? Design.Surface.controlHover

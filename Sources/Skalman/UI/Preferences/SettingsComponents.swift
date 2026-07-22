@@ -68,14 +68,14 @@ enum SettingsUI {
     static func heading(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = Design.Typography.heading()
-        label.textColor = .labelColor
+        label.textColor = Design.Text.label
         return label
     }
 
     static func caption(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text.uppercased())
         label.font = Design.Typography.caption()
-        label.textColor = .tertiaryLabelColor
+        label.textColor = Design.Text.tertiary
         return label
     }
 
@@ -83,7 +83,7 @@ enum SettingsUI {
     static func note(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = Design.Typography.subheading()
-        label.textColor = .secondaryLabelColor
+        label.textColor = Design.Text.secondary
         return label
     }
 
@@ -93,13 +93,13 @@ enum SettingsUI {
     static func row(title: String, subtitle: String? = nil, control: NSView? = nil) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = Design.Typography.body()
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = Design.Text.label
 
         var labelViews: [NSView] = [titleLabel]
         if let subtitle {
             let sub = NSTextField(wrappingLabelWithString: subtitle)
             sub.font = Design.Typography.subheading()
-            sub.textColor = .secondaryLabelColor
+            sub.textColor = Design.Text.secondary
             labelViews.append(sub)
         }
 
@@ -256,7 +256,7 @@ final class FlatButton: NSButton {
         isBordered = false
         bezelStyle = .inline
         font = Design.Typography.control()
-        contentTintColor = .labelColor
+        contentTintColor = Design.Text.label
         wantsLayer = true
         layer?.cornerCurve = .continuous
         layer?.cornerRadius = Design.Radius.control

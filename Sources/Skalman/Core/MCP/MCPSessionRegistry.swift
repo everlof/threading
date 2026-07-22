@@ -103,7 +103,17 @@ enum MCPSessionRegistry {
         for sessionID: SessionID,
         brokersPermissions: Bool
     ) -> String? {
-        guard let port = MCPServer.shared.port else { return nil }
+        guard let port = MCPServer.shared.port else {
+            // Silent otherwise, and total: no port means no hooks, so the session falls back to
+            // inferring its state from output and — if it is a rendered one — to having its
+            // tools blocked outright with no card to approve them.
+            SkalmanLogger.mcp.error("No MCP port; \(sessionID) launches without hooks")
+            EventLog.shared.record(.hooks, "Launched without hooks, MCP listener has no port", [
+                "session": sessionID.uuidString,
+                "brokersPermissions": brokersPermissions ? "yes" : "no"
+            ])
+            return nil
+        }
 
         let base = "http://\(MCPDefaults.host):\(port)"
         let token = token(for: sessionID)

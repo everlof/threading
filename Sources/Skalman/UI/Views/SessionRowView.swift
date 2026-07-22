@@ -145,7 +145,7 @@ final class SessionRowView: NSTableCellView {
         )
         actionButton.isBordered = false
         actionButton.bezelStyle = .inline
-        actionButton.contentTintColor = .secondaryLabelColor
+        actionButton.contentTintColor = Design.Text.secondary
         actionButton.target = self
         actionButton.action = #selector(actionClicked)
         actionButton.alphaValue = 0
@@ -308,7 +308,7 @@ final class SessionRowView: NSTableCellView {
             )
             : session.kind.icon
         iconView.image = image
-        iconView.contentTintColor = isDormant ? .tertiaryLabelColor : .secondaryLabelColor
+        iconView.contentTintColor = isDormant ? Design.Text.tertiary : Design.Text.secondary
 
         let dimsThroughAlpha = image.map { !$0.isTemplate } ?? false
         iconView.alphaValue = (isDormant && dimsThroughAlpha) ? AgentIconDefaults.dormantAlpha : 1
@@ -333,7 +333,7 @@ final class SessionRowView: NSTableCellView {
             return
         }
 
-        titleLabel.textColor = isDormant ? .secondaryLabelColor : .labelColor
+        titleLabel.textColor = isDormant ? Design.Text.secondary : Design.Text.label
     }
 }
 

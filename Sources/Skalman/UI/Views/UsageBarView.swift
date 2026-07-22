@@ -8,7 +8,7 @@ final class UsageBarView: NSView {
     // MARK: - Properties
 
     var fraction: Double = 0 { didSet { needsLayout = true } }
-    var tint: NSColor = .controlAccentColor { didSet { needsLayout = true } }
+    var tint: NSColor = Design.Surface.accent { didSet { needsLayout = true } }
 
     /// The linear time position within the window, 0…1, drawn as a thin vertical mark so the
     /// spent fill can be read against the clock. Nil hides it.
@@ -62,7 +62,7 @@ final class UsageBarView: NSView {
             markView.layer?.cornerRadius = markWidth / 2
             // labelColor adapts to light/dark, so the mark reads against both the track and any
             // tint fill it overlaps.
-            markView.layer?.backgroundColor = NSColor.labelColor
+            markView.layer?.backgroundColor = Design.Text.label
                 .withAlphaComponent(UsageBarDefaults.timeMarkAlpha).cgColor
             markView.isHidden = false
         } else {

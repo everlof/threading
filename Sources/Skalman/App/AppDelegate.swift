@@ -36,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // early, because the first thing it reports is how the *previous* launch ended.
         EventLog.shared.beginLaunch()
 
+        // Before the first window is built, so everything is created already themed and nothing
+        // has to be repainted at launch. `AppThemeRefresh` exists for the *later* changes.
+        AppThemeLibrary.restore()
+
         setupMenuBar()
 
         mainWindowController = MainWindowController()

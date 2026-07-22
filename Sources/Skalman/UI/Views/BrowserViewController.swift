@@ -44,7 +44,7 @@ final class BrowserViewController: NSViewController {
     override func loadView() {
         view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        view.layer?.backgroundColor = Design.Surface.ground.cgColor
         setupWebView()
         setupChrome()
         observeWebView()
@@ -70,7 +70,7 @@ final class BrowserViewController: NSViewController {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
-        webView.underPageBackgroundColor = .windowBackgroundColor
+        webView.underPageBackgroundColor = Design.Surface.ground
 
         // Right-click → Inspect Element brings up the full Web Inspector — the element-pinpointing
         // tool WebKit already ships, no code of our own.
@@ -263,7 +263,7 @@ final class BrowserViewController: NSViewController {
         )
         button.bezelStyle = .texturedRounded
         button.isBordered = false
-        button.contentTintColor = .secondaryLabelColor
+        button.contentTintColor = Design.Text.secondary
         return button
     }
 

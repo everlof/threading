@@ -28,7 +28,7 @@ final class AIInputBar: NSView {
     private lazy var providerLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        label.textColor = .secondaryLabelColor
+        label.textColor = Design.Text.secondary
         label.setContentHuggingPriority(.required, for: .horizontal)
         return label
     }()
@@ -84,11 +84,11 @@ final class AIInputBar: NSView {
 
     private func setupUI() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.backgroundColor = Design.Surface.elevated.cgColor
 
         // Add a subtle top border
         let borderLayer = CALayer()
-        borderLayer.backgroundColor = NSColor.separatorColor.cgColor
+        borderLayer.backgroundColor = Design.Surface.border.cgColor
         borderLayer.frame = CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
         borderLayer.autoresizingMask = [.layerWidthSizable, .layerMinYMargin]
         layer?.addSublayer(borderLayer)
@@ -143,7 +143,7 @@ final class AIInputBar: NSView {
             providerLabel.isHidden = false
         } else {
             providerLabel.stringValue = "Not configured"
-            providerLabel.textColor = .systemOrange
+            providerLabel.textColor = Design.Status.warning
             providerLabel.isHidden = false
         }
     }

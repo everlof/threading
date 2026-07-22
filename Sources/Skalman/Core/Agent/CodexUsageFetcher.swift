@@ -15,9 +15,32 @@ private struct CodexUsageResponse: Decodable {
     let planType: String?
     let rateLimit: RateLimit?
 
+    /// Limits belonging to one model rather than the plan — each named, each with a window of
+    /// its own. Present on this account for `GPT-5.3-Codex-Spark`.
+    let additionalRateLimits: [NamedRateLimit]?
+
+    /// Resets the account has banked, each clearing a spent window early.
+    let rateLimitResetCredits: ResetCredits?
+
+    let credits: Credits?
+
     struct RateLimit: Decodable {
         let primaryWindow: Window?
         let secondaryWindow: Window?
+    }
+
+    struct NamedRateLimit: Decodable {
+        let limitName: String?
+        let rateLimit: RateLimit?
+    }
+
+    struct ResetCredits: Decodable {
+        let availableCount: Int?
+    }
+
+    struct Credits: Decodable {
+        let hasCredits: Bool?
+        let balance: String?
     }
 
     struct Window: Decodable {
@@ -61,12 +84,37 @@ enum CodexUsageFetcher {
 
         guard !windows.isEmpty else { throw UsageFetchError.decoding }
 
-        return AccountUsage(
+        var usage = AccountUsage(
             windows: windows,
             planLabel: response.planType?.capitalized,
             observedAt: Date(),
             source: .api
         )
+
+        // Named per model, since that is what tells one apart from the plan's own windows —
+        // and why they are kept out of `windows`, where they would distort the account's peak.
+        usage.modelWindows = (response.additionalRateLimits ?? []).compactMap { limit in
+            guard let name = limit.limitName,
+                  let window = normalize(limit.rateLimit?.primaryWindow) else { return nil }
+
+            return AccountUsage.Window(
+                id: name,
+                label: name,
+                fraction: window.fraction,
+                resetsAt: window.resetsAt,
+                windowDuration: window.windowDuration
+            )
+        }
+
+        usage.resetCredits = response.rateLimitResetCredits?.availableCount
+
+        // Only when there is a balance to speak of: "0" is what every account without credits
+        // reports, and stating it would be noise on all of them.
+        if response.credits?.hasCredits == true, let balance = response.credits?.balance {
+            usage.creditBalance = balance
+        }
+
+        return usage
     }
 
     // MARK: - Private Methods

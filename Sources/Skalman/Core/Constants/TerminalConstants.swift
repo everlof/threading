@@ -97,6 +97,13 @@ enum AgentDefaults {
     static let claudeModelFlag = "--model"
     static let codexModelFlag = "--model"
 
+    /// Runs enabled hooks without the review Codex otherwise requires.
+    ///
+    /// Named here rather than written inline because of what it does: it un-gates every hook in
+    /// the account's config directory for that invocation, not only the ones Skalman installed.
+    /// It is passed solely when `AppSettings.bypassesCodexHookTrust` is on.
+    static let codexBypassHookTrustFlag = "--dangerously-bypass-hook-trust"
+
     /// Model choices offered for Claude: the aliases its `--help` documents, which track the
     /// latest of each family rather than pinning a dated name.
     static let claudeModels = ["opus", "sonnet", "fable"]
@@ -191,6 +198,30 @@ enum MCPDefaults {
     /// per session still distinguishes the events, and so nothing depends on the payload's own
     /// event field — Claude and Codex spell it differently.
     static let lifecycleEventParameter = "event"
+
+    /// Environment variables carrying the listener's port and the session's token into a hook.
+    ///
+    /// Codex reads one `hooks.json` per account, shared by every session, and refuses to run a
+    /// hook whose text has not been reviewed. Passing the port and token through the
+    /// environment answers both at once: one static file routes every session correctly, and
+    /// its text never changes — so a trust decision survives the next launch, which a file
+    /// carrying today's port would not.
+    static let portEnvironmentKey = "SKALMAN_MCP_PORT"
+    static let sessionTokenEnvironmentKey = "SKALMAN_SESSION_TOKEN"
+
+    /// Set only for sessions Skalman renders itself, and read by Codex's `PreToolUse` hook.
+    ///
+    /// Codex has one `hooks.json` per account, shared by every session, so a surface-specific
+    /// behaviour cannot be expressed in the file. This variable is how a shared file is scoped
+    /// to one surface: a terminal session raises Codex's own approval prompt and must not be
+    /// intercepted, so it simply does not export this.
+    static let brokerEnvironmentKey = "SKALMAN_BROKER_TOOLS"
+
+    /// Marks the entries in a shared `hooks.json` that belong to Skalman.
+    ///
+    /// A shell comment, so it is inert where it sits, and the only way to tell our entries from
+    /// another tool's when updating a file we do not own.
+    static let hookMarker = "# skalman-lifecycle"
 
     /// Where per-session hook settings files are written, under Application Support.
     static let settingsDirectoryName = "settings"

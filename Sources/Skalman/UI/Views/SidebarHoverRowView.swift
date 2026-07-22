@@ -56,7 +56,7 @@ final class SidebarHoverRowView: NSTableRowView {
             dx: SidebarRowDefaults.hoverHighlightInsetX,
             dy: SidebarRowDefaults.hoverHighlightInsetY
         )
-        NSColor.labelColor
+        Design.Text.label
             .withAlphaComponent(SidebarRowDefaults.hoverHighlightAlpha)
             .setFill()
         NSBezierPath(

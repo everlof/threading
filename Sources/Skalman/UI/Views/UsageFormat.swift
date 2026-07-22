@@ -24,6 +24,14 @@ enum UsageFormat {
     }
 
     /// How stale a reading is: `just now`, `4m ago`.
+    /// Banked rate-limit resets, each of which clears a spent window early.
+    ///
+    /// Only ever shown when there are some: an account with none should say nothing rather
+    /// than announce a zero.
+    static func resetCredits(_ count: Int) -> String {
+        count == 1 ? "1 limit reset banked" : "\(count) limit resets banked"
+    }
+
     static func age(of date: Date, at now: Date = Date()) -> String {
         let minutes = Int(max(0, now.timeIntervalSince(date)) / 60)
         if minutes < 1 { return "just now" }
@@ -88,17 +96,17 @@ extension UsageSeverity {
     /// own warning colours, so light and dark both work.
     var glyphColor: NSColor {
         switch self {
-        case .normal: return .secondaryLabelColor
-        case .warning: return .systemOrange
-        case .critical: return .systemRed
+        case .normal: return Design.Text.secondary
+        case .warning: return Design.Status.warning
+        case .critical: return Design.Status.negative
         }
     }
 
     var barColor: NSColor {
         switch self {
-        case .normal: return .controlAccentColor
-        case .warning: return .systemOrange
-        case .critical: return .systemRed
+        case .normal: return Design.Surface.accent
+        case .warning: return Design.Status.warning
+        case .critical: return Design.Status.negative
         }
     }
 }

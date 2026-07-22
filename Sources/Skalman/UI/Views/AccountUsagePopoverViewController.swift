@@ -97,7 +97,7 @@ final class AccountUsagePopoverViewController: NSViewController {
         if let footer = footerText(usage: usage) {
             let label = NSTextField(labelWithString: footer)
             label.font = Design.Typography.caption()
-            label.textColor = .tertiaryLabelColor
+            label.textColor = Design.Text.tertiary
             label.lineBreakMode = .byWordWrapping
             label.maximumNumberOfLines = 0
             contentStack.addArrangedSubview(label)
@@ -109,7 +109,7 @@ final class AccountUsagePopoverViewController: NSViewController {
             labelWithString: "\(account.provider.displayName) — \(account.displayName)"
         )
         nameLabel.font = Design.Typography.control()
-        nameLabel.textColor = .labelColor
+        nameLabel.textColor = Design.Text.label
         nameLabel.lineBreakMode = .byTruncatingTail
 
         let row = NSStackView(views: [nameLabel])
@@ -120,7 +120,7 @@ final class AccountUsagePopoverViewController: NSViewController {
         if let planLabel {
             let plan = NSTextField(labelWithString: planLabel)
             plan.font = Design.Typography.caption()
-            plan.textColor = .secondaryLabelColor
+            plan.textColor = Design.Text.secondary
             row.addArrangedSubview(plan)
         }
 

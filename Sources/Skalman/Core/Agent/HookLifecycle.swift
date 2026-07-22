@@ -101,6 +101,15 @@ enum HookLifecycleRelay {
     /// no live controller — the prompt is the one thing a terminal session holds nowhere else
     /// until the CLI writes its transcript, which is exactly the window a crash lands in.
     static func deliver(_ report: HookLifecycleReport) {
+        // Live view only. These arrive on every turn boundary of every session, so they belong
+        // in the ring buffer `log stream` reads, not in a journal kept for two weeks.
+        SkalmanLogger.agent.debug(
+            """
+            Lifecycle \(report.event.rawValue, privacy: .public) \
+            for \(report.sessionID.uuidString, privacy: .public)
+            """
+        )
+
         if report.event == .turnStarted, let prompt = report.prompt, !prompt.isEmpty {
             EventLog.shared.record(.session, "Prompt submitted", [
                 "session": report.sessionID.uuidString,
@@ -108,6 +117,18 @@ enum HookLifecycleRelay {
             ])
         }
 
-        observe?(report)
+        guard let observe else {
+            // Before the relay is installed, or after it is torn down. Worth a record: it means
+            // reports are arriving and being discarded, which from the sidebar is
+            // indistinguishable from an agent that never reported at all.
+            SkalmanLogger.agent.warning("Lifecycle report with no observer installed")
+            EventLog.shared.record(.hooks, "Lifecycle report dropped, no observer", [
+                "session": report.sessionID.uuidString,
+                "event": report.event.rawValue
+            ])
+            return
+        }
+
+        observe(report)
     }
 }

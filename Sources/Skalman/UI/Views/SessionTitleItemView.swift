@@ -31,18 +31,18 @@ final class SessionTitleItemView: NSView {
             systemSymbolName: SessionTitleDefaults.symbolName,
             accessibilityDescription: nil
         )
-        iconView.contentTintColor = .secondaryLabelColor
+        iconView.contentTintColor = Design.Text.secondary
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         projectLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize, weight: .semibold)
-        projectLabel.textColor = .labelColor
+        projectLabel.textColor = Design.Text.label
         projectLabel.lineBreakMode = .byTruncatingTail
 
         separatorLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize)
-        separatorLabel.textColor = .tertiaryLabelColor
+        separatorLabel.textColor = Design.Text.tertiary
 
         sessionLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize)
-        sessionLabel.textColor = .secondaryLabelColor
+        sessionLabel.textColor = Design.Text.secondary
         sessionLabel.lineBreakMode = .byTruncatingTail
 
         let stack = NSStackView(views: [iconView, projectLabel, separatorLabel, sessionLabel])

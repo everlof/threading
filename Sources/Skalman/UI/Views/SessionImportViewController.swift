@@ -66,10 +66,10 @@ final class SessionImportViewController: NSViewController {
 
     private func setupViews() {
         headingLabel.font = Design.Typography.heading()
-        headingLabel.textColor = .labelColor
+        headingLabel.textColor = Design.Text.label
 
         subheadingLabel.font = Design.Typography.subheading()
-        subheadingLabel.textColor = .secondaryLabelColor
+        subheadingLabel.textColor = Design.Text.secondary
 
         let headings = NSStackView(views: [headingLabel, subheadingLabel])
         headings.orientation = .vertical
@@ -246,7 +246,7 @@ extension SessionImportViewController: NSTableViewDelegate {
         icon.image = session.kind.icon
         icon.imageScaling = .scaleProportionallyDown
         icon.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
-        icon.contentTintColor = .secondaryLabelColor
+        icon.contentTintColor = Design.Text.secondary
 
         let title = NSTextField(labelWithString: session.title)
         title.font = Design.Typography.body()
@@ -254,7 +254,7 @@ extension SessionImportViewController: NSTableViewDelegate {
 
         let detail = NSTextField(labelWithString: detailText(for: session))
         detail.font = Design.Typography.subheading()
-        detail.textColor = .tertiaryLabelColor
+        detail.textColor = Design.Text.tertiary
         detail.lineBreakMode = .byTruncatingTail
 
         let text = NSStackView(views: [title, detail])

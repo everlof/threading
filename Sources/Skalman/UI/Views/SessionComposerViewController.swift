@@ -53,10 +53,10 @@ final class SessionComposerViewController: NSViewController {
 
     private func setupViews() {
         headingLabel.font = Design.Typography.heading()
-        headingLabel.textColor = .labelColor
+        headingLabel.textColor = Design.Text.label
 
         subheadingLabel.font = Design.Typography.subheading()
-        subheadingLabel.textColor = .secondaryLabelColor
+        subheadingLabel.textColor = Design.Text.secondary
 
         let headings = NSStackView(views: [headingLabel, subheadingLabel])
         headings.orientation = .vertical

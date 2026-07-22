@@ -123,7 +123,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         // The full title leads: it is the one thing the row itself cannot always show.
         let title = NSTextField(wrappingLabelWithString: info.title)
         title.font = Design.Typography.control()
-        title.textColor = .labelColor
+        title.textColor = Design.Text.label
         title.preferredMaxLayoutWidth = SessionPopoverDefaults.width - 2 * Design.Spacing.inset
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -153,7 +153,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         case secondary, muted
 
         var color: NSColor {
-            self == .secondary ? .secondaryLabelColor : .tertiaryLabelColor
+            self == .secondary ? Design.Text.secondary : Design.Text.tertiary
         }
     }
 
@@ -169,7 +169,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         let icon = NSImageView()
         icon.image = image
         icon.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
-        icon.contentTintColor = .secondaryLabelColor
+        icon.contentTintColor = Design.Text.secondary
         icon.setContentHuggingPriority(.required, for: .horizontal)
         icon.setContentCompressionResistancePriority(.required, for: .horizontal)
         icon.widthAnchor.constraint(equalToConstant: SessionPopoverDefaults.iconSlotWidth).isActive = true

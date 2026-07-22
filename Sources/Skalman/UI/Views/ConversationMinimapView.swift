@@ -117,7 +117,7 @@ final class ConversationMinimapView: NSView {
             x: 0, y: top - Design.Spacing.tight,
             width: 1, height: height + Design.Spacing.small
         )
-        NSColor.separatorColor.withAlphaComponent(0.4).setFill()
+        Design.Surface.border.withAlphaComponent(0.4).setFill()
         spine.fill()
 
         for index in turns.indices {
@@ -131,11 +131,11 @@ final class ConversationMinimapView: NSView {
             let isOnScreen = visibleTurnIndices.contains(index)
             let colour: NSColor
             if index == activeIndex {
-                colour = .labelColor
+                colour = Design.Text.label
             } else if isOnScreen {
-                colour = .secondaryLabelColor
+                colour = Design.Text.secondary
             } else {
-                colour = .tertiaryLabelColor
+                colour = Design.Text.tertiary
             }
             colour.setFill()
 

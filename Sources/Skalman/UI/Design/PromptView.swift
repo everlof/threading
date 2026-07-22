@@ -87,7 +87,7 @@ final class PromptView: NSView {
         )
         submitButton.isBordered = false
         submitButton.bezelStyle = .inline
-        submitButton.contentTintColor = .tertiaryLabelColor
+        submitButton.contentTintColor = Design.Text.tertiary
         submitButton.target = self
         submitButton.action = #selector(submit)
         submitButton.translatesAutoresizingMaskIntoConstraints = false
@@ -129,7 +129,7 @@ final class PromptView: NSView {
         textView.delegate = self
         textView.placeholder = placeholder
         textView.font = Design.Typography.body()
-        textView.textColor = .labelColor
+        textView.textColor = Design.Text.label
         textView.drawsBackground = false
         textView.isRichText = false
         textView.isVerticallyResizable = true
@@ -203,7 +203,7 @@ final class PromptView: NSView {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty
 
-        submitButton.contentTintColor = hasText ? Design.Surface.accent : .tertiaryLabelColor
+        submitButton.contentTintColor = hasText ? Design.Surface.accent : Design.Text.tertiary
     }
 
     /// Sizes the box to its text, between one line and `inputMaxHeight`.

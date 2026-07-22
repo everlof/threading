@@ -28,10 +28,38 @@ extension MCPServer {
 
         let target = request.path.dropFirst(MCPDefaults.lifecyclePathPrefix.count)
         let parts = target.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        let query = parts.count > 1 ? String(parts[1]) : nil
 
+        // Every rejection below is logged rather than dropped. A hook that reached this app and
+        // was ignored looks exactly like a hook that never ran, and the two have entirely
+        // different causes — one is a stale `hooks.json`, the other a CLI that is not firing.
         guard let token = parts.first.map(String.init),
               let sessionID = MCPSessionRegistry.session(forToken: token) else {
+            SkalmanLogger.mcp.warning("Lifecycle report for unknown token")
+            EventLog.shared.record(.hooks, "Lifecycle report for unknown session token", [
+                "query": query ?? ""
+            ])
             return
+        }
+
+        guard let event = Self.event(inQuery: query) else {
+            SkalmanLogger.mcp.warning("Lifecycle report naming no event: \(query ?? "", privacy: .public)")
+            EventLog.shared.record(.hooks, "Lifecycle report named no known event", [
+                "session": sessionID.uuidString,
+                "query": query ?? ""
+            ])
+            return
+        }
+
+        // An empty body is the failure a probe found and a test now pins: a hook that guards
+        // before draining stdin posts nothing, and the session identifier it was carrying is
+        // lost in silence.
+        if request.body.isEmpty {
+            SkalmanLogger.mcp.warning("Lifecycle report with an empty body: \(event.rawValue, privacy: .public)")
+            EventLog.shared.record(.hooks, "Lifecycle report arrived with no payload", [
+                "session": sessionID.uuidString,
+                "event": event.rawValue
+            ])
         }
 
         let payload = (try? JSONSerialization.jsonObject(with: request.body))
@@ -39,7 +67,7 @@ extension MCPServer {
 
         guard let report = HookLifecycleReport(
             sessionID: sessionID,
-            event: Self.event(inQuery: parts.count > 1 ? String(parts[1]) : nil),
+            event: event,
             payload: payload
         ) else {
             return
