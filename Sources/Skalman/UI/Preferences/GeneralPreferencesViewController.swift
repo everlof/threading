@@ -156,7 +156,7 @@ final class GeneralPreferencesViewController: NSViewController {
 
     @objc private func terminalTitleChanged() {
         AppSettings.shared.usesTerminalTitleInSidebar = terminalTitleToggle.state == .on
-        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 
     @objc private func projectIconChanged() {
@@ -170,13 +170,13 @@ final class GeneralPreferencesViewController: NSViewController {
         // Forgotten attempts plus a sidebar rebuild, so re-enabling acts immediately —
         // rows re-prime lookups as they reconfigure.
         AccountAvatarStore.retryAll()
-        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 
     @objc private func branchGroupingChanged() {
         AppSettings.shared.groupsSessionsByBranch = branchGroupingToggle.state == .on
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
-        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 
     @objc private func shellPathChanged() {

@@ -11,6 +11,7 @@ final class ProjectSidebarViewController: NSViewController {
     private var outlineView: NSOutlineView!
     private var scrollView: NSScrollView!
     private var emptyStateView: NSView!
+    private let appEvents = AppEventObservations()
 
     /// Footer controls, retained so settings mode can hide Add Project and mark the cogwheel.
     private var addButton: HoverTintButton!
@@ -232,12 +233,9 @@ private extension ProjectSidebarViewController {
     }
 
     private func observeStoreChanges() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(projectsDidChange),
-            name: .projectsDidChange,
-            object: nil
-        )
+        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
+            self?.projectsDidChange()
+        }
     }
 
 }
@@ -612,7 +610,7 @@ private extension ProjectSidebarViewController {
         NSWorkspace.shared.activateFileViewerSelecting([project.folderURL])
     }
 
-    @objc private func projectsDidChange() {
+    private func projectsDidChange() {
         // A full rebuild rather than a row refresh: this fires on structural changes — a
         // session archived or unarchived (possibly from Settings, in another window), added or
         // removed — which add and drop rows. `reload` preserves selection and expansion.
@@ -734,7 +732,7 @@ private extension ProjectSidebarViewController {
     @objc private func toggleBranchGroupingClicked() {
         AppSettings.shared.groupsSessionsByBranch.toggle()
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
-        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 
     // MARK: - Context Menu

@@ -59,6 +59,22 @@ final class AgentRuntime {
         controllers[sessionID]?.activity ?? conversations[sessionID]?.activity ?? .dormant
     }
 
+    /// Applies a lifecycle report from an agent's own hooks to the session that raised it.
+    ///
+    /// Only terminal sessions are routed here. A rendered conversation learns its turn
+    /// boundaries from the stream it is already reading — it sent the message and it sees the
+    /// result — so a hook would tell it something it knows, one process later.
+    func applyLifecycle(_ report: HookLifecycleReport) {
+        guard let tracker = controllers[report.sessionID]?.activityTracker else { return }
+
+        switch report.event {
+        case .turnStarted: tracker.noteTurnStarted()
+        case .turnFinished: tracker.noteTurnFinished()
+        case .awaitingUser: tracker.noteAwaitingUser()
+        case .sessionStarted: break
+        }
+    }
+
     /// Marks which session is on screen, so only the others flag finished work.
     func setVisibleSession(_ sessionID: SessionID?) {
         for (id, controller) in controllers {

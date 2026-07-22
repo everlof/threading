@@ -414,7 +414,7 @@ final class ProjectStore {
     }
 
     private func notifyChanged() {
-        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 
     // MARK: - Persistence

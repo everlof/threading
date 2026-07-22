@@ -3,45 +3,48 @@ import Foundation
 // MARK: - Projects State Version
 
 enum ProjectsStateVersion {
-    static let current = 1
+    /// 2 dropped `AgentKind.shell`. A version-1 document may hold shell sessions, which no
+    /// longer decode — `StateManager` strips them on the way through.
+    static let current = 2
 }
 
 // MARK: - Agent Kind
 
 /// The kind of program a session hosts.
+/// A session is a *conversation*, so this names an agent and nothing else.
+///
+/// A shell used to be one of these — a sidebar row with a title, a launch record and an
+/// account slot it could never use, for something with no conversation to resume, no
+/// transcript, and nothing to import. It is now a surface belonging to a conversation
+/// (`ShellDrawerViewController`), which is what it always was in practice. What that removes
+/// is not one case: it is every branch in this file, in the launcher, the replayer, the
+/// account discovery and the usage service that existed to say "not for shells".
 enum AgentKind: String, Codable, CaseIterable {
     case claude
     case codex
-    case shell
 
     /// Human-readable name shown in menus and the sidebar.
     var displayName: String {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
-        case .shell: return "Shell"
         }
     }
 
     /// The executable invoked on the user's PATH.
-    ///
-    /// Nil for shells, whose executable comes from the active profile at launch rather than
-    /// being fixed by the agent kind.
-    var executableName: String? {
+    var executableName: String {
         switch self {
         case .claude: return AgentDefaults.claudeExecutable
         case .codex: return AgentDefaults.codexExecutable
-        case .shell: return nil
         }
     }
 
     /// Whether sessions of this kind can be resumed by identifier after exiting.
-    var supportsResume: Bool {
-        switch self {
-        case .claude, .codex: return true
-        case .shell: return false
-        }
-    }
+    ///
+    /// Every kind can, now that shells are not a kind. Kept as a property rather than deleted
+    /// with its call sites, because a future agent without a resume story would need it back
+    /// and the branches reading it are the honest place to notice.
+    var supportsResume: Bool { true }
 
     /// Whether the session identifier can be chosen by us before launch.
     ///
@@ -52,9 +55,7 @@ enum AgentKind: String, Codable, CaseIterable {
     }
 
     /// Whether this agent supports multiple logins.
-    var supportsAccounts: Bool {
-        self != .shell
-    }
+    var supportsAccounts: Bool { true }
 
     /// Whether Skalman may render this agent's conversation itself, instead of a terminal.
     ///
@@ -72,9 +73,7 @@ enum AgentKind: String, Codable, CaseIterable {
     /// credits was withdrawn on the day it was to take effect. That withdrawal was explicitly
     /// a pause, so this may become an economic choice — headless turns billed at API rates
     /// rather than against the plan — but it is a *permitted* one either way.
-    var supportsNativeUI: Bool {
-        self != .shell
-    }
+    var supportsNativeUI: Bool { true }
 
     /// Whether a conversation of this agent can be forked into a side chat.
     ///
@@ -88,11 +87,10 @@ enum AgentKind: String, Codable, CaseIterable {
     }
 
     /// Environment variable redirecting this CLI to an alternate config directory.
-    var accountEnvironmentKey: String? {
+    var accountEnvironmentKey: String {
         switch self {
         case .claude: return "CLAUDE_CONFIG_DIR"
         case .codex: return "CODEX_HOME"
-        case .shell: return nil
         }
     }
 }

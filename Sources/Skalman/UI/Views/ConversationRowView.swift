@@ -33,7 +33,7 @@ enum ConversationRowView {
             return (notice(text, kind: kind), false)
 
         case .toolCall(let call):
-            let view = ToolCallView(toolName: call.name, summary: call.summary, diff: call.diff)
+            let view = ToolCallView(tool: call.tool, summary: call.summary, diff: call.diff)
             if let result = call.result {
                 view.setResult(result.text, isError: result.isError)
             }

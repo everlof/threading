@@ -312,7 +312,7 @@ final class ConversationTimelineTests: XCTestCase {
     func testLongToolOutputIsCutAndSaysSo() {
         var timeline = ConversationTimeline(sessionID: SessionID())
         _ = timeline.apply(.assistantMessage(blocks: [
-            .toolUse(id: "call-1", name: "Bash", input: ["command": "cat huge.log"])
+            .toolUse(id: "call-1", tool: .bash, input: ["command": "cat huge.log"])
         ]))
         _ = timeline.apply(.toolResults([
             ToolResult(
@@ -334,7 +334,7 @@ final class ConversationTimelineTests: XCTestCase {
     func testShortToolOutputIsNotMarkedTruncated() {
         var timeline = ConversationTimeline(sessionID: SessionID())
         _ = timeline.apply(.assistantMessage(blocks: [
-            .toolUse(id: "call-1", name: "Bash", input: ["command": "echo hi"])
+            .toolUse(id: "call-1", tool: .bash, input: ["command": "echo hi"])
         ]))
         _ = timeline.apply(.toolResults([
             ToolResult(toolUseID: "call-1", text: "hi\n", isError: false)
@@ -369,7 +369,7 @@ final class ConversationTimelineTests: XCTestCase {
         var timeline = ConversationTimeline(sessionID: SessionID())
         _ = timeline.apply(.assistantMessage(blocks: [
             .text(""),
-            .toolUse(id: "call-1", name: "Bash", input: ["command": "ls"]),
+            .toolUse(id: "call-1", tool: .bash, input: ["command": "ls"]),
             .text("")
         ]))
 

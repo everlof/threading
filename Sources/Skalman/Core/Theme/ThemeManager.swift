@@ -34,7 +34,7 @@ final class ThemeManager {
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Keys.customThemes)
             }
-            NotificationCenter.default.post(name: .themesDidChange, object: nil)
+            NotificationCenter.default.post(ThemesDidChange())
         }
     }
 
@@ -281,10 +281,4 @@ enum ThemeImportError: LocalizedError {
             return "The theme file could not be found."
         }
     }
-}
-
-// MARK: - Notifications
-
-extension Notification.Name {
-    static let themesDidChange = Notification.Name("themesDidChange")
 }

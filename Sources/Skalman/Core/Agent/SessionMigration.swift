@@ -38,7 +38,6 @@ enum SessionMigration {
         switch session.kind {
         case .claude: url = ClaudeTranscript.url(sessionID: id, for: session, in: project)
         case .codex: url = CodexTranscript.url(sessionID: id, for: session)
-        case .shell: url = nil
         }
 
         guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }

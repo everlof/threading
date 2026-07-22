@@ -282,6 +282,11 @@ final class MCPServer {
             return
         }
 
+        if request.path.hasPrefix(MCPDefaults.lifecyclePathPrefix) {
+            routeLifecycle(request, respond: respond)
+            return
+        }
+
         guard request.path.hasPrefix(MCPDefaults.pathPrefix) else {
             respond(.status(404, "Not Found"))
             return
@@ -388,7 +393,8 @@ final class MCPServer {
             // held until the hop returns, which the client already expects for `initialize`.
             DispatchQueue.main.async { [weak self] in
                 let base = MCPToolCatalog.instructions
-                let addendum = self?.handler?.panelState(for: sessionID) ?? ""
+                let addendum = (self?.handler?.panelState(for: sessionID) ?? "")
+                    + (self?.handler?.storagePressure() ?? "")
 
                 completion(Self.result(
                     id: id,

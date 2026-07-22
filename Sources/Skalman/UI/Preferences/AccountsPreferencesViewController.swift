@@ -237,7 +237,7 @@ final class AccountsPreferencesViewController: NSViewController {
 
     /// Sidebar rows show account icons and names, so they refresh alongside this pane.
     private func notifyAccountsChanged() {
-        NotificationCenter.default.post(name: .projectsDidChange, object: self)
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 }
 
@@ -250,7 +250,6 @@ extension AgentKind {
         switch self {
         case .claude: return "✳️"
         case .codex: return "🌀"
-        case .shell: return "▶️"
         }
     }
 }

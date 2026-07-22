@@ -37,6 +37,7 @@ final class StoragePreferencesViewController: NSViewController {
 
     /// Findings by checkout, largest first, read from the cache the service keeps.
     private var groups: [CheckoutGroup] = []
+    private let appEvents = AppEventObservations()
 
     private var isScanning: Bool { ArtifactScanService.shared.isScanning }
 
@@ -69,12 +70,9 @@ final class StoragePreferencesViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(reload),
-            name: .artifactScanDidChange,
-            object: nil
-        )
+        appEvents.observe(ArtifactScanDidChange.self) { [weak self] _ in
+            self?.reload()
+        }
     }
 
     /// Draws what is already known, then asks for anything stale to be measured again.
@@ -93,7 +91,7 @@ final class StoragePreferencesViewController: NSViewController {
 
     /// Rebuilds from the cache, whether it changed because a scan landed or because something
     /// was removed.
-    @objc private func reload() {
+    private func reload() {
         groups = ProjectStore.shared.projects.flatMap { project in
             Self.group(ArtifactScanService.shared.artifacts(for: project.id), of: project)
         }

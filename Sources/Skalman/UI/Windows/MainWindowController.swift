@@ -360,6 +360,18 @@ final class MainWindowController: NSWindowController {
 
     /// Opens the git review as a tab in the selected session's display panel — the same
     /// per-session shape as the browser, and the same beep when no session is selected.
+    /// Opens or closes the shell under the session on screen. A session is required — the shell
+    /// belongs to a conversation, which is the whole point of the change that put it here.
+    func toggleShellDrawer() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard containerViewController.currentSessionID != nil else {
+            NSSound.beep()
+            return
+        }
+        containerViewController.toggleShellDrawer()
+    }
+
     func showReview() {
         window?.makeKeyAndOrderFront(nil)
 
@@ -796,7 +808,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         exitCode: Int32?
     ) {
         sidebarViewController.refreshRows()
-        NotificationCenter.default.post(name: .terminalSessionDidEnd, object: self)
+        NotificationCenter.default.post(TerminalSessionDidEnd(sessionID: sessionID))
     }
 
     func terminalContainer(

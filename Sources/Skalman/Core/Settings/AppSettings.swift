@@ -146,7 +146,7 @@ final class AppSettings {
     }
 
     private func notifyChanged() {
-        NotificationCenter.default.post(name: .appSettingsDidChange, object: self)
+        NotificationCenter.default.post(AppSettingsDidChange())
     }
 
     // MARK: - Keys

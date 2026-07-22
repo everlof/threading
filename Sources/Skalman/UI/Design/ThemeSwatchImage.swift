@@ -13,8 +13,10 @@ enum ThemeSwatchImage {
         static let menuSize = NSSize(width: 22, height: 14)
         static let listSize = NSSize(width: 44, height: 28)
         static let radiusFraction: CGFloat = 0.18
-        /// The band of ANSI colour down the trailing edge, as a fraction of the width.
-        static let stripeFraction: CGFloat = 0.42
+        /// The band of ANSI colour down the trailing edge, as a fraction of the width. Kept
+        /// narrow: it is there to say what the palette is *like*, and at half the chip four
+        /// saturated bands stop reading as a terminal and start reading as a colour picker.
+        static let stripeFraction: CGFloat = 0.3
         static let promptFraction: CGFloat = 0.44
     }
 

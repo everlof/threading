@@ -11,7 +11,7 @@ final class ThemePreferencesViewController: NSViewController {
     // MARK: - Constants
 
     private enum Layout {
-        static let listHeight: CGFloat = 220
+        static let listHeight: CGFloat = 190
         static let rowHeight: CGFloat = 36
         static let buttonWidth: CGFloat = 28
         static let buttonHeight: CGFloat = 22
@@ -31,6 +31,7 @@ final class ThemePreferencesViewController: NSViewController {
 
     private var themes: [TerminalTheme] = []
     private var selectedTheme: TerminalTheme?
+    private let appEvents = AppEventObservations()
 
     private var isBuiltInSelected: Bool {
         selectedTheme.map { ThemeManager.shared.isBuiltIn($0) } ?? false
@@ -140,18 +141,8 @@ final class ThemePreferencesViewController: NSViewController {
             self?.apply(color, for: key)
         }
 
-        for name in [Notification.Name.themesDidChange, .profileDidChange] {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(themesDidChange),
-                name: name,
-                object: nil
-            )
-        }
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
+        appEvents.observe(ThemesDidChange.self) { [weak self] _ in self?.themesDidChange() }
+        appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.themesDidChange() }
     }
 
     // MARK: - Setup
@@ -265,7 +256,7 @@ final class ThemePreferencesViewController: NSViewController {
         updateEditor()
     }
 
-    @objc private func themesDidChange() {
+    private func themesDidChange() {
         loadThemes()
     }
 
@@ -444,7 +435,7 @@ final class ThemePreferencesViewController: NSViewController {
         if ThemeAssignments.defaultTheme.name == theme.name {
             ThemeAssignments.setDefaultTheme(theme)
         } else {
-            NotificationCenter.default.post(name: .themeAssignmentsDidChange, object: nil)
+            NotificationCenter.default.post(ThemeAssignmentsDidChange())
         }
     }
 

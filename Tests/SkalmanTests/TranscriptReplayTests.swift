@@ -18,12 +18,12 @@ final class TranscriptReplayTests: XCTestCase {
 
         let event = try XCTUnwrap(TranscriptReplay.codexEvent(from: record))
         guard case .assistantMessage(let blocks) = event,
-              case .toolUse(let id, let name, let input) = try XCTUnwrap(blocks.first) else {
+              case .toolUse(let id, let tool, let input) = try XCTUnwrap(blocks.first) else {
             return XCTFail("Expected one replayed tool call")
         }
 
         XCTAssertEqual(id, "call-1")
-        XCTAssertEqual(name, "Bash")
+        XCTAssertEqual(tool, .bash)
         XCTAssertEqual(input["command"] as? String, "ls -la")
     }
 

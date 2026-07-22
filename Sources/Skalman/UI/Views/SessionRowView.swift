@@ -346,7 +346,6 @@ extension AgentKind {
         switch self {
         case .claude: return "sparkle"
         case .codex: return "chevron.left.forwardslash.chevron.right"
-        case .shell: return "terminal"
         }
     }
 }

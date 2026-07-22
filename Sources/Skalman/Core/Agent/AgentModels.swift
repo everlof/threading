@@ -17,8 +17,6 @@ enum AgentModels {
             return AgentDefaults.claudeModels
         case .codex:
             return configuredCodexModel(account: account).map { [$0] } ?? []
-        case .shell:
-            return []
         }
     }
 

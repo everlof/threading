@@ -12,6 +12,7 @@ final class AgentSessionViewController: NSViewController {
 
     let sessionID: SessionID
     let session: TerminalSession
+    private let appEvents = AppEventObservations()
 
     private(set) var isRunning = false
 
@@ -97,13 +98,9 @@ final class AgentSessionViewController: NSViewController {
         // the answer is to resolve *this* session's theme again rather than to adopt a value
         // the notification carried, which is what lets a narrower assignment survive a change
         // to a wider one.
-        for name in [Notification.Name.profileDidChange, .themeAssignmentsDidChange] {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(themeDidChange),
-                name: name,
-                object: nil
-            )
+        appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.themeDidChange() }
+        appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in
+            self?.themeDidChange()
         }
     }
 
@@ -114,7 +111,7 @@ final class AgentSessionViewController: NSViewController {
         view.layer?.backgroundColor = session.terminalView.nativeBackgroundColor.cgColor
     }
 
-    @objc private func themeDidChange() {
+    private func themeDidChange() {
         session.updateProfile(ThemeAssignments.profile(for: sessionID))
         applyBackgroundColor()
     }

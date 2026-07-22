@@ -98,8 +98,6 @@ final class ConversationViewController: NSViewController {
             self.stream = ClaudeStreamSession(sessionID: agentSession.id, plan: plan)
         case .codex:
             self.stream = CodexStreamSession(sessionID: agentSession.id, plan: plan)
-        case .shell:
-            preconditionFailure("Shell sessions do not support native conversation rendering")
         }
         super.init(nibName: nil, bundle: nil)
     }

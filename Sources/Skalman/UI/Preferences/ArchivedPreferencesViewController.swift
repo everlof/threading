@@ -14,6 +14,7 @@ final class ArchivedPreferencesViewController: NSViewController {
     // MARK: - Properties
 
     private var rows: [(project: Project, session: AgentSession)] = []
+    private let appEvents = AppEventObservations()
 
     private static let relativeDate: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -34,19 +35,16 @@ final class ArchivedPreferencesViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(reload),
-            name: .projectsDidChange,
-            object: nil
-        )
+        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
+            self?.reload()
+        }
     }
 
     // MARK: - Build
 
     /// Rebuilds the whole page from the current archived list. Cheap enough to do wholesale:
     /// the list is short, and a fresh build keeps each row's button tags in step with `rows`.
-    @objc private func reload() {
+    private func reload() {
         rows = ProjectStore.shared.archivedSessions()
 
         view.subviews.forEach { $0.removeFromSuperview() }

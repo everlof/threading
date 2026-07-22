@@ -57,6 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // failed listener costs the restored session its display panel and nothing else.
         MCPServer.shared.handler = mainWindowController
         mainWindowController.installPermissionPresenter()
+
+        // Installed here rather than on the window, because a lifecycle report is about a
+        // running session and stays meaningful whether or not anything is showing it.
+        HookLifecycleRelay.observe = { report in
+            AgentRuntime.shared.applyLifecycle(report)
+        }
+
         MCPServer.shared.start { [weak self] in
             self?.mainWindowController.restoreSelectedSession()
         }
@@ -291,6 +298,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reviewItem.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(reviewItem)
 
+        // ⌃` — the shortcut every editor with a terminal drawer uses, and free here because
+        // ⌘` is the platform's cycle-windows.
+        let shellItem = NSMenuItem(title: "Shell", action: #selector(toggleShell), keyEquivalent: "`")
+        shellItem.keyEquivalentModifierMask = [.control]
+        menu.addItem(shellItem)
+
         menu.addItem(.separator())
 
         let fullScreenItem = NSMenuItem(
@@ -381,6 +394,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openReview() {
         mainWindowController.showReview()
+    }
+
+    @objc private func toggleShell() {
+        mainWindowController.toggleShellDrawer()
     }
 
     @objc private func newSession() {

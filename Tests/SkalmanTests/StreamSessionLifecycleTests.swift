@@ -126,11 +126,11 @@ final class StreamEventParserTests: XCTestCase {
             }]}}
             """))
         guard case .assistantMessage(let blocks) = call,
-              case .toolUse(let id, let name, let input) = try XCTUnwrap(blocks.first) else {
+              case .toolUse(let id, let tool, let input) = try XCTUnwrap(blocks.first) else {
             return XCTFail("Expected Claude tool call")
         }
         XCTAssertEqual(id, "call-1")
-        XCTAssertEqual(name, "Bash")
+        XCTAssertEqual(tool, .bash)
         XCTAssertEqual(input["command"] as? String, "echo hi")
         XCTAssertEqual((input["options"] as? [String: Any])?["quiet"] as? Bool, true)
         XCTAssertEqual(input["retries"] as? Int, 2)
@@ -150,11 +150,11 @@ final class StreamEventParserTests: XCTestCase {
     func testCodexDecodesStringEncodedMCPArgumentsAndErrorObjects() throws {
         let call = try onlyEvent(CodexStreamEvent.parse(##"{"type":"item.started","item":{"id":"call-2","type":"mcp_tool_call","server":"web","tool":"query","arguments":"{\"selector\":\"#main\"}"}}"##))
         guard case .assistantMessage(let blocks) = call,
-              case .toolUse(let id, let name, let input) = try XCTUnwrap(blocks.first) else {
+              case .toolUse(let id, let tool, let input) = try XCTUnwrap(blocks.first) else {
             return XCTFail("Expected Codex MCP tool call")
         }
         XCTAssertEqual(id, "call-2")
-        XCTAssertEqual(name, "mcp__web__query")
+        XCTAssertEqual(tool, .mcp("mcp__web__query"))
         XCTAssertEqual(input["selector"] as? String, "#main")
 
         let failed = try onlyEvent(CodexStreamEvent.parse("""
@@ -205,5 +205,35 @@ final class StreamEventParserTests: XCTestCase {
 
     private enum ParserTestError: Error {
         case malformed
+    }
+}
+
+final class AppEventTests: XCTestCase {
+
+    func testTypedEventDeliversItsPayload() {
+        let center = NotificationCenter()
+        let observations = AppEventObservations(center: center)
+        let sessionID = SessionID()
+        var receivedSessionID: SessionID?
+
+        observations.observe(TerminalSessionDidEnd.self) { event in
+            receivedSessionID = event.sessionID
+        }
+        center.post(TerminalSessionDidEnd(sessionID: sessionID))
+
+        XCTAssertEqual(receivedSessionID, sessionID)
+    }
+
+    func testObservationLifetimeUnregistersItsTokens() {
+        let center = NotificationCenter()
+        var deliveryCount = 0
+        var observations: AppEventObservations? = AppEventObservations(center: center)
+
+        observations?.observe(ProjectsDidChange.self) { _ in deliveryCount += 1 }
+        center.post(ProjectsDidChange())
+        observations = nil
+        center.post(ProjectsDidChange())
+
+        XCTAssertEqual(deliveryCount, 1)
     }
 }

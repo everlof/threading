@@ -19,12 +19,21 @@ enum SessionActivity {
 
 // MARK: - Session Activity Tracker
 
-/// Derives a session's activity from its terminal output.
+/// Derives a session's activity, from the agent's own hooks where it reports them and from its
+/// terminal output where it does not.
 ///
-/// An idle agent writes nothing to its PTY, so output is a reliable signal that work is
-/// happening, and it holds for any program rather than just one agent. Two details keep it
-/// honest: a byte threshold, so echoed keystrokes are not mistaken for work, and a quiet
-/// period, so the brief gaps within a burst of output do not flicker the state.
+/// Output is the general signal: an idle agent writes nothing to its PTY, so output means work,
+/// and that holds for any program rather than one specific agent. It is a proxy, though, and
+/// needs a byte threshold plus three quiet periods to stay honest — it cannot tell a session
+/// thinking from a session repainting.
+///
+/// An agent with lifecycle hooks says so outright, and `noteTurnStarted`/`noteTurnFinished` are
+/// believed over anything inferred. The first such report latches `reportsOwnActivity`, after
+/// which output stops driving the state at all: the two disagree constantly and by design —
+/// a working agent is quiet while it waits on the model, and noisy after its turn has ended
+/// while the CLI redraws its footer. Falling back per-event would flicker between them.
+///
+/// Shells never report, so they keep the heuristic in full.
 @MainActor
 final class SessionActivityTracker {
 
@@ -51,6 +60,13 @@ final class SessionActivityTracker {
         }
     }
 
+    /// Whether this session has ever reported a turn boundary through a hook.
+    ///
+    /// Latched rather than per-event: once an agent has proved it reports, its silence is
+    /// meaningful. Treating a missing report as "fall back to counting bytes" would hand the
+    /// state straight back to the proxy this exists to replace.
+    private(set) var reportsOwnActivity = false
+
     private var bytesSinceQuiet = 0
     private var quietTimer: Timer?
 
@@ -61,6 +77,10 @@ final class SessionActivityTracker {
 
     /// Records a chunk of output.
     func recordOutput(byteCount: Int) {
+        // An agent that reports its own turns has already said what it is doing. Its output is
+        // then only redraw, and counting it would end turns early and start them late.
+        if reportsOwnActivity { return }
+
         if isSuppressed {
             // A redraw we caused. It must not start a session working, but it also must not
             // end one that already is — so an in-flight session keeps its timer alive.
@@ -102,6 +122,42 @@ final class SessionActivityTracker {
         return Date() < suppressOutputUntil
     }
 
+    // MARK: - Reported Activity
+
+    /// The agent reported that a turn began.
+    func noteTurnStarted() {
+        adoptOwnReports()
+        activity = .working
+    }
+
+    /// The agent reported that its turn ended.
+    ///
+    /// Finishing while the session is on screen needs no flag; the user watched it happen.
+    func noteTurnFinished() {
+        adoptOwnReports()
+        activity = isVisible ? .idle : .needsAttention
+    }
+
+    /// The agent reported that it is waiting on the user.
+    ///
+    /// Unlike finishing, this flags even a visible session: the agent is blocked until someone
+    /// answers, and a session the user is looking at but not attending to is exactly the case
+    /// worth marking.
+    func noteAwaitingUser() {
+        adoptOwnReports()
+        activity = .needsAttention
+    }
+
+    /// Switches this session off the output heuristic, the first time it reports anything.
+    private func adoptOwnReports() {
+        guard !reportsOwnActivity else { return }
+
+        reportsOwnActivity = true
+        quietTimer?.invalidate()
+        quietTimer = nil
+        bytesSinceQuiet = 0
+    }
+
     /// Records a terminal bell, which agents ring to ask for attention.
     func recordBell() {
         quietTimer?.invalidate()
@@ -120,8 +176,13 @@ final class SessionActivityTracker {
     }
 
     /// Marks the session as running again after being dormant.
+    ///
+    /// A new process has to earn the right to be believed all over again. The settings file
+    /// carrying the hooks is written per launch and can fail — if it did, this session has no
+    /// reports coming, and staying latched would leave it permanently idle.
     func markRunning() {
         bytesSinceQuiet = 0
+        reportsOwnActivity = false
         activity = .idle
     }
 

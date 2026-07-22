@@ -5,8 +5,20 @@ import Foundation
 /// A tool call awaiting a decision.
 struct PermissionRequest {
     let sessionID: SessionID
-    let toolName: String
+    let tool: ToolIdentity
     let input: [String: Any]
+
+    var toolName: String { tool.rawName }
+
+    init(sessionID: SessionID, tool: ToolIdentity, input: [String: Any]) {
+        self.sessionID = sessionID
+        self.tool = tool
+        self.input = input
+    }
+
+    init(sessionID: SessionID, toolName: String, input: [String: Any]) {
+        self.init(sessionID: sessionID, tool: ToolIdentity(toolName), input: input)
+    }
 
     /// A one-line description of what the tool would actually do, for the approval sheet.
     ///
@@ -14,25 +26,25 @@ struct PermissionRequest {
     /// to parse a schema before deciding — which is how people learn to click Allow without
     /// reading.
     var summary: String {
-        switch toolName {
-        case "Bash":
+        switch tool {
+        case .bash:
             return input["command"] as? String ?? ""
-        case "Write", "Edit", "NotebookEdit", "Read", "NotebookRead":
+        case .write, .edit, .notebookEdit, .read, .notebookRead:
             return (input["file_path"] as? String).map { abbreviate($0) } ?? ""
-        case "WebFetch":
+        case .webFetch:
             return input["url"] as? String ?? ""
-        case "WebSearch", "Grep", "Glob":
+        case .webSearch, .grep, .glob:
             // `Grep` and `Glob` name themselves by what they looked for, optionally where.
             let subject = (input["query"] ?? input["pattern"]) as? String ?? ""
             guard let path = (input["path"] as? String).map({ abbreviate($0) }), !path.isEmpty else {
                 return subject
             }
             return subject.isEmpty ? path : "\(subject)  in \(path)"
-        case "Plan":
+        case .plan:
             // Codex's `update_plan` carries the whole list. The step in progress is the one
             // worth a row; the rest is a checklist nobody reads collapsed.
             return currentPlanStep ?? "\(planSteps.count) steps"
-        default:
+        case .multiEdit, .task, .todoWrite, .todoRead, .toolSearch, .mcp, .unknown:
             // Tools without a rule of their own are the *common* case, not the exception —
             // there are always more tools than rules, and every MCP server adds more. This
             // branch used to dump the arguments as JSON, which is precisely what the rest of
@@ -173,7 +185,7 @@ enum PermissionBroker {
     static var present: ((PermissionRequest, @escaping (PermissionDecision) -> Void) -> Void)?
 
     /// Tools the user chose to stop being asked about, per session.
-    private static var alwaysAllowed: [SessionID: Set<String>] = [:]
+    private static var alwaysAllowed: [SessionID: Set<ToolIdentity>] = [:]
 
     // MARK: - Public Methods
 
@@ -184,12 +196,12 @@ enum PermissionBroker {
         _ request: PermissionRequest,
         completion: @escaping (PermissionDecision) -> Void
     ) {
-        if PermissionPolicy.isAutoAllowed(request.toolName) {
+        if PermissionPolicy.isAutoAllowed(request.tool) {
             completion(.allow(reason: "Read-only tool, allowed automatically by Skalman."))
             return
         }
 
-        if alwaysAllowed[request.sessionID]?.contains(request.toolName) == true {
+        if alwaysAllowed[request.sessionID]?.contains(request.tool) == true {
             completion(.allow(reason: "Allowed for this session by the user."))
             return
         }
@@ -204,7 +216,7 @@ enum PermissionBroker {
 
     /// Records that a tool should stop prompting for the rest of a session.
     static func allowAlways(toolName: String, for sessionID: SessionID) {
-        alwaysAllowed[sessionID, default: []].insert(toolName)
+        alwaysAllowed[sessionID, default: []].insert(ToolIdentity(toolName))
     }
 
     /// Forgets a session's standing approvals, so a resumed conversation starts asking again.
@@ -222,20 +234,26 @@ enum PermissionBroker {
 /// the policy somewhere it can be reasoned about.
 enum PermissionPolicy {
 
-    /// Tools that only read, and so are allowed without asking.
-    ///
-    /// Deliberately a short allowlist rather than a denylist: a tool absent from this set is
-    /// treated as consequential, so a new tool in a future release prompts rather than
-    /// slipping through unasked.
-    private static let readOnlyTools: Set<String> = [
-        "Read", "Glob", "Grep", "NotebookRead", "TodoWrite", "TodoRead", "Task", "ToolSearch"
-    ]
-
     static func isAutoAllowed(_ toolName: String) -> Bool {
-        if readOnlyTools.contains(toolName) { return true }
+        isAutoAllowed(ToolIdentity(toolName))
+    }
 
-        // Skalman's own display tools draw in a panel the user is already looking at, and
-        // are allowlisted for terminal sessions for the same reason.
-        return toolName.hasPrefix("mcp__\(MCPDefaults.serverName)__")
+    /// Deliberately exhaustive rather than a denylist: adding a known identity forces an
+    /// explicit policy choice, while `.unknown` remains consequential and prompts.
+    static func isAutoAllowed(_ tool: ToolIdentity) -> Bool {
+        switch tool {
+        case .read, .glob, .grep, .notebookRead,
+             .todoWrite, .todoRead, .task, .toolSearch:
+            return true
+
+        case .mcp(let name):
+            // Skalman's own display tools draw in a panel the user is already looking at, and
+            // are allowlisted for terminal sessions for the same reason.
+            return name.hasPrefix("mcp__\(MCPDefaults.serverName)__")
+
+        case .bash, .write, .edit, .multiEdit, .notebookEdit,
+             .webFetch, .webSearch, .plan, .unknown:
+            return false
+        }
     }
 }

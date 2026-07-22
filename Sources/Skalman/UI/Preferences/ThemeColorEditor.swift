@@ -163,13 +163,20 @@ final class ThemeColorEditor: NSView {
             column.orientation = .vertical
             column.alignment = .leading
             column.spacing = Design.Spacing.tight
+
+            // A fixed column, so the four chips sit on a regular pitch. Sized to their own
+            // labels they landed wherever "Background" happened to end, and four evenly
+            // coloured squares at irregular intervals read as a mistake rather than a row.
+            column.translatesAutoresizingMaskIntoConstraints = false
+            column.widthAnchor.constraint(equalToConstant: ThemeEditorLayout.mainColumnWidth)
+                .isActive = true
             return column
         }
 
         let row = NSStackView(views: columns)
         row.orientation = .horizontal
         row.alignment = .top
-        row.spacing = Design.Spacing.large
+        row.spacing = Design.Spacing.small
         return row
     }
 
@@ -226,4 +233,8 @@ enum ThemeEditorLayout {
     static let swatchGap: CGFloat = Design.Spacing.medium
     static let rowLabelWidth: CGFloat = 52
     static let hexFontSize: CGFloat = 10
+    /// Wide enough for "Background", so every main colour keeps the same pitch — and no wider,
+    /// since four of these are what decides how narrow the palette card can go before the ANSI
+    /// grid does.
+    static let mainColumnWidth: CGFloat = 84
 }

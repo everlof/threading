@@ -81,7 +81,6 @@ enum AccountAvatarStore {
         switch account.provider {
         case .claude: return claudeEmail(configPath: account.configPath)
         case .codex: return codexEmail(configPath: account.configPath)
-        case .shell: return nil
         }
     }
 
@@ -162,7 +161,7 @@ enum AccountAvatarStore {
 
                 // The same route an emoji edit takes: the sidebar rebuilds and the rows
                 // pick the file up from disk.
-                NotificationCenter.default.post(name: .projectsDidChange, object: nil)
+                NotificationCenter.default.post(ProjectsDidChange())
             }
         }
     }

@@ -178,12 +178,33 @@ enum MCPDefaults {
     /// Path prefix for `PreToolUse` permission requests, completed by the same token.
     static let permissionPathPrefix = "/permission/"
 
+    /// Path prefix for lifecycle hook reports, completed by the same token.
+    ///
+    /// Separate from the permission prefix because the two have opposite blocking rules: a
+    /// permission request holds the agent until a person answers, while a lifecycle report is
+    /// told and forgotten.
+    static let lifecyclePathPrefix = "/lifecycle/"
+
+    /// The query parameter naming which lifecycle event a report describes.
+    ///
+    /// The event is carried in the URL rather than read from the payload so that one endpoint
+    /// per session still distinguishes the events, and so nothing depends on the payload's own
+    /// event field — Claude and Codex spell it differently.
+    static let lifecycleEventParameter = "event"
+
     /// Where per-session hook settings files are written, under Application Support.
     static let settingsDirectoryName = "settings"
 
     /// How long the permission hook waits for a decision. Long, because what it is waiting
     /// for is a person reading a dialog, not a machine.
     static let permissionTimeout: TimeInterval = 600
+
+    /// How long a lifecycle hook waits before giving up.
+    ///
+    /// Deliberately tiny. These hooks run on the agent's own turn boundaries, so every one of
+    /// them is latency the user feels before their prompt is answered — and nothing depends on
+    /// the reply. An unreachable app must cost a moment, not a turn.
+    static let lifecycleTimeout: TimeInterval = 2
 
     /// Also cleaned up when a session is deleted. Kept alongside the retained tokens so a
     /// revoked endpoint leaves no settings file pointing at it.
@@ -355,16 +376,89 @@ enum SidebarRowDefaults {
     static let hoverHighlightAlpha: CGFloat = 0.06
 }
 
-// MARK: - Notification Names
+// MARK: - Typed App Events
 
-extension Notification.Name {
-    static let terminalSessionDidStart = Notification.Name("terminalSessionDidStart")
-    static let terminalSessionDidEnd = Notification.Name("terminalSessionDidEnd")
-    static let terminalTitleDidChange = Notification.Name("terminalTitleDidChange")
-    static let projectsDidChange = Notification.Name("projectsDidChange")
-    static let appSettingsDidChange = Notification.Name("appSettingsDidChange")
+/// A notification whose concrete value is also its payload. Callers can no longer pair a name
+/// with the wrong `object` type, and observers receive the value they asked for without casts.
+protocol AppEvent {
+    static var name: Notification.Name { get }
+}
 
-    /// A storage scan finished, or its cached findings changed.
-    static let artifactScanDidChange = Notification.Name("artifactScanDidChange")
-    static let accountPreferencesDidChange = Notification.Name("accountPreferencesDidChange")
+extension NotificationCenter {
+    func post<Event: AppEvent>(_ event: Event) {
+        post(name: Event.name, object: event)
+    }
+
+    @discardableResult
+    func observe<Event: AppEvent>(
+        _ type: Event.Type,
+        queue: OperationQueue? = nil,
+        using handler: @escaping (Event) -> Void
+    ) -> NSObjectProtocol {
+        addObserver(forName: Event.name, object: nil, queue: queue) { notification in
+            guard let event = notification.object as? Event else { return }
+            handler(event)
+        }
+    }
+}
+
+/// Owns block-observer tokens and unregisters them with its own lifetime.
+final class AppEventObservations {
+    private let center: NotificationCenter
+    private var tokens: [NSObjectProtocol] = []
+
+    init(center: NotificationCenter = .default) {
+        self.center = center
+    }
+
+    deinit {
+        tokens.forEach(center.removeObserver)
+    }
+
+    func observe<Event: AppEvent>(
+        _ type: Event.Type,
+        using handler: @escaping (Event) -> Void
+    ) {
+        tokens.append(center.observe(type, using: handler))
+    }
+}
+
+struct TerminalSessionDidEnd: AppEvent {
+    static let name = Notification.Name("terminalSessionDidEnd")
+    let sessionID: SessionID
+}
+
+struct ProjectsDidChange: AppEvent {
+    static let name = Notification.Name("projectsDidChange")
+}
+
+struct AppSettingsDidChange: AppEvent {
+    static let name = Notification.Name("appSettingsDidChange")
+}
+
+/// A storage scan finished, or its cached findings changed.
+struct ArtifactScanDidChange: AppEvent {
+    static let name = Notification.Name("artifactScanDidChange")
+}
+
+struct AccountPreferencesDidChange: AppEvent {
+    static let name = Notification.Name("accountPreferencesDidChange")
+}
+
+struct ProfileDidChange: AppEvent {
+    static let name = Notification.Name("profileDidChange")
+    let profile: TerminalProfile
+}
+
+struct AccountUsageDidChange: AppEvent {
+    static let name = Notification.Name("SkalmanAccountUsageDidChange")
+    let accountID: AccountID
+}
+
+struct ThemesDidChange: AppEvent {
+    static let name = Notification.Name("themesDidChange")
+}
+
+struct ThemeAssignmentsDidChange: AppEvent {
+    static let name = Notification.Name("themeAssignmentsDidChange")
 }

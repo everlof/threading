@@ -17,6 +17,7 @@ final class AccountUsageItemView: NSView {
 
     private let ringView = UsageRingView()
     private let summaryLabel = NSTextField(labelWithString: "")
+    private let appEvents = AppEventObservations()
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false { didSet { updateBackground() } }
@@ -47,7 +48,6 @@ final class AccountUsageItemView: NSView {
 
     deinit {
         refreshTimer?.invalidate()
-        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: - Setup
@@ -85,12 +85,9 @@ final class AccountUsageItemView: NSView {
     }
 
     private func startObserving() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(usageDidChange(_:)),
-            name: .accountUsageDidChange,
-            object: nil
-        )
+        appEvents.observe(AccountUsageDidChange.self) { [weak self] event in
+            self?.usageDidChange(event)
+        }
 
         refreshTimer = Timer.scheduledTimer(
             withTimeInterval: UsageDefaults.refreshTimerInterval,
@@ -119,8 +116,8 @@ final class AccountUsageItemView: NSView {
 
     // MARK: - Private Methods
 
-    @objc private func usageDidChange(_ notification: Notification) {
-        guard let account, notification.object as? AccountID == account.id else { return }
+    private func usageDidChange(_ event: AccountUsageDidChange) {
+        guard let account, event.accountID == account.id else { return }
         render()
     }
 

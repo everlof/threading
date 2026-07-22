@@ -84,16 +84,18 @@ final class StateManagerTests: XCTestCase {
                 #"{"kind":"claude","title":"Ready","agentSessionID":"legacy-thread"}"#.utf8
             )
         )
-        let shell = try decoder.decode(
-            AgentSession.self,
-            from: Data(
-                #"{"kind":"shell","title":"Shell","agentSessionID":"invalid-shell-id"}"#.utf8
-            )
-        )
-
         XCTAssertEqual(pending.resumeState, .awaitingIdentifier)
         XCTAssertEqual(resumable.resumeState, .resumable(TranscriptID("legacy-thread")))
-        XCTAssertEqual(shell.resumeState, .unavailable)
+
+        // A shell is no longer a kind, so a record naming one does not decode at all. That is
+        // the reason the version-1 migration strips them before the document is read, rather
+        // than the model quietly tolerating a kind it no longer has.
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AgentSession.self,
+                from: Data(#"{"kind":"shell","title":"Shell"}"#.utf8)
+            )
+        )
     }
 
     func testExplicitModelEncodingPreservesNonDefaultFields() throws {
@@ -323,6 +325,45 @@ final class StateManagerTests: XCTestCase {
             return XCTFail("Expected a fresh state after an explicit structural change")
         }
         XCTAssertEqual(freshState.projects.count, 1)
+    }
+
+    /// Version 2 removed `AgentKind.shell`. A version-1 document naming that kind must still
+    /// import — one session that no longer decodes would otherwise fail the whole document,
+    /// which for this user is every project they have.
+    func testVersionOneShellSessionsAreDroppedOnImport() throws {
+        let projectID = ProjectID()
+        let keptID = SessionID()
+        let document: [String: Any] = [
+            "version": 1,
+            "savedAt": 0,
+            "projects": [[
+                "id": projectID.uuidString,
+                "name": "stegvis",
+                "folderPath": "/tmp/stegvis",
+                "isExpanded": true,
+                "createdAt": 0,
+                "sessions": [
+                    ["id": keptID.uuidString, "kind": "claude", "title": "Claude Code",
+                     "createdAt": 0, "lastActiveAt": 0, "hasLaunched": true],
+                    ["id": SessionID().uuidString, "kind": "shell", "title": "stegvis",
+                     "createdAt": 0, "lastActiveAt": 0, "hasLaunched": true],
+                    ["id": SessionID().uuidString, "kind": "shell", "title": "stegvis",
+                     "createdAt": 0, "lastActiveAt": 0, "hasLaunched": true]
+                ]
+            ]]
+        ]
+        try JSONSerialization.data(withJSONObject: document)
+            .write(to: testDirectory.appendingPathComponent("projects.json"))
+
+        guard case .loaded(let state) = makeManager().loadProjectsState() else {
+            return XCTFail("a document with shell sessions should still import")
+        }
+
+        XCTAssertEqual(state.projects.map(\.name), ["stegvis"], "the project survives")
+        XCTAssertEqual(
+            state.projects[0].sessions.map(\.id), [keptID],
+            "the agent session survives and both shells are gone"
+        )
     }
 
     func testNewerStateVersionIsQuarantined() throws {

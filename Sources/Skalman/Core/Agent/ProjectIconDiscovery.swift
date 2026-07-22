@@ -27,18 +27,16 @@ final class ProjectIconDiscovery {
     private var attempted: Set<ProjectID> = []
 
     private let queue = DispatchQueue(label: "com.skalman.icon-discovery", qos: .utility)
+    private let appEvents = AppEventObservations()
 
     // MARK: - Public Methods
 
     /// Begins watching the store, and sweeps whatever it already holds. Called once at launch.
     @MainActor
     func start() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(projectsDidChange),
-            name: .projectsDidChange,
-            object: nil
-        )
+        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
+            self?.projectsDidChange()
+        }
         sweep()
     }
 
@@ -81,7 +79,7 @@ final class ProjectIconDiscovery {
     // MARK: - Private Methods
 
     @MainActor
-    @objc private func projectsDidChange() {
+    private func projectsDidChange() {
         // Catches newly added and imported projects. `attempted` keeps this from looping:
         // the sweep itself changes the store when it finds something.
         sweep()

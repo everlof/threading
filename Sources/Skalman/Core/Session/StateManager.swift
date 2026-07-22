@@ -10,6 +10,11 @@ enum ProjectsStateLoadResult {
     case failed(quarantinedAt: URL?)
 }
 
+/// Values that once appeared in a stored document and no longer exist in the model.
+private enum LegacyKinds {
+    static let shell = "shell"
+}
+
 private enum ProjectsStateLoadError: LocalizedError {
     case newerVersion(found: Int, current: Int)
     case missingMigration(from: Int)
@@ -189,12 +194,48 @@ final class StateManager {
         return try decoder.decode(ProjectsState.self, from: migratedData)
     }
 
-    /// Migration seam for future schema versions. Each case upgrades exactly one version.
+    /// Migration seam for schema versions. Each case upgrades exactly one version.
     private func migrateProjectsState(_ data: Data, from version: Int) throws -> Data {
         switch version {
+        case 1:
+            return try dropShellSessions(from: data)
         default:
             throw ProjectsStateLoadError.missingMigration(from: version)
         }
+    }
+
+    /// Version 2 removed `AgentKind.shell`, so a version-1 document may name a kind that no
+    /// longer decodes — and one undecodable session would otherwise fail the whole document.
+    ///
+    /// They are dropped rather than converted, because a shell session held nothing to convert:
+    /// no transcript, no resume identifier, and scrollback that was never persisted. What is
+    /// lost is a row in the sidebar, and every session gains a shell of its own in exchange.
+    private func dropShellSessions(from data: Data) throws -> Data {
+        guard var document = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let projects = document["projects"] as? [[String: Any]] else {
+            throw ProjectsStateLoadError.missingMigration(from: 1)
+        }
+
+        var dropped = 0
+        document["projects"] = projects.map { project -> [String: Any] in
+            guard let sessions = project["sessions"] as? [[String: Any]] else { return project }
+
+            var updated = project
+            updated["sessions"] = sessions.filter { session in
+                let isShell = (session["kind"] as? String) == LegacyKinds.shell
+                if isShell { dropped += 1 }
+                return !isShell
+            }
+            return updated
+        }
+        document["version"] = 2
+
+        if dropped > 0 {
+            SkalmanLogger.agent.info(
+                "Dropped \(dropped, privacy: .public) shell sessions: shells are a surface now, not a kind"
+            )
+        }
+        return try JSONSerialization.data(withJSONObject: document)
     }
 
     /// Moves unreadable or unsupported state out of the live path so it cannot be overwritten.

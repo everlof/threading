@@ -86,7 +86,6 @@ final class SideChatTests: XCTestCase {
 
         XCTAssertNil(AgentLauncher.forkParent(for: child, in: project))
         XCTAssertFalse(AgentKind.codex.supportsForking)
-        XCTAssertFalse(AgentKind.shell.supportsForking)
     }
 
     // MARK: - Launch Line
@@ -106,10 +105,10 @@ final class SideChatTests: XCTestCase {
         let command = try XCTUnwrap(AgentLauncher.plan(for: child, in: project).arguments.last)
         let parentID = try XCTUnwrap(parent.resumeState.transcriptID)
 
-        XCTAssertTrue(command.contains("--resume '\(parentID)'"), command)
-        XCTAssertTrue(command.contains("--fork-session"), command)
+        XCTAssertTrue(command.contains("'--resume' '\(parentID)'"), command)
+        XCTAssertTrue(command.contains("'--fork-session'"), command)
         XCTAssertTrue(
-            command.contains("--session-id '\(child.id.uuidString.lowercased())'"),
+            command.contains("'--session-id' '\(child.id.uuidString.lowercased())'"),
             command
         )
     }
@@ -127,7 +126,7 @@ final class SideChatTests: XCTestCase {
 
         XCTAssertFalse(command.contains("--fork-session"), command)
         XCTAssertTrue(
-            command.contains("--session-id '\(child.id.uuidString.lowercased())'"),
+            command.contains("'--session-id' '\(child.id.uuidString.lowercased())'"),
             command
         )
     }
@@ -138,7 +137,6 @@ final class SideChatTests: XCTestCase {
         let project = try makeProject()
         let claude = AgentSession(kind: .claude, title: "Claude")
         let codex = AgentSession(kind: .codex, title: "Codex")
-        let shell = AgentSession(kind: .shell, title: "Shell")
 
         XCTAssertEqual(
             AgentLauncher.plan(for: claude, in: project).resumeState,
@@ -148,10 +146,22 @@ final class SideChatTests: XCTestCase {
             AgentLauncher.plan(for: codex, in: project).resumeState,
             .awaitingIdentifier
         )
-        XCTAssertEqual(
-            AgentLauncher.plan(for: shell, in: project).resumeState,
-            .unavailable
+    }
+
+    func testLaunchPlanQuotesHostilePathTitleModelAndPrompt() throws {
+        let hostile = "'; rm -rf ~'"
+        var project = try makeProject()
+        project.folderPath = "/tmp/\(hostile)"
+        let session = AgentSession(kind: .claude, title: hostile, model: hostile)
+
+        let source = try XCTUnwrap(
+            AgentLauncher.plan(for: session, in: project, initialPrompt: hostile).arguments.last
         )
+        let quotedHostile = ShellCommand(word: hostile).source
+        let occurrenceCount = source.components(separatedBy: quotedHostile).count - 1
+
+        XCTAssertGreaterThanOrEqual(occurrenceCount, 3, source)
+        XCTAssertTrue(source.contains(ShellCommand(word: project.folderPath).source), source)
     }
 
     // MARK: - Helpers
@@ -178,5 +188,55 @@ final class SideChatTests: XCTestCase {
             try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
         }
         return url
+    }
+}
+
+final class ShellCommandTests: XCTestCase {
+
+    /// Values representative of every dynamic launch field. Running them through a real shell
+    /// proves they remain one argument; merely comparing quote characters would test the
+    /// implementation rather than the safety property.
+    func testHostileWordsRoundTripThroughShell() throws {
+        let hostileWords = [
+            "'; rm -rf ~'",
+            "feature/one && touch /tmp/skalman-injection",
+            "$(whoami) `id` $HOME",
+            "folder with spaces/and\nnewlines",
+            "double\" and single' quotes",
+            "",
+            "🦊 unicode"
+        ]
+
+        for word in hostileWords {
+            var command = ShellCommand(word: "/usr/bin/printf")
+            command.append(word: "%s")
+            command.append(word: word)
+
+            XCTAssertEqual(try run(command), word, "Did not preserve \(word.debugDescription)")
+        }
+    }
+
+    func testFlagValueAndFixedOperatorComposeWithoutRawFragments() throws {
+        var first = ShellCommand(word: "/usr/bin/true")
+        var second = ShellCommand(word: "/usr/bin/printf")
+        second.append(flag: "--", value: "'; echo injected'")
+        first.append(operator: .and)
+        first.append(contentsOf: second)
+
+        XCTAssertEqual(try run(first), "'; echo injected'")
+    }
+
+    private func run(_ command: ShellCommand) throws -> String {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command.source]
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, command.source)
+        return String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     }
 }

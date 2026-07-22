@@ -114,7 +114,7 @@ final class ProfileStorage {
             currentProfiles.append(profile)
         }
         profiles = currentProfiles
-        NotificationCenter.default.post(name: .profileDidChange, object: profile)
+        NotificationCenter.default.post(ProfileDidChange(profile: profile))
     }
 
     func delete(_ profile: TerminalProfile) {
@@ -128,10 +128,4 @@ final class ProfileStorage {
         save(profile)
         defaultProfile = profile
     }
-}
-
-// MARK: - Notifications
-
-extension Notification.Name {
-    static let profileDidChange = Notification.Name("profileDidChange")
 }

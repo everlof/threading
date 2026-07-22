@@ -764,6 +764,39 @@ Four guards keep it honest:
 Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
 `DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
 
+**An agent that reports its own turns is believed instead.** All of the above is a proxy, and
+the guards exist because it cannot tell thinking from repainting. Claude's own hooks say so
+outright, so `AgentLauncher.claudeCommand` now writes a `--settings` file for *terminal*
+sessions too — lifecycle hooks only, no `PreToolUse`, because a terminal session raises the
+CLI's own permission prompt and intercepting it would replace a working prompt with a second
+one. `UserPromptSubmit`, `Stop`, `Notification` and `SessionStart` curl back to the listener
+(`MCPDefaults.lifecyclePathPrefix`), and `HookLifecycleRelay` hands each report to the session's
+tracker. Verified end to end against CLI 2.1.217: the three ordinary events arrive in order,
+carrying the prompt text.
+
+Three things shape it, and each was wrong first or would have been:
+
+- **The lifecycle endpoint never blocks**, unlike the permission one. These hooks fire on the
+  agent's own turn boundaries, so any pause is latency before the user's prompt is answered, and
+  nothing reads the reply — `routeLifecycle` responds `.accepted` before it parses the body, and
+  the hook runs with a 2-second timeout.
+- **The hook must stay silent.** Claude feeds a `UserPromptSubmit` hook's stdout back to the
+  model as context and reads a failing `Stop` hook as a reason to keep going, so a lifecycle
+  report that leaked either would change the conversation it only observes. Hence
+  `>/dev/null 2>&1 || true`, which is load-bearing rather than tidy.
+- **Reporting latches** (`reportsOwnActivity`), and output then stops driving the state at all.
+  The two signals disagree by design: a working agent is quiet while it waits on the model and
+  noisy after its turn ends while the CLI redraws its footer. Falling back per-event would
+  flicker between them. `markRunning` clears the latch, because the settings file is written per
+  launch and can fail — a latched tracker with no reports coming would sit idle forever.
+
+`--settings` **layers rather than replaces** (measured: with one `SessionStart` in the file, two
+`SessionStart` hooks fire — ours and the user's own), so this does not disable whatever the user
+already has wired into their agents.
+
+`Notification` is the one event with no Codex equivalent in 0.144.6, which is why
+`HookLifecycleEvent.codexEventName` is optional and pinned by a test.
+
 ### The Store
 
 Projects and sessions live in **SQLite** (`skalman.db`), not in `projects.json`. The system
@@ -911,6 +944,99 @@ Terminal titles are stripped of their leading decorative glyph on the way in
 identifies the agent in a plain terminal tab, but the sidebar already draws a status dot and an
 agent icon, so keeping it would put a third symbol before every name. A title consisting only of
 symbols is left intact rather than reduced to nothing.
+
+### Themes
+
+A terminal theme is chosen at one of three scopes — session, project, or the app default —
+and `ThemeResolution.resolve` picks the narrowest one that names a theme that exists.
+
+Two rules carry the whole design, and both are pure functions of four arguments precisely so
+they could be tested without standing up three singletons and a window:
+
+- **Absent means inherit, not copy.** A session with no `themeName` follows its project, and a
+  project with none follows the default, so changing the default still moves everything that
+  never opted out. Recording the current theme at creation would have frozen every session
+  against the one setting most likely to change.
+- **A dangling name is not an error.** Themes are identified by name, so deleting one leaves
+  references behind; an unknown name degrades to inheriting from the next scope out, which is
+  indistinguishable from never having chosen. A *rename* is the case that must not degrade, so
+  `ThemeAssignments.rename` re-points every reference through `ProjectStore.renameTheme` — it
+  is the only rename path, and `ThemeManager.renameTheme` alone would silently reset every
+  session using the theme.
+
+**The broadcast had to invert.** `TerminalSession` used to observe `.profileDidChange` and
+*adopt* whatever profile it carried, which was right while there was one theme for the app and
+is exactly what a per-session override must not be overwritten by. Its observer is gone;
+`AgentSessionViewController` re-resolves and pushes through `updateProfile`, and
+`TerminalContainerViewController` resolves the pane's backdrop from the session id rather than
+reading it off the terminal view — two observers of one notification have no defined order, so
+reading the view could paint the pane the colour it is leaving.
+
+Only the *theme* is scoped. The rest of a profile — font, cursor, shell, scrollback —
+describes how the user works rather than how one conversation looks, and `ThemeAssignments.profile`
+returns the global profile carrying a resolved theme.
+
+The assignments live on the records they theme (`AgentSession.themeName`, `Project.themeName`
+in `projects.json`) rather than in a side table, so each is deleted with the thing it applies
+to instead of outliving it and re-theming whatever reuses the identifier.
+
+`ThemeColorKey` names the palette's twenty colours once, as key paths with a `displayName` and
+a snake-case `wireName`. The settings editor previously kept a `[String: NSColorWell]` and a
+twenty-case `switch` to put a changed colour back, and the MCP schema needs the same mapping —
+generating the tool's schema from the enum is what stops a colour being added to the model and
+left out of the schema an agent reads.
+
+**Scope is chosen where it applies**, which is a session's or a project's own `⋯` menu — the
+same placement as the surface switch and the project icon. Only the default lives in Settings,
+being the scope with no row to hang from. Each menu's "Inherit" item names what it inherits,
+since that is the one choice in the list whose result cannot otherwise be seen, and every item
+carries a `ThemeMenuChoice` naming its own target rather than reading "whichever row was last
+clicked" — the submenu is built from three places and that ambient state goes stale between
+them.
+
+Agents reach the same three scopes over MCP (`list_themes`, `set_theme`, `create_theme`). The
+call already arrives attributed, so `set_theme` needs no argument saying which terminal and
+defaults to the session that asked — which is what makes "make this one darker" work in the
+conversation it was said in. Three things the tools do that a thinner wrapper would not:
+
+- **`set_theme` reports what the session actually draws with afterwards**, which is not always
+  what was just set: a project-wide change is invisible in a session that named its own theme,
+  and saying so is the difference between a tool that worked and one the agent believes worked.
+- **`create_theme` merges onto a base** — the session's current theme unless told otherwise —
+  so "warmer background" is one colour rather than twenty, and it refuses to overwrite an
+  existing name, because a clobbered custom theme is unrecoverable and the caller most likely
+  to collide is an agent inventing one.
+- **A palette whose text fails `ThemeContrast` is refused.** A theme is the one setting that
+  can make the app's *input* surface unusable, and the terminal is where the user would have to
+  type to undo it. Only text-against-ground is checked: an ANSI colour close to the background
+  is ordinary — a dark `black` on a dark ground is how most themes are built — and the floor is
+  WCAG's large-text 3:1 rather than 4.5, which would reject Solarized Dark and stop being a
+  safety net and start being a taste.
+
+A natively-rendered session records an assignment but shows almost none of it: the conversation
+is drawn in system colours per the design system, so the theme reaches only the pane's backdrop.
+The tools say so rather than reporting a success nothing visible followed.
+
+The settings page was rebuilt around `ThemeColorEditor` and `ThemePreviewView`, and both
+changes came from looking at a render rather than from reasoning about a control:
+
+- **The palette is a grid.** Sixteen chips four points apart in two rows that did not line up
+  read as one undifferentiated field of circles — `bright blue` could not be found in it. At
+  `Design.Spacing.medium`, index-aligned so a colour sits above its bright variant, they are a
+  grid with columns. There are deliberately no column headings: a red chip says "red" better
+  than the word does, and eight headings wide enough for "Magenta" would set the grid's pitch
+  for it. The name and hex live in each chip's tooltip.
+- **A swatch is ringed, and the ring is a layer border** — which Core Animation paints *above*
+  sublayers, so it survives the colour well filling the chip underneath. A theme's `black` on
+  the settings card's own dark ground is otherwise a hole rather than a value.
+- **A built-in theme shows its colours rather than disabling them.** Disabled wells dim, which
+  misreports the palette they exist to display; the read-only state says why and offers
+  Duplicate instead.
+
+`ThemeSettingsRenderTests` draws the page at the width the pane actually gives it
+(`Design.Size.readableWidth`, which `showSettingsPage` caps it at) and at a squeezed one, light
+and dark — the same fixture-to-PNG idea as the conversation and git-review renders, for the
+same reason: no assertion anyone would write catches "these twenty chips read as a smear".
 
 ### Icons
 

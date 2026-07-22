@@ -33,6 +33,7 @@ final class SessionComposerViewController: NSViewController {
 
     /// What is left of the account the chips currently name.
     private let usagePanel = AccountUsagePanelView()
+    private let appEvents = AppEventObservations()
 
     private var selectedAgent: AgentKind = AgentDefaults.defaultKind
     private var selectedAccountHandle: AccountHandle = .standard
@@ -121,16 +122,9 @@ final class SessionComposerViewController: NSViewController {
     /// A reading arriving after the composer is on screen redraws the panel in place, rather
     /// than waiting for the next time an account is picked.
     private func observeUsage() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(usageDidChange),
-            name: .accountUsageDidChange,
-            object: nil
-        )
-    }
-
-    @objc private func usageDidChange() {
-        refreshUsagePanel()
+        appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
+            self?.refreshUsagePanel()
+        }
     }
 
     private func wirePrompt() {

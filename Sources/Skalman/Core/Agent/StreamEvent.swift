@@ -37,11 +37,80 @@ enum StreamEvent {
 
 // MARK: - Content Block
 
+/// The tools whose behavior Skalman understands, independent of the provider spelling that
+/// introduced them. Unknown and MCP tools keep their original name: they still render
+/// intelligibly, and a future tool cannot accidentally inherit the permissions of a known one.
+enum ToolIdentity: Hashable {
+    case bash
+    case read
+    case write
+    case edit
+    case multiEdit
+    case notebookEdit
+    case notebookRead
+    case glob
+    case grep
+    case webFetch
+    case webSearch
+    case task
+    case todoWrite
+    case todoRead
+    case toolSearch
+    case plan
+    case mcp(String)
+    case unknown(String)
+
+    init(_ rawName: String) {
+        switch rawName {
+        case "Bash": self = .bash
+        case "Read": self = .read
+        case "Write": self = .write
+        case "Edit": self = .edit
+        case "MultiEdit": self = .multiEdit
+        case "NotebookEdit": self = .notebookEdit
+        case "NotebookRead": self = .notebookRead
+        case "Glob": self = .glob
+        case "Grep": self = .grep
+        case "WebFetch": self = .webFetch
+        case "WebSearch": self = .webSearch
+        case "Task": self = .task
+        case "TodoWrite": self = .todoWrite
+        case "TodoRead": self = .todoRead
+        case "ToolSearch": self = .toolSearch
+        case "Plan": self = .plan
+        case let name where name.hasPrefix("mcp__"): self = .mcp(name)
+        default: self = .unknown(rawName)
+        }
+    }
+
+    var rawName: String {
+        switch self {
+        case .bash: return "Bash"
+        case .read: return "Read"
+        case .write: return "Write"
+        case .edit: return "Edit"
+        case .multiEdit: return "MultiEdit"
+        case .notebookEdit: return "NotebookEdit"
+        case .notebookRead: return "NotebookRead"
+        case .glob: return "Glob"
+        case .grep: return "Grep"
+        case .webFetch: return "WebFetch"
+        case .webSearch: return "WebSearch"
+        case .task: return "Task"
+        case .todoWrite: return "TodoWrite"
+        case .todoRead: return "TodoRead"
+        case .toolSearch: return "ToolSearch"
+        case .plan: return "Plan"
+        case .mcp(let name), .unknown(let name): return name
+        }
+    }
+}
+
 /// One piece of an assistant message.
 enum ContentBlock {
     case text(String)
     case thinking(String)
-    case toolUse(id: String, name: String, input: [String: Any])
+    case toolUse(id: String, tool: ToolIdentity, input: [String: Any])
 }
 
 // MARK: - Tool Result
@@ -233,7 +302,11 @@ extension StreamEvent {
             guard let id = block.id, let name = block.name else {
                 return nil
             }
-            return .toolUse(id: id, name: name, input: block.input?.foundationObject ?? [:])
+            return .toolUse(
+                id: id,
+                tool: ToolIdentity(name),
+                input: block.input?.foundationObject ?? [:]
+            )
         default:
             return nil
         }
@@ -272,7 +345,11 @@ extension StreamEvent {
             guard let id = block["id"] as? String, let name = block["name"] as? String else {
                 return nil
             }
-            return .toolUse(id: id, name: name, input: block["input"] as? [String: Any] ?? [:])
+            return .toolUse(
+                id: id,
+                tool: ToolIdentity(name),
+                input: block["input"] as? [String: Any] ?? [:]
+            )
         default:
             return nil
         }

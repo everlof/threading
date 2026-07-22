@@ -94,7 +94,7 @@ enum ThemeAssignments {
 
     /// Sets the app-wide default, which every unassigned session follows.
     static func setDefaultTheme(_ theme: TerminalTheme) {
-        // `setTheme` posts `.profileDidChange`, which the terminals re-resolve on.
+        // `setTheme` posts `ProfileDidChange`, which the terminals re-resolve on.
         ProfileStorage.shared.setTheme(theme)
     }
 
@@ -137,58 +137,9 @@ enum ThemeAssignments {
         return true
     }
 
-    /// Whether a foreground and background can be told apart at terminal text sizes.
-    ///
-    /// A theme is the one setting that can make the app's own input surface unreadable, and the
-    /// terminal is where the user would have to type to undo it. Only this pair is checked: an
-    /// ANSI colour close to the background is ordinary — a dark "black" on a dark ground is how
-    /// most themes are built — while text the colour of its own background is never intended.
-    static func hasLegibleContrast(foreground: NSColor, background: NSColor) -> Bool {
-        contrastRatio(foreground, background) >= ThemeDefaults.minimumContrastRatio
-    }
-
-    /// WCAG relative-luminance contrast, in the sRGB space both colours are stored in.
-    static func contrastRatio(_ first: NSColor, _ second: NSColor) -> CGFloat {
-        let a = relativeLuminance(first)
-        let b = relativeLuminance(second)
-        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
-    }
-
-    private static func relativeLuminance(_ color: NSColor) -> CGFloat {
-        guard let srgb = color.usingColorSpace(.sRGB) else { return 0 }
-
-        func linear(_ component: CGFloat) -> CGFloat {
-            component <= 0.03928
-                ? component / 12.92
-                : pow((component + 0.055) / 1.055, 2.4)
-        }
-
-        return 0.2126 * linear(srgb.redComponent)
-            + 0.7152 * linear(srgb.greenComponent)
-            + 0.0722 * linear(srgb.blueComponent)
-    }
-
     // MARK: - Notification
 
     private static func notifyChanged() {
-        NotificationCenter.default.post(name: .themeAssignmentsDidChange, object: nil)
+        NotificationCenter.default.post(ThemeAssignmentsDidChange())
     }
-}
-
-// MARK: - Defaults
-
-enum ThemeDefaults {
-    /// WCAG's floor for large text. Terminal type is small, but a theme is a deliberate
-    /// aesthetic choice and holding it to body-text contrast would reject palettes people
-    /// genuinely use — this rejects the unreadable, not the low-contrast.
-    static let minimumContrastRatio: CGFloat = 3.0
-}
-
-// MARK: - Notifications
-
-extension Notification.Name {
-    /// A session's or project's theme assignment changed. Terminals re-resolve their own
-    /// theme rather than adopting anything the notification carries, since a broadcast value
-    /// is exactly what a per-session override must not be overwritten by.
-    static let themeAssignmentsDidChange = Notification.Name("themeAssignmentsDidChange")
 }

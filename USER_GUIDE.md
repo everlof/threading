@@ -598,6 +598,24 @@ an oversight — the agent already has a shell, so a locked-down web view would 
 could not do more easily with `curl`. What is blocked is navigation, which is a usability
 problem rather than a security one.
 
+### Letting an agent change the theme
+
+The same server gives agents `list_themes`, `set_theme` and `create_theme`, so you can ask the
+session you are talking to for a different colour scheme and watch it change — no restart, no
+trip to Settings.
+
+- **"Use Ocean here"** sets it on that session alone. Ask for the project or the app default
+  and it sets those instead; the same three scopes described under [Themes](#themes).
+- **"Make me something warmer, like solarized but darker"** creates a new theme. Colours you
+  do not mention are kept from whatever the session is using now.
+
+Two guards, both because a terminal is where you would have to type to undo a mistake: an
+existing theme is never overwritten (the agent is told to pick another name), and a palette
+whose text cannot be read against its own background is refused outright.
+
+Switch the group off in **Settings ▸ Tools ▸ Terminal theme** if you would rather agents left
+your colours alone.
+
 ## Git Review
 
 **View ▸ Git Review** (Cmd+Shift+R) opens a Review tab in the display panel: a native diff
@@ -678,13 +696,35 @@ it — which is the one case that can report "the index is in use".
 - **Cmd+Ctrl+F**: toggle full screen
 
 ### Themes
-Configure in **Preferences > Themes**:
+Configure in **Settings > Themes**:
 - 16 ANSI colors (8 normal + 8 bright)
 - Foreground, background, cursor, and selection colors
 - Import themes from Terminal.app (.terminal files)
 - Export themes as JSON
-- Duplicate and customize built-in themes
+- Duplicate and customize built-in themes (built-in themes are read-only)
 - Live preview with sample output
+
+**Use as Default** sets the theme every terminal uses unless it has been given one of its own.
+
+#### Per-project and per-session themes
+
+A theme can be set at three levels, and the narrowest one wins:
+
+| Scope | Where to set it | Applies to |
+|---|---|---|
+| Session | The session row's `⋯` menu, or right-click ▸ **Theme** | That one terminal |
+| Project | The project row's `⋯` menu ▸ **Theme** | Every session in it that has no theme of its own |
+| Default | Settings ▸ Themes ▸ **Use as Default** | Everything else |
+
+Each menu's **Inherit** item clears that level's choice and names what it falls back to, so
+"Inherit (Ocean)" means removing this choice leaves the terminal on Ocean. A theme with no
+choice anywhere follows the default wherever it moves — the level is remembered as *inherit*,
+not as a copy of whatever was current at the time.
+
+Deleting a theme leaves anything using it inheriting again. Renaming one keeps them.
+
+Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
+a theme sets only the backdrop behind them.
 
 ### Profiles
 Configure in **Preferences > Profiles**:

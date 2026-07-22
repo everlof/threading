@@ -144,24 +144,29 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
       session, and logged. Focused tests cover optional-field drift, structured arguments and
       results, unknown kinds, and recovery after malformed lines. Foundation dictionary adapters
       remain only at the separate transcript-replay boundary.
-- [ ] Tool identity enum with `unknown(String)` case so `PermissionPolicy` and the tool-row
-      glyph mapping switch exhaustively (`PermissionBroker.swift:141-143`,
-      `CodexStreamEvent.swift:61-93`).
+- [x] Tool calls now cross the provider-neutral stream boundary as a `ToolIdentity`, with raw
+      names retained by `unknown(String)` and MCP identities. Permission summaries, per-session
+      approvals, `PermissionPolicy`, and tool-row glyphs consume the identity; the policy and
+      glyph mappings switch exhaustively, so new known cases require an explicit decision while
+      unknown tools continue to prompt and render by their original name. Focused parser,
+      replay, timeline, policy, and glyph tests pass.
 
 ### 2.5 Typed notifications
-- [ ] Replace `object:`-cast payloads with a ~20-line typed event helper
-      (`protocol AppEvent { static var name: Notification.Name }` + generic post/observe).
-      Worst offenders: `.accountUsageDidChange` matching on a raw id string;
-      `.terminalSessionDidEnd` carrying no session at all; `.profileDidChange` downcast at
-      each receiver. Nine names total (`TerminalConstants.swift:350-357` + per-file
-      extensions).
+- [x] All nine live app notifications are concrete `AppEvent` values sent and observed through
+      generic `NotificationCenter.post`/`observe` helpers; block-observer tokens are owned by an
+      `AppEventObservations` lifetime bag. Session-end now carries its `SessionID`, profile and
+      usage changes carry `TerminalProfile` and `AccountID`, and signal-only events use empty
+      structs instead of arbitrary sender objects. The two unused terminal notification names
+      were removed. Focused payload/lifetime tests and the full suite pass.
 
 ### 2.6 `ShellCommand` builder
-- [ ] A small type whose `append(word:)`/`append(flag:value:)` quote by construction, so
-      unquoted interpolation into the `sh -c` string becomes unrepresentable. One unquoted
-      interpolation exists today (`AgentLauncher.swift:225-227`, safe only because the
-      env-var name is a constant). Fuzz-test with hostile titles/branches/paths
-      (`'; rm -rf ~'`).
+- [x] `ShellCommand` now quotes every executable, word, flag, value, environment assignment,
+      prompt, model, identifier, title, and path as it enters the command. Composition accepts
+      other builders and a closed operator enum (`&&`) rather than raw source fragments, and all
+      terminal, native-stream, research, account-routing, MCP, resume/fork, and shell-profile
+      launch paths use it. Hostile title/model/prompt/path fixtures and shell-executed fuzz cases
+      (quotes, substitutions, operators, whitespace, newlines, empty values, and Unicode) round
+      trip as single arguments. Focused tests and the full suite pass.
 
 ---
 

@@ -44,6 +44,31 @@ final class PermissionRequestViewTests: XCTestCase {
         XCTAssertNil(cardReference)
     }
 
+    func testToolIdentityPreservesNamesItDoesNotKnow() {
+        let tool = ToolIdentity("FutureProviderTool")
+
+        XCTAssertEqual(tool, .unknown("FutureProviderTool"))
+        XCTAssertEqual(tool.rawName, "FutureProviderTool")
+    }
+
+    func testPermissionPolicyAllowsOnlyKnownReadOnlyAndOwnedMCPTools() {
+        XCTAssertTrue(PermissionPolicy.isAutoAllowed(.read))
+        XCTAssertTrue(PermissionPolicy.isAutoAllowed(.mcp("mcp__skalman__show_image")))
+        XCTAssertFalse(PermissionPolicy.isAutoAllowed(.bash))
+        XCTAssertFalse(PermissionPolicy.isAutoAllowed(.mcp("mcp__external__delete")))
+        XCTAssertFalse(PermissionPolicy.isAutoAllowed(.unknown("FutureProviderTool")))
+    }
+
+    func testToolGlyphKeepsUnknownAndMCPNamesUseful() {
+        let unknown = ToolGlyph.forTool(.unknown("FutureProviderTool"))
+        let mcp = ToolGlyph.forTool(.mcp("mcp__web__query"))
+
+        XCTAssertEqual(unknown.symbol, "•")
+        XCTAssertEqual(unknown.label, "FutureProviderTool")
+        XCTAssertEqual(mcp.symbol, "◇")
+        XCTAssertEqual(mcp.label, "query")
+    }
+
     private func makeRequest() -> PermissionRequest {
         PermissionRequest(sessionID: SessionID(), toolName: "Bash", input: ["command": "pwd"])
     }

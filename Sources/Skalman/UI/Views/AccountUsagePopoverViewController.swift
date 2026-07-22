@@ -12,6 +12,7 @@ final class AccountUsagePopoverViewController: NSViewController {
 
     private let account: AgentAccount
     private let contentStack = NSStackView()
+    private let appEvents = AppEventObservations()
 
     /// Fired as the pointer enters and leaves the popover, so the owning pill can keep a
     /// hover-opened popover alive while the pointer is inside it.
@@ -26,10 +27,6 @@ final class AccountUsagePopoverViewController: NSViewController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: - Lifecycle
@@ -70,18 +67,15 @@ final class AccountUsagePopoverViewController: NSViewController {
         view = container
         render()
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(usageDidChange(_:)),
-            name: .accountUsageDidChange,
-            object: nil
-        )
+        appEvents.observe(AccountUsageDidChange.self) { [weak self] event in
+            self?.usageDidChange(event)
+        }
     }
 
     // MARK: - Private Methods
 
-    @objc private func usageDidChange(_ notification: Notification) {
-        guard notification.object as? AccountID == account.id else { return }
+    private func usageDidChange(_ event: AccountUsageDidChange) {
+        guard event.accountID == account.id else { return }
         render()
     }
 

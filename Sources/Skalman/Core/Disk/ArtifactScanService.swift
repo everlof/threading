@@ -183,7 +183,7 @@ final class ArtifactScanService {
     }
 
     private func notifyChanged() {
-        NotificationCenter.default.post(name: .artifactScanDidChange, object: self)
+        NotificationCenter.default.post(ArtifactScanDidChange())
     }
 
     // MARK: - Persistence

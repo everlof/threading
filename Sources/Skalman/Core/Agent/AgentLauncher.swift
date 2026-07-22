@@ -14,6 +14,63 @@ struct AgentLaunchPlan {
     let resumeState: ResumeState
 }
 
+// MARK: - Shell Command
+
+/// A shell command assembled from arguments rather than source-code fragments.
+///
+/// Every caller-provided word is single-quoted as it enters the command. The only syntax that
+/// can be emitted raw is one of the fixed operators below, so interpolating a title, branch,
+/// model, prompt, environment value, or path into `sh -c` is not an available operation.
+struct ShellCommand: Equatable {
+    enum Operator {
+        case and
+
+        fileprivate var source: String {
+            switch self {
+            case .and: return "&&"
+            }
+        }
+    }
+
+    private var components: [String] = []
+
+    init() {}
+
+    init(word: String) {
+        append(word: word)
+    }
+
+    mutating func append(word: String) {
+        components.append(Self.quote(word))
+    }
+
+    mutating func append(flag: String) {
+        precondition(flag.hasPrefix("-"), "A shell flag must start with '-'")
+        append(word: flag)
+    }
+
+    mutating func append(flag: String, value: String) {
+        append(flag: flag)
+        append(word: value)
+    }
+
+    mutating func append(operator shellOperator: Operator) {
+        components.append(shellOperator.source)
+    }
+
+    mutating func append(contentsOf command: ShellCommand) {
+        components.append(contentsOf: command.components)
+    }
+
+    var source: String {
+        components.joined(separator: " ")
+    }
+
+    private static func quote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
 // MARK: - Agent Launcher
 
 /// Builds command lines for starting and resuming agent sessions.
@@ -33,7 +90,7 @@ enum AgentLauncher {
         in project: Project,
         initialPrompt: String? = nil
     ) -> AgentLaunchPlan {
-        let command: String
+        let command: ShellCommand
         let resumeState: ResumeState
 
         switch session.kind {
@@ -45,15 +102,11 @@ enum AgentLauncher {
             )
         case .codex:
             (command, resumeState) = codexCommand(for: session, prompt: initialPrompt)
-        case .shell:
-            (command, resumeState) = (shellCommand(), .unavailable)
         }
 
-        let routed = accountPrefix(for: session) + command + mcpFlags(for: session)
-
-        return AgentLaunchPlan(
-            executable: loginShellPath,
-            arguments: ["-l", "-c", "cd \(quoted(project.folderPath)) && exec \(routed)"],
+        return launchPlan(
+            command: routed(command, for: session),
+            in: project.folderPath,
             resumeState: resumeState
         )
     }
@@ -72,8 +125,6 @@ enum AgentLauncher {
             return claudeStreamPlan(for: session, in: project)
         case .codex:
             return codexStreamPlan(for: session, in: project)
-        case .shell:
-            preconditionFailure("Shell sessions do not support native conversation rendering")
         }
     }
 
@@ -82,40 +133,42 @@ enum AgentLauncher {
         for session: AgentSession,
         in project: Project
     ) -> AgentLaunchPlan {
-        let executable = AgentDefaults.claudeExecutable
-        let model = modelFlag(for: session, flag: AgentDefaults.claudeModelFlag)
-
-        var command = "\(executable)\(model) --print"
-            + " --input-format stream-json"
-            + " --output-format stream-json"
-            + " --include-partial-messages"
-            + " --verbose"
+        var command = ShellCommand(word: AgentDefaults.claudeExecutable)
+        appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &command)
+        command.append(flag: "--print")
+        command.append(flag: "--input-format", value: "stream-json")
+        command.append(flag: "--output-format", value: "stream-json")
+        command.append(flag: "--include-partial-messages")
+        command.append(flag: "--verbose")
 
         let resumeState: ResumeState
 
         if let fork = claudeForkFlags(for: session, in: project) {
-            command += fork.flags
+            command.append(contentsOf: fork.flags)
             resumeState = .resumable(fork.sessionID)
         } else if let existingID = session.resumeState.transcriptID,
            ClaudeTranscript.exists(sessionID: existingID, for: session, in: project) {
-            command += " --resume \(quoted(existingID))"
+            command.append(flag: "--resume", value: existingID.rawValue)
             resumeState = .resumable(existingID)
         } else {
             let mintedID = session.resumeState.transcriptID
                 ?? TranscriptID(session.id.uuidString.lowercased())
-            command += " --session-id \(quoted(mintedID))"
+            command.append(flag: "--session-id", value: mintedID.rawValue)
             resumeState = .resumable(mintedID)
         }
 
-        if let settingsPath = MCPSessionRegistry.writePermissionSettings(for: session.id) {
-            command += " --settings \(quoted(settingsPath))"
+        // Brokered: a headless run has nowhere to ask, so without the `PreToolUse` hook it
+        // silently blocks the tools it would otherwise prompt about.
+        if let settingsPath = MCPSessionRegistry.writeHookSettings(
+            for: session.id,
+            brokersPermissions: true
+        ) {
+            command.append(flag: "--settings", value: settingsPath)
         }
 
-        let routed = accountPrefix(for: session) + command + mcpFlags(for: session)
-
-        return AgentLaunchPlan(
-            executable: loginShellPath,
-            arguments: ["-l", "-c", "cd \(quoted(project.folderPath)) && exec \(routed)"],
+        return launchPlan(
+            command: routed(command, for: session),
+            in: project.folderPath,
             resumeState: resumeState
         )
     }
@@ -126,22 +179,21 @@ enum AgentLauncher {
         for session: AgentSession,
         in project: Project
     ) -> AgentLaunchPlan {
-        let executable = AgentDefaults.codexExecutable
-        let model = modelFlag(for: session, flag: AgentDefaults.codexModelFlag)
+        var command = ShellCommand(word: AgentDefaults.codexExecutable)
+        appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
+        command.append(flag: "--sandbox", value: "workspace-write")
+        command.append(word: "exec")
 
-        let command: String
         if let existingID = session.resumeState.transcriptID {
-            command = "\(executable)\(model) --sandbox workspace-write"
-                + " exec resume \(quoted(existingID)) --json -"
-        } else {
-            command = "\(executable)\(model) --sandbox workspace-write exec --json -"
+            command.append(word: "resume")
+            command.append(word: existingID.rawValue)
         }
+        command.append(flag: "--json")
+        command.append(word: "-")
 
-        let routed = accountPrefix(for: session) + command + mcpFlags(for: session)
-
-        return AgentLaunchPlan(
-            executable: loginShellPath,
-            arguments: ["-l", "-c", "cd \(quoted(project.folderPath)) && exec \(routed)"],
+        return launchPlan(
+            command: routed(command, for: session),
+            in: project.folderPath,
             resumeState: session.resumeState
         )
     }
@@ -150,28 +202,30 @@ enum AgentLauncher {
     /// discovery today.
     ///
     /// Routed to the default account (research belongs to a project, not any session — the
-    /// same `env -u` rule as `accountPrefix`), sandboxed read-only because research must
+    /// same `env -u` rule as `routed`), sandboxed read-only because research must
     /// not write, and with reasoning effort turned down: the answer is a look-up, not a
     /// plan. No MCP flags — a run with no terminal has no panel to reach.
     static func codexResearchPlan(in folder: String, prompt: String) -> AgentLaunchPlan {
-        let environmentKey = AgentKind.codex.accountEnvironmentKey ?? ""
-        let accountPrefix = environmentKey.isEmpty ? "" : "env -u \(environmentKey) "
-
-        let command = accountPrefix + AgentDefaults.codexExecutable
-            + codexConfigOverride(
-                AgentDefaults.codexReasoningEffortKey,
-                string: AgentDefaults.codexResearchReasoningEffort
-            )
-            + " --sandbox read-only exec --json \(quoted(prompt))"
-
-        return AgentLaunchPlan(
-            executable: loginShellPath,
-            arguments: ["-l", "-c", "cd \(quoted(folder)) && exec \(command)"],
-            resumeState: .unavailable
+        var command = ShellCommand()
+        // `env -u`, not a bare command: a login shell may export an override, which would
+        // otherwise route research at whichever account that names.
+        command.append(word: "env")
+        command.append(flag: "-u", value: AgentKind.codex.accountEnvironmentKey)
+        command.append(word: AgentDefaults.codexExecutable)
+        appendCodexConfigOverride(
+            AgentDefaults.codexReasoningEffortKey,
+            string: AgentDefaults.codexResearchReasoningEffort,
+            to: &command
         )
+        command.append(flag: "--sandbox", value: "read-only")
+        command.append(word: "exec")
+        command.append(flag: "--json")
+        command.append(word: prompt)
+
+        return launchPlan(command: command, in: folder, resumeState: .unavailable)
     }
 
-    /// Flags registering Skalman's own MCP server for this session, or "" when unavailable.
+    /// Appends flags registering Skalman's own MCP server when one is available.
     ///
     /// Each launch receives a URL carrying the session's token — that URL is what lets a tool
     /// call find the right display panel. Claude takes it through a per-session JSON config;
@@ -183,26 +237,26 @@ enum AgentLauncher {
     /// Skalman's own tools are pre-approved because they call back into the app the user is
     /// already looking at. Without this, showing panel content or driving the browser raises a
     /// permission prompt every time, which costs more attention than the action it is guarding.
-    private static func mcpFlags(for session: AgentSession) -> String {
+    private static func appendMCPFlags(for session: AgentSession, to command: inout ShellCommand) {
         // Which tools are exposed is the user's choice on the Tools settings page. With every
         // group switched off there is nothing to register — and an empty `enabled_tools` list is
         // ambiguous to Codex (it can read as "all"), so the server is skipped outright rather than
         // handed an empty allowlist.
         let enabledTools = MCPToolCatalog.enabledToolNames
-        guard !enabledTools.isEmpty else { return "" }
+        guard !enabledTools.isEmpty else { return }
 
         switch session.kind {
         case .claude:
             guard let configPath = MCPSessionRegistry.writeConfiguration(for: session.id) else {
-                return ""
+                return
             }
 
-            return " --mcp-config \(quoted(configPath))"
-                + " --allowedTools \(quoted(MCPDefaults.allowedToolsPattern))"
+            command.append(flag: "--mcp-config", value: configPath)
+            command.append(flag: "--allowedTools", value: MCPDefaults.allowedToolsPattern)
 
         case .codex:
             guard let url = MCPSessionRegistry.endpointURL(for: session.id) else {
-                return ""
+                return
             }
 
             let server = "mcp_servers.\(MCPDefaults.serverName)"
@@ -210,33 +264,39 @@ enum AgentLauncher {
                 .map(tomlString)
                 .joined(separator: ",")
 
-            var flags = codexConfigOverride("\(server).url", string: url)
-                + codexConfigOverride(
-                    "\(server).enabled_tools",
-                    tomlValue: "[\(toolList)]"
-                )
+            appendCodexConfigOverride("\(server).url", string: url, to: &command)
+            appendCodexConfigOverride(
+                "\(server).enabled_tools",
+                tomlValue: "[\(toolList)]",
+                to: &command
+            )
 
             for tool in enabledTools {
-                flags += codexConfigOverride(
+                appendCodexConfigOverride(
                     "\(server).tools.\(tool).approval_mode",
-                    string: "approve"
+                    string: "approve",
+                    to: &command
                 )
             }
 
-            return flags
-
-        case .shell:
-            return ""
         }
     }
 
     /// A one-run Codex config override. Values are TOML inside a shell-quoted argument.
-    private static func codexConfigOverride(_ key: String, string value: String) -> String {
-        codexConfigOverride(key, tomlValue: tomlString(value))
+    private static func appendCodexConfigOverride(
+        _ key: String,
+        string value: String,
+        to command: inout ShellCommand
+    ) {
+        appendCodexConfigOverride(key, tomlValue: tomlString(value), to: &command)
     }
 
-    private static func codexConfigOverride(_ key: String, tomlValue: String) -> String {
-        " --config \(quoted("\(key)=\(tomlValue)"))"
+    private static func appendCodexConfigOverride(
+        _ key: String,
+        tomlValue: String,
+        to command: inout ShellCommand
+    ) {
+        command.append(flag: "--config", value: "\(key)=\(tomlValue)")
     }
 
     /// A TOML basic-string literal for values supplied through Codex's `--config` flag.
@@ -255,16 +315,28 @@ enum AgentLauncher {
     /// The default account explicitly *clears* the variable rather than leaving it unset:
     /// the login shell may export an override, and a bare invocation would then silently
     /// run against the wrong account.
-    private static func accountPrefix(for session: AgentSession) -> String {
-        guard let environmentKey = session.kind.accountEnvironmentKey,
-              let account = AgentAccountDiscovery.account(
+    private static func routed(_ command: ShellCommand, for session: AgentSession) -> ShellCommand {
+        var routed = ShellCommand()
+
+        let environmentKey = session.kind.accountEnvironmentKey
+        guard let account = AgentAccountDiscovery.account(
                   for: session.kind,
                   handle: session.accountHandle
-              ) else { return "" }
+              ) else {
+            routed.append(contentsOf: command)
+            appendMCPFlags(for: session, to: &routed)
+            return routed
+        }
 
-        return account.isDefault
-            ? "env -u \(environmentKey) "
-            : "env \(environmentKey)=\(quoted(account.configPath)) "
+        routed.append(word: "env")
+        if account.isDefault {
+            routed.append(flag: "-u", value: environmentKey)
+        } else {
+            routed.append(word: "\(environmentKey)=\(account.configPath)")
+        }
+        routed.append(contentsOf: command)
+        appendMCPFlags(for: session, to: &routed)
+        return routed
     }
 
     // MARK: - Private Methods
@@ -280,31 +352,39 @@ enum AgentLauncher {
         for session: AgentSession,
         in project: Project,
         prompt: String?
-    ) -> (String, ResumeState) {
-        let executable = AgentDefaults.claudeExecutable
-        let model = modelFlag(for: session, flag: AgentDefaults.claudeModelFlag)
+    ) -> (ShellCommand, ResumeState) {
+        var command = ShellCommand(word: AgentDefaults.claudeExecutable)
+        appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &command)
+
+        // Lifecycle hooks only. A terminal session raises the CLI's own permission prompt,
+        // which the user can see and answer — intercepting it would replace a working prompt
+        // with a second one. What the terminal cannot say is when a turn begins and ends.
+        if let settingsPath = MCPSessionRegistry.writeHookSettings(
+            for: session.id,
+            brokersPermissions: false
+        ) {
+            command.append(flag: "--settings", value: settingsPath)
+        }
 
         if let fork = claudeForkFlags(for: session, in: project) {
-            let command = "\(executable)\(model)\(fork.flags)"
-                + " --name \(quoted(session.launchName))"
-                + trailingPrompt(prompt)
+            command.append(contentsOf: fork.flags)
+            command.append(flag: "--name", value: session.launchName)
+            appendPrompt(prompt, to: &command)
             return (command, .resumable(fork.sessionID))
         }
 
         if let existingID = session.resumeState.transcriptID,
            ClaudeTranscript.exists(sessionID: existingID, for: session, in: project) {
             // No prompt on resume: the conversation already has its opening.
-            return (
-                "\(executable)\(model) --resume \(quoted(existingID))",
-                .resumable(existingID)
-            )
+            command.append(flag: "--resume", value: existingID.rawValue)
+            return (command, .resumable(existingID))
         }
 
         let mintedID = session.resumeState.transcriptID
             ?? TranscriptID(session.id.uuidString.lowercased())
-        let command = "\(executable)\(model) --session-id \(quoted(mintedID))"
-            + " --name \(quoted(session.launchName))"
-            + trailingPrompt(prompt)
+        command.append(flag: "--session-id", value: mintedID.rawValue)
+        command.append(flag: "--name", value: session.launchName)
+        appendPrompt(prompt, to: &command)
 
         return (command, .resumable(mintedID))
     }
@@ -346,7 +426,7 @@ enum AgentLauncher {
     private static func claudeForkFlags(
         for session: AgentSession,
         in project: Project
-    ) -> (flags: String, sessionID: TranscriptID)? {
+    ) -> (flags: ShellCommand, sessionID: TranscriptID)? {
         guard let parent = forkParent(for: session, in: project),
               let parentAgentID = parent.resumeState.transcriptID,
               ClaudeTranscript.exists(sessionID: parentAgentID, for: parent, in: project)
@@ -354,25 +434,30 @@ enum AgentLauncher {
 
         let mintedID = session.resumeState.transcriptID
             ?? TranscriptID(session.id.uuidString.lowercased())
-        let flags = " --resume \(quoted(parentAgentID))"
-            + " --fork-session"
-            + " --session-id \(quoted(mintedID))"
+        var flags = ShellCommand()
+        flags.append(flag: "--resume", value: parentAgentID.rawValue)
+        flags.append(flag: "--fork-session")
+        flags.append(flag: "--session-id", value: mintedID.rawValue)
 
         return (flags, mintedID)
     }
 
-    /// The model flag, or "" when the session takes the CLI's default.
-    private static func modelFlag(for session: AgentSession, flag: String) -> String {
-        guard let model = session.model, !model.isEmpty else { return "" }
-        return " \(flag) \(quoted(model))"
+    /// Adds the model flag when the session does not use the CLI's default.
+    private static func appendModelFlag(
+        for session: AgentSession,
+        flag: String,
+        to command: inout ShellCommand
+    ) {
+        guard let model = session.model, !model.isEmpty else { return }
+        command.append(flag: flag, value: model)
     }
 
     /// Both CLIs take an opening prompt as a trailing positional argument.
-    private static func trailingPrompt(_ prompt: String?) -> String {
+    private static func appendPrompt(_ prompt: String?, to command: inout ShellCommand) {
         guard let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return ""
+            return
         }
-        return " \(quoted(prompt))"
+        command.append(word: prompt)
     }
 
     /// Codex assigns its own session identifier, so a fresh launch takes no flag and
@@ -380,26 +465,37 @@ enum AgentLauncher {
     private static func codexCommand(
         for session: AgentSession,
         prompt: String?
-    ) -> (String, ResumeState) {
-        let executable = AgentDefaults.codexExecutable
-        let model = modelFlag(for: session, flag: AgentDefaults.codexModelFlag)
+    ) -> (ShellCommand, ResumeState) {
+        var command = ShellCommand(word: AgentDefaults.codexExecutable)
+        appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
 
         if let existingID = session.resumeState.transcriptID {
-            return (
-                "\(executable)\(model) resume \(quoted(existingID))",
-                .resumable(existingID)
-            )
+            command.append(word: "resume")
+            command.append(word: existingID.rawValue)
+            return (command, .resumable(existingID))
         }
 
-        return ("\(executable)\(model)\(trailingPrompt(prompt))", .awaitingIdentifier)
+        appendPrompt(prompt, to: &command)
+        return (command, .awaitingIdentifier)
     }
 
-    private static func shellCommand() -> String {
-        let profile = ProfileStorage.shared.defaultProfile
-        let arguments = profile.shellArguments.map(quoted).joined(separator: " ")
-        return arguments.isEmpty
-            ? quoted(profile.shellPath)
-            : "\(quoted(profile.shellPath)) \(arguments)"
+    /// Wraps a command invocation in the login-shell source shared by every launch surface.
+    private static func launchPlan(
+        command: ShellCommand,
+        in folder: String,
+        resumeState: ResumeState
+    ) -> AgentLaunchPlan {
+        var source = ShellCommand(word: "cd")
+        source.append(word: folder)
+        source.append(operator: .and)
+        source.append(word: "exec")
+        source.append(contentsOf: command)
+
+        return AgentLaunchPlan(
+            executable: loginShellPath,
+            arguments: ["-l", "-c", source.source],
+            resumeState: resumeState
+        )
     }
 
     /// The user's login shell, used so agent launches inherit the interactive `PATH`.
@@ -408,13 +504,4 @@ enum AgentLauncher {
             ?? ProfileStorage.shared.defaultProfile.shellPath
     }
 
-    /// Wraps a value in single quotes, escaping any it contains, so it survives the
-    /// login shell unchanged.
-    private static func quoted(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
-
-    private static func quoted(_ value: TranscriptID) -> String {
-        quoted(value.rawValue)
-    }
 }

@@ -65,8 +65,6 @@ enum TranscriptReplay {
             return ClaudeTranscript.url(sessionID: sessionID, account: account, in: project)
         case .codex:
             return CodexTranscript.url(sessionID: sessionID, account: account)
-        case .shell:
-            return nil
         }
     }
 
@@ -103,8 +101,6 @@ enum TranscriptReplay {
             return claudeEvent(from: record)
         case .codex:
             return codexEvent(from: record)
-        case .shell:
-            return nil
         }
     }
 
@@ -181,7 +177,9 @@ enum TranscriptReplay {
             let rawInput = payload["input"] ?? payload["arguments"]
             let input = codexToolInput(persistedName: persistedName, value: rawInput)
             let name = codexToolName(persistedName: persistedName, value: rawInput)
-            return .assistantMessage(blocks: [.toolUse(id: id, name: name, input: input)])
+            return .assistantMessage(blocks: [
+                .toolUse(id: id, tool: ToolIdentity(name), input: input)
+            ])
 
         case "custom_tool_call_output", "function_call_output":
             guard let id = payload["call_id"] as? String else { return nil }

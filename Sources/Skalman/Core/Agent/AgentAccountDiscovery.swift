@@ -71,7 +71,6 @@ enum AgentAccountDiscovery {
             switch provider {
             case .claude: return claudeAccounts()
             case .codex: return codexAccounts()
-            case .shell: return []
             }
         }
 

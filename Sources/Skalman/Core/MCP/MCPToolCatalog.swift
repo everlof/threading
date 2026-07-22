@@ -40,7 +40,7 @@ enum MCPToolCatalog {
 
     // MARK: Groups
 
-    static let groups: [MCPToolGroup] = [display, browser, tabs, project, storage]
+    static let groups: [MCPToolGroup] = [display, browser, tabs, project, storage, appearance]
 
     static let display = MCPToolGroup(
         id: "display",
@@ -186,6 +186,50 @@ enum MCPToolCatalog {
         ],
         instruction: """
             list_reclaimable_storage reports build output across the user's projects that can             be deleted and rebuilt, with sizes. Reach for it when disk space is short or the             user asks what is taking up space. To act on any of it, call             propose_storage_cleanup with paths taken from that listing: it asks the user, who             approves or declines, and only then does Skalman remove anything. Never delete             these directories yourself with shell commands — the proposal exists so the user             sees what is going and what rebuilding it costs.
+            """
+    )
+
+    static let appearance = MCPToolGroup(
+        id: "appearance",
+        title: "Terminal theme",
+        summary: "Let agents change the colours of this session, its project, or the app.",
+        symbol: "paintpalette",
+        tools: [
+            MCPToolInfo(
+                name: MCPTools.listThemes,
+                title: "List themes",
+                detail: "Read the available themes and which one this session is using.",
+                symbol: "list.bullet"
+            ),
+            MCPToolInfo(
+                name: MCPTools.setTheme,
+                title: "Set the theme",
+                detail: "Apply a theme to this session, its project, or as the default.",
+                symbol: "paintbrush"
+            ),
+            MCPToolInfo(
+                name: MCPTools.createTheme,
+                title: "Create a theme",
+                detail: "Build a new palette from a description, guarded against unreadable text.",
+                symbol: "wand.and.stars"
+            )
+        ],
+        instruction: """
+            You can change the colours of the terminal you are running in. list_themes reports \
+            what exists and what this session currently uses; set_theme applies one, to this \
+            session (the default), to its whole project, or as the app-wide default; \
+            create_theme builds a new palette when the user describes colours rather than \
+            naming a theme — it merges the colours you give onto a base, so a warmer background \
+            is one colour, not twenty.
+
+            The change is immediate and needs no restart. Three things are worth knowing: an \
+            existing theme is never overwritten, a palette whose text cannot be read on its own \
+            background is refused, and a session rendered as a conversation rather than a \
+            terminal records the choice but shows almost none of it.
+
+            Do not restyle anything unasked. This changes what the user is looking at while \
+            they are looking at it, and the colours they chose are a preference, not a defect \
+            to be fixed.
             """
     )
 

@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 // MARK: - Theme Scope
 
@@ -67,5 +67,50 @@ enum ThemeResolution {
         }
 
         return nil
+    }
+}
+
+// MARK: - Contrast
+
+/// Whether a theme's text can be read on its own ground.
+///
+/// A theme is the one setting in the app that can make its *input* surface unusable, and the
+/// terminal is where a user would have to type to undo it — so a palette arriving from
+/// anywhere but a colour picker is checked before it is stored.
+///
+/// Only text-against-ground is checked. An ANSI colour close to the background is ordinary
+/// (a dark `black` on a dark ground is how most themes are built, and rejecting it would
+/// reject nearly every theme in circulation); text the colour of what it is drawn on is not.
+enum ThemeContrast {
+
+    /// WCAG's floor for large text. Terminal type is smaller than that, but a theme is a
+    /// deliberate aesthetic choice and holding it to body-text contrast would reject palettes
+    /// people genuinely use — Solarized Dark included. This rejects the unreadable, not the
+    /// low-contrast.
+    static let minimumRatio: CGFloat = 3.0
+
+    static func isLegible(foreground: NSColor, background: NSColor) -> Bool {
+        ratio(foreground, background) >= minimumRatio
+    }
+
+    /// WCAG relative-luminance contrast, in the sRGB space these colours are stored in.
+    static func ratio(_ first: NSColor, _ second: NSColor) -> CGFloat {
+        let a = relativeLuminance(first)
+        let b = relativeLuminance(second)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    private static func relativeLuminance(_ color: NSColor) -> CGFloat {
+        guard let srgb = color.usingColorSpace(.sRGB) else { return 0 }
+
+        func linear(_ component: CGFloat) -> CGFloat {
+            component <= 0.03928
+                ? component / 12.92
+                : pow((component + 0.055) / 1.055, 2.4)
+        }
+
+        return 0.2126 * linear(srgb.redComponent)
+            + 0.7152 * linear(srgb.greenComponent)
+            + 0.0722 * linear(srgb.blueComponent)
     }
 }

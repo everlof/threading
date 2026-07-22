@@ -47,7 +47,6 @@ extension AgentKind {
         switch self {
         case .claude: return AgentBrandIcons.claude
         case .codex: return AgentBrandIcons.codex
-        case .shell: return nil
         }
     }
 

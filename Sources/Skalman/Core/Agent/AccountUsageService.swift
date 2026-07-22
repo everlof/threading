@@ -1,13 +1,5 @@
 import Foundation
 
-// MARK: - Notifications
-
-extension Notification.Name {
-    /// Posted on the main queue when an account's usage entry changes; `object` is the
-    /// typed account identifier.
-    static let accountUsageDidChange = Notification.Name("SkalmanAccountUsageDidChange")
-}
-
 // MARK: - Usage Fetch Error
 
 enum UsageFetchError: Error {
@@ -83,8 +75,6 @@ final class AccountUsageService {
     /// Fetches when the cached value has aged out, or sooner when `force` asks — though
     /// never more often than the per-account floor, so an eager UI cannot hammer the APIs.
     func refresh(_ account: AgentAccount, force: Bool = false) {
-        guard account.provider != .shell else { return }
-
         let id = account.id
         guard !inFlight.contains(id) else { return }
 
@@ -144,14 +134,13 @@ final class AccountUsageService {
         }
         entries[accountID] = entry
 
-        NotificationCenter.default.post(name: .accountUsageDidChange, object: accountID)
+        NotificationCenter.default.post(AccountUsageDidChange(accountID: accountID))
     }
 
     private static func fetchUsage(for account: AgentAccount) async throws -> AccountUsage {
         switch account.provider {
         case .claude: return try await ClaudeUsageFetcher.fetch(account: account)
         case .codex: return try await CodexUsageFetcher.fetch(account: account)
-        case .shell: throw UsageFetchError.noCredential("Shells have no usage.")
         }
     }
 }

@@ -63,6 +63,14 @@ extension MainWindowController: MCPToolHandling {
             // Answers only once the user has decided, so the agent's next turn knows the
             // outcome rather than assuming one.
             proposeStorageCleanup(arguments, completion: completion)
+        case .listThemes:
+            // Not `observed`: a theme is not panel content, and marking the panel seen here
+            // would suppress the description a later resume owes the agent.
+            completion(listThemes(for: sessionID))
+        case .setTheme(let arguments):
+            completion(setTheme(arguments, for: sessionID))
+        case .createTheme(let arguments):
+            completion(createTheme(arguments, for: sessionID))
         default:
             observed(handle(call, for: sessionID))
         }

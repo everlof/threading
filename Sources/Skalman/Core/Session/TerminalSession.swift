@@ -61,7 +61,7 @@ final class TerminalSession: NSObject {
 
         applyProfile()
 
-        // Deliberately *not* an observer of `.profileDidChange`.
+        // Deliberately *not* an observer of `ProfileDidChange`.
         //
         // This used to adopt whatever profile that notification carried, which was correct
         // while there was one theme for the whole app and is wrong now that a session or its

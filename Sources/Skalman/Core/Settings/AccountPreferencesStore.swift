@@ -92,7 +92,7 @@ final class AccountPreferencesStore {
     private func save() {
         guard let data = try? JSONEncoder().encode(preferences) else { return }
         defaults.set(data, forKey: Keys.accountPreferences)
-        NotificationCenter.default.post(name: .accountPreferencesDidChange, object: self)
+        NotificationCenter.default.post(AccountPreferencesDidChange())
     }
 
     private static func load(from defaults: UserDefaults) -> [String: AccountPreference] {

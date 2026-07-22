@@ -43,7 +43,9 @@ struct ConversationTimeline {
     /// between a command and its output whenever an agent fires several at once.
     struct ToolCall: Equatable {
         let id: String
-        let name: String
+        let tool: ToolIdentity
+
+        var name: String { tool.rawName }
 
         /// The one-line subject — the command, the path, the query. Shared with the permission
         /// card, because what identifies a call is the same question in both places.
@@ -248,13 +250,13 @@ struct ConversationTimeline {
         case .thinking(let text) where !text.isEmpty:
             return [append(.thinking(text))]
 
-        case .toolUse(let id, let name, let input):
-            let request = PermissionRequest(sessionID: sessionID, toolName: name, input: input)
+        case .toolUse(let id, let tool, let input):
+            let request = PermissionRequest(sessionID: sessionID, tool: tool, input: input)
             let call = ToolCall(
                 id: id,
-                name: name,
+                tool: tool,
                 summary: request.oneLineSummary,
-                diff: EditDiff.lines(forTool: name, input: input),
+                diff: EditDiff.lines(forTool: tool.rawName, input: input),
                 result: nil
             )
             let change = append(.toolCall(call))

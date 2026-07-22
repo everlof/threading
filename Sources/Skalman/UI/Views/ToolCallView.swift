@@ -13,7 +13,7 @@ final class ToolCallView: NSView {
 
     // MARK: - Properties
 
-    private let toolName: String
+    private let tool: ToolIdentity
     private let diffLines: [DiffLine]?
 
     private var glyphLabel: NSTextField!
@@ -32,8 +32,8 @@ final class ToolCallView: NSView {
 
     // MARK: - Initialization
 
-    init(toolName: String, summary: String, diff: [DiffLine]? = nil) {
-        self.toolName = toolName
+    init(tool: ToolIdentity, summary: String, diff: [DiffLine]? = nil) {
+        self.tool = tool
         self.diffLines = diff
         super.init(frame: .zero)
         setupViews(summary: summary)
@@ -49,7 +49,7 @@ final class ToolCallView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         applySurface(fill: Design.Chat.toolRowResting, radius: Design.Radius.control)
 
-        let glyph = ToolGlyph.forTool(toolName)
+        let glyph = ToolGlyph.forTool(tool)
 
         glyphLabel = makeLabel(glyph.symbol, font: monospace(weight: .medium))
         glyphLabel.textColor = .secondaryLabelColor
@@ -166,7 +166,7 @@ final class ToolCallView: NSView {
 
     /// Attaches the result once the tool has run.
     func setResult(_ text: String, isError: Bool) {
-        let label = ToolGlyph.forTool(toolName).label
+        let label = ToolGlyph.forTool(tool).label
         let tint: NSColor = isError ? .systemRed : .secondaryLabelColor
         glyphLabel.textColor = tint
         titleLabel.textColor = tint
@@ -258,28 +258,41 @@ enum ToolGlyph {
         let label: String
     }
 
-    /// Glyphs drawn from the vocabulary a terminal user already knows, so nothing has to be
-    /// learned to read a row.
-    private static let known: [String: Style] = [
-        "Bash": Style(symbol: "$", label: "Bash"),
-        "Read": Style(symbol: "→", label: "Read"),
-        "Write": Style(symbol: "←", label: "Write"),
-        "Edit": Style(symbol: "±", label: "Edit"),
-        "MultiEdit": Style(symbol: "±", label: "Edit"),
-        "Glob": Style(symbol: "✱", label: "Glob"),
-        "Grep": Style(symbol: "✱", label: "Grep"),
-        "WebFetch": Style(symbol: "%", label: "Fetch"),
-        "WebSearch": Style(symbol: "◈", label: "Search"),
-        "Task": Style(symbol: "⌘", label: "Task"),
-        "TodoWrite": Style(symbol: "✓", label: "Todo")
-    ]
-
     static func forTool(_ name: String) -> Style {
-        if let known = known[name] { return known }
-        if name.hasPrefix("mcp__") {
+        forTool(ToolIdentity(name))
+    }
+
+    /// Exhaustive on semantic identity so a newly understood tool cannot silently inherit the
+    /// generic presentation. Only truly provider-defined names take the fallback row.
+    static func forTool(_ tool: ToolIdentity) -> Style {
+        switch tool {
+        case .bash:
+            return Style(symbol: "$", label: "Bash")
+        case .read:
+            return Style(symbol: "→", label: "Read")
+        case .write:
+            return Style(symbol: "←", label: "Write")
+        case .edit, .multiEdit:
+            return Style(symbol: "±", label: "Edit")
+        case .glob:
+            return Style(symbol: "✱", label: "Glob")
+        case .grep:
+            return Style(symbol: "✱", label: "Grep")
+        case .webFetch:
+            return Style(symbol: "%", label: "Fetch")
+        case .webSearch:
+            return Style(symbol: "◈", label: "Search")
+        case .task:
+            return Style(symbol: "⌘", label: "Task")
+        case .todoWrite:
+            return Style(symbol: "✓", label: "Todo")
+        case .mcp(let name):
             return Style(symbol: "◇", label: name.components(separatedBy: "__").last ?? name)
+        case .notebookEdit, .notebookRead, .todoRead, .toolSearch, .plan:
+            return Style(symbol: "•", label: tool.rawName)
+        case .unknown(let name):
+            return Style(symbol: "•", label: name)
         }
-        return Style(symbol: "•", label: name)
     }
 }
 

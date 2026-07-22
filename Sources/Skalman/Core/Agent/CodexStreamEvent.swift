@@ -65,7 +65,7 @@ enum CodexStreamEvent {
         case "command_execution":
             return .toolUse(
                 id: id,
-                name: "Bash",
+                tool: .bash,
                 input: ["command": item.string("command") ?? ""]
             )
 
@@ -74,22 +74,22 @@ enum CodexStreamEvent {
             let tool = item.string("tool") ?? item.string("name") ?? "tool"
             return .toolUse(
                 id: id,
-                name: "mcp__\(server)__\(tool)",
+                tool: .mcp("mcp__\(server)__\(tool)"),
                 input: arguments(from: item.value("arguments"))
             )
 
         case "web_search":
             return .toolUse(
                 id: id,
-                name: "WebSearch",
+                tool: .webSearch,
                 input: ["query": item.string("query") ?? ""]
             )
 
         case "file_change":
-            return .toolUse(id: id, name: "Edit", input: item.foundationObject)
+            return .toolUse(id: id, tool: .edit, input: item.foundationObject)
 
         case "plan_update":
-            return .toolUse(id: id, name: "Plan", input: item.foundationObject)
+            return .toolUse(id: id, tool: .plan, input: item.foundationObject)
 
         default:
             return nil

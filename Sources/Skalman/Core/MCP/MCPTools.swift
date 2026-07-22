@@ -25,6 +25,20 @@ struct SetProjectIconArguments: Decodable {
     let url: String?
 }
 
+struct ListThemesArguments: Decodable {}
+
+struct SetThemeArguments: Decodable {
+    let theme: String?
+    let scope: String?
+}
+
+struct CreateThemeArguments: Decodable {
+    let name: String?
+    let base: String?
+    let colors: [String: String]?
+    let apply: String?
+}
+
 /// What an agent proposes removing, and why the user should agree.
 ///
 /// Paths arrive as one absolute path per line, since the schema this server speaks has no
@@ -68,6 +82,9 @@ enum MCPToolCall {
     case setProjectIcon(SetProjectIconArguments)
     case listReclaimableStorage(EmptyToolArguments)
     case proposeStorageCleanup(StorageCleanupArguments)
+    case listThemes(ListThemesArguments)
+    case setTheme(SetThemeArguments)
+    case createTheme(CreateThemeArguments)
     case unknown(String)
 
     var name: String {
@@ -83,6 +100,9 @@ enum MCPToolCall {
         case .setProjectIcon: return MCPTools.setProjectIcon
         case .listReclaimableStorage: return MCPTools.listReclaimableStorage
         case .proposeStorageCleanup: return MCPTools.proposeStorageCleanup
+        case .listThemes: return MCPTools.listThemes
+        case .setTheme: return MCPTools.setTheme
+        case .createTheme: return MCPTools.createTheme
         case .unknown(let name): return name
         }
     }
@@ -156,6 +176,21 @@ struct MCPToolCallParameters: Decodable {
                 try container.decodeIfPresent(StorageCleanupArguments.self, forKey: .arguments)
                     ?? StorageCleanupArguments(paths: nil, reason: nil)
             )
+        case MCPTools.listThemes:
+            call = .listThemes(
+                try container.decodeIfPresent(ListThemesArguments.self, forKey: .arguments)
+                    ?? ListThemesArguments()
+            )
+        case MCPTools.setTheme:
+            call = .setTheme(
+                try container.decodeIfPresent(SetThemeArguments.self, forKey: .arguments)
+                    ?? SetThemeArguments(theme: nil, scope: nil)
+            )
+        case MCPTools.createTheme:
+            call = .createTheme(
+                try container.decodeIfPresent(CreateThemeArguments.self, forKey: .arguments)
+                    ?? CreateThemeArguments(name: nil, base: nil, colors: nil, apply: nil)
+            )
         default:
             call = .unknown(name)
         }
@@ -213,6 +248,11 @@ protocol MCPToolHandling: AnyObject {
     /// panel — but only when it changed while the agent was away, so a resume does not re-state a
     /// panel the agent's own transcript already reflects. Empty when there is nothing to add.
     func panelState(for sessionID: SessionID) -> String
+
+    /// Text appended to the `initialize` instructions when the disk is short — the one fact that
+    /// turns a cleanup tool from a capability into a suggestion worth acting on. Empty whenever
+    /// there is room, so an ordinary session is told nothing about storage at all.
+    func storagePressure() -> String
 }
 
 extension MCPToolHandling {
@@ -221,6 +261,7 @@ extension MCPToolHandling {
     }
 
     func panelState(for sessionID: SessionID) -> String { "" }
+    func storagePressure() -> String { "" }
 }
 
 // MARK: - Tool Schema
@@ -240,11 +281,21 @@ struct MCPInputSchema: Encodable {
 struct MCPPropertySchema: Encodable {
     let type: MCPPropertyType
     let description: String
+
+    /// The members of an `.object` property. Omitted for every other type, so a scalar's
+    /// schema is unchanged.
+    var properties: [String: MCPPropertySchema]?
 }
 
 enum MCPPropertyType: Encodable {
     case string
     case integerOrString
+    /// A nested object, whose members are described by the schema's own `properties`.
+    ///
+    /// Worth the extra case rather than flattening a structure into a delimited string: a
+    /// palette is twenty named colours, and "sixteen hex values, comma separated, in ANSI
+    /// order" is a format a model gets subtly wrong while a named object is one it cannot.
+    case object
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
@@ -253,6 +304,8 @@ enum MCPPropertyType: Encodable {
             try container.encode("string")
         case .integerOrString:
             try container.encode(["integer", "string"])
+        case .object:
+            try container.encode("object")
         }
     }
 }
@@ -283,11 +336,17 @@ enum MCPTools {
     static let proposeStorageCleanup = "propose_storage_cleanup"
     static let storageTools = [listReclaimableStorage, proposeStorageCleanup]
 
+    static let listThemes = "list_themes"
+    static let setTheme = "set_theme"
+    static let createTheme = "create_theme"
+    static let themeTools = [listThemes, setTheme, createTheme]
+
     /// Every tool the server serves, all pre-approved together: each only calls back into the app
     /// the user is already looking at, and an agent with a shell already outreaches a browser
     /// click. `MCPToolCatalog` groups these and decides — from the user's Tools settings — which
     /// are actually advertised and pre-approved on a launch.
-    static let allTools = displayTools + browserTools + panelTools + projectTools + storageTools
+    static let allTools = displayTools + browserTools + panelTools + projectTools
+        + storageTools + themeTools
 
     /// The full `tools/list` payload. `MCPToolCatalog.enabledDefinitions` filters this to the
     /// groups the user has switched on before it is served.
@@ -511,6 +570,126 @@ enum MCPTools {
                 ],
                 required: ["paths"]
             )
+        ),
+        MCPToolDefinition(
+            name: listThemes,
+            description: """
+                List the terminal colour themes available in Skalman — each one's name, whether \
+                it is built in, and its background and text colours — and report which theme \
+                this session is currently drawing with and which scope decided that. Use it \
+                before set_theme, and as the `base` for create_theme.
+                """,
+            inputSchema: MCPInputSchema(properties: [:], required: [])
+        ),
+        MCPToolDefinition(
+            name: setTheme,
+            description: """
+                Set the terminal colour theme, for this session, for its whole project, or as \
+                the app-wide default. Takes effect immediately — the terminal you are running \
+                in is restyled without restarting anything.
+
+                The three scopes are a chain: a session follows its project, and a project \
+                follows the default. Prefer `session`, which is what "make this one darker" \
+                means and is the only scope that touches nothing else; use `project` or \
+                `global` when the user asks for something broader.
+
+                Omit `theme` to clear that scope's choice, so it inherits again. Do not restyle \
+                the terminal unasked — this changes what the user is looking at.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "theme": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            The theme's name, exactly as list_themes reported it. Omit to clear \
+                            the assignment at this scope and inherit again.
+                            """
+                    ),
+                    "scope": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            "session" (the default — this conversation's own terminal), \
+                            "project" (every session in this project that has not chosen its \
+                            own), or "global" (the app-wide default).
+                            """
+                    )
+                ],
+                required: []
+            )
+        ),
+        MCPToolDefinition(
+            name: createTheme,
+            description: """
+                Create a new terminal theme and, unless told otherwise, apply it to this \
+                session. Use it when the user describes colours they want rather than naming a \
+                theme that exists — "something warmer", "match the Rust logo", "solarized but \
+                darker".
+
+                `colors` is merged onto `base`, so changing one colour means sending one \
+                colour, not twenty. Every value is a hex string such as "#1E1E2E".
+
+                An existing theme is never overwritten: pick another name if this one is taken. \
+                Text that cannot be read against its own background is refused — check the pair \
+                yourself before sending, since a terminal the user cannot read is one they \
+                cannot type in either.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "name": MCPPropertySchema(
+                        type: .string,
+                        description: "A name for the new theme. Must not already be taken."
+                    ),
+                    "base": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            The theme to start from, by name. Defaults to whatever this session \
+                            is drawing with now, so unspecified colours keep their current value.
+                            """
+                    ),
+                    "colors": MCPPropertySchema(
+                        type: .object,
+                        description: """
+                            The colours to change, as hex strings. Any subset; anything omitted \
+                            is taken from `base`.
+                            """,
+                        properties: paletteSchema
+                    ),
+                    "apply": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            Where to apply the new theme once created: "session" (the default), \
+                            "project", "global", or "none" to create it without using it.
+                            """
+                    )
+                ],
+                required: ["name", "colors"]
+            )
         )
     ]
+
+    /// The twenty named colours of a palette, described once for `create_theme`.
+    ///
+    /// Generated from `ThemeColorKey` rather than written out, so a colour cannot be added to
+    /// the model and left out of the schema an agent reads.
+    private static var paletteSchema: [String: MCPPropertySchema] {
+        var properties: [String: MCPPropertySchema] = [:]
+
+        for key in ThemeColorKey.allCases {
+            let role: String
+            switch key {
+            case .foreground: role = "Default text colour."
+            case .background: role = "The terminal's ground."
+            case .cursor: role = "The caret."
+            case .selection: role = "The fill behind selected text."
+            default: role = "ANSI \(key.displayName.lowercased())."
+            }
+
+            properties[key.wireName] = MCPPropertySchema(
+                type: .string,
+                description: "\(role) Hex, e.g. \"#1E1E2E\"."
+            )
+        }
+
+        return properties
+    }
 }

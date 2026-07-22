@@ -9,6 +9,7 @@ final class TerminalContainerViewController: NSViewController {
     // MARK: - Properties
 
     private let placeholderView = SessionPlaceholderView()
+    private let appEvents = AppEventObservations()
 
     /// Shown when a project rather than a session is selected.
     let composerViewController = SessionComposerViewController()
@@ -19,6 +20,19 @@ final class TerminalContainerViewController: NSViewController {
 
     /// Settings is shown as a single page centred in the pane; the page list lives in the
     /// window's sidebar, which the settings sections replace, so there is no second sidebar.
+    /// One shell per session, kept alive while the app runs — the process *is* the feature, and
+    /// a shell that forgot its directory on every session switch would be worse than useless.
+    private var drawers: [SessionID: ShellDrawerViewController] = [:]
+    private var openDrawerSessions: Set<SessionID> = []
+
+    private var drawerHost: NSView!
+    private var drawerDivider: ShellDrawerDivider!
+    private var drawerHeight: NSLayoutConstraint!
+
+    /// In-memory, like the sidebar's branch-group collapse state: a drawer height is a working
+    /// preference for a window, not a fact about the session.
+    private var drawerHeightValue: CGFloat = ShellDrawerDefaults.defaultHeight
+
     private var settingsPage: NSViewController?
     private var settingsPageCache: [Int: NSViewController] = [:]
 
@@ -36,6 +50,7 @@ final class TerminalContainerViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupDrawer()
         setupPlaceholder()
         setupComposer()
         showEmptyState()
@@ -43,20 +58,16 @@ final class TerminalContainerViewController: NSViewController {
         // A theme change repaints the terminal but not the pane behind it, so the seam would
         // return until the next surface swap; re-apply the colour when the theme changes,
         // whether that was the app default or an assignment on this session or its project.
-        for name in [Notification.Name.profileDidChange, .themeAssignmentsDidChange] {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(themeDidChange),
-                name: name,
-                object: nil
-            )
+        appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.themeDidChange() }
+        appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in
+            self?.themeDidChange()
         }
     }
 
     /// Resolves the colour here rather than reading it off the terminal view, because the
     /// session controller observes the same notification and the order between two observers
     /// is not defined — reading its view could paint the pane the colour it is leaving.
-    @objc private func themeDidChange() {
+    private func themeDidChange() {
         guard currentChild != nil || currentConversation != nil else { return }
         applyPaneBackground(ThemeAssignments.theme(for: currentSessionID).background)
     }
@@ -139,6 +150,119 @@ final class TerminalContainerViewController: NSViewController {
 
     // MARK: - Setup
 
+    // MARK: - Shell Drawer
+
+    /// The drawer lives at the pane's bottom edge and is *always* installed, zero-high when
+    /// closed. Every session surface pins its bottom to the drawer's top rather than to the
+    /// pane, so opening one is a change of constant rather than a rebuild of the layout.
+    private func setupDrawer() {
+        drawerHost = NSView()
+        drawerHost.wantsLayer = true
+        drawerHost.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(drawerHost)
+
+        drawerDivider = ShellDrawerDivider()
+        drawerDivider.translatesAutoresizingMaskIntoConstraints = false
+        drawerDivider.isHidden = true
+        drawerDivider.onDrag = { [weak self] delta in self?.resizeDrawer(by: delta) }
+        view.addSubview(drawerDivider)
+
+        drawerHeight = drawerHost.heightAnchor.constraint(equalToConstant: 0)
+
+        NSLayoutConstraint.activate([
+            drawerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            drawerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            drawerHost.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            drawerHeight,
+
+            drawerDivider.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            drawerDivider.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            drawerDivider.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
+            drawerDivider.heightAnchor.constraint(equalToConstant: ShellDrawerDefaults.dividerHeight)
+        ])
+    }
+
+    /// Opens or closes the shell for the session on screen. Sessions keep their own answer, so
+    /// a drawer opened for one conversation does not follow you into the next.
+    func toggleShellDrawer() {
+        guard let sessionID = currentSessionID else { return }
+
+        if openDrawerSessions.contains(sessionID) {
+            openDrawerSessions.remove(sessionID)
+        } else {
+            openDrawerSessions.insert(sessionID)
+        }
+        applyDrawer(for: sessionID, focusing: openDrawerSessions.contains(sessionID))
+    }
+
+    var isShellDrawerOpen: Bool {
+        currentSessionID.map { openDrawerSessions.contains($0) } ?? false
+    }
+
+    /// Installs the session's own shell and sizes the drawer to match its state.
+    private func applyDrawer(for sessionID: SessionID?, focusing: Bool = false) {
+        drawerHost.subviews.forEach { $0.removeFromSuperview() }
+        children.compactMap { $0 as? ShellDrawerViewController }.forEach { $0.removeFromParent() }
+
+        guard let sessionID, openDrawerSessions.contains(sessionID),
+              let drawer = drawer(for: sessionID) else {
+            drawerHeight.constant = 0
+            drawerDivider.isHidden = true
+            return
+        }
+
+        addChild(drawer)
+        drawer.view.translatesAutoresizingMaskIntoConstraints = false
+        drawerHost.addSubview(drawer.view)
+        NSLayoutConstraint.activate([
+            drawer.view.topAnchor.constraint(equalTo: drawerHost.topAnchor),
+            drawer.view.bottomAnchor.constraint(equalTo: drawerHost.bottomAnchor),
+            drawer.view.leadingAnchor.constraint(equalTo: drawerHost.leadingAnchor),
+            drawer.view.trailingAnchor.constraint(equalTo: drawerHost.trailingAnchor)
+        ])
+
+        drawerHeight.constant = clampedDrawerHeight(drawerHeightValue)
+        drawerDivider.isHidden = false
+        drawer.startIfNeeded()
+        if focusing { drawer.focus() }
+    }
+
+    /// A session's shell, built the first time it is asked for. A session whose project has
+    /// gone is not given one — there would be nowhere to run it.
+    private func drawer(for sessionID: SessionID) -> ShellDrawerViewController? {
+        if let existing = drawers[sessionID] { return existing }
+
+        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+        let drawer = ShellDrawerViewController(sessionID: sessionID) {
+            // Where the agent *is*, asked at the moment the shell starts: a running terminal
+            // session reports its directory over OSC 7. A conversation has no PTY to ask, and
+            // was launched in the project's folder, which is what the fallback is.
+            AgentRuntime.shared.controller(for: sessionID)?.session.effectiveWorkingDirectory()
+                ?? URL(fileURLWithPath: project.folderPath)
+        }
+        drawers[sessionID] = drawer
+        return drawer
+    }
+
+    private func resizeDrawer(by delta: CGFloat) {
+        drawerHeightValue = clampedDrawerHeight(drawerHeight.constant - delta)
+        drawerHeight.constant = drawerHeightValue
+    }
+
+    private func clampedDrawerHeight(_ height: CGFloat) -> CGFloat {
+        let ceiling = max(
+            ShellDrawerDefaults.minimumHeight,
+            view.bounds.height * ShellDrawerDefaults.maximumHeightFraction
+        )
+        return min(max(height, ShellDrawerDefaults.minimumHeight), ceiling)
+    }
+
+    /// Drops a closed session's shell, so its process does not outlive the thing it belonged to.
+    func closeShellDrawer(for sessionID: SessionID) {
+        openDrawerSessions.remove(sessionID)
+        drawers.removeValue(forKey: sessionID)?.terminate()
+    }
+
     private func setupPlaceholder() {
         placeholderView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(placeholderView)
@@ -162,6 +286,7 @@ final class TerminalContainerViewController: NSViewController {
 
         detachCurrentChild()
         currentSessionID = sessionID
+        applyDrawer(for: sessionID)
 
         guard let sessionID,
               let agentSession = ProjectStore.shared.session(withID: sessionID) else {
@@ -220,6 +345,7 @@ final class TerminalContainerViewController: NSViewController {
     /// Drops the session's terminal if it is showing, returning the pane to a placeholder.
     func closeTerminal(for sessionID: SessionID) {
         AgentRuntime.shared.discard(sessionID: sessionID)
+        closeShellDrawer(for: sessionID)
 
         guard sessionID == currentSessionID else { return }
         detachCurrentChild()
@@ -236,7 +362,7 @@ final class TerminalContainerViewController: NSViewController {
         // Pinned to the safe area, which the toolbar insets for us.
         NSLayoutConstraint.activate([
             controller.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            controller.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
             controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
@@ -283,7 +409,7 @@ final class TerminalContainerViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             conversation.view.topAnchor.constraint(equalTo: view.topAnchor),
-            conversation.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            conversation.view.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
             conversation.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             conversation.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
@@ -451,5 +577,34 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
         // Same channel a terminal session's activity uses, so the sidebar refreshes its row
         // and its attention dot the one way it already knows.
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
+    }
+}
+
+
+// MARK: - Drawer Divider
+
+/// The grab strip above the shell drawer.
+///
+/// A hand-rolled divider rather than an `NSSplitView`, because the pane is not a split: the
+/// conversation fills it and the drawer is a strip taken off the bottom. A split view would
+/// bring its own collapse behaviour, its own delegate and its own idea of priorities, all of
+/// which would have to be argued out of the way.
+final class ShellDrawerDivider: NSView {
+
+    /// Positive as the pointer moves down, which is the direction that *shrinks* the drawer.
+    var onDrag: ((CGFloat) -> Void)?
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        NSColor.separatorColor.setFill()
+        NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeUpDown)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onDrag?(event.deltaY)
     }
 }

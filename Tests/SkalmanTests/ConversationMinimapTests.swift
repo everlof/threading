@@ -203,7 +203,7 @@ final class ConversationTurnTests: XCTestCase {
         let timeline = self.timeline([
             .userMessage("Fix the failing test"),
             .assistantMessage(blocks: [.text("Let me look.")]),
-            .assistantMessage(blocks: [.toolUse(id: "1", name: "Bash", input: ["command": "swift test"])]),
+            .assistantMessage(blocks: [.toolUse(id: "1", tool: .bash, input: ["command": "swift test"])]),
             .assistantMessage(blocks: [.text("Fixed — it was an off-by-one.")])
         ])
 
