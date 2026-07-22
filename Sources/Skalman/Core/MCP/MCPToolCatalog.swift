@@ -40,7 +40,7 @@ enum MCPToolCatalog {
 
     // MARK: Groups
 
-    static let groups: [MCPToolGroup] = [display, browser, tabs, project]
+    static let groups: [MCPToolGroup] = [display, browser, tabs, project, storage]
 
     static let display = MCPToolGroup(
         id: "display",
@@ -162,6 +162,30 @@ enum MCPToolCatalog {
             it when the user asks for a project icon, or offer it when you come across the \
             project's own mark — its favicon, logo, or owner avatar. Do not replace an icon \
             the user chose without being asked.
+            """
+    )
+
+    static let storage = MCPToolGroup(
+        id: "storage",
+        title: "Disk space",
+        summary: "Let agents see reclaimable build output and propose removing some of it.",
+        symbol: "internaldrive",
+        tools: [
+            MCPToolInfo(
+                name: MCPTools.listReclaimableStorage,
+                title: "List reclaimable storage",
+                detail: "Read what build output can be deleted and rebuilt, and how big it is.",
+                symbol: "list.bullet.rectangle"
+            ),
+            MCPToolInfo(
+                name: MCPTools.proposeStorageCleanup,
+                title: "Propose a cleanup",
+                detail: "Ask you to approve removing some of it. Never removes anything itself.",
+                symbol: "hand.raised"
+            )
+        ],
+        instruction: """
+            list_reclaimable_storage reports build output across the user's projects that can             be deleted and rebuilt, with sizes. Reach for it when disk space is short or the             user asks what is taking up space. To act on any of it, call             propose_storage_cleanup with paths taken from that listing: it asks the user, who             approves or declines, and only then does Skalman remove anything. Never delete             these directories yourself with shell commands — the proposal exists so the user             sees what is going and what rebuilding it costs.
             """
     )
 

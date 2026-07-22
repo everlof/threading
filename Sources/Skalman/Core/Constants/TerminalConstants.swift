@@ -363,5 +363,8 @@ extension Notification.Name {
     static let terminalTitleDidChange = Notification.Name("terminalTitleDidChange")
     static let projectsDidChange = Notification.Name("projectsDidChange")
     static let appSettingsDidChange = Notification.Name("appSettingsDidChange")
+
+    /// A storage scan finished, or its cached findings changed.
+    static let artifactScanDidChange = Notification.Name("artifactScanDidChange")
     static let accountPreferencesDidChange = Notification.Name("accountPreferencesDidChange")
 }

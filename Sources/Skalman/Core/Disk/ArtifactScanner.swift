@@ -7,7 +7,7 @@ import Foundation
 ///
 /// The marker is not decoration. `build`, `dist` and `target` are ordinary English words, and
 /// a directory called `target` beside no `Cargo.toml` is somebody's data, not Cargo's cache.
-enum ArtifactKind: String, CaseIterable {
+enum ArtifactKind: String, CaseIterable, Codable {
     case rust
     case node
     case swiftPackage
@@ -99,7 +99,12 @@ enum ArtifactKind: String, CaseIterable {
 // MARK: - Reclaimable Artifact
 
 /// One directory that can be deleted and rebuilt.
-struct ReclaimableArtifact: Identifiable, Equatable {
+///
+/// `Codable` so a scan survives to the next launch: finding these means walking every other
+/// directory in a project first, which is far too slow to repeat whenever a page opens. The
+/// record is a claim about the disk at a moment, not the disk itself, so everything that reads
+/// one back re-checks what matters (see `ArtifactScanner.isSafeToRemove`).
+struct ReclaimableArtifact: Identifiable, Equatable, Codable {
     let url: URL
     let kind: ArtifactKind
 

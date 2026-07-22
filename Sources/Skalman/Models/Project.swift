@@ -233,6 +233,11 @@ struct AgentSession: Codable, Identifiable {
     /// untouched, so an archived session resumes exactly as it would have.
     var isArchived: Bool
 
+    /// The terminal theme this session draws with, by name. Nil inherits — from the project,
+    /// and from the app default beyond that — so a session that never chose still follows a
+    /// later change to either. See `ThemeResolution.resolve`.
+    var themeName: String?
+
     init(
         kind: AgentKind,
         title: String,
@@ -258,12 +263,13 @@ struct AgentSession: Codable, Identifiable {
         self.isArchived = false
         self.usesNativeUI = usesNativeUI
         self.forkedFrom = forkedFrom
+        self.themeName = nil
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, title, customTitle, terminalTitle, createdAt, lastActiveAt
         case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, branch
-        case archived, nativeUI, forkParent
+        case archived, nativeUI, forkParent, themeName
     }
 
     init(from decoder: Decoder) throws {
@@ -294,6 +300,7 @@ struct AgentSession: Codable, Identifiable {
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
         forkedFrom = try container.decodeIfPresent(SessionID.self, forKey: .forkParent)
+        themeName = try container.decodeIfPresent(String.self, forKey: .themeName)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -314,6 +321,7 @@ struct AgentSession: Codable, Identifiable {
         try container.encode(isArchived, forKey: .archived)
         try container.encode(usesNativeUI, forKey: .nativeUI)
         try container.encodeIfPresent(forkedFrom, forKey: .forkParent)
+        try container.encodeIfPresent(themeName, forKey: .themeName)
     }
 
     /// Whether a previous conversation exists that can be resumed.
@@ -395,6 +403,10 @@ struct Project: Codable, Identifiable {
     /// existed still decodes.
     var icon: ProjectIcon?
 
+    /// The terminal theme this project's sessions draw with, by name. Nil inherits the app
+    /// default; a session naming its own theme overrides this.
+    var themeName: String?
+
     init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
         self.id = id
         self.name = name
@@ -403,10 +415,11 @@ struct Project: Codable, Identifiable {
         self.isExpanded = true
         self.createdAt = Date()
         self.icon = nil
+        self.themeName = nil
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, folderPath, sessions, isExpanded, createdAt, icon
+        case id, name, folderPath, sessions, isExpanded, createdAt, icon, themeName
     }
 
     init(from decoder: Decoder) throws {
@@ -422,6 +435,7 @@ struct Project: Codable, Identifiable {
         isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         icon = try container.decodeIfPresent(ProjectIcon.self, forKey: .icon)
+        themeName = try container.decodeIfPresent(String.self, forKey: .themeName)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -433,6 +447,7 @@ struct Project: Codable, Identifiable {
         try container.encode(isExpanded, forKey: .isExpanded)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(icon, forKey: .icon)
+        try container.encodeIfPresent(themeName, forKey: .themeName)
     }
 
     var folderURL: URL {

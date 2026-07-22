@@ -736,6 +736,18 @@ which almost always means a build is running in it right now.
 Remove one row, everything in one checkout, or everything found. Removals ask first, and say so
 if a session is running in the project or if anything about to go was written moments ago.
 
+**The page never makes you wait.** Skalman surveys the disk quietly in the background — at low
+priority, and never while a session in that project is working — and remembers what it found
+between launches. Opening Storage shows what is already known, with a line saying when it was
+measured, and refreshes anything stale behind you. **Rescan** re-reads everything now.
+
+**Agents can help, but cannot delete.** With **Settings > Tools > Disk space** on, an agent that
+notices the disk is filling can read this same listing and *propose* a cleanup — "these three
+worktree build directories are 60 GB and rebuild with `cargo build`". You get a sheet with
+exactly what it proposes and why, and nothing happens until you approve. An agent can only
+propose paths that already appear in the listing, so it cannot use this to delete anything else,
+and it is told to propose rather than reach for `rm` itself.
+
 **What is never offered.** Only directories that git ignores *and* that a known tool can rebuild
 — `target` beside a `Cargo.toml`, `node_modules` beside a `package.json`, and so on. Ignored
 files that are not build output are never touched, which matters more than it sounds: your

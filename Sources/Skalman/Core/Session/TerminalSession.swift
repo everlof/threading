@@ -61,21 +61,13 @@ final class TerminalSession: NSObject {
 
         applyProfile()
 
-        // Listen for profile changes to update colors live
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(profileDidChange(_:)),
-            name: .profileDidChange,
-            object: nil
-        )
-    }
-
-    @objc private func profileDidChange(_ notification: Notification) {
-        // Update with the new profile
-        if let newProfile = notification.object as? TerminalProfile {
-            profile = newProfile
-            applyProfile()
-        }
+        // Deliberately *not* an observer of `.profileDidChange`.
+        //
+        // This used to adopt whatever profile that notification carried, which was correct
+        // while there was one theme for the whole app and is wrong now that a session or its
+        // project can name its own: a broadcast value is exactly what a per-session override
+        // must not be overwritten by. The owning `AgentSessionViewController` re-resolves this
+        // session's theme instead and pushes the result through `updateProfile`.
     }
 
     private func applyProfile() {

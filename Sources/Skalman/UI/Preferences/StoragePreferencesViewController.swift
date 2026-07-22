@@ -35,14 +35,10 @@ final class StoragePreferencesViewController: NSViewController {
         var byteCount: Int64 { artifacts.reduce(0) { $0 + $1.byteCount } }
     }
 
-    /// Findings by checkout, largest first. Empty until the first scan lands.
+    /// Findings by checkout, largest first, read from the cache the service keeps.
     private var groups: [CheckoutGroup] = []
 
-    private var isScanning = false
-
-    /// Scans run here and hop to the main queue with their results — the walk touches every
-    /// file in a `target/`, which is not a thing to do on the main thread.
-    private let queue = DispatchQueue(label: "com.skalman.artifact-scan", qos: .utility)
+    private var isScanning: Bool { ArtifactScanService.shared.isScanning }
 
     private static let size: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -71,45 +67,39 @@ final class StoragePreferencesViewController: NSViewController {
         view = NSView()
     }
 
-    override func viewWillAppear() {
-        super.viewWillAppear()
-        rebuild()
-        scan()
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reload),
+            name: .artifactScanDidChange,
+            object: nil
+        )
     }
 
-    // MARK: - Scanning
-
-    /// Rescans every project, replacing whatever was shown.
+    /// Draws what is already known, then asks for anything stale to be measured again.
     ///
-    /// Results land per project rather than all at once, so a long scan fills the page as it
-    /// goes instead of showing nothing until the last checkout is measured.
-    private func scan() {
-        guard !isScanning else { return }
+    /// The page never scans on the way in. Finding 45 directories means walking every other
+    /// directory in four projects first — over a minute here — and paying that on each visit
+    /// would mean the page is empty every time it opens, for numbers that barely move between
+    /// builds. `ArtifactScanService` keeps them from launch to launch instead.
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        reload()
+        ArtifactScanService.shared.refreshStaleProjects()
+    }
 
-        isScanning = true
-        groups = []
-        rebuild()
+    // MARK: - Reading
 
-        let projects = ProjectStore.shared.projects
-        queue.async { [weak self] in
-            for project in projects {
-                let artifacts = ArtifactScanner.scan(projectFolder: project.folderPath)
-                guard !artifacts.isEmpty else { continue }
-
-                let found = Self.group(artifacts, of: project)
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.groups.append(contentsOf: found)
-                    self.groups.sort { $0.byteCount > $1.byteCount }
-                    self.rebuild()
-                }
-            }
-
-            DispatchQueue.main.async {
-                self?.isScanning = false
-                self?.rebuild()
-            }
+    /// Rebuilds from the cache, whether it changed because a scan landed or because something
+    /// was removed.
+    @objc private func reload() {
+        groups = ProjectStore.shared.projects.flatMap { project in
+            Self.group(ArtifactScanService.shared.artifacts(for: project.id), of: project)
         }
+        .sorted { $0.byteCount > $1.byteCount }
+
+        rebuild()
     }
 
     /// Splits a project's findings by the checkout each belongs to, and names each one.
@@ -176,9 +166,7 @@ final class StoragePreferencesViewController: NSViewController {
         total.font = Design.Typography.heading()
         total.textColor = totalBytes > 0 ? .labelColor : .secondaryLabelColor
 
-        let caption = NSTextField(labelWithString: isScanning
-            ? StorageStrings.scanning
-            : StorageStrings.reclaimable(count: allArtifacts.count))
+        let caption = NSTextField(labelWithString: summaryCaption())
         caption.font = Design.Typography.subheading()
         caption.textColor = .secondaryLabelColor
 
@@ -214,6 +202,31 @@ final class StoragePreferencesViewController: NSViewController {
         row.addArrangedSubview(actions)
 
         return SettingsUI.section(nil, SettingsCard(rows: [SettingsUI.fullRow(row)]))
+    }
+
+    /// What the number underneath the total means, which is not the same sentence twice.
+    ///
+    /// A cached reading has to say **when** it was true, or it quietly claims to be live. The
+    /// page shows numbers measured up to an hour ago and would otherwise look identical whether
+    /// the disk was read a second or a day before.
+    private func summaryCaption() -> String {
+        if isScanning {
+            return StorageStrings.scanning
+        }
+
+        let count = allArtifacts.count
+        guard count > 0 else { return StorageStrings.nothingFound }
+
+        let projectIDs = ProjectStore.shared.projects.map(\.id)
+        guard let measured = ArtifactScanService.shared.oldestScan(among: projectIDs) else {
+            return StorageStrings.reclaimable(count: count)
+        }
+
+        return StorageStrings.reclaimable(count: count)
+            + " · "
+            + StorageStrings.measured(
+                Self.relativeDate.localizedString(for: measured, relativeTo: Date())
+            )
     }
 
     /// One checkout: its artifacts largest first, closed by a row that removes the lot.
@@ -294,7 +307,7 @@ final class StoragePreferencesViewController: NSViewController {
     // MARK: - Actions
 
     @objc private func rescanClicked() {
-        scan()
+        ArtifactScanService.shared.refreshAll()
     }
 
     @objc private func removeArtifactClicked(_ sender: NSButton) {
@@ -357,10 +370,9 @@ final class StoragePreferencesViewController: NSViewController {
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        // Removal walks directories too, so it goes to the same queue as the scan. The page is
-        // rebuilt from a fresh scan rather than by editing the list in place: what is left on
-        // disk afterwards is the only answer worth showing.
-        queue.async { [weak self] in
+        // Deleting walks the directory too, so it never happens on the main thread — but at
+        // `.userInitiated`, unlike the passive scan: this one somebody is waiting on.
+        DispatchQueue.global(qos: .userInitiated).async {
             var removed = 0
             for artifact in artifacts where ArtifactScanner.remove(artifact) {
                 removed += 1
@@ -371,8 +383,13 @@ final class StoragePreferencesViewController: NSViewController {
             )
 
             DispatchQueue.main.async {
-                self?.isScanning = false
-                self?.scan()
+                // The cache is corrected from what actually went, so the page updates at once;
+                // the project is then re-measured, since removing one directory changes the
+                // size of nothing else but proves the reading is a moment old.
+                for project in projects {
+                    ArtifactScanService.shared.forget(artifacts, in: project.id)
+                    ArtifactScanService.shared.refresh(project, force: true)
+                }
             }
         }
     }
@@ -409,6 +426,7 @@ private enum StorageStrings {
         """
 
     static let empty = "Nothing to reclaim."
+    static let nothingFound = "Nothing found to remove"
     static let scanning = "Scanning…"
     static let rescan = "Rescan"
     static let remove = "Remove"
@@ -422,6 +440,11 @@ private enum StorageStrings {
     }
 
     static let removeAll = "Remove All…"
+
+    /// When the reading was taken. A cached number that does not say its age claims to be live.
+    static func measured(_ relative: String) -> String {
+        "measured \(relative)"
+    }
 
     static func built(_ relative: String) -> String {
         "last written \(relative)"

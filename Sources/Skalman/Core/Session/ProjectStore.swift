@@ -225,6 +225,47 @@ final class ProjectStore {
         notifyChanged()
     }
 
+    /// Records which theme a session's terminal draws with. Nil clears the assignment, so the
+    /// session inherits its project's theme — and the app default beyond that — again.
+    func setThemeName(_ name: String?, forSessionID sessionID: SessionID) {
+        update(sessionID: sessionID) { $0.themeName = name }
+        notifyChanged()
+    }
+
+    /// The same for a project, which every session inside it follows unless it names its own.
+    func setThemeName(_ name: String?, forProjectID projectID: ProjectID) {
+        guard let index = index(ofProject: projectID) else { return }
+        projects[index].themeName = name
+        save()
+        notifyChanged()
+    }
+
+    /// Re-points every assignment naming a theme that was renamed.
+    ///
+    /// Themes are identified by name, so without this a rename would look exactly like a
+    /// delete to `ThemeResolution` and silently reset every session and project using it.
+    /// Called by `ThemeAssignments.rename`, which is the only rename path.
+    func renameTheme(from oldName: String, to newName: String) {
+        var changed = false
+
+        for projectIndex in projects.indices {
+            if projects[projectIndex].themeName == oldName {
+                projects[projectIndex].themeName = newName
+                changed = true
+            }
+
+            for sessionIndex in projects[projectIndex].sessions.indices
+            where projects[projectIndex].sessions[sessionIndex].themeName == oldName {
+                projects[projectIndex].sessions[sessionIndex].themeName = newName
+                changed = true
+            }
+        }
+
+        guard changed else { return }
+        save()
+        notifyChanged()
+    }
+
     /// Every archived session, newest first, paired with the project it belongs to.
     func archivedSessions() -> [(project: Project, session: AgentSession)] {
         projects

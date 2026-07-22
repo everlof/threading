@@ -111,8 +111,8 @@ final class DisplayPaneStore {
     // MARK: Layout
 
     func loadLayout(for sessionID: SessionID) -> PersistedPanel? {
-        guard let data = try? Data(contentsOf: layoutFile(sessionID)) else { return nil }
-        return try? decoder.decode(PersistedPanel.self, from: data)
+        guard let payload = StateManager.shared.loadPanelPayload(for: sessionID) else { return nil }
+        return try? decoder.decode(PersistedPanel.self, from: Data(payload.utf8))
     }
 
     /// Replaces the stored tabs and selection, preserving the observed signature (which tracks the
@@ -138,13 +138,14 @@ final class DisplayPaneStore {
         write(panel, for: sessionID)
     }
 
+    /// The layout is a row; the images beside it are still files, because a PNG in a database
+    /// is a PNG with extra steps.
     private func write(_ panel: PersistedPanel, for sessionID: SessionID) {
         do {
-            try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
             let data = try encoder.encode(panel)
-            try data.write(to: layoutFile(sessionID), options: .atomic)
+            StateManager.shared.savePanelPayload(String(decoding: data, as: UTF8.self), for: sessionID)
         } catch {
-            SkalmanLogger.mcp.error("Could not persist display panel: \(error.localizedDescription)")
+            SkalmanLogger.mcp.error("Could not encode display panel: \(error.localizedDescription)")
         }
     }
 
@@ -178,13 +179,15 @@ final class DisplayPaneStore {
     /// Drops the stored layout and cache of every session not in the set, called when sessions are
     /// deleted so a removed session leaves nothing behind on disk.
     func retainOnly(sessionIDs: Set<SessionID>) {
+        StateManager.shared.retainPanelLayouts(sessionIDs: sessionIDs)
+
+        // The image caches are still directories on disk, so they are still swept by hand.
         let keep = Set(sessionIDs.map(\.uuidString))
         guard let entries = try? fileManager.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil
         ) else { return }
 
         for entry in entries {
-            // Both `<uuid>.json` and the `<uuid>` cache directory reduce to the same base.
             let base = entry.deletingPathExtension().lastPathComponent
             if !keep.contains(base) {
                 try? fileManager.removeItem(at: entry)

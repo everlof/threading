@@ -4,118 +4,122 @@ import Foundation
 /// native conversation view.
 enum CodexStreamEvent {
 
-    static func parse(_ line: String) -> [StreamEvent] {
+    static func parse(_ line: String) -> StreamLineParseResult {
         guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else { return [] }
+              let wire = try? JSONDecoder().decode(CodexWireEvent.self, from: data)
+        else { return .malformed }
 
-        switch type {
+        switch wire.type {
         case "thread.started":
-            return [.initialised(
-                sessionID: (object["thread_id"] as? String).map(TranscriptID.init),
+            return .events([.initialised(
+                sessionID: wire.threadID.map(TranscriptID.init),
                 model: nil
-            )]
+            )])
 
         case "turn.completed":
-            return [.turnFinished(text: nil, isError: false)]
+            return .events([.turnFinished(text: nil, isError: false)])
 
-        case "turn.failed":
-            return [.turnFinished(text: errorText(in: object), isError: true)]
-
-        case "error":
-            return [.turnFinished(text: errorText(in: object), isError: true)]
+        case "turn.failed", "error":
+            return .events([.turnFinished(text: errorText(in: wire), isError: true)])
 
         case "item.started":
-            guard let item = object["item"] as? [String: Any],
-                  let block = toolUse(from: item) else { return [] }
-            return [.assistantMessage(blocks: [block])]
+            guard let item = wire.item else { return .malformed }
+            guard let block = toolUse(from: item) else {
+                return .events([.unknown(type: "item.started:\(item.type ?? "unknown")")])
+            }
+            return .events([.assistantMessage(blocks: [block])])
 
         case "item.completed":
-            guard let item = object["item"] as? [String: Any] else { return [] }
-            return completed(item)
+            guard let item = wire.item else { return .malformed }
+            return .events(completed(item))
 
         default:
-            return [.other(type: type)]
+            return .events([.unknown(type: wire.type)])
         }
     }
 
     // MARK: - Items
 
-    private static func completed(_ item: [String: Any]) -> [StreamEvent] {
-        switch item["type"] as? String {
+    private static func completed(_ item: CodexWireItem) -> [StreamEvent] {
+        switch item.type {
         case "agent_message":
-            guard let text = item["text"] as? String, !text.isEmpty else { return [] }
+            guard let text = item.string("text"), !text.isEmpty else { return [] }
             return [.assistantMessage(blocks: [.text(text)])]
 
         case "reasoning":
-            guard let text = item["text"] as? String, !text.isEmpty else { return [] }
+            guard let text = item.string("text"), !text.isEmpty else { return [] }
             return [.assistantMessage(blocks: [.thinking(text)])]
 
         default:
-            guard let result = toolResult(from: item) else { return [] }
+            guard let result = toolResult(from: item) else {
+                return [.unknown(type: "item.completed:\(item.type ?? "unknown")")]
+            }
             return [.toolResults([result])]
         }
     }
 
-    private static func toolUse(from item: [String: Any]) -> ContentBlock? {
-        guard let id = item["id"] as? String,
-              let type = item["type"] as? String else { return nil }
+    private static func toolUse(from item: CodexWireItem) -> ContentBlock? {
+        guard let id = item.string("id"), let type = item.type else { return nil }
 
         switch type {
         case "command_execution":
             return .toolUse(
                 id: id,
                 name: "Bash",
-                input: ["command": item["command"] as? String ?? ""]
+                input: ["command": item.string("command") ?? ""]
             )
 
         case "mcp_tool_call":
-            let server = item["server"] as? String ?? "mcp"
-            let tool = item["tool"] as? String ?? item["name"] as? String ?? "tool"
+            let server = item.string("server") ?? "mcp"
+            let tool = item.string("tool") ?? item.string("name") ?? "tool"
             return .toolUse(
                 id: id,
                 name: "mcp__\(server)__\(tool)",
-                input: dictionary(item["arguments"])
+                input: arguments(from: item.value("arguments"))
             )
 
         case "web_search":
             return .toolUse(
                 id: id,
                 name: "WebSearch",
-                input: ["query": item["query"] as? String ?? ""]
+                input: ["query": item.string("query") ?? ""]
             )
 
         case "file_change":
-            return .toolUse(id: id, name: "Edit", input: item)
+            return .toolUse(id: id, name: "Edit", input: item.foundationObject)
 
         case "plan_update":
-            return .toolUse(id: id, name: "Plan", input: item)
+            return .toolUse(id: id, name: "Plan", input: item.foundationObject)
 
         default:
             return nil
         }
     }
 
-    private static func toolResult(from item: [String: Any]) -> ToolResult? {
-        guard let id = item["id"] as? String,
-              let type = item["type"] as? String,
+    private static func toolResult(from item: CodexWireItem) -> ToolResult? {
+        guard let id = item.string("id"),
+              let type = item.type,
               toolTypes.contains(type) else { return nil }
 
-        let status = item["status"] as? String
-        let exitCode = item["exit_code"] as? Int
+        let status = item.string("status")
+        let exitCode = item.integer("exit_code")
         let isError = status == "failed" || (exitCode.map { $0 != 0 } ?? false)
 
-        let text: String
+        let value: JSONValue?
         switch type {
         case "command_execution":
-            text = item["aggregated_output"] as? String ?? ""
+            value = item.value("aggregated_output")
         case "mcp_tool_call":
-            text = resultText(item["result"] ?? item["error"])
+            value = item.value("result") ?? item.value("error")
         default:
-            text = resultText(item["changes"] ?? item["result"] ?? item)
+            value = item.value("changes") ?? item.value("result") ?? item.rawValue
         }
 
-        return ToolResult(toolUseID: id, text: text, isError: isError)
+        return ToolResult(
+            toolUseID: id,
+            text: resultText(value),
+            isError: isError
+        )
     }
 
     private static let toolTypes: Set<String> = [
@@ -124,30 +128,85 @@ enum CodexStreamEvent {
 
     // MARK: - Values
 
-    private static func dictionary(_ value: Any?) -> [String: Any] {
-        if let value = value as? [String: Any] { return value }
-        guard let text = value as? String,
+    private static func arguments(from value: JSONValue?) -> [String: Any] {
+        if let object = value?.foundationObject { return object }
+        guard let text = value?.stringValue,
               let data = text.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+              let decoded = try? JSONDecoder().decode(JSONValue.self, from: data)
         else { return [:] }
-        return object
+        return decoded.foundationObject ?? [:]
     }
 
-    private static func resultText(_ value: Any?) -> String {
-        if let text = value as? String { return text }
-        guard let value,
-              JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted]),
-              let text = String(data: data, encoding: .utf8) else { return "" }
-        return text
+    private static func resultText(_ value: JSONValue?) -> String {
+        if let text = value?.stringValue { return text }
+        return value?.encodedText(prettyPrinted: true) ?? ""
     }
 
-    private static func errorText(in object: [String: Any]) -> String? {
-        if let message = object["message"] as? String { return message }
-        if let error = object["error"] as? String { return error }
-        if let error = object["error"] as? [String: Any] {
-            return error["message"] as? String ?? resultText(error)
+    private static func errorText(in event: CodexWireEvent) -> String? {
+        if let message = event.message { return message }
+        if let error = event.error?.stringValue { return error }
+        if let message = event.error?.objectValue?["message"]?.stringValue { return message }
+        guard let error = event.error else { return nil }
+        let text = error.encodedText(prettyPrinted: true)
+        return text.isEmpty ? nil : text
+    }
+}
+
+// MARK: - Codex Wire Models
+
+private struct CodexWireEvent: Decodable {
+    let type: String
+    let threadID: String?
+    let item: CodexWireItem?
+    let message: String?
+    let error: JSONValue?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, item, message, error
+        case threadID = "thread_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        threadID = try? container.decode(String.self, forKey: .threadID)
+        item = try? container.decode(CodexWireItem.self, forKey: .item)
+        message = try? container.decode(String.self, forKey: .message)
+        error = try? container.decode(JSONValue.self, forKey: .error)
+    }
+}
+
+private struct CodexWireItem: Decodable {
+    let values: [String: JSONValue]
+
+    init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder)
+        guard case .object(let values) = value else {
+            throw DecodingError.typeMismatch(
+                [String: JSONValue].self,
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Codex item must be a JSON object"
+                )
+            )
         }
-        return nil
+        self.values = values
+    }
+
+    var type: String? { string("type") }
+    var rawValue: JSONValue { .object(values) }
+    var foundationObject: [String: Any] { values.mapValues(\.foundationValue) }
+
+    func value(_ key: String) -> JSONValue? {
+        values[key]
+    }
+
+    func string(_ key: String) -> String? {
+        values[key]?.stringValue
+    }
+
+    func integer(_ key: String) -> Int64? {
+        guard case .integer(let value) = values[key] else { return nil }
+        return value
     }
 }

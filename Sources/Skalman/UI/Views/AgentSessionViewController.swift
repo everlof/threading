@@ -41,7 +41,7 @@ final class AgentSessionViewController: NSViewController {
     init(agentSession: AgentSession) {
         self.sessionID = agentSession.id
         self.session = TerminalSession(
-            profile: ProfileStorage.shared.defaultProfile,
+            profile: ThemeAssignments.profile(for: agentSession.id),
             identifier: agentSession.id
         )
         super.init(nibName: nil, bundle: nil)
@@ -92,13 +92,19 @@ final class AgentSessionViewController: NSViewController {
 
         applyBackgroundColor()
 
-        // The inset area is part of the terminal visually, so it tracks theme changes too.
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(profileDidChange),
-            name: .profileDidChange,
-            object: nil
-        )
+        // Two notifications, one response: the profile changed (font, cursor, the app-wide
+        // default theme), or an assignment did (this session's, or its project's). Either way
+        // the answer is to resolve *this* session's theme again rather than to adopt a value
+        // the notification carried, which is what lets a narrower assignment survive a change
+        // to a wider one.
+        for name in [Notification.Name.profileDidChange, .themeAssignmentsDidChange] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(themeDidChange),
+                name: name,
+                object: nil
+            )
+        }
     }
 
     /// Fills the inset area with the terminal's own background so the padding reads as part
@@ -108,7 +114,8 @@ final class AgentSessionViewController: NSViewController {
         view.layer?.backgroundColor = session.terminalView.nativeBackgroundColor.cgColor
     }
 
-    @objc private func profileDidChange() {
+    @objc private func themeDidChange() {
+        session.updateProfile(ThemeAssignments.profile(for: sessionID))
         applyBackgroundColor()
     }
 

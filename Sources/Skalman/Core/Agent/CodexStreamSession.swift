@@ -21,6 +21,8 @@ final class CodexStreamSession: ConversationStreamSession {
     private var process: Process?
     private var buffer = Data()
     private var errorBuffer = Data()
+    private var parseDiagnostics = StreamParseDiagnostics()
+    var malformedLineCount: Int { parseDiagnostics.malformedLineCount }
     private var receivedTurnFinished = false
     private var isTerminating = false
 
@@ -39,6 +41,7 @@ final class CodexStreamSession: ConversationStreamSession {
         guard !isRunning else { return }
         isRunning = true
         isTerminating = false
+        parseDiagnostics.reset()
     }
 
     @discardableResult
@@ -137,11 +140,19 @@ final class CodexStreamSession: ConversationStreamSession {
             let lineData = buffer[buffer.startIndex..<newline]
             buffer = Data(buffer[buffer.index(after: newline)...])
 
-            guard let line = String(data: lineData, encoding: .utf8) else { continue }
+            guard let line = String(data: lineData, encoding: .utf8) else {
+                parseDiagnostics.recordMalformedLine(provider: "Codex")
+                continue
+            }
 
-            for event in CodexStreamEvent.parse(line) {
-                if case .turnFinished = event { receivedTurnFinished = true }
-                onEvent?(event)
+            switch CodexStreamEvent.parse(line) {
+            case .events(let events):
+                for event in events {
+                    if case .turnFinished = event { receivedTurnFinished = true }
+                    onEvent?(event)
+                }
+            case .malformed:
+                parseDiagnostics.recordMalformedLine(provider: "Codex")
             }
         }
     }

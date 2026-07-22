@@ -511,6 +511,25 @@ claimed 42.79 GB where the directory occupies 33.18 GiB, a 29% overstatement of 
 number the feature exists to report. The identifier is only fetched when `linkCount > 1`, so an
 ordinary file costs nothing extra.
 
+**Findings are cached and the scan is passive.** `ArtifactScanService` keeps the results in
+Application Support and refreshes them on a `.background` queue — the QoS whose I/O the system
+throttles, which is right for a chore nobody is waiting on. Finding 45 directories means walking
+every *other* directory in four projects first, a little over a minute here, so a page that
+scanned on open would be empty every time it opened. It draws the cache instead and asks for
+anything stale to be re-measured. A passive pass skips a project whose sessions are **working**:
+an agent mid-build is both the worst moment to compete for the disk and the worst moment to
+measure a directory it is still writing. A cached number is shown with its age, because one that
+does not say when it was taken is claiming to be live.
+
+**Agents can see the listing and propose a cleanup, never perform one.** `list_reclaimable_storage`
+returns the cache; `propose_storage_cleanup` puts named paths to the user as a sheet and removes
+only what they approve. The gate that keeps this from being an arbitrary-delete primitive is that
+**a proposal can only name paths already in the findings** — everything there has passed both of
+the scanner's gates, and they are checked again at the moment of deletion. The tool answers only
+once the user has decided, so the agent's next turn knows the outcome rather than assuming it.
+The instruction tells the agent not to delete these directories with shell commands itself, since
+the whole value of the proposal is that the user sees what is going and what rebuilding it costs.
+
 The page groups **by checkout, not by project**, because six of one project's checkouts hold a
 `web/node_modules` and a row reading `web/node_modules` under a heading reading `sonda` names
 none of them. Each heading is `<project> · <worktree or branch> · <size>`; rows are relative to
@@ -744,6 +763,46 @@ Four guards keep it honest:
 
 Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
 `DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
+
+### The Store
+
+Projects and sessions live in **SQLite** (`skalman.db`), not in `projects.json`. The system
+`libsqlite3` — macOS ships 3.51 with FTS5 — so `import SQLite3` keeps the one-dependency rule
+intact, and there is no ORM: a dozen queries are fewer lines than a query builder.
+
+**Thin rows, JSON payloads**, which is opencode's own shape (they made this same move, from
+per-file JSON to `opencode.db`, and their schema keeps `message.data` and `event.data` as
+`TEXT`). Columns exist to be ordered by, filtered on or joined — `position`, `kind`,
+`last_active_at`, the foreign key — and everything else rides in `data` as the model's own
+`Codable` encoding. A field added to `AgentSession` therefore costs no migration, which is what
+makes the schema survivable in a model still growing side chats, archiving and typed ids. A
+project's payload is stored with `sessions` **emptied**, because sessions are rows; giving the
+same fact two homes is how one of them goes stale.
+
+Writes are **per row, in one transaction**: upsert what is there, delete what has gone. That is
+the actual gain over the document — the store is no longer rewritten in full every time an agent
+renames a terminal tab — and it retires the rolling `projects.json.bak`, whose whole job was
+covering the window in which a full rewrite could be interrupted. WAL is the other half: a read
+never blocks the writer, and `busy_timeout` turns "another process has it" into a wait. That
+makes multiple writers *possible*, not permitted — `SingleInstanceLock` still stands, and is a
+chosen concurrency model rather than a workaround.
+
+**The import runs once and keeps its rollback.** A `projects.json` is read through the decoder
+and migration chain it always used, written into the database in a single transaction, and then
+*renamed* to `projects.json.migrated` — never deleted. opencode's own migration is the reason:
+an update that recreated its storage directory without migrating took users' legacy sessions
+with it. The same applies to the panel layouts, which were `panels/<uuid>.json` and are now
+rows; their cached PNGs stay files, because a PNG in a database is a PNG with extra steps.
+
+Quarantine still works exactly as it did for the document, because `ProjectStore` never learned
+the difference: an unopenable database is moved aside (with its `-wal` and `-shm` sidecars
+deleted, or SQLite would recover a fresh database from them) and reported, which is what lets
+the store refuse to write over state it could not read.
+
+`ProjectDatabaseTests` imports **the machine's own `projects.json`** into a throwaway database
+and compares ids, order, titles, accounts and resume identifiers. A fixture proves the code
+path; that one proves the file the user will actually migrate, which is the only copy they
+cannot get back.
 
 ### Diagnostics and Drafts
 

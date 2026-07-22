@@ -28,6 +28,7 @@ extension ProjectSidebarViewController {
         menu.addItem(.separator())
         addSideChatItems(to: menu, for: session)
         addSurfaceItem(to: menu, for: session)
+        menu.addItem(makeSessionThemeItem(for: sessionID))
         menu.addItem(withTitle: "Rename Session…", action: #selector(renameSessionClicked), keyEquivalent: "")
         addMoveToAccountItem(to: menu, for: session)
         menu.addItem(.separator())

@@ -41,18 +41,24 @@ final class TerminalContainerViewController: NSViewController {
         showEmptyState()
 
         // A theme change repaints the terminal but not the pane behind it, so the seam would
-        // return until the next surface swap; re-apply the colour when the profile changes.
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(profileDidChange),
-            name: .profileDidChange,
-            object: nil
-        )
+        // return until the next surface swap; re-apply the colour when the theme changes,
+        // whether that was the app default or an assignment on this session or its project.
+        for name in [Notification.Name.profileDidChange, .themeAssignmentsDidChange] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(themeDidChange),
+                name: name,
+                object: nil
+            )
+        }
     }
 
-    @objc private func profileDidChange() {
-        guard let currentChild else { return }
-        applyPaneBackground(currentChild.paneBackgroundColor)
+    /// Resolves the colour here rather than reading it off the terminal view, because the
+    /// session controller observes the same notification and the order between two observers
+    /// is not defined — reading its view could paint the pane the colour it is leaving.
+    @objc private func themeDidChange() {
+        guard currentChild != nil || currentConversation != nil else { return }
+        applyPaneBackground(ThemeAssignments.theme(for: currentSessionID).background)
     }
 
     /// The composer sits alongside the placeholder, hidden until a project is selected.
@@ -287,10 +293,12 @@ final class TerminalContainerViewController: NSViewController {
         composerViewController.view.isHidden = true
 
         // A native conversation has no terminal, but it should read like one: the backdrop is
-        // the default terminal theme's background, so it — and the sidebar sampling it — match a
+        // its resolved terminal theme's background, so it — and the sidebar sampling it — match a
         // Claude or shell session rather than the flatter `windowBackgroundColor`, which shows
-        // through the sidebar's material as a subtly different tone.
-        applyPaneBackground(ProfileStorage.shared.defaultProfile.theme.background)
+        // through the sidebar's material as a subtly different tone. This is also the whole
+        // extent to which a theme reaches a natively-rendered session: the conversation itself
+        // is drawn in system colours, per the design system.
+        applyPaneBackground(ThemeAssignments.theme(for: currentSessionID).background)
         conversation.focusPrompt()
     }
 

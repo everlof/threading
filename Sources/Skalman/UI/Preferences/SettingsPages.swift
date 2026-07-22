@@ -10,15 +10,20 @@ enum SettingsPages {
         let make: () -> NSViewController
     }
 
-    /// Named so the sidebar can find this page without hardcoding its position, which moves
-    /// whenever a page is added above it.
+    /// Named so the sidebar can find these pages without hardcoding their position, which
+    /// moves whenever a page is added above them.
     static let storageTitle = "Storage"
+    static let themesTitle = "Themes"
+
+    static func index(ofTitle title: String) -> Int? {
+        all.firstIndex { $0.title == title }
+    }
 
     static let all: [Page] = [
         Page(title: "General", symbol: "gearshape") { GeneralPreferencesViewController() },
         Page(title: "Accounts", symbol: "person.2") { AccountsPreferencesViewController() },
         Page(title: "Profiles", symbol: "person.crop.circle") { ProfilePreferencesViewController() },
-        Page(title: "Themes", symbol: "paintpalette") { ThemePreferencesViewController() },
+        Page(title: themesTitle, symbol: "paintpalette") { ThemePreferencesViewController() },
         Page(title: "Tools", symbol: "wrench.and.screwdriver") { ToolsPreferencesViewController() },
         Page(title: storageTitle, symbol: "internaldrive") { StoragePreferencesViewController() },
         Page(title: "Archived", symbol: "archivebox") { ArchivedPreferencesViewController() }

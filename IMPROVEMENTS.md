@@ -138,10 +138,12 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
       name selects a concrete argument struct (including the integer/string tab union), while
       initialize, tool-list, tool-result, error, and schema payloads are `Encodable`; the old
       `[String: Any]` dispatch and hand-built JSON-RPC response dictionaries are gone.
-- [ ] Stream events: `StreamEvent.parse` / `CodexStreamEvent.parse` from
-      `JSONSerialization` + `as?`-with-defaults to tolerant `Codable` (unknown kind →
-      `.unknown` case; malformed line → skipped *and counted*, surfacing drift in logs
-      instead of silence). This removes the bulk of the 92 `[String: Any]` sites.
+- [x] Claude and Codex live-stream JSONL now decodes through tolerant Codable wire models,
+      retaining tool-owned arbitrary data as `JSONValue`. Unknown provider kinds become
+      `.unknown`; malformed UTF-8, JSON, or required envelope fields are skipped, counted per
+      session, and logged. Focused tests cover optional-field drift, structured arguments and
+      results, unknown kinds, and recovery after malformed lines. Foundation dictionary adapters
+      remain only at the separate transcript-replay boundary.
 - [ ] Tool identity enum with `unknown(String)` case so `PermissionPolicy` and the tool-row
       glyph mapping switch exhaustively (`PermissionBroker.swift:141-143`,
       `CodexStreamEvent.swift:61-93`).

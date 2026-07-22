@@ -1,20 +1,30 @@
 import AppKit
 import UniformTypeIdentifiers
 
-/// View controller for theme management in preferences.
+/// The Themes page: the list of themes, a preview of the selected one, and its palette.
+///
+/// This page sets the **default** theme — the one every session that has not been given its
+/// own follows. The narrower scopes are assigned where they apply, from a session's or a
+/// project's own menu, since that is where the thing being themed can be seen.
 final class ThemePreferencesViewController: NSViewController {
 
     // MARK: - Constants
 
     private enum Layout {
-        static let padding: CGFloat = 24
-        static let spacing: CGFloat = 16
-        static let listWidth: CGFloat = 180
-        static let listHeight: CGFloat = 200
-        static let previewHeight: CGFloat = 100
-        static let colorWellSize: CGFloat = 24
-        static let thumbnailWidth: CGFloat = 32
-        static let thumbnailHeight: CGFloat = 24
+        static let listHeight: CGFloat = 220
+        static let rowHeight: CGFloat = 36
+        static let buttonWidth: CGFloat = 28
+        static let buttonHeight: CGFloat = 22
+    }
+
+    private enum Strings {
+        static let defaultNote = """
+            The default theme applies to every terminal that has not been given one of its own. \
+            A project or a single session can override it from its ⋯ menu in the sidebar.
+            """
+        static let builtInNote = """
+            Built-in themes cannot be edited. Duplicate this one to change its colours.
+            """
     }
 
     // MARK: - Properties
@@ -22,21 +32,24 @@ final class ThemePreferencesViewController: NSViewController {
     private var themes: [TerminalTheme] = []
     private var selectedTheme: TerminalTheme?
 
+    private var isBuiltInSelected: Bool {
+        selectedTheme.map { ThemeManager.shared.isBuiltIn($0) } ?? false
+    }
+
     // MARK: - UI Elements
 
     private lazy var themeTableView: NSTableView = {
         let table = NSTableView()
         table.headerView = nil
-        table.rowHeight = 32
+        table.rowHeight = Layout.rowHeight
         table.intercellSpacing = NSSize(width: 0, height: 2)
         table.backgroundColor = .clear
+        table.style = .inset
         table.delegate = self
         table.dataSource = self
-
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ThemeName"))
-        column.width = Layout.listWidth - 20
-        table.addTableColumn(column)
-
+        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ThemeName")))
+        table.doubleAction = #selector(useSelectedTheme)
+        table.target = self
         return table
     }()
 
@@ -49,25 +62,8 @@ final class ThemePreferencesViewController: NSViewController {
         return scroll
     }()
 
-    private lazy var addButton: NSButton = {
-        let button = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "Add")!, target: self, action: #selector(addTheme))
-        button.bezelStyle = .roundRect
-        button.isBordered = true
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 28).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        return button
-    }()
-
-    private lazy var removeButton: NSButton = {
-        let button = NSButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: "Remove")!, target: self, action: #selector(removeTheme))
-        button.bezelStyle = .roundRect
-        button.isBordered = true
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 28).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        return button
-    }()
+    private lazy var addButton = iconButton("plus", tooltip: "New Theme", action: #selector(addTheme))
+    private lazy var removeButton = iconButton("minus", tooltip: "Delete Theme", action: #selector(removeTheme))
 
     private lazy var actionButton: NSPopUpButton = {
         let button = NSPopUpButton()
@@ -77,68 +73,47 @@ final class ThemePreferencesViewController: NSViewController {
 
         let menu = NSMenu()
         menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
-        menu.addItem(withTitle: "Import from Terminal.app...", action: #selector(importFromTerminal), keyEquivalent: "")
         menu.addItem(withTitle: "Duplicate", action: #selector(duplicateTheme), keyEquivalent: "")
-        menu.addItem(withTitle: "Rename...", action: #selector(renameTheme), keyEquivalent: "")
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Export...", action: #selector(exportTheme), keyEquivalent: "")
+        menu.addItem(withTitle: "Rename…", action: #selector(renameTheme), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Import from Terminal.app…", action: #selector(importFromTerminal), keyEquivalent: "")
+        menu.addItem(withTitle: "Export…", action: #selector(exportTheme), keyEquivalent: "")
 
-        for item in menu.items {
-            item.target = self
-        }
-
+        for item in menu.items { item.target = self }
         button.menu = menu
 
-        if let gearImage = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Actions") {
-            button.item(at: 0)?.image = gearImage
+        if let gear = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Actions") {
+            button.item(at: 0)?.image = gear
         }
 
         return button
     }()
 
     private lazy var useThemeButton: NSButton = {
-        let button = NSButton(title: "Use Theme", target: self, action: #selector(useSelectedTheme))
+        let button = NSButton(title: "Use as Default", target: self, action: #selector(useSelectedTheme))
         button.bezelStyle = .rounded
         button.controlSize = .regular
         return button
     }()
 
-    private lazy var previewView: NSView = {
-        let view = NSView()
-        view.wantsLayer = true
-        view.layer?.cornerRadius = 6
-        view.layer?.borderWidth = 1
-        view.layer?.borderColor = NSColor.separatorColor.cgColor
-        return view
-    }()
+    private let previewView = ThemePreviewView()
+    private let colorEditor = ThemeColorEditor()
 
-    private lazy var previewLabel: NSTextField = {
-        let label = NSTextField(labelWithString: "")
-        label.isBezeled = false
-        label.drawsBackground = false
-        label.isEditable = false
-        label.isSelectable = false
-        label.maximumNumberOfLines = 8
-        return label
-    }()
+    /// Explains why the palette below it is read-only, and offers the way out. Hidden for a
+    /// custom theme, where the palette simply works.
+    private lazy var builtInNote = SettingsUI.note(Strings.builtInNote)
 
-    private lazy var mainColorsSection: NSStackView = {
-        let stack = NSStackView()
+    private lazy var duplicateButton = SettingsUI.button("Duplicate", target: self, action: #selector(duplicateTheme))
+
+    private lazy var builtInBanner: NSView = {
+        let stack = NSStackView(views: [builtInNote, duplicateButton])
         stack.orientation = .horizontal
-        stack.spacing = 24
-        stack.alignment = .top
+        stack.alignment = .centerY
+        stack.spacing = Design.Spacing.medium
+        builtInNote.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        duplicateButton.setContentHuggingPriority(.required, for: .horizontal)
         return stack
     }()
-
-    private lazy var ansiColorsSection: NSStackView = {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 12
-        stack.alignment = .leading
-        return stack
-    }()
-
-    private var colorWells: [String: NSColorWell] = [:]
 
     // MARK: - Initialization
 
@@ -161,26 +136,17 @@ final class ThemePreferencesViewController: NSViewController {
         setupUI()
         loadThemes()
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(themesDidChange),
-            name: .themesDidChange,
-            object: nil
-        )
+        colorEditor.onChange = { [weak self] key, color in
+            self?.apply(color, for: key)
+        }
 
-        // Add keyboard event monitoring for delete key
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self,
-                  self.view.window?.firstResponder === self.themeTableView else {
-                return event
-            }
-
-            // Check for Delete or Backspace key
-            if event.keyCode == 51 || event.keyCode == 117 { // Backspace or Delete
-                self.removeTheme()
-                return nil // Consume the event
-            }
-            return event
+        for name in [Notification.Name.themesDidChange, .profileDidChange] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(themesDidChange),
+                name: name,
+                object: nil
+            )
         }
     }
 
@@ -194,7 +160,7 @@ final class ThemePreferencesViewController: NSViewController {
         let page = SettingsUI.page([
             SettingsUI.heading("Themes"),
             SettingsUI.section("Theme", themeListSection()),
-            SettingsUI.section("Preview", previewSection()),
+            SettingsUI.section("Preview", previewView),
             SettingsUI.section("Colors", colorsSection())
         ])
 
@@ -208,8 +174,8 @@ final class ThemePreferencesViewController: NSViewController {
         ])
     }
 
-    /// The theme list on its flat surface, with the add/remove/actions and Use Theme controls
-    /// below it.
+    /// The theme list on its flat surface, the list-editing controls beneath it, and a note
+    /// saying what "default" actually means now that a session can override it.
     private func themeListSection() -> NSView {
         themeScrollView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -222,10 +188,10 @@ final class ThemePreferencesViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             card.heightAnchor.constraint(equalToConstant: Layout.listHeight),
-            themeScrollView.topAnchor.constraint(equalTo: card.topAnchor, constant: Design.Spacing.tight),
-            themeScrollView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -Design.Spacing.tight),
-            themeScrollView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Design.Spacing.small),
-            themeScrollView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Design.Spacing.small)
+            themeScrollView.topAnchor.constraint(equalTo: card.topAnchor, constant: Design.Spacing.small),
+            themeScrollView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -Design.Spacing.small),
+            themeScrollView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Design.Spacing.tight),
+            themeScrollView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Design.Spacing.tight)
         ])
 
         let spacer = NSView()
@@ -236,178 +202,46 @@ final class ThemePreferencesViewController: NSViewController {
         buttonRow.alignment = .centerY
         buttonRow.spacing = Design.Spacing.small
 
-        let stack = NSStackView(views: [card, buttonRow])
+        let note = SettingsUI.note(Strings.defaultNote)
+
+        let stack = NSStackView(views: [card, buttonRow, note])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
+        stack.spacing = Design.Spacing.medium
+        stack.setCustomSpacing(Design.Spacing.small, after: card)
 
-        card.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
-        card.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
-        buttonRow.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
-        buttonRow.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        for row in [card, buttonRow, note] as [NSView] {
+            row.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+            row.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        }
 
         return stack
     }
 
-    private func previewSection() -> NSView {
-        previewView.translatesAutoresizingMaskIntoConstraints = false
-        previewLabel.translatesAutoresizingMaskIntoConstraints = false
-        previewView.addSubview(previewLabel)
-
-        NSLayoutConstraint.activate([
-            previewView.heightAnchor.constraint(equalToConstant: Layout.previewHeight),
-            previewLabel.topAnchor.constraint(equalTo: previewView.topAnchor, constant: Design.Spacing.inset),
-            previewLabel.leadingAnchor.constraint(equalTo: previewView.leadingAnchor, constant: Design.Spacing.inset),
-            previewLabel.trailingAnchor.constraint(equalTo: previewView.trailingAnchor, constant: -Design.Spacing.inset)
-        ])
-
-        return previewView
-    }
-
-    /// Main and ANSI colour wells grouped on one flat card.
     private func colorsSection() -> NSView {
-        setupMainColors()
-        setupANSIColors()
-
-        let panel = NSView()
-        panel.applySurface(fill: Design.Surface.panel, radius: Design.Radius.panel, border: Design.Surface.border)
-
-        let stack = NSStackView(views: [
-            colorGroup("Main", mainColorsSection),
-            colorGroup("ANSI", ansiColorsSection)
-        ])
+        let stack = NSStackView(views: [builtInBanner, colorEditor])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = Design.Spacing.large
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(stack)
+        stack.spacing = Design.Spacing.medium
 
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: Design.Spacing.inset),
-            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -Design.Spacing.inset),
-            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: Design.Spacing.inset),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: panel.trailingAnchor, constant: -Design.Spacing.inset)
-        ])
-
-        return panel
-    }
-
-    private func colorGroup(_ title: String, _ content: NSView) -> NSView {
-        let label = SettingsUI.caption(title)
-        let stack = NSStackView(views: [label, content])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
-        return stack
-    }
-
-    private func setupMainColors() {
-        let mainColors: [(key: String, label: String)] = [
-            ("foreground", "Text"),
-            ("background", "Background"),
-            ("cursor", "Cursor"),
-            ("selection", "Selection")
-        ]
-
-        for colorInfo in mainColors {
-            let stack = createLabeledColorWell(key: colorInfo.key, label: colorInfo.label)
-            mainColorsSection.addArrangedSubview(stack)
+        for row in [builtInBanner, colorEditor] as [NSView] {
+            row.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+            row.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
         }
-    }
-
-    private func setupANSIColors() {
-        // Normal colors row
-        let normalRow = NSStackView()
-        normalRow.orientation = .horizontal
-        normalRow.spacing = 8
-
-        let normalLabel = NSTextField(labelWithString: "Normal")
-        normalLabel.font = .systemFont(ofSize: 11)
-        normalLabel.textColor = .secondaryLabelColor
-        normalLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        normalLabel.widthAnchor.constraint(equalToConstant: 50).isActive = true
-        normalRow.addArrangedSubview(normalLabel)
-
-        let normalColorsStack = NSStackView()
-        normalColorsStack.orientation = .horizontal
-        normalColorsStack.spacing = 4
-
-        let normalColors = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"]
-        for key in normalColors {
-            normalColorsStack.addArrangedSubview(createColorWell(key: key))
-        }
-        normalRow.addArrangedSubview(normalColorsStack)
-
-        // Bright colors row
-        let brightRow = NSStackView()
-        brightRow.orientation = .horizontal
-        brightRow.spacing = 8
-
-        let brightLabel = NSTextField(labelWithString: "Bright")
-        brightLabel.font = .systemFont(ofSize: 11)
-        brightLabel.textColor = .secondaryLabelColor
-        brightLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        brightLabel.widthAnchor.constraint(equalToConstant: 50).isActive = true
-        brightRow.addArrangedSubview(brightLabel)
-
-        let brightColorsStack = NSStackView()
-        brightColorsStack.orientation = .horizontal
-        brightColorsStack.spacing = 4
-
-        let brightColors = ["brightBlack", "brightRed", "brightGreen", "brightYellow",
-                           "brightBlue", "brightMagenta", "brightCyan", "brightWhite"]
-        for key in brightColors {
-            brightColorsStack.addArrangedSubview(createColorWell(key: key))
-        }
-        brightRow.addArrangedSubview(brightColorsStack)
-
-        ansiColorsSection.addArrangedSubview(normalRow)
-        ansiColorsSection.addArrangedSubview(brightRow)
-    }
-
-    private func createLabeledColorWell(key: String, label: String) -> NSStackView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 6
-        stack.alignment = .centerX
-
-        let well: NSColorWell
-        if #available(macOS 13.0, *) {
-            well = NSColorWell(style: .minimal)
-        } else {
-            well = NSColorWell()
-        }
-        well.translatesAutoresizingMaskIntoConstraints = false
-        well.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        well.heightAnchor.constraint(equalToConstant: 28).isActive = true
-        well.target = self
-        well.action = #selector(colorChanged(_:))
-        colorWells[key] = well
-
-        let labelField = NSTextField(labelWithString: label)
-        labelField.font = .systemFont(ofSize: 10)
-        labelField.textColor = .secondaryLabelColor
-
-        stack.addArrangedSubview(well)
-        stack.addArrangedSubview(labelField)
 
         return stack
     }
 
-    private func createColorWell(key: String) -> NSColorWell {
-        let well: NSColorWell
-        if #available(macOS 13.0, *) {
-            well = NSColorWell(style: .minimal)
-        } else {
-            well = NSColorWell()
-        }
-        well.translatesAutoresizingMaskIntoConstraints = false
-        well.widthAnchor.constraint(equalToConstant: Layout.colorWellSize).isActive = true
-        well.heightAnchor.constraint(equalToConstant: Layout.colorWellSize).isActive = true
-        well.target = self
-        well.action = #selector(colorChanged(_:))
-        colorWells[key] = well
-        return well
+    private func iconButton(_ symbol: String, tooltip: String, action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
+        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        button.bezelStyle = .roundRect
+        button.isBordered = true
+        button.toolTip = tooltip
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: Layout.buttonWidth).isActive = true
+        button.heightAnchor.constraint(equalToConstant: Layout.buttonHeight).isActive = true
+        return button
     }
 
     // MARK: - Data
@@ -416,16 +250,16 @@ final class ThemePreferencesViewController: NSViewController {
         themes = ThemeManager.shared.allThemes
         themeTableView.reloadData()
 
-        if selectedTheme == nil && !themes.isEmpty {
-            // Select the currently active theme by default
-            let activeThemeName = ProfileStorage.shared.defaultProfile.theme.name
-            if let index = themes.firstIndex(where: { $0.name == activeThemeName }) {
-                selectedTheme = themes[index]
-                themeTableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-            } else {
-                selectedTheme = themes[0]
-                themeTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-            }
+        // Keep whatever was selected across a reload — editing a colour reloads the list, and
+        // jumping back to the default theme mid-edit would be maddening.
+        let target = selectedTheme?.name ?? ThemeAssignments.defaultTheme.name
+        let index = themes.firstIndex { $0.name == target } ?? 0
+
+        if !themes.isEmpty {
+            selectedTheme = themes[index]
+            themeTableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        } else {
+            selectedTheme = nil
         }
 
         updateEditor()
@@ -436,174 +270,106 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     private func updateEditor() {
+        previewView.show(selectedTheme)
+
         guard let theme = selectedTheme else {
-            previewView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-            previewLabel.stringValue = ""
-            colorWells.values.forEach { $0.isEnabled = false }
+            builtInBanner.isHidden = true
+            removeButton.isEnabled = false
             return
         }
 
-        // Update preview with colored text
-        previewView.layer?.backgroundColor = theme.background.cgColor
-        previewLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-
-        let previewString = NSMutableAttributedString()
-        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-
-        // Line 1: prompt with bright green user and bright blue path
-        previewString.append(NSAttributedString(string: "user@mac", attributes: [.foregroundColor: theme.brightGreen, .font: font]))
-        previewString.append(NSAttributedString(string: ":", attributes: [.foregroundColor: theme.foreground, .font: font]))
-        previewString.append(NSAttributedString(string: "~/projects", attributes: [.foregroundColor: theme.brightBlue, .font: font]))
-        previewString.append(NSAttributedString(string: "$ ls\n", attributes: [.foregroundColor: theme.foreground, .font: font]))
-
-        // Line 2: directory listing (bright blue for dirs, bright red for errors)
-        previewString.append(NSAttributedString(string: "Documents  ", attributes: [.foregroundColor: theme.brightBlue, .font: font]))
-        previewString.append(NSAttributedString(string: "README.md  ", attributes: [.foregroundColor: theme.foreground, .font: font]))
-        previewString.append(NSAttributedString(string: "error.log\n", attributes: [.foregroundColor: theme.brightRed, .font: font]))
-
-        // Line 3: bright yellow warning
-        previewString.append(NSAttributedString(string: "Warning: ", attributes: [.foregroundColor: theme.brightYellow, .font: font]))
-        previewString.append(NSAttributedString(string: "check config\n", attributes: [.foregroundColor: theme.foreground, .font: font]))
-
-        // Line 4: cursor
-        previewString.append(NSAttributedString(string: "$ _", attributes: [.foregroundColor: theme.foreground, .font: font]))
-
-        previewLabel.attributedStringValue = previewString
-
-        // Update color wells
-        let isEditable = !ThemeManager.shared.isBuiltIn(theme)
-
-        colorWells["foreground"]?.color = theme.foreground
-        colorWells["background"]?.color = theme.background
-        colorWells["cursor"]?.color = theme.cursor
-        colorWells["selection"]?.color = theme.selection
-        colorWells["black"]?.color = theme.black
-        colorWells["red"]?.color = theme.red
-        colorWells["green"]?.color = theme.green
-        colorWells["yellow"]?.color = theme.yellow
-        colorWells["blue"]?.color = theme.blue
-        colorWells["magenta"]?.color = theme.magenta
-        colorWells["cyan"]?.color = theme.cyan
-        colorWells["white"]?.color = theme.white
-        colorWells["brightBlack"]?.color = theme.brightBlack
-        colorWells["brightRed"]?.color = theme.brightRed
-        colorWells["brightGreen"]?.color = theme.brightGreen
-        colorWells["brightYellow"]?.color = theme.brightYellow
-        colorWells["brightBlue"]?.color = theme.brightBlue
-        colorWells["brightMagenta"]?.color = theme.brightMagenta
-        colorWells["brightCyan"]?.color = theme.brightCyan
-        colorWells["brightWhite"]?.color = theme.brightWhite
-
-        colorWells.values.forEach { $0.isEnabled = isEditable }
-        removeButton.isEnabled = isEditable
+        let isBuiltIn = ThemeManager.shared.isBuiltIn(theme)
+        colorEditor.show(theme, isEditable: !isBuiltIn)
+        builtInBanner.isHidden = !isBuiltIn
+        removeButton.isEnabled = !isBuiltIn
+        useThemeButton.isEnabled = theme.name != ThemeAssignments.defaultTheme.name
     }
 
     // MARK: - Actions
 
     @objc private func useSelectedTheme() {
         guard let theme = selectedTheme else { return }
-        ProfileStorage.shared.setTheme(theme)
-        // Reload table to update checkmark indicator
+        ThemeAssignments.setDefaultTheme(theme)
         themeTableView.reloadData()
+        updateEditor()
     }
 
     @objc private func addTheme() {
         var newTheme = TerminalTheme.basic
-        var counter = 1
-        var newName = "New Theme"
+        newTheme.name = uniqueName(basedOn: "New Theme")
 
-        while themes.contains(where: { $0.name == newName }) {
-            counter += 1
-            newName = "New Theme \(counter)"
-        }
+        guard ThemeAssignments.create(newTheme) else { return }
 
-        newTheme.name = newName
-        ThemeManager.shared.addTheme(newTheme)
-
+        selectedTheme = newTheme
         loadThemes()
-        if let index = themes.firstIndex(where: { $0.name == newName }) {
-            selectedTheme = themes[index]
-            themeTableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-            updateEditor()
+        renameTheme()
+    }
+
+    private func uniqueName(basedOn base: String) -> String {
+        var name = base
+        var counter = 1
+        while ThemeManager.shared.theme(named: name) != nil {
+            counter += 1
+            name = "\(base) \(counter)"
         }
+        return name
     }
 
     @objc private func removeTheme() {
         guard let theme = selectedTheme else { return }
 
-        if ThemeManager.shared.isBuiltIn(theme) {
-            let alert = NSAlert()
-            alert.messageText = "Cannot Delete"
-            alert.informativeText = "Built-in themes cannot be deleted. You can duplicate it and modify the copy."
-            alert.runModal()
+        guard !ThemeManager.shared.isBuiltIn(theme) else {
+            presentAlert(
+                "Cannot Delete",
+                "Built-in themes cannot be deleted. Duplicate this one and change the copy instead."
+            )
             return
         }
 
         let alert = NSAlert()
-        alert.messageText = "Delete Theme"
-        alert.informativeText = "Are you sure you want to delete \"\(theme.name)\"?"
+        alert.messageText = "Delete “\(theme.name)”?"
+        alert.informativeText = "Sessions and projects using it fall back to the theme they inherit."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
 
-        if alert.runModal() == .alertFirstButtonReturn {
-            let deleted = ThemeManager.shared.deleteTheme(theme)
-            if deleted {
-                // Reload themes first, then select a new one
-                themes = ThemeManager.shared.allThemes
-                selectedTheme = themes.first
-                themeTableView.reloadData()
-                if !themes.isEmpty {
-                    themeTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-                }
-                updateEditor()
-            }
-        }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard ThemeManager.shared.deleteTheme(theme) else { return }
+
+        selectedTheme = nil
+        loadThemes()
     }
 
     @objc private func importFromTerminal() {
+        guard let type = UTType(filenameExtension: "terminal"), let window = view.window else { return }
+
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "terminal")!]
+        panel.allowedContentTypes = [type]
         panel.allowsMultipleSelection = true
         panel.message = "Select Terminal.app theme files to import"
 
-        panel.beginSheetModal(for: view.window!) { [weak self] response in
-            guard response == .OK else { return }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let self else { return }
 
             var lastImported: TerminalTheme?
-
             for url in panel.urls {
                 do {
-                    let theme = try ThemeManager.shared.importAppleTerminalTheme(from: url)
-                    lastImported = theme
+                    lastImported = try ThemeManager.shared.importAppleTerminalTheme(from: url)
                 } catch {
-                    let alert = NSAlert(error: error)
-                    alert.runModal()
+                    NSAlert(error: error).runModal()
                 }
             }
 
-            if let theme = lastImported {
-                self?.loadThemes()
-                if let index = self?.themes.firstIndex(where: { $0.name == theme.name }) {
-                    self?.selectedTheme = theme
-                    self?.themeTableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-                    self?.updateEditor()
-                }
-            }
+            guard let lastImported else { return }
+            self.selectedTheme = lastImported
+            self.loadThemes()
         }
     }
 
     @objc private func duplicateTheme() {
         guard let theme = selectedTheme else { return }
-
-        let newTheme = ThemeManager.shared.duplicateTheme(theme)
+        selectedTheme = ThemeManager.shared.duplicateTheme(theme)
         loadThemes()
-
-        if let index = themes.firstIndex(where: { $0.name == newTheme.name }) {
-            selectedTheme = newTheme
-            themeTableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-            updateEditor()
-        }
     }
 
     @objc private func renameTheme() {
@@ -611,97 +377,87 @@ final class ThemePreferencesViewController: NSViewController {
 
         let alert = NSAlert()
         alert.messageText = "Rename Theme"
-        alert.informativeText = "Enter a new name for \"\(theme.name)\":"
+        alert.informativeText = "Enter a new name for “\(theme.name)”:"
         alert.addButton(withTitle: "Rename")
         alert.addButton(withTitle: "Cancel")
 
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-        textField.stringValue = theme.name
-        alert.accessoryView = textField
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.stringValue = theme.name
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
 
-        if alert.runModal() == .alertFirstButtonReturn {
-            let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !newName.isEmpty && newName != theme.name {
-                if ThemeManager.shared.renameTheme(theme, to: newName) {
-                    loadThemes()
-                    if let index = themes.firstIndex(where: { $0.name == newName }) {
-                        selectedTheme = themes[index]
-                        themeTableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-                    }
-                } else {
-                    let errorAlert = NSAlert()
-                    errorAlert.messageText = "Cannot Rename"
-                    errorAlert.informativeText = "A theme with that name already exists."
-                    errorAlert.runModal()
-                }
-            }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty, newName != theme.name else { return }
+
+        // Through `ThemeAssignments`, which re-points every session and project naming the old
+        // one — `ThemeManager` alone would leave them all inheriting again.
+        guard ThemeAssignments.rename(theme, to: newName) else {
+            presentAlert("Cannot Rename", "A theme with that name already exists.")
+            return
         }
+
+        selectedTheme = ThemeManager.shared.theme(named: newName)
+        loadThemes()
     }
 
     @objc private func exportTheme() {
-        guard let theme = selectedTheme else { return }
+        guard let theme = selectedTheme, let window = view.window else { return }
 
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType.json]
+        panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "\(theme.name).json"
         panel.message = "Export theme as JSON"
 
-        panel.beginSheetModal(for: view.window!) { response in
+        panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }
 
             do {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                let data = try encoder.encode(theme)
-                try data.write(to: url)
+                try encoder.encode(theme).write(to: url)
             } catch {
-                let alert = NSAlert(error: error)
-                alert.runModal()
+                NSAlert(error: error).runModal()
             }
         }
     }
 
-    @objc private func colorChanged(_ sender: NSColorWell) {
+    /// Writes one changed colour back to the theme, and to the default if this is it.
+    ///
+    /// The list is *not* reloaded here: a reload rebuilds the rows under a colour panel the
+    /// user is still dragging in, and the only thing on screen that a single colour changes is
+    /// the row's own swatch and the preview.
+    private func apply(_ color: NSColor, for key: ThemeColorKey) {
         guard var theme = selectedTheme, !ThemeManager.shared.isBuiltIn(theme) else { return }
 
-        for (key, well) in colorWells where well === sender {
-            let color = sender.color
-
-            switch key {
-            case "foreground": theme.foreground = color
-            case "background": theme.background = color
-            case "cursor": theme.cursor = color
-            case "selection": theme.selection = color
-            case "black": theme.black = color
-            case "red": theme.red = color
-            case "green": theme.green = color
-            case "yellow": theme.yellow = color
-            case "blue": theme.blue = color
-            case "magenta": theme.magenta = color
-            case "cyan": theme.cyan = color
-            case "white": theme.white = color
-            case "brightBlack": theme.brightBlack = color
-            case "brightRed": theme.brightRed = color
-            case "brightGreen": theme.brightGreen = color
-            case "brightYellow": theme.brightYellow = color
-            case "brightBlue": theme.brightBlue = color
-            case "brightMagenta": theme.brightMagenta = color
-            case "brightCyan": theme.brightCyan = color
-            case "brightWhite": theme.brightWhite = color
-            default: break
-            }
-
-            break
-        }
-
+        theme[key] = color
         ThemeManager.shared.addTheme(theme)
         selectedTheme = theme
-        updateEditor()
+        themes = ThemeManager.shared.allThemes
 
-        // If this is the active theme, apply changes immediately to terminals
-        if ProfileStorage.shared.defaultProfile.theme.name == theme.name {
-            ProfileStorage.shared.setTheme(theme)
+        previewView.show(theme)
+        reloadRow(named: theme.name)
+
+        // The default carries an embedded copy of the theme rather than its name, so an edit
+        // reaches the terminals only by re-saving it.
+        if ThemeAssignments.defaultTheme.name == theme.name {
+            ThemeAssignments.setDefaultTheme(theme)
+        } else {
+            NotificationCenter.default.post(name: .themeAssignmentsDidChange, object: nil)
         }
+    }
+
+    private func reloadRow(named name: String) {
+        guard let row = themes.firstIndex(where: { $0.name == name }) else { return }
+        themeTableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+    }
+
+    private func presentAlert(_ title: String, _ message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 }
 
@@ -716,83 +472,77 @@ extension ThemePreferencesViewController: NSTableViewDataSource {
 // MARK: - NSTableViewDelegate
 
 extension ThemePreferencesViewController: NSTableViewDelegate {
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let theme = themes[row]
-        let isActiveTheme = ProfileStorage.shared.defaultProfile.theme.name == theme.name
+        let cell = tableView.makeView(withIdentifier: ThemeListRowView.identifier, owner: self)
+            as? ThemeListRowView ?? ThemeListRowView()
 
-        let cell = NSTableCellView()
-
-        // Theme thumbnail with foreground color text
-        let thumbnailView = NSView()
-        thumbnailView.translatesAutoresizingMaskIntoConstraints = false
-        thumbnailView.wantsLayer = true
-        thumbnailView.layer?.cornerRadius = 4
-        thumbnailView.layer?.backgroundColor = theme.background.cgColor
-        thumbnailView.layer?.borderWidth = 1
-        thumbnailView.layer?.borderColor = NSColor.separatorColor.cgColor
-
-        // Mini text in thumbnail
-        let miniText = NSTextField(labelWithString: ">_")
-        miniText.translatesAutoresizingMaskIntoConstraints = false
-        miniText.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-        miniText.textColor = theme.foreground
-        miniText.isBezeled = false
-        miniText.drawsBackground = false
-        thumbnailView.addSubview(miniText)
-
-        let textField = NSTextField(labelWithString: theme.name)
-        textField.translatesAutoresizingMaskIntoConstraints = false
-        textField.lineBreakMode = .byTruncatingTail
-
-        if ThemeManager.shared.isBuiltIn(theme) {
-            textField.textColor = .secondaryLabelColor
-        }
-
-        cell.addSubview(thumbnailView)
-        cell.addSubview(textField)
-
-        // Checkmark for active theme
-        var trailingConstraint: NSLayoutConstraint
-        if isActiveTheme {
-            let checkmark = NSImageView()
-            checkmark.translatesAutoresizingMaskIntoConstraints = false
-            checkmark.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: "Active")
-            checkmark.contentTintColor = .controlAccentColor
-            cell.addSubview(checkmark)
-
-            NSLayoutConstraint.activate([
-                checkmark.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                checkmark.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                checkmark.widthAnchor.constraint(equalToConstant: 14),
-                checkmark.heightAnchor.constraint(equalToConstant: 14)
-            ])
-            trailingConstraint = textField.trailingAnchor.constraint(equalTo: checkmark.leadingAnchor, constant: -4)
-        } else {
-            trailingConstraint = textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4)
-        }
-
-        NSLayoutConstraint.activate([
-            thumbnailView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-            thumbnailView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            thumbnailView.widthAnchor.constraint(equalToConstant: Layout.thumbnailWidth),
-            thumbnailView.heightAnchor.constraint(equalToConstant: Layout.thumbnailHeight),
-
-            miniText.centerXAnchor.constraint(equalTo: thumbnailView.centerXAnchor),
-            miniText.centerYAnchor.constraint(equalTo: thumbnailView.centerYAnchor),
-
-            textField.leadingAnchor.constraint(equalTo: thumbnailView.trailingAnchor, constant: 8),
-            textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            trailingConstraint
-        ])
-
+        cell.configure(
+            with: theme,
+            isDefault: theme.name == ThemeAssignments.defaultTheme.name
+        )
         return cell
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         let row = themeTableView.selectedRow
-        if row >= 0 && row < themes.count {
-            selectedTheme = themes[row]
-            updateEditor()
-        }
+        guard row >= 0, row < themes.count else { return }
+        selectedTheme = themes[row]
+        updateEditor()
+    }
+}
+
+// MARK: - Theme Row
+
+/// One theme in the list: what it looks like, what it is called, and whether it is the default.
+///
+/// The swatch leads deliberately. A theme is a set of colours, so a column of names is a list
+/// of things the user cannot see — the row's job is to make the list scannable without
+/// selecting every entry in turn to preview it.
+private final class ThemeListRowView: NSTableCellView {
+
+    static let identifier = NSUserInterfaceItemIdentifier("ThemeListRow")
+
+    private let swatch = NSImageView()
+    private let name = NSTextField(labelWithString: "")
+    private let badge = NSTextField(labelWithString: "Default")
+
+    init() {
+        super.init(frame: .zero)
+        identifier = Self.identifier
+
+        name.font = Design.Typography.body()
+        name.lineBreakMode = .byTruncatingTail
+        badge.font = Design.Typography.caption()
+        badge.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(views: [swatch, name, NSView(), badge])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = Design.Spacing.medium
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.medium)
+        ])
+
+        name.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        badge.setContentHuggingPriority(.required, for: .horizontal)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(with theme: TerminalTheme, isDefault: Bool) {
+        swatch.image = ThemeSwatchImage.listSwatch(for: theme)
+        name.stringValue = theme.name
+        badge.isHidden = !isDefault
     }
 }

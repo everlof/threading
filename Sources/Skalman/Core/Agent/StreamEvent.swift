@@ -5,7 +5,7 @@ import Foundation
 /// One provider-neutral event consumed by the native conversation view.
 ///
 /// Claude and Codex adapters map their different JSONL shapes here. Only what the panel
-/// actually needs is modelled; anything unrecognised becomes `.other`, so a new provider event
+/// actually needs is modelled; anything unrecognised becomes `.unknown`, so a new provider event
 /// in a future release is ignored rather than fatal.
 enum StreamEvent {
 
@@ -32,7 +32,7 @@ enum StreamEvent {
     case turnFinished(text: String?, isError: Bool)
 
     /// Anything not modelled, kept so callers can log without the parser throwing.
-    case other(type: String)
+    case unknown(type: String)
 }
 
 // MARK: - Content Block
@@ -52,71 +52,216 @@ struct ToolResult {
     let isError: Bool
 }
 
+// MARK: - JSON Value
+
+/// Arbitrary JSON retained inside typed provider envelopes, primarily for tool arguments and
+/// results whose schemas belong to the tool rather than to the stream protocol.
+enum JSONValue: Codable, Equatable {
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case string(String)
+    case integer(Int64)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Int64.self) {
+            self = .integer(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else {
+            self = .object(try container.decode([String: JSONValue].self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .integer(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+
+    var stringValue: String? {
+        guard case .string(let value) = self else { return nil }
+        return value
+    }
+
+    var objectValue: [String: JSONValue]? {
+        guard case .object(let value) = self else { return nil }
+        return value
+    }
+
+    var foundationValue: Any {
+        switch self {
+        case .object(let value):
+            return value.mapValues(\.foundationValue)
+        case .array(let value):
+            return value.map(\.foundationValue)
+        case .string(let value):
+            return value
+        case .integer(let value):
+            return Int(exactly: value) ?? value
+        case .number(let value):
+            return value
+        case .bool(let value):
+            return value
+        case .null:
+            return NSNull()
+        }
+    }
+
+    var foundationObject: [String: Any]? {
+        objectValue?.mapValues(\.foundationValue)
+    }
+
+    func encodedText(prettyPrinted: Bool = false) -> String {
+        let encoder = JSONEncoder()
+        if prettyPrinted { encoder.outputFormatting = [.prettyPrinted, .sortedKeys] }
+        guard let data = try? encoder.encode(self) else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+
+// MARK: - Parse Result
+
+/// A complete JSONL line either yields zero or more provider-neutral events, or is malformed.
+/// Unknown but well-formed provider events are ordinary `.unknown` events, never malformed.
+enum StreamLineParseResult {
+    case events([StreamEvent])
+    case malformed
+}
+
+struct StreamParseDiagnostics {
+    private(set) var malformedLineCount = 0
+
+    mutating func reset() {
+        malformedLineCount = 0
+    }
+
+    mutating func recordMalformedLine(provider: String) {
+        malformedLineCount += 1
+        let total = malformedLineCount
+        SkalmanLogger.agent.warning(
+            "Skipped malformed \(provider, privacy: .public) stream line; total \(total)"
+        )
+    }
+}
+
 // MARK: - Parsing
 
 extension StreamEvent {
 
     /// Parses one line of `stream-json` output.
     ///
-    /// Returns nil for lines that are not JSON at all, which the CLI should not emit but a
-    /// crashing subprocess might.
-    static func parse(_ line: String) -> StreamEvent? {
+    static func parse(_ line: String) -> StreamLineParseResult {
         guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else { return nil }
+              let wire = try? JSONDecoder().decode(ClaudeWireEvent.self, from: data)
+        else { return .malformed }
 
-        switch type {
+        let event: StreamEvent
+        switch wire.type {
         case "system":
-            guard object["subtype"] as? String == "init" else { return .other(type: "system") }
-            return .initialised(
-                sessionID: (object["session_id"] as? String).map(TranscriptID.init),
-                model: object["model"] as? String
-            )
+            guard wire.subtype == "init" else {
+                return .events([.unknown(type: "system")])
+            }
+            event = .initialised(sessionID: wire.sessionID.map(TranscriptID.init), model: wire.model)
 
         case "stream_event":
-            return parseStreamEvent(object)
+            event = parseStreamEvent(wire.event)
 
         case "assistant":
-            let content = (object["message"] as? [String: Any])?["content"] as? [[String: Any]]
-            return .assistantMessage(blocks: (content ?? []).compactMap(contentBlock))
-
-        case "user":
-            let content = (object["message"] as? [String: Any])?["content"] as? [[String: Any]]
-            let results = (content ?? []).compactMap(toolResult)
-            return results.isEmpty ? .other(type: "user") : .toolResults(results)
-
-        case "result":
-            return .turnFinished(
-                text: object["result"] as? String,
-                isError: object["is_error"] as? Bool ?? false
+            event = .assistantMessage(
+                blocks: (wire.message?.content ?? []).compactMap(contentBlock)
             )
 
+        case "user":
+            let results = (wire.message?.content ?? []).compactMap(toolResult)
+            event = results.isEmpty ? .unknown(type: "user") : .toolResults(results)
+
+        case "result":
+            event = .turnFinished(text: wire.result, isError: wire.isError)
+
         default:
-            return .other(type: type)
+            event = .unknown(type: wire.type)
         }
+
+        return .events([event])
     }
 
     /// Only the deltas that carry visible text are surfaced; block start and stop are
     /// implied by the complete message that follows.
-    private static func parseStreamEvent(_ object: [String: Any]) -> StreamEvent {
-        guard let event = object["event"] as? [String: Any],
-              event["type"] as? String == "content_block_delta",
-              let delta = event["delta"] as? [String: Any] else {
-            return .other(type: "stream_event")
+    private static func parseStreamEvent(_ event: ClaudeWireStreamEvent?) -> StreamEvent {
+        guard event?.type == "content_block_delta", let delta = event?.delta else {
+            return .unknown(type: "stream_event")
         }
 
-        switch delta["type"] as? String {
+        switch delta.type {
         case "text_delta":
-            return .textDelta(delta["text"] as? String ?? "")
+            return .textDelta(delta.text ?? "")
         case "thinking_delta":
-            return .thinkingDelta(delta["thinking"] as? String ?? "")
+            return .thinkingDelta(delta.thinking ?? "")
         default:
             // `input_json_delta` streams a tool's arguments a fragment at a time. Showing
             // half-formed JSON helps nobody; the finished call arrives with the message.
-            return .other(type: "stream_event")
+            return .unknown(type: "stream_event")
         }
     }
 
+    private static func contentBlock(_ block: ClaudeWireContentBlock) -> ContentBlock? {
+        switch block.type {
+        case "text":
+            return .text(block.text ?? "")
+        case "thinking":
+            return .thinking(block.thinking ?? "")
+        case "tool_use":
+            guard let id = block.id, let name = block.name else {
+                return nil
+            }
+            return .toolUse(id: id, name: name, input: block.input?.foundationObject ?? [:])
+        default:
+            return nil
+        }
+    }
+
+    private static func toolResult(_ block: ClaudeWireContentBlock) -> ToolResult? {
+        guard block.type == "tool_result", let id = block.toolUseID else { return nil }
+
+        return ToolResult(
+            toolUseID: id,
+            text: resultText(block.content),
+            isError: block.isError
+        )
+    }
+
+    /// A tool result's content is a bare string for simple tools and an array of blocks for
+    /// ones that return structured output, so both shapes are flattened to text.
+    private static func resultText(_ content: JSONValue?) -> String {
+        if let text = content?.stringValue { return text }
+        guard case .array(let blocks) = content else { return "" }
+        return blocks
+            .compactMap { $0.objectValue?["text"]?.stringValue }
+            .joined(separator: "\n")
+    }
+
+    // Transcript replay still reads scrubbed records through `JSONLReader`'s Foundation
+    // representation. These adapters keep that disk format separate from the live Codable wire
+    // models above until the transcript boundary gets its own migration.
     static func contentBlock(_ block: [String: Any]) -> ContentBlock? {
         switch block["type"] as? String {
         case "text":
@@ -139,20 +284,125 @@ extension StreamEvent {
 
         return ToolResult(
             toolUseID: id,
-            text: resultText(block["content"]),
+            text: transcriptResultText(block["content"]),
             isError: block["is_error"] as? Bool ?? false
         )
     }
 
-    /// A tool result's content is a bare string for simple tools and an array of blocks for
-    /// ones that return structured output, so both shapes are flattened to text.
-    static func resultText(_ content: Any?) -> String {
+    private static func transcriptResultText(_ content: Any?) -> String {
         if let text = content as? String { return text }
-
         guard let blocks = content as? [[String: Any]] else { return "" }
-
         return blocks
             .compactMap { $0["text"] as? String }
             .joined(separator: "\n")
+    }
+}
+
+// MARK: - Claude Wire Models
+
+private struct ClaudeWireEvent: Decodable {
+    let type: String
+    let subtype: String?
+    let sessionID: String?
+    let model: String?
+    let event: ClaudeWireStreamEvent?
+    let message: ClaudeWireMessage?
+    let result: String?
+    let isError: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case type, subtype, model, event, message, result
+        case sessionID = "session_id"
+        case isError = "is_error"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        subtype = try? container.decode(String.self, forKey: .subtype)
+        sessionID = try? container.decode(String.self, forKey: .sessionID)
+        model = try? container.decode(String.self, forKey: .model)
+        event = try? container.decode(ClaudeWireStreamEvent.self, forKey: .event)
+        message = try? container.decode(ClaudeWireMessage.self, forKey: .message)
+        result = try? container.decode(String.self, forKey: .result)
+        isError = (try? container.decode(Bool.self, forKey: .isError)) ?? false
+    }
+}
+
+private struct ClaudeWireStreamEvent: Decodable {
+    let type: String?
+    let delta: ClaudeWireDelta?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        type = try? container.decode(String.self, forKey: DynamicCodingKey("type"))
+        delta = try? container.decode(ClaudeWireDelta.self, forKey: DynamicCodingKey("delta"))
+    }
+}
+
+private struct ClaudeWireDelta: Decodable {
+    let type: String?
+    let text: String?
+    let thinking: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        type = try? container.decode(String.self, forKey: DynamicCodingKey("type"))
+        text = try? container.decode(String.self, forKey: DynamicCodingKey("text"))
+        thinking = try? container.decode(String.self, forKey: DynamicCodingKey("thinking"))
+    }
+}
+
+private struct ClaudeWireMessage: Decodable {
+    let content: [ClaudeWireContentBlock]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        content = (try? container.decode(
+            [ClaudeWireContentBlock].self,
+            forKey: DynamicCodingKey("content")
+        )) ?? []
+    }
+}
+
+private struct ClaudeWireContentBlock: Decodable {
+    let type: String?
+    let text: String?
+    let thinking: String?
+    let id: String?
+    let name: String?
+    let input: JSONValue?
+    let toolUseID: String?
+    let content: JSONValue?
+    let isError: Bool
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        type = try? container.decode(String.self, forKey: DynamicCodingKey("type"))
+        text = try? container.decode(String.self, forKey: DynamicCodingKey("text"))
+        thinking = try? container.decode(String.self, forKey: DynamicCodingKey("thinking"))
+        id = try? container.decode(String.self, forKey: DynamicCodingKey("id"))
+        name = try? container.decode(String.self, forKey: DynamicCodingKey("name"))
+        input = try? container.decode(JSONValue.self, forKey: DynamicCodingKey("input"))
+        toolUseID = try? container.decode(String.self, forKey: DynamicCodingKey("tool_use_id"))
+        content = try? container.decode(JSONValue.self, forKey: DynamicCodingKey("content"))
+        isError = (try? container.decode(Bool.self, forKey: DynamicCodingKey("is_error"))) ?? false
+    }
+}
+
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init(_ stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(stringValue: String) {
+        self.init(stringValue)
+    }
+
+    init?(intValue: Int) {
+        return nil
     }
 }

@@ -179,7 +179,7 @@ struct ConversationTimeline {
             changes.append(.status(.ready(model: nil)))
             return changes
 
-        case .other:
+        case .unknown:
             return []
         }
     }

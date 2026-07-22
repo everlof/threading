@@ -33,6 +33,9 @@ final class ClaudeStreamSession: ConversationStreamSession {
     /// than not, so lines are only parsed once their newline has arrived.
     private var buffer = Data()
 
+    private var parseDiagnostics = StreamParseDiagnostics()
+    var malformedLineCount: Int { parseDiagnostics.malformedLineCount }
+
     /// Diagnostic fallback for a child that exits before stream-json can explain why.
     private var errorBuffer = Data()
 
@@ -68,6 +71,7 @@ final class ClaudeStreamSession: ConversationStreamSession {
 
         buffer.removeAll(keepingCapacity: true)
         errorBuffer.removeAll(keepingCapacity: true)
+        parseDiagnostics.reset()
 
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
@@ -159,10 +163,17 @@ final class ClaudeStreamSession: ConversationStreamSession {
             let lineData = buffer[buffer.startIndex..<newline]
             buffer = Data(buffer[buffer.index(after: newline)...])
 
-            guard let line = String(data: lineData, encoding: .utf8),
-                  let event = StreamEvent.parse(line) else { continue }
+            guard let line = String(data: lineData, encoding: .utf8) else {
+                parseDiagnostics.recordMalformedLine(provider: "Claude")
+                continue
+            }
 
-            onEvent?(event)
+            switch StreamEvent.parse(line) {
+            case .events(let events):
+                for event in events { onEvent?(event) }
+            case .malformed:
+                parseDiagnostics.recordMalformedLine(provider: "Claude")
+            }
         }
     }
 

@@ -60,6 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MCPServer.shared.start { [weak self] in
             self?.mainWindowController.restoreSelectedSession()
         }
+
+        // The disk survey runs itself from here on, at background priority and on its own
+        // delay — it is the least urgent thing the app does, and the Storage page is only ever
+        // reading what it has already found.
+        ArtifactScanService.shared.startPassiveScanning()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

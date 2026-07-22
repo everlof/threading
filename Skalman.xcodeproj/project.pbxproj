@@ -35,6 +35,7 @@
 		4CC29E6CBEE5E72D3B78DCBD /* GitCommitGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */; };
 		287B00D68004042D190D2F68 /* GitStagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3779521669E4E149E1C77B10 /* GitStagingTests.swift */; };
 		FD8F1D30E29CF4F0EB06D000 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */; };
+		CA89150A08702C023D3D9A45 /* ProjectDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE242D7B54894292C2D86C32 /* ProjectDatabaseTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -77,6 +78,7 @@
 		20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitCommitGraphTests.swift; sourceTree = "<group>"; };
 		3779521669E4E149E1C77B10 /* GitStagingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitStagingTests.swift; sourceTree = "<group>"; };
 		B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
+		CE242D7B54894292C2D86C32 /* ProjectDatabaseTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectDatabaseTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -162,6 +164,7 @@
 				20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */,
 				3779521669E4E149E1C77B10 /* GitStagingTests.swift */,
 				B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */,
+				CE242D7B54894292C2D86C32 /* ProjectDatabaseTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -323,6 +326,7 @@
 				4CC29E6CBEE5E72D3B78DCBD /* GitCommitGraphTests.swift in Sources */,
 				287B00D68004042D190D2F68 /* GitStagingTests.swift in Sources */,
 				FD8F1D30E29CF4F0EB06D000 /* AppDelegateTests.swift in Sources */,
+				CA89150A08702C023D3D9A45 /* ProjectDatabaseTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

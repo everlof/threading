@@ -638,8 +638,18 @@ private extension ProjectSidebarViewController {
         return row >= 0 ? row : nil
     }
 
+    /// The session a context menu action applies to, when one was clicked.
+    ///
+    /// Internal rather than private: the theme menu is built in `ProjectSidebarThemeMenu` and
+    /// serves the right-click menu as well as the row's `⋯` button.
+    func contextSessionID() -> SessionID? {
+        guard let row = contextRow(),
+              let node = outlineView.item(atRow: row) as? SessionNode else { return nil }
+        return node.sessionID
+    }
+
     /// The project a context menu action applies to, whether a project or session was clicked.
-    private func contextProjectID() -> ProjectID? {
+    func contextProjectID() -> ProjectID? {
         guard let row = contextRow() else { return nil }
 
         if let node = outlineView.item(atRow: row) as? ProjectNode {
@@ -969,8 +979,9 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             // The heading offers the display option that created it, and nothing else — it
             // is a grouping, not a place.
             menu.addItem(makeBranchGroupingItem())
-        } else if item is SessionNode {
+        } else if let node = item as? SessionNode {
             menu.addItem(withTitle: "Rename Session…", action: #selector(renameClicked), keyEquivalent: "")
+            menu.addItem(makeSessionThemeItem(for: node.sessionID))
             menu.addItem(.separator())
             menu.addItem(withTitle: "Delete Session", action: #selector(removeClicked), keyEquivalent: "")
         }
@@ -992,6 +1003,9 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         menu.addItem(withTitle: "Rename Project…", action: #selector(renameClicked), keyEquivalent: "")
         menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealInFinderClicked), keyEquivalent: "")
         menu.addItem(makeProjectIconItem())
+        if let projectID = contextProjectID() {
+            menu.addItem(makeProjectThemeItem(for: projectID))
+        }
         menu.addItem(
             withTitle: "Reclaim Disk Space…",
             action: #selector(reclaimDiskSpaceClicked),

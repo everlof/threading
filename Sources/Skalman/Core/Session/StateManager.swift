@@ -35,6 +35,9 @@ final class StateManager {
     private let appSupportDirectoryOverride: URL?
     private let now: () -> Date
 
+    private var openDatabase: ProjectDatabase?
+    private var didAttemptPanelImport = false
+
     /// The injectable directory and clock keep persistence tests away from the user's real state.
     init(
         appSupportDirectory: URL? = nil,
@@ -89,21 +92,7 @@ final class StateManager {
     @discardableResult
     func saveProjectsState(_ state: ProjectsState) -> Bool {
         do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(state)
-
-            // Move the last known-good state aside before replacing it. If any part of that
-            // rotation fails, leave the current file untouched instead of falling through to
-            // an overwrite without a backup.
-            if fileManager.fileExists(atPath: projectsStateURL.path) {
-                if fileManager.fileExists(atPath: projectsBackupURL.path) {
-                    try fileManager.removeItem(at: projectsBackupURL)
-                }
-                try fileManager.moveItem(at: projectsStateURL, to: projectsBackupURL)
-            }
-
-            try data.write(to: projectsStateURL, options: .atomic)
+            try database().save(state)
             return true
         } catch {
             SkalmanLogger.agent.error("Failed to save projects state: \(error.localizedDescription, privacy: .public)")
@@ -111,18 +100,67 @@ final class StateManager {
         }
     }
 
+    /// Restores the store, importing a legacy `projects.json` the first time.
+    ///
+    /// Three outcomes, and the contract is the one the JSON document had: a missing store starts
+    /// fresh, a readable one loads, and an unreadable one is moved aside and reported — which is
+    /// what lets `ProjectStore` refuse to write over state it could not read.
     func loadProjectsState() -> ProjectsStateLoadResult {
-        guard fileManager.fileExists(atPath: projectsStateURL.path) else {
-            return .missing
-        }
-
         do {
-            let data = try Data(contentsOf: projectsStateURL)
-            return .loaded(try decodeAndMigrateProjectsState(from: data))
+            let database = try self.database()
+
+            if database.isEmpty, fileManager.fileExists(atPath: projectsStateURL.path) {
+                return try importLegacyProjectsState(into: database)
+            }
+
+            let state = try database.load()
+            return state.projects.isEmpty && state.selectedSessionID == nil ? .missing : .loaded(state)
         } catch {
-            SkalmanLogger.agent.error("Failed to load projects state: \(error.localizedDescription, privacy: .public)")
+            SkalmanLogger.agent.error(
+                "Failed to load projects state: \(error.localizedDescription, privacy: .public)"
+            )
+            return .failed(quarantinedAt: quarantineDatabase())
+        }
+    }
+
+    /// Reads the JSON document through the decoder and migration chain it always used, writes it
+    /// into the database in one transaction, and renames it out of the way.
+    ///
+    /// It is *renamed, never deleted*. opencode's own move off per-file JSON is the cautionary
+    /// tale — an update that recreated the directory without migrating took sessions with it —
+    /// and a file still sitting there is a rollback that costs nothing to keep.
+    private func importLegacyProjectsState(into database: ProjectDatabase) throws -> ProjectsStateLoadResult {
+        let data: Data
+        let state: ProjectsState
+        do {
+            data = try Data(contentsOf: projectsStateURL)
+            state = try decodeAndMigrateProjectsState(from: data)
+        } catch {
+            SkalmanLogger.agent.error(
+                "Legacy projects.json could not be read: \(error.localizedDescription, privacy: .public)"
+            )
             return .failed(quarantinedAt: quarantineProjectsState())
         }
+
+        try database.save(state)
+        retireLegacyProjectsState()
+
+        SkalmanLogger.agent.info(
+            "Imported \(state.projects.count, privacy: .public) projects from projects.json into the database"
+        )
+        return .loaded(state)
+    }
+
+    private func retireLegacyProjectsState() {
+        let retiredURL = projectsStateURL.appendingPathExtension(SQLiteDefaults.migratedSuffix)
+        try? fileManager.removeItem(at: retiredURL)
+        try? fileManager.moveItem(at: projectsStateURL, to: retiredURL)
+        // The rolling backup described the document, not the database; it would only ever be
+        // restored *over* an import that has already happened.
+        try? fileManager.moveItem(
+            at: projectsBackupURL,
+            to: projectsBackupURL.appendingPathExtension(SQLiteDefaults.migratedSuffix)
+        )
     }
 
     /// Reads the version before the full schema, refusing state from a newer app and routing
@@ -185,6 +223,127 @@ final class StateManager {
             )
             return nil
         }
+    }
+
+    /// Moves an unopenable database aside, so the next launch starts on a fresh one rather than
+    /// failing forever — and so the broken file is still there to look at.
+    private func quarantineDatabase() -> URL? {
+        openDatabase = nil
+
+        let destination = uniqueQuarantineURL(named: "\(SQLiteDefaults.databaseName).corrupt")
+        do {
+            try fileManager.moveItem(at: databaseURL, to: destination)
+            // WAL and shared-memory sidecars belong to the file they were written beside; left
+            // behind, SQLite would try to recover a fresh database from them.
+            for sidecar in ["-wal", "-shm"] {
+                let url = URL(fileURLWithPath: databaseURL.path + sidecar)
+                try? fileManager.removeItem(at: url)
+            }
+            SkalmanLogger.agent.error(
+                "Quarantined unreadable database at \(destination.path, privacy: .public)"
+            )
+            return destination
+        } catch {
+            SkalmanLogger.agent.error(
+                "Failed to quarantine the database: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+    }
+
+    private func uniqueQuarantineURL(named baseName: String) -> URL {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let stamped = "\(baseName)-\(formatter.string(from: now()))"
+        var destination = appSupportDirectory.appendingPathComponent(stamped)
+        var suffix = 2
+        while fileManager.fileExists(atPath: destination.path) {
+            destination = appSupportDirectory.appendingPathComponent("\(stamped)-\(suffix)")
+            suffix += 1
+        }
+        return destination
+    }
+
+    // MARK: - Panel Layouts
+
+    /// The display panel's stored record for a session, or nil when it has none.
+    ///
+    /// Routed through here rather than opened separately by `DisplayPaneStore`, so the process
+    /// keeps one connection: two would each hold their own WAL reader and checkpoint against
+    /// each other for no benefit.
+    func loadPanelPayload(for sessionID: SessionID) -> String? {
+        importLegacyPanelLayoutsIfNeeded()
+        return try? database().panelPayload(for: sessionID)
+    }
+
+    func savePanelPayload(_ payload: String, for sessionID: SessionID) {
+        do {
+            try database().savePanelPayload(payload, for: sessionID)
+        } catch {
+            SkalmanLogger.mcp.error(
+                "Could not persist display panel: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    func retainPanelLayouts(sessionIDs: Set<SessionID>) {
+        try? database().retainPanels(sessionIDs: sessionIDs)
+    }
+
+    /// Reads the `panels/<uuid>.json` files into the database once, then renames the directory.
+    ///
+    /// Attempted at most once per launch whether or not it finds anything, since the common
+    /// case is a user who has already migrated and the check is a directory listing.
+    private func importLegacyPanelLayoutsIfNeeded() {
+        guard !didAttemptPanelImport else { return }
+        didAttemptPanelImport = true
+
+        let legacyRoot = appSupportDirectory.appendingPathComponent(
+            DisplayPaneStoreDefaults.rootDirectory,
+            isDirectory: true
+        )
+        guard fileManager.fileExists(atPath: legacyRoot.path),
+              let database = try? self.database(),
+              !database.hasPanelLayouts else { return }
+
+        let files = (try? fileManager.contentsOfDirectory(at: legacyRoot, includingPropertiesForKeys: nil)) ?? []
+        var imported = 0
+
+        for file in files where file.pathExtension == DisplayPaneStoreDefaults.layoutExtension {
+            guard let sessionID = SessionID(uuidString: file.deletingPathExtension().lastPathComponent),
+                  let payload = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            try? database.savePanelPayload(payload, for: sessionID)
+            imported += 1
+        }
+
+        guard imported > 0 else { return }
+
+        // The cached images stay where they are — they are PNGs, and the directory keeps them.
+        // Only the layout files are retired, by extension, so the caches beside them survive.
+        for file in files where file.pathExtension == DisplayPaneStoreDefaults.layoutExtension {
+            try? fileManager.moveItem(
+                at: file,
+                to: file.appendingPathExtension(SQLiteDefaults.migratedSuffix)
+            )
+        }
+        SkalmanLogger.mcp.info("Imported \(imported, privacy: .public) display panel layouts into the database")
+    }
+
+    // MARK: - Database
+
+    private var databaseURL: URL {
+        appSupportDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
+    }
+
+    /// Opened once and held for the process. A connection is cheap but not free, and WAL wants
+    /// a long-lived one — reopening per write would checkpoint far more often than necessary.
+    private func database() throws -> ProjectDatabase {
+        if let openDatabase { return openDatabase }
+
+        let database = try ProjectDatabase(url: databaseURL)
+        openDatabase = database
+        return database
     }
 
     // MARK: - Legacy Cleanup

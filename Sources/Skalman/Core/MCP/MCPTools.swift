@@ -25,6 +25,16 @@ struct SetProjectIconArguments: Decodable {
     let url: String?
 }
 
+/// What an agent proposes removing, and why the user should agree.
+///
+/// Paths arrive as one absolute path per line, since the schema this server speaks has no
+/// array type. Whatever arrives is only ever *matched against* the current findings — see
+/// `MainWindowController.proposeStorageCleanup`.
+struct StorageCleanupArguments: Decodable {
+    let paths: String?
+    let reason: String?
+}
+
 enum PanelTabReference: Decodable, Equatable {
     case index(Int)
     case identifier(String)
@@ -56,6 +66,8 @@ enum MCPToolCall {
     case panelListTabs(EmptyToolArguments)
     case panelActivateTab(PanelActivateTabArguments)
     case setProjectIcon(SetProjectIconArguments)
+    case listReclaimableStorage(EmptyToolArguments)
+    case proposeStorageCleanup(StorageCleanupArguments)
     case unknown(String)
 
     var name: String {
@@ -69,6 +81,8 @@ enum MCPToolCall {
         case .panelListTabs: return MCPTools.panelListTabs
         case .panelActivateTab: return MCPTools.panelActivateTab
         case .setProjectIcon: return MCPTools.setProjectIcon
+        case .listReclaimableStorage: return MCPTools.listReclaimableStorage
+        case .proposeStorageCleanup: return MCPTools.proposeStorageCleanup
         case .unknown(let name): return name
         }
     }
@@ -131,6 +145,16 @@ struct MCPToolCallParameters: Decodable {
             call = .setProjectIcon(
                 try container.decodeIfPresent(SetProjectIconArguments.self, forKey: .arguments)
                     ?? SetProjectIconArguments(path: nil, url: nil)
+            )
+        case MCPTools.listReclaimableStorage:
+            call = .listReclaimableStorage(
+                try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+                    ?? EmptyToolArguments()
+            )
+        case MCPTools.proposeStorageCleanup:
+            call = .proposeStorageCleanup(
+                try container.decodeIfPresent(StorageCleanupArguments.self, forKey: .arguments)
+                    ?? StorageCleanupArguments(paths: nil, reason: nil)
             )
         default:
             call = .unknown(name)
@@ -255,11 +279,15 @@ enum MCPTools {
     static let setProjectIcon = "set_project_icon"
     static let projectTools = [setProjectIcon]
 
+    static let listReclaimableStorage = "list_reclaimable_storage"
+    static let proposeStorageCleanup = "propose_storage_cleanup"
+    static let storageTools = [listReclaimableStorage, proposeStorageCleanup]
+
     /// Every tool the server serves, all pre-approved together: each only calls back into the app
     /// the user is already looking at, and an agent with a shell already outreaches a browser
     /// click. `MCPToolCatalog` groups these and decides — from the user's Tools settings — which
     /// are actually advertised and pre-approved on a launch.
-    static let allTools = displayTools + browserTools + panelTools + projectTools
+    static let allTools = displayTools + browserTools + panelTools + projectTools + storageTools
 
     /// The full `tools/list` payload. `MCPToolCatalog.enabledDefinitions` filters this to the
     /// groups the user has switched on before it is served.
@@ -440,6 +468,48 @@ enum MCPTools {
                     )
                 ],
                 required: ["tab"]
+            )
+        ),
+        MCPToolDefinition(
+            name: listReclaimableStorage,
+            description: """
+                List build output across the user's projects that can be deleted and rebuilt — \
+                Rust and Swift build directories, node_modules, caches — with the size of each, \
+                which checkout it belongs to, and when it was last written. Use this when disk \
+                space is short, or when the user asks what is taking up space. Skalman has \
+                already checked that everything listed is ignored by git and rebuildable by a \
+                known command, so nothing tracked or irreplaceable appears here. Reading this \
+                changes nothing.
+                """,
+            inputSchema: MCPInputSchema(properties: [:], required: [])
+        ),
+        MCPToolDefinition(
+            name: proposeStorageCleanup,
+            description: """
+                Propose deleting some of what list_reclaimable_storage returned. This does not \
+                delete anything: it shows the user exactly what you are proposing and why, and \
+                they approve or decline. Only paths from that listing can be proposed. Say in \
+                `reason` what the user gets and what it costs — how much space, and what will \
+                have to be rebuilt.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "paths": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            The directories to propose removing, one absolute path per line, \
+                            each exactly as list_reclaimable_storage reported it.
+                            """
+                    ),
+                    "reason": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            One sentence the user will read, saying why these and what it \
+                            costs to rebuild them.
+                            """
+                    )
+                ],
+                required: ["paths"]
             )
         )
     ]

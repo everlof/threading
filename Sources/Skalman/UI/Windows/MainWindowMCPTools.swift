@@ -57,6 +57,12 @@ extension MainWindowController: MCPToolHandling {
             observed(panelActivateTab(arguments, for: sessionID))
         case .setProjectIcon(let arguments):
             setProjectIcon(arguments, for: sessionID, completion: completion)
+        case .listReclaimableStorage:
+            completion(listReclaimableStorage())
+        case .proposeStorageCleanup(let arguments):
+            // Answers only once the user has decided, so the agent's next turn knows the
+            // outcome rather than assuming one.
+            proposeStorageCleanup(arguments, completion: completion)
         default:
             observed(handle(call, for: sessionID))
         }

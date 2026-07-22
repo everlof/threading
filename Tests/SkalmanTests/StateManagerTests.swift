@@ -231,7 +231,11 @@ final class StateManagerTests: XCTestCase {
         }
     }
 
-    func testSaveRollsPreviousStateIntoBackup() throws {
+    /// The rolling `projects.json.bak` is gone, and this is what replaced it: a save is one
+    /// transaction, so the previous state survives anything that interrupts the next one.
+    /// There is no window in which the store is half-written, which is the whole reason a
+    /// backup copy existed.
+    func testSaveReplacesTheWholeStateAtomically() throws {
         let manager = makeManager()
         let first = ProjectsState(projects: [
             Project(name: "First", folderURL: URL(fileURLWithPath: "/tmp/first"))
@@ -243,14 +247,42 @@ final class StateManagerTests: XCTestCase {
         XCTAssertTrue(manager.saveProjectsState(first))
         XCTAssertTrue(manager.saveProjectsState(second))
 
-        let backupData = try Data(contentsOf: testDirectory.appendingPathComponent("projects.json.bak"))
-        let backup = try JSONDecoder().decode(ProjectsState.self, from: backupData)
-        XCTAssertEqual(backup.projects.map(\.name), ["First"])
-
         guard case .loaded(let current) = manager.loadProjectsState() else {
             return XCTFail("Expected the replacement state to load")
         }
         XCTAssertEqual(current.projects.map(\.name), ["Second"])
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: testDirectory.appendingPathComponent("projects.json").path),
+            "the database is the store now; nothing should write the document back"
+        )
+    }
+
+    /// The imported document is kept, not deleted — the rollback that opencode's own move off
+    /// per-file JSON did not leave itself.
+    func testImportedDocumentIsRetainedForRollback() throws {
+        let liveURL = testDirectory.appendingPathComponent("projects.json")
+        let state = ProjectsState(projects: [
+            Project(name: "Imported", folderURL: URL(fileURLWithPath: "/tmp/imported"))
+        ])
+        try JSONEncoder().encode(state).write(to: liveURL)
+
+        let manager = makeManager()
+        guard case .loaded(let restored) = manager.loadProjectsState() else {
+            return XCTFail("Expected the legacy document to be imported")
+        }
+        XCTAssertEqual(restored.projects.map(\.name), ["Imported"])
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL.path), "the document is retired")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: liveURL.appendingPathExtension("migrated").path),
+            "…but kept beside the database"
+        )
+
+        // And it is imported exactly once: a second load reads the database, not the file.
+        guard case .loaded(let second) = manager.loadProjectsState() else {
+            return XCTFail("Expected the database to load on the second pass")
+        }
+        XCTAssertEqual(second.projects.map(\.name), ["Imported"])
     }
 
     @MainActor
@@ -280,8 +312,13 @@ final class StateManagerTests: XCTestCase {
         )
         store.addProject(folderURL: projectDirectory)
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: liveURL.path))
+        // The quarantined document is never touched again — the new state went to the database,
+        // and the unreadable file stays exactly as it was for whoever wants to look at it.
         XCTAssertEqual(try Data(contentsOf: quarantineURL), corruptData)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: liveURL.path),
+            "a fresh save must not resurrect the document that was moved aside"
+        )
         guard case .loaded(let freshState) = manager.loadProjectsState() else {
             return XCTFail("Expected a fresh state after an explicit structural change")
         }
