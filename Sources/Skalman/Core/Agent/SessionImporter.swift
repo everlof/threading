@@ -37,7 +37,7 @@ enum SessionImporter {
         completion: @escaping @MainActor @Sendable ([ImportableSession]) -> Void
     ) {
         let folder = normalized(project.folderPath)
-        let known = Set(project.sessions.compactMap { $0.agentSessionID })
+        let known = Set(project.sessions.compactMap { $0.resumeState.transcriptID })
         let claudeAccounts = AgentAccountDiscovery.accounts(for: .claude)
         let codexAccounts = AgentAccountDiscovery.accounts(for: .codex)
 

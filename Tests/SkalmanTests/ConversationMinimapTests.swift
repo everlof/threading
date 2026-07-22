@@ -45,6 +45,59 @@ final class ConversationMinimapTests: XCTestCase {
         XCTAssertTrue(ConversationMinimap.isPersistent(paneWidth: roomy, columnWidth: column))
     }
 
+    // MARK: - Placement
+
+    func testTheRailStaysByThePaneEdgeAsTheWindowGrows() {
+        // The bug this fixes, seen in the running app: anchored to the column's leading edge,
+        // the rail drifted inward with the centred column and ended up stranded in the middle
+        // of an empty margin, attached to nothing.
+        let wide = ConversationMinimap.railLeading(paneWidth: 1400, columnWidth: column)
+        let wider = ConversationMinimap.railLeading(paneWidth: 2600, columnWidth: column)
+
+        XCTAssertEqual(wide, ConversationMinimap.Metrics.edgeInset)
+        XCTAssertEqual(wider, ConversationMinimap.Metrics.edgeInset, "The rail drifted with the column")
+    }
+
+    func testTheRailGivesUpTheEdgeRatherThanItsClearanceFromTheText() {
+        // In a tight gutter the two cannot both be had. Clearance from the text wins: a rail
+        // touching the column is worse than one sitting closer in than usual.
+        let paneWidth = column + 2 * 60
+        let leading = ConversationMinimap.railLeading(paneWidth: paneWidth, columnWidth: column)
+        let width = ConversationMinimap.railWidth(paneWidth: paneWidth, columnWidth: column)
+
+        XCTAssertLessThan(leading, ConversationMinimap.Metrics.edgeInset)
+        XCTAssertLessThanOrEqual(
+            leading + width,
+            60 - ConversationMinimap.Metrics.gutterInset,
+            "The rail crossed into its clearance from the column"
+        )
+    }
+
+    func testTheRailNeverStartsOffThePane() {
+        for paneWidth in [stride(from: 320.0, through: 2000.0, by: 40.0)].joined() {
+            XCTAssertGreaterThanOrEqual(
+                ConversationMinimap.railLeading(paneWidth: paneWidth, columnWidth: column), 0,
+                "A \(Int(paneWidth))pt pane put the rail off its own leading edge"
+            )
+        }
+    }
+
+    func testTheRailNeverTouchesTheColumnAtAnyWidth() {
+        // The one thing it must never do, checked across every width rather than at the two
+        // that happened to be looked at.
+        for paneWidth in [stride(from: 320.0, through: 2600.0, by: 20.0)].joined() {
+            let leading = ConversationMinimap.railLeading(paneWidth: paneWidth, columnWidth: column)
+            let width = ConversationMinimap.railWidth(paneWidth: paneWidth, columnWidth: column)
+            let columnLeading = ConversationMinimap.gutter(paneWidth: paneWidth, columnWidth: column)
+
+            guard width > 0 else { continue }
+            XCTAssertLessThanOrEqual(
+                leading + width + ConversationMinimap.Metrics.gutterInset, columnLeading,
+                "At \(Int(paneWidth))pt the rail came within \(ConversationMinimap.Metrics.gutterInset)pt of the text"
+            )
+        }
+    }
+
     func testOneTurnEarnsNoRail() {
         // Same "earns its level" rule the sidebar's grouping uses: an index of one item is not
         // an index.

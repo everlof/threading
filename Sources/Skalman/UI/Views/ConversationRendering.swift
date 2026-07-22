@@ -58,7 +58,7 @@ extension ConversationViewController {
             // The CLI's own identifier wins: a resume can settle on one other than the
             // identifier we asked for, and resuming again must use what it actually used.
             ProjectStore.shared.update(sessionID: agentSession.id) {
-                $0.agentSessionID = agentSessionID
+                $0.resumeState = .resumable(agentSessionID)
             }
         }
     }

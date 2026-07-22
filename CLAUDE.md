@@ -373,6 +373,16 @@ worth protecting are invisible in a screenshot of a wide window:
   narrow for a gutter, and the view hides. Skalman is a three-pane window and the conversation
   is routinely the narrow one, so this is the common case rather than the edge case — the same
   rule t3code encodes, arrived at for the same reason.
+- **It belongs to the pane, not to the column** (`railLeading`). Anchored to the column's
+  leading edge it looked right at 1000pt and wrong at 2000: the column is centred, so the rail
+  drifted inward with it and ended up stranded mid-margin, attached to nothing the eye can
+  see. It rests at `Design.Spacing.pane` from the pane's own edge and gives that up only when
+  the gutter cannot hold both — clearance from the text is the one thing it never trades.
+
+That last one was found by *running the app*, not by the harness, which had only been asked
+for widths where the answer was not yet obviously wrong. The pane renders now include 1800pt
+for that reason, and a test walks every width from 320 to 2600 checking the rail neither
+leaves the pane nor comes within `gutterInset` of the column.
 
 Marker spacing is 20, not t3code's 8: at three turns theirs is a 16pt smudge that reads as a
 rendering artefact. Measured off Codex's own rail — about twenty-five marks over five hundred
@@ -469,6 +479,46 @@ file. This is opencode's diff-viewer idea in AppKit and system colours.
 already read these files, and the transcript path was already derived in two places. The
 reader's correctness notes — never cap a record, let the caller decide when to stop — now live
 in one place instead of being rediscovered per caller.
+
+### Reclaimable Storage
+
+`ArtifactScanner` finds build output a project can rebuild, and the Storage settings page
+removes it. On the machine it was built for: **87.61 GB across 45 directories**, and 58 GB of
+that in git worktrees rather than the checkouts anyone opens — abandoned branches each holding
+a full `target/` and their own copy of `node_modules`.
+
+**Two gates decide, and neither alone is enough.** A path is offered only when git considers it
+disposable *and* its directory name plus an ecosystem marker identify it as known build output.
+
+- Ignore status alone is the tempting rule, and it deletes your secrets: measured here,
+  `git check-ignore` also says yes to `.env.local`, `.env.jira` and
+  `ansible/runner-controller-secrets.yml`. It is *necessary* (the project does not keep this),
+  never *sufficient*.
+- The marker is not decoration either. `target`, `build` and `dist` are ordinary words; a
+  `target` beside no `Cargo.toml` is somebody's data.
+- **`check-ignore` answers about patterns, not tracking.** A committed directory matched by
+  `.gitignore` still reports as ignored, because git's rule is that tracked files are unaffected
+  by the ignore list. `ls-files` is therefore asked as well, and anything tracked inside refuses
+  the whole directory. A test found this while being written, not a user.
+
+Both gates are re-checked immediately before a delete: a listing being read is a listing going
+stale. Removal is **immediate rather than to the Trash**, which for once is the safer-feeling
+option that helps nobody — 30 GB in the Trash has not been reclaimed.
+
+**Sizes count each inode once, the way `du` does.** Build directories are full of hard links —
+one real Cargo `target/` held 37,810 files sharing 25,021 inodes — and summing per-file sizes
+claimed 42.79 GB where the directory occupies 33.18 GiB, a 29% overstatement of the single
+number the feature exists to report. The identifier is only fetched when `linkCount > 1`, so an
+ordinary file costs nothing extra.
+
+The page groups **by checkout, not by project**, because six of one project's checkouts hold a
+`web/node_modules` and a row reading `web/node_modules` under a heading reading `sonda` names
+none of them. Each heading is `<project> · <worktree or branch> · <size>`; rows are relative to
+their checkout. Rows state the rebuild command and the age, and a directory written in the last
+fifteen minutes reads as **in use** — the first real scan found the largest directory on the
+page had been written two minutes earlier, in a worktree with no Skalman session to warn about.
+That is the second of two independent in-flight checks, the other being a running session in
+the project.
 
 ### Git Layouts
 

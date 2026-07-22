@@ -97,12 +97,49 @@ enum AgentKind: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - Resume State
+
+/// Whether a session can identify a conversation to resume.
+///
+/// These are deliberately separate states rather than one optional transcript identifier:
+/// a shell will never have a conversation, while a fresh agent session is waiting for an
+/// identifier to be minted or discovered. Only `.resumable` names an existing conversation.
+enum ResumeState: Equatable {
+    /// This kind of session has no resumable conversation, as with a shell.
+    case unavailable
+
+    /// An agent conversation has not received its provider identifier yet.
+    case awaitingIdentifier
+
+    /// The provider identifier for an existing conversation.
+    case resumable(TranscriptID)
+
+    var transcriptID: TranscriptID? {
+        guard case .resumable(let id) = self else { return nil }
+        return id
+    }
+
+    var isResumable: Bool {
+        if case .resumable = self { return true }
+        return false
+    }
+
+    static func initial(for kind: AgentKind) -> ResumeState {
+        kind.supportsResume ? .awaitingIdentifier : .unavailable
+    }
+
+    static func restoring(_ transcriptID: TranscriptID?, for kind: AgentKind) -> ResumeState {
+        guard kind.supportsResume else { return .unavailable }
+        return transcriptID.map(ResumeState.resumable) ?? .awaitingIdentifier
+    }
+}
+
 // MARK: - Agent Session
 
 /// A single agent conversation or shell belonging to a project.
 ///
 /// The session outlives its terminal: when the agent exits, the PTY is torn down but
-/// this record remains so the conversation can be resumed by `agentSessionID` later.
+/// this record remains so the conversation can be resumed through `resumeState` later.
 struct AgentSession: Codable, Identifiable {
     let id: SessionID
     var kind: AgentKind
@@ -124,11 +161,11 @@ struct AgentSession: Codable, Identifiable {
     let createdAt: Date
     var lastActiveAt: Date
 
-    /// Identifier used to resume this conversation.
+    /// Whether this record has no conversation, is waiting for an identifier, or can resume.
     ///
-    /// For Claude this is minted by us and set at first launch. For Codex it is assigned
-    /// by the CLI and remains nil until discovery completes. Always nil for shells.
-    var agentSessionID: TranscriptID?
+    /// Claude's identifier is minted at first launch. Codex reports its identifier after
+    /// launch. Shells stay `.unavailable` for their lifetime.
+    var resumeState: ResumeState
 
     /// Whether this session has been launched at least once, distinguishing a first
     /// launch from a resume.
@@ -153,7 +190,7 @@ struct AgentSession: Codable, Identifiable {
     /// whatever branch was checked out at the time, and that is what this records: captured
     /// at creation and re-read each time the session stops working, then frozen while
     /// dormant. It drives the sidebar's optional branch grouping. Nil for non-git projects
-    /// and for sessions recorded before this existed.
+    /// and when no branch was available while decoding an older record.
     var branch: String?
 
     /// The session this one was forked from, for a **side chat** — a conversation started
@@ -212,7 +249,7 @@ struct AgentSession: Codable, Identifiable {
         self.terminalTitle = nil
         self.createdAt = Date()
         self.lastActiveAt = Date()
-        self.agentSessionID = nil
+        self.resumeState = ResumeState.initial(for: kind)
         self.hasLaunched = false
         self.lastExitCode = nil
         self.accountHandle = accountHandle
@@ -243,7 +280,10 @@ struct AgentSession: Codable, Identifiable {
         createdAt = decodedCreatedAt ?? Date()
         lastActiveAt = try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
             ?? createdAt
-        agentSessionID = try container.decodeIfPresent(TranscriptID.self, forKey: .agentSessionID)
+        resumeState = ResumeState.restoring(
+            try container.decodeIfPresent(TranscriptID.self, forKey: .agentSessionID),
+            for: kind
+        )
         hasLaunched = try container.decodeIfPresent(Bool.self, forKey: .hasLaunched) ?? false
         lastExitCode = try container.decodeIfPresent(Int32.self, forKey: .lastExitCode)
         accountHandle = AccountHandle(
@@ -265,7 +305,7 @@ struct AgentSession: Codable, Identifiable {
         try container.encodeIfPresent(terminalTitle, forKey: .terminalTitle)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(lastActiveAt, forKey: .lastActiveAt)
-        try container.encodeIfPresent(agentSessionID, forKey: .agentSessionID)
+        try container.encodeIfPresent(resumeState.transcriptID, forKey: .agentSessionID)
         try container.encode(hasLaunched, forKey: .hasLaunched)
         try container.encodeIfPresent(lastExitCode, forKey: .lastExitCode)
         try container.encodeIfPresent(accountHandle.persistedSessionName, forKey: .accountHandle)
@@ -278,7 +318,7 @@ struct AgentSession: Codable, Identifiable {
 
     /// Whether a previous conversation exists that can be resumed.
     var isResumable: Bool {
-        kind.supportsResume && agentSessionID != nil
+        resumeState.isResumable
     }
 
     /// The name shown in the sidebar.

@@ -710,6 +710,43 @@ Open with **Cmd+,**.
 ### Accounts
 Per-account icons and names. See [Accounts](#accounts).
 
+### Storage
+Build output your projects can make again, and a button that removes it. Also reachable from a
+project's own menu (**Reclaim Disk Space…**), though the page always reports every project —
+what is worth finding is usually somewhere you were not thinking about.
+
+Findings are grouped **by checkout**, because that is where the surprise is. A project with six
+worktrees has six `target/` directories and six copies of `node_modules`, and only one of them
+belongs to the folder you actually open:
+
+```
+sonda · SONDA-401-issued-artifact-publisher · 36.8 GB
+    target                35.62 GB   Rust build output · cargo build · last written 2 wk ago
+    web/node_modules       1.18 GB   Node packages · npm install · last written 2 days ago
+
+sonda · main · 14.6 GB
+    target                13.38 GB   Rust build output · cargo build · last written 1 day ago
+    web/node_modules       1.18 GB   Node packages · npm install · last written 3 days ago
+```
+
+Every row says what it costs to bring back — the command that rebuilds it — and when anything
+inside it was last written. A directory written in the last few minutes is marked **in use**,
+which almost always means a build is running in it right now.
+
+Remove one row, everything in one checkout, or everything found. Removals ask first, and say so
+if a session is running in the project or if anything about to go was written moments ago.
+
+**What is never offered.** Only directories that git ignores *and* that a known tool can rebuild
+— `target` beside a `Cargo.toml`, `node_modules` beside a `package.json`, and so on. Ignored
+files that are not build output are never touched, which matters more than it sounds: your
+`.env.local` and your secrets files are ignored too. Anything a repository tracks is left alone
+whatever it is called, even if `.gitignore` also matches it.
+
+Removal is immediate rather than to the Trash, since space in the Trash has not been reclaimed.
+Sizes are measured the way `du` measures them, counting a hard-linked file once however many
+names it has — build directories are full of them, and counting each name would promise space
+that deleting does not return.
+
 ### Profiles, Themes, AI
 Terminal font and cursor, colour schemes, and AI provider configuration.
 

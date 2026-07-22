@@ -23,7 +23,7 @@ final class SideChatTests: XCTestCase {
 
     private func makeParent() -> AgentSession {
         var parent = AgentSession(kind: .claude, title: "Parent")
-        parent.agentSessionID = TranscriptID(parent.id.uuidString.lowercased())
+        parent.resumeState = .resumable(TranscriptID(parent.id.uuidString.lowercased()))
         parent.hasLaunched = true
         return parent
     }
@@ -56,7 +56,7 @@ final class SideChatTests: XCTestCase {
     func testForkParentRefusesAParentWithNoConversation() throws {
         var project = try makeProject()
         var parent = makeParent()
-        parent.agentSessionID = nil
+        parent.resumeState = .awaitingIdentifier
         let child = AgentSession(kind: .claude, title: "Side Chat", forkedFrom: parent.id)
         project.sessions = [parent, child]
 
@@ -76,7 +76,9 @@ final class SideChatTests: XCTestCase {
     func testCodexNeverForks() throws {
         var project = try makeProject()
         var parent = AgentSession(kind: .codex, title: "Parent")
-        parent.agentSessionID = TranscriptID("01930000-0000-7000-8000-000000000000")
+        parent.resumeState = .resumable(
+            TranscriptID("01930000-0000-7000-8000-000000000000")
+        )
         parent.hasLaunched = true
 
         let child = AgentSession(kind: .codex, title: "Side Chat", forkedFrom: parent.id)
@@ -102,7 +104,7 @@ final class SideChatTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: transcript) }
 
         let command = try XCTUnwrap(AgentLauncher.plan(for: child, in: project).arguments.last)
-        let parentID = try XCTUnwrap(parent.agentSessionID)
+        let parentID = try XCTUnwrap(parent.resumeState.transcriptID)
 
         XCTAssertTrue(command.contains("--resume '\(parentID)'"), command)
         XCTAssertTrue(command.contains("--fork-session"), command)
@@ -130,13 +132,35 @@ final class SideChatTests: XCTestCase {
         )
     }
 
+    // MARK: - Resume State Launch Plans
+
+    func testFreshLaunchPlansExposeHowTheirIdentifierIsEstablished() throws {
+        let project = try makeProject()
+        let claude = AgentSession(kind: .claude, title: "Claude")
+        let codex = AgentSession(kind: .codex, title: "Codex")
+        let shell = AgentSession(kind: .shell, title: "Shell")
+
+        XCTAssertEqual(
+            AgentLauncher.plan(for: claude, in: project).resumeState,
+            .resumable(TranscriptID(claude.id.uuidString.lowercased()))
+        )
+        XCTAssertEqual(
+            AgentLauncher.plan(for: codex, in: project).resumeState,
+            .awaitingIdentifier
+        )
+        XCTAssertEqual(
+            AgentLauncher.plan(for: shell, in: project).resumeState,
+            .unavailable
+        )
+    }
+
     // MARK: - Helpers
 
     /// Writes an empty transcript where the CLI would keep the parent's conversation, so the
     /// launcher's existence gate sees what it expects. Skips the test when no Claude account
     /// is installed, since the path is derived from the account's own config directory.
     private func writeTranscript(for session: AgentSession, in project: Project) throws -> URL {
-        let agentID = try XCTUnwrap(session.agentSessionID)
+        let agentID = try XCTUnwrap(session.resumeState.transcriptID)
         let url = try XCTUnwrap(
             ClaudeTranscript.url(sessionID: agentID, for: session, in: project),
             "no Claude account discovered on this machine"

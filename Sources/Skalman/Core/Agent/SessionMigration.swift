@@ -32,7 +32,7 @@ enum SessionMigration {
 
     /// The transcript that would move, if one has been recorded under the session's account.
     static func sourceTranscript(for session: AgentSession, in project: Project) -> URL? {
-        guard let id = session.agentSessionID else { return nil }
+        guard let id = session.resumeState.transcriptID else { return nil }
 
         let url: URL?
         switch session.kind {

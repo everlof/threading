@@ -11,7 +11,7 @@ final class StreamSessionLifecycleTests: XCTestCase {
             AgentLaunchPlan(
                 executable: "/path/that/does/not/exist/claude",
                 arguments: [],
-                agentSessionID: nil
+                resumeState: .unavailable
             )
         }
         session.onExit = { status in
@@ -93,6 +93,10 @@ final class StreamSessionLifecycleTests: XCTestCase {
     }
 
     private func shellPlan(_ script: String) -> AgentLaunchPlan {
-        AgentLaunchPlan(executable: "/bin/sh", arguments: ["-c", script], agentSessionID: nil)
+        AgentLaunchPlan(
+            executable: "/bin/sh",
+            arguments: ["-c", script],
+            resumeState: .unavailable
+        )
     }
 }

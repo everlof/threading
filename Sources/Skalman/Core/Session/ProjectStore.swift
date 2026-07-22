@@ -152,14 +152,14 @@ final class ProjectStore {
     /// which lives under the parent's account and is found through the parent's folder, so
     /// changing either would simply fail to find the conversation.
     ///
-    /// Refused when the parent has no `agentSessionID`: there is no conversation yet, and a
+    /// Refused when the parent is not resumable: there is no conversation yet, and a
     /// fork of nothing is just an ordinary new session.
     @discardableResult
     func addSideChat(of parentID: SessionID, title: String? = nil) -> AgentSession? {
         guard let location = locate(sessionID: parentID) else { return nil }
 
         let parent = projects[location.projectIndex].sessions[location.sessionIndex]
-        guard parent.agentSessionID != nil else { return nil }
+        guard parent.resumeState.isResumable else { return nil }
 
         var session = AgentSession(
             kind: parent.kind,
@@ -188,7 +188,9 @@ final class ProjectStore {
     func importSession(_ found: ImportableSession, into projectID: ProjectID) -> AgentSession? {
         guard let index = index(ofProject: projectID) else { return nil }
 
-        guard !projects[index].sessions.contains(where: { $0.agentSessionID == found.agentSessionID })
+        guard !projects[index].sessions.contains(where: {
+            $0.resumeState.transcriptID == found.agentSessionID
+        })
         else { return nil }
 
         var session = AgentSession(
@@ -196,7 +198,7 @@ final class ProjectStore {
             title: found.title,
             accountHandle: found.accountHandle
         )
-        session.agentSessionID = found.agentSessionID
+        session.resumeState = .resumable(found.agentSessionID)
         session.hasLaunched = true
         session.lastActiveAt = found.lastActiveAt
         session.branch = GitInfo.currentBranch(for: projects[index].folderPath)

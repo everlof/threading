@@ -49,7 +49,7 @@ extension ProjectSidebarViewController {
     /// conversation that has actually started. A fork of nothing is an ordinary new session,
     /// which the composer already offers.
     private func addSideChatItems(to menu: NSMenu, for session: AgentSession) {
-        guard session.kind.supportsForking, session.agentSessionID != nil else { return }
+        guard session.kind.supportsForking, session.resumeState.isResumable else { return }
 
         let newItem = menu.addItem(
             withTitle: "New Side Chat",

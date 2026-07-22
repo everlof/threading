@@ -1,6 +1,145 @@
 import Foundation
 import Network
 
+// MARK: - JSON-RPC Wire Types
+
+/// JSON-RPC permits integer, string, and explicit null identifiers. A missing identifier is
+/// represented separately by `JSONRPCRequest.id == nil`, because it marks a notification.
+enum RequestID: Codable, Equatable {
+    case integer(Int64)
+    case string(String)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let integer = try? container.decode(Int64.self) {
+            self = .integer(integer)
+        } else {
+            self = .string(try container.decode(String.self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .integer(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+}
+
+struct JSONRPCRequest: Decodable {
+    enum Parameters {
+        case initialize(InitializeParameters)
+        case toolCall(MCPToolCall)
+        case invalid
+        case none
+    }
+
+    let jsonrpc: String
+    let id: RequestID?
+    let method: String
+    let parameters: Parameters
+
+    private enum CodingKeys: String, CodingKey {
+        case jsonrpc, id, method, params
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        jsonrpc = try container.decodeIfPresent(String.self, forKey: .jsonrpc) ?? "2.0"
+        method = try container.decode(String.self, forKey: .method)
+        id = container.contains(.id)
+            ? try container.decode(RequestID.self, forKey: .id)
+            : nil
+
+        switch method {
+        case "initialize":
+            let value = try? container.decode(InitializeParameters.self, forKey: .params)
+            parameters = .initialize(value ?? InitializeParameters(protocolVersion: nil))
+        case "tools/call":
+            do {
+                let value = try container.decode(MCPToolCallParameters.self, forKey: .params)
+                parameters = .toolCall(value.call)
+            } catch {
+                parameters = .invalid
+            }
+        default:
+            parameters = .none
+        }
+    }
+}
+
+struct InitializeParameters: Decodable {
+    let protocolVersion: String?
+}
+
+struct EmptyJSONObject: Encodable {}
+
+struct InitializeResult: Encodable {
+    struct Capabilities: Encodable {
+        let tools = EmptyJSONObject()
+    }
+
+    struct ServerInfo: Encodable {
+        let name: String
+        let version: String
+    }
+
+    let protocolVersion: String
+    let capabilities = Capabilities()
+    let serverInfo: ServerInfo
+    let instructions: String
+}
+
+struct ToolsListResult: Encodable {
+    let tools: [MCPToolDefinition]
+}
+
+struct JSONRPCError: Encodable, Equatable {
+    let code: Int
+    let message: String
+}
+
+enum JSONRPCResult: Encodable {
+    case initialize(InitializeResult)
+    case empty(EmptyJSONObject)
+    case toolsList(ToolsListResult)
+    case tool(MCPToolResult)
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .initialize(let value): try container.encode(value)
+        case .empty(let value): try container.encode(value)
+        case .toolsList(let value): try container.encode(value)
+        case .tool(let value): try container.encode(value)
+        }
+    }
+}
+
+struct JSONRPCResponse: Encodable {
+    let jsonrpc = "2.0"
+    let id: RequestID
+    let result: JSONRPCResult?
+    let error: JSONRPCError?
+
+    static func success(id: RequestID, result: JSONRPCResult) -> JSONRPCResponse {
+        JSONRPCResponse(id: id, result: result, error: nil)
+    }
+
+    static func failure(id: RequestID, code: Int, message: String) -> JSONRPCResponse {
+        JSONRPCResponse(
+            id: id,
+            result: nil,
+            error: JSONRPCError(code: code, message: message)
+        )
+    }
+}
+
 /// An MCP server exposing Skalman's own UI to the agents it launches.
 ///
 /// Agents run in a terminal, which can only render text. This server is the way back out of
@@ -154,8 +293,14 @@ final class MCPServer {
             return
         }
 
-        guard let message = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] else {
+        let message: JSONRPCRequest
+        do {
+            message = try JSONDecoder().decode(JSONRPCRequest.self, from: request.body)
+        } catch DecodingError.dataCorrupted {
             respond(.json(Self.errorResponse(id: nil, code: -32700, message: "Parse error")))
+            return
+        } catch {
+            respond(.json(Self.errorResponse(id: nil, code: -32600, message: "Invalid Request")))
             return
         }
 
@@ -165,7 +310,7 @@ final class MCPServer {
                 return
             }
 
-            guard let data = try? JSONSerialization.data(withJSONObject: reply) else {
+            guard let data = try? JSONEncoder().encode(reply) else {
                 respond(.status(500, "Internal Server Error"))
                 return
             }
@@ -221,23 +366,22 @@ final class MCPServer {
 
     /// Dispatches one JSON-RPC message, calling back with the reply, or nil for notifications.
     private func handle(
-        _ message: [String: Any],
+        _ message: JSONRPCRequest,
         for sessionID: SessionID,
-        completion: @escaping ([String: Any]?) -> Void
+        completion: @escaping (JSONRPCResponse?) -> Void
     ) {
-        let method = message["method"] as? String ?? ""
-        let id = message["id"]
-
         // No id means a notification: acknowledged at the transport level, never answered.
-        guard let id else {
+        guard let id = message.id else {
             completion(nil)
             return
         }
 
-        switch method {
+        switch message.method {
         case "initialize":
-            let params = message["params"] as? [String: Any]
-            let clientVersion = params?["protocolVersion"] as? String
+            guard case .initialize(let params) = message.parameters else {
+                completion(Self.error(id: id, code: -32602, message: "Invalid params"))
+                return
+            }
 
             // The panel-state addendum reads the display store through the handler, which is
             // main-queue bound; enabled-tool settings share that isolation. The connection is
@@ -246,89 +390,91 @@ final class MCPServer {
                 let base = MCPToolCatalog.instructions
                 let addendum = self?.handler?.panelState(for: sessionID) ?? ""
 
-                completion(Self.result(id: id, [
-                    // Echoed back when the client names one, so a client on an older revision is
-                    // not refused over a difference this server does not actually depend on.
-                    "protocolVersion": clientVersion ?? MCPDefaults.protocolVersion,
-                    "capabilities": ["tools": [:] as [String: Any]],
-                    "serverInfo": [
-                        "name": MCPDefaults.serverName,
-                        "version": MCPDefaults.serverVersion
-                    ],
-                    "instructions": base + addendum
-                ]))
+                completion(Self.result(
+                    id: id,
+                    .initialize(InitializeResult(
+                        // Echoed back when the client names one, so a client on an older revision
+                        // is not refused over a difference this server does not depend on.
+                        protocolVersion: params.protocolVersion ?? MCPDefaults.protocolVersion,
+                        serverInfo: InitializeResult.ServerInfo(
+                            name: MCPDefaults.serverName,
+                            version: MCPDefaults.serverVersion
+                        ),
+                        instructions: base + addendum
+                    ))
+                ))
             }
 
         case "ping":
-            completion(Self.result(id: id, [:]))
+            completion(Self.result(id: id, .empty(EmptyJSONObject())))
 
         case "tools/list":
             DispatchQueue.main.async {
-                completion(Self.result(id: id, ["tools": MCPToolCatalog.enabledDefinitions]))
+                completion(Self.result(
+                    id: id,
+                    .toolsList(ToolsListResult(tools: MCPToolCatalog.enabledDefinitions))
+                ))
             }
 
         case "tools/call":
-            callTool(message, id: id, for: sessionID, completion: completion)
+            guard case .toolCall(let call) = message.parameters else {
+                completion(Self.error(id: id, code: -32602, message: "Invalid params"))
+                return
+            }
+            callTool(call, id: id, for: sessionID, completion: completion)
 
         default:
-            completion(Self.error(id: id, code: -32601, message: "Method not found: \(method)"))
+            completion(Self.error(
+                id: id,
+                code: -32601,
+                message: "Method not found: \(message.method)"
+            ))
         }
     }
 
     private func callTool(
-        _ message: [String: Any],
-        id: Any,
+        _ call: MCPToolCall,
+        id: RequestID,
         for sessionID: SessionID,
-        completion: @escaping ([String: Any]?) -> Void
+        completion: @escaping (JSONRPCResponse?) -> Void
     ) {
-        guard let params = message["params"] as? [String: Any],
-              let name = params["name"] as? String else {
-            completion(Self.error(id: id, code: -32602, message: "Invalid params"))
-            return
-        }
-
-        let call = MCPToolCall(
-            name: name,
-            arguments: params["arguments"] as? [String: Any] ?? [:]
-        )
-
         // The handler touches AppKit and the model layer, neither of which is thread-safe.
         DispatchQueue.main.async { [weak self] in
             guard let handler = self?.handler else {
                 completion(Self.result(
                     id: id,
-                    MCPToolResult.failure("Skalman is not ready to display content.").payload
+                    .tool(.failure("Skalman is not ready to display content."))
                 ))
                 return
             }
 
             // Completion-based, since some tools (a page load, a DOM query) finish asynchronously.
             handler.handle(call, for: sessionID) { result in
-                SkalmanLogger.mcp.info("tools/call \(name) for \(sessionID): isError=\(result.isError)")
+                SkalmanLogger.mcp.info("tools/call \(call.name) for \(sessionID): isError=\(result.isError)")
 
                 // A failing tool reports through `isError` in the result, not a protocol error:
                 // the call itself succeeded, and the agent should see why it did not work.
-                completion(Self.result(id: id, result.payload))
+                completion(Self.result(id: id, .tool(result)))
             }
         }
     }
 
     // MARK: - Message Construction
 
-    private static func result(id: Any, _ value: [String: Any]) -> [String: Any] {
-        ["jsonrpc": "2.0", "id": id, "result": value]
+    private static func result(id: RequestID, _ value: JSONRPCResult) -> JSONRPCResponse {
+        .success(id: id, result: value)
     }
 
-    private static func error(id: Any, code: Int, message: String) -> [String: Any] {
-        ["jsonrpc": "2.0", "id": id, "error": ["code": code, "message": message]]
+    private static func error(id: RequestID, code: Int, message: String) -> JSONRPCResponse {
+        .failure(id: id, code: code, message: message)
     }
 
-    private static func errorResponse(id: Any?, code: Int, message: String) -> Data {
-        let payload: [String: Any] = [
-            "jsonrpc": "2.0",
-            "id": id ?? NSNull(),
-            "error": ["code": code, "message": message]
-        ]
-        return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+    private static func errorResponse(id: RequestID?, code: Int, message: String) -> Data {
+        let response = JSONRPCResponse.failure(
+            id: id ?? .null,
+            code: code,
+            message: message
+        )
+        return (try? JSONEncoder().encode(response)) ?? Data()
     }
 }

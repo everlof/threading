@@ -187,13 +187,10 @@ final class AgentSessionViewController: NSViewController {
             stored.hasLaunched = true
             stored.lastActiveAt = Date()
             stored.lastExitCode = nil
-
-            if let sessionID = plan.agentSessionID {
-                stored.agentSessionID = sessionID
-            }
+            stored.resumeState = plan.resumeState
         }
 
-        if plan.agentSessionID == nil {
+        if plan.resumeState == .awaitingIdentifier {
             discoverCodexSessionID()
         }
 
@@ -222,7 +219,7 @@ final class AgentSessionViewController: NSViewController {
             guard let self, let discoveredID else { return }
 
             ProjectStore.shared.update(sessionID: self.sessionID) { stored in
-                stored.agentSessionID = discoveredID
+                stored.resumeState = .resumable(discoveredID)
             }
 
             SkalmanLogger.agent.info("Discovered Codex session \(discoveredID, privacy: .public)")

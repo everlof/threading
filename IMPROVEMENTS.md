@@ -126,17 +126,18 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
       `decodeIfPresent … ?? default` and explicit legacy-key encoding. The stored-`Bool?`
       and account property-wrapper workarounds are retired; missing-key and non-default
       round-trip fixtures lock in both sides of the contract.
-- [ ] Replace overloaded optionals with enums where nil has two meanings today:
-      `agentSessionID` (shell vs not-yet-discovered vs resumable) → `ResumeState`;
-      `branch` (non-git vs pre-feature record) can stay `String?` once recorded-at is
-      implied by decode defaults, but document the single remaining meaning.
+- [x] `ResumeState` now distinguishes shells (`.unavailable`), agent conversations awaiting
+      an identifier, and resumable conversations carrying a `TranscriptID`. Launch planning,
+      discovery, imports, forks, replay, and migration consume the explicit state while legacy
+      JSON keeps the `agentSessionID` key. `branch` remains `String?`, with nil documented as
+      the single "no branch was available" state, including for older decoded records.
 
 ### 2.4 Codable at the wire boundaries
-- [ ] MCP: `JSONRPCRequest`/`JSONRPCResponse` envelopes; `RequestID` enum (int / string /
-      null) instead of `Any` threaded through `result(id:_:)`; per-tool argument structs
-      decoded by tool name instead of `MCPToolCall.arguments: [String: Any]` with a
-      string-only accessor. Hand-built response dictionaries become `Encodable`.
-      (`MCPServer.swift:152-155,223-234,303-318`, `MCPTools.swift`)
+- [x] MCP JSON-RPC now has Codable request/response envelopes and a `RequestID` enum that
+      preserves integer, string, explicit-null, and missing-notification semantics. Each tool
+      name selects a concrete argument struct (including the integer/string tab union), while
+      initialize, tool-list, tool-result, error, and schema payloads are `Encodable`; the old
+      `[String: Any]` dispatch and hand-built JSON-RPC response dictionaries are gone.
 - [ ] Stream events: `StreamEvent.parse` / `CodexStreamEvent.parse` from
       `JSONSerialization` + `as?`-with-defaults to tolerant `Codable` (unknown kind →
       `.unknown` case; malformed line → skipped *and counted*, surfacing drift in logs

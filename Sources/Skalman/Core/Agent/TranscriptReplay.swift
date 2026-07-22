@@ -23,7 +23,7 @@ enum TranscriptReplay {
             _ events: [StreamEvent], _ isTruncated: Bool
         ) -> Void
     ) {
-        guard let agentSessionID = session.agentSessionID else {
+        guard let agentSessionID = session.resumeState.transcriptID else {
             completion([], false)
             return
         }

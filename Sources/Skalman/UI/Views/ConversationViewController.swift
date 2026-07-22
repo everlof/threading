@@ -27,6 +27,7 @@ final class ConversationViewController: NSViewController {
     /// The turn rail in the gutter beside the column.
     private var minimap: ConversationMinimapView!
     private var minimapWidth: NSLayoutConstraint!
+    private var minimapLeading: NSLayoutConstraint!
     private var promptView: PromptView!
     var statusLabel: NSTextField!
 
@@ -224,15 +225,16 @@ final class ConversationViewController: NSViewController {
             stack.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
             stack.widthAnchor.constraint(lessThanOrEqualTo: documentView.widthAnchor),
 
-            // The rail sits in the gutter beside the column, its width driven by how much
-            // gutter there is — zero, when there is none.
-            minimap.trailingAnchor.constraint(
-                equalTo: stack.leadingAnchor,
-                constant: -ConversationMinimap.Metrics.gutterInset
-            ),
+            // Anchored to the *pane*, not to the column. The column is centred, so a rail
+            // hanging off its leading edge drifts inward as the window grows and strands
+            // itself in the middle of an empty margin. `railLeading` keeps it by the pane's
+            // edge and only pulls it back when the gutter is too tight for both.
             minimap.topAnchor.constraint(equalTo: scrollView.topAnchor),
             minimap.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor)
         ])
+
+        minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+        minimapLeading.isActive = true
 
         // Beats the cap when the pane is wide, so the column reaches `readableWidth` rather
         // than hugging its content — but yields to it, so it never overflows a narrow pane.
@@ -277,7 +279,13 @@ final class ConversationViewController: NSViewController {
             paneWidth: view.bounds.width,
             columnWidth: Design.Size.readableWidth
         )
+        let leading = ConversationMinimap.railLeading(
+            paneWidth: view.bounds.width,
+            columnWidth: Design.Size.readableWidth
+        )
+
         if minimapWidth.constant != width { minimapWidth.constant = width }
+        if minimapLeading.constant != leading { minimapLeading.constant = leading }
         minimap.setAvailableWidth(width, paneWidth: view.bounds.width)
     }
 

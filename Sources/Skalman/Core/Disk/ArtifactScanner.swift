@@ -120,6 +120,18 @@ struct ReclaimableArtifact: Identifiable, Equatable {
     func isNestedCheckout(of projectFolder: String) -> Bool {
         checkoutPath != projectFolder
     }
+
+    /// Whether something wrote here moments ago, which usually means a build is running.
+    ///
+    /// Worth its own state because the first real scan found it: the largest directory on the
+    /// page had been written to two minutes earlier, in a worktree with no Skalman session to
+    /// warn about. Age is the only evidence available that a directory is in use, and deleting
+    /// a `target/` mid-build is the one way this goes wrong for someone who understood exactly
+    /// what they asked for.
+    func isInUse(at now: Date = Date()) -> Bool {
+        guard let modifiedAt else { return false }
+        return now.timeIntervalSince(modifiedAt) < ArtifactDefaults.inUseWindow
+    }
 }
 
 // MARK: - Artifact Scanner
@@ -287,8 +299,22 @@ enum ArtifactScanner {
     // MARK: - Measuring
 
     /// Bytes on disk and the newest write inside, walked once.
+    ///
+    /// **Each inode is counted once**, the way `du` counts it, because a build directory is
+    /// full of hard links and summing per-file sizes reports space that deleting would not
+    /// return. Measured on one Cargo `target/`: 37,810 files but 25,021 distinct inodes, and
+    /// the naive sum claimed 42.79 GB where the directory occupies 33.18 GB — a 29% overstatement
+    /// of the one number this whole feature promises.
+    ///
+    /// The identifier is only fetched for files that *are* linked more than once, so the
+    /// ordinary file costs nothing extra.
     private static func measure(_ url: URL) -> (bytes: Int64, modifiedAt: Date?) {
-        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .contentModificationDateKey]
+        let keys: [URLResourceKey] = [
+            .totalFileAllocatedSizeKey,
+            .contentModificationDateKey,
+            .linkCountKey,
+            .fileResourceIdentifierKey
+        ]
         guard let walker = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: keys,
@@ -297,9 +323,16 @@ enum ArtifactScanner {
 
         var bytes: Int64 = 0
         var newest: Date?
+        var countedLinks: Set<NSObject> = []
 
         for case let file as URL in walker {
             guard let values = try? file.resourceValues(forKeys: Set(keys)) else { continue }
+
+            if (values.linkCount ?? 1) > 1 {
+                guard let identifier = values.fileResourceIdentifier as? NSObject,
+                      countedLinks.insert(identifier).inserted else { continue }
+            }
+
             bytes += Int64(values.totalFileAllocatedSize ?? 0)
             if let modified = values.contentModificationDate, modified > (newest ?? .distantPast) {
                 newest = modified
@@ -326,4 +359,9 @@ enum ArtifactDefaults {
     /// `ls-files` is asked only whether *anything* is tracked, so one path is already the
     /// whole answer and the rest of a large listing is waste.
     static let maximumTrackedOutput = 64 * 1024
+
+    /// How recently a write means "something is building here". Generous, because the cost of
+    /// calling a live build stale is an interrupted build, while the cost of calling a stale
+    /// one live is a sentence of caution on a row.
+    static let inUseWindow: TimeInterval = 15 * 60
 }

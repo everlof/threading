@@ -234,9 +234,11 @@ final class ConversationRenderTests: XCTestCase {
             stack.centerXAnchor.constraint(equalTo: host.centerXAnchor),
             stack.widthAnchor.constraint(equalToConstant: min(width, Design.Size.readableWidth)),
 
-            minimap.trailingAnchor.constraint(
-                equalTo: stack.leadingAnchor,
-                constant: -ConversationMinimap.Metrics.gutterInset
+            minimap.leadingAnchor.constraint(
+                equalTo: host.leadingAnchor,
+                constant: ConversationMinimap.railLeading(
+                    paneWidth: width, columnWidth: Design.Size.readableWidth
+                )
             ),
             minimap.topAnchor.constraint(equalTo: host.topAnchor),
             minimap.bottomAnchor.constraint(equalTo: host.bottomAnchor),
@@ -267,9 +269,10 @@ final class ConversationRenderTests: XCTestCase {
         let rows = Array(timeline.rows.prefix(Render.rowLimit))
         let turns = timeline.turns.filter { $0.rowIndex < rows.count }
 
-        // Chosen to straddle the thresholds: no gutter, a rail that fades in, and a rail shown
-        // at rest.
-        for width in [Design.Size.readableWidth, 720, 1000] as [CGFloat] {
+        // Chosen to straddle the thresholds: no gutter, a rail that fades in, a rail shown at
+        // rest, and a window wide enough that the rail's placement stops being obvious — which
+        // is the width at which it was found to be wrong.
+        for width in [Design.Size.readableWidth, 720, 1000, 1800] as [CGFloat] {
             let host = pane(rows: rows, turns: turns, width: width)
             guard let data = png(of: host) else { continue }
             try data.write(to: directory.appendingPathComponent("pane-\(Int(width)).png"))

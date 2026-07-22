@@ -1,5 +1,18 @@
 import AppKit
 
+private struct PanelTabsPayload: Encodable {
+    struct Tab: Encodable {
+        let index: Int
+        let id: String
+        let kind: String
+        let title: String
+        let active: Bool
+    }
+
+    let count: Int
+    let tabs: [Tab]
+}
+
 // MARK: - MCPToolHandling
 
 /// Serves the tool calls agents make against Skalman's own MCP server.
@@ -9,11 +22,11 @@ import AppKit
 extension MainWindowController: MCPToolHandling {
 
     func handle(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
-        switch call.name {
-        case MCPTools.displayImage:
-            return displayImage(call, for: sessionID)
-        case MCPTools.displayHTML:
-            return displayHTML(call, for: sessionID)
+        switch call {
+        case .displayImage(let arguments):
+            return displayImage(arguments, for: sessionID)
+        case .displayHTML(let arguments):
+            return displayHTML(arguments, for: sessionID)
         default:
             return .failure("Unknown tool: \(call.name)")
         }
@@ -29,21 +42,21 @@ extension MainWindowController: MCPToolHandling {
             completion(result)
         }
 
-        switch call.name {
-        case MCPTools.browserNavigate:
-            browserNavigate(call, for: sessionID, completion: observed)
-        case MCPTools.browserQuery:
-            browserQuery(call, for: sessionID, completion: observed)
-        case MCPTools.browserClick:
-            browserClick(call, for: sessionID, completion: observed)
-        case MCPTools.browserScreenshot:
-            browserScreenshot(call, for: sessionID, completion: observed)
-        case MCPTools.panelListTabs:
+        switch call {
+        case .browserNavigate(let arguments):
+            browserNavigate(arguments, for: sessionID, completion: observed)
+        case .browserQuery(let arguments):
+            browserQuery(arguments, for: sessionID, completion: observed)
+        case .browserClick(let arguments):
+            browserClick(arguments, for: sessionID, completion: observed)
+        case .browserScreenshot:
+            browserScreenshot(for: sessionID, completion: observed)
+        case .panelListTabs:
             observed(panelListTabs(for: sessionID))
-        case MCPTools.panelActivateTab:
-            observed(panelActivateTab(call, for: sessionID))
-        case MCPTools.setProjectIcon:
-            setProjectIcon(call, for: sessionID, completion: completion)
+        case .panelActivateTab(let arguments):
+            observed(panelActivateTab(arguments, for: sessionID))
+        case .setProjectIcon(let arguments):
+            setProjectIcon(arguments, for: sessionID, completion: completion)
         default:
             observed(handle(call, for: sessionID))
         }
@@ -80,7 +93,7 @@ extension MainWindowController: MCPToolHandling {
 
     /// Async because the icon may arrive over the network; the file form answers at once.
     private func setProjectIcon(
-        _ call: MCPToolCall,
+        _ arguments: SetProjectIconArguments,
         for sessionID: SessionID,
         completion: @escaping (MCPToolResult) -> Void
     ) {
@@ -89,7 +102,7 @@ extension MainWindowController: MCPToolHandling {
             return
         }
 
-        if let path = call.string("path"), !path.isEmpty {
+        if let path = arguments.path, !path.isEmpty {
             guard let url = resolve(path: path, for: sessionID) else {
                 completion(.failure("No such file: \(path)"))
                 return
@@ -102,7 +115,7 @@ extension MainWindowController: MCPToolHandling {
             return
         }
 
-        if let address = call.string("url"), !address.isEmpty {
+        if let address = arguments.url, !address.isEmpty {
             guard let url = URL(string: address), url.scheme == "https" else {
                 completion(.failure("url must be an https image URL."))
                 return
@@ -143,8 +156,12 @@ extension MainWindowController: MCPToolHandling {
 
     // MARK: Browser Tools
 
-    private func browserNavigate(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
-        guard let input = call.string("url"), !input.isEmpty else {
+    private func browserNavigate(
+        _ arguments: BrowserNavigateArguments,
+        for sessionID: SessionID,
+        completion: @escaping (MCPToolResult) -> Void
+    ) {
+        guard let input = arguments.url, !input.isEmpty else {
             completion(.failure("Missing required argument: url"))
             return
         }
@@ -167,8 +184,12 @@ extension MainWindowController: MCPToolHandling {
         }
     }
 
-    private func browserQuery(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
-        guard let selector = call.string("selector"), !selector.isEmpty else {
+    private func browserQuery(
+        _ arguments: BrowserSelectorArguments,
+        for sessionID: SessionID,
+        completion: @escaping (MCPToolResult) -> Void
+    ) {
+        guard let selector = arguments.selector, !selector.isEmpty else {
             completion(.failure("Missing required argument: selector"))
             return
         }
@@ -188,8 +209,12 @@ extension MainWindowController: MCPToolHandling {
         }
     }
 
-    private func browserClick(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
-        guard let selector = call.string("selector"), !selector.isEmpty else {
+    private func browserClick(
+        _ arguments: BrowserSelectorArguments,
+        for sessionID: SessionID,
+        completion: @escaping (MCPToolResult) -> Void
+    ) {
+        guard let selector = arguments.selector, !selector.isEmpty else {
             completion(.failure("Missing required argument: selector"))
             return
         }
@@ -211,7 +236,10 @@ extension MainWindowController: MCPToolHandling {
         }
     }
 
-    private func browserScreenshot(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
+    private func browserScreenshot(
+        for sessionID: SessionID,
+        completion: @escaping (MCPToolResult) -> Void
+    ) {
         guard let browser = loadedBrowser(for: sessionID), let url = browser.currentURL else {
             completion(.failure("No page is loaded. Use browser_navigate first."))
             return
@@ -257,7 +285,7 @@ extension MainWindowController: MCPToolHandling {
         }
 
         let activeID = displayPaneController.activeTabID(for: sessionID)
-        let listed: [[String: Any]] = tabs.enumerated().map { index, tab in
+        let listed: [PanelTabsPayload.Tab] = tabs.enumerated().map { index, tab in
             var kind = "document"
             if tab.browser != nil {
                 kind = "browser"
@@ -266,35 +294,42 @@ extension MainWindowController: MCPToolHandling {
             } else if case .image? = tab.content?.body {
                 kind = "image"
             }
-            return [
-                "index": index,
-                "id": tab.id.uuidString,
-                "kind": kind,
-                "title": tab.title,
-                "active": tab.id == activeID
-            ]
+            return PanelTabsPayload.Tab(
+                index: index,
+                id: tab.id.uuidString,
+                kind: kind,
+                title: tab.title,
+                active: tab.id == activeID
+            )
         }
 
-        let payload: [String: Any] = ["count": tabs.count, "tabs": listed]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]),
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        let payload = PanelTabsPayload(count: tabs.count, tabs: listed)
+        guard let data = try? encoder.encode(payload),
               let text = String(data: data, encoding: .utf8) else {
             return .failure("Could not list the tabs.")
         }
         return .success(text)
     }
 
-    private func panelActivateTab(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
-        let raw = call.arguments["tab"]
-
-        // A number (or numeric string) is a strip index; anything else is a tab id.
-        let asIndex = (raw as? Int) ?? (raw as? NSNumber)?.intValue ?? (raw as? String).flatMap(Int.init)
-
+    private func panelActivateTab(
+        _ arguments: PanelActivateTabArguments,
+        for sessionID: SessionID
+    ) -> MCPToolResult {
         let activated: Bool
-        if let index = asIndex {
+        switch arguments.tab {
+        case .index(let index):
             activated = displayPaneController.activateTab(index: index, for: sessionID)
-        } else if let string = raw as? String, let id = UUID(uuidString: string) {
-            activated = displayPaneController.activateTab(id: id, for: sessionID)
-        } else {
+        case .identifier(let string):
+            if let index = Int(string) {
+                activated = displayPaneController.activateTab(index: index, for: sessionID)
+            } else if let id = UUID(uuidString: string) {
+                activated = displayPaneController.activateTab(id: id, for: sessionID)
+            } else {
+                return .failure("Missing or invalid argument: tab (a tab index or id).")
+            }
+        case nil:
             return .failure("Missing or invalid argument: tab (a tab index or id).")
         }
 
@@ -370,8 +405,11 @@ extension MainWindowController: MCPToolHandling {
 
     // MARK: Tools
 
-    private func displayImage(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
-        guard let path = call.string("path"), !path.isEmpty else {
+    private func displayImage(
+        _ arguments: DisplayImageArguments,
+        for sessionID: SessionID
+    ) -> MCPToolResult {
+        guard let path = arguments.path, !path.isEmpty else {
             return .failure("Missing required argument: path")
         }
 
@@ -398,7 +436,7 @@ extension MainWindowController: MCPToolHandling {
         return present(
             DisplayContent(
                 body: .image(image, url: url),
-                title: call.string("title"),
+                title: arguments.title,
                 subtitle: "\(url.lastPathComponent) · \(dimensions)"
             ),
             for: sessionID,
@@ -406,8 +444,11 @@ extension MainWindowController: MCPToolHandling {
         )
     }
 
-    private func displayHTML(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
-        guard let html = call.string("html"), !html.isEmpty else {
+    private func displayHTML(
+        _ arguments: DisplayHTMLArguments,
+        for sessionID: SessionID
+    ) -> MCPToolResult {
+        guard let html = arguments.html, !html.isEmpty else {
             return .failure("Missing required argument: html")
         }
 
@@ -423,7 +464,7 @@ extension MainWindowController: MCPToolHandling {
         return present(
             DisplayContent(
                 body: .html(html),
-                title: call.string("title"),
+                title: arguments.title,
                 subtitle: "HTML · \(byteDescription(size))"
             ),
             for: sessionID,

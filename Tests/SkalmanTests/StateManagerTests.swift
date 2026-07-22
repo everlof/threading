@@ -67,9 +67,33 @@ final class StateManagerTests: XCTestCase {
         XCTAssertFalse(session.isArchived)
         XCTAssertFalse(session.usesNativeUI)
         XCTAssertNil(session.forkedFrom)
-        XCTAssertNil(session.agentSessionID)
+        XCTAssertEqual(session.resumeState, .awaitingIdentifier)
         XCTAssertNil(session.model)
         XCTAssertNil(session.branch)
+    }
+
+    func testLegacyResumeIdentifierDecodesIntoExplicitStates() throws {
+        let decoder = JSONDecoder()
+        let pending = try decoder.decode(
+            AgentSession.self,
+            from: Data(#"{"kind":"codex","title":"Pending"}"#.utf8)
+        )
+        let resumable = try decoder.decode(
+            AgentSession.self,
+            from: Data(
+                #"{"kind":"claude","title":"Ready","agentSessionID":"legacy-thread"}"#.utf8
+            )
+        )
+        let shell = try decoder.decode(
+            AgentSession.self,
+            from: Data(
+                #"{"kind":"shell","title":"Shell","agentSessionID":"invalid-shell-id"}"#.utf8
+            )
+        )
+
+        XCTAssertEqual(pending.resumeState, .awaitingIdentifier)
+        XCTAssertEqual(resumable.resumeState, .resumable(TranscriptID("legacy-thread")))
+        XCTAssertEqual(shell.resumeState, .unavailable)
     }
 
     func testExplicitModelEncodingPreservesNonDefaultFields() throws {
@@ -84,7 +108,7 @@ final class StateManagerTests: XCTestCase {
         )
         session.customTitle = "Renamed"
         session.terminalTitle = "Terminal title"
-        session.agentSessionID = TranscriptID("thread-test")
+        session.resumeState = .resumable(TranscriptID("thread-test"))
         session.hasLaunched = true
         session.lastExitCode = 7
         session.branch = "feature/test"
@@ -99,6 +123,14 @@ final class StateManagerTests: XCTestCase {
         project.icon = ProjectIcon(source: .custom, fileName: "icon.png")
 
         let data = try JSONEncoder().encode(project)
+        let encodedProject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let encodedSessions = try XCTUnwrap(encodedProject["sessions"] as? [[String: Any]])
+        let encodedSession = try XCTUnwrap(encodedSessions.first)
+        XCTAssertEqual(encodedSession["agentSessionID"] as? String, "thread-test")
+        XCTAssertNil(encodedSession["resumeState"])
+
         let restored = try JSONDecoder().decode(Project.self, from: data)
         let restoredSession = try XCTUnwrap(restored.sessions.first)
 
@@ -108,7 +140,7 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(restoredSession.id, session.id)
         XCTAssertEqual(restoredSession.customTitle, "Renamed")
         XCTAssertEqual(restoredSession.terminalTitle, "Terminal title")
-        XCTAssertEqual(restoredSession.agentSessionID, TranscriptID("thread-test"))
+        XCTAssertEqual(restoredSession.resumeState, .resumable(TranscriptID("thread-test")))
         XCTAssertEqual(restoredSession.accountHandle, .named("codex-work"))
         XCTAssertEqual(restoredSession.model, "gpt-test")
         XCTAssertEqual(restoredSession.branch, "feature/test")

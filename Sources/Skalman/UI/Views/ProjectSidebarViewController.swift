@@ -592,6 +592,18 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebarDidRemoveSessions(self)
     }
 
+    /// Opens Storage, which reports every project rather than only this one.
+    ///
+    /// Reached from a project because that is where the question occurs to someone — but not
+    /// scoped to it, since the build output worth finding is usually in a worktree they were
+    /// not thinking about.
+    @objc private func reclaimDiskSpaceClicked() {
+        guard let index = SettingsPages.all.firstIndex(where: { $0.title == SettingsPages.storageTitle })
+        else { return }
+
+        delegate?.projectSidebar(self, didSelectSettingsPage: index)
+    }
+
     @objc private func revealInFinderClicked() {
         guard let row = contextRow(),
               let node = outlineView.item(atRow: row) as? ProjectNode,
@@ -980,6 +992,11 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         menu.addItem(withTitle: "Rename Project…", action: #selector(renameClicked), keyEquivalent: "")
         menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealInFinderClicked), keyEquivalent: "")
         menu.addItem(makeProjectIconItem())
+        menu.addItem(
+            withTitle: "Reclaim Disk Space…",
+            action: #selector(reclaimDiskSpaceClicked),
+            keyEquivalent: ""
+        )
         menu.addItem(.separator())
         menu.addItem(makeBranchGroupingItem())
         menu.addItem(.separator())

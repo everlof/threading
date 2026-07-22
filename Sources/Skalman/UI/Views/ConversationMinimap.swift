@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 // MARK: - Conversation Minimap
 
@@ -33,6 +33,9 @@ enum ConversationMinimap {
 
         /// Clearance between the rail and the text column, so the two never touch.
         static let gutterInset: CGFloat = 12
+
+        /// Where the rail rests relative to the pane's own leading edge, when there is room.
+        static let edgeInset: CGFloat = Design.Spacing.pane
 
         /// The rail never grows past this, however wide the window gets. It is a control, and
         /// a 200pt one would read as a third pane.
@@ -75,6 +78,25 @@ enum ConversationMinimap {
     /// Whether the rail stays visible without being asked for.
     static func isPersistent(paneWidth: CGFloat, columnWidth: CGFloat) -> Bool {
         gutter(paneWidth: paneWidth, columnWidth: columnWidth) >= Metrics.persistentGutter
+    }
+
+    /// How far the rail's leading edge sits from the pane's.
+    ///
+    /// **The rail belongs to the pane, not to the column.** Anchoring it to the column's
+    /// leading edge looked right at 1000pt and wrong at 2000: the column is centred, so as the
+    /// window grows the rail drifts inward with it and ends up stranded in the middle of an
+    /// empty margin, attached to nothing the eye can see.
+    ///
+    /// So it rests near the pane's edge, and only gives that up when the gutter is too tight to
+    /// hold both — at which point it slides left to keep its clearance from the text, which is
+    /// the one thing it must never lose.
+    static func railLeading(paneWidth: CGFloat, columnWidth: CGFloat) -> CGFloat {
+        let columnLeading = gutter(paneWidth: paneWidth, columnWidth: columnWidth)
+        let latest = columnLeading - Metrics.gutterInset - railWidth(
+            paneWidth: paneWidth,
+            columnWidth: columnWidth
+        )
+        return max(0, min(Metrics.edgeInset, latest))
     }
 
     /// Whether a rail is worth drawing for this many turns in this much room.

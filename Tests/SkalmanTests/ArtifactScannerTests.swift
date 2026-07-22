@@ -132,6 +132,33 @@ final class ArtifactScannerTests: XCTestCase {
         XCTAssertNotNil(rust.modifiedAt)
     }
 
+    /// Build directories are full of hard links — Cargo alone left 37,810 files sharing 25,021
+    /// inodes in one real `target/`. Counting a shared inode once per name reports space that
+    /// deleting would not return, which is the one number this feature exists to state.
+    func testHardLinksAreCountedOnce() throws {
+        try write("Cargo.toml", "[package]")
+        let payload = String(repeating: "x", count: 64 * 1024)
+        try write("target/original", payload)
+
+        let original = root.appendingPathComponent("target/original")
+        for index in 0..<4 {
+            try FileManager.default.linkItem(
+                at: original,
+                to: root.appendingPathComponent("target/link-\(index)")
+            )
+        }
+
+        let artifact = try XCTUnwrap(
+            ArtifactScanner.scan(projectFolder: root.path).first { $0.kind == .rust }
+        )
+
+        // Five names, one inode: the answer is one file's worth, not five.
+        let onDisk = try XCTUnwrap(
+            original.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize
+        )
+        XCTAssertLessThan(artifact.byteCount, Int64(onDisk) * 2)
+    }
+
     /// A `node_modules` containing a thousand nested `node_modules` is one answer, not a
     /// thousand — the walk stops at the top of what it finds.
     func testDoesNotDescendIntoWhatItFinds() throws {

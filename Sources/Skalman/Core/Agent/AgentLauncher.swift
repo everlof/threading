@@ -7,11 +7,11 @@ struct AgentLaunchPlan {
     let executable: String
     let arguments: [String]
 
-    /// The session identifier this launch will use, when known up front.
+    /// The conversation state this launch establishes.
     ///
-    /// Set for Claude (we mint it) and for any resume. Nil for a fresh Codex launch,
-    /// whose identifier must be discovered afterwards.
-    let agentSessionID: TranscriptID?
+    /// Claude launches and all resumes carry an identifier. A fresh Codex launch awaits the
+    /// identifier reported by the CLI, while research runs and shells have none by design.
+    let resumeState: ResumeState
 }
 
 // MARK: - Agent Launcher
@@ -34,15 +34,19 @@ enum AgentLauncher {
         initialPrompt: String? = nil
     ) -> AgentLaunchPlan {
         let command: String
-        let sessionID: TranscriptID?
+        let resumeState: ResumeState
 
         switch session.kind {
         case .claude:
-            (command, sessionID) = claudeCommand(for: session, in: project, prompt: initialPrompt)
+            (command, resumeState) = claudeCommand(
+                for: session,
+                in: project,
+                prompt: initialPrompt
+            )
         case .codex:
-            (command, sessionID) = codexCommand(for: session, prompt: initialPrompt)
+            (command, resumeState) = codexCommand(for: session, prompt: initialPrompt)
         case .shell:
-            (command, sessionID) = (shellCommand(), nil)
+            (command, resumeState) = (shellCommand(), .unavailable)
         }
 
         let routed = accountPrefix(for: session) + command + mcpFlags(for: session)
@@ -50,7 +54,7 @@ enum AgentLauncher {
         return AgentLaunchPlan(
             executable: loginShellPath,
             arguments: ["-l", "-c", "cd \(quoted(project.folderPath)) && exec \(routed)"],
-            agentSessionID: sessionID
+            resumeState: resumeState
         )
     }
 
@@ -87,21 +91,20 @@ enum AgentLauncher {
             + " --include-partial-messages"
             + " --verbose"
 
-        let agentSessionID: TranscriptID?
+        let resumeState: ResumeState
 
         if let fork = claudeForkFlags(for: session, in: project) {
             command += fork.flags
-            agentSessionID = fork.sessionID
-        } else if session.isResumable,
-           let existingID = session.agentSessionID,
+            resumeState = .resumable(fork.sessionID)
+        } else if let existingID = session.resumeState.transcriptID,
            ClaudeTranscript.exists(sessionID: existingID, for: session, in: project) {
             command += " --resume \(quoted(existingID))"
-            agentSessionID = existingID
+            resumeState = .resumable(existingID)
         } else {
-            let mintedID = session.agentSessionID
+            let mintedID = session.resumeState.transcriptID
                 ?? TranscriptID(session.id.uuidString.lowercased())
             command += " --session-id \(quoted(mintedID))"
-            agentSessionID = mintedID
+            resumeState = .resumable(mintedID)
         }
 
         if let settingsPath = MCPSessionRegistry.writePermissionSettings(for: session.id) {
@@ -113,7 +116,7 @@ enum AgentLauncher {
         return AgentLaunchPlan(
             executable: loginShellPath,
             arguments: ["-l", "-c", "cd \(quoted(project.folderPath)) && exec \(routed)"],
-            agentSessionID: agentSessionID
+            resumeState: resumeState
         )
     }
 
@@ -127,7 +130,7 @@ enum AgentLauncher {
         let model = modelFlag(for: session, flag: AgentDefaults.codexModelFlag)
 
         let command: String
-        if session.isResumable, let existingID = session.agentSessionID {
+        if let existingID = session.resumeState.transcriptID {
             command = "\(executable)\(model) --sandbox workspace-write"
                 + " exec resume \(quoted(existingID)) --json -"
         } else {
@@ -139,7 +142,7 @@ enum AgentLauncher {
         return AgentLaunchPlan(
             executable: loginShellPath,
             arguments: ["-l", "-c", "cd \(quoted(project.folderPath)) && exec \(routed)"],
-            agentSessionID: session.agentSessionID
+            resumeState: session.resumeState
         )
     }
 
@@ -164,7 +167,7 @@ enum AgentLauncher {
         return AgentLaunchPlan(
             executable: loginShellPath,
             arguments: ["-l", "-c", "cd \(quoted(folder)) && exec \(command)"],
-            agentSessionID: nil
+            resumeState: .unavailable
         )
     }
 
@@ -277,7 +280,7 @@ enum AgentLauncher {
         for session: AgentSession,
         in project: Project,
         prompt: String?
-    ) -> (String, TranscriptID?) {
+    ) -> (String, ResumeState) {
         let executable = AgentDefaults.claudeExecutable
         let model = modelFlag(for: session, flag: AgentDefaults.claudeModelFlag)
 
@@ -285,23 +288,25 @@ enum AgentLauncher {
             let command = "\(executable)\(model)\(fork.flags)"
                 + " --name \(quoted(session.launchName))"
                 + trailingPrompt(prompt)
-            return (command, fork.sessionID)
+            return (command, .resumable(fork.sessionID))
         }
 
-        if session.isResumable,
-           let existingID = session.agentSessionID,
+        if let existingID = session.resumeState.transcriptID,
            ClaudeTranscript.exists(sessionID: existingID, for: session, in: project) {
             // No prompt on resume: the conversation already has its opening.
-            return ("\(executable)\(model) --resume \(quoted(existingID))", existingID)
+            return (
+                "\(executable)\(model) --resume \(quoted(existingID))",
+                .resumable(existingID)
+            )
         }
 
-        let mintedID = session.agentSessionID
+        let mintedID = session.resumeState.transcriptID
             ?? TranscriptID(session.id.uuidString.lowercased())
         let command = "\(executable)\(model) --session-id \(quoted(mintedID))"
             + " --name \(quoted(session.launchName))"
             + trailingPrompt(prompt)
 
-        return (command, mintedID)
+        return (command, .resumable(mintedID))
     }
 
     /// The launch that makes a **side chat**: resume the *parent's* conversation, but write
@@ -332,7 +337,7 @@ enum AgentLauncher {
               !session.hasLaunched,
               let parentID = session.forkedFrom else { return nil }
 
-        return project.sessions.first { $0.id == parentID && $0.agentSessionID != nil }
+        return project.sessions.first { $0.id == parentID && $0.resumeState.isResumable }
     }
 
     /// Returns the flags and the child's identifier, so both surfaces can compose them into
@@ -343,11 +348,11 @@ enum AgentLauncher {
         in project: Project
     ) -> (flags: String, sessionID: TranscriptID)? {
         guard let parent = forkParent(for: session, in: project),
-              let parentAgentID = parent.agentSessionID,
+              let parentAgentID = parent.resumeState.transcriptID,
               ClaudeTranscript.exists(sessionID: parentAgentID, for: parent, in: project)
         else { return nil }
 
-        let mintedID = session.agentSessionID
+        let mintedID = session.resumeState.transcriptID
             ?? TranscriptID(session.id.uuidString.lowercased())
         let flags = " --resume \(quoted(parentAgentID))"
             + " --fork-session"
@@ -375,15 +380,18 @@ enum AgentLauncher {
     private static func codexCommand(
         for session: AgentSession,
         prompt: String?
-    ) -> (String, TranscriptID?) {
+    ) -> (String, ResumeState) {
         let executable = AgentDefaults.codexExecutable
         let model = modelFlag(for: session, flag: AgentDefaults.codexModelFlag)
 
-        if session.isResumable, let existingID = session.agentSessionID {
-            return ("\(executable)\(model) resume \(quoted(existingID))", existingID)
+        if let existingID = session.resumeState.transcriptID {
+            return (
+                "\(executable)\(model) resume \(quoted(existingID))",
+                .resumable(existingID)
+            )
         }
 
-        return ("\(executable)\(model)\(trailingPrompt(prompt))", nil)
+        return ("\(executable)\(model)\(trailingPrompt(prompt))", .awaitingIdentifier)
     }
 
     private static func shellCommand() -> String {

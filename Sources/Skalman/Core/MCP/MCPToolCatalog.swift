@@ -187,11 +187,9 @@ enum MCPToolCatalog {
 
     /// The `tools/list` payload, filtered to the enabled groups.
     @MainActor
-    static var enabledDefinitions: [[String: Any]] {
+    static var enabledDefinitions: [MCPToolDefinition] {
         let names = Set(enabledToolNames)
-        return MCPTools.definitions.filter { definition in
-            (definition["name"] as? String).map(names.contains) ?? false
-        }
+        return MCPTools.definitions.filter { names.contains($0.name) }
     }
 
     /// The `initialize` instructions, assembled from the enabled groups so the model is told about
