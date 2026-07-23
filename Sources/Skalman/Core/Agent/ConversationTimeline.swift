@@ -87,8 +87,12 @@ struct ConversationTimeline {
     enum Status: Equatable {
         case loading
         case ready(model: String?)
-        case working
-        case thinking
+
+        /// A turn in flight, carrying the word the status line shows for it. The word is drawn
+        /// by whoever starts the turn and travels with the status so it cannot be re-drawn on
+        /// the way to being displayed — see `WorkingWords` for why it must not change mid-turn.
+        case working(word: String)
+
         case ended(code: Int32)
     }
 
@@ -159,7 +163,11 @@ struct ConversationTimeline {
         case .thinkingDelta:
             // Reasoning is streamed but not shown as it arrives: it needs a fold to sit behind,
             // and it lands complete in the finished message anyway.
-            return [.status(.thinking)]
+            //
+            // It no longer moves the status either. Claude streams these and Codex does not, so
+            // a status raised here described the same wait differently per transport; the turn
+            // already said it was working when it started, and it still is.
+            return []
 
         case .assistantMessage(let blocks):
             var changes: [Change] = clearStreaming()

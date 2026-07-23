@@ -109,7 +109,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
         let alert = NSAlert()
         alert.messageText = "Rename Session"
-        alert.informativeText = "Leave empty to use the name reported by the terminal."
+        alert.informativeText = "Leave empty to follow the agent's own name for the conversation."
         alert.addButton(withTitle: "Rename")
         alert.addButton(withTitle: "Cancel")
 
@@ -164,5 +164,21 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
         // Now let SwiftTerm draw on top (selection will overwrite background where needed)
         super.draw(dirtyRect)
+    }
+}
+
+// MARK: - Theme Boundary
+
+extension EmojiFixedTerminalView: SystemChromeBoundary {
+
+    /// The terminal is a self-contained SwiftTerm rendering surface that brings its own
+    /// `NSScroller` — window-server chrome we contain rather than draw, the same shape as a
+    /// themed scroll view permitting AppKit's overlay scroller. Without this the runtime theme
+    /// audit fatals in a debug build the moment a terminal session shows a scroller. Scoped to
+    /// the scroller alone (SwiftTerm's only always-present chrome; its search is a headless
+    /// service and its caret a custom view) so a stray control ever added to the terminal
+    /// subtree still fails the audit rather than riding this exemption.
+    func permitsSystemChrome(_ view: NSView) -> Bool {
+        view is NSScroller
     }
 }

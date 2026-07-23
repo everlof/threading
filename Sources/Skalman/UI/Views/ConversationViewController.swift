@@ -29,6 +29,11 @@ final class ConversationViewController: NSViewController {
     private var minimapWidth: NSLayoutConstraint!
     private var minimapLeading: NSLayoutConstraint!
     private var promptView: PromptView!
+
+    /// The status text and, ahead of it, the working orb — shown only while a
+    /// turn is in flight (`showWorkingOrb`).
+    private var statusRow: NSStackView!
+    let orbView = WorkingOrbView()
     var statusLabel: NSTextField!
 
     /// The view showing the assistant's current message while its tokens arrive.
@@ -36,6 +41,10 @@ final class ConversationViewController: NSViewController {
     /// Streaming text has no identity of its own: it is replaced wholesale once the finished
     /// message lands, which is the authoritative copy. The text itself lives on the timeline.
     var streamingLabel: NSTextField?
+
+    /// Words for the status line while a turn is in flight, one drawn per turn. Per session, so
+    /// two conversations working at once are unlikely to be saying the same thing.
+    var workingWords = WorkingWordCycle()
 
     /// Suppresses per-item scrolling while a transcript is being replayed: four hundred items
     /// each scheduling their own scroll is four hundred layout passes to reach one position.
@@ -166,10 +175,20 @@ final class ConversationViewController: NSViewController {
         statusLabel.font = Design.Typography.subheading()
         statusLabel.textColor = Design.Text.tertiary
 
+        // The orb leads the status text and is shown only while a turn is in
+        // flight. A stack detaches a hidden arranged view, so idle status sits
+        // flush at the leading edge rather than behind a reserved orb-sized gap.
+        orbView.isHidden = true
+        statusRow = NSStackView(views: [orbView, statusLabel])
+        statusRow.orientation = .horizontal
+        statusRow.alignment = .centerY
+        statusRow.spacing = Design.Spacing.tight
+        statusRow.translatesAutoresizingMaskIntoConstraints = false
+
         view.addSubview(scrollView)
         view.addSubview(minimap)
         view.addSubview(promptView)
-        view.addSubview(statusLabel)
+        view.addSubview(statusRow)
 
         // The preview hangs off the pane, not off the rail: it is wider than the rail and
         // would be clipped inside it, and it has to float over the conversation.
@@ -186,15 +205,15 @@ final class ConversationViewController: NSViewController {
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(
-                equalTo: statusLabel.topAnchor,
+                equalTo: statusRow.topAnchor,
                 constant: -Design.Spacing.small
             ),
 
-            statusLabel.leadingAnchor.constraint(
+            statusRow.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor,
                 constant: Design.Spacing.inset
             ),
-            statusLabel.bottomAnchor.constraint(
+            statusRow.bottomAnchor.constraint(
                 equalTo: promptView.topAnchor,
                 constant: -Design.Spacing.tight
             ),
@@ -394,7 +413,11 @@ final class ConversationViewController: NSViewController {
         // Echoed locally as it is sent. The stream never reports a live user turn back —
         // `.userMessage` exists only for replay — so producing it here is what draws it once.
         apply(timeline.apply(.userMessage(trimmed)))
-        apply(.status(.working))
+
+        // Drawn here, which is the moment the turn starts and the only place the status enters
+        // `working` — so the word is fixed for the whole wait and a new one arrives with the
+        // next turn.
+        apply(.status(.working(word: workingWords.next())))
         promptView.stringValue = ""
     }
 

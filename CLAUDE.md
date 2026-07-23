@@ -49,6 +49,22 @@ mode is silent: an unregistered test file builds nothing and `xcodebuild test` r
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
 
+- **ThinkingOrbs** (local fork): the dotted "working" thought-orb drawn beside the
+  conversation status while a turn is in flight.
+  - Location: `./ThinkingOrbs/` (git submodule), referenced as a local Swift package the same
+    way SwiftTerm is (`XCLocalSwiftPackageReference`, mirrored entries in `project.pbxproj`).
+  - Upstream: https://github.com/everlof/thinking-orbs-swift — **our fork**, mod it directly.
+  - The app uses only the AppKit `ThinkingOrbView` (a plain `NSView` drawing through a
+    CoreGraphics engine, display link on 14+ / 60Hz timer on 13). SwiftUI ships in the package
+    but the app touches none of it, so the app itself stays AppKit-only.
+  - **The `tint` seam is ours.** The stock engine draws grayscale ink keyed off a `dark: Bool`,
+    so it follows macOS light/dark but knows nothing of Skalman's accent. `paint` gained an
+    optional `tint`: when set, depth rides on opacity instead of luminance (a dot's visibility
+    is `1 - white` on either substrate), so a tinted orb reads identically in light and dark,
+    only in the accent's hue. `WorkingOrbView` (in `UI/Design/`) is the theme boundary that
+    drives it from `Design.Surface.accent`, re-resolved on a live theme switch and an
+    appearance change.
+
 ## Architecture
 
 ### Core Components
@@ -315,6 +331,27 @@ Claude's two views come from the CLI: `stream_event` deltas while tokens arrive,
 `assistant`/`user` messages once each finishes. The finished message is authoritative — the
 streaming label is thrown away and replaced when it lands, rather than reconstructing state
 from deltas.
+
+**The status line says one thing per turn** (`WorkingWords`). While a turn is in flight the
+label draws from a twenty-word vocabulary — "Pondering…", "Untangling…", "Sharpening pencils…" —
+and the word is chosen at submit and held until the turn ends, because a label that rewrote
+itself mid-wait would report a change that had not happened. Variety belongs *between* turns.
+`WorkingWordCycle` is a shuffle bag rather than a random pick: independent draws repeat, and the
+same word twice running reads as the status having stopped updating.
+
+Choosing at submit is also what makes the two transports agree. The status used to be raised
+from whatever each CLI reported, so Claude — which streams `thinkingDelta` — flipped to
+"Thinking…" a moment in, while Codex, whose `exec --json` emits reasoning only as a finished
+block, sat on "Working…" for the whole turn: one wait, described two ways, for a reason no user
+could see. A word drawn where the turn starts asks neither CLI anything. `thinkingDelta` now
+moves no status at all, and reasoning still lands as its own row when the message finishes.
+
+Beside the word, a **dotted orb spins while the turn is in flight** (`WorkingOrbView`, the
+`ThinkingOrbs` dependency). It is shown only for the `working` status and hidden otherwise;
+in the status `NSStackView` a hidden arranged view detaches, so an idle "Ready" sits flush at
+the leading edge rather than behind a reserved gap, and the orb's own display link idles the
+moment it is hidden. It draws in the theme accent — see the Dependencies note on the `tint`
+fork — so it belongs to the current app theme rather than drawing plain black-on-white.
 
 **Resuming replays the transcript.** Neither agent streams old context into a new process, so
 without `TranscriptReplay` the agent remembers a conversation the screen does not show. The
@@ -1592,6 +1629,7 @@ Components so far:
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. |
 | `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
+| `WorkingOrbView` | The dotted "working" orb, tinted with the accent — the theme boundary for the `ThinkingOrbs` view. |
 
 The rule behind the table now covers **every chrome-drawing AppKit class**, not just the seven
 that eroded first: content containers (`NSScrollView`, `NSTextView`, tables) because their

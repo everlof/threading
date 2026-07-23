@@ -53,6 +53,13 @@ extension ConversationViewController {
 
         case .status(let status):
             setStatus(describe(status))
+            // The orb runs only while a turn is in flight; hidden, it detaches
+            // from the status row and its display link idles.
+            if case .working = status {
+                orbView.isHidden = false
+            } else {
+                orbView.isHidden = true
+            }
 
         case .adoptedSessionID(let agentSessionID):
             // The CLI's own identifier wins: a resume can settle on one other than the
@@ -79,10 +86,8 @@ extension ConversationViewController {
             // in which case saying Ready would invite a message the CLI cannot yet receive.
             guard let model else { return stream.canSend ? "Ready" : "Starting…" }
             return "Ready · \(model)"
-        case .working:
-            return "Working…"
-        case .thinking:
-            return "Thinking…"
+        case .working(let word):
+            return word
         case .ended(let code):
             return code == 0 ? "Session ended" : "Session ended (\(code))"
         }

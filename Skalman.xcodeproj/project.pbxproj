@@ -28,6 +28,7 @@
 		83FA7B157AC55CF7B3F151C5 /* ArtifactScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */; };
 		49022923B31CFED2F032E6EC /* SideChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */; };
 		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
+		F1000001000000000000037 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
 		2A84B6880DED3F071BEF4857 /* ConversationTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */; };
 		8CDE135AB43AE5B76A4E2CBD /* ConversationRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */; };
 		E15000010000000000000002 /* HotPathCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15000010000000000000001 /* HotPathCacheTests.swift */; };
@@ -57,6 +58,9 @@
 		445F0F42B17C51EC9BB38077 /* ElementInspectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */; };
 		122556F8FAB3711CCBA7AAD0 /* ChipViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B977AD037DD062B2428AA28 /* ChipViewTests.swift */; };
 		61B9374AE8515F0AE5311E1F /* ThemedIndicatorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */; };
+		B5CE1BC1391776027471C273 /* WorkingWordsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */; };
+		FCB14DF3E12E78DFBB1A2C55 /* ThinkingOrbTintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */; };
+		F8EEA2C01E6CF61FAAF1F024 /* TerminalThemeBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -121,6 +125,9 @@
 		115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ElementInspectionTests.swift; sourceTree = "<group>"; };
 		2B977AD037DD062B2428AA28 /* ChipViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChipViewTests.swift; sourceTree = "<group>"; };
 		48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedIndicatorsTests.swift; sourceTree = "<group>"; };
+		E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkingWordsTests.swift; sourceTree = "<group>"; };
+		4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThinkingOrbTintTests.swift; sourceTree = "<group>"; };
+		EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalThemeBoundaryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -163,6 +170,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F1000001000000000000036 /* SwiftTerm in Frameworks */,
+				F1000001000000000000037 /* ThinkingOrbs in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -228,6 +236,9 @@
 				115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */,
 				2B977AD037DD062B2428AA28 /* ChipViewTests.swift */,
 				48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */,
+				E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */,
+				4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */,
+				EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -300,6 +311,7 @@
 			name = Skalman;
 			packageProductDependencies = (
 				F4000001000000000000001 /* SwiftTerm */,
+				F4000001000000000000003 /* ThinkingOrbs */,
 			);
 			productName = Skalman;
 			productReference = F2000001000000000000038 /* Skalman.app */;
@@ -331,6 +343,7 @@
 			mainGroup = F5000001000000000000001;
 			packageReferences = (
 				F4000001000000000000002 /* XCLocalSwiftPackageReference "SwiftTerm" */,
+				F4000001000000000000004 /* XCLocalSwiftPackageReference "ThinkingOrbs" */,
 			);
 			productRefGroup = F5000001000000000000020 /* Products */;
 			projectDirPath = "";
@@ -442,6 +455,9 @@
 				445F0F42B17C51EC9BB38077 /* ElementInspectionTests.swift in Sources */,
 				122556F8FAB3711CCBA7AAD0 /* ChipViewTests.swift in Sources */,
 				61B9374AE8515F0AE5311E1F /* ThemedIndicatorsTests.swift in Sources */,
+				B5CE1BC1391776027471C273 /* WorkingWordsTests.swift in Sources */,
+				FCB14DF3E12E78DFBB1A2C55 /* ThinkingOrbTintTests.swift in Sources */,
+				F8EEA2C01E6CF61FAAF1F024 /* TerminalThemeBoundaryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -734,12 +750,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = SwiftTerm;
 		};
+		F4000001000000000000004 /* XCLocalSwiftPackageReference "ThinkingOrbs" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ThinkingOrbs;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		F4000001000000000000001 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftTerm;
+		};
+		F4000001000000000000003 /* ThinkingOrbs */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThinkingOrbs;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
