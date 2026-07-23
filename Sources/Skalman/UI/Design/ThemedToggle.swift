@@ -47,6 +47,15 @@ final class ThemedToggle: ThemedControl {
     override func accessibilityRole() -> NSAccessibility.Role? { .checkBox }
     override func accessibilityValue() -> Any? { isOn }
 
+    /// A drawn control has no cell to inherit this from, so the press has to be routed by hand or
+    /// the switch can be read but never flipped without a pointer.
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        state = isOn ? .off : .on
+        sendAction(action, to: target)
+        return true
+    }
+
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {

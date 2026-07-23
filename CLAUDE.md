@@ -1531,6 +1531,9 @@ Components so far:
 |---|---|
 | `ChipView` | A flat pill that opens a menu. The standard way to offer a choice. |
 | `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
+| `ThemedControl` | The base for a control that draws itself from the theme. |
+| `ThemedToggle` | A drop-in `NSSwitch` whose on-track is the theme's accent. |
+| `ThemedPopUp` | A drop-in `NSPopUpButton`, button included and dropdown excepted. |
 
 `PromptView` is an `NSTextView`, not an `NSTextField`, for two things a single-line field
 cannot do: a task worth describing runs past one line, and what is dropped on a composer is
@@ -1588,8 +1591,35 @@ same thing. An identifier the table does not know is handed back intact rather t
 wrong friendly name is worse than an unfamiliar accurate one on the string that says what the
 session costs. "Default model" survives only where the account states nothing at all.
 
-Preferences still use stock AppKit via `PreferencesFormBuilder`. That is deliberate: a
-settings window is one place where matching the platform beats matching the app.
+### Themed Controls
+
+Preferences used stock AppKit deliberately — a settings window being one place where matching
+the platform beats matching the app. **App themes ended that argument**, because under a style
+there is no platform look left to match: a page of system-blue switches and softly-bezelled
+pop-ups on a Cyberpunk-green or Swiss-red surface is not "native", it is a theme that reached
+the cards and stopped at the controls. The System theme is what keeps the original promise, and
+it keeps it exactly — every role resolves to the system colour, so a user who never picks a
+style sees the app they always saw.
+
+`ThemedControl` is the base and closes the whole class of bug at once. It **draws in `draw(_:)`,
+never into a frozen layer** — `layer.backgroundColor = colour.cgColor` resolves once and keeps
+that value, which is why a live theme switch used to leave stale colours across the app — and it
+answers a theme change with one `needsDisplay = true`. Subclasses read `Design.*` roles at draw
+time and inherit the redraw.
+
+It also has to declare `isAccessibilityElement`. A stock control is one because its *cell* is,
+and a control that draws itself has no cell; without it a themed control is invisible to
+VoiceOver and to UI scripting alike. That was found by a settings page reporting no pop-up
+buttons on a page that visibly had one.
+
+`ThemedPopUp` is where the one genuinely unthemeable thing is contained: **the menu a pop-up
+opens is drawn by the window server**, outside any view this app owns, so its chrome cannot
+follow the theme. Call sites depend on the wrapper rather than on the menu, so replacing that
+dropdown with a custom popover later is a change to one file. Two smaller rules earn their
+keep — an item that carries its own action keeps it (which is the whole of how a pull-down like
+the themes gear works, and only unclaimed items route through the control), and an
+out-of-range `selectItem(at:)` leaves the control unselected rather than trapping, since the
+index usually comes from looking a stored preference up in a list that may have moved on.
 
 ## Code Style Guidelines
 

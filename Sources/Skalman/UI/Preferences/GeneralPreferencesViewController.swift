@@ -5,7 +5,7 @@ final class GeneralPreferencesViewController: NSViewController {
 
     // MARK: - Controls
 
-    private let defaultAgentPopUp = NSPopUpButton()
+    private let defaultAgentPopUp = ThemedPopUp()
     private let terminalTitleToggle = ThemedToggle()
     private let branchGroupingToggle = ThemedToggle()
     private let projectIconToggle = ThemedToggle()

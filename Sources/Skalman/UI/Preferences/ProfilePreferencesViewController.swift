@@ -28,7 +28,7 @@ final class ProfilePreferencesViewController: NSViewController {
     private lazy var fontButton: NSButton =
         SettingsUI.button(fontButtonTitle, target: self, action: #selector(showFontPanel))
 
-    private lazy var cursorStylePopup: NSPopUpButton = {
+    private lazy var cursorStylePopup: ThemedPopUp = {
         let popup = SettingsUI.popUp(target: self, action: #selector(cursorStyleChanged))
         for style in TerminalProfile.CursorStyle.allCases {
             popup.addItem(withTitle: style.displayName)

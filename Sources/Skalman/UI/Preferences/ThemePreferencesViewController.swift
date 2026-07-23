@@ -66,10 +66,9 @@ final class ThemePreferencesViewController: NSViewController {
     private lazy var addButton = iconButton("plus", tooltip: "New Theme", action: #selector(addTheme))
     private lazy var removeButton = iconButton("minus", tooltip: "Delete Theme", action: #selector(removeTheme))
 
-    private lazy var actionButton: NSPopUpButton = {
-        let button = NSPopUpButton()
+    private lazy var actionButton: ThemedPopUp = {
+        let button = ThemedPopUp()
         button.pullsDown = true
-        button.bezelStyle = .smallSquare
         button.isBordered = false
 
         let menu = NSMenu()
@@ -100,7 +99,7 @@ final class ThemePreferencesViewController: NSViewController {
     private let previewView = ThemePreviewView()
     private let colorEditor = ThemeColorEditor()
 
-    private weak var appThemePopUp: NSPopUpButton?
+    private weak var appThemePopUp: ThemedPopUp?
     private weak var appThemeSubtitle: NSTextField?
 
     /// Explains why the palette below it is read-only, and offers the way out. Hidden for a
@@ -197,7 +196,7 @@ final class ThemePreferencesViewController: NSViewController {
         return card
     }
 
-    @objc private func appThemeChanged(_ sender: NSPopUpButton) {
+    @objc private func appThemeChanged(_ sender: ThemedPopUp) {
         guard let raw = sender.selectedItem?.representedObject as? String,
               let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
 

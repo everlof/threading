@@ -49,4 +49,10 @@ class ThemedControl: NSControl {
     /// Themed controls draw their own appearance top to bottom, so the layer-backed view never
     /// needs the extra pass AppKit would otherwise take.
     override var wantsUpdateLayer: Bool { false }
+
+    /// A stock control is an accessibility element because its *cell* is; a control that draws
+    /// itself has no cell, so it has to say so. Without this a themed control is invisible to
+    /// VoiceOver and to UI scripting alike — which is also how this was noticed, a settings page
+    /// reporting no pop-up buttons on a page that visibly has one.
+    override func isAccessibilityElement() -> Bool { true }
 }

@@ -173,8 +173,8 @@ enum SettingsUI {
         return control
     }
 
-    static func popUp(target: AnyObject, action: Selector, width: CGFloat = SettingsUIDefaults.controlWidth) -> NSPopUpButton {
-        let popUp = NSPopUpButton()
+    static func popUp(target: AnyObject, action: Selector, width: CGFloat = SettingsUIDefaults.controlWidth) -> ThemedPopUp {
+        let popUp = ThemedPopUp()
         popUp.target = target
         popUp.action = action
         popUp.translatesAutoresizingMaskIntoConstraints = false
