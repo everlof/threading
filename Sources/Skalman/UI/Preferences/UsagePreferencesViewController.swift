@@ -90,11 +90,11 @@ final class UsagePreferencesViewController: NSViewController {
     private func summarySection(_ report: TranscriptUsageReport?) -> NSView {
         let total = NSTextField(labelWithString: UsageFormat.tokens(report?.billedTokens ?? 0))
         total.font = Design.Typography.heading()
-        total.textColor = report == nil ? .secondaryLabelColor : .labelColor
+        total.textColor = report == nil ? Design.Text.secondary : Design.Text.label
 
         let caption = NSTextField(labelWithString: summaryCaption(report))
         caption.font = Design.Typography.subheading()
-        caption.textColor = .secondaryLabelColor
+        caption.textColor = Design.Text.secondary
 
         let labels = NSStackView(views: [total, caption])
         labels.orientation = .vertical

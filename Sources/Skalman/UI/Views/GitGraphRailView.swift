@@ -145,8 +145,7 @@ enum GitGraphDefaults {
     static let nodeRadius: CGFloat = 3
     static let mergeNodeRadius: CGFloat = 3.5
 
-    /// Cycled by lane index. Ordered so neighbouring lanes are never near-hues of each other.
-    static let laneColors: [NSColor] = [
-        .systemBlue, .systemOrange, .systemPurple, .systemTeal, .systemPink, .systemIndigo
-    ]
+    /// Cycled by lane index. The design system's categorical ramp, which is where colours that
+    /// only have to differ from one another live.
+    static let laneColors: [NSColor] = Design.Categorical.ramp
 }

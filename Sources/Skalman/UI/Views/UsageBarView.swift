@@ -17,6 +17,10 @@ final class UsageBarView: NSView {
     private let fillView = NSView()
     private let markView = NSView()
 
+    /// The colours are resolved in `layout()`, which a theme change does not otherwise trigger —
+    /// so the bar would keep the previous theme's accent until something else moved it.
+    private var themeRedraw: ThemeRedraw?
+
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
@@ -28,6 +32,14 @@ final class UsageBarView: NSView {
         addSubview(fillView)
         // Above the fill, so the pace line stays visible even where usage has passed it.
         addSubview(markView)
+        themeRedraw = ThemeRedraw(self)
+    }
+
+    /// `ThemeRedraw` asks for a redraw; this one needs a re-*layout*, because that is where its
+    /// layer colours are set.
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        super.setNeedsDisplay(invalidRect)
+        needsLayout = true
     }
 
     required init?(coder: NSCoder) {

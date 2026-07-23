@@ -165,6 +165,21 @@ enum Design {
         static var negative: NSColor { AppThemePalette.color(.statusNegative) }
     }
 
+    // MARK: - Categorical
+
+    /// Hues that exist to tell things *apart* rather than to say what they are — the git graph's
+    /// lanes, and anything else that needs N distinguishable colours with no meaning attached.
+    ///
+    /// The one place system colours are used directly rather than through a role, and the reason
+    /// is that a role answers "what is this", which is exactly what a lane does not have. They
+    /// adapt to light and dark on their own, and are ordered so neighbouring entries are never
+    /// near-hues. A theme may want its own ramp one day; this is where it would go.
+    enum Categorical {
+        static let ramp: [NSColor] = [
+            .systemBlue, .systemOrange, .systemPurple, .systemTeal, .systemPink, .systemIndigo
+        ]
+    }
+
     // MARK: - Diff
 
     enum Diff {

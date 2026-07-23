@@ -354,17 +354,28 @@ final class ThemedControlTests: XCTestCase {
         let bannedField = try NSRegularExpression(
             pattern: #"NSTextField\(\s*(?!labelWithString|wrappingLabelWithString|labelWithAttributedString)"#
         )
+        // The same erosion one level down: a system colour follows light and dark but not the
+        // theme, so it stays system-blue on a page that has gone neon. Read through a Design role
+        // instead. `(?!\s*=)` keeps the property being *assigned* out of it — setting a web
+        // view's `underPageBackgroundColor` to a role is the correct thing to do.
+        let bannedColour = try NSRegularExpression(
+            pattern: #"\.(labelColor|secondaryLabelColor|tertiaryLabelColor|quaternaryLabelColor|controlAccentColor|windowBackgroundColor|controlBackgroundColor|underPageBackgroundColor|separatorColor|gridColor|headerTextColor|selectedContentBackgroundColor|unemphasizedSelectedContentBackgroundColor|systemRed|systemGreen|systemBlue|systemOrange|systemYellow|systemPurple|systemTeal|systemPink|systemIndigo|systemGray)\b(?!\s*=)"#
+        )
 
         let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }
-            .filter { $0.pathExtension == "swift" && !$0.path.contains("/UI/Design/") } ?? []
+            .filter {
+                $0.pathExtension == "swift"
+                    && !$0.path.contains("/UI/Design/")
+                    && !$0.path.contains("/Core/Theme/")
+            } ?? []
         XCTAssertFalse(files.isEmpty, "the source tree was not found from #filePath")
 
         var offences: [String] = []
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
             let range = NSRange(text.startIndex..., in: text)
-            for pattern in [banned, bannedField] {
+            for pattern in [banned, bannedField, bannedColour] {
                 for match in pattern.matches(in: text, range: range) {
                     guard let found = Range(match.range, in: text) else { continue }
                     let line = text[text.startIndex..<found.lowerBound].filter(\.isNewline).count + 1
@@ -375,9 +386,10 @@ final class ThemedControlTests: XCTestCase {
 
         XCTAssertEqual(
             offences, [],
-            "stock AppKit controls outside UI/Design/. Build from the design system instead: "
-                + "ThemedButton, ThemedToggle, ThemedPopUp, ThemedTextField, ThemedSearchField, "
-                + "ThemedSpinner, ThemedProgressBar, SeparatorView, ThemeSwatchView."
+            "stock AppKit outside the design system. Controls: ThemedButton, ThemedToggle, "
+                + "ThemedPopUp, ThemedTextField, ThemedSearchField, ThemedSpinner, "
+                + "ThemedProgressBar, SeparatorView, ThemeSwatchView. Colours: Design.Text.*, "
+                + "Design.Surface.*, Design.Status.*, Design.Categorical.ramp."
         )
     }
 }

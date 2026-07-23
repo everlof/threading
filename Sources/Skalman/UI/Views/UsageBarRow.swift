@@ -19,7 +19,7 @@ final class UsageBarRow: NSView {
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = Design.Typography.body()
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -28,7 +28,7 @@ final class UsageBarRow: NSView {
             ofSize: UsageBarRowDefaults.valueFontSize,
             weight: .regular
         )
-        valueLabel.textColor = .secondaryLabelColor
+        valueLabel.textColor = Design.Text.secondary
         valueLabel.alignment = .right
         valueLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -42,7 +42,7 @@ final class UsageBarRow: NSView {
         if let detail {
             let detailLabel = NSTextField(labelWithString: detail)
             detailLabel.font = Design.Typography.subheading()
-            detailLabel.textColor = .tertiaryLabelColor
+            detailLabel.textColor = Design.Text.tertiary
             rows.insert(detailLabel, at: 1)
         }
 
@@ -69,35 +69,22 @@ final class UsageBarRow: NSView {
 
     // MARK: - Private Methods
 
-    /// The bar itself: a track the full width, filled proportionally.
+    /// The bar itself — `UsageBarView`, the same gauge the toolbar popover and the composer
+    /// draw.
     ///
-    /// A floor keeps the smallest rows visible — a row whose bar rounds to nothing reads as a
-    /// rendering failure rather than as a small number.
+    /// It was a second implementation until this was written, and the duplicate was the *only*
+    /// un-themed one: a track in `quaternaryLabelColor` and a fill in `controlAccentColor`, both
+    /// frozen into a layer at construction. So the Usage page drew system-blue bars on a
+    /// Cyberpunk-green card — the switch's bug exactly, one level down, and the reason the answer
+    /// is always "share the themed component" rather than "fix the colour here".
     private func bar(fraction: Double) -> NSView {
-        let track = NSView()
-        track.wantsLayer = true
-        track.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
-        track.layer?.cornerRadius = UsageBarRowDefaults.height / 2
-        track.translatesAutoresizingMaskIntoConstraints = false
-
-        let fill = NSView()
-        fill.wantsLayer = true
-        fill.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-        fill.layer?.cornerRadius = UsageBarRowDefaults.height / 2
-        fill.translatesAutoresizingMaskIntoConstraints = false
-        track.addSubview(fill)
-
-        let share = max(min(fraction, 1), UsageBarRowDefaults.minimumFraction)
-
-        NSLayoutConstraint.activate([
-            track.heightAnchor.constraint(equalToConstant: UsageBarRowDefaults.height),
-            fill.topAnchor.constraint(equalTo: track.topAnchor),
-            fill.bottomAnchor.constraint(equalTo: track.bottomAnchor),
-            fill.leadingAnchor.constraint(equalTo: track.leadingAnchor),
-            fill.widthAnchor.constraint(equalTo: track.widthAnchor, multiplier: share)
-        ])
-
-        return track
+        let bar = UsageBarView()
+        // A floor keeps the smallest rows visible — a row whose bar rounds to nothing reads as a
+        // rendering failure rather than as a small number.
+        bar.fraction = max(min(fraction, 1), UsageBarRowDefaults.minimumFraction)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.heightAnchor.constraint(equalToConstant: UsageBarRowDefaults.height).isActive = true
+        return bar
     }
 
     private func spacer() -> NSView {
