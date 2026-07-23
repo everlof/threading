@@ -37,6 +37,12 @@ final class StoragePreferencesViewController: NSViewController {
 
     /// Findings by checkout, largest first, read from the cache the service keeps.
     private var groups: [CheckoutGroup] = []
+
+    /// Checkouts whose sub-gigabyte rows the user has unfolded, by path. A checkout of a
+    /// codebase collects dozens of tiny `__pycache__` directories, which buried the two that
+    /// mattered under a page of noise — so anything under a gigabyte folds into one row until
+    /// asked for. Kept for the session only; the fold is a view state, not a preference.
+    private var expandedCheckouts: Set<String> = []
     private let appEvents = AppEventObservations()
 
     private var isScanning: Bool { ArtifactScanService.shared.isScanning }
@@ -238,13 +244,32 @@ final class StoragePreferencesViewController: NSViewController {
         return caption
     }
 
-    /// One checkout: its artifacts largest first, closed by a row that removes the lot.
+    /// One checkout: its big artifacts as their own rows, everything under a gigabyte folded
+    /// into one, closed by a row that removes the lot.
     ///
-    /// The heading carries the project *and* the checkout, because the checkout is the answer
-    /// to "which of these is it" and the project alone is not.
+    /// The heading carries the project *and* the checkout, because the checkout is the answer to
+    /// "which of these is it"; the full path sits beneath it, because a worktree name alone does
+    /// not say where on disk it lives, and that is what someone about to delete gigabytes wants
+    /// to confirm.
     private func checkoutSection(_ group: CheckoutGroup, groupIndex: Int) -> NSView {
-        var rows: [NSView] = group.artifacts.enumerated().map { index, artifact in
+        // Enumerated over the *original* order, so a row's tag still indexes `group.artifacts`
+        // however the rows are then partitioned for display.
+        let indexed = Array(group.artifacts.enumerated())
+        let large = indexed.filter { $0.element.byteCount >= StorageDefaults.collapseThreshold }
+        let small = indexed.filter { $0.element.byteCount < StorageDefaults.collapseThreshold }
+
+        var rows: [NSView] = large.map { index, artifact in
             row(for: artifact, in: group, tag: tag(group: groupIndex, artifact: index))
+        }
+
+        if !small.isEmpty {
+            let expanded = expandedCheckouts.contains(group.path)
+            if expanded {
+                rows += small.map { index, artifact in
+                    row(for: artifact, in: group, tag: tag(group: groupIndex, artifact: index))
+                }
+            }
+            rows.append(foldRow(for: small.map(\.element), in: group, expanded: expanded))
         }
 
         if group.artifacts.count > 1 {
@@ -263,7 +288,86 @@ final class StoragePreferencesViewController: NSViewController {
 
         let title = "\(group.project.name) · \(group.label)"
             + " · \(Self.size.string(fromByteCount: group.byteCount))"
-        return SettingsUI.section(title, SettingsCard(rows: rows))
+        return pathSection(title: title, path: group.path, card: SettingsCard(rows: rows))
+    }
+
+    /// A section whose heading is followed by the checkout's full path — abbreviated at the home
+    /// directory, truncated in the middle so both ends survive a long worktree path.
+    private func pathSection(title: String, path: String, card: NSView) -> NSView {
+        let pathLabel = NSTextField(labelWithString: abbreviate(path))
+        pathLabel.font = Design.Typography.subheading()
+        pathLabel.textColor = Design.Text.tertiary
+        pathLabel.lineBreakMode = .byTruncatingMiddle
+        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let stack = NSStackView(views: [SettingsUI.caption(title), pathLabel, card])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.tight
+
+        for pinned in [pathLabel, card] {
+            pinned.translatesAutoresizingMaskIntoConstraints = false
+            pinned.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+            pinned.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        }
+
+        return stack
+    }
+
+    /// The row that stands in for everything under a gigabyte, and unfolds it on a click.
+    ///
+    /// It reads like a data row so the size column stays aligned — a count and a total where a
+    /// name and a size would be — with a chevron in place of a Remove button, since the whole
+    /// row is the control.
+    private func foldRow(
+        for artifacts: [ReclaimableArtifact],
+        in group: CheckoutGroup,
+        expanded: Bool
+    ) -> NSView {
+        let total = artifacts.reduce(0) { $0 + $1.byteCount }
+
+        let size = NSTextField(labelWithString: Self.size.string(fromByteCount: total))
+        size.font = .monospacedDigitSystemFont(ofSize: StorageDefaults.sizeFontSize, weight: .regular)
+        size.textColor = Design.Text.secondary
+        size.alignment = .right
+
+        let chevron = NSImageView()
+        chevron.image = NSImage(
+            systemSymbolName: expanded ? "chevron.up" : "chevron.down",
+            accessibilityDescription: nil
+        )
+        chevron.contentTintColor = Design.Text.tertiary
+        chevron.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.chevron)
+
+        let trailing = NSStackView(views: [size, chevron])
+        trailing.orientation = .horizontal
+        trailing.spacing = Design.Spacing.medium
+
+        let content = SettingsUI.row(
+            title: expanded
+                ? StorageStrings.showFewer
+                : StorageStrings.smallerDirectories(artifacts.count),
+            subtitle: expanded ? nil : StorageStrings.underAGigabyte,
+            control: trailing
+        )
+
+        let path = group.path
+        return ClickableRow(content: content) { [weak self] in
+            guard let self else { return }
+            if self.expandedCheckouts.contains(path) {
+                self.expandedCheckouts.remove(path)
+            } else {
+                self.expandedCheckouts.insert(path)
+            }
+            self.rebuild()
+        }
+    }
+
+    /// Replaces the home directory with `~`, so a path is read for its shape rather than its
+    /// first forty identical characters.
+    private func abbreviate(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
     /// One artifact: what it is, where it is, what it costs to bring back, and how stale it is.
@@ -415,6 +519,11 @@ private enum StorageDefaults {
 
     /// Matches `Design.Typography.body()`, in its monospaced-digit form.
     static let sizeFontSize: CGFloat = 13
+
+    /// Directories smaller than this fold into one row. A gigabyte is the line between "worth
+    /// its own row" and "part of the tail" — a checkout gathers dozens of KB-sized caches, and
+    /// they buried the two directories that held the space.
+    static let collapseThreshold: Int64 = 1_000_000_000
 }
 
 // MARK: - Storage Strings
@@ -449,6 +558,12 @@ private enum StorageStrings {
     }
 
     static let removeAll = "Remove All…"
+    static let showFewer = "Show fewer"
+    static let underAGigabyte = "Under 1 GB — click to show each"
+
+    static func smallerDirectories(_ count: Int) -> String {
+        count == 1 ? "1 smaller directory" : "\(count) smaller directories"
+    }
 
     /// When the reading was taken. A cached number that does not say its age claims to be live.
     static func measured(_ relative: String) -> String {
@@ -492,5 +607,45 @@ private enum StorageStrings {
     static func confirmBusy(_ projects: String) -> String {
         "A session is running in \(projects). If it is building right now, removing its build "
             + "output will interrupt that build."
+    }
+}
+
+// MARK: - Clickable Row
+
+/// Wraps a row so a click anywhere on it fires a callback — for the fold row, whose whole
+/// surface is the control rather than a button at its edge.
+private final class ClickableRow: NSView {
+
+    private let handler: () -> Void
+
+    init(content: NSView, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+
+        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(clicked)))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    /// A pointing hand, so the row reads as clickable before it is clicked.
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    @objc private func clicked() {
+        handler()
     }
 }

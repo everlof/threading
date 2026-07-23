@@ -101,6 +101,7 @@ final class ThemePreferencesViewController: NSViewController {
     private let colorEditor = ThemeColorEditor()
 
     private weak var appThemePopUp: NSPopUpButton?
+    private weak var appThemeSubtitle: NSTextField?
 
     /// Explains why the palette below it is read-only, and offers the way out. Hidden for a
     /// custom theme, where the palette simply works.
@@ -189,7 +190,8 @@ final class ThemePreferencesViewController: NSViewController {
             SettingsUI.row(
                 title: "App theme",
                 subtitle: AppThemeLibrary.current.summary,
-                control: popUp
+                control: popUp,
+                subtitleField: &appThemeSubtitle
             )
         ])
         return card
@@ -200,6 +202,9 @@ final class ThemePreferencesViewController: NSViewController {
               let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
 
         AppThemeLibrary.apply(theme)
+        // The subtitle describes the *chosen* theme, so it moves with the choice — otherwise
+        // it keeps describing the theme that was selected when the card was built.
+        appThemeSubtitle?.stringValue = theme.summary ?? ""
     }
 
     /// The theme list on its flat surface, the list-editing controls beneath it, and a note

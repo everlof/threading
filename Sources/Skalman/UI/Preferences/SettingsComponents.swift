@@ -90,7 +90,16 @@ enum SettingsUI {
     // MARK: - Rows
 
     /// A row inside a card: a title (with optional secondary line) leading, a control trailing.
-    static func row(title: String, subtitle: String? = nil, control: NSView? = nil) -> NSView {
+    ///
+    /// `subtitleField` hands back the secondary label so a caller whose subtitle changes — the
+    /// App theme card, whose line describes the chosen theme — can update it in place rather
+    /// than rebuild the row.
+    static func row(
+        title: String,
+        subtitle: String? = nil,
+        control: NSView? = nil,
+        subtitleField: inout NSTextField?
+    ) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = Design.Typography.body()
         titleLabel.textColor = Design.Text.label
@@ -101,6 +110,7 @@ enum SettingsUI {
             sub.font = Design.Typography.subheading()
             sub.textColor = Design.Text.secondary
             labelViews.append(sub)
+            subtitleField = sub
         }
 
         let labels = NSStackView(views: labelViews)
@@ -124,6 +134,12 @@ enum SettingsUI {
         }
 
         return padded(row)
+    }
+
+    /// The common case — no caller needs the subtitle back.
+    static func row(title: String, subtitle: String? = nil, control: NSView? = nil) -> NSView {
+        var ignored: NSTextField?
+        return row(title: title, subtitle: subtitle, control: control, subtitleField: &ignored)
     }
 
     /// A control that spans the row's full width, such as a text field with a Choose button.

@@ -5,9 +5,9 @@ import AppKit
 /// What one item in the Theme submenu would do: which record it themes, and with what.
 ///
 /// Carried on the item itself rather than read from the controller when it fires, because the
-/// submenu is built from three places — a session's `⋯`, a session's right-click, a project's
-/// menu — and ambient "whichever row was last clicked" state is exactly what gets stale
-/// between them.
+/// submenu is built from several places — a session's `⋯`, a session's right-click, a
+/// project's menu, the toolbar's context button — and ambient "whichever row was last
+/// clicked" state is exactly what gets stale between them.
 struct ThemeMenuChoice {
 
     enum Target {
@@ -21,18 +21,22 @@ struct ThemeMenuChoice {
     let themeName: String?
 }
 
-// MARK: - Theme Menu
+// MARK: - Theme Menu Builder
 
-/// The Theme submenu, offered on a session row and on a project row alike.
+/// Builds the Theme submenu, offered wherever a theme is chosen at the thing it applies to:
+/// the sidebar rows' menus, and the toolbar's context button.
 ///
-/// It sits in the row's own menu rather than in Settings because a scope is chosen *at* the
-/// thing it applies to — the same placement as the surface switch and the project icon. The
-/// app-wide default stays in Settings, which is the scope with no row to hang from.
-extension ProjectSidebarViewController {
+/// A class rather than free functions because the items need a stable target for their
+/// actions; each presenter keeps one and tells it how "Edit Themes…" reaches Settings.
+@MainActor
+final class ThemeMenuBuilder: NSObject {
+
+    /// Opens the Themes settings page, in whatever way the presenter reaches Settings.
+    var onEditThemes: (() -> Void)?
 
     /// A session's theme: its own choice, or inheriting whatever its project and the default
     /// resolve to.
-    func makeSessionThemeItem(for sessionID: SessionID) -> NSMenuItem {
+    func sessionThemeItem(for sessionID: SessionID) -> NSMenuItem {
         makeThemeItem(
             target: .session(sessionID),
             assigned: ThemeAssignments.themeName(forSession: sessionID),
@@ -41,13 +45,15 @@ extension ProjectSidebarViewController {
     }
 
     /// A project's theme, which every session inside it follows unless it names its own.
-    func makeProjectThemeItem(for projectID: ProjectID) -> NSMenuItem {
+    func projectThemeItem(for projectID: ProjectID) -> NSMenuItem {
         makeThemeItem(
             target: .project(projectID),
             assigned: ThemeAssignments.themeName(forProject: projectID),
             inherited: ThemeAssignments.inheritedName(forProject: projectID)
         )
     }
+
+    // MARK: - Private Methods
 
     /// One builder for both scopes: they differ in what they read and write, not in what
     /// they offer.
@@ -118,7 +124,31 @@ extension ProjectSidebarViewController {
     }
 
     @objc private func editThemesClicked() {
-        guard let index = SettingsPages.index(ofTitle: SettingsPages.themesTitle) else { return }
-        delegate?.projectSidebar(self, didSelectSettingsPage: index)
+        onEditThemes?()
+    }
+}
+
+// MARK: - Sidebar Wrappers
+
+/// The submenu sits in a row's own menu rather than in Settings because a scope is chosen
+/// *at* the thing it applies to — the same placement as the surface switch and the project
+/// icon. The app-wide default stays in Settings, which is the scope with no row to hang from.
+extension ProjectSidebarViewController {
+
+    func makeSessionThemeItem(for sessionID: SessionID) -> NSMenuItem {
+        sidebarThemeBuilder().sessionThemeItem(for: sessionID)
+    }
+
+    func makeProjectThemeItem(for projectID: ProjectID) -> NSMenuItem {
+        sidebarThemeBuilder().projectThemeItem(for: projectID)
+    }
+
+    private func sidebarThemeBuilder() -> ThemeMenuBuilder {
+        themeMenuBuilder.onEditThemes = { [weak self] in
+            guard let self,
+                  let index = SettingsPages.index(ofTitle: SettingsPages.themesTitle) else { return }
+            self.delegate?.projectSidebar(self, didSelectSettingsPage: index)
+        }
+        return themeMenuBuilder
     }
 }

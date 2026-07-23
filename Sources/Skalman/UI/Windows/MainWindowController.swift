@@ -39,6 +39,12 @@ final class MainWindowController: NSWindowController {
     /// Toolbar pill showing the current account's rate-limit usage.
     let accountUsageItemView = AccountUsageItemView()
 
+    /// The toolbar context button's menu, rebuilt each open so the theme checkmarks are live.
+    let sessionContextMenu = NSMenu()
+
+    /// Builds the Theme submenu for the context button; retained because the items target it.
+    let themeMenuBuilder = ThemeMenuBuilder()
+
     /// Exposed to the toolbar delegate, which needs the split view for its tracking separator.
     var splitView: NSSplitView { splitViewController.splitView }
 
@@ -351,6 +357,28 @@ final class MainWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
         guard !containerViewController.isShowingSettings else { return }
         toggleSettings()
+    }
+
+    /// Opens Settings directly on a named page — the door "Edit Themes…" walks through.
+    func showSettingsPage(title: String) {
+        guard let index = SettingsPages.index(ofTitle: title) else { return }
+        showSettings()
+        sidebarViewController.selectSettingsPage(index)
+        containerViewController.showSettingsPage(index: index)
+    }
+
+    /// Opens the display panel on the current session's tabs, or closes it.
+    ///
+    /// The toolbar button's job: the panel otherwise opens only when content arrives or a
+    /// View-menu surface asks for it, which left no way to just look. An empty panel shows
+    /// its placeholder, which is honest.
+    func toggleDisplayPane() {
+        if displayItem.isCollapsed {
+            displayPaneController.showSession(containerViewController.currentSessionID)
+            setDisplayPaneVisible(true)
+        } else {
+            setDisplayPaneVisible(false)
+        }
     }
 
     /// Opens the browser as a tab in the selected session's display panel, beside the terminal.

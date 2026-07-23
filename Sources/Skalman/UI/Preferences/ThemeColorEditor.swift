@@ -64,7 +64,10 @@ final class ThemeSwatchView: NSView {
     /// colour the well already holds would fight the panel the user is dragging in.
     func setColor(_ newColor: NSColor, name: String) {
         color = newColor
-        layer?.backgroundColor = newColor.cgColor
+        // Through applySurface so the recorded surface *is* this colour: otherwise the app-theme
+        // refresh sweep re-applies the `.clear` recorded at init and wipes every swatch to
+        // transparent — which emptied the whole COLORS grid on a live theme switch.
+        applySurface(fill: newColor, radius: ThemeEditorLayout.swatchRadius, border: Design.Surface.border)
         if well.color != newColor { well.color = newColor }
         toolTip = "\(name) · \(newColor.hexString)"
     }

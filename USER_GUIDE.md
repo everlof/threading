@@ -424,11 +424,13 @@ The default account launches with `env -u CLAUDE_CONFIG_DIR` rather than a bare 
 override exported by your shell cannot silently route it to the wrong account.
 
 ### Usage in the toolbar
-The top-right of the toolbar shows how much of the current account's rate limit is spent —
+The toolbar shows how much of the current account's rate limit is spent —
 each window labelled with its value, like `5h 43% · 7d 73%`, beside a small ring gauging
 whichever window is closest to its limit. It follows the selected session's account, and
 hides for shells and anything else without a metered login. The pill stays monochrome while
-usage is comfortable; a value turns orange past 75% and red past 92% of its window.
+usage is comfortable; a value turns orange past 75% and red past 92% of its window. The
+pill sits at the trailing edge of the **session pane** — when the display panel opens, the
+panel's own controls slide right and the pill stays over the conversation it describes.
 
 Click it for the full picture: every rate-limit window (the 5-hour session window and the
 weekly one), each with its own bar, percentage and reset countdown, plus how fresh the
@@ -603,7 +605,19 @@ the right that Claude or Codex can put content into while you keep working in th
 
 Ask for something visual — "show me that screenshot", "chart the bundle sizes", "render that
 as a table" — and the panel opens beside the terminal. Close it with the **✕** in its header;
-it reopens the next time the agent displays something.
+it reopens the next time the agent displays something. It can also be opened by hand — the
+panel toggle at the toolbar's right edge, or **View ▸ Display Panel** — so its tabs (the
+browser, Git Review) are reachable without an agent putting content there first.
+
+### Toolbar controls
+
+Three buttons sit at the toolbar's right edge:
+
+- **Context** (⋯) — a menu of what applies to the session on screen. So far: the **Theme**
+  picker (the same one as the session row's `⋯` menu), with an *Edit Themes…* door to
+  Settings.
+- **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
+- **Panel** — shows or hides the display panel.
 
 Two kinds of content:
 
@@ -909,6 +923,12 @@ sonda · main · 14.6 GB
     target                13.38 GB   Rust build output · cargo build · last written 1 day ago
     web/node_modules       1.18 GB   Node packages · npm install · last written 3 days ago
 ```
+
+Under each heading is the checkout's full path, so a worktree name resolves to a place on disk
+before you remove gigabytes from it. Directories a gigabyte or larger get their own row;
+everything smaller folds into a single **"N smaller directories"** line — a codebase collects
+dozens of tiny caches, and they used to bury the two directories holding the space. Click the
+fold to show them, and **Show fewer** to close it again.
 
 Every row says what it costs to bring back — the command that rebuilds it — and when anything
 inside it was last written. A directory written in the last few minutes is marked **in use**,

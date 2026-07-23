@@ -21,6 +21,9 @@ final class ProjectSidebarViewController: NSViewController {
     /// the window never grows a second sidebar.
     private var settingsSidebar: SettingsSidebar?
 
+    /// Builds the Theme submenu for the row menus; retained because the items target it.
+    let themeMenuBuilder = ThemeMenuBuilder()
+
     /// Covers the sidebar's system material while a style is in force. Absent under System,
     /// where the material is what should be seen — see `applySidebarSurface`.
     private var themeBackdrop: NSView?
@@ -514,6 +517,12 @@ extension ProjectSidebarViewController {
 
     /// Swaps the sidebar between the project list and the settings section list, so opening
     /// settings replaces the sidebar rather than adding a second one beside it.
+    /// Highlights a settings row, for doors that land on a specific page rather than the
+    /// first. A no-op outside settings mode, where there is no list to highlight.
+    func selectSettingsPage(_ index: Int) {
+        settingsSidebar?.select(index)
+    }
+
     func setSettingsMode(_ on: Bool) {
         isSettingsMode = on
 

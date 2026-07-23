@@ -51,12 +51,16 @@ final class ThemePreviewView: NSView {
 
     func show(_ theme: TerminalTheme?) {
         guard let theme else {
-            layer?.backgroundColor = Design.Surface.ground.cgColor
+            // Through applySurface, not a bare `layer.backgroundColor`: the app-theme refresh
+            // sweep re-applies whatever surface was *recorded*, so a direct assignment here is
+            // overwritten by the `.clear` this view recorded at init the next time the app
+            // theme changes — which left the preview transparent and its white text invisible.
+            applySurface(fill: Design.Surface.ground, radius: Design.Radius.panel, border: Design.Surface.border)
             label.stringValue = ""
             return
         }
 
-        layer?.backgroundColor = theme.background.cgColor
+        applySurface(fill: theme.background, radius: Design.Radius.panel, border: Design.Surface.border)
         label.attributedStringValue = sample(for: theme)
     }
 

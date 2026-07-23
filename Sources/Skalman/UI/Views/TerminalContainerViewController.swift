@@ -80,14 +80,29 @@ final class TerminalContainerViewController: NSViewController {
         appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in
             self?.themeDidChange()
         }
+        // The **app** theme change is the one that was missing here, which is why switching to a
+        // light style while Settings was open left the pane dark: the sweep repaints recorded
+        // surfaces, but the pane fill is set directly by `applyPaneBackground` and follows
+        // nothing on its own.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.themeDidChange() }
     }
 
+    /// Repaints the pane behind whatever surface is on screen after a theme change.
+    ///
     /// Resolves the colour here rather than reading it off the terminal view, because the
     /// session controller observes the same notification and the order between two observers
     /// is not defined — reading its view could paint the pane the colour it is leaving.
+    ///
+    /// The early-return this used to have was the bug: it covered only the terminal and the
+    /// conversation, so a theme switch while the **composer, settings, or placeholder** was
+    /// showing left the pane on the previous theme's colour. Those surfaces are the app's own
+    /// chrome, so they take the app theme's ground.
     private func themeDidChange() {
-        guard currentChild != nil || currentConversation != nil else { return }
-        applyPaneBackground(ThemeAssignments.theme(for: currentSessionID).background)
+        if currentChild != nil || currentConversation != nil {
+            applyPaneBackground(ThemeAssignments.theme(for: currentSessionID).background)
+        } else {
+            applyPaneBackground(Design.Surface.ground)
+        }
     }
 
     /// The composer sits alongside the placeholder, hidden until a project is selected.

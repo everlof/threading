@@ -319,6 +319,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shellItem.keyEquivalentModifierMask = [.control]
         menu.addItem(shellItem)
 
+        menu.addItem(withTitle: "Display Panel", action: #selector(toggleDisplayPanel), keyEquivalent: "")
+
         menu.addItem(.separator())
 
         let fullScreenItem = NSMenuItem(
@@ -413,6 +415,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleShell() {
         mainWindowController.toggleShellDrawer()
+    }
+
+    @objc private func toggleDisplayPanel() {
+        mainWindowController.toggleDisplayPane()
     }
 
     @objc private func newSession() {

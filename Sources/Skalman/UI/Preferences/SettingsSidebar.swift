@@ -99,6 +99,11 @@ private final class SettingsSidebarRow: NSView {
 
     private var trackingArea: NSTrackingArea?
 
+    /// The selected-row fill is the theme's accent, assigned as a frozen `cgColor`, so it does
+    /// not follow a live theme switch on its own — a Cyberpunk-green selection stayed green
+    /// after switching to Swiss. `updateStyle` re-resolves it; this is what re-runs it.
+    private let appEvents = AppEventObservations()
+
     // MARK: - Initialization
 
     init(title: String, symbol: String) {
@@ -148,6 +153,7 @@ private final class SettingsSidebarRow: NSView {
         ])
 
         updateStyle()
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.updateStyle() }
     }
 
     // MARK: - Hover & Click
