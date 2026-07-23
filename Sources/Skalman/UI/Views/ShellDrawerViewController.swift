@@ -99,7 +99,7 @@ final class ShellDrawerViewController: NSViewController {
     }
 
     var backgroundColor: NSColor {
-        session?.terminalView.nativeBackgroundColor ?? .textBackgroundColor
+        session?.terminalView.nativeBackgroundColor ?? Design.Surface.ground
     }
 
     // MARK: - Private Methods
@@ -110,7 +110,7 @@ final class ShellDrawerViewController: NSViewController {
     }
 
     private func applyBackground() {
-        view.layer?.backgroundColor = session.terminalView.nativeBackgroundColor.cgColor
+        view.applyLayerBackground(session.terminalView.nativeBackgroundColor)
     }
 }
 

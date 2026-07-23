@@ -10,13 +10,13 @@ import AppKit
 /// composer is as often an image as it is text. It **grows with its content** up to
 /// `Design.Size.inputMaxHeight` and scrolls beyond that, so a long prompt stays visible
 /// without the box eating the pane.
-final class PromptView: NSView {
+final class PromptView: NSView, ThemedComponent {
 
     // MARK: - Properties
 
-    private let scrollView = NSScrollView()
-    private let textView = PromptTextView()
-    private let submitButton = NSButton()
+    private let scrollView = ThemedScrollView()
+    private let textView = PromptTextView(frame: .zero, textContainer: nil)
+    private let submitButton = ThemedButton()
 
     /// Drives the growth. Held so the height can be recomputed as the text changes.
     private var heightConstraint: NSLayoutConstraint?
@@ -87,7 +87,6 @@ final class PromptView: NSView {
             accessibilityDescription: "Start session"
         )
         submitButton.isBordered = false
-        submitButton.bezelStyle = .inline
         submitButton.contentTintColor = Design.Text.tertiary
         submitButton.target = self
         submitButton.action = #selector(submit)
@@ -247,7 +246,7 @@ extension PromptView: NSTextViewDelegate {
 /// Exists for three behaviours `NSTextView` does not have: a placeholder, Return meaning
 /// *submit* rather than *newline*, and files arriving by drag or paste becoming paths in the
 /// text instead of being refused (images) or pasted as an attachment cell (files).
-private final class PromptTextView: NSTextView {
+private final class PromptTextView: ThemedTextView {
 
     // MARK: - Properties
 
@@ -268,7 +267,7 @@ private final class PromptTextView: NSTextView {
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font ?? Design.Typography.body(),
-            .foregroundColor: NSColor.placeholderTextColor
+            .foregroundColor: Design.Text.tertiary
         ]
 
         placeholder.draw(

@@ -175,7 +175,7 @@ final class GitReviewCommitRow: NSView {
     }
 
     private func applyHover() {
-        layer?.backgroundColor = (isHovered ? Design.Chat.toolRowActive : NSColor.clear).cgColor
+        applyLayerBackground(isHovered ? Design.Chat.toolRowActive : NSColor.clear)
     }
 
     // MARK: - Actions

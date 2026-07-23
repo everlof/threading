@@ -474,7 +474,7 @@ final class TerminalContainerViewController: NSViewController {
     /// shows it, but leaving a stale colour there is exactly the seam this avoids — so every
     /// surface swap sets it, resetting to the window's own colour for anything but a terminal.
     private func applyPaneBackground(_ color: NSColor) {
-        view.layer?.backgroundColor = color.cgColor
+        view.applyLayerBackground(color)
 
         // Also paint the window itself, so the terminal's colour is the backdrop the whole
         // right side sits on: it fills the strip beneath the transparent toolbar and runs into

@@ -86,9 +86,8 @@ final class PreferencesFormBuilder {
         let container = FlippedView()
         container.addSubview(grid)
 
-        let scrollView = NSScrollView()
+        let scrollView = ThemedScrollView()
         scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
         scrollView.documentView = container
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         container.translatesAutoresizingMaskIntoConstraints = false

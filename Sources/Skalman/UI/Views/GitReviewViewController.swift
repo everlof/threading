@@ -160,7 +160,7 @@ final class GitReviewViewController: NSViewController {
         let clipView = FlippedClipView()
         clipView.drawsBackground = false
 
-        scrollView = NSScrollView()
+        scrollView = ThemedScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.contentView = clipView
         scrollView.documentView = stack

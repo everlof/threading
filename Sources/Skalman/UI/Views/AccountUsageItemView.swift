@@ -287,6 +287,6 @@ final class AccountUsageItemView: BackdropOverlay {
 
     private func updateBackground() {
         layer?.cornerRadius = Design.Radius.pill(height: AccountUsageItemDefaults.height)
-        layer?.backgroundColor = (isHovered ? ink.surfaceHover : ink.surface).cgColor
+        applyLayerBackground(isHovered ? ink.surfaceHover : ink.surface)
     }
 }

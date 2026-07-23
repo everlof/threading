@@ -155,6 +155,18 @@ enum Design {
         static var tertiary: NSColor { AppThemePalette.color(.tertiaryLabel) }
         static var quaternary: NSColor { AppThemePalette.color(.quaternaryLabel) }
 
+        /// Text over an emphasized selection.
+        ///
+        /// System keeps AppKit's own answer because its source-list fill is also AppKit's. A
+        /// styled theme draws its own accent selection, so the foreground is measured against
+        /// that accent rather than inherited from the user's unrelated system accent.
+        static var selected: NSColor {
+            guard !AppThemePalette.current.isSystem else {
+                return .alternateSelectedControlTextColor
+            }
+            return on(Design.Surface.accent).label
+        }
+
         /// The label tiers that read on an *arbitrary* ground, for the one place a role cannot
         /// answer: a surface the app theme does not own.
         ///

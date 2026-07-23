@@ -205,7 +205,7 @@ private final class SettingsSidebarRow: NSView {
             foreground = Design.Text.secondary
         }
 
-        layer?.backgroundColor = fill.cgColor
+        applyLayerBackground(fill)
         label.textColor = foreground
         iconView.contentTintColor = foreground
     }

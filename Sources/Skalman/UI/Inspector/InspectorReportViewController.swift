@@ -121,9 +121,8 @@ final class InspectorReportViewController: NSViewController {
     }
 
     private func makeReportText() -> NSView {
-        let scrollView = NSTextView.scrollableTextView()
+        let scrollView = ThemedTextView.scrolling()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.drawsBackground = false
         scrollView.applySurface(
             fill: Design.Surface.panel,
             radius: Design.Radius.panel,
@@ -133,16 +132,14 @@ final class InspectorReportViewController: NSViewController {
             .constraint(equalToConstant: InspectorReportLayout.textHeight)
             .isActive = true
 
-        if let textView = scrollView.documentView as? NSTextView {
+        if let textView = scrollView.documentView as? ThemedTextView {
             textView.string = markdown
             textView.isEditable = false
             textView.isSelectable = true
-            textView.drawsBackground = false
             textView.font = .monospacedSystemFont(
                 ofSize: InspectorReportLayout.reportFontSize,
                 weight: .regular
             )
-            textView.textColor = Design.Text.label
             textView.textContainerInset = NSSize(
                 width: Design.Spacing.medium,
                 height: Design.Spacing.medium

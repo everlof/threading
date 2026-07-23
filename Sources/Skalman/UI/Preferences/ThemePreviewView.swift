@@ -66,7 +66,7 @@ final class ThemePreviewView: NSView {
 
     override func updateLayer() {
         super.updateLayer()
-        layer?.borderColor = Design.Surface.border.cgColor
+        applyLayerBorder(Design.Surface.border)
     }
 
     // MARK: - Sample

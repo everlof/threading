@@ -89,7 +89,7 @@ extension MainWindowController {
     /// `NSAlert` sizes an accessory view to its frame, so the diff is capped in both directions
     /// and allowed to scroll — a large edit must not push the buttons off the screen.
     private func permissionDiffAccessory(_ diff: [DiffLine], path: String?) -> NSView {
-        let scroll = NSScrollView(frame: NSRect(
+        let scroll = ThemedScrollView(frame: NSRect(
             x: 0, y: 0,
             width: PermissionDiffDefaults.width,
             height: PermissionDiffDefaults.maxHeight

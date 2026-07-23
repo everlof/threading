@@ -111,7 +111,7 @@ final class AgentSessionViewController: NSViewController {
     /// of the terminal rather than a gap around it.
     private func applyBackgroundColor() {
         view.wantsLayer = true
-        view.layer?.backgroundColor = session.terminalView.nativeBackgroundColor.cgColor
+        view.applyLayerBackground(session.terminalView.nativeBackgroundColor)
     }
 
     private func themeDidChange() {

@@ -20,8 +20,7 @@ enum SettingsUI {
         let document = SettingsFlippedView()
         document.addSubview(stack)
 
-        let scrollView = NSScrollView()
-        scrollView.drawsBackground = false
+        let scrollView = ThemedScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.documentView = document
@@ -237,7 +236,7 @@ final class SettingsCard: NSView {
             if index > 0 {
                 let divider = NSView()
                 divider.wantsLayer = true
-                divider.layer?.backgroundColor = Design.Surface.border.cgColor
+                divider.applyLayerBackground(Design.Surface.border)
                 divider.translatesAutoresizingMaskIntoConstraints = false
                 stack.addArrangedSubview(divider)
                 NSLayoutConstraint.activate([

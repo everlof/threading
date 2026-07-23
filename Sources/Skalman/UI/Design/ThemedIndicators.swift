@@ -6,7 +6,7 @@ import AppKit
 /// *system* grey — which on a themed page is the one grey the theme has already replaced.
 /// Swiss Minimalist is the case that makes this obvious: the style is black rules on white, and
 /// a pale system hairline is the single thing it cannot have.
-final class SeparatorView: NSView {
+final class SeparatorView: NSView, ThemedComponent {
 
     enum Orientation {
         case horizontal
@@ -54,7 +54,7 @@ final class SeparatorView: NSView {
 /// It animates with a `CABasicAnimation` on a sublayer rather than by redrawing on a timer: a
 /// spinner runs for as long as an agent is working, which is minutes, and a timer-driven redraw
 /// of a 12pt view is main-thread work for the whole of it.
-final class ThemedSpinner: NSView {
+final class ThemedSpinner: NSView, ThemedComponent {
 
     private enum Layout {
         static let size: CGFloat = 14
@@ -145,7 +145,7 @@ final class ThemedSpinner: NSView {
 ///
 /// One page load's worth of feedback in the browser pane, in the accent rather than in the system
 /// blue a themed window has already moved away from.
-final class ThemedProgressBar: NSView {
+final class ThemedProgressBar: NSView, ThemedComponent {
 
     private enum Layout {
         static let height: CGFloat = 3

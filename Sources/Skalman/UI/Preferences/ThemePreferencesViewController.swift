@@ -54,11 +54,10 @@ final class ThemePreferencesViewController: NSViewController {
     // MARK: - UI Elements
 
     private lazy var themeTableView: NSTableView = {
-        let table = NSTableView()
+        let table = ThemedTableView()
         table.headerView = nil
         table.rowHeight = Layout.rowHeight
         table.intercellSpacing = NSSize(width: 0, height: 2)
-        table.backgroundColor = .clear
         table.style = .inset
         table.delegate = self
         table.dataSource = self
@@ -69,11 +68,10 @@ final class ThemePreferencesViewController: NSViewController {
     }()
 
     private lazy var themeScrollView: NSScrollView = {
-        let scroll = NSScrollView()
+        let scroll = ThemedScrollView()
         scroll.documentView = themeTableView
         scroll.hasVerticalScroller = true
         scroll.borderType = .noBorder
-        scroll.drawsBackground = false
         return scroll
     }()
 

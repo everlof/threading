@@ -327,7 +327,7 @@ final class SessionRowView: NSTableCellView {
     /// filled shape alone.
     private func applyTextColors() {
         if backgroundStyle == .emphasized {
-            titleLabel.textColor = .alternateSelectedControlTextColor
+            titleLabel.textColor = Design.Text.selected
             return
         }
 

@@ -148,7 +148,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     }
 
     override public func viewWillDraw() {
-        layer?.backgroundColor = nativeBackgroundColor.cgColor
+        applyLayerBackground(nativeBackgroundColor)
         super.viewWillDraw()
     }
 

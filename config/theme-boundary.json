@@ -1,0 +1,164 @@
+{
+  "bannedTypes": {
+    "NSBox": "SeparatorView or a component from UI/Design",
+    "NSBrowser": "a component from UI/Design",
+    "NSButton": "ThemedButton",
+    "NSClipView": "ThemedClipView",
+    "NSCollectionView": "a themed collection component",
+    "NSColorWell": "ThemeSwatchView",
+    "NSComboBox": "a component from UI/Design",
+    "NSComboButton": "a component from UI/Design",
+    "NSDatePicker": "a component from UI/Design",
+    "NSForm": "a component from UI/Design",
+    "NSLevelIndicator": "a component from UI/Design",
+    "NSMatrix": "a component from UI/Design",
+    "NSOutlineView": "ThemedOutlineView",
+    "NSPathControl": "a component from UI/Design",
+    "NSPopUpButton": "ThemedPopUp",
+    "NSPredicateEditor": "a component from UI/Design",
+    "NSProgressIndicator": "ThemedSpinner or ThemedProgressBar",
+    "NSRuleEditor": "a component from UI/Design",
+    "NSScrollView": "ThemedScrollView",
+    "NSScroller": "system chrome contained by ThemedScrollView",
+    "NSSearchField": "ThemedSearchField",
+    "NSSecureTextField": "a secure component from UI/Design",
+    "NSSegmentedControl": "a component from UI/Design",
+    "NSSlider": "a component from UI/Design",
+    "NSStepper": "a component from UI/Design",
+    "NSSwitch": "ThemedToggle",
+    "NSTabView": "a component from UI/Design",
+    "NSTableHeaderView": "ThemedTableHeaderView",
+    "NSTableView": "ThemedTableView",
+    "NSTextField": "ThemedTextField; label factories remain allowed",
+    "NSTextView": "ThemedTextView",
+    "NSTokenField": "a component from UI/Design",
+    "NSVisualEffectView": "a named system-chrome boundary"
+  },
+  "allowedTextFieldLabels": [
+    "labelWithString",
+    "wrappingLabelWithString",
+    "labelWithAttributedString"
+  ],
+  "bannedFactories": {
+    "NSTextView.scrollableTextView": "ThemedTextView.scrolling()",
+    "NSTextView.scrollablePlainTextView": "ThemedTextView.scrolling()"
+  },
+  "systemColors": [
+    "alternateSelectedControlTextColor",
+    "controlAccentColor",
+    "controlBackgroundColor",
+    "controlTextColor",
+    "disabledControlTextColor",
+    "gridColor",
+    "headerTextColor",
+    "keyboardFocusIndicatorColor",
+    "labelColor",
+    "linkColor",
+    "placeholderTextColor",
+    "quaternaryLabelColor",
+    "secondaryLabelColor",
+    "selectedContentBackgroundColor",
+    "selectedTextBackgroundColor",
+    "selectedTextColor",
+    "separatorColor",
+    "systemBlue",
+    "systemBrown",
+    "systemCyan",
+    "systemGray",
+    "systemGreen",
+    "systemIndigo",
+    "systemMint",
+    "systemOrange",
+    "systemPink",
+    "systemPurple",
+    "systemRed",
+    "systemTeal",
+    "systemYellow",
+    "tertiaryLabelColor",
+    "textBackgroundColor",
+    "textColor",
+    "underPageBackgroundColor",
+    "unemphasizedSelectedContentBackgroundColor",
+    "windowBackgroundColor"
+  ],
+  "exceptions": [
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedScrollView.swift",
+      "kind": "inherit",
+      "symbol": "NSClipView",
+      "reason": "The themed boundary has to subclass the AppKit surface it contains."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedScrollView.swift",
+      "kind": "inherit",
+      "symbol": "NSScrollView",
+      "reason": "The themed boundary has to subclass the AppKit surface it contains."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedTables.swift",
+      "kind": "inherit",
+      "symbol": "NSTableHeaderView",
+      "reason": "The themed boundary has to subclass the AppKit surface it contains."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedTables.swift",
+      "kind": "inherit",
+      "symbol": "NSTableView",
+      "reason": "The themed boundary has to subclass the AppKit surface it contains."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedTables.swift",
+      "kind": "inherit",
+      "symbol": "NSOutlineView",
+      "reason": "The themed boundary has to subclass the AppKit surface it contains."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedTextField.swift",
+      "kind": "inherit",
+      "symbol": "NSTextField",
+      "reason": "The themed boundary preserves AppKit's field editor while replacing its chrome."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedTextView.swift",
+      "kind": "inherit",
+      "symbol": "NSTextView",
+      "reason": "The themed boundary preserves AppKit's text system while replacing its surface."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemeSwatchView.swift",
+      "kind": "construct",
+      "symbol": "NSColorWell",
+      "reason": "The invisible well is the narrow boundary to the system colour panel."
+    },
+    {
+      "path": "Sources/Skalman/Core/Theme/AppThemeRole.swift",
+      "kind": "systemColor",
+      "symbol": "*",
+      "reason": "This is the single mapping from system colours into semantic app-theme roles."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/Design.swift",
+      "kind": "systemColor",
+      "symbol": "*",
+      "reason": "Design owns the documented categorical palette and contrast-derived ink."
+    },
+    {
+      "path": "Sources/Skalman/Core/Theme/AppThemeRefresh.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "*",
+      "reason": "This file is the refresh-aware implementation behind layer-colour helpers."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/Design.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "*",
+      "reason": "applySurface records and refreshes every CGColor it assigns."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedIndicators.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "strokeColor",
+      "reason": "The spinner reapplies its shape-layer stroke from draw(_:) on every theme refresh."
+    }
+  ]
+}

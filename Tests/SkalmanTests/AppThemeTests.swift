@@ -161,6 +161,28 @@ final class AppThemeTests: XCTestCase {
         )
     }
 
+    /// State-specific fills use the lighter layer helper rather than replacing the surface
+    /// record. It must retain the dynamic NSColor for the same reason `applySurface` does.
+    func testARecordedLayerColourIsResolvedAgainWhenTheThemeChanges() {
+        AppThemePalette.set(.system)
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        view.applyLayerBackground(Design.Surface.controlResting)
+        let before = view.layer?.backgroundColor
+
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        XCTAssertEqual(view.layer?.backgroundColor, before)
+
+        view.reapplyRecordedLayerColorsForTesting()
+
+        let after = view.layer?.backgroundColor
+        XCTAssertNotEqual(after, before)
+        XCTAssertEqual(
+            after.flatMap { NSColor(cgColor: $0)?.hexString },
+            AppThemeStyles.swissMinimalist.resolved(.controlResting).hexString
+        )
+    }
+
     /// A view with no recorded surface must survive the sweep untouched — most views have none.
     func testTheSweepLeavesUnrecordedViewsAlone() {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))

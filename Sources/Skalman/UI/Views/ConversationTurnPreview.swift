@@ -36,7 +36,7 @@ final class ConversationTurnPreview: NSView {
         // The card floats over the conversation, so it needs a shadow to read as *over* rather
         // than as another row that has lost its place in the column.
         shadow = NSShadow()
-        layer?.shadowColor = NSColor.black.withAlphaComponent(0.28).cgColor
+        applyLayerShadow(NSColor.black.withAlphaComponent(0.28))
         layer?.shadowOpacity = 1
         layer?.shadowRadius = 12
         layer?.shadowOffset = .zero

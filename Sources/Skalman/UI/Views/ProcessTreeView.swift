@@ -56,7 +56,7 @@ final class ProcessTreeView: NSView {
     }
 
     private func setupOutlineView() {
-        outlineView = NSOutlineView()
+        outlineView = ThemedOutlineView()
         outlineView.rowHeight = Layout.rowHeight
         outlineView.indentationPerLevel = 16
         outlineView.autoresizesOutlineColumn = false
@@ -67,7 +67,7 @@ final class ProcessTreeView: NSView {
         outlineView.columnAutoresizingStyle = .noColumnAutoresizing
 
         // Enable column resizing via header
-        let headerView = NSTableHeaderView()
+        let headerView = ThemedTableHeaderView()
         outlineView.headerView = headerView
 
         // PID column (outline column - needs extra width for indentation)
@@ -118,7 +118,7 @@ final class ProcessTreeView: NSView {
     }
 
     private func setupScrollView() {
-        scrollView = NSScrollView()
+        scrollView = ThemedScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true

@@ -16,7 +16,7 @@ final class SessionImportViewController: NSViewController {
     private let headingLabel = NSTextField(labelWithString: ImportStrings.heading)
     private let subheadingLabel = NSTextField(labelWithString: "")
     private let searchField = ThemedSearchField()
-    private let tableView = NSTableView()
+    private let tableView = ThemedTableView()
     private let importButton = ThemedButton()
 
     /// Called with the chosen conversation, or nil when the sheet is dismissed.
@@ -113,15 +113,13 @@ final class SessionImportViewController: NSViewController {
         tableView.headerView = nil
         tableView.rowHeight = ImportLayout.rowHeight
         tableView.style = .inset
-        tableView.backgroundColor = .clear
         tableView.doubleAction = #selector(confirm)
         tableView.target = self
         tableView.addTableColumn(NSTableColumn(identifier: ImportColumn.session))
 
-        let scrollView = NSScrollView()
+        let scrollView = ThemedScrollView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.applySurface(
             fill: Design.Surface.panel,

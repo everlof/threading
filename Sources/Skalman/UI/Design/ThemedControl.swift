@@ -22,7 +22,7 @@ import AppKit
 /// No explicit `@MainActor`: `NSControl` already carries it from the SDK, and adding it again
 /// over-isolates the control's own properties relative to the plain `SettingsUI` helpers that
 /// build these.
-class ThemedControl: NSControl {
+class ThemedControl: NSControl, ThemedComponent {
 
     private var themeRedraw: ThemeRedraw?
 

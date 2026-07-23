@@ -448,70 +448,94 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    // MARK: - Content Surfaces
+
+    func testThemedContentContainersStartTransparent() {
+        XCTAssertFalse(ThemedScrollView().drawsBackground)
+        XCTAssertFalse(ThemedClipView().drawsBackground)
+        XCTAssertEqual(ThemedTableView().backgroundColor, .clear)
+        XCTAssertEqual(ThemedOutlineView().backgroundColor, .clear)
+        XCTAssertFalse(ThemedTextView(frame: .zero, textContainer: nil).drawsBackground)
+    }
+
+    /// A wrapper that only changes its type name is not a themed component. The process-tree
+    /// header used to be such a seam; pin that it now paints a role from the active theme.
+    func testThemedTableHeaderPaintsTheActiveTheme() {
+        func sampled(under theme: AppTheme) -> NSColor {
+            AppThemePalette.set(theme)
+
+            let table = ThemedTableView(frame: NSRect(x: 0, y: 0, width: 160, height: 80))
+            table.addTableColumn(NSTableColumn(identifier: .init("Name")))
+
+            let header = ThemedTableHeaderView(frame: NSRect(x: 0, y: 0, width: 160, height: 24))
+            table.headerView = header
+
+            let rep = header.bitmapImageRepForCachingDisplay(in: header.bounds)!
+            header.cacheDisplay(in: header.bounds, to: rep)
+            return rep.colorAt(x: 8, y: 12)!.usingColorSpace(.sRGB)!
+        }
+
+        let cyber = sampled(under: AppThemeStyles.cyberpunk)
+        let swiss = sampled(under: AppThemeStyles.swissMinimalist)
+        XCTAssertNotEqual(cyber.hexString, swiss.hexString)
+    }
+
     // MARK: - The Rule Itself
 
-    /// The design system's rule, enforced rather than written down: **no stock AppKit control
-    /// outside `UI/Design/`.**
-    ///
-    /// It was written down for a long time and eroded anyway — by the time app themes arrived, a
-    /// styled page was themed cards around system-blue switches, softly-bezelled pop-ups and a
-    /// system-grey spinner. The themed controls fixed the symptom; this is what stops it coming
-    /// back, and it is a test rather than only a lint config because this is what runs on every
-    /// build.
-    ///
-    /// Labels are deliberately allowed: `NSTextField(labelWithString:)` draws no bezel and no
-    /// background, so it is already nothing but text in a themed colour. The bezel is the
-    /// erosion, not the type.
+    /// Runs the same SwiftSyntax checker as the application build. The policy and exception list
+    /// therefore have one owner; the test cannot quietly drift to a second regex vocabulary.
     func testNoStockControlsOutsideTheDesignSystem() throws {
-        let sources = URL(fileURLWithPath: #filePath)
+        let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // SkalmanTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // repo root
-            .appendingPathComponent("Sources")
 
-        let banned = try NSRegularExpression(
-            pattern: #"\b(NSButton|NSSwitch|NSPopUpButton|NSSearchField|NSProgressIndicator|NSColorWell|NSBox)\s*\("#
-        )
-        let bannedField = try NSRegularExpression(
-            pattern: #"NSTextField\(\s*(?!labelWithString|wrappingLabelWithString|labelWithAttributedString)"#
-        )
-        // The same erosion one level down: a system colour follows light and dark but not the
-        // theme, so it stays system-blue on a page that has gone neon. Read through a Design role
-        // instead. `(?!\s*=)` keeps the property being *assigned* out of it — setting a web
-        // view's `underPageBackgroundColor` to a role is the correct thing to do.
-        let bannedColour = try NSRegularExpression(
-            pattern: #"\.(labelColor|secondaryLabelColor|tertiaryLabelColor|quaternaryLabelColor|controlAccentColor|windowBackgroundColor|controlBackgroundColor|underPageBackgroundColor|separatorColor|gridColor|headerTextColor|selectedContentBackgroundColor|unemphasizedSelectedContentBackgroundColor|systemRed|systemGreen|systemBlue|systemOrange|systemYellow|systemPurple|systemTeal|systemPink|systemIndigo|systemGray)\b(?!\s*=)"#
-        )
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = ["scripts/check_theme_boundaries.sh"]
+        task.currentDirectoryURL = root
 
-        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?
-            .compactMap { $0 as? URL }
-            .filter {
-                $0.pathExtension == "swift"
-                    && !$0.path.contains("/UI/Design/")
-                    && !$0.path.contains("/Core/Theme/")
-            } ?? []
-        XCTAssertFalse(files.isEmpty, "the source tree was not found from #filePath")
+        let output = Pipe()
+        task.standardOutput = output
+        task.standardError = output
+        try task.run()
+        task.waitUntilExit()
 
-        var offences: [String] = []
-        for file in files {
-            let text = try String(contentsOf: file, encoding: .utf8)
-            let range = NSRange(text.startIndex..., in: text)
-            for pattern in [banned, bannedField, bannedColour] {
-                for match in pattern.matches(in: text, range: range) {
-                    guard let found = Range(match.range, in: text) else { continue }
-                    let line = text[text.startIndex..<found.lowerBound].filter(\.isNewline).count + 1
-                    offences.append("\(file.lastPathComponent):\(line) — \(text[found])")
-                }
-            }
-        }
+        let report = String(
+            data: output.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+        XCTAssertEqual(task.terminationStatus, 0, report)
+    }
 
-        XCTAssertEqual(
-            offences, [],
-            "stock AppKit outside the design system. Controls: ThemedButton, ThemedToggle, "
-                + "ThemedPopUp, ThemedTextField, ThemedSearchField, ThemedSpinner, "
-                + "ThemedProgressBar, SeparatorView, ThemeSwatchView. Colours: Design.Text.*, "
-                + "Design.Surface.*, Design.Status.*, Design.Categorical.ramp."
-        )
+    func testRuntimeAuditRejectsRawControlsButAllowsThemedComponentsAndLabels() {
+        let root = NSView()
+        root.addSubview(ThemedButton())
+        root.addSubview(NSTextField(labelWithString: "Safe label"))
+
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: root), [])
+
+        let raw = NSButton()
+        root.addSubview(raw)
+        let violations = ThemeBoundaryAudit.violations(in: root)
+
+        XCTAssertEqual(violations.count, 1)
+        XCTAssertEqual(violations.first?.className, "NSButton")
+    }
+
+    func testRuntimeAuditAcceptsNamedSystemChromeBoundaries() {
+        let root = NSView()
+        root.addSubview(ThemeSwatchView())
+
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        root.addSubview(scroll)
+
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: root), [])
+    }
+
+    func testPromptUsesOnlyThemedRuntimeBoundaries() {
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: PromptView()), [])
     }
 }
 

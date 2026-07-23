@@ -279,6 +279,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F7000001000000000000003 /* Build configuration list for PBXNativeTarget "Skalman" */;
 			buildPhases = (
+				C0D3A1100000000000000001 /* Enforce Theme Boundary */,
 				F6000001000000000000002 /* Sources */,
 				F3000001000000000000001 /* Frameworks */,
 				F6000001000000000000003 /* Resources */,
@@ -351,6 +352,36 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		C0D3A1100000000000000001 /* Enforce Theme Boundary */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Sources",
+				"$(SRCROOT)/config/theme-boundary.json",
+				"$(SRCROOT)/scripts/check_theme_boundaries.sh",
+				"$(SRCROOT)/scripts/theme_boundary_lint.swift",
+				"$(SRCROOT)/docs/THEME_BOUNDARY.md",
+				"$(SRCROOT)/AGENTS.md",
+				"$(SRCROOT)/CLAUDE.md",
+			);
+			name = "Enforce Theme Boundary";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/theme-boundary-lint",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/scripts/check_theme_boundaries.sh\"";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2B94BD9027B7FD53BB982AFA /* Sources */ = {

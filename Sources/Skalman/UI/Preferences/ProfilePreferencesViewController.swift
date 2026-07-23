@@ -154,7 +154,7 @@ final class ProfilePreferencesViewController: NSViewController {
     }
 
     private func updatePreview() {
-        previewView.layer?.backgroundColor = currentProfile.theme.background.cgColor
+        previewView.applyLayerBackground(currentProfile.theme.background)
         previewLabel.textColor = currentProfile.theme.foreground
         previewLabel.font = NSFont.monospacedSystemFont(ofSize: currentProfile.fontSize, weight: .regular)
     }

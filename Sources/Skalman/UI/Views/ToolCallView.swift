@@ -242,7 +242,7 @@ final class ToolCallView: NSView {
         // An open row keeps its fill: it is holding content, which needs a surface to sit on
         // whether or not the pointer is still over it.
         let isActive = isHovered || isExpanded
-        layer?.backgroundColor = (isActive ? Design.Chat.toolRowActive : Design.Chat.toolRowResting).cgColor
+        applyLayerBackground(isActive ? Design.Chat.toolRowActive : Design.Chat.toolRowResting)
     }
 }
 

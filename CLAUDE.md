@@ -1547,6 +1547,24 @@ Agent Output ← LocalProcessTerminalView ← PTY
 
 ## Design System
 
+### Required AppKit theme boundary
+
+Before changing UI, read and follow [`docs/THEME_BOUNDARY.md`](docs/THEME_BOUNDARY.md). It is
+the canonical policy for both humans and agents.
+
+- Feature code never constructs or subclasses an AppKit control or chrome-drawing surface.
+- Use `UI/Design/`; if the needed component does not exist, add the boundary there first.
+- `UI/Design/` is not exempt: composite components use the lower-level themed components too.
+- Structural AppKit types are allowed only when they choose no visible styling.
+- System chrome is contained behind a named wrapper and a narrow, documented policy exception.
+- Colours come from semantic `Design` roles, and theme colours never become unrecorded layer
+  `CGColor`s.
+- A new component includes behavior, accessibility, live-theme-switch and rendered-state tests.
+
+`scripts/check_theme_boundaries.sh` is an error-producing build lint. Do not silence it with a
+directory exclusion; fix the call site or add the smallest justified exception to
+`config/theme-boundary.json`.
+
 **New UI is built from `Sources/Skalman/UI/Design/`, not from stock AppKit controls.** This is
 the default, not a preference: a screen assembled from `NSPopUpButton`, `NSBox` and bezelled
 buttons will not match anything else in the app.
@@ -1568,8 +1586,22 @@ Components so far:
 | `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. |
 | `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
 | `ThemedSpinner` / `ThemedProgressBar` | `NSProgressIndicator`, in the theme's accent. |
+| `ThemedScrollView` | An `NSScrollView` that starts transparent — the stock one paints a system surface. |
+| `ThemedTextView` | An `NSTextView` in theme colours; `.scrolling()` replaces `scrollableTextView()`. |
+| `ThemedTableView` / `ThemedOutlineView` | Tables that start transparent, replacing the system background. |
+| `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. |
 | `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
+
+The rule behind the table now covers **every chrome-drawing AppKit class**, not just the seven
+that eroded first: content containers (`NSScrollView`, `NSTextView`, tables) because their
+stock backgrounds are system surfaces, and every control the app has never used, so the first
+slider arrives through a themed wrapper rather than establishing stock. Layout types
+(`NSView`, `NSStackView`, `NSGridView`), labels, chromeless `NSImageView` and contained system
+chrome (`NSMenu`, `NSPopover`, `NSAlert`, the file panels) stay allowed — they draw nothing
+the theme owns. `config/theme-boundary.json` owns the list; the build and test suite both run
+its SwiftSyntax checker, while `.swiftlint.yml` provides fast editor feedback. A class with no
+wrapper yet gets one in `UI/Design/` first.
 
 `PromptView` is an `NSTextView`, not an `NSTextField`, for two things a single-line field
 cannot do: a task worth describing runs past one line, and what is dropped on a composer is
@@ -1638,10 +1670,11 @@ the original promise, and it keeps it exactly — every role resolves to the sys
 user who never picks a style sees the app they always saw.
 
 So there are no stock AppKit controls left outside `UI/Design/`, and
-`ThemedControlTests.testNoStockControlsOutsideTheDesignSystem` is what keeps it that way. The
-rule is a test rather than only a comment because it *was* only a comment for most of this
-project's life and eroded anyway. `.swiftlint.yml` states the same rule for editors; the test is
-what runs on every build. **Labels are deliberately exempt**: `NSTextField(labelWithString:)`
+`scripts/check_theme_boundaries.sh` is what keeps it that way. The Xcode target runs the
+SwiftSyntax checker before compilation, and
+`ThemedControlTests.testNoStockControlsOutsideTheDesignSystem` invokes that same checker rather
+than maintaining a second list. `.swiftlint.yml` remains fast editor feedback. **Labels are
+deliberately exempt**: `NSTextField(labelWithString:)`
 draws no bezel and no background, so it is already nothing but text in a themed colour. The
 bezel is the erosion, not the type.
 

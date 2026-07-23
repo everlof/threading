@@ -1517,6 +1517,24 @@ Agent Output ← LocalProcessTerminalView ← PTY
 
 ## Design System
 
+### Required AppKit theme boundary
+
+Before changing UI, read and follow [`docs/THEME_BOUNDARY.md`](docs/THEME_BOUNDARY.md). It is
+the canonical policy for both humans and agents.
+
+- Feature code never constructs or subclasses an AppKit control or chrome-drawing surface.
+- Use `UI/Design/`; if the needed component does not exist, add the boundary there first.
+- `UI/Design/` is not exempt: composite components use the lower-level themed components too.
+- Structural AppKit types are allowed only when they choose no visible styling.
+- System chrome is contained behind a named wrapper and a narrow, documented policy exception.
+- Colours come from semantic `Design` roles, and theme colours never become unrecorded layer
+  `CGColor`s.
+- A new component includes behavior, accessibility, live-theme-switch and rendered-state tests.
+
+`scripts/check_theme_boundaries.sh` is an error-producing build lint. Do not silence it with a
+directory exclusion; fix the call site or add the smallest justified exception to
+`config/theme-boundary.json`.
+
 **New UI is built from `Sources/Skalman/UI/Design/`, not from stock AppKit controls.** This is
 the default, not a preference: a screen assembled from `NSPopUpButton`, `NSBox` and bezelled
 buttons will not match anything else in the app.
@@ -1588,8 +1606,8 @@ same thing. An identifier the table does not know is handed back intact rather t
 wrong friendly name is worse than an unfamiliar accurate one on the string that says what the
 session costs. "Default model" survives only where the account states nothing at all.
 
-Preferences still use stock AppKit via `PreferencesFormBuilder`. That is deliberate: a
-settings window is one place where matching the platform beats matching the app.
+Preferences follow the same boundary as every other app-owned surface. The System theme
+preserves the native palette; styled themes must not stop at settings controls.
 
 ## Code Style Guidelines
 

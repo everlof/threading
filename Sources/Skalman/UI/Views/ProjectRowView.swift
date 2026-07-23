@@ -372,11 +372,11 @@ final class ProjectRowView: NSTableCellView {
     /// only reaches the folder-symbol fallback; a real icon keeps its own colours.
     private func applyTextColors() {
         if backgroundStyle == .emphasized {
-            nameLabel.textColor = .alternateSelectedControlTextColor
-            countLabel.textColor = .alternateSelectedControlTextColor.withAlphaComponent(
+            nameLabel.textColor = Design.Text.selected
+            countLabel.textColor = Design.Text.selected.withAlphaComponent(
                 SidebarRowDefaults.secondaryTextAlpha
             )
-            iconView.contentTintColor = .alternateSelectedControlTextColor
+            iconView.contentTintColor = Design.Text.selected
             return
         }
 

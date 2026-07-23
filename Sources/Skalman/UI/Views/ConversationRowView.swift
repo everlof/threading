@@ -93,7 +93,7 @@ enum ConversationRowView {
         let rule = NSView()
         rule.translatesAutoresizingMaskIntoConstraints = false
         rule.wantsLayer = true
-        rule.layer?.backgroundColor = Design.Chat.turnDivider.cgColor
+        rule.applyLayerBackground(Design.Chat.turnDivider)
         rule.heightAnchor.constraint(equalToConstant: Design.Chat.turnDividerHeight).isActive = true
         return rule
     }

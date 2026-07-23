@@ -115,7 +115,7 @@ final class PermissionRequestView: NSView {
     /// The diff, bounded so a large edit scrolls inside the card rather than growing it without
     /// limit — the buttons must stay reachable.
     private func makeDiffPreview(_ diff: [DiffLine], path: String?) -> NSView {
-        let scroll = NSScrollView()
+        let scroll = ThemedScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
@@ -172,7 +172,7 @@ final class PermissionRequestView: NSView {
         resolvedLabel.stringValue = note
         resolvedLabel.textColor = note.hasPrefix("Denied") ? Design.Status.negative : Design.Text.secondary
 
-        layer?.borderColor = Design.Surface.border.cgColor
+        applyLayerBorder(Design.Surface.border)
 
         // The controller's closure refers back to this card while it advances the queue.
         // Release it before invoking it so a settled card keeps only its visual record, not

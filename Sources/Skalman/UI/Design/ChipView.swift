@@ -165,10 +165,15 @@ final class ChipView: NSView {
         updateHoverWidth()
     }
 
+    /// Goes through `applySurface` rather than setting the layer's colour directly, so the fill
+    /// the chip is *currently* wearing is the one recorded for `AppThemeRefresh`'s sweep. Setting
+    /// it directly left the resting fill recorded forever, and a chip hovered while the theme
+    /// changed was swept back to resting under the pointer until the mouse moved again.
     private func updateBackground() {
-        layer?.backgroundColor = (isHovered
-            ? Design.Surface.controlHover
-            : Design.Surface.controlResting).cgColor
+        applySurface(
+            fill: isHovered ? Design.Surface.controlHover : Design.Surface.controlResting,
+            radius: Design.Radius.pill(height: Design.Size.chipHeight)
+        )
     }
 
     /// Pins the chip to its full contents while hovered, so a label the row squeezed into an

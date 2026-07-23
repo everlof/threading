@@ -107,7 +107,7 @@ final class DiffView: NSStackView {
         let view = NSView()
         view.translatesAutoresizingMaskIntoConstraints = false
         view.wantsLayer = true
-        view.layer?.backgroundColor = background(for: row.kind).cgColor
+        view.applyLayerBackground(background(for: row.kind))
 
         let gutter = NSTextField(labelWithString: sign(for: row.kind))
         gutter.font = font()

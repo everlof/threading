@@ -11,7 +11,7 @@ import AppKit
 /// A label is deliberately *not* this. `NSTextField(labelWithString:)` draws no bezel and no
 /// background, so it is already nothing but text in a themed colour; the erosion this exists to
 /// stop is the bezel, not the type.
-class ThemedTextField: NSTextField {
+class ThemedTextField: NSTextField, ThemedComponent {
 
     // MARK: - Geometry
 

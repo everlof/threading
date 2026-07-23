@@ -54,13 +54,13 @@ final class UsageBarView: NSView {
         let radius = bounds.height / 2
         layer?.cornerCurve = .continuous
         layer?.cornerRadius = radius
-        layer?.backgroundColor = Design.Surface.controlResting.cgColor
+        applyLayerBackground(Design.Surface.controlResting)
 
         let width = bounds.width * min(max(fraction, 0), 1)
         fillView.frame = NSRect(x: 0, y: 0, width: width, height: bounds.height)
         fillView.layer?.cornerCurve = .continuous
         fillView.layer?.cornerRadius = radius
-        fillView.layer?.backgroundColor = tint.cgColor
+        fillView.applyLayerBackground(tint)
         fillView.isHidden = width <= 0
 
         if let timeMark {
@@ -74,8 +74,9 @@ final class UsageBarView: NSView {
             markView.layer?.cornerRadius = markWidth / 2
             // labelColor adapts to light/dark, so the mark reads against both the track and any
             // tint fill it overlaps.
-            markView.layer?.backgroundColor = Design.Text.label
-                .withAlphaComponent(UsageBarDefaults.timeMarkAlpha).cgColor
+            markView.applyLayerBackground(
+                Design.Text.label.withAlphaComponent(UsageBarDefaults.timeMarkAlpha)
+            )
             markView.isHidden = false
         } else {
             markView.isHidden = true

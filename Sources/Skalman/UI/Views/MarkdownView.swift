@@ -102,7 +102,7 @@ final class MarkdownView: NSStackView {
 
         // Horizontally scrollable, so a long line neither wraps mid-token nor forces the whole
         // conversation wider than the pane.
-        let scroll = NSScrollView()
+        let scroll = ThemedScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.drawsBackground = false
         scroll.hasHorizontalScroller = true
@@ -147,7 +147,7 @@ final class MarkdownView: NSStackView {
         let bar = NSView()
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.wantsLayer = true
-        bar.layer?.backgroundColor = style.secondaryColor.withAlphaComponent(0.4).cgColor
+        bar.applyLayerBackground(style.secondaryColor.withAlphaComponent(0.4))
 
         let content = label(text)
         content.textColor = style.secondaryColor

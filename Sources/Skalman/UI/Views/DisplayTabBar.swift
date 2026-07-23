@@ -28,7 +28,7 @@ final class DisplayTabBar: NSView {
     // MARK: - Views
 
     private let stack = NSStackView()
-    private let scrollView = NSScrollView()
+    private let scrollView = ThemedScrollView()
 
     // MARK: - Init
 
@@ -189,7 +189,7 @@ final class DisplayTabChip: NSView {
         let fill: NSColor = item.isActive
             ? Design.Surface.controlHover
             : (hovered ? Design.Surface.controlResting : .clear)
-        layer?.backgroundColor = fill.cgColor
+        applyLayerBackground(fill)
 
         // The close control is reserved a slot always, so raising it on hover does not relayout
         // the strip; it simply fades in.

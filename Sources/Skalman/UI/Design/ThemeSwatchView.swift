@@ -14,7 +14,7 @@ import AppKit
 /// reads as a hole rather than as a value — and the ring is drawn by the layer's border,
 /// which Core Animation paints *above* sublayers, so it survives the colour well filling the
 /// chip underneath it.
-final class ThemeSwatchView: NSView {
+final class ThemeSwatchView: NSView, ThemedComponent, SystemChromeBoundary {
 
     // MARK: Properties
 
@@ -79,12 +79,16 @@ final class ThemeSwatchView: NSView {
     override func updateLayer() {
         super.updateLayer()
         // Border colours are resolved at assignment, so they do not follow an appearance change.
-        layer?.borderColor = Design.Surface.border.cgColor
+        applyLayerBorder(Design.Surface.border)
     }
 
     @objc private func wellChanged() {
         color = well.color
-        layer?.backgroundColor = well.color.cgColor
+        applyLayerBackground(well.color)
         onChange?(well.color)
+    }
+
+    func permitsSystemChrome(_ view: NSView) -> Bool {
+        view is NSColorWell
     }
 }

@@ -98,7 +98,7 @@ final class ProjectSidebarViewController: NSViewController {
 private extension ProjectSidebarViewController {
 
     private func setupOutlineView() {
-        outlineView = NSOutlineView()
+        outlineView = ThemedOutlineView()
         outlineView.style = .sourceList
         outlineView.headerView = nil
         outlineView.rowSizeStyle = .default
@@ -114,10 +114,9 @@ private extension ProjectSidebarViewController {
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
 
-        scrollView = NSScrollView()
+        scrollView = ThemedScrollView()
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(scrollView)

@@ -60,12 +60,32 @@ private enum RecordedRadius {
 }
 
 private var recordedSurfaceKey: UInt8 = 0
+private var recordedLayerColorsKey: UInt8 = 0
+
+/// Layer colours that were assigned outside `applySurface`.
+///
+/// These are kept separately from a surface because a view may use `applySurface` for its
+/// geometry and glow, then change only its fill as hover or selection changes.
+private final class RecordedLayerColors {
+    var background: NSColor?
+    var border: NSColor?
+    var shadow: NSColor?
+}
 
 extension NSView {
 
     fileprivate var recordedSurface: RecordedSurface? {
         get { objc_getAssociatedObject(self, &recordedSurfaceKey) as? RecordedSurface }
         set { objc_setAssociatedObject(self, &recordedSurfaceKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
+    }
+
+    private var recordedLayerColors: RecordedLayerColors {
+        if let recorded = objc_getAssociatedObject(self, &recordedLayerColorsKey) as? RecordedLayerColors {
+            return recorded
+        }
+        let recorded = RecordedLayerColors()
+        objc_setAssociatedObject(self, &recordedLayerColorsKey, recorded, .OBJC_ASSOCIATION_RETAIN)
+        return recorded
     }
 
     /// Re-applies whatever `applySurface` last set, resolving its colours again.
@@ -82,6 +102,37 @@ extension NSView {
         )
     }
 
+    fileprivate func reapplyRecordedLayerColors() {
+        guard let recorded = objc_getAssociatedObject(
+            self,
+            &recordedLayerColorsKey
+        ) as? RecordedLayerColors else { return }
+
+        if let background = recorded.background { layer?.backgroundColor = background.cgColor }
+        if let border = recorded.border { layer?.borderColor = border.cgColor }
+        if let shadow = recorded.shadow { layer?.shadowColor = shadow.cgColor }
+    }
+
+    /// Assigns a layer fill while retaining the `NSColor` that produced the frozen `CGColor`.
+    /// The app-theme sweep asks that colour again after a live switch.
+    func applyLayerBackground(_ color: NSColor) {
+        wantsLayer = true
+        layer?.backgroundColor = color.cgColor
+        recordedLayerColors.background = color
+    }
+
+    func applyLayerBorder(_ color: NSColor) {
+        wantsLayer = true
+        layer?.borderColor = color.cgColor
+        recordedLayerColors.border = color
+    }
+
+    func applyLayerShadow(_ color: NSColor) {
+        wantsLayer = true
+        layer?.shadowColor = color.cgColor
+        recordedLayerColors.shadow = color
+    }
+
     /// Remembers the colours a surface was drawn with. Called by `applySurface`, so its
     /// eighteen call sites need no change of their own.
     func recordSurface(fill: NSColor, border: NSColor?, radius: CGFloat, glow: Bool) {
@@ -92,6 +143,10 @@ extension NSView {
     /// The sweep itself needs a window, which a unit test has no business standing up.
     func reapplyRecordedSurfaceForTesting() {
         reapplyRecordedSurface()
+    }
+
+    func reapplyRecordedLayerColorsForTesting() {
+        reapplyRecordedLayerColors()
     }
 }
 
@@ -124,6 +179,9 @@ enum AppThemeRefresh {
 
     private static func repaint(_ view: NSView) {
         view.reapplyRecordedSurface()
+        // A state-specific layer colour is applied after the base surface, because it represents
+        // the most recent visible state (hovered, selected, and so on).
+        view.reapplyRecordedLayerColors()
         view.needsDisplay = true
 
         // Effect views and anything else deriving from the appearance need their own nudge, and

@@ -84,9 +84,9 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// that stopped meaning added would cost more than the contrast it bought.
     override func applyInk(_ ink: Design.Ink) {
         layer?.cornerRadius = Design.Radius.pill(height: GitStatusOverlayDefaults.height)
-        layer?.backgroundColor = ink.surface.cgColor
+        applyLayerBackground(ink.surface)
         layer?.borderWidth = Design.Radius.border
-        layer?.borderColor = ink.border.cgColor
+        applyLayerBorder(ink.border)
         glyph.contentTintColor = ink.secondary
         if let lastReading { update(with: lastReading) }
     }

@@ -10,9 +10,10 @@
 # bury the one rule that matters here under thousands of unrelated line-length warnings, and a
 # warning nobody reads is worse than no warning at all.
 #
-# `ThemedControlTests.testNoStockControlsOutsideTheDesignSystem` enforces the same rule in the
-# test suite, which is what actually runs on every build. This file is for editors and for
-# `swiftlint` at the command line.
+# This remains deliberately fast editor feedback. The canonical, syntax-aware policy is
+# `config/theme-boundary.json`, enforced by `scripts/check_theme_boundaries.sh` in the Xcode
+# build and test suite. The SwiftLint expressions need not carry exceptions because the
+# canonical checker is what decides whether a boundary use is legitimate.
 
 only_rules:
   - custom_rules
@@ -26,22 +27,44 @@ excluded:
 
 custom_rules:
   stock_appkit_control:
-    name: "Stock AppKit control"
-    regex: '\b(NSButton|NSSwitch|NSPopUpButton|NSSearchField|NSProgressIndicator|NSColorWell|NSBox)\s*\('
-    excluded: ".*/UI/Design/.*"
-    message: "Build from UI/Design/ — ThemedButton, ThemedToggle, ThemedPopUp, ThemedSearchField, ThemedSpinner, ThemedProgressBar, SeparatorView, ThemeSwatchView. A stock control bakes in the system accent and bezel, so it stays system-blue on a page that has gone red."
+    name: "Stock AppKit control or chrome view"
+    regex: '\b(NSButton|NSComboButton|NSSwitch|NSPopUpButton|NSSearchField|NSProgressIndicator|NSColorWell|NSBox|NSScrollView|NSClipView|NSTextView|NSTableView|NSOutlineView|NSTableHeaderView|NSCollectionView|NSVisualEffectView|NSSegmentedControl|NSSlider|NSStepper|NSLevelIndicator|NSComboBox|NSDatePicker|NSTokenField|NSSecureTextField|NSPathControl|NSRuleEditor|NSPredicateEditor|NSBrowser|NSTabView|NSMatrix|NSForm|NSScroller)\s*\('
+    excluded: ".*/UI/Design/ThemeSwatchView\\.swift"
+    message: "Build from UI/Design/ — ThemedButton, ThemedToggle, ThemedPopUp, ThemedSearchField, ThemedSpinner, ThemedProgressBar, ThemedScrollView, ThemedTextView, ThemedTableView, ThemedOutlineView, SeparatorView, ThemeSwatchView. A stock control bakes in the system accent, bezel or background, so it stays system-styled on a page that has gone red. No wrapper yet? Make one in UI/Design first."
+    match_kinds:
+      - identifier
+    severity: error
+
+  stock_appkit_factory:
+    name: "Stock AppKit factory"
+    regex: 'NSTextView\s*\.\s*scrollableTextView'
+    message: "The factory hands back a stock text view in a stock scroll view. Use ThemedTextView.scrolling()."
+    match_kinds:
+      - identifier
     severity: error
 
   stock_appkit_field:
     name: "Stock AppKit text field"
     regex: 'NSTextField\(\s*(?!labelWithString|wrappingLabelWithString|labelWithAttributedString)'
-    excluded: ".*/UI/Design/.*"
     message: "An editable field is ThemedTextField. Labels are fine — NSTextField(labelWithString:) draws no bezel, and the bezel is what this rule exists to stop."
+    match_kinds:
+      - identifier
     severity: error
 
   system_colour:
     name: "System colour used directly"
-    regex: '\.(labelColor|secondaryLabelColor|tertiaryLabelColor|quaternaryLabelColor|controlAccentColor|windowBackgroundColor|controlBackgroundColor|underPageBackgroundColor|separatorColor|gridColor|headerTextColor|selectedContentBackgroundColor|unemphasizedSelectedContentBackgroundColor|systemRed|systemGreen|systemBlue|systemOrange|systemYellow|systemPurple|systemTeal|systemPink|systemIndigo|systemGray)\b(?!\s*=)'
-    excluded: ".*/(UI/Design|Core/Theme)/.*"
+    regex: '\b(?:NSColor|AppKit\s*\.\s*NSColor)\s*\.\s*(alternateSelectedControlTextColor|controlAccentColor|controlBackgroundColor|controlTextColor|disabledControlTextColor|gridColor|headerTextColor|keyboardFocusIndicatorColor|labelColor|linkColor|placeholderTextColor|quaternaryLabelColor|secondaryLabelColor|selectedContentBackgroundColor|selectedTextBackgroundColor|selectedTextColor|separatorColor|systemBlue|systemBrown|systemCyan|systemGray|systemGreen|systemIndigo|systemMint|systemOrange|systemPink|systemPurple|systemRed|systemTeal|systemYellow|tertiaryLabelColor|textBackgroundColor|underPageBackgroundColor|unemphasizedSelectedContentBackgroundColor|windowBackgroundColor)\b(?!\s*=)'
+    excluded: ".*/(UI/Design/Design|Core/Theme/AppThemeRole)\\.swift"
     message: "Read the colour through a Design role — Design.Text.*, Design.Surface.*, Design.Status.*, Design.Categorical.ramp. A system colour follows light and dark but not the theme, which is how the Usage page ended up drawing system-blue bars on a Cyberpunk card."
+    match_kinds:
+      - identifier
+    severity: error
+
+  frozen_layer_colour:
+    name: "Frozen layer theme colour"
+    regex: '(backgroundColor|borderColor|shadowColor|strokeColor|fillColor)\s*=\s*[^\n]*\.cgColor'
+    excluded: ".*/(Core/Theme/AppThemeRefresh|UI/Design/Design|UI/Design/ThemedIndicators)\\.swift"
+    message: "A CALayer freezes CGColor at assignment. Use applySurface or the refresh-aware NSView layer-colour helpers."
+    match_kinds:
+      - identifier
     severity: error

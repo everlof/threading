@@ -144,7 +144,7 @@ final class ConversationViewController: NSViewController {
         document.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(stack)
 
-        scrollView = NSScrollView()
+        scrollView = ThemedScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.contentView = clip
         scrollView.hasVerticalScroller = true
@@ -321,7 +321,7 @@ final class ConversationViewController: NSViewController {
             context.allowsImplicitAnimation = true
             scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: target))
         } completionHandler: { [weak self] in
-            self?.scrollView.reflectScrolledClipView(self?.scrollView.contentView ?? NSClipView())
+            self?.scrollView.reflectScrolledClipView(self?.scrollView.contentView ?? ThemedClipView())
             self?.updateVisibleTurns()
         }
     }
