@@ -16,8 +16,8 @@ final class ProcessTreePaneController: NSViewController {
 
     private var headerView: NSView!
     private var titleLabel: NSTextField!
-    private var refreshButton: NSButton!
-    private var closeButton: NSButton!
+    private var refreshButton: ThemedButton!
+    private var closeButton: ThemedButton!
     private var contentSplitView: NSSplitView!
     private var processTreeView: ProcessTreeView!
     private var detailView: NSView!
@@ -72,14 +72,12 @@ final class ProcessTreePaneController: NSViewController {
         titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = Design.Text.label
 
-        refreshButton = NSButton(image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")!, target: self, action: #selector(refreshTree))
+        refreshButton = ThemedButton(symbol: "arrow.clockwise", accessibility: "Refresh", target: self, action: #selector(refreshTree))
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
-        refreshButton.bezelStyle = .accessoryBarAction
         refreshButton.isBordered = false
 
-        closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")!, target: self, action: #selector(closeTapped))
+        closeButton = ThemedButton(symbol: "xmark", accessibility: "Close", target: self, action: #selector(closeTapped))
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.bezelStyle = .accessoryBarAction
         closeButton.isBordered = false
 
         headerView.addSubview(titleLabel)

@@ -106,9 +106,8 @@ final class PermissionRequestView: NSView {
         return row
     }
 
-    private func makeButton(_ title: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .rounded
+    private func makeButton(_ title: String, action: Selector) -> ThemedButton {
+        let button = ThemedButton(title: title, target: self, action: action)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }

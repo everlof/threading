@@ -546,7 +546,7 @@ final class SessionComposerViewController: NSViewController {
         alert.addButton(withTitle: "Create")
         alert.addButton(withTitle: "Cancel")
 
-        let field = NSTextField(frame: NSRect(
+        let field = ThemedTextField(frame: NSRect(
             x: 0, y: 0,
             width: ComposerDefaults.branchFieldWidth,
             height: ComposerDefaults.branchFieldHeight

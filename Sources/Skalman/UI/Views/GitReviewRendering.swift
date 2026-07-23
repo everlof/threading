@@ -169,8 +169,7 @@ extension GitReviewViewController {
         }
 
         if canLoadMore {
-            let more = NSButton(title: "Show more…", target: self, action: #selector(loadMoreCommits))
-            more.bezelStyle = .accessoryBarAction
+            let more = ThemedButton(title: "Show more…", target: self, action: #selector(loadMoreCommits))
             more.isBordered = false
             more.font = Design.Typography.caption()
             more.contentTintColor = Design.Text.secondary

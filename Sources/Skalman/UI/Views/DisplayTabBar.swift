@@ -78,9 +78,7 @@ final class DisplayTabBar: NSView {
         ])
 
         // A hairline under the strip, separating it from the content below.
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
+        let separator = SeparatorView()
         addSubview(separator)
         NSLayoutConstraint.activate([
             separator.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -120,7 +118,7 @@ final class DisplayTabChip: NSView {
     private let item: DisplayTabBarItem
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
-    private let closeButton = NSButton()
+    private let closeButton = ThemedButton()
     private var trackingArea: NSTrackingArea?
     private var hovered = false
 
@@ -156,7 +154,6 @@ final class DisplayTabChip: NSView {
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")?
             .withSymbolConfiguration(closeConfig)
         closeButton.isBordered = false
-        closeButton.bezelStyle = .accessoryBarAction
         closeButton.target = self
         closeButton.action = #selector(closeClicked)
         closeButton.translatesAutoresizingMaskIntoConstraints = false

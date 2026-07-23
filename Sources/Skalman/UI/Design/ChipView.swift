@@ -202,4 +202,5 @@ final class ChipView: NSView {
 enum DesignSymbols {
     static let chevron = "chevron.down"
     static let submit = "return"
+    static let search = "magnifyingglass"
 }

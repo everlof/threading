@@ -37,7 +37,7 @@ final class ProjectRowView: NSTableCellView {
     /// A `+` sat beside it once, opening a menu that created a session with defaults for
     /// agent, account, model and checkout. Selecting the row opens the composer, where those
     /// are chosen — so the shortcut was a way to skip the only screen that asks.
-    private let hoverButton = NSButton()
+    private let hoverButton = ThemedButton()
     private let hoverControls = NSStackView()
 
     private var trackingArea: NSTrackingArea?
@@ -280,8 +280,6 @@ final class ProjectRowView: NSTableCellView {
 
         for button in [hoverButton] {
             button.isBordered = false
-            button.bezelStyle = .inline
-            button.contentTintColor = Design.Text.secondary
             button.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 button.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),

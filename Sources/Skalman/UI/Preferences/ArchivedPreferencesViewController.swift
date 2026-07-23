@@ -6,7 +6,7 @@ import AppKit
 /// archived ones live — to be restored to the sidebar or deleted for good. Nothing is created
 /// here; the list only reflects what has been archived.
 ///
-/// Built from the settings kit (`SettingsUI`, `SettingsCard`, `FlatButton`) rather than an
+/// Built from the settings kit (`SettingsUI`, `SettingsCard`, `ThemedButton`) rather than an
 /// `NSTableView`: each archived conversation is a flat card row carrying its own Restore and
 /// Delete actions, so there is no selection state and no footer button bar.
 final class ArchivedPreferencesViewController: NSViewController {
@@ -132,13 +132,13 @@ final class ArchivedPreferencesViewController: NSViewController {
 
     // MARK: - Actions
 
-    private func session(for sender: NSButton) -> (project: Project, session: AgentSession)? {
+    private func session(for sender: ThemedButton) -> (project: Project, session: AgentSession)? {
         guard sender.tag >= 0, sender.tag < rows.count else { return nil }
         return rows[sender.tag]
     }
 
     /// Puts the session back on the sidebar, where selecting it resumes the conversation.
-    @objc private func restoreSession(_ sender: NSButton) {
+    @objc private func restoreSession(_ sender: ThemedButton) {
         guard let entry = session(for: sender) else { return }
         ProjectStore.shared.setArchived(false, for: entry.session.id)
         reload()
@@ -146,7 +146,7 @@ final class ArchivedPreferencesViewController: NSViewController {
 
     /// Deletes the session for good, after confirming — its conversation cannot be recovered
     /// from the sidebar afterwards, though the CLI's own transcript on disk is untouched.
-    @objc private func deleteSession(_ sender: NSButton) {
+    @objc private func deleteSession(_ sender: ThemedButton) {
         guard let entry = session(for: sender) else { return }
 
         let alert = NSAlert()

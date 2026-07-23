@@ -113,7 +113,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         alert.addButton(withTitle: "Rename")
         alert.addButton(withTitle: "Cancel")
 
-        let textField = NSTextField(frame: NSRect(
+        let textField = ThemedTextField(frame: NSRect(
             x: 0, y: 0,
             width: SidebarDefaults.renameFieldWidth,
             height: SidebarDefaults.renameFieldHeight

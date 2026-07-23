@@ -4,7 +4,7 @@ import AppKit
 ///
 /// Accounts themselves are discovered from disk and cannot be added or removed here; this
 /// pane only customises how they are presented. It is built from the settings design kit
-/// (`SettingsUI`, `SettingsCard`, `FlatButton`) as a card of flat account rows rather than a
+/// (`SettingsUI`, `SettingsCard`, `ThemedButton`) as a card of flat account rows rather than a
 /// table, so it reads as one piece with the other preference panes.
 final class AccountsPreferencesViewController: NSViewController {
 
@@ -98,14 +98,13 @@ final class AccountsPreferencesViewController: NSViewController {
 
     /// A round-ish clickable well showing the account's icon; clicking it opens the picker.
     /// The fallback icon is dimmed, so an unset account still hints at what the well is for.
-    private func makeIconButton(for account: AgentAccount, row index: Int) -> NSButton {
-        let button = NSButton(
+    private func makeIconButton(for account: AgentAccount, row index: Int) -> ThemedButton {
+        let button = ThemedButton(
             title: account.emoji ?? account.provider.fallbackIcon,
             target: self,
             action: #selector(iconClicked(_:))
         )
         button.isBordered = false
-        button.bezelStyle = .inline
         button.font = .systemFont(ofSize: AccountsPreferencesLayout.emojiFontSize)
         button.tag = index
         button.alphaValue = account.emoji == nil ? AccountsPreferencesLayout.unsetIconAlpha : 1
@@ -125,7 +124,7 @@ final class AccountsPreferencesViewController: NSViewController {
 
     /// The editable name over a quiet caption naming the provider and its config directory.
     private func makeLabelStack(for account: AgentAccount, row index: Int) -> NSView {
-        let field = NSTextField(string: account.displayName)
+        let field = ThemedTextField(string: account.displayName)
         field.font = Design.Typography.body()
         field.textColor = Design.Text.label
         field.isBordered = false
@@ -182,7 +181,7 @@ final class AccountsPreferencesViewController: NSViewController {
     // MARK: - Actions
 
     /// Opens the emoji picker beneath the clicked icon well.
-    @objc private func iconClicked(_ sender: NSButton) {
+    @objc private func iconClicked(_ sender: ThemedButton) {
         guard let account = account(at: sender.tag) else { return }
 
         let picker = EmojiPickerViewController(showsRemove: account.emoji != nil)
@@ -213,7 +212,7 @@ final class AccountsPreferencesViewController: NSViewController {
         notifyAccountsChanged()
     }
 
-    @objc private func resetClicked(_ sender: NSButton) {
+    @objc private func resetClicked(_ sender: ThemedButton) {
         guard let account = account(at: sender.tag) else { return }
 
         AccountPreferencesStore.shared.clear(accountID: account.id)

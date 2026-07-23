@@ -11,7 +11,7 @@ final class SessionPlaceholderView: NSView {
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
-    private let actionButton = NSButton()
+    private let actionButton = ThemedButton()
 
     /// Invoked when the action button is clicked. The button is hidden when nil.
     var onAction: (() -> Void)? {
@@ -52,8 +52,7 @@ final class SessionPlaceholderView: NSView {
         detailLabel.textColor = Design.Text.tertiary
         detailLabel.alignment = .center
 
-        actionButton.bezelStyle = .rounded
-        actionButton.controlSize = .large
+        actionButton.isProminent = true
         actionButton.target = self
         actionButton.action = #selector(actionButtonClicked)
         actionButton.isHidden = true

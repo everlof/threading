@@ -9,7 +9,7 @@ final class SessionRowView: NSTableCellView {
     // MARK: - Properties
 
     private let statusIndicator = SessionStatusIndicator()
-    private let actionButton = NSButton()
+    private let actionButton = ThemedButton()
 
     /// Fixed-size container holding the status indicator and the action button overlaid,
     /// so swapping between them on hover never re-lays out the row.
@@ -144,8 +144,6 @@ final class SessionRowView: NSTableCellView {
             accessibilityDescription: "Session actions"
         )
         actionButton.isBordered = false
-        actionButton.bezelStyle = .inline
-        actionButton.contentTintColor = Design.Text.secondary
         actionButton.target = self
         actionButton.action = #selector(actionClicked)
         actionButton.alphaValue = 0

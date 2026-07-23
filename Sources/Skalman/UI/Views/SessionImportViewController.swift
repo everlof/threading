@@ -15,9 +15,9 @@ final class SessionImportViewController: NSViewController {
 
     private let headingLabel = NSTextField(labelWithString: ImportStrings.heading)
     private let subheadingLabel = NSTextField(labelWithString: "")
-    private let searchField = NSSearchField()
+    private let searchField = ThemedSearchField()
     private let tableView = NSTableView()
-    private let importButton = NSButton()
+    private let importButton = ThemedButton()
 
     /// Called with the chosen conversation, or nil when the sheet is dismissed.
     var onPick: ((ImportableSession?) -> Void)?
@@ -140,17 +140,16 @@ final class SessionImportViewController: NSViewController {
 
     private func makeFooter() -> NSView {
         importButton.title = ImportStrings.importTitle
-        importButton.bezelStyle = .rounded
+        importButton.isProminent = true
         importButton.keyEquivalent = "\r"
         importButton.target = self
         importButton.action = #selector(confirm)
 
-        let cancelButton = NSButton(
+        let cancelButton = ThemedButton(
             title: ImportStrings.cancelTitle,
             target: self,
             action: #selector(cancel)
         )
-        cancelButton.bezelStyle = .rounded
         cancelButton.keyEquivalent = "\u{1b}"
 
         let spacer = NSView()

@@ -14,8 +14,8 @@ final class ProjectSidebarViewController: NSViewController {
     private let appEvents = AppEventObservations()
 
     /// Footer controls, retained so settings mode can hide Add Project and mark the cogwheel.
-    private var addButton: HoverTintButton!
-    private var settingsButton: HoverTintButton!
+    private var addButton: ThemedButton!
+    private var settingsButton: ThemedButton!
 
     /// The settings section list, shown in place of the projects when settings is open — so
     /// the window never grows a second sidebar.
@@ -179,30 +179,24 @@ private extension ProjectSidebarViewController {
     /// Footer holding the add-project control and the settings cogwheel, pinned below the list
     /// behind a hairline. Add sits at the leading edge; settings mirrors it at the trailing one.
     private func setupFooter() {
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
+        let separator = SeparatorView()
 
-        addButton = HoverTintButton()
-        addButton.title = " Add Project"
-        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")
-        addButton.imagePosition = .imageLeading
-        addButton.bezelStyle = .inline
+        addButton = ThemedButton()
+        addButton.title = "Add Project"
+        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
+            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         addButton.isBordered = false
         addButton.font = .systemFont(ofSize: SidebarRowDefaults.sessionFontSize)
-        addButton.contentTintColor = Design.Text.secondary
         addButton.target = self
         addButton.action = #selector(addProjectClicked)
         addButton.translatesAutoresizingMaskIntoConstraints = false
 
         // A quiet icon-only twin of Add Project, so settings is reachable without leaving the
         // window. It carries no title, so the row reads as "add on the left, settings opposite".
-        settingsButton = HoverTintButton()
-        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
-        settingsButton.imagePosition = .imageOnly
-        settingsButton.bezelStyle = .inline
+        settingsButton = ThemedButton()
+        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
+            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         settingsButton.isBordered = false
-        settingsButton.contentTintColor = Design.Text.secondary
         settingsButton.toolTip = "Settings"
         settingsButton.target = self
         settingsButton.action = #selector(settingsClicked)
@@ -401,7 +395,7 @@ extension ProjectSidebarViewController {
         alert.addButton(withTitle: confirmTitle)
         alert.addButton(withTitle: "Cancel")
 
-        let textField = NSTextField(frame: NSRect(
+        let textField = ThemedTextField(frame: NSRect(
             x: 0, y: 0,
             width: SidebarDefaults.renameFieldWidth,
             height: SidebarDefaults.renameFieldHeight
@@ -1272,7 +1266,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         alert.addButton(withTitle: "Use Favicon")
         alert.addButton(withTitle: "Cancel")
 
-        let field = NSTextField(frame: NSRect(
+        let field = ThemedTextField(frame: NSRect(
             x: 0, y: 0,
             width: SidebarDefaults.renameFieldWidth,
             height: SidebarDefaults.renameFieldHeight

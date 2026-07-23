@@ -89,11 +89,8 @@ final class ThemePreferencesViewController: NSViewController {
         return button
     }()
 
-    private lazy var useThemeButton: NSButton = {
-        let button = NSButton(title: "Use as Default", target: self, action: #selector(useSelectedTheme))
-        button.bezelStyle = .rounded
-        button.controlSize = .regular
-        return button
+    private lazy var useThemeButton: ThemedButton = {
+        ThemedButton(title: "Use as Default", target: self, action: #selector(useSelectedTheme))
     }()
 
     private let previewView = ThemePreviewView()
@@ -264,12 +261,9 @@ final class ThemePreferencesViewController: NSViewController {
         return stack
     }
 
-    private func iconButton(_ symbol: String, tooltip: String, action: Selector) -> NSButton {
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
-        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
-        button.bezelStyle = .roundRect
+    private func iconButton(_ symbol: String, tooltip: String, action: Selector) -> ThemedButton {
+        let button = ThemedButton(symbol: symbol, accessibility: tooltip, target: self, action: action)
         button.isBordered = true
-        button.toolTip = tooltip
         button.translatesAutoresizingMaskIntoConstraints = false
         button.widthAnchor.constraint(equalToConstant: Layout.buttonWidth).isActive = true
         button.heightAnchor.constraint(equalToConstant: Layout.buttonHeight).isActive = true
@@ -413,7 +407,7 @@ final class ThemePreferencesViewController: NSViewController {
         alert.addButton(withTitle: "Rename")
         alert.addButton(withTitle: "Cancel")
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        let field = ThemedTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
         field.stringValue = theme.name
         alert.accessoryView = field
         alert.window.initialFirstResponder = field

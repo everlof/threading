@@ -253,19 +253,11 @@ final class ThemedPopUp: ThemedControl {
     }
 
     private func drawSurface() {
-        // Half a point in, so a one-point border falls inside the control rather than straddling
-        // its edge and drawing at half intensity.
-        let border = Design.Radius.border
-        let rect = bounds.insetBy(dx: border / 2, dy: border / 2)
-        let radius = Design.Radius.control
-        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-
-        (isHovered && isEnabled ? Design.Surface.controlHover : Design.Surface.controlResting).setFill()
-        path.fill()
-
-        Design.Surface.border.setStroke()
-        path.lineWidth = border
-        path.stroke()
+        ThemedSurface.draw(
+            bounds,
+            fill: isHovered && isEnabled ? Design.Surface.controlHover : Design.Surface.controlResting,
+            border: Design.Surface.border
+        )
     }
 
     /// Stroked rather than set from `chevron.down`, so it takes the theme's own weight and needs

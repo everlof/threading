@@ -34,36 +34,30 @@ final class AIInputBar: NSView {
     }()
 
     private lazy var inputField: NSTextField = {
-        let field = NSTextField()
+        let field = ThemedTextField()
         field.placeholderString = "Ask AI to generate a command..."
         field.font = NSFont.systemFont(ofSize: 13)
         field.delegate = self
         field.focusRingType = .none
-        field.bezelStyle = .roundedBezel
         return field
     }()
 
-    private lazy var submitButton: NSButton = {
-        let button = NSButton(image: NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: "Submit")!, target: self, action: #selector(submit))
-        button.bezelStyle = .inline
-        button.isBordered = false
-        button.imageScaling = .scaleProportionallyUpOrDown
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        return button
-    }()
-
-    private lazy var cancelButton: NSButton = {
-        let button = NSButton(image: NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Cancel")!, target: self, action: #selector(cancel))
-        button.bezelStyle = .inline
+    private lazy var submitButton: ThemedButton = {
+        let button = ThemedButton(symbol: "arrow.up.circle.fill", accessibility: "Submit", target: self, action: #selector(submit))
         button.isBordered = false
         button.setContentHuggingPriority(.required, for: .horizontal)
         return button
     }()
 
-    private lazy var loadingIndicator: NSProgressIndicator = {
-        let indicator = NSProgressIndicator()
-        indicator.style = .spinning
-        indicator.controlSize = .small
+    private lazy var cancelButton: ThemedButton = {
+        let button = ThemedButton(symbol: "xmark.circle", accessibility: "Cancel", target: self, action: #selector(cancel))
+        button.isBordered = false
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        return button
+    }()
+
+    private lazy var loadingIndicator: ThemedSpinner = {
+        let indicator = ThemedSpinner()
         indicator.isHidden = true
         return indicator
     }()
@@ -156,9 +150,9 @@ final class AIInputBar: NSView {
         loadingIndicator.isHidden = !isLoading
 
         if isLoading {
-            loadingIndicator.startAnimation(nil)
+            loadingIndicator.isAnimating = true
         } else {
-            loadingIndicator.stopAnimation(nil)
+            loadingIndicator.isAnimating = false
         }
     }
 

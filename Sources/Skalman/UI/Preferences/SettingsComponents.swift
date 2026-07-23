@@ -182,8 +182,8 @@ enum SettingsUI {
         return popUp
     }
 
-    static func textField(target: AnyObject, action: Selector, width: CGFloat = SettingsUIDefaults.controlWidth) -> NSTextField {
-        let field = NSTextField()
+    static func textField(target: AnyObject, action: Selector, width: CGFloat = SettingsUIDefaults.controlWidth) -> ThemedTextField {
+        let field = ThemedTextField()
         field.font = Design.Typography.body()
         field.target = target
         field.action = action
@@ -192,11 +192,10 @@ enum SettingsUI {
         return field
     }
 
-    /// A quiet, pill-shaped push button in the app's flat style.
-    static func button(_ title: String, target: AnyObject, action: Selector) -> NSButton {
-        let button = FlatButton(title: title)
-        button.target = target
-        button.action = action
+    /// A quiet push button in the app's flat style.
+    static func button(_ title: String, target: AnyObject, action: Selector) -> ThemedButton {
+        let button = ThemedButton(title: title, target: target, action: action)
+        button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }
 }
@@ -260,56 +259,6 @@ final class SettingsCard: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-}
-
-// MARK: - Flat Button
-
-/// A borderless push button with a soft rounded fill that lifts on hover, matching the app's
-/// pills rather than a stock bezel.
-final class FlatButton: NSButton {
-
-    private var trackingArea: NSTrackingArea?
-
-    init(title: String) {
-        super.init(frame: .zero)
-        self.title = title
-        isBordered = false
-        bezelStyle = .inline
-        font = Design.Typography.control()
-        contentTintColor = Design.Text.label
-        wantsLayer = true
-        layer?.cornerCurve = .continuous
-        layer?.cornerRadius = Design.Radius.control
-        translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: Design.Size.chipHeight).isActive = true
-        updateFill(hovered: false)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var intrinsicContentSize: NSSize {
-        var size = super.intrinsicContentSize
-        size.width += Design.Spacing.large
-        return size
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { updateFill(hovered: true) }
-    override func mouseExited(with event: NSEvent) { updateFill(hovered: false) }
-
-    private func updateFill(hovered: Bool) {
-        layer?.backgroundColor = (hovered ? Design.Surface.controlHover : Design.Surface.controlResting).cgColor
     }
 }
 

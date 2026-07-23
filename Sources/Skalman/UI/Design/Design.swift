@@ -129,6 +129,9 @@ enum Design {
 
         static var border: NSColor { AppThemePalette.color(.border) }
 
+        /// A rule between rows, quieter than a border around them.
+        static var divider: NSColor { AppThemePalette.color(.divider) }
+
         /// The window's own backdrop.
         static var ground: NSColor { AppThemePalette.color(.ground) }
 

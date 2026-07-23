@@ -18,7 +18,7 @@ final class EmojiPickerViewController: NSViewController {
     /// Whether a "Remove" control is offered, i.e. an icon is currently set.
     private let showsRemove: Bool
 
-    private let field = NSTextField(string: "")
+    private let field = ThemedTextField(string: "")
 
     // MARK: - Initialization
 
@@ -86,8 +86,8 @@ final class EmojiPickerViewController: NSViewController {
         return grid
     }
 
-    private func makeEmojiCell(_ emoji: String) -> NSButton {
-        let button = EmojiGridButton(title: emoji, target: self, action: #selector(cellClicked(_:)))
+    private func makeEmojiCell(_ emoji: String) -> ThemedButton {
+        let button = ThemedButton(title: emoji, target: self, action: #selector(cellClicked(_:)))
         button.isBordered = false
         button.font = .systemFont(ofSize: EmojiPickerLayout.emojiFontSize)
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -104,27 +104,20 @@ final class EmojiPickerViewController: NSViewController {
     /// so "coffee" finds ☕ — over a quiet field that also takes a pasted or typed emoji, with
     /// removal beside it when there is an icon to clear.
     private func makeInputRow() -> NSView {
-        let browse = NSButton(
-            title: EmojiPickerStrings.browse,
-            image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)!,
-            target: self,
-            action: #selector(browseClicked)
-        )
-        browse.imagePosition = .imageLeading
-        browse.bezelStyle = .rounded
-        browse.controlSize = .large
+        let browse = ThemedButton(title: EmojiPickerStrings.browse, target: self, action: #selector(browseClicked))
+        browse.image = NSImage(systemSymbolName: DesignSymbols.search, accessibilityDescription: nil)?
+            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        browse.isProminent = true
         browse.translatesAutoresizingMaskIntoConstraints = false
 
         field.placeholderString = EmojiPickerStrings.placeholder
         field.font = .systemFont(ofSize: EmojiPickerLayout.fieldFontSize)
-        field.bezelStyle = .roundedBezel
         field.delegate = self
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         var fieldViews: [NSView] = [field]
         if showsRemove {
-            let remove = NSButton(title: EmojiPickerStrings.remove, target: self, action: #selector(removeClicked))
-            remove.bezelStyle = .rounded
+            let remove = ThemedButton(title: EmojiPickerStrings.remove, target: self, action: #selector(removeClicked))
             remove.setContentHuggingPriority(.required, for: .horizontal)
             fieldViews.append(remove)
         }
@@ -146,7 +139,7 @@ final class EmojiPickerViewController: NSViewController {
 
     // MARK: - Actions
 
-    @objc private func cellClicked(_ sender: NSButton) {
+    @objc private func cellClicked(_ sender: ThemedButton) {
         onPick?(sender.title)
     }
 
@@ -186,42 +179,6 @@ extension EmojiPickerViewController: NSTextFieldDelegate {
 
 /// Borderless emoji cell with a soft rounded highlight under the pointer, so the grid reads as
 /// pickable without two dozen bezels.
-private final class EmojiGridButton: NSButton {
-
-    private var trackingArea: NSTrackingArea?
-
-    private var isMouseInside = false {
-        didSet { needsDisplay = true }
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { isMouseInside = true }
-    override func mouseExited(with event: NSEvent) { isMouseInside = false }
-
-    override func draw(_ dirtyRect: NSRect) {
-        if isMouseInside {
-            Design.Surface.controlResting.setFill()
-            NSBezierPath(
-                roundedRect: bounds,
-                xRadius: EmojiPickerLayout.hoverRadius,
-                yRadius: EmojiPickerLayout.hoverRadius
-            ).fill()
-        }
-        super.draw(dirtyRect)
-    }
-}
-
 // MARK: - Emoji Detection
 
 private extension Character {

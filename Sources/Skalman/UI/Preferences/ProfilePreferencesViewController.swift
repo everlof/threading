@@ -25,7 +25,7 @@ final class ProfilePreferencesViewController: NSViewController {
 
     // MARK: - Controls
 
-    private lazy var fontButton: NSButton =
+    private lazy var fontButton: ThemedButton =
         SettingsUI.button(fontButtonTitle, target: self, action: #selector(showFontPanel))
 
     private lazy var cursorStylePopup: ThemedPopUp = {

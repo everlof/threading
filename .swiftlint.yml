@@ -1,0 +1,40 @@
+# SwiftLint is used here for one job: keeping stock AppKit controls out of the app.
+#
+# Not a style pass. The design system's rule — "new UI is built from `UI/Design/`, not from stock
+# AppKit controls" — was written long before there was any machinery to hold it, and it eroded
+# exactly as you would expect: by the time app themes arrived, a themed page was a set of themed
+# cards around system-blue switches, softly-bezelled pop-ups and a system-grey spinner. The themed
+# controls fixed the symptom; this is what stops it coming back.
+#
+# `only_rules` names `custom_rules` and nothing else on purpose. Turning the default set on would
+# bury the one rule that matters here under thousands of unrelated line-length warnings, and a
+# warning nobody reads is worse than no warning at all.
+#
+# `ThemedControlTests.testNoStockControlsOutsideTheDesignSystem` enforces the same rule in the
+# test suite, which is what actually runs on every build. This file is for editors and for
+# `swiftlint` at the command line.
+
+only_rules:
+  - custom_rules
+
+included:
+  - Sources
+
+excluded:
+  - SwiftTerm
+  - Tests
+
+custom_rules:
+  stock_appkit_control:
+    name: "Stock AppKit control"
+    regex: '\b(NSButton|NSSwitch|NSPopUpButton|NSSearchField|NSProgressIndicator|NSColorWell|NSBox)\s*\('
+    excluded: ".*/UI/Design/.*"
+    message: "Build from UI/Design/ — ThemedButton, ThemedToggle, ThemedPopUp, ThemedSearchField, ThemedSpinner, ThemedProgressBar, SeparatorView, ThemeSwatchView. A stock control bakes in the system accent and bezel, so it stays system-blue on a page that has gone red."
+    severity: error
+
+  stock_appkit_field:
+    name: "Stock AppKit text field"
+    regex: 'NSTextField\(\s*(?!labelWithString|wrappingLabelWithString|labelWithAttributedString)'
+    excluded: ".*/UI/Design/.*"
+    message: "An editable field is ThemedTextField. Labels are fine — NSTextField(labelWithString:) draws no bezel, and the bezel is what this rule exists to stop."
+    severity: error

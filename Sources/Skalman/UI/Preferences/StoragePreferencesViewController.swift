@@ -423,7 +423,7 @@ final class StoragePreferencesViewController: NSViewController {
         ArtifactScanService.shared.refreshAll()
     }
 
-    @objc private func removeArtifactClicked(_ sender: NSButton) {
+    @objc private func removeArtifactClicked(_ sender: ThemedButton) {
         let position = coordinates(of: sender.tag)
         guard groups.indices.contains(position.group) else { return }
 
@@ -433,7 +433,7 @@ final class StoragePreferencesViewController: NSViewController {
         remove([group.artifacts[position.artifact]], in: [group.project])
     }
 
-    @objc private func removeCheckoutClicked(_ sender: NSButton) {
+    @objc private func removeCheckoutClicked(_ sender: ThemedButton) {
         let position = coordinates(of: sender.tag)
         guard groups.indices.contains(position.group) else { return }
 

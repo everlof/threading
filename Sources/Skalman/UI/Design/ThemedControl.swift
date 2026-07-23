@@ -24,26 +24,17 @@ import AppKit
 /// build these.
 class ThemedControl: NSControl {
 
-    private let appEvents = AppEventObservations()
+    private var themeRedraw: ThemeRedraw?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        observeTheme()
+        themeRedraw = ThemeRedraw(self)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    /// Redraws on every theme change — the app theme, and the profile/assignment changes that
-    /// can move a role too. A control drawn from roles needs nothing more.
-    private func observeTheme() {
-        for observe in [
-            { self.appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.needsDisplay = true } },
-            { self.appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.needsDisplay = true } }
-        ] { observe() }
     }
 
     /// Themed controls draw their own appearance top to bottom, so the layer-backed view never
@@ -55,4 +46,61 @@ class ThemedControl: NSControl {
     /// VoiceOver and to UI scripting alike — which is also how this was noticed, a settings page
     /// reporting no pop-up buttons on a page that visibly has one.
     override func isAccessibilityElement() -> Bool { true }
+}
+
+// MARK: - Surface
+
+/// The fill and hairline every themed control sits on, drawn rather than applied.
+///
+/// The draw-time counterpart of `applySurface`, and the reason both exist: `applySurface` sets a
+/// `cgColor` on a layer, which resolves once and freezes — fine for a container rebuilt on a
+/// theme change, wrong for a control that must survive a live switch.
+enum ThemedSurface {
+
+    /// Returns the path it drew, so a caller can stroke a focus ring on the same shape rather
+    /// than rebuilding it from the same three tokens and drifting by half a point.
+    @discardableResult
+    static func draw(
+        _ bounds: NSRect,
+        fill: NSColor,
+        border: NSColor? = nil,
+        radius: CGFloat? = nil
+    ) -> NSBezierPath {
+        let width = Design.Radius.border
+        // Half a point in, so a one-point border falls inside the control rather than straddling
+        // its edge and drawing at half intensity.
+        let rect = border == nil ? bounds : bounds.insetBy(dx: width / 2, dy: width / 2)
+        let corner = radius ?? Design.Radius.control
+        let path = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
+
+        fill.setFill()
+        path.fill()
+
+        if let border {
+            border.setStroke()
+            path.lineWidth = width
+            path.stroke()
+        }
+        return path
+    }
+}
+
+// MARK: - Theme Redraw
+
+/// Redraws a view on every theme change — the app theme, and the profile/assignment changes that
+/// can move a role too. A view drawn from roles needs nothing more.
+///
+/// Held separately from `ThemedControl` because not every themed control can inherit from it:
+/// `ThemedTextField` has to subclass `NSTextField` for the field editor, the formatter and the
+/// whole of text editing. One description of what "follows the theme" means, two bases.
+final class ThemeRedraw {
+
+    private let appEvents = AppEventObservations()
+
+    init(_ view: NSView) {
+        for observe in [
+            { self.appEvents.observe(AppThemeDidChange.self) { [weak view] _ in view?.needsDisplay = true } },
+            { self.appEvents.observe(ProfileDidChange.self) { [weak view] _ in view?.needsDisplay = true } }
+        ] { observe() }
+    }
 }

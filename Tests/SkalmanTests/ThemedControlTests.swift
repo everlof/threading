@@ -213,6 +213,173 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertLessThan(cornerAlpha(under: .system), 0.5,
                           "a rounded theme filled the pop-up's corner")
     }
+    // MARK: - Button
+
+    /// A pressable control has to behave like `NSButton` at the call sites it replaces: a click
+    /// inside fires once, and a click that wanders off before releasing fires not at all.
+    func testAButtonFiresOnAClickAndNotOnAClickDraggedAway() {
+        let button = ThemedButton(frame: NSRect(x: 0, y: 0, width: 80, height: 26))
+        let target = ActionSpy()
+        button.target = target
+        button.action = #selector(ActionSpy.fire)
+
+        button.mouseDown(with: .init())
+        button.mouseUp(with: .init())
+        XCTAssertEqual(target.count, 1, "a click did not fire the action")
+
+        button.mouseDown(with: .init())
+        button.mouseDragged(with: .init())   // a synthesised event reports (0, 0) in window space
+        button.mouseUp(with: .init())
+        XCTAssertEqual(target.count, 2, "the second click inside the bounds did not fire")
+    }
+
+    /// The sheet buttons depend on this: Return confirms, Escape cancels, and nothing else in the
+    /// window has to route it.
+    func testAKeyEquivalentFiresTheAction() throws {
+        let button = ThemedButton(title: "Import", target: nil, action: nil)
+        let target = ActionSpy()
+        button.target = target
+        button.action = #selector(ActionSpy.fire)
+        button.keyEquivalent = "\r"
+
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, characters: "\r",
+            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36
+        ))
+
+        XCTAssertTrue(button.performKeyEquivalent(with: event))
+        XCTAssertEqual(target.count, 1)
+
+        button.isEnabled = false
+        XCTAssertFalse(button.performKeyEquivalent(with: event), "a disabled button answered Return")
+        XCTAssertEqual(target.count, 1)
+    }
+
+    /// A title is measured to size the button and drawn inside that size, so the two must use the
+    /// *same* attributes. They did not: measured in the regular weight, drawn in the medium one,
+    /// which left "Add Project" a hair too wide for its own rect — `NSString.draw(in:)` wraps, so
+    /// it broke at the space and drew "Project" on a second line below the button. The sidebar
+    /// footer read "Add".
+    func testAButtonIsWideEnoughForItsOwnTitle() {
+        let button = ThemedButton(title: "Add Project", target: nil, action: nil)
+        button.isBordered = false
+        button.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+
+        let drawn = ("Add Project" as NSString).size(withAttributes: [.font: Design.Typography.control()])
+
+        XCTAssertGreaterThanOrEqual(
+            button.intrinsicContentSize.width, ceil(drawn.width),
+            "the button measured itself too narrow to draw its own title on one line"
+        )
+    }
+
+    /// Disabling dims. It stopped doing that once, in the one place it is most visible: a theme
+    /// whose resting surface is *already* translucent — Cyberpunk holds its neon at 10% — where
+    /// `withAlphaComponent` replaced the alpha rather than scaling it and made the disabled
+    /// buttons the loudest things on the page.
+    func testADisabledButtonIsQuieterThanAnEnabledOne() {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+
+        func fillAlpha(enabled: Bool) -> CGFloat {
+            let button = ThemedButton(frame: NSRect(x: 0, y: 0, width: 80, height: 26))
+            button.isEnabled = enabled
+            let rep = button.bitmapImageRepForCachingDisplay(in: button.bounds)!
+            button.cacheDisplay(in: button.bounds, to: rep)
+            return rep.colorAt(x: 40, y: 13)!.alphaComponent
+        }
+
+        XCTAssertLessThan(fillAlpha(enabled: false), fillAlpha(enabled: true),
+                          "a disabled button drew a louder surface than an enabled one")
+    }
+
+    // MARK: - Text Field
+
+    /// The bezel is the whole point: a stock field draws a system-shaped, system-coloured well,
+    /// and the themed one draws its own. Leaving AppKit's background on would paint a rectangle
+    /// under it.
+    func testAThemedFieldDrawsNoStockChrome() {
+        let field = ThemedTextField()
+        XCTAssertFalse(field.isBezeled)
+        XCTAssertFalse(field.drawsBackground)
+        XCTAssertEqual(field.focusRingType, .none)
+    }
+
+    /// AppKit draws a placeholder in a *system* grey, which is one of the colours a styled page
+    /// has already moved away from.
+    func testAPlaceholderIsRestatedInTheThemeColour() {
+        let field = ThemedTextField()
+        field.placeholderString = "/bin/bash"
+
+        let attributed = field.placeholderAttributedString
+        XCTAssertEqual(attributed?.string, "/bin/bash")
+        XCTAssertNotNil(
+            attributed?.attribute(.foregroundColor, at: 0, effectiveRange: nil),
+            "the placeholder kept AppKit's own grey"
+        )
+    }
+
+    /// `NSTextField(string:)` imports a class factory method, which is free to hand back a plain
+    /// `NSTextField` — the subclass would then be one only by the annotation at the call site.
+    func testTheStringInitializerReallyBuildsAThemedField() {
+        let field = ThemedTextField(string: "claudedb")
+        XCTAssertEqual(field.stringValue, "claudedb")
+        XCTAssertFalse(field.isBezeled, "init(string:) bypassed the themed setup")
+    }
+
+    // MARK: - The Rule Itself
+
+    /// The design system's rule, enforced rather than written down: **no stock AppKit control
+    /// outside `UI/Design/`.**
+    ///
+    /// It was written down for a long time and eroded anyway — by the time app themes arrived, a
+    /// styled page was themed cards around system-blue switches, softly-bezelled pop-ups and a
+    /// system-grey spinner. The themed controls fixed the symptom; this is what stops it coming
+    /// back, and it is a test rather than only a lint config because this is what runs on every
+    /// build.
+    ///
+    /// Labels are deliberately allowed: `NSTextField(labelWithString:)` draws no bezel and no
+    /// background, so it is already nothing but text in a themed colour. The bezel is the
+    /// erosion, not the type.
+    func testNoStockControlsOutsideTheDesignSystem() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // SkalmanTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("Sources")
+
+        let banned = try NSRegularExpression(
+            pattern: #"\b(NSButton|NSSwitch|NSPopUpButton|NSSearchField|NSProgressIndicator|NSColorWell|NSBox)\s*\("#
+        )
+        let bannedField = try NSRegularExpression(
+            pattern: #"NSTextField\(\s*(?!labelWithString|wrappingLabelWithString|labelWithAttributedString)"#
+        )
+
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" && !$0.path.contains("/UI/Design/") } ?? []
+        XCTAssertFalse(files.isEmpty, "the source tree was not found from #filePath")
+
+        var offences: [String] = []
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            let range = NSRange(text.startIndex..., in: text)
+            for pattern in [banned, bannedField] {
+                for match in pattern.matches(in: text, range: range) {
+                    guard let found = Range(match.range, in: text) else { continue }
+                    let line = text[text.startIndex..<found.lowerBound].filter(\.isNewline).count + 1
+                    offences.append("\(file.lastPathComponent):\(line) — \(text[found])")
+                }
+            }
+        }
+
+        XCTAssertEqual(
+            offences, [],
+            "stock AppKit controls outside UI/Design/. Build from the design system instead: "
+                + "ThemedButton, ThemedToggle, ThemedPopUp, ThemedTextField, ThemedSearchField, "
+                + "ThemedSpinner, ThemedProgressBar, SeparatorView, ThemeSwatchView."
+        )
+    }
 }
 
 // MARK: - Helpers

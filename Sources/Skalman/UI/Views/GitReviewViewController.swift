@@ -23,9 +23,9 @@ final class GitReviewViewController: NSViewController {
     var onModeChange: (() -> Void)?
 
     var modeChip: ChipView!
-    var backButton: NSButton!
+    var backButton: ThemedButton!
     var counterLabel: NSTextField!
-    private var refreshButton: NSButton!
+    private var refreshButton: ThemedButton!
     var scrollView: NSScrollView!
     var stack: NSStackView!
     var placeholderLabel: NSTextField!
@@ -114,12 +114,8 @@ final class GitReviewViewController: NSViewController {
     // MARK: - Setup
 
     private func setupHeader() {
-        backButton = NSButton(
-            image: NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
-            target: self,
-            action: #selector(backToCommits)
+        backButton = ThemedButton(symbol: "chevron.left", accessibility: "Back", target: self, action: #selector(backToCommits)
         )
-        backButton.bezelStyle = .accessoryBarAction
         backButton.isBordered = false
         backButton.toolTip = "Back to history"
         backButton.isHidden = true
@@ -137,12 +133,8 @@ final class GitReviewViewController: NSViewController {
         counterLabel.font = Design.Typography.caption()
         counterLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        refreshButton = NSButton(
-            image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")!,
-            target: self,
-            action: #selector(refreshTapped)
+        refreshButton = ThemedButton(symbol: "arrow.clockwise", accessibility: "Refresh", target: self, action: #selector(refreshTapped)
         )
-        refreshButton.bezelStyle = .accessoryBarAction
         refreshButton.isBordered = false
         refreshButton.toolTip = "Refresh"
 

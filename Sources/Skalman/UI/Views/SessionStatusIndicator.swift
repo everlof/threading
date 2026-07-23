@@ -9,7 +9,7 @@ final class SessionStatusIndicator: NSView {
 
     // MARK: - Properties
 
-    private let spinner = NSProgressIndicator()
+    private let spinner = ThemedSpinner()
     private let attentionDot = NSView()
 
     /// Rows are reconfigured far more often than their state changes, so repeated updates
@@ -34,9 +34,6 @@ final class SessionStatusIndicator: NSView {
     // MARK: - Setup
 
     private func setupViews() {
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.isDisplayedWhenStopped = false
         spinner.translatesAutoresizingMaskIntoConstraints = false
 
         attentionDot.wantsLayer = true
@@ -71,16 +68,16 @@ final class SessionStatusIndicator: NSView {
         switch activity {
         case .working:
             attentionDot.isHidden = true
-            spinner.startAnimation(nil)
+            spinner.isAnimating = true
 
         case .needsAttention:
-            spinner.stopAnimation(nil)
+            spinner.isAnimating = false
             // Faded in rather than snapped, so a session finishing catches the eye —
             // except on first configure, where the state is old news.
             showAttentionDot(animated: !isFirstUpdate)
 
         case .idle, .dormant:
-            spinner.stopAnimation(nil)
+            spinner.isAnimating = false
             attentionDot.isHidden = true
         }
     }

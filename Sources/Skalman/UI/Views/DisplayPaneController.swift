@@ -122,14 +122,14 @@ final class DisplayPaneController: NSViewController {
 
     private var headerView: NSView!
     private var titleLabel: NSTextField!
-    private var closeButton: NSButton!
+    private var closeButton: ThemedButton!
     private var tabBar: DisplayTabBar!
     private var tabBarHeight: NSLayoutConstraint!
     private var imageView: NSImageView!
     private var webView: WKWebView!
     private var hostedView: NSView!
     private var captionLabel: NSTextField!
-    private var contentMenuButton: NSButton!
+    private var contentMenuButton: ThemedButton!
     private var placeholderLabel: NSTextField!
 
     /// The live tab's view controller currently parented into `hostedView` — the browser or a
@@ -179,13 +179,9 @@ final class DisplayPaneController: NSViewController {
         titleLabel.textColor = Design.Text.secondary
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        closeButton = NSButton(
-            image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")!,
-            target: self,
-            action: #selector(closeTapped)
+        closeButton = ThemedButton(symbol: "xmark", accessibility: "Close", target: self, action: #selector(closeTapped)
         )
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.bezelStyle = .accessoryBarAction
         closeButton.isBordered = false
         closeButton.toolTip = "Hide panel"
 
@@ -204,7 +200,6 @@ final class DisplayPaneController: NSViewController {
     private func setupContent() {
         imageView = NSImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.imageScaling = .scaleProportionallyUpOrDown
 
         // Top-aligned, not centred. The view fills the pane's height, so a wide image centred
         // in it floats in the middle with dead space above; anchored to the top it sits under
@@ -248,13 +243,9 @@ final class DisplayPaneController: NSViewController {
         // An explicit button beside the caption rather than a click target on the text or the
         // image: nothing about a caption advertises that it is clickable, and a button is the
         // only one of the three that can be seen before it is tried.
-        contentMenuButton = NSButton(
-            image: NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Content actions")!,
-            target: self,
-            action: #selector(contentMenuButtonClicked)
+        contentMenuButton = ThemedButton(symbol: "ellipsis.circle", accessibility: "Content actions", target: self, action: #selector(contentMenuButtonClicked)
         )
         contentMenuButton.translatesAutoresizingMaskIntoConstraints = false
-        contentMenuButton.bezelStyle = .accessoryBarAction
         contentMenuButton.isBordered = false
         contentMenuButton.toolTip = "Actions"
 

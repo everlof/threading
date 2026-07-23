@@ -1534,6 +1534,12 @@ Components so far:
 | `ThemedControl` | The base for a control that draws itself from the theme. |
 | `ThemedToggle` | A drop-in `NSSwitch` whose on-track is the theme's accent. |
 | `ThemedPopUp` | A drop-in `NSPopUpButton`, button included and dropdown excepted. |
+| `ThemedButton` | A drop-in `NSButton`: bordered, plain, or accent-filled. |
+| `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. |
+| `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
+| `ThemedSpinner` / `ThemedProgressBar` | `NSProgressIndicator`, in the theme's accent. |
+| `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. |
+| `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
 
 `PromptView` is an `NSTextView`, not an `NSTextField`, for two things a single-line field
 cannot do: a task worth describing runs past one line, and what is dropped on a composer is
@@ -1595,31 +1601,57 @@ session costs. "Default model" survives only where the account states nothing at
 
 Preferences used stock AppKit deliberately — a settings window being one place where matching
 the platform beats matching the app. **App themes ended that argument**, because under a style
-there is no platform look left to match: a page of system-blue switches and softly-bezelled
-pop-ups on a Cyberpunk-green or Swiss-red surface is not "native", it is a theme that reached
-the cards and stopped at the controls. The System theme is what keeps the original promise, and
-it keeps it exactly — every role resolves to the system colour, so a user who never picks a
-style sees the app they always saw.
+there is no platform look left to match: a page of system-blue switches, softly-bezelled
+pop-ups and a system-grey spinner on a Cyberpunk-green or Swiss-red surface is not "native", it
+is a theme that reached the cards and stopped at the controls. The System theme is what keeps
+the original promise, and it keeps it exactly — every role resolves to the system colour, so a
+user who never picks a style sees the app they always saw.
 
-`ThemedControl` is the base and closes the whole class of bug at once. It **draws in `draw(_:)`,
+So there are no stock AppKit controls left outside `UI/Design/`, and
+`ThemedControlTests.testNoStockControlsOutsideTheDesignSystem` is what keeps it that way. The
+rule is a test rather than only a comment because it *was* only a comment for most of this
+project's life and eroded anyway. `.swiftlint.yml` states the same rule for editors; the test is
+what runs on every build. **Labels are deliberately exempt**: `NSTextField(labelWithString:)`
+draws no bezel and no background, so it is already nothing but text in a themed colour. The
+bezel is the erosion, not the type.
+
+`ThemedControl` is the base and closes a whole class of bug at once. It **draws in `draw(_:)`,
 never into a frozen layer** — `layer.backgroundColor = colour.cgColor` resolves once and keeps
 that value, which is why a live theme switch used to leave stale colours across the app — and it
-answers a theme change with one `needsDisplay = true`. Subclasses read `Design.*` roles at draw
-time and inherit the redraw.
+answers a theme change with one `needsDisplay = true`. `ThemeRedraw` is that behaviour on its
+own, for the themed views that cannot inherit from `ThemedControl`: `ThemedTextField` has to
+subclass `NSTextField` for the field editor, the formatter and the whole of text editing.
 
 It also has to declare `isAccessibilityElement`. A stock control is one because its *cell* is,
 and a control that draws itself has no cell; without it a themed control is invisible to
 VoiceOver and to UI scripting alike. That was found by a settings page reporting no pop-up
 buttons on a page that visibly had one.
 
-`ThemedPopUp` is where the one genuinely unthemeable thing is contained: **the menu a pop-up
-opens is drawn by the window server**, outside any view this app owns, so its chrome cannot
-follow the theme. Call sites depend on the wrapper rather than on the menu, so replacing that
-dropdown with a custom popover later is a change to one file. Two smaller rules earn their
-keep — an item that carries its own action keeps it (which is the whole of how a pull-down like
-the themes gear works, and only unclaimed items route through the control), and an
-out-of-range `selectItem(at:)` leaves the control unselected rather than trapping, since the
-index usually comes from looking a stored preference up in a list that may have moved on.
+Two things are contained rather than replaced, and both are drawn by the window server where no
+amount of our drawing reaches: the **`NSMenu` a `ThemedPopUp` opens**, and the **system colour
+panel behind `ThemeSwatchView`**. Callers depend on the wrapper, not on the system part, so
+replacing either with something custom later is a change to one file.
+
+Four bugs are worth keeping, because each is a trap the next drawn control will walk into:
+
+- **`withAlphaComponent` replaces alpha, it does not scale it.** Dimming a disabled button
+  against a resting surface that is *already* translucent — Cyberpunk holds its neon at 10% —
+  made the disabled controls the loudest things on the page. Resolve, then multiply.
+- **`NSString.draw(in:)` wraps.** A title measured a hair too narrow for its own rect breaks at
+  the space and draws its second word below the button, with no ellipsis to show for it: the
+  sidebar footer read "Add" instead of "Add Project". Measure and draw with the *same*
+  attributes, and give the draw a paragraph style that truncates.
+- **`NSTextField(string:)` is a class factory method**, free to return a plain `NSTextField`. A
+  subclass declares its own or is one only by the annotation at the call site.
+- **A `CGColor` on a layer is frozen**, which is the whole reason these controls draw. The one
+  place a layer is unavoidable is `ThemedSpinner` — it animates off the main thread — so its
+  `strokeColor` is re-applied on every redraw instead.
+
+`ThemedPopUp` carries two rules that are not obvious: an item that already has an action keeps
+it (which is how a pull-down like the themes gear works, and only unclaimed items route through
+the control), and an out-of-range `selectItem(at:)` leaves the control unselected rather than
+trapping, since the index usually comes from looking a stored preference up in a list that may
+have moved on.
 
 ## Code Style Guidelines
 

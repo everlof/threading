@@ -17,8 +17,8 @@ final class BrowserViewController: NSViewController {
     private let backButton = BrowserViewController.navButton("chevron.backward", "Back")
     private let forwardButton = BrowserViewController.navButton("chevron.forward", "Forward")
     private let reloadButton = BrowserViewController.navButton("arrow.clockwise", "Reload")
-    private let addressField = NSTextField()
-    private let progressBar = NSProgressIndicator()
+    private let addressField = ThemedTextField()
+    private let progressBar = ThemedProgressBar()
 
     // MARK: - Web View
 
@@ -89,7 +89,6 @@ final class BrowserViewController: NSViewController {
 
         addressField.placeholderString = BrowserDefaults.addressPlaceholder
         addressField.font = Design.Typography.body()
-        addressField.bezelStyle = .roundedBezel
         addressField.focusRingType = .none
         addressField.target = self
         addressField.action = #selector(addressEntered)
@@ -105,16 +104,10 @@ final class BrowserViewController: NSViewController {
         )
         bar.translatesAutoresizingMaskIntoConstraints = false
 
-        progressBar.isIndeterminate = false
-        progressBar.minValue = 0
-        progressBar.maxValue = 1
-        progressBar.controlSize = .small
         progressBar.isHidden = true
         progressBar.translatesAutoresizingMaskIntoConstraints = false
 
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
+        let separator = SeparatorView()
 
         view.addSubview(bar)
         view.addSubview(progressBar)
@@ -249,22 +242,14 @@ final class BrowserViewController: NSViewController {
     }
 
     private func updateProgress(_ value: Double) {
-        progressBar.doubleValue = value
+        progressBar.progress = value
         progressBar.isHidden = value >= 1 || value <= 0
     }
 
     // MARK: - Helpers
 
-    private static func navButton(_ symbol: String, _ label: String) -> NSButton {
-        let button = NSButton(
-            image: NSImage(systemSymbolName: symbol, accessibilityDescription: label)!,
-            target: nil,
-            action: nil
-        )
-        button.bezelStyle = .texturedRounded
-        button.isBordered = false
-        button.contentTintColor = Design.Text.secondary
-        return button
+    private static func navButton(_ symbol: String, _ label: String) -> ThemedButton {
+        ThemedButton(symbol: symbol, accessibility: label, target: nil, action: nil)
     }
 
     /// Turns whatever was typed into a URL: an explicit scheme is honoured, a bare domain gets

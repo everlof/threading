@@ -105,9 +105,8 @@ final class AccountUsagePopoverViewController: NSViewController {
     }
 
     private func headerRow(planLabel: String?) -> NSView {
-        let nameLabel = NSTextField(
-            labelWithString: "\(account.provider.displayName) — \(account.displayName)"
-        )
+        let title = "\(account.provider.displayName) — \(account.displayName)"
+        let nameLabel = NSTextField(labelWithString: title)
         nameLabel.font = Design.Typography.control()
         nameLabel.textColor = Design.Text.label
         nameLabel.lineBreakMode = .byTruncatingTail

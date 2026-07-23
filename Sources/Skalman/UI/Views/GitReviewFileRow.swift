@@ -239,12 +239,10 @@ final class GitReviewFileRow: NSView {
 
     /// A borderless caption-weight control: this is a pane of content, and a bezelled button
     /// per hunk would read as a form.
-    private static func makeActionButton(_ title: String, target: AnyObject, action: Selector) -> NSButton {
-        let button = HoverTintButton(title: title, target: target, action: action)
-        button.bezelStyle = .accessoryBarAction
+    private static func makeActionButton(_ title: String, target: AnyObject, action: Selector) -> ThemedButton {
+        let button = ThemedButton(title: title, target: target, action: action)
         button.isBordered = false
         button.font = Design.Typography.caption()
-        button.tintsTitle = true
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -257,7 +255,7 @@ final class GitReviewFileRow: NSView {
         onStageFile?()
     }
 
-    @objc private func stageHunkClicked(_ sender: NSButton) {
+    @objc private func stageHunkClicked(_ sender: ThemedButton) {
         onStageHunk?(sender.tag)
     }
 
@@ -329,6 +327,6 @@ extension GitReviewFileRow: NSGestureRecognizerDelegate {
         shouldAttemptToRecognizeWith event: NSEvent
     ) -> Bool {
         guard let superview else { return true }
-        return !(superview.hitTest(superview.convert(event.locationInWindow, from: nil)) is NSButton)
+        return !(superview.hitTest(superview.convert(event.locationInWindow, from: nil)) is ThemedButton)
     }
 }

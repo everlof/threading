@@ -14,7 +14,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let confirmCloseToggle = ThemedToggle()
     private let codexHookToggle = ThemedToggle()
     private let codexHookTrustToggle = ThemedToggle()
-    private let shellField = NSTextField()
+    private let shellField = ThemedTextField()
 
     // MARK: - Lifecycle
 

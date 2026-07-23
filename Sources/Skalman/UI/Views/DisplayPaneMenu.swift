@@ -43,7 +43,7 @@ extension DisplayPaneController {
         return menu
     }
 
-    @objc func contentMenuButtonClicked(_ sender: NSButton) {
+    @objc func contentMenuButtonClicked(_ sender: ThemedButton) {
         guard currentContent != nil else { return }
 
         // Popped above the button, which sits at the bottom edge of the pane: a menu dropped
