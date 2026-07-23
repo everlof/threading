@@ -178,7 +178,7 @@ extension MainWindowController: NSToolbarDelegate {
         item.showsIndicator = false
 
         sessionContextMenu.delegate = self
-        item.itemMenu = sessionContextMenu
+        item.menu = sessionContextMenu
 
         themeMenuBuilder.onEditThemes = { [weak self] in
             self?.showSettingsPage(title: SettingsPages.themesTitle)
