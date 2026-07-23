@@ -98,7 +98,7 @@ final class MarkdownView: NSStackView {
     private func codeBlock(_ code: String) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.applySurface(fill: style.codeBackground, radius: Design.Radius.control)
+        container.applySurface(fill: style.codeBackground, radius: .control)
 
         // Horizontally scrollable, so a long line neither wraps mid-token nor forces the whole
         // conversation wider than the pane.

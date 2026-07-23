@@ -36,7 +36,11 @@ final class ThemeSwatchView: NSView, ThemedComponent, SystemChromeBoundary {
     init(size: CGFloat = ThemeEditorLayout.swatch) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: .clear, radius: ThemeEditorLayout.swatchRadius, border: Design.Surface.border)
+        applySurface(
+            fill: .clear,
+            radius: .fixed(ThemeEditorLayout.swatchRadius),
+            border: Design.Surface.border
+        )
         layer?.masksToBounds = true
 
         well.translatesAutoresizingMaskIntoConstraints = false
@@ -71,7 +75,11 @@ final class ThemeSwatchView: NSView, ThemedComponent, SystemChromeBoundary {
         // Through applySurface so the recorded surface *is* this colour: otherwise the app-theme
         // refresh sweep re-applies the `.clear` recorded at init and wipes every swatch to
         // transparent — which emptied the whole COLORS grid on a live theme switch.
-        applySurface(fill: newColor, radius: ThemeEditorLayout.swatchRadius, border: Design.Surface.border)
+        applySurface(
+            fill: newColor,
+            radius: .fixed(ThemeEditorLayout.swatchRadius),
+            border: Design.Surface.border
+        )
         if well.color != newColor { well.color = newColor }
         toolTip = "\(name) · \(newColor.hexString)"
     }

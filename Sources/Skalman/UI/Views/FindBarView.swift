@@ -72,7 +72,7 @@ final class FindBarView: NSView {
     // MARK: - Setup
 
     private func setupUI() {
-        applySurface(fill: Design.Surface.ground, radius: 0)
+        applySurface(fill: Design.Surface.ground, radius: .fixed(0))
 
         let stackView = NSStackView()
         stackView.orientation = .horizontal

@@ -75,7 +75,7 @@ final class PromptView: NSView, ThemedComponent {
     private func setupViews() {
         applySurface(
             fill: Design.Surface.panel,
-            radius: Design.Radius.panel,
+            radius: .panel,
             border: Design.Surface.border,
             glow: true
         )

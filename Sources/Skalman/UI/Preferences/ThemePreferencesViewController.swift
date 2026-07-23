@@ -227,7 +227,7 @@ final class ThemePreferencesViewController: NSViewController {
         // floating on the page. The scroll itself is transparent; the card draws the surface.
         let card = NSView()
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.applySurface(fill: Design.Surface.panel, radius: Design.Radius.panel, border: Design.Surface.border)
+        card.applySurface(fill: Design.Surface.panel, radius: .panel, border: Design.Surface.border)
         card.addSubview(themeScrollView)
 
         NSLayoutConstraint.activate([

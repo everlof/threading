@@ -43,7 +43,7 @@ final class BrowserViewController: NSViewController {
 
     override func loadView() {
         view = NSView()
-        view.applySurface(fill: Design.Surface.ground, radius: 0)
+        view.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
         setupWebView()
         setupChrome()
         observeWebView()

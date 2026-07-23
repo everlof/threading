@@ -47,7 +47,7 @@ final class ToolCallView: NSView {
 
     private func setupViews(summary: String) {
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: Design.Chat.toolRowResting, radius: Design.Radius.control)
+        applySurface(fill: Design.Chat.toolRowResting, radius: .control)
 
         let glyph = ToolGlyph.forTool(tool)
 

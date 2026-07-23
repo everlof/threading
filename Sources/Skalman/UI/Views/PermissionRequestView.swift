@@ -39,7 +39,7 @@ final class PermissionRequestView: NSView {
 
         // An accent border rather than a fill, so a waiting request reads as active without
         // shouting over the conversation around it.
-        applySurface(fill: Design.Surface.panel, radius: Design.Radius.control, border: Design.Surface.accent)
+        applySurface(fill: Design.Surface.panel, radius: .control, border: Design.Surface.accent)
 
         let title = NSTextField(labelWithString: "Allow \(request.toolName)?")
         title.font = Design.Typography.caption()

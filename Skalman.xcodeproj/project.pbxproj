@@ -55,6 +55,8 @@
 		B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */; };
 		D88B0FE7D311EE71390A842F /* ThemedControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */; };
 		445F0F42B17C51EC9BB38077 /* ElementInspectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */; };
+		122556F8FAB3711CCBA7AAD0 /* ChipViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B977AD037DD062B2428AA28 /* ChipViewTests.swift */; };
+		61B9374AE8515F0AE5311E1F /* ThemedIndicatorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,6 +119,8 @@
 		8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyCorpusTests.swift; sourceTree = "<group>"; };
 		D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedControlTests.swift; sourceTree = "<group>"; };
 		115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ElementInspectionTests.swift; sourceTree = "<group>"; };
+		2B977AD037DD062B2428AA28 /* ChipViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChipViewTests.swift; sourceTree = "<group>"; };
+		48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedIndicatorsTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -222,6 +226,8 @@
 				8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */,
 				D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */,
 				115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */,
+				2B977AD037DD062B2428AA28 /* ChipViewTests.swift */,
+				48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -434,6 +440,8 @@
 				B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */,
 				D88B0FE7D311EE71390A842F /* ThemedControlTests.swift in Sources */,
 				445F0F42B17C51EC9BB38077 /* ElementInspectionTests.swift in Sources */,
+				122556F8FAB3711CCBA7AAD0 /* ChipViewTests.swift in Sources */,
+				61B9374AE8515F0AE5311E1F /* ThemedIndicatorsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

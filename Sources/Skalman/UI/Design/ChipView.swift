@@ -7,7 +7,7 @@ import AppKit
 /// where a chip is meant to sit quietly next to the content it modifies.
 ///
 /// See `Design` for the vocabulary this belongs to.
-final class ChipView: NSView {
+final class ChipView: ThemedControl {
 
     // MARK: - Properties
 
@@ -17,6 +17,7 @@ final class ChipView: NSView {
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false { didSet { updateHoverState() } }
+    private var isPresentingMenu = false { didSet { updateBackground() } }
 
     /// Widens the chip to its full contents while hovered, so a label truncated to fit the row
     /// (`Default m…`) becomes readable. Held so it can be removed on exit.
@@ -31,8 +32,15 @@ final class ChipView: NSView {
     /// Called after a menu item is chosen.
     var onSelect: ((NSMenuItem) -> Void)?
 
+    /// Replaces AppKit presentation in behavior tests. Production leaves this nil.
+    var menuPresentationOverride: ((NSMenu) -> Void)?
+
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: Design.Size.chipHeight)
+    }
+
+    override var isEnabled: Bool {
+        didSet { updateBackground() }
     }
 
     // MARK: - Initialization
@@ -42,6 +50,7 @@ final class ChipView: NSView {
         setupViews()
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -51,7 +60,7 @@ final class ChipView: NSView {
     private func setupViews() {
         applySurface(
             fill: Design.Surface.controlResting,
-            radius: Design.Radius.pill(height: Design.Size.chipHeight)
+            radius: .pill(height: Design.Size.chipHeight)
         )
 
         iconView.imageScaling = .scaleProportionallyDown
@@ -68,6 +77,12 @@ final class ChipView: NSView {
         )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold))
         chevronView.contentTintColor = Design.Text.tertiary
         chevronView.translatesAutoresizingMaskIntoConstraints = false
+
+        // The chip is the accessibility element; exposing its decorative children too would
+        // make VoiceOver announce one control as three unrelated objects.
+        iconView.setAccessibilityElement(false)
+        titleLabel.setAccessibilityElement(false)
+        chevronView.setAccessibilityElement(false)
 
         let stack = NSStackView(views: [iconView, titleLabel, chevronView])
         stack.orientation = .horizontal
@@ -138,7 +153,46 @@ final class ChipView: NSView {
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseDown(with event: NSEvent) {
-        guard let menu = menuProvider?() else { return }
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        _ = presentMenu()
+    }
+
+    override var acceptsFirstResponder: Bool { isEnabled }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { updateBackground(focused: true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { updateBackground(focused: false) }
+        return resigned
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isEnabled else {
+            super.keyDown(with: event)
+            return
+        }
+
+        switch event.charactersIgnoringModifiers {
+        case " ", "\r":
+            _ = presentMenu()
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    /// Builds the menu and claims it, separately from showing it.
+    ///
+    /// Split out because `popUp` runs a modal event loop: the routing rule below — which items
+    /// the chip takes over and which it leaves alone — is the part most likely to break, and
+    /// inside `mouseDown` it was reachable only by opening a real menu and never tested.
+    func preparedMenu() -> NSMenu? {
+        guard let menu = menuProvider?() else { return nil }
 
         for item in menu.items where item.action == nil && !item.isSeparatorItem {
             item.target = self
@@ -146,11 +200,26 @@ final class ChipView: NSView {
         }
 
         menu.minimumWidth = bounds.width
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: 0, y: bounds.height + Design.Spacing.tight),
-            in: self
-        )
+        return menu
+    }
+
+    @discardableResult
+    private func presentMenu() -> Bool {
+        guard isEnabled, let menu = preparedMenu() else { return false }
+
+        isPresentingMenu = true
+        defer { isPresentingMenu = false }
+
+        if let menuPresentationOverride {
+            menuPresentationOverride(menu)
+        } else {
+            menu.popUp(
+                positioning: nil,
+                at: NSPoint(x: 0, y: bounds.height + Design.Spacing.tight),
+                in: self
+            )
+        }
+        return true
     }
 
     @objc private func menuItemChosen(_ sender: NSMenuItem) {
@@ -169,11 +238,16 @@ final class ChipView: NSView {
     /// the chip is *currently* wearing is the one recorded for `AppThemeRefresh`'s sweep. Setting
     /// it directly left the resting fill recorded forever, and a chip hovered while the theme
     /// changed was swept back to resting under the pointer until the mouse moved again.
-    private func updateBackground() {
+    private func updateBackground(focused explicitFocus: Bool? = nil) {
+        let focused = explicitFocus ?? (window?.firstResponder === self)
         applySurface(
-            fill: isHovered ? Design.Surface.controlHover : Design.Surface.controlResting,
-            radius: Design.Radius.pill(height: Design.Size.chipHeight)
+            fill: isHovered || isPresentingMenu
+                ? Design.Surface.controlHover
+                : Design.Surface.controlResting,
+            radius: .pill(height: Design.Size.chipHeight),
+            border: focused ? Design.Surface.accent : nil
         )
+        alphaValue = isEnabled ? 1 : 0.5
     }
 
     /// Pins the chip to its full contents while hovered, so a label the row squeezed into an
@@ -199,6 +273,15 @@ final class ChipView: NSView {
             superview?.layoutSubtreeIfNeeded()
         }
     }
+
+    // MARK: - Accessibility
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
+    override func accessibilityTitle() -> String? { titleLabel.stringValue }
+    override func accessibilityValue() -> Any? { selectedItem?.title ?? titleLabel.stringValue }
+    override func isAccessibilityEnabled() -> Bool { isEnabled }
+    override func accessibilityPerformPress() -> Bool { presentMenu() }
+    override func accessibilityPerformShowMenu() -> Bool { presentMenu() }
 }
 
 // MARK: - Design Symbols

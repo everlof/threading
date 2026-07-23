@@ -49,7 +49,7 @@ enum ConversationRowView {
     static func userBubble(_ text: String) -> NSView {
         let bubble = NSView()
         bubble.translatesAutoresizingMaskIntoConstraints = false
-        bubble.applySurface(fill: Design.Chat.bubbleFill, radius: Design.Radius.panel)
+        bubble.applySurface(fill: Design.Chat.bubbleFill, radius: .panel)
 
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = Design.Typography.body()

@@ -141,7 +141,7 @@ final class AppThemeTests: XCTestCase {
         AppThemePalette.set(.system)
 
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
-        view.applySurface(fill: Design.Surface.panel, radius: 4, border: Design.Surface.border)
+        view.applySurface(fill: Design.Surface.panel, radius: .fixed(4), border: Design.Surface.border)
 
         let before = view.layer?.backgroundColor
         XCTAssertNotNil(before)
@@ -159,6 +159,41 @@ final class AppThemeTests: XCTestCase {
             after.flatMap { NSColor(cgColor: $0)?.hexString },
             AppThemeStyles.cyberpunk.resolved(.panel).hexString
         )
+    }
+
+    /// Semantic radius identity cannot be recovered from its current number. Swiss deliberately
+    /// gives panels, controls, and pills the same zero radius; a numeric recorder therefore
+    /// classified every one as the first matching role and replayed the wrong shape when the
+    /// next theme separated them again.
+    func testRecordedSurfaceRadiusKeepsItsRoleAcrossEqualRadiusThemes() {
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+
+        let panel = NSView()
+        panel.applySurface(fill: Design.Surface.panel, radius: .panel)
+
+        let control = NSView()
+        control.applySurface(fill: Design.Surface.panel, radius: .control)
+
+        let pill = NSView()
+        pill.applySurface(fill: Design.Surface.panel, radius: .pill(height: 26))
+
+        let fixed = NSView()
+        fixed.applySurface(fill: Design.Surface.panel, radius: .fixed(5))
+
+        XCTAssertEqual(panel.layer?.cornerRadius, 0)
+        XCTAssertEqual(control.layer?.cornerRadius, 0)
+        XCTAssertEqual(pill.layer?.cornerRadius, 0)
+        XCTAssertEqual(fixed.layer?.cornerRadius, 5)
+
+        AppThemePalette.set(.system)
+        for view in [panel, control, pill, fixed] {
+            view.reapplyRecordedSurfaceForTesting()
+        }
+
+        XCTAssertEqual(panel.layer?.cornerRadius, 12)
+        XCTAssertEqual(control.layer?.cornerRadius, 8)
+        XCTAssertEqual(pill.layer?.cornerRadius, 13)
+        XCTAssertEqual(fixed.layer?.cornerRadius, 5)
     }
 
     /// State-specific fills use the lighter layer helper rather than replacing the surface

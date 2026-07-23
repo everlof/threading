@@ -61,7 +61,7 @@ final class GitReviewFileRow: NSView {
 
     private func setupViews() {
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: Design.Surface.controlResting, radius: Design.Radius.control)
+        applySurface(fill: Design.Surface.controlResting, radius: .control)
 
         let glyphLabel = NSTextField(labelWithString: glyph)
         glyphLabel.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .medium)

@@ -31,7 +31,7 @@ final class ConversationTurnPreview: NSView {
     // MARK: - Setup
 
     private func setupViews() {
-        applySurface(fill: Design.Surface.panel, radius: Design.Radius.panel)
+        applySurface(fill: Design.Surface.panel, radius: .panel)
 
         // The card floats over the conversation, so it needs a shadow to read as *over* rather
         // than as another row that has lost its place in the column.

@@ -43,6 +43,12 @@
     "NSTextView.scrollableTextView": "ThemedTextView.scrolling()",
     "NSTextView.scrollablePlainTextView": "ThemedTextView.scrolling()"
   },
+  "interactiveComponentDirectories": [
+    "Sources/Skalman/UI/Design"
+  ],
+  "interactiveBaseTypes": [
+    "ThemedControl"
+  ],
   "systemColors": [
     "alternateSelectedControlTextColor",
     "controlAccentColor",

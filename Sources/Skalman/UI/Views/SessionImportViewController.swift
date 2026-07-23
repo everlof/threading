@@ -123,7 +123,7 @@ final class SessionImportViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.applySurface(
             fill: Design.Surface.panel,
-            radius: Design.Radius.panel,
+            radius: .panel,
             border: Design.Surface.border
         )
 

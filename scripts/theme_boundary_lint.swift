@@ -13,6 +13,8 @@ struct Policy: Decodable {
     let bannedTypes: [String: String]
     let allowedTextFieldLabels: Set<String>
     let bannedFactories: [String: String]
+    let interactiveComponentDirectories: [String]
+    let interactiveBaseTypes: Set<String>
     let systemColors: Set<String>
     let exceptions: [Exception]
 
@@ -80,6 +82,8 @@ final class BoundaryVisitor: SyntaxVisitor {
                 )
             }
         }
+
+        checkInteractiveContract(node)
         return .visitChildren
     }
 
@@ -201,6 +205,36 @@ final class BoundaryVisitor: SyntaxVisitor {
         )
     }
 
+    /// An app-owned component that handles pointer activation is a control even if its author
+    /// happened to subclass `NSView`. Requiring the control base keeps keyboard, enabled-state,
+    /// focus, and accessibility behavior from becoming optional details.
+    private func checkInteractiveContract(_ node: ClassDeclSyntax) {
+        guard policy.interactiveComponentDirectories.contains(where: {
+            relativePath == $0 || relativePath.hasPrefix("\($0)/")
+        }) else { return }
+
+        let handlesPointerActivation = node.memberBlock.members.contains { member in
+            guard let function = member.decl.as(FunctionDeclSyntax.self) else { return false }
+            return function.name.text == "mouseDown" || function.name.text == "mouseUp"
+        }
+        guard handlesPointerActivation else { return }
+
+        let inherited = Set(node.inheritanceClause?.inheritedTypes.map {
+            terminalTypeName($0.type.trimmedDescription)
+        } ?? [])
+        guard inherited.isDisjoint(with: policy.interactiveBaseTypes) else { return }
+
+        let requiredBases = policy.interactiveBaseTypes.sorted().joined(separator: " or ")
+        report(
+            node: node,
+            kind: "interactiveComponent",
+            symbol: node.name.text,
+            message: "\(node.name.text) handles pointer activation from a plain view; "
+                + "subclass \(requiredBases) "
+                + "so keyboard, focus, enabled state, and accessibility remain part of the contract"
+        )
+    }
+
     private func report(
         node: some SyntaxProtocol,
         kind: String,
@@ -297,6 +331,26 @@ func verifyChecker(_ policy: Policy) {
         if !found.isEmpty {
             fail("checker self-test rejected allowed source: \(source)")
         }
+    }
+
+    let interactivePath = "Sources/Skalman/UI/Design/CheckerFixture.swift"
+    let rawInteractive = """
+        final class MouseOnlyControl: NSView {
+            override func mouseDown(with event: NSEvent) {}
+        }
+        """
+    if !lint(source: rawInteractive, path: interactivePath, policy: policy)
+        .contains(where: { $0.kind == "interactiveComponent" }) {
+        fail("checker self-test missed an interactive NSView component")
+    }
+
+    let themedInteractive = """
+        final class AccessibleControl: ThemedControl {
+            override func mouseDown(with event: NSEvent) {}
+        }
+        """
+    if !lint(source: themedInteractive, path: interactivePath, policy: policy).isEmpty {
+        fail("checker self-test rejected a ThemedControl interaction")
     }
 }
 

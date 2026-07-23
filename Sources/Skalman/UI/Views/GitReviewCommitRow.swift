@@ -28,7 +28,7 @@ final class GitReviewCommitRow: NSView {
     init(commit: GitCommitSummary, graph: GitGraphRow? = nil, laneCount: Int = 1) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: .clear, radius: Design.Radius.control)
+        applySurface(fill: .clear, radius: .control)
 
         let hashLabel = NSTextField(labelWithString: commit.shortHash)
         hashLabel.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
@@ -136,7 +136,7 @@ final class GitReviewCommitRow: NSView {
         badge.translatesAutoresizingMaskIntoConstraints = false
         badge.applySurface(
             fill: Design.Surface.controlResting,
-            radius: Design.Radius.pill(height: GitReviewCommitRowDefaults.refBadgeHeight)
+            radius: .pill(height: GitReviewCommitRowDefaults.refBadgeHeight)
         )
         badge.addSubview(label)
         badge.setContentHuggingPriority(.required, for: .horizontal)

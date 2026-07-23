@@ -81,6 +81,22 @@ final class ThemedSpinner: NSView, ThemedComponent {
         arc.lineCap = .round
         layer?.addSublayer(arc)
         themeRedraw = ThemeRedraw(self)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayOptionsChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
+
+        // `didSet` does not run for an initial value, so without this a spinner is a static
+        // three-quarter ring from construction until something first toggles `isAnimating` —
+        // the "small grey ring" this deliberately is not. Call sites had started working around
+        // it by hiding the spinner themselves.
+        applyAnimation()
+    }
+
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     @available(*, unavailable)
@@ -118,10 +134,20 @@ final class ThemedSpinner: NSView, ThemedComponent {
         needsDisplay = true
     }
 
+    @objc private func accessibilityDisplayOptionsChanged() {
+        applyAnimation()
+    }
+
     private func applyAnimation() {
         isHidden = !isAnimating
 
         guard isAnimating else {
+            arc.removeAnimation(forKey: "spin")
+            return
+        }
+        guard !Design.Motion.reducesMotion else {
+            // The visible three-quarter arc still says "working"; only its perpetual movement
+            // disappears. This preserves status without replacing one animation with another.
             arc.removeAnimation(forKey: "spin")
             return
         }

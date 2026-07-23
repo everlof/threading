@@ -325,9 +325,22 @@ enum Design {
     // MARK: - Motion
 
     enum Motion {
+        /// A deterministic seam for behavior and render tests. Production always follows the
+        /// user's macOS accessibility preference.
+        static var reduceMotionOverrideForTesting: Bool?
+
+        static var reducesMotion: Bool {
+            reduceMotionOverrideForTesting
+                ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        }
+
         /// Long enough to read as movement, short enough not to be waited on.
-        static let quick: TimeInterval = 0.15
-        static let standard: TimeInterval = 0.2
+        ///
+        /// Callers keep one path and one final state. Under Reduce Motion the transition is
+        /// immediate rather than requiring every feature to remember a separate accessibility
+        /// branch.
+        static var quick: TimeInterval { reducesMotion ? 0 : 0.15 }
+        static var standard: TimeInterval { reducesMotion ? 0 : 0.2 }
     }
 }
 
@@ -357,6 +370,28 @@ extension NSTextField {
 
 // MARK: - View Helpers
 
+/// The semantic corner a recorded surface should resolve on every theme change.
+///
+/// This is deliberately not a `CGFloat`. A theme may give several roles the same numeric
+/// radius — Swiss makes panel, control, and pill corners all zero — so recovering the role by
+/// comparing numbers loses information. Keeping the role lets a later theme resolve each one
+/// independently.
+enum SurfaceRadius {
+    case panel
+    case control
+    case pill(height: CGFloat)
+    case fixed(CGFloat)
+
+    var current: CGFloat {
+        switch self {
+        case .panel: return Design.Radius.panel
+        case .control: return Design.Radius.control
+        case .pill(let height): return Design.Radius.pill(height: height)
+        case .fixed(let value): return value
+        }
+    }
+}
+
 extension NSView {
 
     /// Applies a rounded, filled surface using the design tokens.
@@ -374,18 +409,23 @@ extension NSView {
     /// a settings card is the point.
     func applySurface(
         fill: NSColor,
-        radius: CGFloat,
+        radius: SurfaceRadius,
         border: NSColor? = nil,
         glow: Bool = false
     ) {
         wantsLayer = true
         layer?.cornerCurve = .continuous
-        layer?.cornerRadius = radius
+        layer?.cornerRadius = radius.current
         layer?.backgroundColor = fill.cgColor
 
         if let border {
             layer?.borderWidth = Design.Radius.border
             layer?.borderColor = border.cgColor
+        } else {
+            // Surface state is replaceable. A focused control that loses focus must not keep
+            // the previous state's accent ring merely because the next state has no border.
+            layer?.borderWidth = 0
+            layer?.borderColor = nil
         }
 
         applyThemeGlow(glow)

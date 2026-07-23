@@ -113,7 +113,7 @@ final class InspectorReportViewController: NSViewController {
 
         imageView.applySurface(
             fill: Design.Surface.panel,
-            radius: Design.Radius.panel,
+            radius: .panel,
             border: Design.Surface.border
         )
 
@@ -125,7 +125,7 @@ final class InspectorReportViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.applySurface(
             fill: Design.Surface.panel,
-            radius: Design.Radius.panel,
+            radius: .panel,
             border: Design.Surface.border
         )
         scrollView.heightAnchor

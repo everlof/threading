@@ -26,7 +26,7 @@ final class ThemePreviewView: NSView {
     init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: .clear, radius: Design.Radius.panel, border: Design.Surface.border)
+        applySurface(fill: .clear, radius: .panel, border: Design.Surface.border)
         layer?.masksToBounds = true
 
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -55,12 +55,12 @@ final class ThemePreviewView: NSView {
             // sweep re-applies whatever surface was *recorded*, so a direct assignment here is
             // overwritten by the `.clear` this view recorded at init the next time the app
             // theme changes — which left the preview transparent and its white text invisible.
-            applySurface(fill: Design.Surface.ground, radius: Design.Radius.panel, border: Design.Surface.border)
+            applySurface(fill: Design.Surface.ground, radius: .panel, border: Design.Surface.border)
             label.stringValue = ""
             return
         }
 
-        applySurface(fill: theme.background, radius: Design.Radius.panel, border: Design.Surface.border)
+        applySurface(fill: theme.background, radius: .panel, border: Design.Surface.border)
         label.attributedStringValue = sample(for: theme)
     }
 

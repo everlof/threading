@@ -18,44 +18,14 @@ private final class RecordedSurface {
     let border: NSColor?
     /// Recorded because a theme changes a surface's *shape* as well as its colour, and a layer
     /// keeps whatever radius it was last given.
-    let radius: RecordedRadius
+    let radius: SurfaceRadius
     let glow: Bool
 
-    init(fill: NSColor, border: NSColor?, radius: CGFloat, glow: Bool) {
+    init(fill: NSColor, border: NSColor?, radius: SurfaceRadius, glow: Bool) {
         self.fill = fill
         self.border = border
-        self.radius = RecordedRadius(matching: radius)
+        self.radius = radius
         self.glow = glow
-    }
-}
-
-/// *Which token* a caller asked for, not the number it resolved to.
-///
-/// A call site passes `Design.Radius.panel`, which is already a `CGFloat` by the time it
-/// arrives — so replaying the recorded number would re-apply the previous theme's geometry
-/// forever. Classifying it at record time is what lets the re-apply ask the *current* theme
-/// again. A radius matching neither token is a deliberate literal and is kept as given.
-private enum RecordedRadius {
-    case panel
-    case control
-    case fixed(CGFloat)
-
-    init(matching value: CGFloat) {
-        if value == Design.Radius.panel {
-            self = .panel
-        } else if value == Design.Radius.control {
-            self = .control
-        } else {
-            self = .fixed(value)
-        }
-    }
-
-    var current: CGFloat {
-        switch self {
-        case .panel: return Design.Radius.panel
-        case .control: return Design.Radius.control
-        case .fixed(let value): return value
-        }
     }
 }
 
@@ -96,7 +66,7 @@ extension NSView {
         // every card wearing the previous theme's silhouette.
         applySurface(
             fill: recorded.fill,
-            radius: recorded.radius.current,
+            radius: recorded.radius,
             border: recorded.border,
             glow: recorded.glow
         )
@@ -135,7 +105,7 @@ extension NSView {
 
     /// Remembers the colours a surface was drawn with. Called by `applySurface`, so its
     /// eighteen call sites need no change of their own.
-    func recordSurface(fill: NSColor, border: NSColor?, radius: CGFloat, glow: Bool) {
+    func recordSurface(fill: NSColor, border: NSColor?, radius: SurfaceRadius, glow: Bool) {
         recordedSurface = RecordedSurface(fill: fill, border: border, radius: radius, glow: glow)
     }
 

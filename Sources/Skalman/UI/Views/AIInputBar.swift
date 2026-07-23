@@ -56,11 +56,8 @@ final class AIInputBar: NSView {
         return button
     }()
 
-    private lazy var loadingIndicator: ThemedSpinner = {
-        let indicator = ThemedSpinner()
-        indicator.isHidden = true
-        return indicator
-    }()
+    /// A spinner hides itself while stopped, so it needs no hiding here.
+    private lazy var loadingIndicator = ThemedSpinner()
 
     // MARK: - Initialization
 
@@ -77,7 +74,7 @@ final class AIInputBar: NSView {
     // MARK: - Setup
 
     private func setupUI() {
-        applySurface(fill: Design.Surface.elevated, radius: 0)
+        applySurface(fill: Design.Surface.elevated, radius: .fixed(0))
 
         // A rule rather than a bare `CALayer`: a layer's colour freezes at assignment and nothing
         // re-reads it, where a `SeparatorView` redraws itself when the theme moves.

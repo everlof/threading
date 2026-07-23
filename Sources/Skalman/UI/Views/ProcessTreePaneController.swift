@@ -64,7 +64,7 @@ final class ProcessTreePaneController: NSViewController {
     private func setupHeader() {
         headerView = NSView()
         headerView.translatesAutoresizingMaskIntoConstraints = false
-        headerView.applySurface(fill: Design.Surface.ground, radius: 0)
+        headerView.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
 
         titleLabel = NSTextField(labelWithString: "Process Tree")
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -96,7 +96,7 @@ final class ProcessTreePaneController: NSViewController {
         // Detail view (right side)
         detailView = NSView()
         detailView.translatesAutoresizingMaskIntoConstraints = false
-        detailView.applySurface(fill: Design.Surface.elevated, radius: 0)
+        detailView.applySurface(fill: Design.Surface.elevated, radius: .fixed(0))
 
         // Create detail labels
         let labels = ["PID:", "Command:", "Age:", "CPU Time:", "Memory:", "CWD:"]

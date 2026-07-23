@@ -271,7 +271,7 @@ private extension ProjectSidebarViewController {
         }
 
         let backdrop = themeBackdrop ?? makeThemeBackdrop()
-        backdrop.applySurface(fill: Design.Surface.background, radius: 0)
+        backdrop.applySurface(fill: Design.Surface.background, radius: .fixed(0))
     }
 
     private func makeThemeBackdrop() -> NSView {
@@ -365,7 +365,7 @@ extension ProjectSidebarViewController {
         promptForText(
             title: title,
             message: allowsEmpty
-                ? "Leave empty to use the name reported by the terminal."
+                ? "Leave empty to follow the agent's own name for the conversation."
                 : nil,
             confirmTitle: "Rename",
             current: current,

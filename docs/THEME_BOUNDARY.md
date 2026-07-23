@@ -31,11 +31,18 @@ records why it cannot be removed.
    emphasized, and live theme changes.
 4. Read colours, typography, spacing, radii and motion through `Design` roles. Feature code never
    reads an `NSColor` system role directly.
-5. Never assign a theme-derived `CGColor` directly to a layer. Draw at display time, use
+5. Pass a semantic `SurfaceRadius` (`.panel`, `.control`, `.pill`, or an intentional `.fixed`)
+   to `applySurface`. Never resolve a role to a `CGFloat` first: two roles can share a number in
+   one theme and diverge after a live theme switch.
+6. Never assign a theme-derived `CGColor` directly to a layer. Draw at display time, use
    `applySurface`, or use the refresh-aware layer-colour helpers.
-6. Preserve accessibility. A custom-drawn control must expose its role, title/value, enabled
+7. Preserve accessibility. A custom-drawn control must expose its role, title/value, enabled
    state, and action.
-7. Add behavior tests and render the component under at least System plus two deliberately
+8. A component in `UI/Design/` that handles pointer input must inherit `ThemedControl`, so
+   keyboard activation, focus, enabled state, and accessibility cannot be omitted accidentally.
+9. Read transition durations from `Design.Motion`; it collapses them under Reduce Motion.
+   Indeterminate status views may stay visible, but must stop perpetual animation.
+10. Add behavior tests and render the component under at least System plus two deliberately
    different app themes. Include focus, selection and disabled states when applicable.
 
 Do not fix a violation with a directory exclusion or a blanket lint disable. Add a narrow,
@@ -52,3 +59,7 @@ Static checking proves that feature code entered through the right boundary. Run
 audits catch factories and framework-created view trees, while render and live-theme-switch
 tests prove that a boundary actually paints every state correctly. No one layer replaces the
 others.
+
+The source checker also rejects pointer-handling classes in `UI/Design/` unless they inherit a
+configured interactive base type. This is a contract lint, not merely a ban on stock AppKit:
+custom drawing does not excuse a mouse-only control.

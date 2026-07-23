@@ -210,7 +210,7 @@ final class SettingsCard: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         applySurface(
             fill: Design.Surface.panel,
-            radius: Design.Radius.panel,
+            radius: .panel,
             border: Design.Surface.border,
             glow: true
         )

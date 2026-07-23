@@ -112,7 +112,7 @@ final class AccountsPreferencesViewController: NSViewController {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.applySurface(
             fill: Design.Surface.controlResting,
-            radius: Design.Radius.pill(height: AccountsPreferencesLayout.iconWellSize)
+            radius: .pill(height: AccountsPreferencesLayout.iconWellSize)
         )
         button.setContentHuggingPriority(.required, for: .horizontal)
         NSLayoutConstraint.activate([
