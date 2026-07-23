@@ -175,6 +175,7 @@ enum Design {
             // The tiers are further apart on a dark ground than a light one: black fades to
             // nothing on paper long before white does on ink.
             return Design.Ink(
+                base: base,
                 label: base.withAlphaComponent(light ? 0.95 : 0.88),
                 secondary: base.withAlphaComponent(light ? 0.70 : 0.62),
                 tertiary: base.withAlphaComponent(light ? 0.50 : 0.44),
@@ -191,21 +192,27 @@ enum Design {
     /// chrome's ground and is wrong over the window's backdrop by exactly the amount the two
     /// palettes differ.
     struct Ink {
+
+        /// The tone every value here is cut from: white over a dark ground, black over a light
+        /// one. Held so each tier and surface is *the base at an opacity* rather than a dimming
+        /// of the tier above it — `withAlphaComponent` replaces alpha rather than scaling it, and
+        /// chaining it reads as a scale that it is not.
+        let base: NSColor
+
         let label: NSColor
         let secondary: NSColor
         let tertiary: NSColor
         let quaternary: NSColor
 
         /// A control surface that reads on the same ground — the pill behind the usage summary,
-        /// the fill under a hovered overlay button.
+        /// the card floating at the pane's corner.
         ///
         /// Derived rather than taken from `Design.Surface`, for the same reason as the ink: the
-        /// chrome's resting fill is its label colour held at 8%, which over a backdrop of the
-        /// opposite tone is either invisible or a bright smear. This is *the backdrop's own*
-        /// opposite, held down.
-        var surface: NSColor { quaternary.withAlphaComponent(0.14) }
-        var surfaceHover: NSColor { quaternary.withAlphaComponent(0.24) }
-        var border: NSColor { quaternary.withAlphaComponent(0.30) }
+        /// chrome's resting fill is *its* label colour held at 8%, which over a backdrop of the
+        /// opposite tone is either invisible or a bright smear.
+        var surface: NSColor { base.withAlphaComponent(0.14) }
+        var surfaceHover: NSColor { base.withAlphaComponent(0.24) }
+        var border: NSColor { base.withAlphaComponent(0.30) }
     }
 
     // MARK: - Status

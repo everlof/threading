@@ -76,8 +76,26 @@ class BackdropOverlay: NSView {
         inkDidChange()
     }
 
+    /// The third thing that moves the ink, and the one that fires no event of its own.
+    ///
+    /// Under the System theme the backdrop is a *dynamic* colour, so macOS switching between
+    /// light and dark at sunset changes what that colour resolves to while the app theme and the
+    /// backdrop object both stay exactly as they were. Without this the toolbar would keep the
+    /// previous appearance's ink until something else happened to move it.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        inkDidChange()
+    }
+
+    /// Resolved inside the view's own appearance, because the backdrop may be a dynamic colour
+    /// and a dynamic colour answers whatever appearance is current when it is asked. Off a
+    /// notification there is no drawing appearance in force, so asking here rather than there is
+    /// the difference between measuring the ground the view is actually on and measuring
+    /// whichever one AppKit last had in hand.
     private func inkDidChange() {
-        applyInk(ink)
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            applyInk(ink)
+        }
         needsDisplay = true
     }
 }

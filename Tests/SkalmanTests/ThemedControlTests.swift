@@ -362,7 +362,11 @@ final class ThemedControlTests: XCTestCase {
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
             // The base class itself explains the rule and names the roles it forbids.
-            guard text.contains(": BackdropOverlay {"), !file.lastPathComponent.hasPrefix("BackdropOverlay")
+            // Matches `: BackdropOverlay {` and `: BackdropOverlay, Protocol {` alike — the
+            // first version of this rule saw only the former, which is a rule that stops
+            // working the first time someone adds a conformance.
+            let declaresOverlay = text.range(of: #": BackdropOverlay\s*[{,]"#, options: .regularExpression) != nil
+            guard declaresOverlay, !file.lastPathComponent.hasPrefix("BackdropOverlay")
             else { continue }
             overlayFiles.append(file.lastPathComponent)
 
@@ -379,6 +383,68 @@ final class ThemedControlTests: XCTestCase {
             offences, [],
             "a BackdropOverlay read the chrome's roles. It is drawn on the window's backdrop, "
                 + "not on Design.Surface.ground — colour it from the Ink handed to applyInk(_:)."
+        )
+    }
+
+    /// Which tone the ink is cut from is *measured* against the ground rather than guessed from a
+    /// luminance threshold, so a mid-tone terminal — and there are plenty — gets the one that
+    /// actually reads rather than the one a constant happened to pick.
+    func testInkTakesWhicheverToneReadsOnTheGround() {
+        for ground in [NSColor.black, NSColor(hex: "#07070B")!, NSColor(hex: "#1C0F1E")!] {
+            let ink = Design.Text.on(ground)
+            XCTAssertGreaterThan(
+                ThemeContrast.ratio(ink.label, ground), ThemeContrast.minimumRatio,
+                "ink on \(ground) is not legible"
+            )
+        }
+
+        // Paper takes black, night takes white — and the two must not agree.
+        let onPaper = Design.Text.on(.white)
+        let onInk = Design.Text.on(.black)
+        XCTAssertNotEqual(onPaper.base, onInk.base, "the ink did not flip between grounds")
+    }
+
+    /// Every tier and surface is the *base* at an opacity, never a dimming of the tier above it:
+    /// `withAlphaComponent` replaces alpha rather than scaling it, so chaining reads as a scale
+    /// it is not — the same trap that once made disabled buttons the loudest thing on the page.
+    func testEveryInkValueIsCutFromTheOneBaseTone() {
+        let ink = Design.Text.on(NSColor(hex: "#101014")!)
+        let expected = ink.base.usingColorSpace(.sRGB)!
+
+        for value in [ink.label, ink.secondary, ink.tertiary, ink.quaternary,
+                      ink.surface, ink.surfaceHover, ink.border] {
+            let resolved = value.usingColorSpace(.sRGB)!
+            XCTAssertEqual(resolved.redComponent, expected.redComponent, accuracy: 0.001)
+            XCTAssertEqual(resolved.greenComponent, expected.greenComponent, accuracy: 0.001)
+            XCTAssertEqual(resolved.blueComponent, expected.blueComponent, accuracy: 0.001)
+        }
+
+        XCTAssertGreaterThan(ink.label.alphaComponent, ink.secondary.alphaComponent)
+        XCTAssertGreaterThan(ink.secondary.alphaComponent, ink.tertiary.alphaComponent)
+        XCTAssertGreaterThan(ink.tertiary.alphaComponent, ink.quaternary.alphaComponent)
+    }
+
+    /// The third thing that moves the ink, and the one that announces itself through no event:
+    /// under the System theme the backdrop is a *dynamic* colour, so macOS switching to dark at
+    /// sunset changes what it resolves to while the theme and the backdrop object both stay
+    /// exactly as they were. Found by review rather than by a screenshot, because it only shows
+    /// up at dusk.
+    func testTheInkFollowsAChangeOfSystemAppearance() {
+        AppThemePalette.set(.system)
+        WindowBackdrop.set(Design.Surface.ground)
+
+        let spy = InkSpy(frame: NSRect(x: 0, y: 0, width: 100, height: 22))
+
+        spy.appearance = NSAppearance(named: .darkAqua)
+        let onDark = spy.applied.last
+        spy.appearance = NSAppearance(named: .aqua)
+        let onLight = spy.applied.last
+
+        XCTAssertNotNil(onDark, "no ink was applied when the appearance changed")
+        XCTAssertNotEqual(
+            onDark?.base, onLight?.base,
+            "the ink did not follow the system appearance — a dynamic backdrop changed meaning "
+                + "under it and nothing asked again"
         )
     }
 
@@ -454,4 +520,14 @@ final class ThemedControlTests: XCTestCase {
 private final class ActionSpy: NSObject {
     private(set) var count = 0
     @objc func fire() { count += 1 }
+}
+
+/// A `BackdropOverlay` that only records what it was handed. It also stands as the smallest
+/// statement of the contract: a subclass overrides `applyInk` and colours from the argument.
+private final class InkSpy: BackdropOverlay {
+    private(set) var applied: [Design.Ink] = []
+
+    override func applyInk(_ ink: Design.Ink) {
+        applied.append(ink)
+    }
 }
