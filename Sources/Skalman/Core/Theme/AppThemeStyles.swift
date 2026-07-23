@@ -52,6 +52,33 @@ enum AppThemeStyles {
             .syntaxString: hex("#00FF88"),
             .syntaxNumber: hex("#FFB000")
         ],
+        // The terminal half of the style, written out rather than derived — see
+        // `AppTheme.terminalPalette`. Built from the same neon the chrome states: the syntax
+        // hues become magenta/cyan/green/yellow, `statusNegative` becomes red, and `black` is
+        // the panel colour rather than true black so an ANSI-black glyph is still a glyph.
+        terminalPalette: TerminalTheme(
+            name: "Cyberpunk",
+            foreground: hex("#E6FFF4"),
+            background: hex("#07070B"),
+            cursor: hex("#00FF88"),
+            selection: hex("#103D2C"),
+            black: hex("#14142A"),
+            red: hex("#FF3366"),
+            green: hex("#00FF88"),
+            yellow: hex("#FFB000"),
+            blue: hex("#2E8BFF"),
+            magenta: hex("#FF00FF"),
+            cyan: hex("#00D4FF"),
+            white: hex("#B9C6C0"),
+            brightBlack: hex("#2E2E5A"),
+            brightRed: hex("#FF6B93"),
+            brightGreen: hex("#7CFFC4"),
+            brightYellow: hex("#FFD166"),
+            brightBlue: hex("#7AB4FF"),
+            brightMagenta: hex("#FF7AFF"),
+            brightCyan: hex("#7CE9FF"),
+            brightWhite: hex("#E6FFF4")
+        ),
         // Tight corners and a neon halo behind every panel — the one thing that makes this read
         // as Cyberpunk rather than as "a dark theme".
         material: AppTheme.Material(
@@ -96,6 +123,40 @@ enum AppThemeStyles {
             .syntaxNumber: hex("#4A4A4A")
         ],
         // Square. The grid is the whole idea, and a 12pt radius rounds it away.
+        // Paper, black type, one red. The ANSI colours are held *down* — a Swiss terminal that
+        // lit up in eight bright hues would contradict the style it is named after — so they are
+        // muted enough to sit on white and still be told apart, with red left at full strength
+        // because red is the accent this style actually has.
+        //
+        // The greys break with convention on purpose. A light theme normally leaves `white` and
+        // `brightWhite` near-white, because in a light palette those indices are meant as
+        // *backgrounds* — but a CLI that dims its status line to index 7 then writes pale grey on
+        // paper, which is what the first version of this did and it was unreadable. So the four
+        // neutrals are a monotone ramp dark enough to read on white and still ordered
+        // black → brightBlack → white → brightWhite, so nothing that picks one of them vanishes.
+        terminalPalette: TerminalTheme(
+            name: "Swiss Minimalist",
+            foreground: hex("#111111"),
+            background: hex("#FFFFFF"),
+            cursor: hex("#D6180B"),
+            selection: hex("#FAD5D1"),
+            black: hex("#111111"),
+            red: hex("#D6180B"),
+            green: hex("#2E6B4F"),
+            yellow: hex("#A67C00"),
+            blue: hex("#24408E"),
+            magenta: hex("#8B2E6B"),
+            cyan: hex("#1F6B75"),
+            white: hex("#767676"),
+            brightBlack: hex("#5A5A5A"),
+            brightRed: hex("#FF3B2E"),
+            brightGreen: hex("#3F8F6B"),
+            brightYellow: hex("#C99A1E"),
+            brightBlue: hex("#3557B8"),
+            brightMagenta: hex("#B04A8C"),
+            brightCyan: hex("#2E8C99"),
+            brightWhite: hex("#A8A8A8")
+        ),
         material: AppTheme.Material(panelRadius: 0, controlRadius: 0, borderWidth: 1, glow: nil)
     )
 

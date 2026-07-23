@@ -215,7 +215,12 @@ final class ThemedButton: ThemedControl {
     }
 
     override func accessibilityRole() -> NSAccessibility.Role? { .button }
-    override func accessibilityLabel() -> String? { title.isEmpty ? toolTip : title }
+
+    /// A button's words are its *title*; `accessibilityLabel` maps to AXDescription, which is
+    /// where an icon-only button's tooltip belongs and where a titled button's text does not —
+    /// a screen reader and a UI script both ask for the title first.
+    override func accessibilityTitle() -> String? { title.isEmpty ? nil : title }
+    override func accessibilityLabel() -> String? { title.isEmpty ? toolTip : nil }
     override func accessibilityPerformPress() -> Bool {
         guard isEnabled else { return false }
         performClick()

@@ -54,8 +54,15 @@ final class ThemeManager {
         builtInThemes.contains { $0.name == theme.name }
     }
 
+    /// The one name a custom theme may not take: the list's app-theme entry is a *name*, and a
+    /// user theme wearing it would shadow the entry at every scope that chose it.
+    func isReserved(_ name: String) -> Bool {
+        name == TerminalThemeNames.followsAppTheme
+    }
+
     /// Add a new custom theme
     func addTheme(_ theme: TerminalTheme) {
+        guard !isReserved(theme.name) else { return }
         var themes = customThemes
         // Replace if exists, otherwise append
         if let index = themes.firstIndex(where: { $0.name == theme.name }) {
@@ -77,7 +84,7 @@ final class ThemeManager {
 
     /// Rename a custom theme
     func renameTheme(_ theme: TerminalTheme, to newName: String) -> Bool {
-        guard !isBuiltIn(theme) else { return false }
+        guard !isBuiltIn(theme), !isReserved(newName) else { return false }
         guard !allThemes.contains(where: { $0.name == newName }) else { return false }
 
         var themes = customThemes

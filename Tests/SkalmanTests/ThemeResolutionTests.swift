@@ -178,3 +178,86 @@ final class ThemeResolutionTests: XCTestCase {
         XCTAssertEqual(theme[.brightCyan].hexString, orange.hexString)
     }
 }
+
+// MARK: - Follow App Theme
+
+/// The terminal-theme list's app-theme entry, which is a reserved *name* rather than a fourth
+/// setting — that is what lets it inherit down the same three scopes as any palette.
+@MainActor
+final class FollowsAppThemeTests: XCTestCase {
+
+    override func tearDown() {
+        AppThemeLibrary.apply(.system)
+        super.tearDown()
+    }
+
+    /// The whole point of making it a name: `ThemeResolution` needs no case for it, so a session
+    /// can follow the chrome while its project names a palette, and the narrowest scope still
+    /// wins.
+    func testTheEntryResolvesLikeAnyOtherNameInTheChain() {
+        let available: Set<String> = ["Basic", "Pro", TerminalThemeNames.followsAppTheme]
+
+        let session = ThemeResolution.resolve(
+            session: TerminalThemeNames.followsAppTheme, project: "Pro", global: "Basic",
+            available: available
+        )
+        XCTAssertEqual(session?.scope, .session)
+        XCTAssertEqual(session?.themeName, TerminalThemeNames.followsAppTheme)
+
+        let project = ThemeResolution.resolve(
+            session: nil, project: TerminalThemeNames.followsAppTheme, global: "Basic",
+            available: available
+        )
+        XCTAssertEqual(project?.scope, .project)
+        XCTAssertEqual(project?.themeName, TerminalThemeNames.followsAppTheme)
+    }
+
+    /// It has to be in `availableNames`, or resolution treats a scope that chose it as a dangling
+    /// name and silently inherits past it — which would look exactly like the choice not sticking.
+    func testTheEntryIsAvailableToResolveAgainst() {
+        XCTAssertTrue(ThemeAssignments.availableNames.contains(TerminalThemeNames.followsAppTheme))
+    }
+
+    /// The palette is the live one, not a copy taken when the choice was made.
+    func testThePaletteFollowsTheAppThemeRatherThanBeingCopied() {
+        AppThemeLibrary.apply(AppThemeStyles.cyberpunk)
+        let cyber = ThemeAssignments.palette(named: TerminalThemeNames.followsAppTheme)
+
+        AppThemeLibrary.apply(AppThemeStyles.swissMinimalist)
+        let swiss = ThemeAssignments.palette(named: TerminalThemeNames.followsAppTheme)
+
+        XCTAssertNotEqual(cyber.background, swiss.background,
+                          "the palette did not move with the app theme")
+        XCTAssertEqual(cyber.name, "Cyberpunk")
+        XCTAssertEqual(swiss.name, "Swiss Minimalist")
+    }
+
+    /// A user theme wearing the reserved name would shadow the entry at every scope that chose
+    /// it, and the entry would stop meaning one thing.
+    func testTheNameCannotBeTakenByAUserTheme() {
+        let manager = ThemeManager.shared
+        let stolen = TerminalTheme.basic.renamed(TerminalThemeNames.followsAppTheme)
+
+        manager.addTheme(stolen)
+        XCTAssertNil(manager.customThemes.first { $0.name == TerminalThemeNames.followsAppTheme },
+                     "a custom theme took the reserved name")
+
+        let mine = TerminalTheme.basic.renamed("Reserved Name Probe")
+        manager.addTheme(mine)
+        defer { _ = manager.deleteTheme(mine) }
+        XCTAssertFalse(manager.renameTheme(mine, to: TerminalThemeNames.followsAppTheme),
+                       "a rename took the reserved name")
+    }
+
+    /// Every stated palette has to be readable on its own ground — the same floor a palette
+    /// arriving over MCP is held to, applied to the ones we ship.
+    func testEveryAppThemePaletteIsLegible() {
+        for theme in [AppTheme.system] + AppThemeStyles.all {
+            let palette = theme.terminalPalette
+            XCTAssertTrue(
+                ThemeContrast.isLegible(foreground: palette.foreground, background: palette.background),
+                "\(theme.name)'s terminal text is not legible on its own background"
+            )
+        }
+    }
+}

@@ -1,6 +1,18 @@
 import AppKit
 import SwiftTerm
 
+// MARK: - Reserved Names
+
+enum TerminalThemeNames {
+    /// The terminal-theme list's first entry: draw with the palette the *app* theme states.
+    ///
+    /// A reserved name rather than a fourth setting, because terminal themes are already keyed
+    /// by name at three scopes — so choosing it is an ordinary assignment, and inheriting works
+    /// without a line of new resolution. `ThemeManager` refuses to create or rename a theme to
+    /// it, which is what keeps the name meaning one thing.
+    static let followsAppTheme = "Follow App Theme"
+}
+
 /// Color scheme for terminal rendering.
 struct TerminalTheme: Codable, Equatable {
 
@@ -258,6 +270,15 @@ extension TerminalTheme {
 
     /// All available themes (use ThemeManager.shared.allThemes for the full list including custom themes)
     static let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean]
+
+    /// The same palette under another name. An app theme's palette is named after the *theme*,
+    /// so anything that reports which colours a terminal drew with names the thing the user
+    /// chose rather than the built-in it happens to equal.
+    func renamed(_ newName: String) -> TerminalTheme {
+        var copy = self
+        copy.name = newName
+        return copy
+    }
 
     /// Convenience accessor - prefer ThemeManager.shared.allThemes
     static var allThemes: [TerminalTheme] {

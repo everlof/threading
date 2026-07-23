@@ -54,6 +54,18 @@ struct AppTheme: Codable, Equatable {
     /// The roles this theme states. Everything absent is derived — see `resolved`.
     let roles: [AppThemeRole: NSColor]
 
+    /// The terminal palette that belongs with this chrome.
+    ///
+    /// Stated per theme rather than derived from the roles, and that is the point: a palette is
+    /// sixteen ANSI colours that have to stay legible against the ground *and* apart from each
+    /// other, which eleven roles cannot answer — derivation would give eight near-hues. Writing
+    /// it out is what makes the pairing a decision taken while the theme is designed, so anyone
+    /// reading the theme can see the two halves were meant to go together.
+    ///
+    /// Reached through the terminal theme list's "Follow App Theme" entry, at whichever scope
+    /// picks it. A session that names a palette of its own still gets that one.
+    let terminalPalette: TerminalTheme
+
     /// How surfaces are *shaped*, as opposed to coloured.
     ///
     /// Added because two themes that differ only in hue read as one app in two tints — which
@@ -102,6 +114,9 @@ struct AppTheme: Codable, Equatable {
         mode: .light,
         summary: "Follows macOS — light, dark, and your accent colour.",
         roles: [:],
+        // The palette the app has always defaulted to, so "Follow App Theme" under the System
+        // theme is not a change of appearance — it is the same terminal, said differently.
+        terminalPalette: TerminalTheme.basic.renamed("System"),
         material: .system
     )
 
@@ -160,7 +175,7 @@ struct AppTheme: Codable, Equatable {
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, mode, summary, roles, material
+        case id, name, mode, summary, roles, material, terminalPalette
     }
 
     init(
@@ -169,6 +184,7 @@ struct AppTheme: Codable, Equatable {
         mode: Mode,
         summary: String?,
         roles: [AppThemeRole: NSColor],
+        terminalPalette: TerminalTheme = TerminalTheme.basic,
         material: Material = .system
     ) {
         self.id = id
@@ -176,6 +192,7 @@ struct AppTheme: Codable, Equatable {
         self.mode = mode
         self.summary = summary
         self.roles = roles
+        self.terminalPalette = terminalPalette
         self.material = material
     }
 
@@ -198,6 +215,10 @@ struct AppTheme: Codable, Equatable {
         }
         roles = parsed
         material = try container.decodeIfPresent(Material.self, forKey: .material) ?? .system
+        // A theme document written before palettes existed keeps the app's own default, which is
+        // what a terminal following it drew with anyway.
+        terminalPalette = try container.decodeIfPresent(TerminalTheme.self, forKey: .terminalPalette)
+            ?? TerminalTheme.basic.renamed(name)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -211,6 +232,7 @@ struct AppTheme: Codable, Equatable {
         for (role, color) in roles { hexes[role.rawValue] = color.hexString }
         try container.encode(hexes, forKey: .roles)
         try container.encode(material, forKey: .material)
+        try container.encode(terminalPalette, forKey: .terminalPalette)
     }
 }
 

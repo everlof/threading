@@ -25,6 +25,9 @@ final class ThemePreferencesViewController: NSViewController {
         static let builtInNote = """
             Built-in themes cannot be edited. Duplicate this one to change its colours.
             """
+        static let followsAppNote = """
+            These colours come from the app theme above. Duplicate them to edit a copy.
+            """
     }
 
     // MARK: - Properties
@@ -35,6 +38,17 @@ final class ThemePreferencesViewController: NSViewController {
 
     private var isBuiltInSelected: Bool {
         selectedTheme.map { ThemeManager.shared.isBuiltIn($0) } ?? false
+    }
+
+    /// The list's first row: the app theme's own palette, wearing the reserved name.
+    private static var followsAppThemeEntry: TerminalTheme {
+        AppThemeLibrary.current.terminalPalette.renamed(TerminalThemeNames.followsAppTheme)
+    }
+
+    /// Neither editable nor deletable, for the same reason: there is no palette here to change.
+    /// The way to change what it draws is to change the app theme above it.
+    private var isFollowsAppThemeSelected: Bool {
+        selectedTheme?.name == TerminalThemeNames.followsAppTheme
     }
 
     // MARK: - UI Elements
@@ -141,6 +155,9 @@ final class ThemePreferencesViewController: NSViewController {
         }
 
         appEvents.observe(ThemesDidChange.self) { [weak self] _ in self?.themesDidChange() }
+        // The app-theme entry *is* the app theme's palette, so a switch changes what this list
+        // shows as well as what the window is painted in.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.themesDidChange() }
         appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.themesDidChange() }
     }
 
@@ -273,7 +290,10 @@ final class ThemePreferencesViewController: NSViewController {
     // MARK: - Data
 
     private func loadThemes() {
-        themes = ThemeManager.shared.allThemes
+        // The app-theme entry leads the list. It is not a palette anyone edits — it is the answer
+        // "whatever the app theme says", shown with the palette that answer currently gives, so
+        // choosing it is the same gesture as choosing any other row.
+        themes = [Self.followsAppThemeEntry] + ThemeManager.shared.allThemes
         themeTableView.reloadData()
 
         // Keep whatever was selected across a reload — editing a colour reloads the list, and
@@ -304,10 +324,11 @@ final class ThemePreferencesViewController: NSViewController {
             return
         }
 
-        let isBuiltIn = ThemeManager.shared.isBuiltIn(theme)
-        colorEditor.show(theme, isEditable: !isBuiltIn)
-        builtInBanner.isHidden = !isBuiltIn
-        removeButton.isEnabled = !isBuiltIn
+        let isFixed = ThemeManager.shared.isBuiltIn(theme) || isFollowsAppThemeSelected
+        colorEditor.show(theme, isEditable: !isFixed)
+        builtInNote.stringValue = isFollowsAppThemeSelected ? Strings.followsAppNote : Strings.builtInNote
+        builtInBanner.isHidden = !isFixed
+        removeButton.isEnabled = !isFixed
         useThemeButton.isEnabled = theme.name != ThemeAssignments.defaultTheme.name
     }
 
@@ -343,6 +364,15 @@ final class ThemePreferencesViewController: NSViewController {
 
     @objc private func removeTheme() {
         guard let theme = selectedTheme else { return }
+
+        guard !isFollowsAppThemeSelected else {
+            presentAlert(
+                "Cannot Delete",
+                "“\(TerminalThemeNames.followsAppTheme)” is not a palette — it draws with whatever "
+                    + "the app theme states. Change the app theme above to change what it gives you."
+            )
+            return
+        }
 
         guard !ThemeManager.shared.isBuiltIn(theme) else {
             presentAlert(

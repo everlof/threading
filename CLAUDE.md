@@ -1186,6 +1186,36 @@ conversation it was said in. Three things the tools do that a thinner wrapper wo
   WCAG's large-text 3:1 rather than 4.5, which would reject Solarized Dark and stop being a
   safety net and start being a taste.
 
+**A terminal palette can follow the app theme.** `AppTheme.terminalPalette` states the palette
+that belongs with each style — neon-on-near-black for Cyberpunk, black-on-paper with the one red
+for Swiss, and the app's long-standing default for System — and the terminal theme list offers
+`TerminalThemeNames.followsAppTheme` ("Follow App Theme") as its first entry.
+
+Three decisions carry it:
+
+- **It is a reserved *name*, not a fourth setting.** Terminal themes are already keyed by name at
+  three scopes, so choosing it is an ordinary assignment and `ThemeResolution` needs no case for
+  it: a session can follow the chrome while its project names Solarized, and the narrowest scope
+  still wins. The name must be in `availableNames` or resolution treats it as dangling and
+  inherits past it, which looks exactly like the choice not sticking. `ThemeManager` refuses to
+  create or rename a theme to it.
+- **The palette is stated per theme, not derived from the roles.** Sixteen ANSI colours have to
+  stay legible against the ground *and* apart from each other, which eleven roles cannot answer —
+  derivation gives eight near-hues. Writing it out is what makes the pairing a decision taken
+  while the theme is designed.
+- **Swiss's greys break with convention deliberately.** A light palette normally leaves `white`
+  and `brightWhite` near-white, because there those indices are meant as *backgrounds* — but a
+  CLI that dims its status line to index 7 then writes pale grey on paper. The four neutrals are
+  a monotone ramp dark enough to read on white, still ordered black → brightBlack → white →
+  brightWhite so nothing that picks one of them vanishes.
+
+What it cannot reach is **truecolor**. Claude Code writes its status line in 24-bit SGR rather
+than ANSI indices, so those colours are the CLI's own under every palette — a limit of the
+protocol, not of the theme.
+
+A live app-theme switch is a terminal-theme switch for any session following it, which is why
+`AgentSessionViewController` observes `AppThemeDidChange` alongside the assignment events.
+
 A natively-rendered session records an assignment but shows almost none of it: the conversation
 is drawn in system colours per the design system, so the theme reaches only the pane's backdrop.
 The tools say so rather than reporting a success nothing visible followed.

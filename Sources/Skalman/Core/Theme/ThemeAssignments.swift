@@ -25,9 +25,30 @@ enum ThemeAssignments {
     /// The theme a session's terminal draws with.
     static func theme(for sessionID: SessionID?) -> TerminalTheme {
         guard let sessionID, let assignment = resolution(for: sessionID) else {
-            return defaultTheme
+            return palette(named: defaultTheme.name)
         }
-        return ThemeManager.shared.theme(named: assignment.themeName) ?? defaultTheme
+        return palette(named: assignment.themeName)
+    }
+
+    /// A name to a palette, with the app-theme entry answered first.
+    ///
+    /// "Follow App Theme" is a *name* rather than a fourth piece of state, which is what lets it
+    /// ride the scope chain unchanged: a session can follow the chrome while its project names
+    /// Solarized, and the whole of `ThemeResolution` is untouched. The cost is one reserved
+    /// name, which `ThemeManager` refuses to let a user take.
+    static func palette(named name: String) -> TerminalTheme {
+        if name == TerminalThemeNames.followsAppTheme {
+            return AppThemeLibrary.current.terminalPalette
+        }
+        guard let named = ThemeManager.shared.theme(named: name) else {
+            // The stored default is an embedded copy, so it answers even when the theme it was
+            // copied from is gone — but if *it* is the app-theme entry, that resolves first.
+            let fallback = defaultTheme
+            return fallback.name == TerminalThemeNames.followsAppTheme
+                ? AppThemeLibrary.current.terminalPalette
+                : fallback
+        }
+        return named
     }
 
     /// The whole profile a session's terminal runs with: the user's own profile — font, cursor,
@@ -100,8 +121,10 @@ enum ThemeAssignments {
 
     // MARK: - Theme Lifecycle
 
+    /// Includes the app-theme entry, or `ThemeResolution` would treat a scope that chose it as
+    /// a dangling name and quietly inherit past it.
     static var availableNames: Set<String> {
-        Set(ThemeManager.shared.allThemes.map(\.name))
+        Set(ThemeManager.shared.allThemes.map(\.name)).union([TerminalThemeNames.followsAppTheme])
     }
 
     /// Renames a theme and re-points every assignment naming it.

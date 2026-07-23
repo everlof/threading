@@ -74,6 +74,17 @@ final class ThemeMenuBuilder: NSObject {
         ))
         submenu.addItem(.separator())
 
+        // Above the list and separated from it, because it is not one of the palettes — it is
+        // the answer "whatever the app theme says", which changes when the app theme does.
+        let followsApp = themeChoiceItem(
+            title: TerminalThemeNames.followsAppTheme,
+            choice: ThemeMenuChoice(target: target, themeName: TerminalThemeNames.followsAppTheme),
+            isChecked: assigned == TerminalThemeNames.followsAppTheme
+        )
+        followsApp.image = ThemeSwatchImage.menuSwatch(for: AppThemeLibrary.current.terminalPalette)
+        submenu.addItem(followsApp)
+        submenu.addItem(.separator())
+
         for theme in ThemeManager.shared.allThemes {
             let item = themeChoiceItem(
                 title: theme.name,

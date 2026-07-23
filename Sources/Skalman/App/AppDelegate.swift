@@ -335,6 +335,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Bigger", action: #selector(increaseFontSize), keyEquivalent: "+")
         menu.addItem(withTitle: "Smaller", action: #selector(decreaseFontSize), keyEquivalent: "-")
 
+        menu.addItem(.separator())
+
+        // ⌥⌘I — the browser devtools shortcut, for the same gesture: point at the thing on
+        // screen and get something you can paste into a conversation about it. The shifted
+        // variant is the freeflow twin; invoking one while the other is active switches mode.
+        let inspectElementItem = NSMenuItem(
+            title: "Inspect Element",
+            action: #selector(inspectElement),
+            keyEquivalent: "i"
+        )
+        inspectElementItem.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(inspectElementItem)
+
+        let inspectPointItem = NSMenuItem(
+            title: "Inspect Point",
+            action: #selector(inspectPoint),
+            keyEquivalent: "i"
+        )
+        inspectPointItem.keyEquivalentModifierMask = [.command, .option, .shift]
+        menu.addItem(inspectPointItem)
+
         let item = NSMenuItem()
         item.submenu = menu
         return item
@@ -443,6 +464,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showFind() {
         mainWindowController.showFind()
+    }
+
+    @objc private func inspectElement() {
+        mainWindowController.toggleElementInspector(mode: .element)
+    }
+
+    @objc private func inspectPoint() {
+        mainWindowController.toggleElementInspector(mode: .freeflow)
     }
 
     @objc private func increaseFontSize() {

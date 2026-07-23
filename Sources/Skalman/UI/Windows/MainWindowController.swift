@@ -51,6 +51,9 @@ final class MainWindowController: NSWindowController {
     private var findBar: FindBarView?
     private var findBarTopConstraint: NSLayoutConstraint?
 
+    /// The inspect mode, kept here because extensions cannot store it. See `MainWindowInspector`.
+    let elementInspector = ElementInspector()
+
     /// The session currently shown, if any.
     var currentSessionID: SessionID? {
         containerViewController.currentSessionID

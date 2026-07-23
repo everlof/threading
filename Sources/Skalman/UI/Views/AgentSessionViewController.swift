@@ -102,6 +102,9 @@ final class AgentSessionViewController: NSViewController {
         appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in
             self?.themeDidChange()
         }
+        // A session set to "Follow App Theme" draws with a palette the app theme owns, so an app
+        // theme switch is a terminal theme switch for it — and a no-op for every other session.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.themeDidChange() }
     }
 
     /// Fills the inset area with the terminal's own background so the padding reads as part
