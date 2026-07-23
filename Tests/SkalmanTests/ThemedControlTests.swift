@@ -327,6 +327,61 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertFalse(field.isBezeled, "init(string:) bypassed the themed setup")
     }
 
+    // MARK: - Backdrop Overlays
+
+    /// The second ground, and the rule that keeps it straight: **a `BackdropOverlay` may not read
+    /// `Design.Text` or `Design.Surface`.**
+    ///
+    /// The window has two grounds. The chrome's is `Design.Surface.ground`, which the app theme
+    /// owns and which `Design.Text` is calibrated against — but a terminal pane paints the
+    /// *window* with the terminal palette's background, so the toolbar and the pane's floating
+    /// cards sit on a colour the app theme knows nothing about. A light app theme over a dark
+    /// terminal wrote a near-black session title and an invisible usage pill straight across it.
+    ///
+    /// The type is what fixes it: `BackdropOverlay` hands its subclass an `Ink` derived from the
+    /// backdrop, and the toolbar's item factory and the pane's `addOverlay` both take that type,
+    /// so a new button cannot be added without one. This is the part the compiler cannot check —
+    /// that having been handed the right ink, the view actually uses it.
+    ///
+    /// `Design.Radius`, `Design.Typography`, `Design.Spacing`, `Design.Diff` and `Design.Status`
+    /// stay allowed: geometry is ground-independent, and a semantic colour that stopped meaning
+    /// "added" would cost more than the contrast it bought.
+    func testBackdropOverlaysDoNotReadChromeRoles() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" } ?? []
+        XCTAssertFalse(files.isEmpty, "the source tree was not found from #filePath")
+
+        var overlayFiles: [String] = []
+        var offences: [String] = []
+
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            // The base class itself explains the rule and names the roles it forbids.
+            guard text.contains(": BackdropOverlay {"), !file.lastPathComponent.hasPrefix("BackdropOverlay")
+            else { continue }
+            overlayFiles.append(file.lastPathComponent)
+
+            for (index, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                let code = line.trimmingCharacters(in: .whitespaces)
+                guard !code.hasPrefix("//"), !code.hasPrefix("*") else { continue }
+                guard code.contains("Design.Text.") || code.contains("Design.Surface.") else { continue }
+                offences.append("\(file.lastPathComponent):\(index + 1) — \(code)")
+            }
+        }
+
+        XCTAssertFalse(overlayFiles.isEmpty, "no BackdropOverlay subclasses were found to check")
+        XCTAssertEqual(
+            offences, [],
+            "a BackdropOverlay read the chrome's roles. It is drawn on the window's backdrop, "
+                + "not on Design.Surface.ground — colour it from the Ink handed to applyInk(_:)."
+        )
+    }
+
     // MARK: - The Rule Itself
 
     /// The design system's rule, enforced rather than written down: **no stock AppKit control

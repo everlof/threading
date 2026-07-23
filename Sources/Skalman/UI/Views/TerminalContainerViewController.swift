@@ -460,6 +460,16 @@ final class TerminalContainerViewController: NSViewController {
         conversation.focusPrompt()
     }
 
+    /// The one way a view is placed over the pane's backdrop.
+    ///
+    /// Typed to `BackdropOverlay` for the same reason the toolbar's factory is: this pane is
+    /// painted with the *terminal palette's* background, so anything floating on it that colours
+    /// itself from `Design.Text` or `Design.Surface` is reading the wrong ground. The type is
+    /// what hands it the right ink, and the compiler is what remembers.
+    private func addOverlay(_ overlay: BackdropOverlay) {
+        view.addSubview(overlay)
+    }
+
     /// Fills the pane behind its content. Only the strip above a toolbar-inset terminal ever
     /// shows it, but leaving a stale colour there is exactly the seam this avoids — so every
     /// surface swap sets it, resetting to the window's own colour for anything but a terminal.
@@ -471,6 +481,10 @@ final class TerminalContainerViewController: NSViewController {
         // the window's rounded corners, instead of a neutral chrome meeting the terminal in a
         // hard edge. The sidebar's own material floats on top of this, unaffected.
         view.window?.backgroundColor = color
+
+        // And tell whatever is drawn on it. The toolbar sits over this colour rather than over
+        // the chrome's ground, so its ink has to come from here — see `WindowBackdrop`.
+        WindowBackdrop.set(color)
     }
 
     private func detachCurrentChild() {
@@ -552,7 +566,7 @@ private extension TerminalContainerViewController {
             guard let self else { return }
             self.delegate?.terminalContainerDidRequestGitReview(self)
         }
-        view.addSubview(gitStatusOverlay)
+        addOverlay(gitStatusOverlay)
 
         NSLayoutConstraint.activate([
             gitStatusOverlay.topAnchor.constraint(

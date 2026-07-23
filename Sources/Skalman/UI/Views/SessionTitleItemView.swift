@@ -4,7 +4,7 @@ import AppKit
 ///
 /// Lives in the window's toolbar rather than inside the terminal pane, so it stays aligned
 /// with the traffic lights whether the sidebar is open or collapsed.
-final class SessionTitleItemView: NSView {
+final class SessionTitleItemView: BackdropOverlay {
 
     // MARK: - Properties
 
@@ -13,6 +13,7 @@ final class SessionTitleItemView: NSView {
     private let separatorLabel = NSTextField(labelWithString: SessionTitleDefaults.separator)
     private let sessionLabel = NSTextField(labelWithString: "")
 
+
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
@@ -20,6 +21,7 @@ final class SessionTitleItemView: NSView {
         setupViews()
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -31,19 +33,17 @@ final class SessionTitleItemView: NSView {
             systemSymbolName: SessionTitleDefaults.symbolName,
             accessibilityDescription: nil
         )
-        iconView.contentTintColor = Design.Text.secondary
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         projectLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize, weight: .semibold)
-        projectLabel.textColor = Design.Text.label
         projectLabel.lineBreakMode = .byTruncatingTail
 
         separatorLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize)
-        separatorLabel.textColor = Design.Text.tertiary
 
         sessionLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize)
-        sessionLabel.textColor = Design.Text.secondary
         sessionLabel.lineBreakMode = .byTruncatingTail
+
+
 
         let stack = NSStackView(views: [iconView, projectLabel, separatorLabel, sessionLabel])
         stack.orientation = .horizontal
@@ -60,6 +60,17 @@ final class SessionTitleItemView: NSView {
             iconView.widthAnchor.constraint(equalToConstant: SessionTitleDefaults.iconSize),
             iconView.heightAnchor.constraint(equalToConstant: SessionTitleDefaults.iconSize)
         ])
+    }
+
+    // MARK: - Ink
+
+    /// Every colour here comes from the backdrop, none from `Design.Text` — see
+    /// `BackdropOverlay`.
+    override func applyInk(_ ink: Design.Ink) {
+        iconView.contentTintColor = ink.secondary
+        projectLabel.textColor = ink.label
+        separatorLabel.textColor = ink.tertiary
+        sessionLabel.textColor = ink.secondary
     }
 
     // MARK: - Public Methods

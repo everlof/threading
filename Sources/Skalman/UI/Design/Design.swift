@@ -154,6 +154,58 @@ enum Design {
         static var secondary: NSColor { AppThemePalette.color(.secondaryLabel) }
         static var tertiary: NSColor { AppThemePalette.color(.tertiaryLabel) }
         static var quaternary: NSColor { AppThemePalette.color(.quaternaryLabel) }
+
+        /// The label tiers that read on an *arbitrary* ground, for the one place a role cannot
+        /// answer: a surface the app theme does not own.
+        ///
+        /// The terminal pane paints the whole window with the *terminal* palette's background, so
+        /// the colour runs to the window's edges instead of meeting the chrome in a hard seam —
+        /// which is the effect worth keeping. The cost is that everything sitting on it, the
+        /// toolbar above all, is over a colour the chrome knows nothing about. Reading
+        /// `Design.Text.label` there is how a light app theme came to write a near-black title
+        /// across a dark terminal.
+        ///
+        /// Fixed neutrals rather than theme roles, deliberately: the answer has to come from the
+        /// ground it is drawn on. Which of black and white is used is decided by *measuring* both
+        /// against that ground rather than by a luminance threshold, so a mid-tone terminal gets
+        /// the one that actually reads rather than the one a constant guessed at.
+        static func on(_ background: NSColor) -> Design.Ink {
+            let light = ThemeContrast.ratio(.white, background) >= ThemeContrast.ratio(.black, background)
+            let base: NSColor = light ? .white : .black
+            // The tiers are further apart on a dark ground than a light one: black fades to
+            // nothing on paper long before white does on ink.
+            return Design.Ink(
+                label: base.withAlphaComponent(light ? 0.95 : 0.88),
+                secondary: base.withAlphaComponent(light ? 0.70 : 0.62),
+                tertiary: base.withAlphaComponent(light ? 0.50 : 0.44),
+                quaternary: base.withAlphaComponent(light ? 0.32 : 0.28)
+            )
+        }
+    }
+
+    // MARK: - Ink
+
+    /// The four label tiers, resolved against a ground the theme does not own.
+    ///
+    /// Handed to a `BackdropOverlay` rather than read from `Design.Text`, which answers for the
+    /// chrome's ground and is wrong over the window's backdrop by exactly the amount the two
+    /// palettes differ.
+    struct Ink {
+        let label: NSColor
+        let secondary: NSColor
+        let tertiary: NSColor
+        let quaternary: NSColor
+
+        /// A control surface that reads on the same ground — the pill behind the usage summary,
+        /// the fill under a hovered overlay button.
+        ///
+        /// Derived rather than taken from `Design.Surface`, for the same reason as the ink: the
+        /// chrome's resting fill is its label colour held at 8%, which over a backdrop of the
+        /// opposite tone is either invisible or a bright smear. This is *the backdrop's own*
+        /// opposite, held down.
+        var surface: NSColor { quaternary.withAlphaComponent(0.14) }
+        var surfaceHover: NSColor { quaternary.withAlphaComponent(0.24) }
+        var border: NSColor { quaternary.withAlphaComponent(0.30) }
     }
 
     // MARK: - Status

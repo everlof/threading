@@ -115,16 +115,33 @@ extension MainWindowController: NSToolbarDelegate {
 
     // MARK: Item Construction
 
-    private func makeSessionTitleItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+    /// The one way a custom view reaches the toolbar.
+    ///
+    /// It takes a `BackdropOverlay` on purpose, and that is the whole enforcement: the toolbar
+    /// floats over the *terminal palette's* background rather than the chrome's ground, so a view
+    /// placed here that colours itself from `Design.Text` is wrong. Requiring the type means a
+    /// new button cannot be added without being handed the right ink, and the compiler says so
+    /// rather than a screenshot three weeks later.
+    ///
+    /// System-drawn items — the bordered pane toggles, the tracking separators — are not this:
+    /// AppKit draws them in its own vibrant material, which adapts to whatever is behind it.
+    private func makeOverlayItem(
+        identifier: NSToolbarItem.Identifier,
+        view: BackdropOverlay
+    ) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: identifier)
-        item.view = sessionTitleItemView
+        item.view = view
+        // These draw their own surface, or none. The system bezel would double it, and on a
+        // label it reads as a button.
+        item.isBordered = false
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return item
+    }
+
+    private func makeSessionTitleItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let item = makeOverlayItem(identifier: identifier, view: sessionTitleItemView)
         item.visibilityPriority = .high
 
-        // This item is a label, not a control. Without this the system draws a bezel behind
-        // it, which reads as a button.
-        item.isBordered = false
-
-        sessionTitleItemView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             sessionTitleItemView.widthAnchor.constraint(
                 greaterThanOrEqualToConstant: SessionTitleDefaults.minWidth
@@ -138,15 +155,7 @@ extension MainWindowController: NSToolbarDelegate {
     }
 
     private func makeAccountUsageItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.view = accountUsageItemView
-
-        // The pill draws its own surface; the system bezel would double it.
-        item.isBordered = false
-
-        accountUsageItemView.translatesAutoresizingMaskIntoConstraints = false
-
-        return item
+        makeOverlayItem(identifier: identifier, view: accountUsageItemView)
     }
 
     private func makePaneToggleItem(

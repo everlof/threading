@@ -11,7 +11,7 @@ import AppKit
 ///
 /// Hidden outright for sessions with no metered account (shells, nothing selected): a pill
 /// with nothing to say is noise in the one corner that is always visible.
-final class AccountUsageItemView: NSView {
+final class AccountUsageItemView: BackdropOverlay {
 
     // MARK: - Properties
 
@@ -42,8 +42,22 @@ final class AccountUsageItemView: NSView {
         startObserving()
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    // MARK: - Ink
+
+    /// The pill's surface as well as its text: `Design.Surface.controlResting` is the *chrome's*
+    /// label colour at 8%, which over a backdrop of the opposite tone is invisible — which is
+    /// exactly how this pill disappeared under a light theme on a dark terminal.
+    override func applyInk(_ ink: Design.Ink) {
+        updateBackground()
+        ringView.trackColor = ink.quaternary
+        // The summary is an attributed string built per window, so it carries its colours with
+        // it — rebuilding is the only way to re-ink it.
+        render()
     }
 
     deinit {
@@ -53,10 +67,10 @@ final class AccountUsageItemView: NSView {
     // MARK: - Setup
 
     private func setupViews() {
-        applySurface(
-            fill: Design.Surface.controlResting,
-            radius: Design.Radius.pill(height: AccountUsageItemDefaults.height)
-        )
+        wantsLayer = true
+        layer?.cornerCurve = .continuous
+        layer?.cornerRadius = Design.Radius.pill(height: AccountUsageItemDefaults.height)
+        updateBackground()
 
         ringView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -147,13 +161,13 @@ final class AccountUsageItemView: NSView {
         ringView.fraction = peak?.fraction
         ringView.tint = severity.glyphColor
 
-        summaryLabel.attributedStringValue = Self.summary(windows: usage?.windows ?? [])
+        summaryLabel.attributedStringValue = Self.summary(windows: usage?.windows ?? [], ink: ink)
     }
 
     /// `5h 43% · 7d 73%`: each window as a quiet label and its value, the value tinted by
     /// that window's own severity. The vocabulary is Claude's own status line, so the short
     /// names read as familiar rather than cryptic.
-    private static func summary(windows: [AccountUsage.Window]) -> NSAttributedString {
+    private static func summary(windows: [AccountUsage.Window], ink: Design.Ink) -> NSAttributedString {
         let result = NSMutableAttributedString()
 
         func append(_ text: String, font: NSFont, color: NSColor) {
@@ -167,7 +181,7 @@ final class AccountUsageItemView: NSView {
             append(
                 AccountUsageItemDefaults.unknownValue,
                 font: Design.Typography.control(),
-                color: Design.Text.secondary
+                color: ink.secondary
             )
             return result
         }
@@ -177,14 +191,14 @@ final class AccountUsageItemView: NSView {
                 append(
                     AccountUsageItemDefaults.segmentSeparator,
                     font: Design.Typography.control(),
-                    color: Design.Text.tertiary
+                    color: ink.tertiary
                 )
             }
 
             append(
                 "\(window.id) ",
                 font: Design.Typography.caption(),
-                color: Design.Text.tertiary
+                color: ink.tertiary
             )
 
             let expired = window.isExpired()
@@ -196,7 +210,7 @@ final class AccountUsageItemView: NSView {
             append(
                 value,
                 font: Design.Typography.control(),
-                color: severity == .normal ? Design.Text.secondary : severity.glyphColor
+                color: severity == .normal ? ink.secondary : severity.glyphColor
             )
         }
 
@@ -272,75 +286,7 @@ final class AccountUsageItemView: NSView {
     }
 
     private func updateBackground() {
-        layer?.backgroundColor = (isHovered
-            ? Design.Surface.controlHover
-            : Design.Surface.controlResting).cgColor
+        layer?.cornerRadius = Design.Radius.pill(height: AccountUsageItemDefaults.height)
+        layer?.backgroundColor = (isHovered ? ink.surfaceHover : ink.surface).cgColor
     }
-}
-
-// MARK: - Usage Ring View
-
-/// A small circular gauge: a quiet full track with the spent fraction drawn over it.
-final class UsageRingView: NSView {
-
-    // MARK: - Properties
-
-    var fraction: Double? { didSet { needsDisplay = true } }
-    var tint: NSColor = Design.Text.secondary { didSet { needsDisplay = true } }
-
-    // MARK: - Drawing
-
-    override func draw(_ dirtyRect: NSRect) {
-        let lineWidth = AccountUsageItemDefaults.ringLineWidth
-        let inset = lineWidth / 2
-        let rect = bounds.insetBy(dx: inset, dy: inset)
-        let center = NSPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-
-        let track = NSBezierPath()
-        track.appendArc(
-            withCenter: center,
-            radius: radius,
-            startAngle: 0,
-            endAngle: 360
-        )
-        track.lineWidth = lineWidth
-        Design.Text.quaternary.setStroke()
-        track.stroke()
-
-        guard let fraction, fraction > 0 else { return }
-
-        // From twelve o'clock, clockwise, like every gauge the user already reads.
-        let progress = NSBezierPath()
-        progress.appendArc(
-            withCenter: center,
-            radius: radius,
-            startAngle: 90,
-            endAngle: 90 - 360 * min(fraction, 1),
-            clockwise: true
-        )
-        progress.lineWidth = lineWidth
-        progress.lineCapStyle = .round
-        tint.setStroke()
-        progress.stroke()
-    }
-}
-
-// MARK: - Account Usage Item Defaults
-
-enum AccountUsageItemDefaults {
-    static let height: CGFloat = 20
-    static let horizontalPadding: CGFloat = 8
-    static let ringSize: CGFloat = 12
-    static let ringLineWidth: CGFloat = 1.5
-
-    /// Shown when a window's percentage is unknown, e.g. after its reset has passed.
-    static let unknownValue = "—"
-
-    /// Between window segments in the pill's summary.
-    static let segmentSeparator = " · "
-
-    /// Grace period after the pointer leaves the pill before the hover popover closes, long enough
-    /// to cross the gap into the popover itself.
-    static let hoverCloseDelay: TimeInterval = 0.35
 }

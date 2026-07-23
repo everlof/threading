@@ -19,7 +19,7 @@ enum GitStatusOverlayDefaults {
 /// the checkout" without asking the conversation to run a tool. It is deliberately a summary —
 /// branch, `+N −M` — because the full answer already has a surface, the Git Review tab, which
 /// is exactly where a click lands.
-final class GitStatusOverlayView: NSView {
+final class GitStatusOverlayView: BackdropOverlay {
 
     // MARK: - Properties
 
@@ -29,6 +29,10 @@ final class GitStatusOverlayView: NSView {
     private let stack = NSStackView()
     private let glyph = NSImageView()
     private var textLabel: NSTextField?
+
+    /// Held so a backdrop change can rebuild the label, which carries its colours inside an
+    /// attributed string and cannot be re-inked in place.
+    private var lastReading: GitChangeMonitor.Reading?
 
     // MARK: - Initialization
 
@@ -40,11 +44,8 @@ final class GitStatusOverlayView: NSView {
         toolTip = "Open Git Review (⇧⌘R)"
         setAccessibilityRole(.button)
 
-        applySurface(
-            fill: Design.Surface.elevated,
-            radius: Design.Radius.pill(height: GitStatusOverlayDefaults.height),
-            border: Design.Surface.border
-        )
+        wantsLayer = true
+        layer?.cornerCurve = .continuous
 
         glyph.image = NSImage(
             systemSymbolName: "arrow.triangle.branch",
@@ -54,7 +55,6 @@ final class GitStatusOverlayView: NSView {
             pointSize: GitStatusOverlayDefaults.fontSize,
             weight: .medium
         )
-        glyph.contentTintColor = Design.Text.secondary
 
         stack.orientation = .horizontal
         stack.spacing = Design.Spacing.small
@@ -75,10 +75,27 @@ final class GitStatusOverlayView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    // MARK: - Ink
+
+    /// This card floats on the *terminal's* background, not on the chrome's ground — see
+    /// `BackdropOverlay`. Its surface and its label both come from there.
+    ///
+    /// `+N −M` keeps `Design.Diff`: those two are semantic rather than decorative, and a green
+    /// that stopped meaning added would cost more than the contrast it bought.
+    override func applyInk(_ ink: Design.Ink) {
+        layer?.cornerRadius = Design.Radius.pill(height: GitStatusOverlayDefaults.height)
+        layer?.backgroundColor = ink.surface.cgColor
+        layer?.borderWidth = Design.Radius.border
+        layer?.borderColor = ink.border.cgColor
+        glyph.contentTintColor = ink.secondary
+        if let lastReading { update(with: lastReading) }
+    }
+
     // MARK: - Public Methods
 
     func update(with reading: GitChangeMonitor.Reading) {
-        let text = Self.attributedText(for: reading)
+        lastReading = reading
+        let text = Self.attributedText(for: reading, ink: ink)
         guard text.length > 0 else {
             clear()
             return
@@ -96,6 +113,7 @@ final class GitStatusOverlayView: NSView {
     }
 
     func clear() {
+        lastReading = nil
         isHidden = true
     }
 
@@ -104,7 +122,10 @@ final class GitStatusOverlayView: NSView {
     /// The card's whole sentence: the branch in secondary, the counters in the diff colours.
     /// A clean checkout shows the branch alone; a detached head shows the counters alone;
     /// both absent is nothing to say, and the caller hides the card.
-    private static func attributedText(for reading: GitChangeMonitor.Reading) -> NSAttributedString {
+    private static func attributedText(
+        for reading: GitChangeMonitor.Reading,
+        ink: Design.Ink
+    ) -> NSAttributedString {
         let font = NSFont.monospacedDigitSystemFont(
             ofSize: GitStatusOverlayDefaults.fontSize,
             weight: .medium
@@ -114,7 +135,7 @@ final class GitStatusOverlayView: NSView {
         if let branch = reading.branch {
             text.append(NSAttributedString(string: branch, attributes: [
                 .font: font,
-                .foregroundColor: Design.Text.secondary
+                .foregroundColor: ink.secondary
             ]))
         }
 
