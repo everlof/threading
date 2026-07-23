@@ -95,3 +95,66 @@ struct WorkingWordCycle {
         remaining.swapAt(remaining.count - 1, 0)
     }
 }
+
+// MARK: - Turn Receipt
+
+/// Provider-neutral copy for the native conversation's one-line live status and last-turn
+/// receipt. Kept out of AppKit so exact duration/token formatting is independently testable.
+enum TurnStatusText {
+
+    static func working(word: String, elapsed: TimeInterval, effort: String?) -> String {
+        var details = [duration(elapsed)]
+        if let effort = clean(effort) { details.append("\(effort) effort") }
+        return "\(word)  (\(details.joined(separator: " · ")))"
+    }
+
+    static func ready(model: String?, lastTurn: TurnMetrics?) -> String {
+        guard let lastTurn, !lastTurn.isEmpty else {
+            guard let model = clean(model) else { return "Ready" }
+            return "Ready · \(model)"
+        }
+
+        var details: [String] = []
+        if let value = lastTurn.duration { details.append(duration(value)) }
+        if let tokens = lastTurn.outputTokens {
+            details.append("↓ \(tokenCount(tokens)) tokens")
+        }
+        if let effort = clean(lastTurn.effort) { details.append("\(effort) effort") }
+
+        guard !details.isEmpty else { return "Ready" }
+        return "Ready · last turn \(details.joined(separator: " · "))"
+    }
+
+    static func duration(_ interval: TimeInterval) -> String {
+        let total = max(0, Int(interval.rounded(.down)))
+        let hours = total / 3_600
+        let minutes = (total % 3_600) / 60
+        let seconds = total % 60
+
+        if hours > 0 { return "\(hours)h \(minutes)m \(seconds)s" }
+        if minutes > 0 { return "\(minutes)m \(seconds)s" }
+        return "\(seconds)s"
+    }
+
+    static func tokenCount(_ count: Int) -> String {
+        let count = max(0, count)
+        if count < 1_000 { return String(count) }
+        if count < 1_000_000 {
+            return compact(Double(count) / 1_000) + "k"
+        }
+        return compact(Double(count) / 1_000_000) + "m"
+    }
+
+    private static func compact(_ value: Double) -> String {
+        let rounded = (value * 10).rounded() / 10
+        return rounded == rounded.rounded()
+            ? String(Int(rounded))
+            : String(format: "%.1f", rounded)
+    }
+
+    private static func clean(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
+    }
+}

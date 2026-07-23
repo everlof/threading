@@ -47,8 +47,45 @@
     "Sources/Skalman/UI/Design"
   ],
   "interactiveBaseTypes": [
+    "BackdropThemedControl",
     "ThemedControl"
   ],
+  "fontFactories": [
+    "boldSystemFont",
+    "monospacedDigitSystemFont",
+    "monospacedSystemFont",
+    "systemFont"
+  ],
+  "systemChromeContractDirectories": [
+    "Sources/Skalman/UI/Design"
+  ],
+  "systemChromeContractTypes": [
+    "NSAlert",
+    "NSColorPanel",
+    "NSColorWell",
+    "NSMenu",
+    "NSMenuItem",
+    "NSOpenPanel",
+    "NSPopover",
+    "NSSavePanel",
+    "NSToolbar"
+  ],
+  "implementationBanDirectories": [
+    "Sources/Skalman/UI/Design"
+  ],
+  "implementationBannedTypes": {
+    "NSMenu": "ThemedMenuPresenter",
+    "NSMenuItem": "ThemedMenuItem",
+    "NSPopover": "ThemedMenuPresenter"
+  },
+  "windowControllerDirectories": [
+    "Sources/Skalman/UI/Windows"
+  ],
+  "windowControllerBaseType": "ThemedWindowController",
+  "motionDirectories": [
+    "Sources/Skalman/UI"
+  ],
+  "motionDurationNamespace": "Design.Motion.",
   "systemColors": [
     "alternateSelectedControlTextColor",
     "controlAccentColor",
@@ -144,6 +181,48 @@
     },
     {
       "path": "Sources/Skalman/UI/Design/Design.swift",
+      "kind": "fontFactory",
+      "symbol": "*",
+      "reason": "Design is the single mapping from semantic typography roles to AppKit fonts."
+    },
+    {
+      "path": "Sources/Skalman/Models/TerminalProfile.swift",
+      "kind": "fontFactory",
+      "symbol": "*",
+      "reason": "The terminal font and size are explicitly user-selected profile data."
+    },
+    {
+      "path": "Sources/Skalman/Core/Session/TerminalSession.swift",
+      "kind": "fontFactory",
+      "symbol": "*",
+      "reason": "The terminal renderer applies the user's profile font size rather than app typography."
+    },
+    {
+      "path": "Sources/Skalman/UI/Preferences/ProfilePreferencesViewController.swift",
+      "kind": "fontFactory",
+      "symbol": "*",
+      "reason": "The profile editor previews and converts the user's selected terminal font."
+    },
+    {
+      "path": "Sources/Skalman/UI/GeneratedProjectIcon.swift",
+      "kind": "fontFactory",
+      "symbol": "*",
+      "reason": "The font draws generated icon artwork rather than application text."
+    },
+    {
+      "path": "Sources/Skalman/UI/AccountBadge.swift",
+      "kind": "fontFactory",
+      "symbol": "*",
+      "reason": "The font draws tiny generated badge artwork rather than application text."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemeSwatchImage.swift",
+      "kind": "fontFactory",
+      "symbol": "*",
+      "reason": "The font draws a scaled theme-preview image rather than application text."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/Design.swift",
       "kind": "systemColor",
       "symbol": "*",
       "reason": "Design owns the documented categorical palette and contrast-derived ink."
@@ -165,6 +244,12 @@
       "kind": "frozenLayerColor",
       "symbol": "strokeColor",
       "reason": "The spinner reapplies its shape-layer stroke from draw(_:) on every theme refresh."
+    },
+    {
+      "path": "Sources/Skalman/UI/Design/ThemedIndicators.swift",
+      "kind": "motionDuration",
+      "symbol": "duration",
+      "reason": "The spinner stops before constructing its perpetual animation when Reduce Motion is enabled."
     }
   ]
 }

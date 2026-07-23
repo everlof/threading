@@ -1140,20 +1140,48 @@ longer has does not decode, and one undecodable session would otherwise fail the
 
 ### Session Names
 
-A session carries three names, resolved by `displayTitle`:
+**A session is never named after its agent or account** — the row's icon slot and account chip
+already carry both facts, so "Claude Code 2" as a name repeated them while saying nothing about
+the conversation. `SessionNaming` holds the rules; three names remain, resolved by
+`displayTitle`:
 
-1. `customTitle` — an explicit rename, which wins and stops following the terminal
-2. `terminalTitle` — the live title the agent reports, retained after it exits
-3. `title` — the name assigned at creation
+1. `customTitle` — an explicit rename, which wins and stops following the agent
+2. `agentTitle` — the agent's own name for the conversation, by whichever transport last
+   reported it: the terminal title while a PTY is attached, or the transcript's title records
+   read when the session stops working — which is what names a *native* session and what
+   survives a surface switch. Retained after the agent exits. (Stored under the old
+   `terminalTitle` key, so existing records decode unchanged.)
+3. `title` — derived from the **first prompt** (first line, capped): set at creation when the
+   composer has the prompt, or by the first `UserPromptSubmit` hook report for a prompt typed
+   straight into the terminal. Empty until then; the display falls back to "New Session".
 
-`launchName` deliberately excludes `terminalTitle`, so the agent's own output is never fed
-back into the next launch's `--name`.
+Claude records both kinds of title in the transcript as different record types, measured
+across this machine's transcripts rather than assumed: `ai-title` is the CLI's own name,
+re-appended every turn (so the *last* one is current, and `SessionNaming` reads the file's
+tail rather than scanning the conversation); `custom-title` is written by `/rename` — after a
+mid-conversation rename both keep being appended, interleaved, so *presence* of a custom
+title decides, not order. Codex records no title at all; its sessions keep their prompt name.
 
-Terminal titles are stripped of their leading decorative glyph on the way in
-(`ProjectStore.strippingDecoration`). Claude Code reports titles like `✻ testings`; that marker
-identifies the agent in a plain terminal tab, but the sidebar already draws a status dot and an
-agent icon, so keeping it would put a third symbol before every name. A title consisting only of
-symbols is left intact rather than reduced to nothing.
+**`launchName` is nil unless the user renamed the session**, and the `--name` flag is only
+passed then. This is load-bearing: `--name` marks the conversation custom-titled in the CLI,
+which sets its terminal title *and stops it generating `ai-title` records* (measured: 9 of 10
+transcripts launched under a default name held none). Passing the old agent-derived default
+name was therefore feeding "Claude Code 2" into the CLI's picker, echoing it back as the
+terminal title, and switching off the very signal the sidebar prefers.
+
+Agent titles that are really the product, account or project name ("Claude Code", the
+account's alias, the folder Codex titles itself after) are ignored as noise rather than
+stored (`SessionNaming.isNoiseTitle`), and titles are stripped of their leading decorative
+glyph on the way in (`ProjectStore.strippingDecoration`). Claude Code reports titles like
+`✻ testings`; that marker identifies the agent in a plain terminal tab, but the sidebar
+already draws a status dot and an agent icon. A title consisting only of symbols is left
+intact rather than reduced to nothing.
+
+`SessionNaming.backfillLegacyNames` runs once per launch and replaces what the old scheme
+left behind: placeholder titles ("Claude Code 2", the account-alias variants) drop to empty
+and are re-derived from the transcripts — the agent's own title where one exists, the first
+prompt otherwise. Idempotent by construction: a backfilled session no longer carries a
+placeholder title, so later launches skip it without reading anything.
 
 ### Themes
 
@@ -1274,9 +1302,23 @@ changes came from looking at a render rather than from reasoning about a control
   Duplicate instead.
 
 `ThemeSettingsRenderTests` draws the page at the width the pane actually gives it
-(`Design.Size.readableWidth`, which `showSettingsPage` caps it at) and at a squeezed one, light
-and dark — the same fixture-to-PNG idea as the conversation and git-review renders, for the
-same reason: no assertion anyone would write catches "these twenty chips read as a smear".
+(`SettingsUIDefaults.pageWidth`, which `showSettingsPage` caps it at) and at a squeezed one,
+light and dark — the same fixture-to-PNG idea as the conversation and git-review renders, for
+the same reason: no assertion anyone would write catches "these twenty chips read as a smear".
+
+**A theme's glow is a layer shadow, and a shadow spills past the panel that casts it** — so a
+clipping ancestor whose edge coincides with a panel's edge cuts the halo off flat on that
+side, invisibly to the code that set the shadow. Found on the settings pages, where the scroll
+view's edges sat exactly at the cards': the halo faded vertically (the spill landed in the
+section spacing, inside the clip) and not sideways at all. The contract is
+`Design.Size.glowGutter` — the room a clipping host holds clear around glowing panels,
+constant across themes because layout never moves with the theme; `SettingsUI.page` budgets
+it, `AppThemeTests` pins it to the widest stock glow, and a Cyberpunk render assertion in
+`ThemeSettingsRenderTests` samples pixels on all four sides of a card so a new clipping host
+cannot silently reintroduce the flat edge. Theme-specific issues get general fixes at this
+seam: themes state specs (`AppTheme.Material`), one interpreter draws them
+(`applySurface`/`applyThemeGlow`), and feature code says only what a surface *is* — never
+`if` on a theme's identity.
 
 ### Icons
 
@@ -1753,6 +1795,17 @@ it (which is how a pull-down like the themes gear works, and only unclaimed item
 the control), and an out-of-range `selectItem(at:)` leaves the control unselected rather than
 trapping, since the index usually comes from looking a stored preference up in a list that may
 have moved on.
+
+## Extension Authoring
+
+Safe extensions are machine-authored, out-of-process executables built against the
+Foundation-only `SkalmanExtensionKit`. Before creating or changing one, read
+`docs/extensions/AGENT_AUTHORING.md` completely and use
+`SkalmanExtensionKit/Examples/HelloStatusExtension` as the source template. Do not infer the
+extension API from application internals, remove `SkalmanExtensionPolicyPlugin`, or import
+AppKit/SwiftUI in a safe extension. If the semantic UI model cannot express a requested
+interface, report the missing node as an SDK requirement rather than bypassing the host
+renderer.
 
 ## Code Style Guidelines
 

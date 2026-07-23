@@ -184,6 +184,7 @@ final class ThemedButton: ThemedControl {
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
+        window?.makeFirstResponder(self)
         isPressed = true
     }
 
@@ -207,6 +208,12 @@ final class ThemedButton: ThemedControl {
         sendAction(action, to: target)
     }
 
+    override func performPrimaryAction() -> Bool {
+        guard isEnabled else { return false }
+        performClick()
+        return true
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard isEnabled, !keyEquivalent.isEmpty,
               event.charactersIgnoringModifiers == keyEquivalent else { return false }
@@ -222,22 +229,36 @@ final class ThemedButton: ThemedControl {
     override func accessibilityTitle() -> String? { title.isEmpty ? nil : title }
     override func accessibilityLabel() -> String? { title.isEmpty ? toolTip : nil }
     override func accessibilityPerformPress() -> Bool {
-        guard isEnabled else { return false }
-        performClick()
-        return true
+        performPrimaryAction()
     }
 
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        let focusPath: NSBezierPath
         if isBordered {
-            ThemedSurface.draw(bounds, fill: surfaceFill, border: isProminent ? nil : Design.Surface.border)
+            focusPath = ThemedSurface.draw(
+                bounds,
+                fill: surfaceFill,
+                border: isProminent ? nil : Design.Surface.border
+            )
         } else if isHovered || isPressed {
             // A plain button carries no surface at rest and lifts under the pointer — the design
             // system's "quiet until relevant". It is also the only thing saying the mark can be
             // clicked, which matters most exactly where the mark is all there is.
-            ThemedSurface.draw(bounds, fill: Design.Surface.controlResting)
+            focusPath = ThemedSurface.draw(bounds, fill: Design.Surface.controlResting)
+        } else {
+            focusPath = NSBezierPath(
+                roundedRect: bounds,
+                xRadius: Design.Radius.control,
+                yRadius: Design.Radius.control
+            )
         }
+
+        drawKeyboardFocus(
+            around: focusPath,
+            color: isProminent ? Design.Text.selected : Design.Surface.accent
+        )
 
         var content = bounds.insetBy(dx: isBordered ? Layout.titleInset : Layout.plainInset, dy: 0)
         let titleWidth = self.titleWidth
@@ -278,10 +299,21 @@ final class ThemedButton: ThemedControl {
     /// A template image carries no colour of its own, so it is drawn and then filled through what
     /// it laid down. A real image — a brand mark — is left alone.
     private func draw(_ image: NSImage, in rect: NSRect) {
+        guard image.isTemplate, let context = NSGraphicsContext.current?.cgContext else {
+            image.draw(in: rect)
+            return
+        }
+
+        // Tint inside an isolated transparency layer. Applying source-in/source-atop directly
+        // to the view's backing context also sees the button surface already drawn underneath,
+        // and consequently paints the icon's entire bounding box as a solid rectangle.
+        context.saveGState()
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
         image.draw(in: rect)
-        guard image.isTemplate else { return }
         foreground.set()
         rect.fill(using: .sourceAtop)
+        context.endTransparencyLayer()
+        context.restoreGState()
     }
 
     /// Disabled dims the *ink*, never `alphaValue` — the sidebar and the tab bar crossfade these

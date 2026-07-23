@@ -13,11 +13,20 @@ final class CodexStreamSession: ConversationStreamSession {
 
     var onEvent: ((StreamEvent) -> Void)?
     var onExit: ((Int32) -> Void)?
+    var onSendAvailabilityChange: (() -> Void)?
 
     private(set) var isRunning = false
     var canSend: Bool { isRunning && process == nil }
 
+    /// Nil between turns: `codex exec` is one child per turn, so an idle conversation has a
+    /// logical session but no process. Saying so is more honest than naming a dead pid.
+    var rootProcessIdentifier: pid_t? {
+        guard let process, process.isRunning else { return nil }
+        return process.processIdentifier
+    }
+
     private let plan: () -> AgentLaunchPlan
+    private let effort: String?
     private var process: Process?
     private var buffer = Data()
     private var errorBuffer = Data()
@@ -25,11 +34,17 @@ final class CodexStreamSession: ConversationStreamSession {
     var malformedLineCount: Int { parseDiagnostics.malformedLineCount }
     private var receivedTurnFinished = false
     private var isTerminating = false
+    private var turnStartedAt: TimeInterval?
 
     // MARK: - Initialization
 
-    init(sessionID: SessionID, plan: @escaping () -> AgentLaunchPlan) {
+    init(
+        sessionID: SessionID,
+        effort: String? = nil,
+        plan: @escaping () -> AgentLaunchPlan
+    ) {
         self.sessionID = sessionID
+        self.effort = effort
         self.plan = plan
     }
 
@@ -42,12 +57,14 @@ final class CodexStreamSession: ConversationStreamSession {
         isRunning = true
         isTerminating = false
         parseDiagnostics.reset()
+        onSendAvailabilityChange?()
     }
 
     @discardableResult
     func send(_ text: String) -> Bool {
         guard canSend else { return false }
 
+        turnStartedAt = ProcessInfo.processInfo.systemUptime
         let launchPlan = plan()
         let process = Process()
         let input = Pipe()
@@ -91,11 +108,16 @@ final class CodexStreamSession: ConversationStreamSession {
             try process.run()
         } catch {
             SkalmanLogger.agent.error("Codex stream failed to start: \(error.localizedDescription)")
-            onEvent?(.turnFinished(text: error.localizedDescription, isError: true))
+            onEvent?(completingTurnMetrics(in: .turnFinished(
+                text: error.localizedDescription,
+                isError: true,
+                metrics: .empty
+            )))
             return false
         }
 
         self.process = process
+        onSendAvailabilityChange?()
 
         do {
             try input.fileHandleForWriting.write(contentsOf: Data(text.utf8))
@@ -108,6 +130,7 @@ final class CodexStreamSession: ConversationStreamSession {
             isTerminating = true
             isRunning = false
             process.terminate()
+            onSendAvailabilityChange?()
             return false
         }
     }
@@ -123,6 +146,7 @@ final class CodexStreamSession: ConversationStreamSession {
 
         isTerminating = true
         isRunning = false
+        onSendAvailabilityChange?()
 
         if let process {
             process.terminate()
@@ -148,8 +172,9 @@ final class CodexStreamSession: ConversationStreamSession {
             switch CodexStreamEvent.parse(line) {
             case .events(let events):
                 for event in events {
-                    if case .turnFinished = event { receivedTurnFinished = true }
-                    onEvent?(event)
+                    let completed = completingTurnMetrics(in: event)
+                    if case .turnFinished = completed { receivedTurnFinished = true }
+                    onEvent?(completed)
                 }
             case .malformed:
                 parseDiagnostics.recordMalformedLine(provider: "Codex")
@@ -169,6 +194,7 @@ final class CodexStreamSession: ConversationStreamSession {
         (process?.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
         (process?.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
         process = nil
+        onSendAvailabilityChange?()
 
         if isTerminating {
             isTerminating = false
@@ -187,7 +213,30 @@ final class CodexStreamSession: ConversationStreamSession {
             ? diagnostics
             : (status == 0 ? nil : "Codex exited with status \(status).")
 
-        onEvent?(.turnFinished(text: message, isError: status != 0))
+        onEvent?(completingTurnMetrics(in: .turnFinished(
+            text: message,
+            isError: status != 0,
+            metrics: .empty
+        )))
+    }
+
+    /// Codex reports exact output usage but no wall duration in `turn.completed`, so the
+    /// process wrapper adds the submit-to-terminal-event round trip from a monotonic clock.
+    private func completingTurnMetrics(in event: StreamEvent) -> StreamEvent {
+        guard case .turnFinished(let text, let isError, let metrics) = event else {
+            return event
+        }
+
+        let duration = turnStartedAt.map {
+            max(0, ProcessInfo.processInfo.systemUptime - $0)
+        }
+        turnStartedAt = nil
+
+        return .turnFinished(
+            text: text,
+            isError: isError,
+            metrics: metrics.filling(duration: duration, effort: effort)
+        )
     }
 }
 

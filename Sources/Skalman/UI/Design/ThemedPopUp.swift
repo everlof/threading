@@ -8,14 +8,9 @@ import AppKit
 /// from `Design` — the theme's surface, its border width, its corner radius — and its chevron
 /// as a stroke rather than as a system glyph.
 ///
-/// A drop-in for the call sites it replaces: `addItem(withTitle:)`, `lastItem`,
-/// `selectItem(at:)`, `selectedItem`, `indexOfSelectedItem` and `pullsDown` keep the names and
-/// the behaviour `NSPopUpButton` gave them, so a call site changes its type and nothing else.
-///
-/// **The menu it opens is an unavoidably-system `NSMenu`, and this wrapper is where that is
-/// contained.** A menu is drawn by the window server, outside any view this app owns, so its
-/// chrome cannot be themed from here. Callers depend on `ThemedPopUp` rather than on the menu,
-/// so replacing that dropdown with a custom popover later is a change to this file alone.
+/// Its dropdown is app-owned too: `ThemedMenuPresenter` draws the rows, selection, scrolling,
+/// and elevation from the same theme roles as the closed control. Callers provide semantic
+/// `ThemedMenuItem` values, so system menu chrome never leaks through this API.
 final class ThemedPopUp: ThemedControl {
 
     // MARK: - Geometry
@@ -54,20 +49,20 @@ final class ThemedPopUp: ThemedControl {
 
     // MARK: - Selection
 
+    private var entries: [ThemedMenuEntry] = []
+
     /// Mirrors `NSPopUpButton.indexOfSelectedItem`. `-1` while there is nothing to select, which
     /// is the value AppKit reports for an empty pop-up.
     private(set) var indexOfSelectedItem: Int = -1
 
-    var selectedItem: NSMenuItem? {
+    var selectedItem: ThemedMenuItem? {
         pullsDown ? nil : item(at: indexOfSelectedItem)
     }
 
-    var lastItem: NSMenuItem? { menu?.items.last }
-
-    var numberOfItems: Int { menu?.numberOfItems ?? 0 }
+    var numberOfItems: Int { entries.count }
 
     /// What the button itself shows: the choice, or a pull-down's fixed first item.
-    private var displayedItem: NSMenuItem? {
+    private var displayedItem: ThemedMenuItem? {
         pullsDown ? item(at: 0) : selectedItem
     }
 
@@ -78,29 +73,48 @@ final class ThemedPopUp: ThemedControl {
     }
 
     private var trackingArea: NSTrackingArea?
+    private var menuSession: AnyObject?
+    private var isPresentingMenu = false {
+        didSet { needsDisplay = true }
+    }
 
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        // The inherited `menu` holds the items, so `popUp.menu?.addItem(…)` reads exactly as it
-        // did against `NSPopUpButton`. `rightMouseDown` below stops it doubling as a context menu.
-        menu = NSMenu()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            ThemedMenuPresenter.dismiss(menuSession)
+        }
+        super.viewWillMove(toWindow: newWindow)
     }
 
     // MARK: - Items
 
     func addItem(withTitle title: String) {
-        menu?.addItem(NSMenuItem(title: title, action: nil, keyEquivalent: ""))
+        addItem(ThemedMenuItem(title: title))
+    }
+
+    func addItem(_ item: ThemedMenuItem) {
+        entries.append(.item(item))
         // AppKit selects the first item a pop-up is given, and call sites rely on it — a menu
         // built without an explicit `selectItem(at:)` still shows something.
         if indexOfSelectedItem < 0 { indexOfSelectedItem = 0 }
         itemsChanged()
     }
 
-    func item(at index: Int) -> NSMenuItem? {
-        guard let menu, index >= 0, index < menu.numberOfItems else { return nil }
-        return menu.item(at: index)
+    func addSeparator() {
+        entries.append(.separator)
+        itemsChanged()
+    }
+
+    func item(at index: Int) -> ThemedMenuItem? {
+        guard entries.indices.contains(index),
+              case .item(let item) = entries[index]
+        else { return nil }
+        return item
     }
 
     /// Out-of-range is tolerated rather than trapped, the way `NSPopUpButton` tolerates it: the
@@ -112,7 +126,7 @@ final class ThemedPopUp: ThemedControl {
     }
 
     func removeAllItems() {
-        menu?.removeAllItems()
+        entries.removeAll()
         indexOfSelectedItem = -1
         itemsChanged()
     }
@@ -159,54 +173,81 @@ final class ThemedPopUp: ThemedControl {
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
-    /// Swallowed rather than passed on, which is what `NSPopUpButton` does. The items live in the
-    /// inherited `menu`, so the default handling would open them as a *context* menu — before
-    /// `mouseDown` has wired their targets, and so with nothing recording the choice.
-    ///
-    /// Deliberately not `menu(for:)`, which would shadow the `menu` property for unqualified
-    /// lookup inside this type and break the very call sites the property exists to serve.
+    /// Swallowed rather than passed on, which is what `NSPopUpButton` does.
     override func rightMouseDown(with event: NSEvent) {}
 
     override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        _ = performPrimaryAction()
+    }
+
+    // The press that opened the dropdown may still be held; its drag and release keep
+    // arriving here. Forwarding both is what makes press-drag-release choose an item, the
+    // way the stock pop-up this replaces always did.
+    override func mouseDragged(with event: NSEvent) {
+        guard let menuSession else { return }
+        ThemedMenuPresenter.dragUpdated(menuSession, event: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let menuSession else { return }
+        ThemedMenuPresenter.dragEnded(menuSession, event: event)
+    }
+
+    override func performPrimaryAction() -> Bool {
         presentMenu()
     }
 
     @discardableResult
     private func presentMenu() -> Bool {
-        guard isEnabled, let menu, menu.numberOfItems > 0 else { return false }
+        guard isEnabled, menuSession == nil, entries.contains(where: {
+            if case .item = $0 { return true }
+            return false
+        }) else { return false }
 
-        adoptUnclaimedItems()
-        menu.minimumWidth = bounds.width
-        // A pop-up opens with the current choice under the pointer, the way AppKit's does; a
-        // pull-down drops below, since its first item is a label rather than a choice.
-        return menu.popUp(
-            positioning: selectedItem,
-            at: NSPoint(x: 0, y: pullsDown ? bounds.height + Design.Spacing.tight : bounds.height),
-            in: self
+        // A pull-down's first item is its fixed label, not an action. The custom dropdown omits
+        // that display-only entry rather than showing an inert duplicate at the top.
+        let entryOffset = pullsDown ? 1 : 0
+        let presentedEntries = Array(entries.dropFirst(entryOffset))
+        guard presentedEntries.contains(where: {
+            if case .item = $0 { return true }
+            return false
+        }) else { return false }
+
+        isPresentingMenu = true
+        menuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: presentedEntries, minimumWidth: bounds.width),
+            from: self,
+            selectedEntryIndex: pullsDown ? nil : indexOfSelectedItem,
+            onChoose: { [weak self] index, _ in
+                self?.chooseItem(at: index + entryOffset)
+            },
+            onDismiss: { [weak self] in
+                self?.menuSession = nil
+                self?.isPresentingMenu = false
+            }
         )
-    }
-
-    /// An item that carries its own action keeps it — that is how a pull-down's entries work, and
-    /// how the themes list's Duplicate and Rename reach their own methods. Everything else routes
-    /// back here, so the choice is recorded before the target is told about it.
-    ///
-    /// Separate from `presentMenu` so the rule can be tested: popping the menu is modal, and a
-    /// test that opened one would hang rather than fail.
-    func adoptUnclaimedItems() {
-        for item in menu?.items ?? [] where item.action == nil && !item.isSeparatorItem {
-            item.target = self
-            item.action = #selector(itemChosen(_:))
+        if menuSession == nil {
+            isPresentingMenu = false
+            return false
         }
+        return true
     }
 
     /// The single point at which a choice becomes the selection. Reachable from a test, which
     /// otherwise could only get here by opening a modal menu.
-    @objc func itemChosen(_ sender: NSMenuItem) {
-        if !pullsDown, let index = menu?.index(of: sender), index >= 0 {
+    func chooseItem(at index: Int) {
+        guard let item = item(at: index), item.isEnabled else { return }
+        if !pullsDown {
             indexOfSelectedItem = index
         }
+        item.onChoose?()
         itemsChanged()
-        sendAction(action, to: target)
+        NSAccessibility.post(element: self, notification: .valueChanged)
+        if item.onChoose == nil {
+            sendAction(action, to: target)
+        }
     }
 
     override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
@@ -253,11 +294,14 @@ final class ThemedPopUp: ThemedControl {
     }
 
     private func drawSurface() {
-        ThemedSurface.draw(
+        let path = ThemedSurface.draw(
             bounds,
-            fill: isHovered && isEnabled ? Design.Surface.controlHover : Design.Surface.controlResting,
+            fill: (isHovered || isPresentingMenu) && isEnabled
+                ? Design.Surface.controlHover
+                : Design.Surface.controlResting,
             border: Design.Surface.border
         )
+        drawKeyboardFocus(around: path)
     }
 
     /// Stroked rather than set from `chevron.down`, so it takes the theme's own weight and needs

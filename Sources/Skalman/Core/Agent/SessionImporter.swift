@@ -130,24 +130,17 @@ enum SessionImporter {
 
     /// A transcript's title and the directory it was launched in.
     ///
-    /// Claude writes an `ai-title` record and rewrites it as the conversation develops, so the
-    /// last one is the current title; the opening message is the fallback until one exists.
-    /// `cwd` sits on every record, so the first is enough.
+    /// The title is the agent's own — the transcript's title records, which Claude re-appends
+    /// every turn, so `SessionNaming` reads them from the file's *tail* where the current pair
+    /// sits. The opening message is the fallback until one exists. `cwd` sits on every record,
+    /// so the front scan stops as soon as it has both of its answers.
     private static func claudeInfo(at url: URL) -> (title: String?, cwd: String?) {
-        var title: String?
         var firstMessage: String?
         var cwd: String?
 
-        // Read on to the limit rather than stopping early: the title is rewritten as the
-        // conversation develops, so only the last one is current.
         JSONLReader.forEachRecord(at: url, limit: ImportDefaults.claudeScanLimit) { record in
             if cwd == nil, let value = record["cwd"] as? String, !value.isEmpty {
                 cwd = value
-            }
-
-            if record["type"] as? String == ImportDefaults.claudeTitleType,
-               let value = record["aiTitle"] as? String, !value.isEmpty {
-                title = value
             }
 
             if firstMessage == nil,
@@ -156,10 +149,28 @@ enum SessionImporter {
                 firstMessage = userText(from: message["content"])
             }
 
-            return true
+            return cwd == nil || firstMessage == nil
         }
 
-        return (title ?? firstMessage, cwd)
+        return (SessionNaming.claudeTranscriptTitle(at: url) ?? firstMessage, cwd)
+    }
+
+    /// The first thing the user typed into a Claude transcript, for naming a session whose
+    /// agent never titled it.
+    static func claudeFirstPrompt(at url: URL) -> String? {
+        var first: String?
+
+        JSONLReader.forEachRecord(at: url, limit: ImportDefaults.claudeScanLimit) { record in
+            guard record["type"] as? String == ImportDefaults.claudeUserType,
+                  let message = record["message"] as? [String: Any],
+                  let text = userText(from: message["content"])
+            else { return true }
+
+            first = text
+            return false
+        }
+
+        return first
     }
 
     // MARK: - Codex
@@ -240,7 +251,7 @@ enum SessionImporter {
     /// user's own words appear unmixed; the conversation also replays them as `user`-role
     /// messages, but behind the instruction blocks both CLIs prepend. The event is preferred
     /// and the replayed message kept as a fallback, since older rollouts predate the event.
-    private static func codexTitle(at url: URL) -> String? {
+    static func codexTitle(at url: URL) -> String? {
         var typed: String?
         var replayed: String?
 
@@ -272,8 +283,9 @@ enum SessionImporter {
     /// whole would make scanning a project unreasonably slow. Reading incrementally and
     /// letting the caller stop means the usual file costs one chunk, while a session that
     /// buries what we need behind a long preamble is still found rather than silently missed.
-    /// Extracts readable text from a message body, skipping the blocks both CLIs inject
-    /// ahead of the user's own words — instructions, environment context, command caveats.
+    /// Extracts readable text from a message body and turns it into a title through
+    /// `SessionNaming.promptTitle`, which skips the blocks both CLIs inject ahead of the
+    /// user's own words — instructions, environment context, command caveats.
     private static func userText(from content: Any?) -> String? {
         let raw: String?
 
@@ -289,14 +301,7 @@ enum SessionImporter {
         }
 
         guard let raw else { return nil }
-
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              !ImportDefaults.injectedPrefixes.contains(where: { trimmed.hasPrefix($0) })
-        else { return nil }
-
-        let firstLine = trimmed.split(separator: "\n").first.map(String.init) ?? trimmed
-        return String(firstLine.prefix(ImportDefaults.titleLimit))
+        return SessionNaming.promptTitle(from: raw)
     }
 
     private static func modificationDate(of url: URL) -> Date {
@@ -328,7 +333,6 @@ enum ImportDefaults {
     static let codexScanLimit = 8 * 1024 * 1024
 
     static let titleLimit = 80
-    static let claudeTitleType = "ai-title"
     static let claudeUserType = "user"
 
     /// Openings that are scaffolding rather than something the user typed. Both CLIs prepend

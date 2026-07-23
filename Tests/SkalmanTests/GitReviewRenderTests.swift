@@ -60,6 +60,21 @@ final class GitReviewRenderTests: XCTestCase {
     +    return f"{version}-{channel}.2"
     """
 
+    /// A change whose lines run far past any pane. This is the only shape that tells the two
+    /// wrap modes apart — anything that fits draws identically either way.
+    private let longLineFixture = """
+    diff --git a/Sources/Skalman/Core/Agent/AgentLauncher.swift b/Sources/Skalman/Core/Agent/AgentLauncher.swift
+    index 5555555..6666666 100644
+    --- a/Sources/Skalman/Core/Agent/AgentLauncher.swift
+    +++ b/Sources/Skalman/Core/Agent/AgentLauncher.swift
+    @@ -3,3 +3,3 @@ enum AgentLauncher {
+         static func claudeCommand(for session: AgentSession) -> [String] {
+    -        return ["claude", "--session-id", session.identifier, "--allowedTools", "mcp__skalman__*", "--mcp-config", configurationPath, "--settings", settingsPath, "--append-system-prompt", promptPath]
+    +        return ["claude", "--session-id", session.identifier, "--allowedTools", "mcp__skalman__*", "--mcp-config", configurationPath, "--settings", settingsPath, "--append-system-prompt", promptPath, "--fork-session", "--include-hook-events", "--permission-prompt-tool", brokerPath]
+         }
+     }
+    """
+
     // MARK: - Images
 
     func testRendersHighlightedFileRowsInBothAppearances() throws {
@@ -157,6 +172,51 @@ final class GitReviewRenderTests: XCTestCase {
         }
     }
 
+    /// The nested horizontal scroller is the one piece of this that a compile says nothing
+    /// about: get its height binding wrong and every unwrapped diff measures zero, which looks
+    /// exactly like a collapsed row. Both halves are asserted — the row still has a height, and
+    /// the long line is contained rather than pushing the pane sideways.
+    func testDisablingWordWrapShortensRowsAndKeepsThemInThePane() throws {
+        let files = GitDiffParser.files(fromUnifiedDiff: longLineFixture)
+        XCTAssertEqual(files.count, 1, "fixture should parse into one file")
+
+        let wrapped = laidOut(files)
+        let unwrapped = laidOut(files, wraps: false)
+
+        for (name, host) in [("wrapped", wrapped), ("unwrapped", unwrapped)] {
+            for row in host.subviews.first?.subviews ?? [] {
+                XCTAssertGreaterThan(row.frame.height, 1, "\(name): a file row measured no height")
+                XCTAssertLessThanOrEqual(
+                    row.frame.maxX, Render.width + 1,
+                    "\(name): a file row overflowed the pane"
+                )
+            }
+        }
+
+        // A long line on one row is shorter than the same line wrapped over several. This is the
+        // whole observable difference, and it only holds if the scroller took the overflow.
+        XCTAssertLessThan(
+            unwrapped.frame.height, wrapped.frame.height,
+            "disabling word wrap should shorten the diff rather than re-wrap it"
+        )
+    }
+
+    func testRendersBothWrapModes() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let files = GitDiffParser.files(fromUnifiedDiff: longLineFixture)
+        for (name, wraps) in [("wrapped", true), ("unwrapped", false)] {
+            let data = try XCTUnwrap(
+                image(of: files, appearance: .darkAqua, wraps: wraps),
+                "failed to render \(name)"
+            )
+            try data.write(to: directory.appendingPathComponent("git-review-\(name)-dark.png"))
+        }
+
+        print("Rendered the wrap comparison to \(directory.path)")
+    }
+
     /// Highlighting must not change what a diff *is*: same row count, same order.
     func testHighlightingDoesNotChangeRowCount() {
         let lines = GitDiffParser.files(fromUnifiedDiff: fixture)[0].hunks.flatMap(\.lines)
@@ -169,11 +229,11 @@ final class GitReviewRenderTests: XCTestCase {
 
     // MARK: - Building
 
-    private func laidOut(_ files: [GitFileDiff]) -> NSView {
-        laidOut(files, staging: GitStaging.capability(for: .unstaged))
+    private func laidOut(_ files: [GitFileDiff], wraps: Bool = true) -> NSView {
+        laidOut(files, staging: GitStaging.capability(for: .unstaged), wraps: wraps)
     }
 
-    private func laidOut(_ files: [GitFileDiff], staging: GitStaging?) -> NSView {
+    private func laidOut(_ files: [GitFileDiff], staging: GitStaging?, wraps: Bool = true) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -187,7 +247,7 @@ final class GitReviewRenderTests: XCTestCase {
         )
 
         for file in files {
-            let row = GitReviewFileRow(file: file, expanded: true, staging: staging)
+            let row = GitReviewFileRow(file: file, expanded: true, staging: staging, wraps: wraps)
             stack.addArrangedSubview(row)
             NSLayoutConstraint.activate([
                 row.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
@@ -211,12 +271,12 @@ final class GitReviewRenderTests: XCTestCase {
 
     /// Builds *and* draws inside the appearance: a diff row fills its layer with a resolved
     /// `CGColor`, so the wash is decided when the row is built, not when it is drawn.
-    private func image(of files: [GitFileDiff], appearance name: NSAppearance.Name) -> Data? {
+    private func image(of files: [GitFileDiff], appearance name: NSAppearance.Name, wraps: Bool = true) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
         let render = {
-            let host = self.laidOut(files)
+            let host = self.laidOut(files, wraps: wraps)
             host.appearance = appearance
             host.subviews.first?.appearance = appearance
             host.layoutSubtreeIfNeeded()

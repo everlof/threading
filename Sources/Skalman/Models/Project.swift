@@ -142,19 +142,25 @@ struct AgentSession: Codable, Identifiable {
     let id: SessionID
     var kind: AgentKind
 
-    /// The name assigned when the session was created, e.g. `Claude Code` or `claudedb`.
-    /// Used as the fallback when nothing better is known.
+    /// The name derived from the session's first prompt — set at creation when the composer
+    /// has the prompt, or by the first `UserPromptSubmit` report for a prompt typed straight
+    /// into the terminal. Empty until a prompt exists; the display falls back to a generic
+    /// label then, never to the agent's or account's name, which the row's icon and chip
+    /// already carry.
     var title: String
 
-    /// An explicit rename by the user. Takes precedence over the terminal's own title,
+    /// An explicit rename by the user. Takes precedence over the agent's own title,
     /// so a deliberate name is never overwritten by agent activity.
     var customTitle: String?
 
-    /// The most recent title reported by the terminal.
+    /// The agent's own name for the conversation, by whichever transport last reported it:
+    /// the terminal title while a PTY is attached, or the transcript's title records read
+    /// when a turn ends — which is what names a native session, and what survives a surface
+    /// switch. Retained after the agent exits so a dormant session still shows what it was.
     ///
-    /// Agents use this to report what they are working on. It is retained after the agent
-    /// exits so a dormant session still shows what it was last doing.
-    var terminalTitle: String?
+    /// Stored under the `terminalTitle` key it had when the terminal was the only transport,
+    /// so existing records decode unchanged.
+    var agentTitle: String?
 
     let createdAt: Date
     var lastActiveAt: Date
@@ -181,6 +187,17 @@ struct AgentSession: Codable, Identifiable {
     /// Model the session was started with, passed again on resume so it does not drift.
     /// Nil uses whatever the CLI defaults to.
     var model: String?
+
+    /// A per-conversation Fast-mode override.
+    ///
+    /// Nil inherits the routed account's setting, true requests Fast, and false explicitly
+    /// requests Standard. The third state matters: decoding an older session must not silently
+    /// turn off an account whose config already selected Fast.
+    ///
+    /// Claude applies this through its persistent print transport's control protocol. Codex
+    /// has one process per native turn, so the launcher maps it onto that next process's
+    /// `service_tier` override while preserving the same conversation id.
+    var fastMode: Bool?
 
     /// The branch the checkout was on when this session last ran.
     ///
@@ -249,7 +266,7 @@ struct AgentSession: Codable, Identifiable {
         self.kind = kind
         self.title = title
         self.customTitle = nil
-        self.terminalTitle = nil
+        self.agentTitle = nil
         self.createdAt = Date()
         self.lastActiveAt = Date()
         self.resumeState = ResumeState.initial(for: kind)
@@ -257,6 +274,7 @@ struct AgentSession: Codable, Identifiable {
         self.lastExitCode = nil
         self.accountHandle = accountHandle
         self.model = model
+        self.fastMode = nil
         self.branch = nil
         self.isArchived = false
         self.usesNativeUI = usesNativeUI
@@ -265,9 +283,10 @@ struct AgentSession: Codable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, title, customTitle, terminalTitle, createdAt, lastActiveAt
+        case id, kind, title, customTitle, createdAt, lastActiveAt
+        case agentTitle = "terminalTitle"
         case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, branch
-        case archived, nativeUI, forkParent, themeName
+        case fastMode, archived, nativeUI, forkParent, themeName
     }
 
     init(from decoder: Decoder) throws {
@@ -277,10 +296,9 @@ struct AgentSession: Codable, Identifiable {
         id = try container.decodeIfPresent(SessionID.self, forKey: .id) ?? SessionID()
         kind = try container.decodeIfPresent(AgentKind.self, forKey: .kind)
             ?? AgentDefaults.defaultKind
-        title = try container.decodeIfPresent(String.self, forKey: .title)
-            ?? AgentDefaults.untitledSessionName
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
         customTitle = try container.decodeIfPresent(String.self, forKey: .customTitle)
-        terminalTitle = try container.decodeIfPresent(String.self, forKey: .terminalTitle)
+        agentTitle = try container.decodeIfPresent(String.self, forKey: .agentTitle)
         createdAt = decodedCreatedAt ?? Date()
         lastActiveAt = try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
             ?? createdAt
@@ -294,6 +312,7 @@ struct AgentSession: Codable, Identifiable {
             storedName: try container.decodeIfPresent(String.self, forKey: .accountHandle)
         )
         model = try container.decodeIfPresent(String.self, forKey: .model)
+        fastMode = try container.decodeIfPresent(Bool.self, forKey: .fastMode)
         branch = try container.decodeIfPresent(String.self, forKey: .branch)
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
@@ -307,7 +326,7 @@ struct AgentSession: Codable, Identifiable {
         try container.encode(kind, forKey: .kind)
         try container.encode(title, forKey: .title)
         try container.encodeIfPresent(customTitle, forKey: .customTitle)
-        try container.encodeIfPresent(terminalTitle, forKey: .terminalTitle)
+        try container.encodeIfPresent(agentTitle, forKey: .agentTitle)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(lastActiveAt, forKey: .lastActiveAt)
         try container.encodeIfPresent(resumeState.transcriptID, forKey: .agentSessionID)
@@ -315,6 +334,7 @@ struct AgentSession: Codable, Identifiable {
         try container.encodeIfPresent(lastExitCode, forKey: .lastExitCode)
         try container.encodeIfPresent(accountHandle.persistedSessionName, forKey: .accountHandle)
         try container.encodeIfPresent(model, forKey: .model)
+        try container.encodeIfPresent(fastMode, forKey: .fastMode)
         try container.encodeIfPresent(branch, forKey: .branch)
         try container.encode(isArchived, forKey: .archived)
         try container.encode(usesNativeUI, forKey: .nativeUI)
@@ -329,32 +349,34 @@ struct AgentSession: Codable, Identifiable {
 
     /// The name shown in the sidebar.
     ///
-    /// An explicit rename wins, then the terminal's own title when that behaviour is
-    /// enabled, then the name the session was created with.
+    /// An explicit rename wins, then the agent's own title when that behaviour is enabled,
+    /// then the first-prompt name — and a generic label when nothing has named the session
+    /// yet. Never the agent or account, which the row's icon slot already identifies.
     @MainActor
     var displayTitle: String {
         if let customTitle, !customTitle.isEmpty {
             return customTitle
         }
 
-        if AppSettings.usesTerminalTitleInSidebar,
-           let terminalTitle, !terminalTitle.isEmpty {
-            return terminalTitle
+        if AppSettings.usesAgentTitleInSidebar,
+           let agentTitle, !agentTitle.isEmpty {
+            return agentTitle
         }
 
-        return title
+        return title.isEmpty ? AgentDefaults.untitledSessionName : title
     }
 
-    /// The name handed to the agent at launch.
+    /// The name handed to the agent at launch, or nil when the user has not chosen one.
     ///
-    /// Deliberately excludes the terminal title, which the agent itself produces and which
-    /// would otherwise be fed back into the next launch.
-    var launchName: String {
-        if let customTitle, !customTitle.isEmpty {
-            return customTitle
-        }
-
-        return title
+    /// Only an explicit rename is forwarded. `--name` marks the conversation custom-titled
+    /// in the CLI, which sets its terminal title *and stops it generating its own `ai-title`*
+    /// (measured: 9 of 10 transcripts launched under a default name held no `ai-title` at
+    /// all) — so passing anything less deliberate than the user's own choice would feed the
+    /// launcher's fallback into the CLI's picker and switch off the agent-naming signal the
+    /// sidebar prefers.
+    var launchName: String? {
+        guard let customTitle, !customTitle.isEmpty else { return nil }
+        return customTitle
     }
 }
 

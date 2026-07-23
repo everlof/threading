@@ -27,7 +27,7 @@ final class PreferencesFormBuilder {
     @discardableResult
     func addSection(_ title: String) -> Self {
         let label = NSTextField(labelWithString: title)
-        label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        label.font = Design.Typography.strongBody()
 
         let row = grid.addRow(with: [label])
         row.mergeCells(in: NSRange(location: 0, length: 2))
@@ -121,7 +121,7 @@ final class PreferencesFormBuilder {
 
     private func makeHelpLabel(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.font = Design.Typography.detail()
         label.textColor = Design.Text.secondary
         label.preferredMaxLayoutWidth = PreferencesLayout.helpWidth
         label.isSelectable = false

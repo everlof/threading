@@ -29,6 +29,7 @@
 		49022923B31CFED2F032E6EC /* SideChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */; };
 		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
 		F1000001000000000000037 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
+		F1000001000000000000038 /* LabelMorph in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000005 /* LabelMorph */; };
 		2A84B6880DED3F071BEF4857 /* ConversationTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */; };
 		8CDE135AB43AE5B76A4E2CBD /* ConversationRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */; };
 		E15000010000000000000002 /* HotPathCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15000010000000000000001 /* HotPathCacheTests.swift */; };
@@ -56,11 +57,18 @@
 		B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */; };
 		D88B0FE7D311EE71390A842F /* ThemedControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */; };
 		445F0F42B17C51EC9BB38077 /* ElementInspectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */; };
+		A8C27A38676335C4660B8182 /* SessionNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FDC3913B435DDBA1E7C13AE /* SessionNamingTests.swift */; };
 		122556F8FAB3711CCBA7AAD0 /* ChipViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B977AD037DD062B2428AA28 /* ChipViewTests.swift */; };
 		61B9374AE8515F0AE5311E1F /* ThemedIndicatorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */; };
+		EB721DBFB8A82B66BF697A0B /* ThemeSwatchViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F950F46B250C9C32360A9E3 /* ThemeSwatchViewTests.swift */; };
+		5724F2C9CE5E00E9DE98F67E /* SettingsRowLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB1A5B994E77DE60A5FEF1BB /* SettingsRowLayoutTests.swift */; };
 		B5CE1BC1391776027471C273 /* WorkingWordsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */; };
 		FCB14DF3E12E78DFBB1A2C55 /* ThinkingOrbTintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */; };
 		F8EEA2C01E6CF61FAAF1F024 /* TerminalThemeBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */; };
+		1FD6060EC0DC83DA4BA1C3C1 /* SessionInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7EA7666508259327901672F /* SessionInfoTests.swift */; };
+		5D2B524A0BB67BC9416D3577 /* FileActivityMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */; };
+		7108C0A471D9CADAA9684DD6 /* FileActivityMapRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */; };
+		74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -123,11 +131,18 @@
 		8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyCorpusTests.swift; sourceTree = "<group>"; };
 		D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedControlTests.swift; sourceTree = "<group>"; };
 		115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ElementInspectionTests.swift; sourceTree = "<group>"; };
+		7FDC3913B435DDBA1E7C13AE /* SessionNamingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionNamingTests.swift; sourceTree = "<group>"; };
 		2B977AD037DD062B2428AA28 /* ChipViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChipViewTests.swift; sourceTree = "<group>"; };
 		48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedIndicatorsTests.swift; sourceTree = "<group>"; };
+		2F950F46B250C9C32360A9E3 /* ThemeSwatchViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeSwatchViewTests.swift; sourceTree = "<group>"; };
+		DB1A5B994E77DE60A5FEF1BB /* SettingsRowLayoutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsRowLayoutTests.swift; sourceTree = "<group>"; };
 		E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkingWordsTests.swift; sourceTree = "<group>"; };
 		4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThinkingOrbTintTests.swift; sourceTree = "<group>"; };
 		EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalThemeBoundaryTests.swift; sourceTree = "<group>"; };
+		C7EA7666508259327901672F /* SessionInfoTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionInfoTests.swift; sourceTree = "<group>"; };
+		EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FileActivityMapTests.swift; sourceTree = "<group>"; };
+		FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FileActivityMapRenderTests.swift; sourceTree = "<group>"; };
+		9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -171,6 +186,7 @@
 			files = (
 				F1000001000000000000036 /* SwiftTerm in Frameworks */,
 				F1000001000000000000037 /* ThinkingOrbs in Frameworks */,
+				F1000001000000000000038 /* LabelMorph in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -234,11 +250,18 @@
 				8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */,
 				D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */,
 				115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */,
+				7FDC3913B435DDBA1E7C13AE /* SessionNamingTests.swift */,
 				2B977AD037DD062B2428AA28 /* ChipViewTests.swift */,
 				48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */,
+				2F950F46B250C9C32360A9E3 /* ThemeSwatchViewTests.swift */,
+				DB1A5B994E77DE60A5FEF1BB /* SettingsRowLayoutTests.swift */,
 				E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */,
 				4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */,
 				EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */,
+				C7EA7666508259327901672F /* SessionInfoTests.swift */,
+				EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */,
+				FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */,
+				9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -312,6 +335,7 @@
 			packageProductDependencies = (
 				F4000001000000000000001 /* SwiftTerm */,
 				F4000001000000000000003 /* ThinkingOrbs */,
+				F4000001000000000000005 /* LabelMorph */,
 			);
 			productName = Skalman;
 			productReference = F2000001000000000000038 /* Skalman.app */;
@@ -344,6 +368,7 @@
 			packageReferences = (
 				F4000001000000000000002 /* XCLocalSwiftPackageReference "SwiftTerm" */,
 				F4000001000000000000004 /* XCLocalSwiftPackageReference "ThinkingOrbs" */,
+				F4000001000000000000006 /* XCLocalSwiftPackageReference "LabelMorph" */,
 			);
 			productRefGroup = F5000001000000000000020 /* Products */;
 			projectDirPath = "";
@@ -453,11 +478,18 @@
 				B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */,
 				D88B0FE7D311EE71390A842F /* ThemedControlTests.swift in Sources */,
 				445F0F42B17C51EC9BB38077 /* ElementInspectionTests.swift in Sources */,
+				A8C27A38676335C4660B8182 /* SessionNamingTests.swift in Sources */,
 				122556F8FAB3711CCBA7AAD0 /* ChipViewTests.swift in Sources */,
 				61B9374AE8515F0AE5311E1F /* ThemedIndicatorsTests.swift in Sources */,
+				EB721DBFB8A82B66BF697A0B /* ThemeSwatchViewTests.swift in Sources */,
+				5724F2C9CE5E00E9DE98F67E /* SettingsRowLayoutTests.swift in Sources */,
 				B5CE1BC1391776027471C273 /* WorkingWordsTests.swift in Sources */,
 				FCB14DF3E12E78DFBB1A2C55 /* ThinkingOrbTintTests.swift in Sources */,
 				F8EEA2C01E6CF61FAAF1F024 /* TerminalThemeBoundaryTests.swift in Sources */,
+				1FD6060EC0DC83DA4BA1C3C1 /* SessionInfoTests.swift in Sources */,
+				5D2B524A0BB67BC9416D3577 /* FileActivityMapTests.swift in Sources */,
+				7108C0A471D9CADAA9684DD6 /* FileActivityMapRenderTests.swift in Sources */,
+				74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -754,6 +786,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ThinkingOrbs;
 		};
+		F4000001000000000000006 /* XCLocalSwiftPackageReference "LabelMorph" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LabelMorph;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -764,6 +800,10 @@
 		F4000001000000000000003 /* ThinkingOrbs */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThinkingOrbs;
+		};
+		F4000001000000000000005 /* LabelMorph */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LabelMorph;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

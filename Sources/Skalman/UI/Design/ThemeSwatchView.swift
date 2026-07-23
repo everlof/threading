@@ -6,8 +6,8 @@ import AppKit
 /// It lives in `UI/Design/` because of what it *contains*: `NSColorWell` is the one stock control
 /// the app still creates, and it is unavoidable — the thing it opens is the system colour panel,
 /// which no amount of drawing replaces. The well is invisible here, laid over the chip purely to
-/// catch the click, so what the page shows is the app's own swatch. Same containment as
-/// `ThemedPopUp` and the `NSMenu` it opens: the system part is real, and it is behind one door.
+/// catch the click, so what the page shows is the app's own swatch. This is a genuine system-panel
+/// boundary; ordinary dropdowns do not need the exception and use `ThemedMenuPresenter`.
 ///
 /// The ring matters more than it looks like it should. A theme's `black` on the settings
 /// page's own dark card is very nearly the same colour as the card, so an unringed swatch

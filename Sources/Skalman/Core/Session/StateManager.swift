@@ -105,6 +105,20 @@ final class StateManager {
         }
     }
 
+    /// Writes the selected row without rewriting the projects and sessions beside it.
+    @discardableResult
+    func saveSelectedSessionID(_ id: SessionID?) -> Bool {
+        do {
+            try database().saveSelectedSessionID(id)
+            return true
+        } catch {
+            SkalmanLogger.agent.error(
+                "Failed to save selected session: \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
     /// Restores the store, importing a legacy `projects.json` the first time.
     ///
     /// Three outcomes, and the contract is the one the JSON document had: a missing store starts

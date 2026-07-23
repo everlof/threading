@@ -21,7 +21,7 @@ struct MarkdownStyle {
             font: Design.Typography.body(),
             textColor: Design.Text.label,
             secondaryColor: Design.Text.secondary,
-            codeFont: .monospacedSystemFont(ofSize: MarkdownDefaults.codeFontSize, weight: .regular),
+            codeFont: Design.Typography.inlineCode(),
             codeColor: Design.Text.label,
             codeBackground: Design.Surface.panel,
             linkColor: Design.Surface.accent

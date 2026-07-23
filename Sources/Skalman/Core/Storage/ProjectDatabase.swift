@@ -113,6 +113,15 @@ final class ProjectDatabase {
         }
     }
 
+    /// Persists only window navigation state.
+    ///
+    /// A sidebar selection changes one value, not the project graph. Routing it through
+    /// `save(_:)` needlessly re-encoded and upserted every project and session on the main
+    /// thread, making a click cost grow with the size of the sidebar.
+    func saveSelectedSessionID(_ id: SessionID?) throws {
+        try setSelectedSessionID(id)
+    }
+
     // MARK: - Public Methods — Panel Layouts
 
     /// The display panel's tabs for a session, as its own `Codable` payload.

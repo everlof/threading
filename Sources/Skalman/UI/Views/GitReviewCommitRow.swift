@@ -31,7 +31,7 @@ final class GitReviewCommitRow: NSView {
         applySurface(fill: .clear, radius: .control)
 
         let hashLabel = NSTextField(labelWithString: commit.shortHash)
-        hashLabel.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
+        hashLabel.font = Design.Typography.code()
         hashLabel.textColor = Design.Text.tertiary
         hashLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -66,7 +66,7 @@ final class GitReviewCommitRow: NSView {
 
         let when = Self.relativeFormatter.localizedString(for: commit.date, relativeTo: Date())
         let byline = NSTextField(labelWithString: "\(commit.author) · \(when)")
-        byline.font = .systemFont(ofSize: GitReviewCommitRowDefaults.bylineFontSize, weight: .regular)
+        byline.font = Design.Typography.detail()
         byline.textColor = Design.Text.tertiary
         byline.lineBreakMode = .byTruncatingTail
         byline.usesSingleLineMode = true

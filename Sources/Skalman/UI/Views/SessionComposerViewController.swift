@@ -18,7 +18,12 @@ final class SessionComposerViewController: NSViewController {
     private let modelChip = ChipView()
     private let branchChip = ChipView()
     private let surfaceChip = ChipView()
-    private let importChip = ChipView()
+    private lazy var importButton = ThemedButton(
+        symbol: ComposerDefaults.importSymbol,
+        accessibility: "Import conversation",
+        target: self,
+        action: #selector(importTapped)
+    )
 
     /// Conversations found on disk for the current project, once discovery has finished.
     ///
@@ -58,12 +63,12 @@ final class SessionComposerViewController: NSViewController {
         subheadingLabel.font = Design.Typography.subheading()
         subheadingLabel.textColor = Design.Text.secondary
 
+        importButton.isBordered = true
+
         let headings = NSStackView(views: [headingLabel, subheadingLabel])
         headings.orientation = .vertical
         headings.alignment = .leading
         headings.spacing = Design.Spacing.hairline
-
-        importChip.menuProvider = nil
 
         // The choices, then what they will cost, then the task. Reading down the column is
         // the decision in order — which is the whole reason a session starts here rather than
@@ -83,7 +88,7 @@ final class SessionComposerViewController: NSViewController {
 
         wirePrompt()
 
-        let stack = NSStackView(views: [headings, chips, usagePanel, promptView, importChip])
+        let stack = NSStackView(views: [headings, chips, usagePanel, promptView, importButton])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
@@ -146,38 +151,38 @@ final class SessionComposerViewController: NSViewController {
 
     /// Each chip rebuilds its menu when opened, so a change of agent is reflected everywhere.
     private func wireChips() {
-        agentChip.menuProvider = { [weak self] in self?.agentMenu() ?? NSMenu() }
+        agentChip.itemsProvider = { [weak self] in self?.agentItems() ?? [] }
         agentChip.onSelect = { [weak self] item in
-            self?.selectedAgent = item.representedObject as? AgentKind ?? AgentDefaults.defaultKind
+            self?.selectedAgent = item.representedValue as? AgentKind ?? AgentDefaults.defaultKind
             self?.selectedAccountHandle = .standard
             self?.selectedModel = nil
             self?.refreshChips()
         }
 
-        accountChip.menuProvider = { [weak self] in self?.accountMenu() ?? NSMenu() }
+        accountChip.itemsProvider = { [weak self] in self?.accountItems() ?? [] }
         accountChip.onSelect = { [weak self] item in
-            self?.selectedAccountHandle = item.representedObject as? AccountHandle ?? .standard
+            self?.selectedAccountHandle = item.representedValue as? AccountHandle ?? .standard
             self?.selectedModel = nil
             self?.refreshChips()
         }
 
-        modelChip.menuProvider = { [weak self] in self?.modelMenu() ?? NSMenu() }
+        modelChip.itemsProvider = { [weak self] in self?.modelItems() ?? [] }
         modelChip.onSelect = { [weak self] item in
-            self?.selectedModel = item.representedObject as? String
+            self?.selectedModel = item.representedValue as? String
             self?.refreshChips()
         }
 
-        surfaceChip.menuProvider = { [weak self] in self?.surfaceMenu() ?? NSMenu() }
+        surfaceChip.itemsProvider = { [weak self] in self?.surfaceItems() ?? [] }
         surfaceChip.onSelect = { [weak self] item in
-            self?.usesNativeUI = (item.representedObject as? Bool) ?? false
+            self?.usesNativeUI = (item.representedValue as? Bool) ?? false
             self?.refreshChips()
         }
 
-        branchChip.menuProvider = { [weak self] in self?.branchMenu() ?? NSMenu() }
+        branchChip.itemsProvider = { [weak self] in self?.branchItems() ?? [] }
         branchChip.onSelect = { [weak self] item in
             guard let self else { return }
 
-            switch item.representedObject as? BranchSelection {
+            switch item.representedValue as? BranchSelection {
             case .checkout(let branch):
                 self.selectedBranch = branch
             case .newWorktree:
@@ -189,11 +194,6 @@ final class SessionComposerViewController: NSViewController {
             }
 
             self.refreshChips()
-        }
-
-        importChip.menuProvider = { [weak self] in
-            self?.presentImportPicker()
-            return NSMenu()
         }
     }
 
@@ -234,7 +234,7 @@ final class SessionComposerViewController: NSViewController {
     /// enough that the user can select another project before it finishes.
     private func discoverImportable(for project: Project) {
         importable = []
-        importChip.isHidden = true
+        importButton.isHidden = true
 
         SessionImporter.discover(for: project) { [weak self] found in
             guard let self, self.projectID == project.id else { return }
@@ -245,11 +245,8 @@ final class SessionComposerViewController: NSViewController {
     }
 
     private func refreshImportChip() {
-        importChip.isHidden = importable.isEmpty
-        importChip.configure(
-            symbolName: ComposerDefaults.importSymbol,
-            title: ComposerDefaults.importTitle(count: importable.count)
-        )
+        importButton.isHidden = importable.isEmpty
+        importButton.title = ComposerDefaults.importTitle(count: importable.count)
     }
 
     // MARK: - Chip State
@@ -335,39 +332,31 @@ final class SessionComposerViewController: NSViewController {
 
     // MARK: - Menus
 
-    private func agentMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        for kind in AgentKind.allCases {
-            let item = NSMenuItem(title: kind.displayName, action: nil, keyEquivalent: "")
-            item.representedObject = kind
-            item.state = kind == selectedAgent ? .on : .off
-            menu.addItem(item)
+    private func agentItems() -> [ThemedMenuEntry] {
+        AgentKind.allCases.map { kind in
+            .item(
+                ThemedMenuItem(
+                    title: kind.displayName,
+                    representedValue: kind,
+                    isSelected: kind == selectedAgent
+                )
+            )
         }
-
-        return menu
     }
 
-    private func accountMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        for account in AgentAccountDiscovery.accounts(for: selectedAgent) {
-            let item = NSMenuItem(
+    private func accountItems() -> [ThemedMenuEntry] {
+        AgentAccountDiscovery.accounts(for: selectedAgent).map { account in
+            var item = ThemedMenuItem(
                 title: AccountName.display(for: account),
-                action: nil,
-                keyEquivalent: ""
+                representedValue: account.handle,
+                isSelected: account.handle == selectedAccountHandle
             )
-            item.representedObject = account.handle
-            item.state = account.handle == selectedAccountHandle ? .on : .off
 
             // Which login to start on is decided here, so this is where what is left of each
             // one belongs — not only in the toolbar, which speaks after the choice is made.
-            AccountUsageMenu.decorate(item, for: account)
-
-            menu.addItem(item)
+            AccountUsageMenu.decorate(&item, for: account)
+            return .item(item)
         }
-
-        return menu
     }
 
     /// What the chip says: the chosen model, else the one the account is configured to use,
@@ -385,9 +374,7 @@ final class SessionComposerViewController: NSViewController {
         return ModelName.display(for: configured)
     }
 
-    private func modelMenu() -> NSMenu {
-        let menu = NSMenu()
-
+    private func modelItems() -> [ThemedMenuEntry] {
         let account = AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
         let configured = AgentModels.defaultModel(for: selectedAgent, account: account)
 
@@ -397,23 +384,26 @@ final class SessionComposerViewController: NSViewController {
             "\(ModelName.display(for: $0))\(ComposerDefaults.accountDefaultSuffix)"
         } ?? ComposerDefaults.defaultModelTitle
 
-        let defaultItem = NSMenuItem(title: defaultTitle, action: nil, keyEquivalent: "")
-        defaultItem.representedObject = nil
-        defaultItem.state = selectedModel == nil ? .on : .off
-        menu.addItem(defaultItem)
-
-        for model in AgentModels.available(for: selectedAgent, account: account) {
-            let item = NSMenuItem(
-                title: ModelName.display(for: model),
-                action: nil,
-                keyEquivalent: ""
+        var items: [ThemedMenuEntry] = [
+            .item(
+                ThemedMenuItem(
+                    title: defaultTitle,
+                    representedValue: nil,
+                    isSelected: selectedModel == nil
+                )
             )
-            item.representedObject = model
-            item.state = model == selectedModel ? .on : .off
-            menu.addItem(item)
-        }
+        ]
 
-        return menu
+        items += AgentModels.available(for: selectedAgent, account: account).map { model in
+            .item(
+                ThemedMenuItem(
+                    title: ModelName.display(for: model),
+                    representedValue: model,
+                    isSelected: model == selectedModel
+                )
+            )
+        }
+        return items
     }
 
     /// Where the session will run: this checkout, another checkout already added, or one
@@ -423,41 +413,44 @@ final class SessionComposerViewController: NSViewController {
     /// place a session can run — offering the repository's whole `git branch` output invited
     /// picking one that resolved to nothing, and the session then ran here anyway while its
     /// record claimed otherwise.
-    private func branchMenu() -> NSMenu {
-        let menu = NSMenu()
+    private func branchItems() -> [ThemedMenuEntry] {
         guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
-            return menu
+            return []
         }
 
         let current = GitInfo.currentBranch(for: project.folderPath)
 
-        let thisCheckout = NSMenuItem(
-            title: current.map { "\($0) — \(ComposerDefaults.thisCheckoutSuffix)" } ?? project.name,
-            action: nil,
-            keyEquivalent: ""
-        )
-        thisCheckout.representedObject = BranchSelection.thisCheckout
-        thisCheckout.state = selectedBranch == nil ? .on : .off
-        menu.addItem(thisCheckout)
+        var items: [ThemedMenuEntry] = [
+            .item(
+                ThemedMenuItem(
+                    title: current.map {
+                        "\($0) — \(ComposerDefaults.thisCheckoutSuffix)"
+                    } ?? project.name,
+                    representedValue: BranchSelection.thisCheckout,
+                    isSelected: selectedBranch == nil
+                )
+            )
+        ]
 
-        for sibling in ProjectStore.shared.siblingCheckouts(of: projectID) {
-            let item = NSMenuItem(title: sibling.branch, action: nil, keyEquivalent: "")
-            item.representedObject = BranchSelection.checkout(sibling.branch)
-            item.state = sibling.branch == selectedBranch ? .on : .off
-            menu.addItem(item)
+        items += ProjectStore.shared.siblingCheckouts(of: projectID).map { sibling in
+            .item(
+                ThemedMenuItem(
+                    title: sibling.branch,
+                    representedValue: BranchSelection.checkout(sibling.branch),
+                    isSelected: sibling.branch == selectedBranch
+                )
+            )
         }
-
-        menu.addItem(.separator())
-
-        let newWorktree = NSMenuItem(
-            title: ComposerDefaults.newWorktreeTitle,
-            action: nil,
-            keyEquivalent: ""
+        items.append(.separator)
+        items.append(
+            .item(
+                ThemedMenuItem(
+                    title: ComposerDefaults.newWorktreeTitle,
+                    representedValue: BranchSelection.newWorktree
+                )
+            )
         )
-        newWorktree.representedObject = BranchSelection.newWorktree
-        menu.addItem(newWorktree)
-
-        return menu
+        return items
     }
 
     // MARK: - Actions
@@ -478,21 +471,16 @@ final class SessionComposerViewController: NSViewController {
     }
 
     /// The choice of surface: the agent's own terminal, or Skalman's conversation view.
-    private func surfaceMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        for isNative in [false, true] {
-            let item = NSMenuItem(
-                title: isNative ? ComposerDefaults.nativeTitle : ComposerDefaults.terminalTitle,
-                action: nil,
-                keyEquivalent: ""
+    private func surfaceItems() -> [ThemedMenuEntry] {
+        [false, true].map { isNative in
+            .item(
+                ThemedMenuItem(
+                    title: isNative ? ComposerDefaults.nativeTitle : ComposerDefaults.terminalTitle,
+                    representedValue: isNative,
+                    isSelected: isNative == usesNativeUI
+                )
             )
-            item.representedObject = isNative
-            item.state = (isNative == usesNativeUI) ? .on : .off
-            menu.addItem(item)
         }
-
-        return menu
     }
 
     /// Offers the conversations found on disk, adopting whichever is chosen.
@@ -515,6 +503,10 @@ final class SessionComposerViewController: NSViewController {
         }
 
         presentAsSheet(picker)
+    }
+
+    @objc private func importTapped() {
+        presentImportPicker()
     }
 
     private func createWorktree() {

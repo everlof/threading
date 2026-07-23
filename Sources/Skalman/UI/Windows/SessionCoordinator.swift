@@ -84,7 +84,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     }
 
     func createSideChat(of sessionID: SessionID, prompt: String?) {
-        guard let session = ProjectStore.shared.addSideChat(of: sessionID) else { return }
+        // "Ask on the Side" carries its question, which names the chat the same way the
+        // composer's prompt names an ordinary session. A plain fork stays "Side Chat" until
+        // its first prompt does.
+        let title = prompt.flatMap(SessionNaming.promptTitle(from:))
+        guard let session = ProjectStore.shared.addSideChat(of: sessionID, title: title)
+        else { return }
 
         EventLog.shared.record(.composer, "Side chat forked", [
             "session": session.id.uuidString,
@@ -115,15 +120,17 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             checkout: ProjectStore.shared.checkout(onBranch:inRepositoryOf:)
         )
 
+        let opening = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+
         guard let session = ProjectStore.shared.addSession(
             to: targetProjectID,
             kind: kind,
             accountHandle: accountHandle,
             model: model,
-            usesNativeUI: usesNativeUI
+            usesNativeUI: usesNativeUI,
+            title: SessionNaming.promptTitle(from: opening)
         ) else { return }
 
-        let opening = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         EventLog.shared.record(.composer, "Session started from composer", [
             "session": session.id.uuidString,
             "project": targetProjectID.uuidString,

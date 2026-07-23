@@ -17,6 +17,7 @@ final class PromptView: NSView, ThemedComponent {
     private let scrollView = ThemedScrollView()
     private let textView = PromptTextView(frame: .zero, textContainer: nil)
     private let submitButton = ThemedButton()
+    private var isTextFocused = false
 
     /// Drives the growth. Held so the height can be recomputed as the text changes.
     private var heightConstraint: NSLayoutConstraint?
@@ -73,12 +74,7 @@ final class PromptView: NSView, ThemedComponent {
     // MARK: - Setup
 
     private func setupViews() {
-        applySurface(
-            fill: Design.Surface.panel,
-            radius: .panel,
-            border: Design.Surface.border,
-            glow: true
-        )
+        updateSurface()
 
         setupTextView()
 
@@ -130,6 +126,11 @@ final class PromptView: NSView, ThemedComponent {
         textView.placeholder = placeholder
         textView.font = Design.Typography.body()
         textView.textColor = Design.Text.label
+        // State these explicitly instead of inheriting NSTextView's initializer defaults.
+        // This is the app's primary input and must never become read-only because an AppKit
+        // default changes or a future shared text-view setup starts from a display surface.
+        textView.isEditable = true
+        textView.isSelectable = true
         textView.drawsBackground = false
         textView.isRichText = false
         textView.isVerticallyResizable = true
@@ -147,6 +148,11 @@ final class PromptView: NSView, ThemedComponent {
 
         textView.onSubmit = { [weak self] in self?.submit() }
         textView.onAttach = { [weak self] paths in self?.insertAttachments(paths) }
+        textView.onFocusChange = { [weak self] focused in
+            guard let self, self.isTextFocused != focused else { return }
+            self.isTextFocused = focused
+            self.updateSurface()
+        }
 
         scrollView.documentView = textView
         scrollView.drawsBackground = false
@@ -206,6 +212,18 @@ final class PromptView: NSView, ThemedComponent {
         submitButton.contentTintColor = hasText ? Design.Surface.accent : Design.Text.tertiary
     }
 
+    private func updateSurface() {
+        applySurface(
+            fill: Design.Surface.panel,
+            radius: .panel,
+            border: isTextFocused ? Design.Surface.accent : Design.Surface.border,
+            borderWidth: isTextFocused
+                ? Design.Accessibility.focusRingWidth
+                : Design.Radius.border,
+            glow: true
+        )
+    }
+
     /// Sizes the box to its text, between one line and `inputMaxHeight`.
     private func updateHeight() {
         guard let layoutManager = textView.layoutManager,
@@ -258,12 +276,21 @@ private final class PromptTextView: ThemedTextView {
     /// Paths for whatever was dropped or pasted, already written to disk.
     var onAttach: (([String]) -> Void)?
 
+    /// Lets the owning surface draw focus around the whole composer, not merely blink a caret
+    /// inside one descendant.
+    var onFocusChange: ((Bool) -> Void)?
+
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        guard string.isEmpty, !placeholder.isEmpty else { return }
+        // While focused the accent border and insertion caret are the cue. Drawing the
+        // placeholder at the selection origin after `super` can cover that caret and make a
+        // successfully focused editor appear inert.
+        guard window?.firstResponder !== self,
+              string.isEmpty,
+              !placeholder.isEmpty else { return }
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font ?? Design.Typography.body(),
@@ -274,6 +301,26 @@ private final class PromptTextView: ThemedTextView {
             at: NSPoint(x: textContainerInset.width, y: textContainerInset.height),
             withAttributes: attributes
         )
+    }
+
+    // MARK: - Focus
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted {
+            needsDisplay = true
+            onFocusChange?(true)
+        }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            needsDisplay = true
+            onFocusChange?(false)
+        }
+        return resigned
     }
 
     // MARK: - Key Handling

@@ -51,7 +51,10 @@ enum Design {
         static var control: CGFloat { AppThemePalette.current.material.controlRadius }
 
         /// Hairline in most themes; a style may draw heavier rules.
-        static var border: CGFloat { AppThemePalette.current.material.borderWidth }
+        static var border: CGFloat {
+            let themed = AppThemePalette.current.material.borderWidth
+            return Accessibility.increasesContrast ? max(themed, 2) : themed
+        }
 
         /// Fully rounded, for pill-shaped controls of a known height.
         /// Fully rounded — unless a style says otherwise.
@@ -70,6 +73,15 @@ enum Design {
     enum Size {
         /// Height of a pill control. Also drives its corner radius.
         static let chipHeight: CGFloat = 26
+        /// A selected destination in a horizontal strip or a sidebar.
+        static let tabHeight: CGFloat = 28
+        static let sidebarTabHeight: CGFloat = 30
+        static let tabIconSlot: CGFloat = 16
+        static let tabCloseTarget: CGFloat = 16
+
+        /// Compact controls floating in the transparent window toolbar.
+        static let toolbarButtonWidth: CGFloat = 30
+        static let toolbarButtonHeight: CGFloat = 28
         /// Height of the prompt box and anything else that reads as a primary input.
         static let inputHeight: CGFloat = 44
 
@@ -78,22 +90,96 @@ enum Design {
         static let inputMaxHeight: CGFloat = 180
         /// Widest a column of content grows before it becomes hard to scan.
         static let readableWidth: CGFloat = 620
+
+        /// The room a panel's halo needs inside any clipping ancestor.
+        ///
+        /// A theme's glow is a layer shadow, and a shadow spills *past* the view that casts
+        /// it — so a scroll view whose edge coincides with a panel's edge cuts the halo off
+        /// flat on that side, which is invisible in the code that set the shadow. Any host
+        /// that clips and holds glowing panels budgets this much space between the panel and
+        /// the clip edge. The gutter is constant across themes — layout never changes with
+        /// the theme — and is sized to the widest glow any stock style states (twice its
+        /// radius, the visible extent of the blur), pinned to that by `AppThemeTests`.
+        static let glowGutter: CGFloat = 20
     }
 
     // MARK: - Typography
 
-    /// A four-step scale. Sizes are paired with a weight, since the two only work together.
+    /// A small semantic scale. Feature code chooses what text *does*, never an AppKit point
+    /// size. Keeping even code, counters, placeholders, and decorative emoji here prevents a
+    /// screen assembled from individually reasonable but mutually inconsistent 10/11/12/13pt
+    /// decisions.
     enum Typography {
         /// The one emphasised string in a view — a project name, a pane title.
         static func heading() -> NSFont { .systemFont(ofSize: 20, weight: .semibold) }
+        /// A compact title inside an otherwise empty content pane.
+        static func placeholderTitle() -> NSFont { .systemFont(ofSize: 15, weight: .medium) }
         /// Supporting detail directly beneath a heading, such as a path.
         static func subheading() -> NSFont { .systemFont(ofSize: 12, weight: .regular) }
         /// Editable and readable content.
         static func body() -> NSFont { .systemFont(ofSize: 13, weight: .regular) }
+        /// A project, pane, or toolbar title at body scale.
+        static func emphasizedBody() -> NSFont { .systemFont(ofSize: 13, weight: .semibold) }
+        /// Strong body copy used only by legacy form section labels.
+        static func strongBody() -> NSFont { .systemFont(ofSize: 13, weight: .bold) }
         /// Labels on controls.
         static func control() -> NSFont { .systemFont(ofSize: 12, weight: .medium) }
+        /// A quieter control label, such as a sidebar session.
+        static func controlRegular() -> NSFont { .systemFont(ofSize: 12, weight: .regular) }
         /// Section headings and other quiet, small type.
         static func caption() -> NSFont { .systemFont(ofSize: 11, weight: .semibold) }
+        /// Metadata and secondary copy that should not carry caption emphasis.
+        static func detail(weight: NSFont.Weight = .regular) -> NSFont {
+            .systemFont(ofSize: 11, weight: weight)
+        }
+
+        /// Tool subjects, paths, diffs, and other code-shaped content.
+        static func code(weight: NSFont.Weight = .regular) -> NSFont {
+            .monospacedSystemFont(ofSize: 11, weight: weight)
+        }
+
+        /// Inline code that must share the body's line box.
+        static func inlineCode() -> NSFont {
+            .monospacedSystemFont(ofSize: 12, weight: .regular)
+        }
+
+        /// A code sample inside the compact theme-preview card.
+        static func previewCode() -> NSFont {
+            .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        }
+
+        /// Dense process metadata and compact hexadecimal values.
+        static func compactCode() -> NSFont {
+            .monospacedSystemFont(ofSize: 10, weight: .regular)
+        }
+
+        /// A compact tool identifier; deliberately halfway between code and metadata.
+        static func compactToolName() -> NSFont {
+            .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        }
+
+        /// Numeric labels use fixed-width digits without making the surrounding prose code.
+        static func numericBody() -> NSFont {
+            .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        }
+
+        static func numericControl() -> NSFont {
+            .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        }
+
+        static func numericDetail(weight: NSFont.Weight = .regular) -> NSFont {
+            .monospacedDigitSystemFont(ofSize: 11, weight: weight)
+        }
+
+        /// Markdown headings scale from the caller's semantic body font while font construction
+        /// remains inside the typography boundary.
+        static func markdownHeading(from base: NSFont) -> NSFont {
+            .systemFont(ofSize: base.pointSize + 3, weight: .semibold)
+        }
+
+        /// Emoji rendered as an application control mark, not prose.
+        static func accountEmoji() -> NSFont { .systemFont(ofSize: 16) }
+        static func emojiPickerCell() -> NSFont { .systemFont(ofSize: 19) }
     }
 
     // MARK: - Symbols
@@ -116,10 +202,14 @@ enum Design {
     /// the accent colour is the user's own.
     enum Surface {
         /// A control at rest. Below full opacity so a row of them stays quiet.
-        static var controlResting: NSColor { AppThemePalette.color(.controlResting) }
+        static var controlResting: NSColor {
+            Accessibility.color(.controlResting, increasedContrastAlphaFloor: 0.16)
+        }
 
         /// The same control under the pointer.
-        static var controlHover: NSColor { AppThemePalette.color(.controlHover) }
+        static var controlHover: NSColor {
+            Accessibility.color(.controlHover, increasedContrastAlphaFloor: 0.24)
+        }
 
         /// A container holding content, such as the prompt box.
         static var panel: NSColor { AppThemePalette.color(.panel) }
@@ -127,10 +217,14 @@ enum Design {
         /// A container above a panel — a popover, a floating card.
         static var elevated: NSColor { AppThemePalette.color(.elevated) }
 
-        static var border: NSColor { AppThemePalette.color(.border) }
+        static var border: NSColor {
+            Accessibility.color(.border, increasedContrastAlphaFloor: 0.70)
+        }
 
         /// A rule between rows, quieter than a border around them.
-        static var divider: NSColor { AppThemePalette.color(.divider) }
+        static var divider: NSColor {
+            Accessibility.color(.divider, increasedContrastAlphaFloor: 0.60)
+        }
 
         /// The window's own backdrop.
         static var ground: NSColor { AppThemePalette.color(.ground) }
@@ -140,6 +234,9 @@ enum Design {
 
         /// Draws attention to the one control that is ready to act.
         static var accent: NSColor { AppThemePalette.color(.accent) }
+
+        /// A selected row inside app-owned chrome.
+        static var selection: NSColor { AppThemePalette.color(.selection) }
     }
 
     // MARK: - Text
@@ -152,8 +249,18 @@ enum Design {
     enum Text {
         static var label: NSColor { AppThemePalette.color(.label) }
         static var secondary: NSColor { AppThemePalette.color(.secondaryLabel) }
-        static var tertiary: NSColor { AppThemePalette.color(.tertiaryLabel) }
-        static var quaternary: NSColor { AppThemePalette.color(.quaternaryLabel) }
+        static var tertiary: NSColor {
+            Accessibility.color(
+                .tertiaryLabel,
+                increasedContrastRole: .secondaryLabel
+            )
+        }
+        static var quaternary: NSColor {
+            Accessibility.color(
+                .quaternaryLabel,
+                increasedContrastRole: .tertiaryLabel
+            )
+        }
 
         /// Text over an emphasized selection.
         ///
@@ -186,12 +293,13 @@ enum Design {
             let base: NSColor = light ? .white : .black
             // The tiers are further apart on a dark ground than a light one: black fades to
             // nothing on paper long before white does on ink.
+            let increased = Accessibility.increasesContrast
             return Design.Ink(
                 base: base,
-                label: base.withAlphaComponent(light ? 0.95 : 0.88),
-                secondary: base.withAlphaComponent(light ? 0.70 : 0.62),
-                tertiary: base.withAlphaComponent(light ? 0.50 : 0.44),
-                quaternary: base.withAlphaComponent(light ? 0.32 : 0.28)
+                label: base.withAlphaComponent(increased ? 1 : (light ? 0.95 : 0.88)),
+                secondary: base.withAlphaComponent(increased ? 0.82 : (light ? 0.70 : 0.62)),
+                tertiary: base.withAlphaComponent(increased ? 0.68 : (light ? 0.50 : 0.44)),
+                quaternary: base.withAlphaComponent(increased ? 0.54 : (light ? 0.32 : 0.28))
             )
         }
     }
@@ -222,9 +330,15 @@ enum Design {
         /// Derived rather than taken from `Design.Surface`, for the same reason as the ink: the
         /// chrome's resting fill is *its* label colour held at 8%, which over a backdrop of the
         /// opposite tone is either invisible or a bright smear.
-        var surface: NSColor { base.withAlphaComponent(0.14) }
-        var surfaceHover: NSColor { base.withAlphaComponent(0.24) }
-        var border: NSColor { base.withAlphaComponent(0.30) }
+        var surface: NSColor {
+            base.withAlphaComponent(Accessibility.increasesContrast ? 0.22 : 0.14)
+        }
+        var surfaceHover: NSColor {
+            base.withAlphaComponent(Accessibility.increasesContrast ? 0.34 : 0.24)
+        }
+        var border: NSColor {
+            base.withAlphaComponent(Accessibility.increasesContrast ? 0.52 : 0.30)
+        }
     }
 
     // MARK: - Status
@@ -341,6 +455,63 @@ enum Design {
         /// branch.
         static var quick: TimeInterval { reducesMotion ? 0 : 0.15 }
         static var standard: TimeInterval { reducesMotion ? 0 : 0.2 }
+
+        /// A surface materialising over content — the dropdown unfolding from its chip.
+        static var appear: TimeInterval { reducesMotion ? 0 : 0.16 }
+
+        /// The same surface leaving. Quicker than `appear`: arriving is information the eye
+        /// follows, leaving is a decision already made.
+        static var vanish: TimeInterval { reducesMotion ? 0 : 0.12 }
+
+        /// One beat of a menu's confirmation blink — the chosen row flickering once before
+        /// the panel fades, the acknowledgement every platform menu gives.
+        static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
+    }
+
+    // MARK: - Accessibility
+
+    /// The system display preferences that change how app-owned chrome must be drawn.
+    ///
+    /// AppKit adapts its own controls automatically. Our controls deliberately replace that
+    /// chrome, so these preferences are design inputs just like the active theme. Test
+    /// overrides keep the behavior deterministic without changing the user's Mac settings.
+    enum Accessibility {
+        static var increaseContrastOverrideForTesting: Bool?
+        static var differentiateWithoutColorOverrideForTesting: Bool?
+
+        static var increasesContrast: Bool {
+            increaseContrastOverrideForTesting
+                ?? NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        }
+
+        static var differentiatesWithoutColor: Bool {
+            differentiateWithoutColorOverrideForTesting
+                ?? NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor
+        }
+
+        /// Focus is an interaction state, not decoration. Increase Contrast makes its outline
+        /// heavier even when a theme deliberately keeps ordinary borders fine.
+        static var focusRingWidth: CGFloat { increasesContrast ? 3 : 2 }
+
+        /// Resolves an app-theme role at draw time and optionally strengthens translucent
+        /// affordances under Increase Contrast. Opaque authored colours keep their hue; only a
+        /// faint role's alpha is raised.
+        static func color(
+            _ role: AppThemeRole,
+            increasedContrastRole: AppThemeRole? = nil,
+            increasedContrastAlphaFloor: CGFloat? = nil
+        ) -> NSColor {
+            NSColor(name: NSColor.Name("skalman.accessible.\(role.rawValue)")) { _ in
+                let resolvedRole = increasesContrast ? increasedContrastRole ?? role : role
+                let color = AppThemePalette.current.resolved(resolvedRole)
+                guard increasesContrast,
+                      let floor = increasedContrastAlphaFloor,
+                      let resolved = color.usingColorSpace(.sRGB)
+                else { return color }
+
+                return resolved.withAlphaComponent(max(resolved.alphaComponent, floor))
+            }
+        }
     }
 }
 
@@ -411,6 +582,7 @@ extension NSView {
         fill: NSColor,
         radius: SurfaceRadius,
         border: NSColor? = nil,
+        borderWidth: CGFloat? = nil,
         glow: Bool = false
     ) {
         wantsLayer = true
@@ -419,7 +591,7 @@ extension NSView {
         layer?.backgroundColor = fill.cgColor
 
         if let border {
-            layer?.borderWidth = Design.Radius.border
+            layer?.borderWidth = borderWidth ?? Design.Radius.border
             layer?.borderColor = border.cgColor
         } else {
             // Surface state is replaceable. A focused control that loses focus must not keep
@@ -429,7 +601,13 @@ extension NSView {
         }
 
         applyThemeGlow(glow)
-        recordSurface(fill: fill, border: border, radius: radius, glow: glow)
+        recordSurface(
+            fill: fill,
+            border: border,
+            borderWidth: borderWidth,
+            radius: radius,
+            glow: glow
+        )
     }
 
     private func applyThemeGlow(_ wantsGlow: Bool) {

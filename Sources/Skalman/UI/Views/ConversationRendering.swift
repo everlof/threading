@@ -52,13 +52,18 @@ extension ConversationViewController {
             showStreaming(text)
 
         case .status(let status):
-            setStatus(describe(status))
             // The orb runs only while a turn is in flight; hidden, it detaches
             // from the status row and its display link idles.
-            if case .working = status {
+            if case .working(let word) = status {
+                if orbView.isHidden {
+                    orbView.prepareForWorking(style: AppSettings.shared.workingOrbStyle)
+                }
                 orbView.isHidden = false
+                beginWorkingStatus(word: word)
             } else {
                 orbView.isHidden = true
+                endWorkingStatus()
+                setStatus(describe(status))
             }
 
         case .adoptedSessionID(let agentSessionID):
@@ -81,16 +86,45 @@ extension ConversationViewController {
         switch status {
         case .loading:
             return "Loading conversation…"
-        case .ready(let model):
+        case .ready(let model, let lastTurn):
             // A reported model names the status; otherwise the session may still be starting,
             // in which case saying Ready would invite a message the CLI cannot yet receive.
-            guard let model else { return stream.canSend ? "Ready" : "Starting…" }
-            return "Ready · \(model)"
+            if model == nil, lastTurn == nil, !stream.canSend { return "Starting…" }
+            return TurnStatusText.ready(model: model, lastTurn: lastTurn)
         case .working(let word):
             return word
         case .ended(let code):
             return code == 0 ? "Session ended" : "Session ended (\(code))"
         }
+    }
+
+    private func beginWorkingStatus(word: String) {
+        workingStatusTimer?.invalidate()
+        workingStartedAt = ProcessInfo.processInfo.systemUptime
+
+        updateWorkingStatus(word: word)
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            self?.updateWorkingStatus(word: word)
+        }
+        workingStatusTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func updateWorkingStatus(word: String) {
+        let elapsed = workingStartedAt.map {
+            max(0, ProcessInfo.processInfo.systemUptime - $0)
+        } ?? 0
+        setStatus(TurnStatusText.working(
+            word: word,
+            elapsed: elapsed,
+            effort: configuredEffort
+        ))
+    }
+
+    private func endWorkingStatus() {
+        workingStatusTimer?.invalidate()
+        workingStatusTimer = nil
+        workingStartedAt = nil
     }
 
     // MARK: - Streaming

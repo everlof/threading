@@ -3,8 +3,14 @@ import AppKit
 // MARK: - Toolbar Item Identifiers
 
 extension NSToolbarItem.Identifier {
+    /// App-owned sidebar toggle; kept beside the system tracking separator.
+    static let skalmanToggleSidebar = NSToolbarItem.Identifier("SkalmanToggleSidebar")
+
     /// Names the project and session currently shown.
     static let sessionTitle = NSToolbarItem.Identifier("SkalmanSessionTitle")
+
+    /// Opens the session composer, placed directly after the active page tab.
+    static let newSessionPage = NSToolbarItem.Identifier("SkalmanNewSessionPage")
 
     /// Shows the current account's rate-limit usage, at the trailing edge of the centre pane.
     static let accountUsage = NSToolbarItem.Identifier("SkalmanAccountUsage")
@@ -31,9 +37,8 @@ extension MainWindowController: NSToolbarDelegate {
     /// Builds the window's toolbar.
     ///
     /// A real toolbar is what keeps the sidebar control pinned beside the traffic lights in
-    /// both states. `.toggleSidebar` and `.sidebarTrackingSeparator` are system items: the
-    /// first drives the split view's first item, the second keeps a divider aligned with the
-    /// split position as it moves.
+    /// both states. The button is app-owned; `.sidebarTrackingSeparator` remains a system item
+    /// because it is the one primitive that follows a moving split divider.
     func makeToolbar() -> NSToolbar {
         let toolbar = NSToolbar(identifier: MainWindowDefaults.toolbarIdentifier)
         toolbar.delegate = self
@@ -48,8 +53,8 @@ extension MainWindowController: NSToolbarDelegate {
 
     public func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [
-            .toggleSidebar, .sidebarTrackingSeparator,
-            .sessionTitle, .flexibleSpace, .accountUsage,
+            .skalmanToggleSidebar, .sidebarTrackingSeparator,
+            .sessionTitle, .newSessionPage, .flexibleSpace, .accountUsage,
             .displayTrackingSeparator, .sessionContext, .toggleShellDrawer, .toggleDisplayPane
         ]
     }
@@ -64,6 +69,16 @@ extension MainWindowController: NSToolbarDelegate {
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
+        case .skalmanToggleSidebar:
+            let button = ToolbarButtonView(
+                symbolName: "sidebar.leading",
+                accessibility: "Show or hide sidebar"
+            )
+            button.toolTip = "Show or Hide the Sidebar (⌃⌘S)"
+            button.onPress = { [weak self] in self?.toggleSidebar() }
+            sidebarToolbarButton = button
+            return makeOverlayItem(identifier: itemIdentifier, view: button)
+
         case .sidebarTrackingSeparator:
             return NSTrackingSeparatorToolbarItem(
                 identifier: itemIdentifier,
@@ -83,6 +98,15 @@ extension MainWindowController: NSToolbarDelegate {
         case .sessionTitle:
             return makeSessionTitleItem(identifier: itemIdentifier)
 
+        case .newSessionPage:
+            let button = ToolbarButtonView(
+                symbolName: "plus",
+                accessibility: "New session"
+            )
+            button.toolTip = "New Session (⌘N)"
+            button.onPress = { [weak self] in self?.newSession() }
+            return makeOverlayItem(identifier: itemIdentifier, view: button)
+
         case .accountUsage:
             return makeAccountUsageItem(identifier: itemIdentifier)
 
@@ -94,21 +118,23 @@ extension MainWindowController: NSToolbarDelegate {
                 identifier: itemIdentifier,
                 symbolName: "rectangle.bottomthird.inset.filled",
                 label: "Shell",
-                toolTip: "Show or Hide the Shell Drawer (⌃`)",
-                action: #selector(toggleShellDrawerClicked)
-            )
+                toolTip: "Show or Hide the Shell Drawer (⌃`)"
+            ) { [weak self] in
+                self?.toggleShellDrawer()
+            }
 
         case .toggleDisplayPane:
             return makePaneToggleItem(
                 identifier: itemIdentifier,
                 symbolName: "sidebar.trailing",
                 label: "Panel",
-                toolTip: "Show or Hide the Display Panel",
-                action: #selector(toggleDisplayPaneClicked)
-            )
+                toolTip: "Show or Hide the Display Panel"
+            ) { [weak self] in
+                self?.toggleDisplayPane()
+            }
 
         default:
-            // .toggleSidebar and the spacers are supplied by the system.
+            // Flexible space is supplied by the system.
             return nil
         }
     }
@@ -117,17 +143,17 @@ extension MainWindowController: NSToolbarDelegate {
 
     /// The one way a custom view reaches the toolbar.
     ///
-    /// It takes a `BackdropOverlay` on purpose, and that is the whole enforcement: the toolbar
-    /// floats over the *terminal palette's* background rather than the chrome's ground, so a view
-    /// placed here that colours itself from `Design.Text` is wrong. Requiring the type means a
-    /// new button cannot be added without being handed the right ink, and the compiler says so
-    /// rather than a screenshot three weeks later.
+    /// It takes `BackdropOverlayContent` on purpose, and that is the whole enforcement: the
+    /// toolbar floats over the *terminal palette's* background rather than the chrome's ground,
+    /// so a view placed here that colours itself from `Design.Text` is wrong. Requiring the
+    /// protocol means a new passive view or interactive control cannot be added without being
+    /// handed the right ink, and the compiler says so rather than a screenshot three weeks later.
     ///
-    /// System-drawn items — the bordered pane toggles, the tracking separators — are not this:
-    /// AppKit draws them in its own vibrant material, which adapts to whatever is behind it.
+    /// System tracking separators are the exception because their job is to follow AppKit's
+    /// moving split dividers; every app-owned action goes through this path.
     private func makeOverlayItem(
         identifier: NSToolbarItem.Identifier,
-        view: BackdropOverlay
+        view: NSView & BackdropOverlayContent
     ) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.view = view
@@ -163,47 +189,51 @@ extension MainWindowController: NSToolbarDelegate {
         symbolName: String,
         label: String,
         toolTip: String,
-        action: Selector
+        onPress: @escaping () -> Void
     ) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)
-        item.label = label
-        item.toolTip = toolTip
-        item.target = self
-        item.action = action
-        item.isBordered = true
-        return item
+        let button = ToolbarButtonView(symbolName: symbolName, accessibility: label)
+        button.toolTip = toolTip
+        button.onPress = onPress
+
+        if identifier == .toggleShellDrawer {
+            shellDrawerToolbarButton = button
+        } else if identifier == .toggleDisplayPane {
+            displayPaneToolbarButton = button
+        }
+
+        return makeOverlayItem(identifier: identifier, view: button)
     }
 
     /// The context button: a menu of what applies to the session on screen. Rebuilt on every
     /// open (`menuNeedsUpdate`), because its checkmarks — which theme is chosen — go stale
     /// the moment they are drawn.
     private func makeSessionContextItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let item = NSMenuToolbarItem(itemIdentifier: identifier)
-        item.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Context")
-        item.label = "Context"
-        item.toolTip = "Session Options"
-        item.isBordered = true
-        item.showsIndicator = false
+        let button = ToolbarButtonView(symbolName: "ellipsis", accessibility: "Session options")
+        button.toolTip = "Session Options"
+        button.onPress = { [weak self, weak button] in
+            guard let self, let button else { return }
+            self.showSessionContextMenu(from: button)
+        }
+        sessionContextToolbarButton = button
 
         sessionContextMenu.delegate = self
-        item.menu = sessionContextMenu
 
         themeMenuBuilder.onEditThemes = { [weak self] in
             self?.showSettingsPage(title: SettingsPages.themesTitle)
         }
 
-        return item
+        return makeOverlayItem(identifier: identifier, view: button)
     }
 
     // MARK: Actions
 
-    @objc private func toggleShellDrawerClicked() {
-        toggleShellDrawer()
-    }
-
-    @objc private func toggleDisplayPaneClicked() {
-        toggleDisplayPane()
+    private func showSessionContextMenu(from button: ToolbarButtonView) {
+        menuNeedsUpdate(sessionContextMenu)
+        sessionContextMenu.popUp(
+            positioning: nil,
+            at: NSPoint(x: button.bounds.minX, y: button.bounds.minY),
+            in: button
+        )
     }
 }
 

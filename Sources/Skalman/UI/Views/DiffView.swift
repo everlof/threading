@@ -24,6 +24,11 @@ final class DiffView: NSStackView {
 
     private let showsNumbers: Bool
 
+    /// Whether long lines wrap to the view's width or run off it. Off puts the diff in a
+    /// horizontal scroller (arranged by the caller), so a row is sized to its content rather
+    /// than to the pane; the default keeps every existing caller wrapping as it always has.
+    private let wraps: Bool
+
     /// Whether this view resolved a language. It decides the *base* colour of every row, not
     /// just the coloured runs: highlighted code is drawn in label colour and left to the wash
     /// and the gutter to say what happened to it, where an unhighlighted diff still tints the
@@ -34,7 +39,7 @@ final class DiffView: NSStackView {
 
     /// An edit tool's diff: unnumbered, capped at the tool-row default. `path` is the file the
     /// tool is editing, which is the only thing that says what language its lines are in.
-    convenience init(lines: [DiffLine], path: String? = nil) {
+    convenience init(lines: [DiffLine], path: String? = nil, wraps: Bool = true) {
         let language = path.flatMap { Syntax.language(forPath: $0) }
         let tokens = Self.tokenize(lines.map { ($0.kind, $0.text) }, language: language)
 
@@ -44,13 +49,14 @@ final class DiffView: NSStackView {
             },
             displayCap: DiffDefaults.displayCap,
             showsNumbers: false,
-            isHighlighted: language != nil
+            isHighlighted: language != nil,
+            wraps: wraps
         )
     }
 
     /// A git diff's lines: numbered, with the cap owned by the caller — the review pane
     /// budgets lines per file, not per hunk.
-    convenience init(gitLines: [GitDiffLine], displayCap: Int, path: String? = nil) {
+    convenience init(gitLines: [GitDiffLine], displayCap: Int, path: String? = nil, wraps: Bool = true) {
         let language = path.flatMap { Syntax.language(forPath: $0) }
         // Tokens index into the *capped* text, so the cap is applied before they are found.
         let texts = gitLines.map { Self.cappedText($0.text) }
@@ -67,13 +73,15 @@ final class DiffView: NSStackView {
             },
             displayCap: displayCap,
             showsNumbers: true,
-            isHighlighted: language != nil
+            isHighlighted: language != nil,
+            wraps: wraps
         )
     }
 
-    private init(rows: [Row], displayCap: Int, showsNumbers: Bool, isHighlighted: Bool) {
+    private init(rows: [Row], displayCap: Int, showsNumbers: Bool, isHighlighted: Bool, wraps: Bool) {
         self.showsNumbers = showsNumbers
         self.isHighlighted = isHighlighted
+        self.wraps = wraps
         super.init(frame: .zero)
 
         orientation = .vertical
@@ -86,14 +94,20 @@ final class DiffView: NSStackView {
             let view = makeRow(row)
             addArrangedSubview(view)
             view.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
-            view.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+            // Pinning a row's trailing to the view's is what makes it wrap to the pane; without
+            // it the row is as wide as its longest line and the caller's scroller reveals it.
+            if wraps {
+                view.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+            }
         }
 
         if rows.count > shown.count {
             let more = makeNote("… \(rows.count - shown.count) more lines")
             addArrangedSubview(more)
             more.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
-            more.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+            if wraps {
+                more.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+            }
         }
     }
 
@@ -115,13 +129,26 @@ final class DiffView: NSStackView {
         gutter.alignment = .center
         gutter.translatesAutoresizingMaskIntoConstraints = false
 
-        let text = NSTextField(wrappingLabelWithString: row.text.isEmpty ? " " : row.text)
+        let string = row.text.isEmpty ? " " : row.text
+        let text = wraps
+            ? NSTextField(wrappingLabelWithString: string)
+            : NSTextField(labelWithString: string)
         text.font = font()
         text.textColor = baseColor(for: row.kind)
         text.isSelectable = true
-        text.lineBreakMode = .byCharWrapping
-        text.maximumNumberOfLines = 0
         text.translatesAutoresizingMaskIntoConstraints = false
+        if wraps {
+            text.lineBreakMode = .byCharWrapping
+            text.maximumNumberOfLines = 0
+        } else {
+            // Sized to its own content and never squeezed, so the row's width is the line's and
+            // the horizontal scroller has something to reveal.
+            text.lineBreakMode = .byClipping
+            text.usesSingleLineMode = true
+            text.maximumNumberOfLines = 1
+            text.setContentHuggingPriority(.required, for: .horizontal)
+            text.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         if !row.tokens.isEmpty {
             text.attributedStringValue = attributed(row)
         }
@@ -205,7 +232,9 @@ final class DiffView: NSStackView {
     /// style along with its text.
     private func attributed(_ row: Row) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byCharWrapping
+        // An attributed value carries its own paragraph style, so the wrap decision has to be
+        // restated here or the field reverts to wrapping.
+        paragraph.lineBreakMode = wraps ? .byCharWrapping : .byClipping
 
         let string = NSMutableAttributedString(string: row.text, attributes: [
             .font: font(),
@@ -247,7 +276,7 @@ final class DiffView: NSStackView {
     }
 
     private func font() -> NSFont {
-        .monospacedSystemFont(ofSize: DiffDefaults.fontSize, weight: .regular)
+        Design.Typography.code()
     }
 
     private func sign(for kind: DiffLine.Kind) -> String {

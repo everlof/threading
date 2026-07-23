@@ -86,7 +86,7 @@ struct ConversationTimeline {
     /// the conversation, and nothing in the transcript records it.
     enum Status: Equatable {
         case loading
-        case ready(model: String?)
+        case ready(model: String?, lastTurn: TurnMetrics?)
 
         /// A turn in flight, carrying the word the status line shows for it. The word is drawn
         /// by whoever starts the turn and travels with the status so it cannot be re-drawn on
@@ -149,7 +149,7 @@ struct ConversationTimeline {
             // mid-conversation too. Only a reported model promotes the status — calling it
             // Ready unconditionally would overwrite Working while the model is still running.
             if let model {
-                changes.append(.status(.ready(model: model)))
+                changes.append(.status(.ready(model: model, lastTurn: nil)))
             }
             return changes
 
@@ -179,14 +179,17 @@ struct ConversationTimeline {
         case .toolResults(let results):
             return results.map { attach($0) }
 
-        case .turnFinished(let text, let isError):
+        case .turnFinished(let text, let isError, let metrics):
             var changes = clearStreaming()
             // Only a failed turn is reported. A successful one's text is the assistant message
             // already rendered, and showing it twice reads as the agent repeating itself.
             if isError, let text, !text.isEmpty {
                 changes.append(append(.notice(text, kind: .error)))
             }
-            changes.append(.status(.ready(model: nil)))
+            changes.append(.status(.ready(
+                model: nil,
+                lastTurn: metrics.isEmpty ? nil : metrics
+            )))
             return changes
 
         case .unknown:

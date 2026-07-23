@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skalman.invalid/schema/extension-node.schema.json",
+  "title": "Skalman extension UI node",
+  "$ref": "#/$defs/node",
+  "$defs": {
+    "node": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text", "role"],
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string" },
+            "role": {
+              "enum": ["heading", "body", "detail", "code"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "title", "role", "isEnabled"],
+          "properties": {
+            "type": { "const": "button" },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9.-]*$"
+            },
+            "title": { "type": "string" },
+            "role": {
+              "enum": ["standard", "primary", "destructive"]
+            },
+            "isEnabled": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text", "role"],
+          "properties": {
+            "type": { "const": "status" },
+            "text": { "type": "string" },
+            "role": {
+              "enum": ["neutral", "positive", "warning", "negative"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "divider" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "spacing"],
+          "properties": {
+            "type": { "const": "spacer" },
+            "spacing": {
+              "$ref": "#/$defs/spacing"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "axis", "spacing", "children"],
+          "properties": {
+            "type": { "const": "stack" },
+            "axis": {
+              "enum": ["horizontal", "vertical"]
+            },
+            "spacing": {
+              "$ref": "#/$defs/spacing"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/node"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "spacing": {
+      "enum": ["none", "tight", "small", "medium", "large"]
+    }
+  }
+}

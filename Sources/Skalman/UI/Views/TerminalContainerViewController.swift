@@ -56,6 +56,11 @@ final class TerminalContainerViewController: NSViewController {
     /// Whether settings is the surface currently on screen, so the window can title the pane.
     var isShowingSettings: Bool { settingsPage != nil }
 
+    /// The non-session sidebar destination currently shown. These make the toolbar tab derive
+    /// from the same selection as the content pane instead of falling back to a generic title.
+    private(set) var currentComposerProjectID: ProjectID?
+    private(set) var currentSettingsPageIndex: Int?
+
     weak var delegate: TerminalContainerViewControllerDelegate?
 
     // MARK: - Lifecycle
@@ -125,6 +130,8 @@ final class TerminalContainerViewController: NSViewController {
     /// Shows the composer for a project, replacing whatever session was on screen.
     func showComposer(projectID: ProjectID) {
         detachCurrentChild()
+        currentComposerProjectID = projectID
+        currentSettingsPageIndex = nil
         currentSessionID = nil
 
         placeholderView.isHidden = true
@@ -140,6 +147,9 @@ final class TerminalContainerViewController: NSViewController {
     /// margins — rather than through an intermediate container, which did not size its child.
     func showSettingsPage(index: Int) {
         guard index >= 0, index < SettingsPages.all.count else { return }
+
+        currentComposerProjectID = nil
+        currentSettingsPageIndex = index
 
         if settingsPage == nil {
             detachCurrentChild()
@@ -163,7 +173,9 @@ final class TerminalContainerViewController: NSViewController {
         content.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(content)
 
-        let preferred = content.widthAnchor.constraint(equalToConstant: Design.Size.readableWidth)
+        // The cap is the readable measure plus the glow gutters the page pads itself with,
+        // so the cards inside keep the readable width.
+        let preferred = content.widthAnchor.constraint(equalToConstant: SettingsUIDefaults.pageWidth)
         preferred.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
@@ -171,7 +183,7 @@ final class TerminalContainerViewController: NSViewController {
             content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             content.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             preferred,
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: SettingsUIDefaults.pageWidth),
             content.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: Design.Spacing.large),
             content.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -Design.Spacing.large)
         ])
@@ -258,6 +270,13 @@ final class TerminalContainerViewController: NSViewController {
         if focusing { drawer.focus() }
     }
 
+    /// The session's shell-drawer root process, when it has one. Asked by the info panel, which
+    /// attributes a listening port to the shell or to the agent. Deliberately does *not* build a
+    /// drawer: a session whose shell was never opened has no second origin to report.
+    func shellRootPid(for sessionID: SessionID) -> pid_t? {
+        drawers[sessionID]?.shellRootPid
+    }
+
     /// A session's shell, built the first time it is asked for. A session whose project has
     /// gone is not given one — there would be nowhere to run it.
     private func drawer(for sessionID: SessionID) -> ShellDrawerViewController? {
@@ -316,6 +335,8 @@ final class TerminalContainerViewController: NSViewController {
         guard sessionID != currentSessionID || settingsPage != nil else { return }
 
         detachCurrentChild()
+        currentComposerProjectID = nil
+        currentSettingsPageIndex = nil
         applyDrawer(for: sessionID)
 
         guard let sessionID,
@@ -508,6 +529,8 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     private func showEmptyState() {
+        currentComposerProjectID = nil
+        currentSettingsPageIndex = nil
         composerViewController.view.isHidden = true
         placeholderView.isHidden = false
         applyPaneBackground(Design.Surface.ground)
@@ -590,8 +613,31 @@ private extension TerminalContainerViewController {
         guard let sessionID = currentSessionID,
               let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
 
-        gitChangeMonitor = GitChangeMonitor(root: project.folderURL) { [weak self] reading in
-            self?.gitStatusOverlay.update(with: reading)
+        delegate?.terminalContainer(self, gitStatusLoadingDidChange: true, for: sessionID)
+
+        gitChangeMonitor = GitChangeMonitor(
+            root: project.folderURL,
+            onChange: { [weak self] reading in
+                guard let self, self.currentSessionID == sessionID else { return }
+                self.gitStatusOverlay.update(with: reading)
+            },
+            onInitialReadComplete: { [weak self] in
+                guard let self, self.currentSessionID == sessionID else { return }
+                self.delegate?.terminalContainer(
+                    self,
+                    gitStatusLoadingDidChange: false,
+                    for: sessionID
+                )
+            }
+        )
+
+        guard gitChangeMonitor != nil else {
+            delegate?.terminalContainer(
+                self,
+                gitStatusLoadingDidChange: false,
+                for: sessionID
+            )
+            return
         }
         gitChangeMonitor?.start()
     }
@@ -604,7 +650,7 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
     func agentSession(_ controller: AgentSessionViewController, titleChangedTo title: String) {
         // Agents report progress through the terminal title, so this drives the sidebar
         // name as well as the window subtitle.
-        ProjectStore.shared.updateTerminalTitle(title, for: controller.sessionID)
+        ProjectStore.shared.updateAgentTitle(title, for: controller.sessionID)
 
         delegate?.terminalContainer(self, sessionTitleChanged: title, for: controller.sessionID)
     }
@@ -653,6 +699,11 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     func terminalContainer(
         _ container: TerminalContainerViewController,
         sessionStateDidChange sessionID: SessionID
+    )
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        gitStatusLoadingDidChange isLoading: Bool,
+        for sessionID: SessionID
     )
     /// The floating git status card was clicked; the window opens the review tab.
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController)

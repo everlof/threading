@@ -47,6 +47,13 @@ final class ProjectSidebarViewController: NSViewController {
     /// Suppresses the selection delegate callback during programmatic selection.
     private var suppressSelectionCallback = false
 
+    /// The selected session whose checkout chrome is still resolving. Kept at controller level
+    /// so a reused row gets the same state when it scrolls out and back into view.
+    private var loadingSessionID: SessionID?
+
+    /// Invalidates a deferred presentation when the user makes another selection first.
+    private var selectionRequestGeneration = 0
+
     /// The session a hover-menu action applies to, set when the menu is opened. Read by the
     /// row-action handlers, which live in `ProjectSidebarSessionActions.swift`.
     var actionSessionID: SessionID?
@@ -143,12 +150,12 @@ private extension ProjectSidebarViewController {
     /// ways to add one. Hidden the moment the list has content.
     private func setupEmptyState() {
         let title = NSTextField(labelWithString: SidebarStrings.emptyTitle)
-        title.font = .systemFont(ofSize: SidebarDefaults.emptyTitleFontSize, weight: .semibold)
+        title.font = Design.Typography.emphasizedBody()
         title.textColor = Design.Text.secondary
         title.alignment = .center
 
         let subtitle = NSTextField(wrappingLabelWithString: SidebarStrings.emptySubtitle)
-        subtitle.font = .systemFont(ofSize: SidebarDefaults.emptySubtitleFontSize)
+        subtitle.font = Design.Typography.detail()
         subtitle.textColor = Design.Text.tertiary
         subtitle.alignment = .center
 
@@ -185,7 +192,7 @@ private extension ProjectSidebarViewController {
         addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         addButton.isBordered = false
-        addButton.font = .systemFont(ofSize: SidebarRowDefaults.sessionFontSize)
+        addButton.font = Design.Typography.controlRegular()
         addButton.target = self
         addButton.action = #selector(addProjectClicked)
         addButton.translatesAutoresizingMaskIntoConstraints = false
@@ -452,6 +459,27 @@ extension ProjectSidebarViewController {
         outlineView.reloadData(forRowIndexes: allRows, columnIndexes: allColumns)
     }
 
+    /// Shows or clears the selected row's activation spinner.
+    ///
+    /// Only one session can be presented in the pane, so beginning a new load also clears the
+    /// previous row. Refreshing just those rows avoids rebuilding the complete outline during
+    /// navigation.
+    func setSessionLoading(_ isLoading: Bool, for sessionID: SessionID) {
+        let previous = loadingSessionID
+
+        if isLoading {
+            loadingSessionID = sessionID
+        } else {
+            guard loadingSessionID == sessionID else { return }
+            loadingSessionID = nil
+        }
+
+        let affected = Set([previous, loadingSessionID].compactMap { $0 })
+        for affectedSessionID in affected {
+            refreshRow(sessionID: affectedSessionID)
+        }
+    }
+
     /// Selects a project row, which is what puts its composer on screen.
     ///
     /// Starting a session goes through here rather than creating one outright: the composer
@@ -470,6 +498,7 @@ extension ProjectSidebarViewController {
         outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         suppressSelectionCallback = false
 
+        cancelPendingSessionPresentation()
         ProjectStore.shared.selectedSessionID = nil
         delegate?.projectSidebar(self, didSelectProject: projectID)
     }
@@ -504,8 +533,43 @@ extension ProjectSidebarViewController {
 
         guard notifyDelegate else { return }
 
+        requestSessionPresentation(sessionID)
+    }
+
+    /// Clears the transient page selection without stopping the session behind it.
+    ///
+    /// The active-page tab uses this for its close button: closing a view is not deleting a
+    /// persisted session and is not stopping an agent that may still be working in the
+    /// background. Selecting the row again reopens the same page.
+    func clearSelection() {
+        suppressSelectionCallback = true
+        outlineView.deselectAll(nil)
+        suppressSelectionCallback = false
+        cancelPendingSessionPresentation()
+        ProjectStore.shared.selectedSessionID = nil
+    }
+
+    /// Returns to the event loop before constructing or swapping the session surface. That one
+    /// turn lets AppKit paint the selection and start the layer-backed spinner immediately.
+    private func requestSessionPresentation(_ sessionID: SessionID) {
         ProjectStore.shared.selectedSessionID = sessionID
-        delegate?.projectSidebar(self, didSelectSession: sessionID)
+        setSessionLoading(true, for: sessionID)
+
+        selectionRequestGeneration += 1
+        let generation = selectionRequestGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.selectionRequestGeneration == generation,
+                  self.selectedNode()?.sessionID == sessionID else { return }
+            self.delegate?.projectSidebar(self, didSelectSession: sessionID)
+        }
+    }
+
+    private func cancelPendingSessionPresentation() {
+        selectionRequestGeneration += 1
+        if let loadingSessionID {
+            setSessionLoading(false, for: loadingSessionID)
+        }
     }
 
     /// Swaps the sidebar between the project list and the settings section list, so opening
@@ -938,7 +1002,8 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
             cell.configure(
                 with: session,
-                activity: AgentRuntime.shared.activity(sessionID: sessionNode.sessionID)
+                activity: AgentRuntime.shared.activity(sessionID: sessionNode.sessionID),
+                isLoading: loadingSessionID == sessionNode.sessionID
             )
             cell.onAction = { [weak self] sessionID, anchor in
                 self?.showRowActions(for: sessionID, from: anchor)
@@ -989,12 +1054,13 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         let item = outlineView.item(atRow: outlineView.selectedRow)
 
         if let node = item as? SessionNode {
-            ProjectStore.shared.selectedSessionID = node.sessionID
-            delegate?.projectSidebar(self, didSelectSession: node.sessionID)
+            requestSessionPresentation(node.sessionID)
             return
         }
 
         if let node = item as? ProjectNode {
+            cancelPendingSessionPresentation()
+            ProjectStore.shared.selectedSessionID = nil
             delegate?.projectSidebar(self, didSelectProject: node.projectID)
         }
     }
@@ -1062,11 +1128,13 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             // The heading offers the display option that created it, and nothing else — it
             // is a grouping, not a place.
             menu.addItem(makeBranchGroupingItem())
-        } else if let node = item as? SessionNode {
-            menu.addItem(withTitle: "Rename Session…", action: #selector(renameClicked), keyEquivalent: "")
-            menu.addItem(makeSessionThemeItem(for: node.sessionID))
-            menu.addItem(.separator())
-            menu.addItem(withTitle: "Delete Session", action: #selector(removeClicked), keyEquivalent: "")
+        } else if let node = item as? SessionNode,
+                  let session = ProjectStore.shared.session(withID: node.sessionID) {
+            // The right-click menu offers exactly what the row's `⋯` button does, built from
+            // the one place both share. `actionSessionID` is what every handler reads, set as
+            // the menu opens.
+            actionSessionID = node.sessionID
+            populateSessionActions(menu, for: session)
         }
 
         for menuItem in menu.items {

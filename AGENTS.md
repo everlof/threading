@@ -1609,6 +1609,17 @@ session costs. "Default model" survives only where the account states nothing at
 Preferences follow the same boundary as every other app-owned surface. The System theme
 preserves the native palette; styled themes must not stop at settings controls.
 
+## Extension Authoring
+
+Safe extensions are machine-authored, out-of-process executables built against the
+Foundation-only `SkalmanExtensionKit`. Before creating or changing one, read
+`docs/extensions/AGENT_AUTHORING.md` completely and use
+`SkalmanExtensionKit/Examples/HelloStatusExtension` as the source template. Do not infer the
+extension API from application internals, remove `SkalmanExtensionPolicyPlugin`, or import
+AppKit/SwiftUI in a safe extension. If the semantic UI model cannot express a requested
+interface, report the missing node as an SDK requirement rather than bypassing the host
+renderer.
+
 ## Code Style Guidelines
 
 ### Constants & Configuration

@@ -24,10 +24,7 @@ final class UsageBarRow: NSView {
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let valueLabel = NSTextField(labelWithString: value)
-        valueLabel.font = .monospacedDigitSystemFont(
-            ofSize: UsageBarRowDefaults.valueFontSize,
-            weight: .regular
-        )
+        valueLabel.font = Design.Typography.numericControl()
         valueLabel.textColor = Design.Text.secondary
         valueLabel.alignment = .right
         valueLabel.setContentHuggingPriority(.required, for: .horizontal)

@@ -72,4 +72,18 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(body?.arrangedSubviews.count, 0)
         XCTAssertEqual(body?.isHidden, true)
     }
+
+    func testLargeComparisonStartsAsAFileIndex() {
+        let file = GitDiffParser.files(fromUnifiedDiff: fixture)[0]
+        let manyFiles = Array(
+            repeating: file,
+            count: GitReviewDefaults.largeDiffFileThreshold + 1
+        )
+
+        XCTAssertEqual(GitReviewViewController.initialExpandBudget(for: manyFiles), 0)
+        XCTAssertEqual(
+            GitReviewViewController.initialExpandBudget(for: [file]),
+            GitReviewDefaults.autoExpandTotalLineLimit
+        )
+    }
 }

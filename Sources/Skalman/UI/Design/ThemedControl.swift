@@ -41,11 +41,72 @@ class ThemedControl: NSControl, ThemedComponent {
     /// needs the extra pass AppKit would otherwise take.
     override var wantsUpdateLayer: Bool { false }
 
+    /// Keyboard access is part of the base contract, not something each drawn control may
+    /// remember independently. A disabled control leaves the key-view loop just like AppKit's.
+    override var acceptsFirstResponder: Bool { isEnabled }
+
+    var hasKeyboardFocus: Bool {
+        window?.firstResponder === self
+    }
+
+    override var isEnabled: Bool {
+        didSet {
+            if !isEnabled, hasKeyboardFocus {
+                window?.makeFirstResponder(nil)
+            }
+            needsDisplay = true
+        }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { needsDisplay = true }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { needsDisplay = true }
+        return resigned
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isEnabled else {
+            super.keyDown(with: event)
+            return
+        }
+
+        switch event.charactersIgnoringModifiers {
+        case " ", "\r":
+            if !performPrimaryAction() {
+                super.keyDown(with: event)
+            }
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    /// Subclasses route keyboard activation through the same semantic action as pointer and
+    /// accessibility activation. Returning false lets AppKit continue handling the key.
+    func performPrimaryAction() -> Bool {
+        guard action != nil else { return false }
+        sendAction(action, to: target)
+        return true
+    }
+
+    func drawKeyboardFocus(around path: NSBezierPath, color: NSColor = Design.Surface.accent) {
+        guard hasKeyboardFocus else { return }
+        color.setStroke()
+        path.lineWidth = Design.Accessibility.focusRingWidth
+        path.stroke()
+    }
+
     /// A stock control is an accessibility element because its *cell* is; a control that draws
     /// itself has no cell, so it has to say so. Without this a themed control is invisible to
     /// VoiceOver and to UI scripting alike — which is also how this was noticed, a settings page
     /// reporting no pop-up buttons on a page that visibly has one.
     override func isAccessibilityElement() -> Bool { true }
+    override func isAccessibilityEnabled() -> Bool { isEnabled }
 }
 
 // MARK: - Surface
@@ -100,7 +161,12 @@ final class ThemeRedraw {
     init(_ view: NSView) {
         for observe in [
             { self.appEvents.observe(AppThemeDidChange.self) { [weak view] _ in view?.needsDisplay = true } },
-            { self.appEvents.observe(ProfileDidChange.self) { [weak view] _ in view?.needsDisplay = true } }
+            { self.appEvents.observe(ProfileDidChange.self) { [weak view] _ in view?.needsDisplay = true } },
+            {
+                self.appEvents.observe(AccessibilityDisplayOptionsDidChange.self) {
+                    [weak view] _ in view?.needsDisplay = true
+                }
+            }
         ] { observe() }
     }
 }

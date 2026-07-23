@@ -67,4 +67,29 @@ final class WorkingWordsTests: XCTestCase {
 
         XCTAssertTrue(WorkingWords.all.contains(cycle.next()))
     }
+
+    // MARK: - Turn Receipt
+
+    func testWorkingStatusTicksWithEffort() {
+        XCTAssertEqual(
+            TurnStatusText.working(word: "Pondering…", elapsed: 89.9, effort: "xhigh"),
+            "Pondering…  (1m 29s · xhigh effort)"
+        )
+    }
+
+    func testFinishedStatusKeepsTheLastRoundTripVisible() {
+        let metrics = TurnMetrics(duration: 89.9, outputTokens: 3_149, effort: "xhigh")
+
+        XCTAssertEqual(
+            TurnStatusText.ready(model: nil, lastTurn: metrics),
+            "Ready · last turn 1m 29s · ↓ 3.1k tokens · xhigh effort"
+        )
+    }
+
+    func testReceiptFormattingScalesWithoutFalsePrecision() {
+        XCTAssertEqual(TurnStatusText.duration(7_445), "2h 4m 5s")
+        XCTAssertEqual(TurnStatusText.tokenCount(999), "999")
+        XCTAssertEqual(TurnStatusText.tokenCount(12_000), "12k")
+        XCTAssertEqual(TurnStatusText.tokenCount(1_250_000), "1.3m")
+    }
 }

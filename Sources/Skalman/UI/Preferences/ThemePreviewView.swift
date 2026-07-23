@@ -72,7 +72,7 @@ final class ThemePreviewView: NSView {
     // MARK: - Sample
 
     private func sample(for theme: TerminalTheme) -> NSAttributedString {
-        let font = NSFont.monospacedSystemFont(ofSize: Layout.fontSize, weight: .regular)
+        let font = Design.Typography.previewCode()
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = Layout.lineSpacing
 

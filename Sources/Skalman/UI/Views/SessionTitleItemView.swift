@@ -1,6 +1,6 @@
 import AppKit
 
-/// Toolbar content naming the project and session currently shown.
+/// The active sidebar destination rendered as a compact toolbar tab.
 ///
 /// Lives in the window's toolbar rather than inside the terminal pane, so it stays aligned
 /// with the traffic lights whether the sidebar is open or collapsed.
@@ -9,10 +9,19 @@ final class SessionTitleItemView: BackdropOverlay {
     // MARK: - Properties
 
     private let iconView = NSImageView()
-    private let projectLabel = NSTextField(labelWithString: "")
-    private let separatorLabel = NSTextField(labelWithString: SessionTitleDefaults.separator)
-    private let sessionLabel = NSTextField(labelWithString: "")
+    private let titleLabel = MorphingTitleLabel()
+    private let closeButton = ToolbarButtonView(
+        symbolName: "xmark",
+        accessibility: "Close active page",
+        buttonSize: NSSize(
+            width: SessionTitleDefaults.closeButtonSize,
+            height: SessionTitleDefaults.closeButtonSize
+        )
+    )
+    private let contentStack = NSStackView()
+    private var representedSessionID: SessionID?
 
+    var onClose: (() -> Void)?
 
     // MARK: - Initialization
 
@@ -29,34 +38,41 @@ final class SessionTitleItemView: BackdropOverlay {
     // MARK: - Setup
 
     private func setupViews() {
+        isHidden = true
+
         iconView.image = NSImage(
-            systemSymbolName: SessionTitleDefaults.symbolName,
+            systemSymbolName: SessionTitleDefaults.projectSymbolName,
             accessibilityDescription: nil
         )
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
-        projectLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize, weight: .semibold)
-        projectLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.font = Design.Typography.emphasizedBody()
+        titleLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
 
-        separatorLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize)
+        closeButton.toolTip = "Close Active Page"
+        closeButton.onPress = { [weak self] in self?.onClose?() }
 
-        sessionLabel.font = .systemFont(ofSize: SessionTitleDefaults.fontSize)
-        sessionLabel.lineBreakMode = .byTruncatingTail
+        [iconView, titleLabel, closeButton].forEach(
+            contentStack.addArrangedSubview
+        )
+        contentStack.orientation = .horizontal
+        contentStack.alignment = .centerY
+        contentStack.spacing = SessionTitleDefaults.spacing
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
 
-
-
-        let stack = NSStackView(views: [iconView, projectLabel, separatorLabel, sessionLabel])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = SessionTitleDefaults.spacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(stack)
+        addSubview(contentStack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: SessionTitleDefaults.height),
+            contentStack.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: SessionTitleDefaults.horizontalInset
+            ),
+            contentStack.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -SessionTitleDefaults.horizontalInset
+            ),
+            contentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: SessionTitleDefaults.iconSize),
             iconView.heightAnchor.constraint(equalToConstant: SessionTitleDefaults.iconSize)
         ])
@@ -68,43 +84,92 @@ final class SessionTitleItemView: BackdropOverlay {
     /// `BackdropOverlay`.
     override func applyInk(_ ink: Design.Ink) {
         iconView.contentTintColor = ink.secondary
-        projectLabel.textColor = ink.label
-        separatorLabel.textColor = ink.tertiary
-        sessionLabel.textColor = ink.secondary
+        titleLabel.textColor = ink.label
+        needsDisplay = true
+    }
+
+    /// The selected sidebar destination is the toolbar's active page tab.
+    override func draw(_ dirtyRect: NSRect) {
+        ThemedSurface.draw(
+            bounds,
+            fill: ink.surface,
+            border: nil,
+            radius: Design.Radius.pill(height: bounds.height)
+        )
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let titleWidth = ceil(
+            titleLabel.stringValue.size(
+                withAttributes: [.font: titleLabel.font as Any]
+            ).width
+        )
+        let closeWidth = closeButton.isHidden
+            ? 0
+            : SessionTitleDefaults.spacing + SessionTitleDefaults.closeButtonSize
+        let width = SessionTitleDefaults.horizontalInset * 2
+            + SessionTitleDefaults.iconSize
+            + SessionTitleDefaults.spacing
+            + titleWidth
+            + closeWidth
+        return NSSize(
+            width: min(
+                max(width, SessionTitleDefaults.minWidth),
+                SessionTitleDefaults.maxWidth
+            ),
+            height: SessionTitleDefaults.height
+        )
     }
 
     // MARK: - Public Methods
 
-    /// Shows the project and session names, or clears them when nothing is selected.
+    /// Shows a selected session, or a non-closable project label when used outside page navigation.
     func configure(project: Project?, session: AgentSession?) {
         guard let project else {
-            projectLabel.stringValue = ""
-            sessionLabel.stringValue = ""
-            separatorLabel.isHidden = true
+            isHidden = true
+            titleLabel.setStringValue("", animated: false)
+            representedSessionID = nil
             iconView.isHidden = true
+            closeButton.isHidden = true
+            invalidateIntrinsicContentSize()
             return
         }
 
+        isHidden = false
         iconView.isHidden = false
-        projectLabel.stringValue = project.name
 
         if let session {
-            sessionLabel.stringValue = session.displayTitle
-            sessionLabel.isHidden = false
-            separatorLabel.isHidden = false
+            iconView.image = session.kind.icon
+            let isRename = representedSessionID == session.id
+            titleLabel.setStringValue(session.displayTitle, animated: isRename)
+            representedSessionID = session.id
+            closeButton.isHidden = false
+            toolTip = "\(project.name) — \(session.displayTitle)"
         } else {
-            sessionLabel.isHidden = true
-            separatorLabel.isHidden = true
+            iconView.image = NSImage(
+                systemSymbolName: SessionTitleDefaults.projectSymbolName,
+                accessibilityDescription: nil
+            )
+            titleLabel.setStringValue(project.name, animated: false)
+            representedSessionID = nil
+            closeButton.isHidden = true
+            toolTip = project.name
         }
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
     }
 
-    /// Names a pane not tied to a project or session, such as Settings.
-    func configure(title: String) {
-        iconView.isHidden = true
-        projectLabel.stringValue = title
-        sessionLabel.stringValue = ""
-        sessionLabel.isHidden = true
-        separatorLabel.isHidden = true
+    /// Names a pane not tied to a project or session, such as a Settings page.
+    func configure(title: String, symbolName: String, showsClose: Bool) {
+        isHidden = false
+        iconView.isHidden = false
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        titleLabel.setStringValue(title, animated: false)
+        representedSessionID = nil
+        closeButton.isHidden = !showsClose
+        toolTip = title
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
     }
 }
 
@@ -113,9 +178,11 @@ final class SessionTitleItemView: BackdropOverlay {
 enum SessionTitleDefaults {
     static let fontSize: CGFloat = 13
     static let iconSize: CGFloat = 14
+    static let height: CGFloat = 28
+    static let horizontalInset: CGFloat = 12
     static let spacing: CGFloat = 6
+    static let closeButtonSize: CGFloat = 18
     static let minWidth: CGFloat = 120
-    static let maxWidth: CGFloat = 520
-    static let symbolName = "folder"
-    static let separator = "—"
+    static let maxWidth: CGFloat = 360
+    static let projectSymbolName = "folder"
 }

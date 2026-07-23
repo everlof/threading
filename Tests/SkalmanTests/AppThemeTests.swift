@@ -100,6 +100,25 @@ final class AppThemeTests: XCTestCase {
         XCTAssertNil(AppTheme.system.material.glow)
     }
 
+    /// A glow is a layer shadow, and a shadow spills past the panel that casts it — so any
+    /// clipping host budgets `Design.Size.glowGutter` around glowing panels. The gutter is a
+    /// stated constant rather than a derivation, because layout must not move when a theme
+    /// does; this is what makes shipping a wider glow a loud decision instead of a silent
+    /// clip. The blur's visible extent is about twice its radius.
+    func testGlowGutterCoversEveryStockGlow() {
+        for theme in AppThemeLibrary.stock {
+            guard let glow = theme.material.glow else { continue }
+            XCTAssertGreaterThanOrEqual(
+                Design.Size.glowGutter, glow.radius * 2,
+                "\(theme.name)'s halo spills past the gutter clipping hosts hold clear for it"
+            )
+        }
+
+        // The settings column's top and bottom padding double as the first and last card's
+        // gutter (`SettingsUI.page`), so the page padding must cover the spill too.
+        XCTAssertGreaterThanOrEqual(Design.Spacing.large, Design.Size.glowGutter)
+    }
+
     /// The accent has to be *stated* for the surfaces that carry a style's identity — the
     /// selected row, the chips, the focus. Derived-from-label greys are what made the first
     /// pass read as the same app in a different tint.
@@ -316,6 +335,38 @@ final class AppThemeTests: XCTestCase {
 
         XCTAssertEqual(decoded.roles[.ground]?.hexString, "#101010")
         XCTAssertEqual(decoded.roles.count, 2)
+    }
+
+    // MARK: - Typography
+
+    func testSemanticTypographyRolesKeepAConsistentHierarchy() {
+        XCTAssertGreaterThan(
+            Design.Typography.heading().pointSize,
+            Design.Typography.placeholderTitle().pointSize
+        )
+        XCTAssertGreaterThan(
+            Design.Typography.placeholderTitle().pointSize,
+            Design.Typography.body().pointSize
+        )
+        XCTAssertGreaterThan(
+            Design.Typography.body().pointSize,
+            Design.Typography.detail().pointSize
+        )
+        XCTAssertEqual(
+            Design.Typography.body().pointSize,
+            Design.Typography.emphasizedBody().pointSize,
+            "emphasis changed size instead of weight"
+        )
+    }
+
+    func testCodeAndNumericRolesUseTheExpectedFixedWidthFamilies() {
+        XCTAssertTrue(Design.Typography.code().fontDescriptor.symbolicTraits.contains(.monoSpace))
+        XCTAssertTrue(Design.Typography.inlineCode().fontDescriptor.symbolicTraits.contains(.monoSpace))
+
+        let numeric = Design.Typography.numericBody()
+        let one = ("1" as NSString).size(withAttributes: [.font: numeric]).width
+        let eight = ("8" as NSString).size(withAttributes: [.font: numeric]).width
+        XCTAssertEqual(one, eight, accuracy: 0.001)
     }
 }
 

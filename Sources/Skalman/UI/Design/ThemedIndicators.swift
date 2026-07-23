@@ -21,6 +21,7 @@ final class SeparatorView: NSView, ThemedComponent {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         themeRedraw = ThemeRedraw(self)
+        setAccessibilityElement(false)
     }
 
     @available(*, unavailable)
@@ -108,6 +109,12 @@ final class ThemedSpinner: NSView, ThemedComponent {
         NSSize(width: Layout.size, height: Layout.size)
     }
 
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .progressIndicator }
+    override func accessibilityLabel() -> String? {
+        super.accessibilityLabel() ?? "Working"
+    }
+
     override func layout() {
         super.layout()
         let inset = Layout.lineWidth
@@ -182,7 +189,12 @@ final class ThemedProgressBar: NSView, ThemedComponent {
     /// 0…1. Clamped, because a caller reading a fraction off a web view is reading someone
     /// else's number.
     var progress: Double = 0 {
-        didSet { needsDisplay = true }
+        didSet {
+            needsDisplay = true
+            if progress != oldValue {
+                NSAccessibility.post(element: self, notification: .valueChanged)
+            }
+        }
     }
 
     override init(frame frameRect: NSRect) {
@@ -198,6 +210,13 @@ final class ThemedProgressBar: NSView, ThemedComponent {
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: Layout.height)
     }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .progressIndicator }
+    override func accessibilityLabel() -> String? {
+        super.accessibilityLabel() ?? "Progress"
+    }
+    override func accessibilityValue() -> Any? { min(max(progress, 0), 1) }
 
     override func draw(_ dirtyRect: NSRect) {
         Design.Surface.controlResting.setFill()

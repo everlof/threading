@@ -26,7 +26,7 @@ class ThemedTableView: NSTableView, ThemedComponent {
 
 /// `ThemedTableView`'s rule again, one class up: `NSOutlineView` inherits `NSTableView`,
 /// so the two-line duplication here is what lets both keep their real superclass.
-class ThemedOutlineView: NSOutlineView, ThemedComponent {
+class ThemedOutlineView: NSOutlineView, ThemedComponent, SystemChromeBoundary {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -36,6 +36,14 @@ class ThemedOutlineView: NSOutlineView, ThemedComponent {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// Disclosure triangles are controls AppKit inserts into outline rows after the data source
+    /// returns them. Permit only that identified system control; an ordinary button anywhere in
+    /// a cell remains a runtime violation.
+    func permitsSystemChrome(_ view: NSView) -> Bool {
+        guard let button = view as? NSButton else { return false }
+        return button.identifier == NSOutlineView.disclosureButtonIdentifier
     }
 }
 

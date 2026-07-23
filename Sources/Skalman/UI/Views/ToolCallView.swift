@@ -120,7 +120,7 @@ final class ToolCallView: NSView {
     }
 
     private func monospace(weight: NSFont.Weight) -> NSFont {
-        .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: weight)
+        Design.Typography.code(weight: weight)
     }
 
     private var headerBottom: NSLayoutConstraint!

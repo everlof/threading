@@ -64,6 +64,96 @@ final class AppThemeRenderTests: XCTestCase {
         XCTAssertEqual(written.count, AppThemeLibrary.stock.count)
     }
 
+    /// The dropdown at both of its densities — a plain choice list (check column only, with a
+    /// separator and an action) and rows carrying images and subtitles — over light and dark.
+    /// The menu is an overlay drawn entirely by the app, so nothing but a render can say
+    /// whether its spacing reads as a menu or as a smear.
+    func testRendersTheDropdownMenu() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let plain: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(title: "SONDA-386-387-source-governance — this checkout", isSelected: true)),
+            .item(ThemedMenuItem(title: "Codex")),
+            .separator,
+            .item(ThemedMenuItem(title: "New Worktree…"))
+        ]
+        let icon = NSImage(
+            systemSymbolName: "person.crop.circle",
+            accessibilityDescription: nil
+        )
+        let detailed: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: "Everlof", subtitle: "5h 30% · 7d 10%", image: icon, isSelected: true
+            )),
+            .item(ThemedMenuItem(title: "Daniel Block", subtitle: "5h — · 7d 25%", image: icon)),
+            .item(ThemedMenuItem(title: "Lundborg Viktor", subtitle: "5h 21% · 7d 31%", image: icon))
+        ]
+
+        var written = 0
+        for (name, entries) in [("plain", plain), ("detailed", detailed)] {
+            for (mode, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+                var data: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    data = menuImage(entries: entries, appearance: appearance)
+                }
+                let url = directory.appendingPathComponent("menu-\(name)-\(mode).png")
+                try XCTUnwrap(data, "Failed to render \(name) \(mode)").write(to: url)
+                written += 1
+            }
+        }
+        print("Rendered \(written) menus to \(directory.path)")
+        XCTAssertEqual(written, 4)
+    }
+
+    private func menuImage(entries: [ThemedMenuEntry], appearance: NSAppearance) -> Data? {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+        root.appearance = appearance
+        let source = NSView(frame: NSRect(x: 24, y: 250, width: 160, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.contentView = root
+        defer { window.close() }
+
+        let selected = entries.firstIndex {
+            guard case .item(let item) = $0 else { return false }
+            return item.isSelected
+        }
+        let token = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: source.bounds.width),
+            from: source,
+            selectedEntryIndex: selected,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        )
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        // The overlay is laid out by frames during the window's display cycle, which an
+        // offscreen render never enters — so the pass is forced.
+        markNeedingLayout(root)
+        root.layoutSubtreeIfNeeded()
+
+        guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return nil }
+        root.wantsLayer = true
+        root.layer?.backgroundColor = AppThemePalette.current.resolved(.ground).cgColor
+        root.cacheDisplay(in: root.bounds, to: rep)
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    private func markNeedingLayout(_ view: NSView) {
+        view.needsLayout = true
+        for subview in view.subviews { markNeedingLayout(subview) }
+    }
+
     // MARK: - Building
 
     private func rows() -> [ConversationTimeline.Row] {

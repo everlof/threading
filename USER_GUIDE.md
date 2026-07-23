@@ -179,6 +179,14 @@ The chips choose the agent, account, model and, in a git repository, **which che
 in**. Beneath them, the chosen account's rate limits are drawn in full — see
 [Usage when picking an account](#usage-when-picking-an-account).
 
+Every chip's dropdown is Skalman's own menu, and it tracks like a menu should: click to open
+and browse, or **press, drag onto a row, and release** to choose in one motion. Arrow keys
+move the highlight, **Return** chooses, **Escape** lets the menu go. **Typing while it is
+open filters it** — what you type echoes across the menu's top, rows that match keep their
+ink while the rest dim, and the highlight lands on the first match, so a long account or
+theme list is a few letters and Return. Escape backs out one layer at a time: the first
+press clears a half-typed filter, only the second closes the menu.
+
 The model chip names the model the session will **actually run on** — `Fable 5 · 1M`, not
 "Default" — read from whatever the selected account is configured to use. Its menu marks that
 one *(account default)*, so choosing it explicitly and leaving it alone are the same thing. It
@@ -297,12 +305,18 @@ Two kinds of transcript are deliberately left out:
 - Right-click > **Delete Session**: removes it from the sidebar entirely
 
 ### Names
-By default a session is named after its terminal title, which agents update as they work —
-so the sidebar reflects what each session is currently doing.
+A session is named after its conversation, never after its agent or account — the row's icon
+and account chip already say which agent and login it runs on.
 
-Renaming a session pins your own name instead, and it stops following the terminal. Clear the
-name to go back to following it. Turn the behaviour off entirely under
-**Settings > General > Name sessions after the terminal title**.
+By default the sidebar follows the agent's own name for the conversation, which it updates as
+the work develops: the terminal title for terminal sessions, and the title Claude records in
+its transcript for natively rendered ones (including a `/rename` typed into the CLI). Until
+the agent has named it, a session is named after its first prompt.
+
+Renaming a session in Skalman pins your own name instead, and it stops following the agent.
+Clear the name to go back to following it. Turn the follow behaviour off entirely under
+**Settings > General > Name sessions after the agent's own title** — sessions then keep their
+first-prompt names.
 
 Rename via right-click in the sidebar, or right-click inside the terminal and choose
 **Rename Session…**.
@@ -607,7 +621,7 @@ Ask for something visual — "show me that screenshot", "chart the bundle sizes"
 as a table" — and the panel opens beside the terminal. Close it with the **✕** in its header;
 it reopens the next time the agent displays something. It can also be opened by hand — the
 panel toggle at the toolbar's right edge, or **View ▸ Display Panel** — so its tabs (the
-browser, Git Review) are reachable without an agent putting content there first.
+browser, Git Review, Session Info) are reachable without an agent putting content there first.
 
 ### Toolbar controls
 
@@ -752,6 +766,44 @@ it — which is the one case that can report "the index is in use".
 - **Esc**: close find bar
 - Results counter shows "N of M"
 
+## Inspect Mode
+
+For pointing at the interface itself — when you want to tell an agent (or a person) *which
+element* or *which spot* you mean, with a report you can paste straight into a conversation.
+
+Two modes, both under the View menu:
+
+- **Inspect Element** (**Cmd+Option+I**): a crosshair appears and the most specific view
+  under the pointer is outlined live, with its class name and size in a badge. Click to
+  capture it.
+- **Inspect Geometry** (**Cmd+Option+Shift+I**): freeflow — nothing is detected. Guides
+  follow the pointer across the window; a **click** records the exact spot, a **drag**
+  rubber-bands and records the rectangle it drew.
+
+**Esc** backs out of either. Invoking one command while the other is active switches mode in
+place; invoking the same one again cancels. A capture ends the mode.
+
+Every capture opens a report sheet holding a screenshot of the whole window with the capture
+marked, and the report text:
+
+- Element reports name the view's class, its frame, the view chain above it, and the view
+  controllers responsible — the names a conversation about this codebase already uses.
+- Point and region reports give the geometry twice: in window coordinates (bottom-left
+  origin, what AppKit code speaks) and from the top-left (how anyone reading the screenshot
+  counts).
+
+The sheet also holds a **note field**: whatever you type there leads the copied text, so
+"make this padding smaller" arrives above the evidence for it. Return in the field copies.
+
+**Copy Report** puts the text on the clipboard as markdown. The screenshot is referenced by
+its file path (saved under the temporary directory), because a path is the one form of an
+image the agent CLIs can act on — so the pasted report lets an agent read the hierarchy *and*
+open the picture.
+
+The screenshot is taken from Skalman's own view tree, so it needs no Screen Recording
+permission and can never include another app's window. The one honest gap: content another
+process draws — a web page in the display panel — may appear blank in it.
+
 ## Appearance
 
 ### Sidebar
@@ -807,7 +859,7 @@ Open with **Cmd+,**.
 
 ### General
 - **New sessions use** — the agent the composer opens on; any other can be picked there
-- **Name sessions after the terminal title** — see [Names](#names)
+- **Name sessions after the agent's own title** — see [Names](#names)
 - **Group sessions by branch** — see [Grouping sessions by branch](#grouping-sessions-by-branch)
 - **Discover project icons** — see [Project icons](#project-icons)
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
@@ -816,6 +868,16 @@ Open with **Cmd+,**.
 - **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
 - **Skip Codex hook review** — see [Codex hooks](#codex-hooks)
 - **Shell path** — used by the shell drawer (⌃`); agents always launch via your login shell
+
+### Motion
+
+- **Working indicator** defaults to **Random**, choosing a new orb for each turn without
+  immediately repeating the last one. Choose a named orb to use that animation every time.
+- **Chat name transition** defaults to **Shape Morph**. Every available transition can be
+  previewed on the page and used when the active chat is renamed.
+
+Animation timing is tuned by Skalman rather than exposed as another preference, and transitions
+honour macOS Reduce Motion.
 
 #### Codex hooks
 
@@ -1006,14 +1068,30 @@ recorded about it dying — is what a crash needs explaining.
 | Action | Shortcut |
 |--------|----------|
 | Toggle Sidebar | Cmd+Ctrl+S |
+| Terminal (display panel tab) | Cmd+T |
 | Browser | Cmd+Shift+B |
+| Files (display panel tab) | Cmd+P |
 | Git Review | Cmd+Shift+R |
+| Session Info | Cmd+Shift+I |
 | Shell drawer | Ctrl+` |
+| Inspect Element | Cmd+Option+I |
+| Inspect Geometry (freeflow) | Cmd+Option+Shift+I |
 | Bigger Font | Cmd++ |
 | Smaller Font | Cmd+- |
 | Full Screen | Cmd+Ctrl+F |
 | Minimize | Cmd+M |
 | Preferences | Cmd+, |
+
+### Changing shortcuts
+
+**Settings ▸ Keyboard** lists every command and the keys it answers to. Click a shortcut and
+press the combination you want; Escape cancels and Delete removes the shortcut entirely. A
+change takes effect immediately — the menu bar is updated in place rather than at next launch.
+
+Skalman's own commands can be rebound. The system ones (Quit, Cut, Copy, Paste, Full Screen and
+the like) are listed but fixed, so the page can answer "what already owns this key" without
+letting a rebinding leave you unable to quit or paste. A combination already in use is refused
+rather than taken from its current owner, and **Reset All** puts everything back.
 
 ## Data Storage
 

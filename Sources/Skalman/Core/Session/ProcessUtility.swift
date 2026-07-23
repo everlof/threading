@@ -16,6 +16,14 @@ struct ProcessResourceUsage {
     let memoryBytes: UInt64  // Physical memory footprint
 }
 
+/// The cheap half of `ProcessDetails`: what one pass over the process table can answer without
+/// a further syscall per process. Enough to reconstruct parentage and name a process.
+struct ProcessSummary {
+    let pid: pid_t
+    let parentPid: pid_t
+    let command: String
+}
+
 /// Utility for querying process information.
 enum ProcessUtility {
 
@@ -126,6 +134,41 @@ enum ProcessUtility {
         return children
     }
 
+    /// Every live process keyed by pid, with its parent and command, in a single pass.
+    ///
+    /// `getProcessChildren(forPid:)` walks the machine's whole process table to answer about one
+    /// parent, so building a tree with it costs that walk once per node. The info panel polls
+    /// while it is on screen, which turns that into a repeated cost for an answer one pass
+    /// already contains. Working directories are deliberately not read here: that is a second
+    /// syscall per process, and the panel needs the directory of the session, not of each child.
+    static func processTable() -> [pid_t: ProcessSummary] {
+        var allPids = [pid_t](repeating: 0, count: ProcessScan.maximumProcesses)
+        let bufferSize = Int32(allPids.count * MemoryLayout<pid_t>.size)
+        let count = proc_listallpids(&allPids, bufferSize)
+
+        guard count > 0 else { return [:] }
+
+        var table: [pid_t: ProcessSummary] = [:]
+        table.reserveCapacity(Int(count))
+
+        for index in 0..<Int(count) {
+            let pid = allPids[index]
+            guard pid > 0 else { continue }
+
+            var taskInfo = proc_bsdinfo()
+            let size = MemoryLayout<proc_bsdinfo>.size
+            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &taskInfo, Int32(size)) == size else { continue }
+
+            let command = withUnsafePointer(to: &taskInfo.pbi_comm) { ptr -> String in
+                ptr.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN)) { String(cString: $0) }
+            }
+
+            table[pid] = ProcessSummary(pid: pid, parentPid: pid_t(taskInfo.pbi_ppid), command: command)
+        }
+
+        return table
+    }
+
     /// Gets resource usage (CPU time, memory) for a process.
     static func getResourceUsage(forPid pid: pid_t) -> ProcessResourceUsage? {
         var usage = rusage_info_current()
@@ -136,10 +179,29 @@ enum ProcessUtility {
         guard result == 0 else { return nil }
 
         return ProcessResourceUsage(
-            cpuTime: usage.ri_user_time + usage.ri_system_time,
+            cpuTime: nanoseconds(fromMachTime: usage.ri_user_time + usage.ri_system_time),
             memoryBytes: usage.ri_phys_footprint
         )
     }
+
+    /// Converts `rusage_info`'s CPU times to nanoseconds.
+    ///
+    /// **They are mach time units, not nanoseconds**, which is easy to miss because on Intel the
+    /// timebase is 1/1 and the two are the same number. On Apple Silicon it is 125/3 — about
+    /// 41.7ns a tick — so reading the raw value as nanoseconds under-reports CPU by ~42×, and a
+    /// process saturating a core renders as a flat 2%. That reads as "idle", which is the one
+    /// answer a busy process must never give.
+    private static func nanoseconds(fromMachTime ticks: UInt64) -> UInt64 {
+        UInt64(Double(ticks) * Double(timebase.numer) / Double(timebase.denom))
+    }
+
+    private static let timebase: mach_timebase_info_data_t = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        // A zeroed timebase would divide by zero; the identity ratio is the safe reading, and
+        // is what Intel reports anyway.
+        return info.denom == 0 ? mach_timebase_info_data_t(numer: 1, denom: 1) : info
+    }()
 
     /// Checks if a process with the given PID exists.
     static func processExists(pid: pid_t) -> Bool {
@@ -147,5 +209,136 @@ enum ProcessUtility {
         let size = MemoryLayout<proc_bsdinfo>.size
         let result = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &taskInfo, Int32(size))
         return result == size
+    }
+
+    /// What the process calls itself — `argv[0]`'s last component, which is what `ps` reports.
+    ///
+    /// `proc_bsdinfo.pbi_comm` is the *executable file's* name, truncated to 16 characters, and
+    /// for a versioned install that is the version rather than the tool: Claude Code's binary
+    /// lives at `…/versions/2.1.218`, so the agent — the row this panel exists to show — renders
+    /// as "2.1.218", which names nothing a user recognises. `argv[0]` says "claude".
+    ///
+    /// Callers should cache the answer: a process cannot rename itself here, and this copies the
+    /// argument area out of the kernel, which is far more than a poll should repeat.
+    static func processName(forPid pid: pid_t) -> String? {
+        var argumentMaximum: Int32 = 0
+        var maximumSize = MemoryLayout<Int32>.size
+        var maximumMib: [Int32] = [CTL_KERN, KERN_ARGMAX]
+        guard sysctl(&maximumMib, 2, &argumentMaximum, &maximumSize, nil, 0) == 0,
+              argumentMaximum > 0 else { return nil }
+
+        var size = Int(argumentMaximum)
+        var buffer = [UInt8](repeating: 0, count: size)
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
+
+        // The region is `[argc][exec_path\0][\0 padding][argv[0]\0][argv[1]\0]…`, so reaching
+        // argv[0] means stepping over the executable path and the alignment nulls behind it.
+        let headerSize = MemoryLayout<Int32>.size
+        guard size > headerSize else { return nil }
+
+        var index = headerSize
+        while index < size, buffer[index] != 0 { index += 1 }
+        while index < size, buffer[index] == 0 { index += 1 }
+        guard index < size else { return nil }
+
+        let start = index
+        while index < size, buffer[index] != 0 { index += 1 }
+        guard index > start else { return nil }
+
+        let name = (String(decoding: buffer[start..<index], as: UTF8.self) as NSString).lastPathComponent
+        return name.isEmpty ? nil : name
+    }
+
+    // MARK: - Listening Sockets
+
+    /// Every TCP port the process is listening on.
+    ///
+    /// This is what `lsof -iTCP -sTCP:LISTEN` reports, asked of the kernel directly rather than
+    /// by spawning it: the panel re-reads while it is on screen, and a subprocess per refresh
+    /// per pid is a cost paid several times a second for an answer libproc already holds. It
+    /// also reads the *bind address*, which is the half of the answer a port number omits.
+    ///
+    /// No privilege is needed for the processes this is asked about — they are the app's own
+    /// descendants, running as the same user.
+    ///
+    /// The caller passes the command name because it has already read it while walking the
+    /// tree; looking it up again here would be a second `proc_pidinfo` per process per refresh.
+    static func listeningPorts(forPid pid: pid_t, command: String) -> [ListeningPort] {
+        let reported = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard reported > 0 else { return [] }
+
+        let stride = MemoryLayout<proc_fdinfo>.stride
+        let capacity = Int(reported) / stride + SocketScan.descriptorHeadroom
+        var descriptors = [proc_fdinfo](repeating: proc_fdinfo(), count: capacity)
+
+        let used = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, &descriptors, Int32(capacity * stride))
+        guard used > 0 else { return [] }
+
+        let count = min(Int(used) / stride, capacity)
+        var ports: [ListeningPort] = []
+
+        for index in 0..<count {
+            let descriptor = descriptors[index]
+            guard descriptor.proc_fdtype == UInt32(PROX_FDTYPE_SOCKET) else { continue }
+            guard let port = listeningPort(pid: pid, fd: descriptor.proc_fd, command: command) else { continue }
+            ports.append(port)
+        }
+
+        return ports
+    }
+
+    // MARK: - Private Methods
+
+    /// Reads one descriptor, keeping it only if it is a TCP socket in the listening state.
+    private static func listeningPort(pid: pid_t, fd: Int32, command: String) -> ListeningPort? {
+        var info = socket_fdinfo()
+        let size = Int32(MemoryLayout<socket_fdinfo>.size)
+        guard proc_pidfdinfo(pid, fd, PROC_PIDFDSOCKETINFO, &info, size) == size else { return nil }
+
+        // Only TCP has a listening state. A bound UDP socket is not a server waiting for
+        // connections, and showing it as one would claim something the panel cannot stand behind.
+        guard info.psi.soi_kind == SOCKINFO_TCP else { return nil }
+
+        let tcp = info.psi.soi_proto.pri_tcp
+        guard tcp.tcpsi_state == TSI_S_LISTEN else { return nil }
+
+        let socket = tcp.tcpsi_ini
+
+        // The local port rides in network byte order in the low half of an int.
+        let port = UInt16(bigEndian: UInt16(truncatingIfNeeded: socket.insi_lport))
+        guard port > 0 else { return nil }
+
+        let isIPv6 = (socket.insi_vflag & UInt8(INI_IPV6)) != 0
+        guard let address = localAddress(of: socket, isIPv6: isIPv6) else { return nil }
+
+        return ListeningPort(port: port, pid: pid, command: command, address: address, isIPv6: isIPv6)
+    }
+
+    /// Renders the socket's local bind address, from whichever half of the union its family names.
+    private static func localAddress(of socket: in_sockinfo, isIPv6: Bool) -> String? {
+        var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+        var local = socket.insi_laddr
+
+        let rendered: UnsafePointer<CChar>? = isIPv6
+            ? inet_ntop(AF_INET6, &local.ina_6, &buffer, socklen_t(INET6_ADDRSTRLEN))
+            : inet_ntop(AF_INET, &local.ina_46.i46a_addr4, &buffer, socklen_t(INET_ADDRSTRLEN))
+
+        guard rendered != nil else { return nil }
+        return String(cString: buffer)
+    }
+
+    // MARK: - Constants
+
+    private enum ProcessScan {
+        /// The pid buffer handed to `proc_listallpids`, matching what the older walks here use.
+        static let maximumProcesses = 4096
+    }
+
+    private enum SocketScan {
+        /// Extra room over the size libproc last reported. The process keeps running while it is
+        /// being asked, so a descriptor opened between the two calls would otherwise be cut off
+        /// the end of the answer.
+        static let descriptorHeadroom = 32
     }
 }

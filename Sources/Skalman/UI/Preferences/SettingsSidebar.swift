@@ -20,7 +20,7 @@ final class SettingsSidebar: NSView {
     /// the initial page without re-entrancy.
     var onSelect: ((Int) -> Void)?
 
-    private var rows: [SettingsSidebarRow] = []
+    private var rows: [ThemedTabItemView] = []
 
     // MARK: - Initialization
 
@@ -48,8 +48,12 @@ final class SettingsSidebar: NSView {
 
     private func build(_ items: [Item]) {
         rows = items.enumerated().map { index, item in
-            let row = SettingsSidebarRow(title: item.title, symbol: item.symbol)
-            row.onClick = { [weak self] in
+            let row = ThemedTabItemView(
+                title: item.title,
+                symbolName: item.symbol,
+                placement: .sidebar
+            )
+            row.onSelect = { [weak self] in
                 self?.select(index)
                 self?.onSelect?(index)
             }
@@ -74,146 +78,4 @@ final class SettingsSidebar: NSView {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
     }
-}
-
-// MARK: - Settings Sidebar Row
-
-/// One page row: an icon and label that fills with a rounded highlight when selected and lifts
-/// on hover, following the design system's "quiet until relevant" rule.
-private final class SettingsSidebarRow: NSView {
-
-    // MARK: - Properties
-
-    var onClick: (() -> Void)?
-
-    var isSelected = false {
-        didSet { updateStyle() }
-    }
-
-    private let iconView = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-
-    private var isHovered = false {
-        didSet { updateStyle() }
-    }
-
-    private var trackingArea: NSTrackingArea?
-
-    /// The selected-row fill is the theme's accent, assigned as a frozen `cgColor`, so it does
-    /// not follow a live theme switch on its own — a Cyberpunk-green selection stayed green
-    /// after switching to Swiss. `updateStyle` re-resolves it; this is what re-runs it.
-    private let appEvents = AppEventObservations()
-
-    // MARK: - Initialization
-
-    init(title: String, symbol: String) {
-        super.init(frame: .zero)
-        setup(title: title, symbol: symbol)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    // MARK: - Setup
-
-    private func setup(title: String, symbol: String) {
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.cornerCurve = .continuous
-        layer?.cornerRadius = Design.Radius.control
-
-        iconView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
-        iconView.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
-        iconView.setContentHuggingPriority(.required, for: .horizontal)
-        iconView.setContentCompressionResistancePriority(.required, for: .horizontal)
-        iconView.widthAnchor.constraint(equalToConstant: SettingsSidebarDefaults.iconSlotWidth).isActive = true
-
-        label.font = Design.Typography.control()
-        label.stringValue = title
-        label.lineBreakMode = .byTruncatingTail
-
-        let stack = NSStackView(views: [iconView, label])
-        stack.orientation = .horizontal
-        stack.spacing = Design.Spacing.small
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(
-            top: 0, left: Design.Spacing.medium,
-            bottom: 0, right: Design.Spacing.medium
-        )
-        addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: SettingsSidebarDefaults.rowHeight),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor)
-        ])
-
-        updateStyle()
-        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.updateStyle() }
-    }
-
-    // MARK: - Hover & Click
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
-
-    override func mouseDown(with event: NSEvent) { onClick?() }
-
-    /// The whole row is the click target: its label and icon are plain subviews that would
-    /// otherwise swallow the mouse, leaving only the padding clickable.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(convert(point, from: superview)) ? self : nil
-    }
-
-    // MARK: - Style
-
-    private func updateStyle() {
-        let fill: NSColor
-        let foreground: NSColor
-
-        if isSelected {
-            // A style's accent, so the chosen page is the one thing on the page wearing it.
-            // System keeps the neutral fill it always had.
-            let themed = !AppThemeLibrary.current.isSystem
-            fill = themed ? Design.Surface.accent : Design.Surface.controlHover
-            foreground = themed ? AppThemePalette.color(.ground) : Design.Text.label
-        } else if isHovered {
-            fill = Design.Surface.controlResting
-            foreground = Design.Text.label
-        } else {
-            fill = .clear
-            foreground = Design.Text.secondary
-        }
-
-        applyLayerBackground(fill)
-        label.textColor = foreground
-        iconView.contentTintColor = foreground
-    }
-}
-
-// MARK: - Settings Sidebar Defaults
-
-private enum SettingsSidebarDefaults {
-    static let rowHeight: CGFloat = 30
-    static let iconSlotWidth: CGFloat = 18
 }

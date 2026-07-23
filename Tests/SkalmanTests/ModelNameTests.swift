@@ -40,4 +40,141 @@ final class ModelNameTests: XCTestCase {
         XCTAssertEqual(ModelName.display(for: ""), "")
         XCTAssertEqual(ModelName.display(for: "   "), "   ")
     }
+
+    func testClaudeEffortComesFromTheRoutedAccountsSettings() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data(#"{"model":"opus","effortLevel":"xhigh"}"#.utf8).write(
+            to: directory.appendingPathComponent(AgentDefaults.claudeSettingsFile)
+        )
+        let account = AgentAccount(
+            provider: .claude,
+            handle: .standard,
+            configPath: directory.path
+        )
+
+        XCTAssertEqual(AgentModels.defaultEffort(for: .claude, account: account), "xhigh")
+    }
+
+    func testCodexEffortComesFromTheRoutedAccountsConfig() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("""
+            model = "gpt-5.6-sol"
+            model_reasoning_effort = "high"
+            """.utf8).write(
+                to: directory.appendingPathComponent(AgentDefaults.codexConfigFile)
+            )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .standard,
+            configPath: directory.path
+        )
+
+        XCTAssertEqual(AgentModels.defaultEffort(for: .codex, account: account), "high")
+    }
+
+    func testCodexModelsAndFastTierComeFromTheRoutedAccountsCatalog() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("""
+            {
+              "models": [
+                {
+                  "slug": "gpt-visible",
+                  "display_name": "GPT Visible",
+                  "visibility": "list",
+                  "additional_speed_tiers": ["fast"],
+                  "service_tiers": [
+                    {"id": "priority-v2", "name": "Fast", "description": "Quick"}
+                  ],
+                  "default_service_tier": "priority-v2"
+                },
+                {
+                  "slug": "gpt-hidden",
+                  "display_name": "GPT Hidden",
+                  "visibility": "hide"
+                }
+              ]
+            }
+            """.utf8).write(
+                to: directory.appendingPathComponent(AgentDefaults.codexModelsCacheFile)
+            )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .standard,
+            configPath: directory.path
+        )
+
+        let options = AgentModels.options(for: .codex, account: account)
+        XCTAssertEqual(options.map(\.identifier), ["gpt-visible"])
+        XCTAssertEqual(options.first?.displayName, "GPT Visible")
+        XCTAssertEqual(options.first?.fastServiceTier, "priority-v2")
+        XCTAssertTrue(options.first?.supportsFastMode == true)
+        XCTAssertEqual(
+            AgentModels.defaultFastMode(
+                for: .codex,
+                model: "gpt-visible",
+                account: account
+            ),
+            true
+        )
+    }
+
+    func testExplicitCodexServiceTierWinsOverTheCatalogDefault() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data(#"service_tier = "default""#.utf8).write(
+            to: directory.appendingPathComponent(AgentDefaults.codexConfigFile)
+        )
+        try Data("""
+            {"models":[{
+              "slug":"gpt-fast",
+              "display_name":"GPT Fast",
+              "visibility":"list",
+              "service_tiers":[{"id":"priority","name":"Fast"}],
+              "default_service_tier":"priority"
+            }]}
+            """.utf8).write(
+                to: directory.appendingPathComponent(AgentDefaults.codexModelsCacheFile)
+            )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .standard,
+            configPath: directory.path
+        )
+
+        XCTAssertEqual(
+            AgentModels.defaultFastMode(
+                for: .codex,
+                model: "gpt-fast",
+                account: account
+            ),
+            false
+        )
+    }
+
+    func testClaudeFastModeCapabilityMatchesOpusFamilyNotDatedVersions() {
+        // A family match keeps a future Opus working without a code change — the point of not
+        // pinning opus-4-7/4-8.
+        XCTAssertTrue(AgentModels.claudeSupportsFastMode("opus"))
+        XCTAssertTrue(AgentModels.claudeSupportsFastMode("claude-opus-4-8"))
+        XCTAssertTrue(AgentModels.claudeSupportsFastMode("claude-opus-4-9-future"))
+        XCTAssertTrue(AgentModels.claudeSupportsFastMode("Claude-Opus-4-8"), "case-insensitive")
+
+        XCTAssertFalse(AgentModels.claudeSupportsFastMode("sonnet"))
+        XCTAssertFalse(AgentModels.claudeSupportsFastMode("claude-sonnet-5"))
+        XCTAssertFalse(AgentModels.claudeSupportsFastMode("fable"))
+        XCTAssertFalse(AgentModels.claudeSupportsFastMode(nil), "nil default is not guessed")
+    }
+
+    private func temporaryAccountDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("skalman-model-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
+    }
 }

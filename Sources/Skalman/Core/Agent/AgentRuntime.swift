@@ -69,6 +69,13 @@ final class AgentRuntime {
             adoptReportedIdentifier(report)
         }
 
+        // The first prompt names a session that nothing has named yet — the one case the
+        // composer cannot cover, a prompt typed straight into the terminal. Applied before
+        // the tracker guard because a rendered conversation's report carries a prompt too.
+        if report.event == .turnStarted, let prompt = report.prompt, !prompt.isEmpty {
+            ProjectStore.shared.applyPromptTitle(prompt, forSessionID: report.sessionID)
+        }
+
         guard let tracker = controllers[report.sessionID]?.activityTracker else {
             // Ordinary for a rendered conversation, which learns its boundaries from the stream
             // and has no terminal controller. Recorded at debug because it is also what a

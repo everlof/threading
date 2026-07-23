@@ -141,6 +141,22 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertNil(try database.load().selectedSessionID)
     }
 
+    func testSelectionCanBeSavedWithoutRewritingProjectRows() throws {
+        let database = try makeDatabase()
+        var project = makeProject("Persisted")
+        try database.save(ProjectsState(projects: [project]))
+
+        // This mutation deliberately stays in memory. A selection-only write must not smuggle
+        // it into the database by routing through the full-state save path.
+        project.name = "Unsaved"
+        let selected = SessionID()
+        try database.saveSelectedSessionID(selected)
+
+        let restored = try database.load()
+        XCTAssertEqual(restored.selectedSessionID, selected)
+        XCTAssertEqual(restored.projects.map(\.name), ["Persisted"])
+    }
+
     // MARK: - Model Fidelity
 
     func testRichSessionFieldsSurviveThePayload() throws {
@@ -149,7 +165,7 @@ final class ProjectDatabaseTests: XCTestCase {
         let database = try makeDatabase()
         var session = AgentSession(kind: .claude, title: "Chat", accountHandle: .named("claudedb"), model: "opus")
         session.customTitle = "Renamed"
-        session.terminalTitle = "working"
+        session.agentTitle = "working"
         session.branch = "feature/x"
         session.hasLaunched = true
         session.lastExitCode = 3
@@ -160,7 +176,7 @@ final class ProjectDatabaseTests: XCTestCase {
         let restored = try XCTUnwrap(try database.load().projects.first?.sessions.first)
 
         XCTAssertEqual(restored.customTitle, "Renamed")
-        XCTAssertEqual(restored.terminalTitle, "working")
+        XCTAssertEqual(restored.agentTitle, "working")
         XCTAssertEqual(restored.branch, "feature/x")
         XCTAssertEqual(restored.model, "opus")
         XCTAssertEqual(restored.accountHandle, session.accountHandle)

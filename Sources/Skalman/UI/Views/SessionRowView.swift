@@ -72,7 +72,7 @@ final class SessionRowView: NSTableCellView {
         accountChipView.imageScaling = .scaleProportionallyDown
         accountChipView.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = .systemFont(ofSize: SidebarRowDefaults.sessionFontSize)
+        titleLabel.font = Design.Typography.controlRegular()
         titleLabel.lineBreakMode = .byTruncatingTail
 
         // The lowest hugging in the stack, unambiguously: the title absorbs all slack, which
@@ -243,7 +243,7 @@ final class SessionRowView: NSTableCellView {
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = SidebarRowDefaults.hoverFadeDuration
+            context.duration = Design.Motion.quick
             actionButton.animator().alphaValue = visible ? 1 : 0
             statusIndicator.animator().alphaValue = visible ? 0 : 1
         }
@@ -256,7 +256,11 @@ final class SessionRowView: NSTableCellView {
 
     // MARK: - Public Methods
 
-    func configure(with session: AgentSession, activity: SessionActivity) {
+    func configure(
+        with session: AgentSession,
+        activity: SessionActivity,
+        isLoading: Bool = false
+    ) {
         // Rows reconfigure constantly while an agent works, so an open popover survives a
         // same-session refresh; only reuse for a different session dismisses it.
         if sessionID != session.id {
@@ -270,7 +274,7 @@ final class SessionRowView: NSTableCellView {
         isDormant = activity == .dormant
         applyTextColors()
 
-        statusIndicator.update(for: activity)
+        statusIndicator.update(for: activity, isLoading: isLoading)
 
         // Rows are reconfigured while the pointer sits on them (activity changes as an
         // agent works), so the hover state is reasserted rather than reset.

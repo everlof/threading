@@ -35,6 +35,13 @@ final class ConversationViewController: NSViewController {
     private var statusRow: NSStackView!
     let orbView = WorkingOrbView()
     var statusLabel: NSTextField!
+    private let modelChip = ChipView()
+
+    /// The Fast/Standard picker: Codex's tri-state Fast/Standard/Account-default tier and Claude's
+    /// live on/off fast mode, offered on the same chip so the two providers read alike.
+    private let speedChip = ChipView()
+    private var isChangingConversationConfiguration = false
+    private var reportedModel: String?
 
     /// The view showing the assistant's current message while its tokens arrive.
     ///
@@ -45,6 +52,10 @@ final class ConversationViewController: NSViewController {
     /// Words for the status line while a turn is in flight, one drawn per turn. Per session, so
     /// two conversations working at once are unlikely to be saying the same thing.
     var workingWords = WorkingWordCycle()
+    private let account: AgentAccount?
+    let configuredEffort: String?
+    var workingStartedAt: TimeInterval?
+    var workingStatusTimer: Timer?
 
     /// Suppresses per-item scrolling while a transcript is being replayed: four hundred items
     /// each scheduling their own scroll is four hundred layout passes to reach one position.
@@ -93,6 +104,16 @@ final class ConversationViewController: NSViewController {
         self.agentSession = agentSession
         self.project = project
         self.timeline = ConversationTimeline(sessionID: agentSession.id)
+        let account = AgentAccountDiscovery.account(
+            for: agentSession.kind,
+            handle: agentSession.accountHandle
+        )
+        self.account = account
+        let configuredEffort = AgentModels.defaultEffort(
+            for: agentSession.kind,
+            account: account
+        )
+        self.configuredEffort = configuredEffort
 
         // Rebuild the plan for every turn. Claude asks only once, while Codex asks once per
         // child process; after `thread.started`, the latest stored identifier makes the next
@@ -104,15 +125,27 @@ final class ConversationViewController: NSViewController {
 
         switch agentSession.kind {
         case .claude:
-            self.stream = ClaudeStreamSession(sessionID: agentSession.id, plan: plan)
+            self.stream = ClaudeStreamSession(
+                sessionID: agentSession.id,
+                effort: configuredEffort,
+                plan: plan
+            )
         case .codex:
-            self.stream = CodexStreamSession(sessionID: agentSession.id, plan: plan)
+            self.stream = CodexStreamSession(
+                sessionID: agentSession.id,
+                effort: configuredEffort,
+                plan: plan
+            )
         }
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        workingStatusTimer?.invalidate()
     }
 
     // MARK: - Lifecycle
@@ -174,12 +207,21 @@ final class ConversationViewController: NSViewController {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.font = Design.Typography.subheading()
         statusLabel.textColor = Design.Text.tertiary
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        wireConversationControls()
+        let statusSpacer = NSView()
+        statusSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        statusSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // The orb leads the status text and is shown only while a turn is in
         // flight. A stack detaches a hidden arranged view, so idle status sits
         // flush at the leading edge rather than behind a reserved orb-sized gap.
         orbView.isHidden = true
-        statusRow = NSStackView(views: [orbView, statusLabel])
+        statusRow = NSStackView(views: [
+            orbView, statusLabel, statusSpacer, modelChip, speedChip
+        ])
         statusRow.orientation = .horizontal
         statusRow.alignment = .centerY
         statusRow.spacing = Design.Spacing.tight
@@ -197,6 +239,26 @@ final class ConversationViewController: NSViewController {
         setupConstraints()
     }
 
+    /// Codex's native transport starts a new process for every turn. These controls edit the
+    /// persisted session while it is idle; the plan closure reads that record synchronously
+    /// when the next turn launches, so `exec resume` keeps the thread and changes only its
+    /// model/tier.
+    private func wireConversationControls() {
+        modelChip.itemsProvider = { [weak self] in self?.modelItems() ?? [] }
+        modelChip.onSelect = { [weak self] item in
+            self?.selectModel(item.representedValue as? String)
+        }
+        speedChip.itemsProvider = { [weak self] in self?.speedItems() ?? [] }
+        speedChip.onSelect = { [weak self] item in
+            guard let fast = item.representedValue as? Bool else { return }
+            self?.selectFastMode(fast)
+        }
+
+        modelChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        speedChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        refreshConversationControls()
+    }
+
     private func setupConstraints() {
         NSLayoutConstraint.activate([
             // Pinned to the safe area, which the toolbar insets: anchoring to the view's own
@@ -212,6 +274,10 @@ final class ConversationViewController: NSViewController {
             statusRow.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor,
                 constant: Design.Spacing.inset
+            ),
+            statusRow.trailingAnchor.constraint(
+                lessThanOrEqualTo: view.trailingAnchor,
+                constant: -Design.Spacing.inset
             ),
             statusRow.bottomAnchor.constraint(
                 equalTo: promptView.topAnchor,
@@ -266,6 +332,9 @@ final class ConversationViewController: NSViewController {
     private func setupStream() {
         stream.onEvent = { [weak self] event in self?.handle(event) }
         stream.onExit = { [weak self] status in self?.handleExit(status) }
+        stream.onSendAvailabilityChange = { [weak self] in
+            self?.refreshConversationControls()
+        }
 
         // The rail brightens the turns on screen, which only means anything if it is told when
         // that changes. `postsBoundsChangedNotifications` is off by default on a clip view.
@@ -370,7 +439,9 @@ final class ConversationViewController: NSViewController {
             self.scrollToBottom()
 
             self.stream.start()
-            self.apply(.status(.ready(model: nil)))
+            self.apply(.status(.ready(model: nil, lastTurn: nil)))
+            self.restoreConversationConfiguration()
+            self.refreshConversationControls()
         }
     }
 
@@ -409,6 +480,7 @@ final class ConversationViewController: NSViewController {
     private func submit(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, stream.send(trimmed) else { return }
+        refreshConversationControls()
 
         // Echoed locally as it is sent. The stream never reports a live user turn back —
         // `.userMessage` exists only for replay — so producing it here is what draws it once.
@@ -433,7 +505,11 @@ final class ConversationViewController: NSViewController {
     /// belongs to an earlier call, and when a streamed placeholder is thrown away are all
     /// `ConversationTimeline`'s, and tested there.
     private func handle(_ event: StreamEvent) {
+        if case .initialised(_, let model) = event, let model {
+            reportedModel = model
+        }
         for change in timeline.apply(event) { apply(change) }
+        refreshConversationControls()
     }
 
     private func handleExit(_ status: Int32) {
@@ -442,4 +518,287 @@ final class ConversationViewController: NSViewController {
         promptView.isHidden = true
         delegate?.conversation(self, didExitWithCode: status)
     }
+
+    // MARK: - Mid-conversation Configuration
+
+    private var storedSession: AgentSession {
+        ProjectStore.shared.session(withID: agentSession.id) ?? agentSession
+    }
+
+    private var activeModel: String? {
+        let session = storedSession
+        return session.model
+            ?? reportedModel
+            ?? AgentModels.defaultModel(for: session.kind, account: account)
+    }
+
+    private func refreshConversationControls() {
+        let canConfigure: Bool
+        switch agentSession.kind {
+        case .claude:
+            // Claude accepts control requests while a turn is active; they apply to its next
+            // model round-trip without restarting the persistent process.
+            canConfigure = stream.isRunning
+        case .codex:
+            // Codex has no persistent input channel. Its choice changes only at the clean
+            // boundary between one `exec` child and the next.
+            canConfigure = stream.canSend
+        }
+
+        let session = storedSession
+        let options = AgentModels.options(for: session.kind, account: account)
+        guard !options.isEmpty else {
+            modelChip.isHidden = true
+            speedChip.isHidden = true
+            return
+        }
+
+        let model = activeModel
+
+        modelChip.isHidden = false
+        modelChip.isEnabled = canConfigure && !isChangingConversationConfiguration
+        modelChip.configure(
+            symbolName: ConversationControlDefaults.modelSymbol,
+            title: model.map(ModelName.display) ?? ConversationControlDefaults.defaultModel
+        )
+
+        speedChip.isHidden = !supportsFastMode(model: model, kind: session.kind)
+        speedChip.isEnabled = canConfigure && !isChangingConversationConfiguration
+
+        let inherited = AgentModels.defaultFastMode(
+            for: session.kind,
+            model: model,
+            account: account
+        )
+        // Claude's print transport starts with Fast off unless Skalman sends its flag control.
+        // Codex can inherit Fast from its account or model catalog.
+        let effective = session.fastMode ?? inherited ?? (
+            session.kind == .claude ? false : nil
+        )
+        let speedTitle: String
+        switch effective {
+        case true: speedTitle = ConversationControlDefaults.fast
+        case false: speedTitle = ConversationControlDefaults.standard
+        case nil: speedTitle = ConversationControlDefaults.accountDefault
+        }
+        speedChip.configure(
+            symbolName: ConversationControlDefaults.speedSymbol,
+            title: speedTitle
+        )
+    }
+
+    private func modelItems() -> [ThemedMenuEntry] {
+        let session = storedSession
+        let configured = AgentModels.defaultModel(for: session.kind, account: account)
+        let defaultTitle = configured.map {
+            "\(ModelName.display(for: $0))\(ConversationControlDefaults.accountDefaultSuffix)"
+        } ?? ConversationControlDefaults.defaultModel
+
+        var items: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: defaultTitle,
+                representedValue: nil,
+                isSelected: session.model == nil
+            ))
+        ]
+
+        var options = AgentModels.options(for: session.kind, account: account)
+        if let selected = session.model,
+           !options.contains(where: { $0.identifier == selected }) {
+            options.insert(
+                AgentModelOption(
+                    identifier: selected,
+                    displayName: ModelName.display(for: selected),
+                    fastServiceTier: nil,
+                    defaultServiceTier: nil
+                ),
+                at: 0
+            )
+        }
+
+        items += options.map { option in
+            .item(ThemedMenuItem(
+                title: option.displayName,
+                representedValue: option.identifier,
+                isSelected: option.identifier == session.model
+            ))
+        }
+        return items
+    }
+
+    private func speedItems() -> [ThemedMenuEntry] {
+        let session = storedSession
+        let inherited = AgentModels.defaultFastMode(
+            for: session.kind,
+            model: activeModel,
+            account: account
+        )
+        let effective = session.fastMode ?? inherited ?? (
+            session.kind == .claude ? false : nil
+        )
+
+        return [
+            .item(ThemedMenuItem(
+                title: ConversationControlDefaults.standard,
+                subtitle: ConversationControlDefaults.standardDetail,
+                representedValue: false,
+                isSelected: effective == false
+            )),
+            .item(ThemedMenuItem(
+                title: ConversationControlDefaults.fast,
+                subtitle: ConversationControlDefaults.fastDetail,
+                representedValue: true,
+                isSelected: effective == true
+            ))
+        ]
+    }
+
+    private func selectModel(_ model: String?) {
+        guard !isChangingConversationConfiguration else { return }
+
+        let session = storedSession
+        let resolved = model ?? AgentModels.defaultModel(for: session.kind, account: account)
+        let supportsFast = supportsFastMode(model: resolved, kind: session.kind)
+        let wasFast = storedSession.fastMode ?? AgentModels.defaultFastMode(
+            for: session.kind,
+            model: activeModel,
+            account: account
+        ) ?? false
+
+        let persist = { [weak self] in
+            guard let self else { return }
+            ProjectStore.shared.update(sessionID: self.agentSession.id) {
+                $0.model = model
+                // Both provider pickers turn Fast off when the newly selected model cannot
+                // run it. For Codex, explicit Standard also overrides an account Fast default.
+                if wasFast, !supportsFast { $0.fastMode = false }
+            }
+            self.reportedModel = resolved
+            self.isChangingConversationConfiguration = false
+            self.refreshConversationControls()
+        }
+
+        switch session.kind {
+        case .claude:
+            guard let switcher = stream as? ModelSwitchableConversation else { return }
+            isChangingConversationConfiguration = true
+            refreshConversationControls()
+            switcher.setModel(model) { [weak self] result in
+                switch result {
+                case .success:
+                    // Fast is independent process state in Claude. An unsupported model ignores
+                    // the flag, but leaving it enabled would make Fast silently return if the
+                    // conversation later switched back to Opus.
+                    if wasFast, !supportsFast,
+                       let speedSwitcher = self?.stream as? FastModeConversation {
+                        speedSwitcher.setFastMode(false) { [weak self] result in
+                            switch result {
+                            case .success:
+                                persist()
+                            case .failure(let error):
+                                // The model change already landed. Record that part while leaving
+                                // the still-enabled Fast flag truthful, then surface the partial
+                                // failure.
+                                guard let self else { return }
+                                ProjectStore.shared.update(sessionID: self.agentSession.id) {
+                                    $0.model = model
+                                }
+                                self.reportedModel = resolved
+                                self.configurationChangeFailed(error)
+                            }
+                        }
+                    } else {
+                        persist()
+                    }
+                case .failure(let error):
+                    self?.configurationChangeFailed(error)
+                }
+            }
+
+        case .codex:
+            guard stream.canSend else { return }
+            persist()
+        }
+    }
+
+    private func selectFastMode(_ fast: Bool) {
+        guard !isChangingConversationConfiguration else { return }
+
+        let persist = { [weak self] in
+            guard let self else { return }
+            ProjectStore.shared.update(sessionID: self.agentSession.id) {
+                $0.fastMode = fast
+            }
+            self.isChangingConversationConfiguration = false
+            self.refreshConversationControls()
+        }
+
+        switch storedSession.kind {
+        case .claude:
+            guard let switcher = stream as? FastModeConversation else { return }
+            isChangingConversationConfiguration = true
+            refreshConversationControls()
+            switcher.setFastMode(fast) { [weak self] result in
+                switch result {
+                case .success:
+                    persist()
+                case .failure(let error):
+                    self?.configurationChangeFailed(error)
+                }
+            }
+        case .codex:
+            guard stream.canSend else { return }
+            persist()
+        }
+    }
+
+    private func supportsFastMode(model: String?, kind: AgentKind) -> Bool {
+        switch kind {
+        case .claude:
+            return AgentModels.claudeSupportsFastMode(model)
+        case .codex:
+            return AgentModels.option(
+                identifier: model,
+                for: .codex,
+                account: account
+            )?.supportsFastMode == true
+        }
+    }
+
+    /// Model is already present on Claude's launch line. Fast mode has no launch flag in the
+    /// persistent print transport, so an explicit saved choice is restored over its control
+    /// channel once that process is ready.
+    private func restoreConversationConfiguration() {
+        guard storedSession.kind == .claude,
+              let fast = storedSession.fastMode,
+              let switcher = stream as? FastModeConversation
+        else { return }
+
+        switcher.setFastMode(fast) { [weak self] result in
+            if case .failure(let error) = result {
+                self?.configurationChangeFailed(error)
+            }
+        }
+    }
+
+    private func configurationChangeFailed(_ error: Error) {
+        isChangingConversationConfiguration = false
+        refreshConversationControls()
+        appendNotice(
+            "Could not change conversation settings: \(error.localizedDescription)",
+            kind: .error
+        )
+    }
+}
+
+private enum ConversationControlDefaults {
+    static let modelSymbol = "cpu"
+    static let speedSymbol = "bolt.fill"
+    static let defaultModel = "Default model"
+    static let accountDefault = "Account default"
+    static let accountDefaultSuffix = "  (account default)"
+    static let standard = "Standard"
+    static let fast = "Fast"
+    static let standardDetail = "Normal speed and usage"
+    static let fastDetail = "1.5× speed, increased usage"
 }

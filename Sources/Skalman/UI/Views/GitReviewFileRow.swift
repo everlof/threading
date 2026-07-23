@@ -17,6 +17,9 @@ final class GitReviewFileRow: NSView {
     /// mode that decides: only a diff whose baseline *is* the index can be applied to it.
     private let staging: GitStaging?
 
+    /// Whether the diff wraps to the pane or runs off it into a horizontal scroller.
+    private let wraps: Bool
+
     /// Fired only for a click, never for the initial state — the pane remembers what the user
     /// chose, not what the auto-expand budget chose for them.
     var onToggle: ((Bool) -> Void)?
@@ -45,9 +48,10 @@ final class GitReviewFileRow: NSView {
 
     /// `staging` is nil in the read-only modes, which is most of them — see
     /// `GitStaging.capability(for:)` for why only two of six offer it.
-    init(file: GitFileDiff, expanded: Bool, staging: GitStaging? = nil) {
+    init(file: GitFileDiff, expanded: Bool, staging: GitStaging? = nil, wraps: Bool = true) {
         self.file = file
         self.staging = staging
+        self.wraps = wraps
         super.init(frame: .zero)
         setupViews()
         if expanded && canExpand { toggle() }
@@ -64,13 +68,13 @@ final class GitReviewFileRow: NSView {
         applySurface(fill: Design.Surface.controlResting, radius: .control)
 
         let glyphLabel = NSTextField(labelWithString: glyph)
-        glyphLabel.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .medium)
+        glyphLabel.font = Design.Typography.code(weight: .medium)
         glyphLabel.textColor = Design.Text.secondary
         glyphLabel.alignment = .center
         glyphLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let pathLabel = NSTextField(labelWithString: pathText)
-        pathLabel.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
+        pathLabel.font = Design.Typography.code()
         pathLabel.textColor = Design.Text.secondary
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.usesSingleLineMode = true
@@ -150,6 +154,21 @@ final class GitReviewFileRow: NSView {
 
     // MARK: - Expansion
 
+    /// Whether this file's diff is currently open — read by "Collapse all" to decide which way
+    /// the one action should move every row.
+    var isOpen: Bool { isExpanded }
+
+    /// Whether there is anything to open at all (a binary or empty file has no body).
+    var canOpen: Bool { canExpand }
+
+    /// Opens or closes to a target, reporting the change through `onToggle` exactly as a click
+    /// would, so "Collapse all" is recorded the same way as collapsing each by hand.
+    func setExpanded(_ expanded: Bool) {
+        guard canExpand, expanded != isExpanded else { return }
+        toggle()
+        onToggle?(isExpanded)
+    }
+
     @objc private func headerClicked() {
         guard canExpand else { return }
         toggle()
@@ -187,7 +206,8 @@ final class GitReviewFileRow: NSView {
             if file.hunks.count > 1 || file.change != .untracked {
                 addBodyRow(makeHunkHeader(hunk.header, index: index))
             }
-            addBodyRow(DiffView(gitLines: hunk.lines, displayCap: remaining, path: file.path))
+            let diff = DiffView(gitLines: hunk.lines, displayCap: remaining, path: file.path, wraps: wraps)
+            addBodyRow(wraps ? diff : Self.horizontallyScrolling(diff))
             remaining -= hunk.lines.count
         }
 
@@ -202,11 +222,31 @@ final class GitReviewFileRow: NSView {
         view.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor).isActive = true
     }
 
+    /// A diff that runs off the pane, put in a horizontal scroller sized to its own height so
+    /// the outer vertical scroll still sees the whole thing. Only the diff scrolls sideways —
+    /// the header and `@@` rows stay put — which is why each hunk is wrapped, not the pane.
+    private static func horizontallyScrolling(_ diff: DiffView) -> NSView {
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasHorizontalScroller = true
+        scroll.hasVerticalScroller = false
+        scroll.drawsBackground = false
+        scroll.verticalScrollElasticity = .none
+        scroll.documentView = diff
+
+        NSLayoutConstraint.activate([
+            diff.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            diff.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            scroll.heightAnchor.constraint(equalTo: diff.heightAnchor)
+        ])
+        return scroll
+    }
+
     /// The `@@` line, and — where a hunk is a thing the index can be given on its own — the
     /// one control that gives it.
     private func makeHunkHeader(_ text: String, index: Int) -> NSView {
         let label = NSTextField(labelWithString: text)
-        label.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
+        label.font = Design.Typography.code()
         label.textColor = Design.Text.tertiary
         label.lineBreakMode = .byTruncatingTail
         label.usesSingleLineMode = true
@@ -261,7 +301,7 @@ final class GitReviewFileRow: NSView {
 
     private func makeNote(_ text: String) -> NSView {
         let label = NSTextField(labelWithString: text)
-        label.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
+        label.font = Design.Typography.code()
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

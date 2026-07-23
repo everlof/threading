@@ -1,7 +1,12 @@
 import AppKit
 
 /// The application's single window: a project sidebar beside the active session's terminal.
-final class MainWindowController: NSWindowController {
+final class MainWindowController: ThemedWindowController {
+
+    private enum SessionLoadingReason: Hashable {
+        case gitStatus
+        case gitReview
+    }
 
     // MARK: - Properties
 
@@ -39,6 +44,12 @@ final class MainWindowController: NSWindowController {
     /// Toolbar pill showing the current account's rate-limit usage.
     let accountUsageItemView = AccountUsageItemView()
 
+    /// App-owned toolbar controls, retained so pane visibility is reflected as selected state.
+    var sidebarToolbarButton: ToolbarButtonView?
+    var shellDrawerToolbarButton: ToolbarButtonView?
+    var displayPaneToolbarButton: ToolbarButtonView?
+    var sessionContextToolbarButton: ToolbarButtonView?
+
     /// The toolbar context button's menu, rebuilt each open so the theme checkmarks are live.
     let sessionContextMenu = NSMenu()
 
@@ -50,6 +61,10 @@ final class MainWindowController: NSWindowController {
 
     private var findBar: FindBarView?
     private var findBarTopConstraint: NSLayoutConstraint?
+
+    /// Several independent reads start from one selection. The row stops spinning only once all
+    /// of them have landed, so a quick status summary cannot hide a still-rendering branch diff.
+    private var sessionLoadingReasons: [SessionID: Set<SessionLoadingReason>] = [:]
 
     /// The inspect mode, kept here because extensions cannot store it. See `MainWindowInspector`.
     let elementInspector = ElementInspector()
@@ -153,6 +168,7 @@ final class MainWindowController: NSWindowController {
             onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() }
         )
         containerViewController.composerViewController.delegate = sessionCoordinator
+        sessionTitleItemView.onClose = { [weak self] in self?.closeActivePageTab() }
 
         let contentItem = NSSplitViewItem(viewController: containerViewController)
         contentItem.canCollapse = false
@@ -166,10 +182,10 @@ final class MainWindowController: NSWindowController {
 
         // Installed after the split view exists: the tracking separator item needs it.
         window?.toolbar = makeToolbar()
+        updateToolbarControlStates()
 
-        // Compact, not `.unified`: the large style sizes system items (the sidebar toggle)
-        // for a 15pt window title, which dwarfed the deliberately quiet 13pt session title
-        // beside it. Compact sizes both to the same small scale.
+        // Compact, not `.unified`: the large style reserves a title-scale toolbar row, which
+        // dwarfs the deliberately quiet session tab and its compact app-owned actions.
         window?.toolbarStyle = .unifiedCompact
 
         unifySidebarWithBackdrop()
@@ -209,6 +225,19 @@ final class MainWindowController: NSWindowController {
         displayPaneController.onClose = { [weak self] in
             self?.setDisplayPaneVisible(false)
         }
+        displayPaneController.onReviewLoadingChange = { [weak self] sessionID, isLoading in
+            self?.setSessionLoading(
+                isLoading,
+                reason: .gitReview,
+                for: sessionID
+            )
+        }
+
+        // The shell drawer belongs to the terminal container, on the other side of the split; the
+        // window is what can see both, so it is what joins them.
+        displayPaneController.shellRootResolver = { [weak self] sessionID in
+            self?.containerViewController.shellRootPid(for: sessionID)
+        }
 
         displayItem = NSSplitViewItem(viewController: displayPaneController)
         displayItem.canCollapse = true
@@ -245,15 +274,17 @@ final class MainWindowController: NSWindowController {
 
         guard visible else {
             displayItem.isCollapsed = true
+            updateToolbarControlStates()
             return
         }
 
         // Read *before* uncollapsing. The layout that follows fires resize notifications
         // carrying a transient thickness — the item's minimum — and recording that would
-        // overwrite the width about to be restored with 260 on every first reveal.
+        // overwrite the width about to be restored with that minimum on every first reveal.
         let target = DisplayPaneWidth.stored
         isRestoringDisplayPaneWidth = true
         displayItem.isCollapsed = false
+        updateToolbarControlStates()
 
         // Deferred by one turn of the run loop. Uncollapsing does not lay the item out
         // synchronously, so a width applied here lands on the previous layout and is lost.
@@ -302,6 +333,28 @@ final class MainWindowController: NSWindowController {
         setDisplayPaneVisible(true)
     }
 
+    private func setSessionLoading(
+        _ isLoading: Bool,
+        reason: SessionLoadingReason,
+        for sessionID: SessionID
+    ) {
+        var reasons = sessionLoadingReasons[sessionID] ?? []
+        if isLoading {
+            reasons.insert(reason)
+            sessionLoadingReasons[sessionID] = reasons
+        } else {
+            reasons.remove(reason)
+            if reasons.isEmpty {
+                sessionLoadingReasons.removeValue(forKey: sessionID)
+            } else {
+                sessionLoadingReasons[sessionID] = reasons
+            }
+        }
+        if sessionID == currentSessionID {
+            sidebarViewController.setSessionLoading(!reasons.isEmpty, for: sessionID)
+        }
+    }
+
     // MARK: - Public Methods
 
     /// Restores the session that was selected when the app last quit.
@@ -313,27 +366,65 @@ final class MainWindowController: NSWindowController {
         sidebarViewController.select(sessionID: sessionID)
     }
 
-    /// Shows or hides the sidebar. Shared by the View menu and the toolbar's system item.
+    /// Shows or hides the sidebar. Shared by the View menu and the themed toolbar action.
     func toggleSidebar() {
         splitViewController.toggleSidebar(nil)
+        updateToolbarControlStates()
     }
 
     /// Keeps the toolbar naming whatever is on screen.
     func updateSessionTitleItem() {
-        if containerViewController.isShowingSettings {
-            sessionTitleItemView.configure(title: "Settings")
+        if let index = containerViewController.currentSettingsPageIndex,
+           SettingsPages.all.indices.contains(index) {
+            let page = SettingsPages.all[index]
+            sessionTitleItemView.configure(
+                title: page.title,
+                symbolName: page.symbol,
+                showsClose: true
+            )
             updateAccountUsageItem(session: nil)
+            updateToolbarControlStates()
             return
         }
 
         let sessionID = containerViewController.currentSessionID
         let session = sessionID.flatMap { ProjectStore.shared.session(withID: $0) }
 
-        sessionTitleItemView.configure(
-            project: sessionID.flatMap { ProjectStore.shared.project(forSessionID: $0) },
-            session: session
-        )
+        if let sessionID {
+            sessionTitleItemView.configure(
+                project: ProjectStore.shared.project(forSessionID: sessionID),
+                session: session
+            )
+        } else if let projectID = containerViewController.currentComposerProjectID {
+            let project = ProjectStore.shared.project(withID: projectID)
+            sessionTitleItemView.configure(
+                title: project?.name ?? "New Session",
+                symbolName: SessionTitleDefaults.projectSymbolName,
+                showsClose: true
+            )
+        } else {
+            sessionTitleItemView.configure(project: nil, session: nil)
+        }
         updateAccountUsageItem(session: session)
+        updateToolbarControlStates()
+    }
+
+    /// Closes the active page without killing the persisted session or its running agent.
+    ///
+    /// The sidebar remains the durable collection. Its page tab is transient: selecting the
+    /// row opens it, and × returns the content pane to its empty state. Settings is a temporary
+    /// mode and closes back to the page it replaced.
+    private func closeActivePageTab() {
+        if containerViewController.isShowingSettings {
+            toggleSettings()
+            return
+        }
+
+        sidebarViewController.clearSelection()
+        containerViewController.show(sessionID: nil)
+        syncDisplayPane(to: nil)
+        updateSessionTitleItem()
+        updateWindowTitle()
     }
 
     /// Points the usage pill at the shown session's account, or clears it.
@@ -382,6 +473,7 @@ final class MainWindowController: NSWindowController {
         } else {
             setDisplayPaneVisible(false)
         }
+        updateToolbarControlStates()
     }
 
     /// Opens the browser as a tab in the selected session's display panel, beside the terminal.
@@ -414,6 +506,18 @@ final class MainWindowController: NSWindowController {
             return
         }
         containerViewController.toggleShellDrawer()
+        updateToolbarControlStates()
+    }
+
+    /// Keeps toolbar controls semantic: a filled pane button means the pane is actually visible,
+    /// and controls that need a session leave the key-view loop when no session is selected.
+    func updateToolbarControlStates() {
+        let hasSession = containerViewController.currentSessionID != nil
+        sidebarToolbarButton?.isSelected = !sidebarItem.isCollapsed
+        shellDrawerToolbarButton?.isEnabled = hasSession
+        shellDrawerToolbarButton?.isSelected = containerViewController.isShellDrawerOpen
+        displayPaneToolbarButton?.isSelected = !displayItem.isCollapsed
+        sessionContextToolbarButton?.isEnabled = hasSession || containerViewController.isShowingSettings
     }
 
     func showReview() {
@@ -425,6 +529,48 @@ final class MainWindowController: NSWindowController {
         }
 
         displayPaneController.activateReview(for: sessionID)
+        displayPaneController.showSession(sessionID)
+        setDisplayPaneVisible(true)
+    }
+
+    /// Opens a shell in the display pane. Unlike the others this *adds* one every time, which is
+    /// the point — the browser and the review answer a question with one answer, while a second
+    /// shell is a thing people actually want.
+    func showTerminalTab() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard let sessionID = containerViewController.currentSessionID else {
+            NSSound.beep()
+            return
+        }
+
+        displayPaneController.addTerminalTab(for: sessionID)
+        displayPaneController.showSession(sessionID)
+        setDisplayPaneVisible(true)
+    }
+
+    func showFilesTab() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard let sessionID = containerViewController.currentSessionID else {
+            NSSound.beep()
+            return
+        }
+
+        displayPaneController.activateFiles(for: sessionID)
+        displayPaneController.showSession(sessionID)
+        setDisplayPaneVisible(true)
+    }
+
+    func showInfo() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard let sessionID = containerViewController.currentSessionID else {
+            NSSound.beep()
+            return
+        }
+
+        displayPaneController.activateInfo(for: sessionID)
         displayPaneController.showSession(sessionID)
         setDisplayPaneVisible(true)
     }
@@ -514,7 +660,7 @@ final class MainWindowController: NSWindowController {
 
         findBarTopConstraint?.constant = 0
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = FindBarDefaults.animationDuration
+            context.duration = Design.Motion.standard
             contentView.layoutSubtreeIfNeeded()
         }
 
@@ -526,7 +672,7 @@ final class MainWindowController: NSWindowController {
 
         findBarTopConstraint?.constant = -FindBarDefaults.height
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = FindBarDefaults.animationDuration
+            context.duration = Design.Motion.standard
             contentView.layoutSubtreeIfNeeded()
         }, completionHandler: { [weak self] in
             self?.findBar?.removeFromSuperview()
@@ -567,18 +713,29 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         // Taken rather than read: an opening prompt belongs to the launch that follows it,
         // not to every later selection of the same session.
         let prompt = sessionCoordinator.takePendingPrompt()
+        let previousSessionID = containerViewController.currentSessionID
 
         containerViewController.show(sessionID: sessionID, initialPrompt: prompt)
         syncDisplayPane(to: sessionID)
-        sidebar.refreshRows()
+
+        // Visibility can change the attention state of the row leaving and entering the pane.
+        // Those are the only two rows affected; rebuilding the entire outline made selection
+        // cost proportional to the number of sessions.
+        if let previousSessionID, previousSessionID != sessionID {
+            sidebar.refreshRow(sessionID: previousSessionID)
+        }
+        sidebar.refreshRow(sessionID: sessionID)
     }
 
     /// A project has no terminal of its own, so selecting one offers the composer: the
     /// choices that are only made when a session starts.
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID) {
+        let previousSessionID = containerViewController.currentSessionID
         containerViewController.showComposer(projectID: projectID)
         syncDisplayPane(to: nil)
-        sidebar.refreshRows()
+        if let previousSessionID {
+            sidebar.refreshRow(sessionID: previousSessionID)
+        }
     }
 
     /// A folder dropped on the sidebar lands in its composer, like one added from the panel:
@@ -656,6 +813,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage index: Int) {
         containerViewController.showSettingsPage(index: index)
+        updateSessionTitleItem()
     }
 }
 
@@ -723,6 +881,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
             // the sidebar through the store's change notification.
             ProjectStore.shared.refreshBranch(forSessionID: sessionID)
 
+            // So does the agent's name for the conversation, which lives in the transcript.
+            // This is the only way a *native* session's title arrives — no PTY, no OSC.
+            SessionNaming.refreshAgentTitle(forSessionID: sessionID)
+
             // The tree probably changed too; an on-screen review tab refreshes itself.
             displayPaneController.noteSessionStoppedWorking(sessionID)
 
@@ -732,6 +894,14 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
                 AccountUsageService.shared.refresh(account, force: true)
             }
         }
+    }
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        gitStatusLoadingDidChange isLoading: Bool,
+        for sessionID: SessionID
+    ) {
+        setSessionLoading(isLoading, reason: .gitStatus, for: sessionID)
     }
 
 }
@@ -782,7 +952,6 @@ enum DisplayPaneWidth {
 
 enum FindBarDefaults {
     static let height: CGFloat = 32
-    static let animationDuration: TimeInterval = 0.2
 }
 
 // MARK: - Visual Effect Lookup

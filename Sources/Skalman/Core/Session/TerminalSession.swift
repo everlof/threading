@@ -149,18 +149,51 @@ final class TerminalSession: NSObject {
         delegate?.terminalSessionDidStart(self)
     }
 
-    /// Captures the shell PID by comparing child processes before and after starting.
-    private func captureShellPid(existingChildren: Set<pid_t>) {
-        let currentChildren = Set(ProcessUtility.findAllChildProcesses())
-        let newChildren = currentChildren.subtracting(existingChildren)
+    /// Captures the child's PID by diffing the app's direct children across the launch.
+    ///
+    /// SwiftTerm cannot answer this on macOS: `startProcess` takes the swift-subprocess path,
+    /// which awaits the run rather than handing back a process, so `LocalProcess.shellPid` is
+    /// only ever set by the `forkpty` fallback and reads 0 here. Hence the diff.
+    ///
+    /// Three rules, each of which was absent before and produced a pid belonging to something
+    /// else entirely:
+    ///
+    /// - **No "any child" fallback.** Skalman spawns short-lived helpers of its own — the
+    ///   account email probe literally runs `claude auth status`, and icon discovery and the
+    ///   artifact scan spawn their own — so "any child" adopts a stranger, which then exits and
+    ///   leaves the session pointing at a *dead* pid. Having no pid is the better answer: every
+    ///   reader already treats 0 as "unknown", while a stranger's pid is silently wrong.
+    /// - **Pids another live session already claimed are excluded**, or two sessions launching
+    ///   in the same breath — which is exactly what restoring a window full of them does — both
+    ///   adopt the first new child either of them sees.
+    /// - **It retries.** One look 0.3s after launch is a race the child loses whenever the
+    ///   machine is busy, and app launch is the busiest moment there is.
+    private func captureShellPid(existingChildren: Set<pid_t>, attempt: Int = 0) {
+        guard isRunning, shellPid == 0 else { return }
 
-        if let newPid = newChildren.first {
-            shellPid = newPid
-        } else if let anyChild = currentChildren.first {
-            // Fallback: use any child we can find
-            shellPid = anyChild
+        let candidates = Set(ProcessUtility.findAllChildProcesses())
+            .subtracting(existingChildren)
+            .subtracting(Self.claimedShellPids)
+
+        // The lowest pid rather than an arbitrary member of a set, so a launch that really does
+        // see two new children resolves the same way every time instead of by hash order.
+        if let pid = candidates.min() {
+            shellPid = pid
+            Self.claimedShellPids.insert(pid)
+            return
+        }
+
+        guard attempt + 1 < ShellDefaults.pidCaptureAttempts else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + ShellDefaults.pidCaptureDelay) { [weak self] in
+            self?.captureShellPid(existingChildren: existingChildren, attempt: attempt + 1)
         }
     }
+
+    /// Pids already adopted by a live session, so no two sessions claim the same child.
+    ///
+    /// Main-thread only, like the rest of this type: sessions are started, captured and torn
+    /// down from AppKit callbacks.
+    private static var claimedShellPids: Set<pid_t> = []
 
     /// Starts an agent using a resolved launch plan.
     ///
@@ -196,6 +229,10 @@ final class TerminalSession: NSObject {
 
         terminalView.terminate()
         isRunning = false
+
+        // Released, or the pid stays claimed for the life of the app and the next session to
+        // inherit that number after pid reuse refuses to adopt its own child.
+        Self.claimedShellPids.remove(shellPid)
         shellPid = 0
     }
 

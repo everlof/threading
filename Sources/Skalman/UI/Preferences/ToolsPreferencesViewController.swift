@@ -98,7 +98,7 @@ final class ToolsPreferencesViewController: NSViewController {
         labels.spacing = Design.Spacing.hairline
 
         let name = NSTextField(labelWithString: tool.name)
-        name.font = .monospacedSystemFont(ofSize: ToolsPreferencesDefaults.toolNameFontSize, weight: .regular)
+        name.font = Design.Typography.compactToolName()
         name.textColor = Design.Text.tertiary
         name.setContentHuggingPriority(.required, for: .horizontal)
         name.setContentCompressionResistancePriority(.required, for: .horizontal)

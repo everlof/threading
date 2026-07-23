@@ -28,8 +28,9 @@ final class GeneralPreferencesViewController: NSViewController {
 
     private func setupControls() {
         for kind in AgentKind.allCases {
-            defaultAgentPopUp.addItem(withTitle: kind.displayName)
-            defaultAgentPopUp.lastItem?.representedObject = kind
+            defaultAgentPopUp.addItem(
+                ThemedMenuItem(title: kind.displayName, representedValue: kind)
+            )
         }
         defaultAgentPopUp.selectItem(at: AgentKind.allCases.firstIndex(of: AppSettings.shared.defaultAgentKind) ?? 0)
         defaultAgentPopUp.target = self
@@ -37,7 +38,7 @@ final class GeneralPreferencesViewController: NSViewController {
         defaultAgentPopUp.translatesAutoresizingMaskIntoConstraints = false
         defaultAgentPopUp.widthAnchor.constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
 
-        configure(terminalTitleToggle, isOn: AppSettings.shared.usesTerminalTitleInSidebar, action: #selector(terminalTitleChanged))
+        configure(terminalTitleToggle, isOn: AppSettings.shared.usesAgentTitleInSidebar, action: #selector(terminalTitleChanged))
         configure(branchGroupingToggle,
                   isOn: AppSettings.shared.groupsSessionsByBranch,
                   action: #selector(branchGroupingChanged))
@@ -75,8 +76,8 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.row(title: "New sessions use",
                            subtitle: "Used by New Session (⌘N). Other agents stay available from the Project menu.",
                            control: defaultAgentPopUp),
-            SettingsUI.row(title: "Name sessions after the terminal title",
-                           subtitle: "Agents report progress through the terminal title. Renaming a session keeps your name.",
+            SettingsUI.row(title: "Name sessions after the agent's own title",
+                           subtitle: "Agents name the conversation as it develops. Renaming a session keeps your name.",
                            control: terminalTitleToggle),
             SettingsUI.row(
                 title: "Group sessions by branch",
@@ -176,7 +177,7 @@ final class GeneralPreferencesViewController: NSViewController {
     // MARK: - Actions
 
     @objc private func defaultAgentChanged() {
-        guard let kind = defaultAgentPopUp.selectedItem?.representedObject as? AgentKind else { return }
+        guard let kind = defaultAgentPopUp.selectedItem?.representedValue as? AgentKind else { return }
         AppSettings.shared.defaultAgentKind = kind
     }
 
@@ -189,7 +190,7 @@ final class GeneralPreferencesViewController: NSViewController {
     }
 
     @objc private func terminalTitleChanged() {
-        AppSettings.shared.usesTerminalTitleInSidebar = terminalTitleToggle.state == .on
+        AppSettings.shared.usesAgentTitleInSidebar = terminalTitleToggle.state == .on
         NotificationCenter.default.post(ProjectsDidChange())
     }
 

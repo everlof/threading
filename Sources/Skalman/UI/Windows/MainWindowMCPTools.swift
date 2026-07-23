@@ -326,6 +326,10 @@ final class AgentToolCoordinator: MCPToolHandling {
                 kind = "browser"
             } else if tab.review != nil {
                 kind = "git review"
+            } else if tab.terminal != nil {
+                kind = "terminal"
+            } else if tab.files != nil {
+                kind = "file tree"
             } else if case .image? = tab.content?.body {
                 kind = "image"
             }

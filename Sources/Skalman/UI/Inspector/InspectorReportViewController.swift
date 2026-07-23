@@ -1,11 +1,12 @@
 import AppKit
 
 /// The report sheet: the window screenshot with the capture marked, the text that names it,
-/// and a copy button putting the whole thing on the clipboard as markdown.
+/// a note field, and a copy button putting the whole thing on the clipboard as markdown.
 ///
 /// The markdown carries the screenshot's *path* rather than embedding the image — a path is
 /// the one form of an image the agent CLIs can act on, so the copied report pastes straight
-/// into a session composer.
+/// into a session composer. The note leads the copied text for the same reason: a chat reads
+/// the instruction before the evidence.
 final class InspectorReportViewController: NSViewController {
 
     // MARK: - Properties
@@ -15,6 +16,7 @@ final class InspectorReportViewController: NSViewController {
     private let markdown: String
     private let screenshot: NSImage?
 
+    private let noteField = ThemedTextField()
     private let copyButton = ThemedButton()
 
     /// Called when the sheet is done, however it was closed.
@@ -49,6 +51,10 @@ final class InspectorReportViewController: NSViewController {
     // MARK: - Setup
 
     private func setupViews() {
+        // The sheet is its own little window, and a window the theme does not reach is a
+        // system panel floating over a styled app. Ground, matching the chrome it slid out of.
+        view.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+
         let headingLabel = NSTextField(labelWithString: heading)
         headingLabel.font = Design.Typography.heading()
         headingLabel.textColor = Design.Text.label
@@ -68,6 +74,7 @@ final class InspectorReportViewController: NSViewController {
             content.append(preview)
         }
         content.append(makeReportText())
+        content.append(makeNoteField())
         content.append(makeFooter())
 
         let stack = NSStackView(views: content)
@@ -136,10 +143,7 @@ final class InspectorReportViewController: NSViewController {
             textView.string = markdown
             textView.isEditable = false
             textView.isSelectable = true
-            textView.font = .monospacedSystemFont(
-                ofSize: InspectorReportLayout.reportFontSize,
-                weight: .regular
-            )
+            textView.font = Design.Typography.code()
             textView.textContainerInset = NSSize(
                 width: Design.Spacing.medium,
                 height: Design.Spacing.medium
@@ -147,6 +151,17 @@ final class InspectorReportViewController: NSViewController {
         }
 
         return scrollView
+    }
+
+    /// One line, deliberately: the note is the sentence that turns evidence into a request —
+    /// "make this padding smaller" — and anything longer belongs in the composer the report
+    /// is about to be pasted into. Return copies, so type-and-Return is the whole gesture.
+    private func makeNoteField() -> NSView {
+        noteField.placeholderString = InspectorStrings.notePlaceholder
+        noteField.target = self
+        noteField.action = #selector(copyReport)
+        noteField.translatesAutoresizingMaskIntoConstraints = false
+        return noteField
     }
 
     private func makeFooter() -> NSView {
@@ -178,7 +193,10 @@ final class InspectorReportViewController: NSViewController {
     @objc private func copyReport() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(markdown, forType: .string)
+        pasteboard.setString(
+            InspectorReportComposer.compose(note: noteField.stringValue, markdown: markdown),
+            forType: .string
+        )
 
         // The button is its own receipt; the sheet stays up in case the screenshot or the
         // chain still wants reading.
@@ -195,11 +213,24 @@ final class InspectorReportViewController: NSViewController {
     }
 }
 
+// MARK: - Report Composition
+
+enum InspectorReportComposer {
+
+    /// What Copy Report actually copies: the user's note first — a chat reads the
+    /// instruction before the evidence — then the report. An empty note adds nothing.
+    static func compose(note: String, markdown: String) -> String {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return markdown }
+        return trimmed + "\n\n" + markdown
+    }
+}
+
 // MARK: - Report Layout
 
 enum InspectorReportLayout {
     static let sheetWidth: CGFloat = 560
-    static let sheetHeight: CGFloat = 620
+    static let sheetHeight: CGFloat = 660
     static let previewHeight: CGFloat = 260
     static let textHeight: CGFloat = 170
     static let reportFontSize: CGFloat = 11
@@ -211,6 +242,8 @@ enum InspectorReportLayout {
 enum InspectorStrings {
     static let elementHeading = "Element Report"
     static let pointHeading = "Point Report"
+    static let regionHeading = "Region Report"
+    static let notePlaceholder = "Add a note — it leads the copied report"
     static let copyTitle = "Copy Report"
     static let copiedTitle = "Copied"
     static let closeTitle = "Close"

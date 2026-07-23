@@ -1,3 +1,6 @@
 [submodule "ThinkingOrbs"]
 	path = ThinkingOrbs
 	url = https://github.com/everlof/thinking-orbs-swift
+[submodule "LabelMorph"]
+	path = LabelMorph
+	url = https://github.com/everlof/LabelMorph.git

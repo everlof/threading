@@ -14,10 +14,11 @@ import XCTest
 final class ThemeSettingsRenderTests: XCTestCase {
 
     private enum Render {
-        /// The width the pane actually gives a settings page — `Design.Size.readableWidth`, the
-        /// cap `showSettingsPage` centres it at — and a squeezed pane, since the eight-column
-        /// ANSI grid is the widest fixed thing on the page and is what breaks first.
-        static let widths: [CGFloat] = [420, Design.Size.readableWidth]
+        /// The width the pane actually gives a settings page — `SettingsUIDefaults.pageWidth`,
+        /// the cap `showSettingsPage` centres it at (the readable measure plus the halo
+        /// gutters) — and a squeezed pane, since the eight-column ANSI grid is the widest
+        /// fixed thing on the page and is what breaks first.
+        static let widths: [CGFloat] = [420, SettingsUIDefaults.pageWidth]
         static let height: CGFloat = 1000
 
         static var directory: URL {
@@ -62,6 +63,61 @@ final class ThemeSettingsRenderTests: XCTestCase {
 
         XCTAssertEqual(controller.view.frame.width, host.bounds.width)
         XCTAssertGreaterThan(controller.view.frame.height, 200)
+    }
+
+    // MARK: - The Halo Contract
+
+    /// A glowing theme's halo must fade on all four sides of a card, and only a render can
+    /// say so: the shadow is always set correctly on the card's own layer — it is an
+    /// *ancestor* that eats it. The page's scroll view clips at its own bounds, and before
+    /// the column kept `Design.Size.glowGutter` clear of them the halo was cut off flat at
+    /// the cards' left and right edges while the vertical spill survived in the section
+    /// spacing — a fade in one axis only, which no assertion about layer properties could
+    /// see.
+    @MainActor
+    func testCardHaloSurvivesTheScrollViewOnAllFourSides() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        defer { AppThemePalette.set(.system) }
+
+        let card = SettingsCard(rows: [SettingsUI.row(title: "Row")])
+        let page = SettingsUI.page([SettingsUI.section(nil, card)])
+        let host = laidOut(page, width: SettingsUIDefaults.pageWidth, height: 300)
+
+        host.wantsLayer = true
+        host.layer?.backgroundColor = AppThemePalette.current.resolved(.ground).cgColor
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        let frame = card.convert(card.bounds, to: host)
+        let reach: CGFloat = 3
+        let samples: [(side: String, point: NSPoint)] = [
+            ("left", NSPoint(x: frame.minX - reach, y: frame.midY)),
+            ("right", NSPoint(x: frame.maxX + reach, y: frame.midY)),
+            ("top", NSPoint(x: frame.midX, y: frame.maxY + reach)),
+            ("bottom", NSPoint(x: frame.midX, y: frame.minY - reach))
+        ]
+
+        for sample in samples {
+            let excess = accentExcess(at: sample.point, in: rep, host: host)
+            XCTAssertGreaterThan(
+                excess, 0.01,
+                "no halo \(sample.side) of the card — its glow is being clipped on that side"
+            )
+        }
+    }
+
+    /// How much of the theme's green accent a pixel carries beyond its own red and blue —
+    /// zero on the ground and on anything neutral, positive inside the accent's halo. The
+    /// card's border is blue-violet, so bleed from the edge can only *lower* it.
+    @MainActor
+    private func accentExcess(at point: NSPoint, in rep: NSBitmapImageRep, host: NSView) -> CGFloat {
+        let scale = CGFloat(rep.pixelsWide) / host.bounds.width
+        let x = Int(point.x * scale)
+        // The rep's rows run top-down while the host's coordinates run bottom-up.
+        let y = Int((host.bounds.height - point.y) * scale)
+
+        guard let colour = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return 0 }
+        return colour.greenComponent - max(colour.redComponent, colour.blueComponent)
     }
 
     // MARK: - Images

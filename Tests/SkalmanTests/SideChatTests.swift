@@ -148,11 +148,47 @@ final class SideChatTests: XCTestCase {
         )
     }
 
+    func testCodexNativeFastModeMapsOntoTheNextExecRun() throws {
+        let project = try makeProject()
+        var session = AgentSession(kind: .codex, title: "Codex", model: "future-fast-model")
+        session.resumeState = .resumable(TranscriptID("thread-fast"))
+        session.fastMode = true
+
+        let source = try XCTUnwrap(
+            AgentLauncher.streamPlan(for: session, in: project).arguments.last
+        )
+
+        XCTAssertTrue(source.contains("'--model' 'future-fast-model'"), source)
+        XCTAssertTrue(source.contains("'--config' 'service_tier=\"priority\"'"), source)
+        XCTAssertTrue(source.contains("'--config' 'features.fast_mode=true'"), source)
+        XCTAssertTrue(source.contains("'exec' 'resume' 'thread-fast'"), source)
+    }
+
+    func testCodexNativeStandardModeOverridesAnAccountFastDefault() throws {
+        let project = try makeProject()
+        var session = AgentSession(kind: .codex, title: "Codex")
+        session.resumeState = .resumable(TranscriptID("thread-standard"))
+        session.fastMode = false
+
+        let source = try XCTUnwrap(
+            AgentLauncher.streamPlan(for: session, in: project).arguments.last
+        )
+
+        XCTAssertTrue(source.contains("'--config' 'service_tier=\"default\"'"), source)
+        XCTAssertFalse(source.contains("features.fast_mode=true"), source)
+        XCTAssertTrue(source.contains("'exec' 'resume' 'thread-standard'"), source)
+    }
+
     func testLaunchPlanQuotesHostilePathTitleModelAndPrompt() throws {
         let hostile = "'; rm -rf ~'"
         var project = try makeProject()
         project.folderPath = "/tmp/\(hostile)"
-        let session = AgentSession(kind: .claude, title: hostile, model: hostile)
+        var session = AgentSession(kind: .claude, title: hostile, model: hostile)
+
+        // Only an explicit rename reaches the launch as `--name`; a creation title stays
+        // out of the command line entirely, so the hostile name must be a rename to be
+        // quoted at all.
+        session.customTitle = hostile
 
         let source = try XCTUnwrap(
             AgentLauncher.plan(for: session, in: project, initialPrompt: hostile).arguments.last

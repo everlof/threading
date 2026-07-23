@@ -93,7 +93,7 @@ final class ProjectRowView: NSTableCellView {
             moreSymbol: SidebarRowDefaults.actionSymbol,
             moreAccessibility: "Project actions"
         )
-        nameLabel.font = .systemFont(ofSize: SidebarRowDefaults.projectFontSize, weight: .semibold)
+        nameLabel.font = Design.Typography.emphasizedBody()
 
         switch style {
         case .standalone:
@@ -117,7 +117,7 @@ final class ProjectRowView: NSTableCellView {
         isHeading = true
         hideIcon()
         setHoverControls(moreSymbol: nil)
-        nameLabel.font = .systemFont(ofSize: SidebarRowDefaults.headingFontSize, weight: .semibold)
+        nameLabel.font = Design.Typography.caption()
         nameLabel.stringValue = name
         setCount(count)
         toolTip = nil
@@ -134,7 +134,7 @@ final class ProjectRowView: NSTableCellView {
             moreSymbol: SidebarRowDefaults.settingsSymbol,
             moreAccessibility: "Grouping options"
         )
-        nameLabel.font = .systemFont(ofSize: SidebarRowDefaults.headingFontSize, weight: .semibold)
+        nameLabel.font = Design.Typography.caption()
         nameLabel.stringValue = branch
         setCount(collapsedSessionCount)
         toolTip = branch
@@ -180,10 +180,7 @@ final class ProjectRowView: NSTableCellView {
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        countLabel.font = .monospacedDigitSystemFont(
-            ofSize: SidebarRowDefaults.countFontSize,
-            weight: .regular
-        )
+        countLabel.font = Design.Typography.numericDetail()
         countLabel.alignment = .right
         countLabel.setContentHuggingPriority(.required, for: .horizontal)
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -353,7 +350,7 @@ final class ProjectRowView: NSTableCellView {
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = SidebarRowDefaults.hoverFadeDuration
+            context.duration = Design.Motion.quick
             hoverControls.animator().alphaValue = visible ? 1 : 0
             countLabel.animator().alphaValue = visible ? 0 : 1
         }

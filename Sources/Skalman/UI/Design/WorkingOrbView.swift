@@ -23,19 +23,64 @@ final class WorkingOrbView: NSView {
 
     // MARK: - Properties
 
-    private let orb = ThinkingOrbView(state: .working, orbSize: .px20)
+    private let orb: ThinkingOrbView
     private let appEvents = AppEventObservations()
+    private var hasPreparedVariant = false
+
+    /// The animation currently drawn. A fixed state is useful to the component
+    /// gallery; conversation code calls `selectRandomVariant()` once per turn.
+    var state: OrbState { orb.state }
 
     // MARK: - Initialization
 
+    init(state: OrbState) {
+        orb = ThinkingOrbView(state: state, orbSize: .px20)
+        super.init(frame: .zero)
+        commonInit()
+    }
+
     override init(frame frameRect: NSRect) {
+        orb = ThinkingOrbView(state: .working, orbSize: .px20)
         super.init(frame: frameRect)
         commonInit()
     }
 
     required init?(coder: NSCoder) {
+        orb = ThinkingOrbView(state: .working, orbSize: .px20)
         super.init(coder: coder)
         commonInit()
+    }
+
+    /// Picks a variant for a newly-started working period. Once an orb has
+    /// actually been selected, the next selection excludes it so consecutive
+    /// turns never happen to show the same animation.
+    func selectRandomVariant(
+        choosingIndex: (Range<Int>) -> Int = { Int.random(in: $0) }
+    ) {
+        let candidates = hasPreparedVariant
+            ? OrbState.allCases.filter { $0 != orb.state }
+            : OrbState.allCases
+        guard !candidates.isEmpty else { return }
+
+        orb.state = candidates[choosingIndex(candidates.indices)]
+        // These are visual variants of one host state, not semantic status
+        // changes: VoiceOver should still hear that the agent is working.
+        orb.setAccessibilityLabel(OrbState.working.label)
+        hasPreparedVariant = true
+    }
+
+    /// Applies the user's choice for one newly-started turn. A fixed choice is
+    /// deliberately re-used; Random delegates to the no-immediate-repeat path.
+    func prepareForWorking(style: WorkingOrbStyle) {
+        guard style != .random else {
+            selectRandomVariant()
+            return
+        }
+        guard let state = OrbState(rawValue: style.rawValue) else { return }
+
+        orb.state = state
+        orb.setAccessibilityLabel(OrbState.working.label)
+        hasPreparedVariant = true
     }
 
     private func commonInit() {

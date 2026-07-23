@@ -17,24 +17,33 @@ enum GitReviewCommands {
 
     static let head = "HEAD"
 
+    /// `-w` folds away whitespace-only changes, for the pane's "Hide whitespace" toggle. Off by
+    /// default, so every builder's argv is unchanged until the toggle asks for it.
+    static let ignoreWhitespaceFlag = "-w"
+
     static func status() -> [String] {
         ["status", "--porcelain=v2", "-z", "--untracked-files=all"]
     }
 
+    /// The diff flags for one read, with the whitespace-ignore flag folded in only when asked.
+    private static func diffFlags(ignoringWhitespace: Bool) -> [String] {
+        ignoringWhitespace ? diffFlags + [ignoreWhitespaceFlag] : diffFlags
+    }
+
     /// Index vs worktree when `ref` is nil; `ref` vs worktree otherwise.
-    static func diff(against ref: String?) -> [String] {
-        var arguments = ["diff"] + diffFlags
+    static func diff(against ref: String?, ignoringWhitespace: Bool = false) -> [String] {
+        var arguments = ["diff"] + diffFlags(ignoringWhitespace: ignoringWhitespace)
         if let ref { arguments.append(ref) }
         return arguments
     }
 
-    static func diffStaged() -> [String] {
-        ["diff", "--cached"] + diffFlags
+    static func diffStaged(ignoringWhitespace: Bool = false) -> [String] {
+        ["diff", "--cached"] + diffFlags(ignoringWhitespace: ignoringWhitespace)
     }
 
     /// `--format=` suppresses the commit header, leaving pure diff on stdout.
-    static func show(_ hash: String) -> [String] {
-        ["show", hash, "--format="] + diffFlags
+    static func show(_ hash: String, ignoringWhitespace: Bool = false) -> [String] {
+        ["show", hash, "--format="] + diffFlags(ignoringWhitespace: ignoringWhitespace)
     }
 
     /// Control-character separators (0x01 record, 0x00 field, 0x02 header end) survive any
@@ -99,6 +108,12 @@ enum GitReviewDefaults {
     static let autoExpandFileLineLimit = 200
     /// …and only until this many lines are expanded across the whole diff.
     static let autoExpandTotalLineLimit = 600
+
+    /// A large comparison opens as a file index rather than constructing hundreds of diff-line
+    /// views before the user has chosen a file. Headers remain available and each file can still
+    /// be expanded on demand.
+    static let largeDiffFileThreshold = 100
+    static let largeDiffChangedLineThreshold = 5_000
 
     /// Untracked files larger than this get a row but no synthesized preview.
     static let untrackedByteCap = 256 * 1024

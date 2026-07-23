@@ -327,7 +327,7 @@ final class StoragePreferencesViewController: NSViewController {
         let total = artifacts.reduce(0) { $0 + $1.byteCount }
 
         let size = NSTextField(labelWithString: Self.size.string(fromByteCount: total))
-        size.font = .monospacedDigitSystemFont(ofSize: StorageDefaults.sizeFontSize, weight: .regular)
+        size.font = Design.Typography.numericBody()
         size.textColor = Design.Text.secondary
         size.alignment = .right
 
@@ -381,7 +381,7 @@ final class StoragePreferencesViewController: NSViewController {
 
         let size = NSTextField(labelWithString: Self.size.string(fromByteCount: artifact.byteCount))
         // Monospaced digits so the sizes form a column instead of jittering row to row.
-        size.font = .monospacedDigitSystemFont(ofSize: StorageDefaults.sizeFontSize, weight: .regular)
+        size.font = Design.Typography.numericBody()
         size.textColor = Design.Text.secondary
         size.alignment = .right
 

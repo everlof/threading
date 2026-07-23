@@ -29,10 +29,44 @@ enum StreamEvent {
     case toolResults([ToolResult])
 
     /// The turn finished. `isError` marks a turn that failed rather than completed.
-    case turnFinished(text: String?, isError: Bool)
+    ///
+    /// Metrics are exact values from the provider where the stream supplies them, completed
+    /// with the local round-trip clock by the session wrapper where it does not. Keeping them
+    /// on the terminal event makes a finished turn one fact: content, outcome and receipt
+    /// cannot arrive out of step in the view.
+    case turnFinished(text: String?, isError: Bool, metrics: TurnMetrics)
 
     /// Anything not modelled, kept so callers can log without the parser throwing.
     case unknown(type: String)
+}
+
+// MARK: - Turn Metrics
+
+/// The small receipt shown after a native turn completes.
+///
+/// `outputTokens` is deliberately output rather than total context: the down-arrow in the
+/// status line means "tokens the agent generated this turn". Input/context tokens can dwarf
+/// the answer on a resumed conversation and answer a different question.
+struct TurnMetrics: Equatable {
+    var duration: TimeInterval?
+    var outputTokens: Int?
+    var effort: String?
+
+    static let empty = TurnMetrics()
+
+    var isEmpty: Bool {
+        duration == nil && outputTokens == nil && effort == nil
+    }
+
+    /// Adds facts known by the process wrapper without replacing more authoritative values
+    /// decoded from the provider's terminal event.
+    func filling(duration: TimeInterval?, effort: String?) -> TurnMetrics {
+        TurnMetrics(
+            duration: self.duration ?? duration,
+            outputTokens: outputTokens,
+            effort: self.effort ?? effort
+        )
+    }
 }
 
 // MARK: - Content Block
@@ -285,7 +319,14 @@ extension StreamEvent {
             event = results.isEmpty ? .unknown(type: "user") : .toolResults(results)
 
         case "result":
-            event = .turnFinished(text: wire.result, isError: wire.isError)
+            event = .turnFinished(
+                text: wire.result,
+                isError: wire.isError,
+                metrics: TurnMetrics(
+                    duration: wire.durationMS.map { $0 / 1_000 },
+                    outputTokens: wire.usage?.outputTokens
+                )
+            )
 
         default:
             event = .unknown(type: wire.type)
@@ -407,11 +448,14 @@ private struct ClaudeWireEvent: Decodable {
     let message: ClaudeWireMessage?
     let result: String?
     let isError: Bool
+    let durationMS: TimeInterval?
+    let usage: ClaudeWireUsage?
 
     private enum CodingKeys: String, CodingKey {
-        case type, subtype, model, event, message, result
+        case type, subtype, model, event, message, result, usage
         case sessionID = "session_id"
         case isError = "is_error"
+        case durationMS = "duration_ms"
     }
 
     init(from decoder: Decoder) throws {
@@ -424,6 +468,16 @@ private struct ClaudeWireEvent: Decodable {
         message = try? container.decode(ClaudeWireMessage.self, forKey: .message)
         result = try? container.decode(String.self, forKey: .result)
         isError = (try? container.decode(Bool.self, forKey: .isError)) ?? false
+        durationMS = try? container.decode(TimeInterval.self, forKey: .durationMS)
+        usage = try? container.decode(ClaudeWireUsage.self, forKey: .usage)
+    }
+}
+
+private struct ClaudeWireUsage: Decodable {
+    let outputTokens: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case outputTokens = "output_tokens"
     }
 }
 

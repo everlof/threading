@@ -56,12 +56,14 @@ enum MenuIdentifiers {
 
 // MARK: - Process Tree Defaults
 
-enum ProcessTreeDefaults {
+enum SessionInfoDefaults {
+    /// How often the info panel re-reads while it is on screen.
+    ///
+    /// Processes and ports raise no filesystem event, so the panel has to ask again rather than
+    /// be told. Two seconds is short enough that a server started in the terminal appears about
+    /// as fast as the eye moves to the pane, and long enough that the walk costs nothing
+    /// noticeable — and it is also the window each CPU percentage is measured over.
     static let refreshInterval: TimeInterval = 2.0
-    static let minPaneHeight: CGFloat = 100
-    static let maxPaneHeight: CGFloat = 600
-    static let defaultPaneHeight: CGFloat = 200
-    static let detailPanelWidth: CGFloat = 200
 }
 
 // MARK: - AI Defaults
@@ -80,6 +82,13 @@ enum AIDefaults {
 enum ShellDefaults {
     /// Delay before sampling child processes to identify the newly spawned shell PID.
     static let pidCaptureDelay: TimeInterval = 0.3
+
+    /// How many times that sample is taken before giving up.
+    ///
+    /// One look is a race the child loses on a busy machine, and app launch — when every
+    /// restored session starts at once — is the busiest moment there is. Ten attempts covers
+    /// about three seconds, after which the child is not coming.
+    static let pidCaptureAttempts = 10
 }
 
 // MARK: - Agent Defaults
@@ -88,7 +97,7 @@ enum AgentDefaults {
     static let defaultKind: AgentKind = .claude
     static let untitledSessionName = "New Session"
 
-    /// Name a side chat carries until the agent reports a terminal title of its own.
+    /// Name a side chat carries until a prompt or the agent names it.
     static let sideChatTitle = "Side Chat"
 
     static let claudeExecutable = "claude"
@@ -108,19 +117,32 @@ enum AgentDefaults {
     /// latest of each family rather than pinning a dated name.
     static let claudeModels = ["opus", "sonnet", "fable"]
 
+    /// Fast mode is an Opus-family capability (measured against CLI 2.1.218). Matching the family
+    /// name rather than pinning dated ids keeps the check correct as new Opus versions ship — the
+    /// `opus` alias and every full Opus identifier share it.
+    static let claudeFastModeFamily = "opus"
+
     /// Where Claude records the model an account runs on, so the composer can name it rather
     /// than calling it "Default".
     static let claudeSettingsFile = "settings.json"
     static let claudeModelKey = "model"
+    static let claudeEffortKey = "effortLevel"
 
-    /// Codex publishes no alias list, so its options come from the user's own
-    /// `~/.codex/config.toml` instead of names invented here.
+    /// Codex writes the model catalog it receives for each account beside config.toml.
     static let codexConfigFile = "config.toml"
+    static let codexModelsCacheFile = "models_cache.json"
     static let codexModelKey = "model"
+    static let codexVisibleModel = "list"
 
-    /// One-run override keys for background research launches.
+    /// One-run override keys and values.
     static let codexReasoningEffortKey = "model_reasoning_effort"
     static let codexResearchReasoningEffort = "low"
+    static let codexServiceTierKey = "service_tier"
+    static let codexStandardServiceTier = "default"
+    static let codexFastServiceTier = "priority"
+    static let codexFastServiceTierAlias = "fast"
+    static let codexFastModeFeatureKey = "features.fast_mode"
+    static let codexFastModeName = "Fast"
 
     /// Where Claude records transcripts, relative to an account's config directory.
     static let claudeProjectsSubdirectory = "projects"
@@ -267,7 +289,7 @@ enum MCPDefaults {
 // MARK: - Display Pane Defaults
 
 enum DisplayPaneDefaults {
-    static let minWidth: CGFloat = 260
+    static let minWidth: CGFloat = 200
     static let defaultWidth: CGFloat = 380
     static let headerHeight: CGFloat = 28
     static let padding: CGFloat = 8
@@ -278,9 +300,8 @@ enum DisplayPaneDefaults {
     /// The tab strip appears only once surfaces coexist — a lone image keeps the cleaner
     /// header-titled look, and the strip earns its row only when there is a choice to make.
     static let tabBarMinimumTabs = 2
-    static let tabBarHeight: CGFloat = 30
-    static let tabChipMaxWidth: CGFloat = 140
-    static let tabChipFontSize: CGFloat = 11
+    static let tabBarHeight: CGFloat = 36
+    static let tabChipMaxWidth: CGFloat = 180
 
     /// Content tabs an agent stacks up are capped so a session that keeps displaying charts
     /// does not grow an unbounded strip; the oldest content tab is dropped, never the browser.
@@ -358,8 +379,6 @@ enum SidebarDefaults {
     static let emptySubtitleFontSize: CGFloat = 11
     static let emptyStateSpacing: CGFloat = 4
     static let emptyStateInset: CGFloat = 20
-
-    static let toggleAnimationDuration: TimeInterval = 0.2
 }
 
 // MARK: - Sidebar Strings
@@ -404,7 +423,6 @@ enum SidebarRowDefaults {
     /// Gap between the `+` and `⋯` when a project row shows both on hover.
     static let hoverButtonSpacing: CGFloat = 2
 
-    static let hoverFadeDuration: TimeInterval = 0.15
     /// Matches the inset and radius of the source list's own selection shape.
     static let hoverHighlightInsetX: CGFloat = 10
     static let hoverHighlightInsetY: CGFloat = 1

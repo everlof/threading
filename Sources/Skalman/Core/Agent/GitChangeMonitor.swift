@@ -23,19 +23,26 @@ final class GitChangeMonitor {
 
     private let root: URL
     private let onChange: (Reading) -> Void
+    private let onInitialReadComplete: () -> Void
 
     private var watcher: GitCheckoutWatcher?
     private var lastReading: Reading?
     private var isReading = false
     private var needsAnotherRead = false
+    private var didCompleteInitialRead = false
 
     // MARK: - Initialization
 
     /// Fails outside a repository — there is then nothing for the card to say.
-    init?(root: URL, onChange: @escaping (Reading) -> Void) {
+    init?(
+        root: URL,
+        onChange: @escaping (Reading) -> Void,
+        onInitialReadComplete: @escaping () -> Void = {}
+    ) {
         guard GitInfo.worktreeLocation(for: root.path) != nil else { return nil }
         self.root = root
         self.onChange = onChange
+        self.onInitialReadComplete = onInitialReadComplete
     }
 
     // MARK: - Public Methods
@@ -69,6 +76,11 @@ final class GitChangeMonitor {
         GitReviewReader.uncommittedSummary(in: root) { [weak self] result in
             guard let self else { return }
             self.isReading = false
+
+            if !self.didCompleteInitialRead {
+                self.didCompleteInitialRead = true
+                self.onInitialReadComplete()
+            }
 
             // A failed read keeps the last reading on screen rather than blanking the card:
             // the likeliest failure is a transient one mid-write, and the stale answer is

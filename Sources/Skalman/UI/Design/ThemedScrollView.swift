@@ -43,7 +43,22 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// A table with a header makes AppKit insert a second clip view beside `contentView`.
+    /// It is framework-owned and cannot be replaced through the public API, but its stock
+    /// background is still ours to neutralise.
+    override func tile() {
+        super.tile()
+        for case let clip as NSClipView in subviews where clip !== contentView {
+            clip.drawsBackground = false
+        }
+    }
+
     func permitsSystemChrome(_ view: NSView) -> Bool {
-        view is NSScroller
+        if view is NSScroller { return true }
+
+        // The only raw clip AppKit may add is the direct, transparent header clip described
+        // above. This does not grant permission to a raw clip in the document subtree.
+        guard let clip = view as? NSClipView else { return false }
+        return clip.superview === self && !clip.drawsBackground
     }
 }

@@ -28,15 +28,40 @@ enum GitReviewReader {
 
     private static let queue = DispatchQueue(label: "com.skalman.git-review", qos: .userInitiated)
 
+    /// Status summaries feed navigation chrome and must not wait behind a megabyte-scale review
+    /// diff already being parsed on `queue`. They are intentionally independent reads: both are
+    /// read-only (`--no-optional-locks`), while making this serial with the review made switching
+    /// sessions inherit the cost of whichever diff happened to be open before it.
+    private static let summaryQueue = DispatchQueue(
+        label: "com.skalman.git-summary",
+        qos: .userInitiated
+    )
+
     // MARK: - Public Methods
 
     /// The diff for a request, parsed into per-file models. Completion arrives on main.
     static func diff(
         _ request: DiffRequest,
         in root: URL,
+        ignoringWhitespace: Bool = false,
         completion: @escaping @MainActor (Result<[GitFileDiff], Failure>) -> Void
     ) {
-        perform(completion) { try performDiff(request, in: root) }
+        perform(completion) { try performDiff(request, in: root, ignoringWhitespace: ignoringWhitespace) }
+    }
+
+    /// The raw unified-diff patch for a request, exactly as git writes it — for handing the
+    /// changes to `git apply`. Reconstructing it from the parsed model would drop the file
+    /// headers `git apply` reads (new-file, deleted-file, rename), so it is re-read rather than
+    /// rebuilt. Untracked files are absent, as they are from `git diff` itself. Completion on main.
+    static func rawDiff(
+        _ request: DiffRequest,
+        in root: URL,
+        ignoringWhitespace: Bool = false,
+        completion: @escaping @MainActor (Result<String, Failure>) -> Void
+    ) {
+        perform(completion) {
+            GitDiffParser.decode(try rawDiffData(request, in: root, ignoringWhitespace: ignoringWhitespace))
+        }
     }
 
     /// One page of history, newest first. Completion arrives on main.
@@ -57,7 +82,7 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor (Result<GitChangeSummary, Failure>) -> Void
     ) {
-        perform(completion) {
+        perform(on: summaryQueue, completion) {
             // The same unborn-HEAD rule as the full uncommitted diff: with nothing to diff
             // against, the index against the empty tree is everything staged so far.
             let tracked = GitDiffParser.summary(fromNumstat: try run(
@@ -103,6 +128,7 @@ enum GitReviewReader {
     // MARK: - Private Methods
 
     private static func perform<Value>(
+        on queue: DispatchQueue = GitReviewReader.queue,
         _ completion: @escaping @MainActor (Result<Value, Failure>) -> Void,
         _ work: @escaping () throws -> Value
     ) {
@@ -121,42 +147,73 @@ enum GitReviewReader {
         }
     }
 
-    private static func performDiff(_ request: DiffRequest, in root: URL) throws -> [GitFileDiff] {
+    private static func performDiff(
+        _ request: DiffRequest,
+        in root: URL,
+        ignoringWhitespace: Bool
+    ) throws -> [GitFileDiff] {
+        let tracked = GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(
+            try trackedDiffData(request, in: root, ignoringWhitespace: ignoringWhitespace)
+        ))
+
+        // The working-tree modes append untracked files, which `git diff` never mentions; a
+        // commit or the raw-patch path speaks only for what git already reported.
+        switch request {
+        case .unstaged, .uncommitted, .branch:
+            return try tracked + untrackedDiffs(in: root, excluding: [])
+        case .lastTurn(let baseline):
+            return try tracked + untrackedDiffs(in: root, excluding: baseline.untrackedPaths)
+        case .staged, .commit:
+            return tracked
+        }
+    }
+
+    /// The exact bytes git writes for a request's tracked diff, shared by the parsed and raw
+    /// paths so both speak from the same command for every mode.
+    private static func rawDiffData(
+        _ request: DiffRequest,
+        in root: URL,
+        ignoringWhitespace: Bool
+    ) throws -> Data {
+        try trackedDiffData(request, in: root, ignoringWhitespace: ignoringWhitespace)
+    }
+
+    private static func trackedDiffData(
+        _ request: DiffRequest,
+        in root: URL,
+        ignoringWhitespace: Bool
+    ) throws -> Data {
+        let ws = ignoringWhitespace
         switch request {
         case .staged:
-            return try parsedDiff(GitReviewCommands.diffStaged(), in: root)
+            return try run(GitReviewCommands.diffStaged(ignoringWhitespace: ws), in: root)
 
         case .unstaged:
-            return try parsedDiff(GitReviewCommands.diff(against: nil), in: root)
-                + untrackedDiffs(in: root, excluding: [])
+            return try run(GitReviewCommands.diff(against: nil, ignoringWhitespace: ws), in: root)
 
         case .uncommitted:
             // On an unborn HEAD there is nothing to diff against, but the index against the
             // empty tree is exactly "everything staged so far".
-            let tracked = hasCommits(in: root)
-                ? try parsedDiff(GitReviewCommands.diff(against: GitReviewCommands.head), in: root)
-                : try parsedDiff(GitReviewCommands.diffStaged(), in: root)
-            return try tracked + untrackedDiffs(in: root, excluding: [])
+            return try run(
+                hasCommits(in: root)
+                    ? GitReviewCommands.diff(against: GitReviewCommands.head, ignoringWhitespace: ws)
+                    : GitReviewCommands.diffStaged(ignoringWhitespace: ws),
+                in: root
+            )
 
         case .branch:
             guard hasCommits(in: root) else { throw Failure.noCommits }
             let base = try defaultBranch(in: root)
             let mergeBase = decodeTrimmed(try run(GitReviewCommands.mergeBase(base), in: root))
-            return try parsedDiff(GitReviewCommands.diff(against: mergeBase), in: root)
-                + untrackedDiffs(in: root, excluding: [])
+            return try run(GitReviewCommands.diff(against: mergeBase, ignoringWhitespace: ws), in: root)
 
         case .lastTurn(let baseline):
             guard commitExists(baseline.snapshotHash, in: root) else { throw Failure.baselineExpired }
-            return try parsedDiff(GitReviewCommands.diff(against: baseline.snapshotHash), in: root)
-                + untrackedDiffs(in: root, excluding: baseline.untrackedPaths)
+            return try run(GitReviewCommands.diff(against: baseline.snapshotHash, ignoringWhitespace: ws), in: root)
 
         case .commit(let hash):
-            return try parsedDiff(GitReviewCommands.show(hash), in: root)
+            return try run(GitReviewCommands.show(hash, ignoringWhitespace: ws), in: root)
         }
-    }
-
-    private static func parsedDiff(_ arguments: [String], in root: URL) throws -> [GitFileDiff] {
-        GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(try run(arguments, in: root)))
     }
 
     /// The ref the Branch mode measures from: origin's HEAD when known, else the first

@@ -17,10 +17,18 @@ enum CodexStreamEvent {
             )])
 
         case "turn.completed":
-            return .events([.turnFinished(text: nil, isError: false)])
+            return .events([.turnFinished(
+                text: nil,
+                isError: false,
+                metrics: TurnMetrics(outputTokens: wire.usage?.outputTokens)
+            )])
 
         case "turn.failed", "error":
-            return .events([.turnFinished(text: errorText(in: wire), isError: true)])
+            return .events([.turnFinished(
+                text: errorText(in: wire),
+                isError: true,
+                metrics: TurnMetrics(outputTokens: wire.usage?.outputTokens)
+            )])
 
         case "item.started":
             guard let item = wire.item else { return .malformed }
@@ -160,9 +168,10 @@ private struct CodexWireEvent: Decodable {
     let item: CodexWireItem?
     let message: String?
     let error: JSONValue?
+    let usage: CodexWireUsage?
 
     private enum CodingKeys: String, CodingKey {
-        case type, item, message, error
+        case type, item, message, error, usage
         case threadID = "thread_id"
     }
 
@@ -173,6 +182,15 @@ private struct CodexWireEvent: Decodable {
         item = try? container.decode(CodexWireItem.self, forKey: .item)
         message = try? container.decode(String.self, forKey: .message)
         error = try? container.decode(JSONValue.self, forKey: .error)
+        usage = try? container.decode(CodexWireUsage.self, forKey: .usage)
+    }
+}
+
+private struct CodexWireUsage: Decodable {
+    let outputTokens: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case outputTokens = "output_tokens"
     }
 }
 

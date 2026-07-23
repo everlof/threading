@@ -1,5 +1,11 @@
 import AppKit
 
+/// The only two bases allowed to put app-owned content over the window backdrop: passive
+/// overlays and interactive controls. The toolbar item factory accepts this contract instead of
+/// `NSView`, so backdrop-incorrect chrome cannot be inserted accidentally.
+@MainActor
+protocol BackdropOverlayContent where Self: NSView {}
+
 /// A view drawn directly on the window's **backdrop** rather than on the chrome's ground.
 ///
 /// # Why this type exists
@@ -39,7 +45,7 @@ import AppKit
 /// Surfaces are the same story: a fill from `Design.Surface.*` is calibrated for the chrome's
 /// ground, so a pill that needs one derives it from `ink` instead (see `Design.Ink.surface`).
 @MainActor
-class BackdropOverlay: NSView {
+class BackdropOverlay: NSView, BackdropOverlayContent {
 
     private let appEvents = AppEventObservations()
 
@@ -54,6 +60,9 @@ class BackdropOverlay: NSView {
         // The backdrop can stay the same colour while the *theme* moves — a session on a fixed
         // palette under a changing chrome — and a subclass may derive more than ink from it.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.inkDidChange() }
+        appEvents.observe(AccessibilityDisplayOptionsDidChange.self) {
+            [weak self] _ in self?.inkDidChange()
+        }
     }
 
     @available(*, unavailable)
@@ -92,6 +101,61 @@ class BackdropOverlay: NSView {
     /// notification there is no drawing appearance in force, so asking here rather than there is
     /// the difference between measuring the ground the view is actually on and measuring
     /// whichever one AppKit last had in hand.
+    private func inkDidChange() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            applyInk(ink)
+        }
+        needsDisplay = true
+    }
+}
+
+/// Interactive counterpart to `BackdropOverlay`.
+///
+/// It keeps `ThemedControl`'s keyboard, enabled-state, and accessibility contract while replacing
+/// chrome-palette colours with ink measured against the active terminal backdrop.
+class BackdropThemedControl: ThemedControl, BackdropOverlayContent {
+
+    private let appEvents = AppEventObservations()
+
+    final var ink: Design.Ink { WindowBackdrop.ink }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in self?.inkDidChange() }
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.inkDidChange() }
+        appEvents.observe(AccessibilityDisplayOptionsDidChange.self) {
+            [weak self] _ in self?.inkDidChange()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        .button
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        performPrimaryAction()
+    }
+
+    func applyInk(_ ink: Design.Ink) {
+        fatalError("\(type(of: self)) is a BackdropThemedControl and must override applyInk(_:)")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        inkDidChange()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        inkDidChange()
+    }
+
     private func inkDidChange() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             applyInk(ink)

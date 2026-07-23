@@ -44,11 +44,11 @@ final class SessionPlaceholderView: NSView {
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.contentTintColor = Design.Text.tertiary
 
-        titleLabel.font = .systemFont(ofSize: PlaceholderDefaults.titleFontSize, weight: .medium)
+        titleLabel.font = Design.Typography.placeholderTitle()
         titleLabel.textColor = Design.Text.secondary
         titleLabel.alignment = .center
 
-        detailLabel.font = .systemFont(ofSize: PlaceholderDefaults.detailFontSize)
+        detailLabel.font = Design.Typography.subheading()
         detailLabel.textColor = Design.Text.tertiary
         detailLabel.alignment = .center
 

@@ -35,6 +35,31 @@ enum ThemeBoundaryAudit {
         return result
     }
 
+    /// Audits only the application-owned content of a window.
+    ///
+    /// The frame view, title bar and toolbar are AppKit's chrome and intentionally outside the
+    /// boundary. Starting at the content controller still includes everything the application
+    /// supplied, including split-view wrappers AppKit expanded underneath that root.
+    static func violations(in window: NSWindow) -> [Violation] {
+        guard let root = window.contentViewController?.view ?? window.contentView else {
+            return []
+        }
+        root.layoutSubtreeIfNeeded()
+        return violations(in: root)
+    }
+
+    static func failureDescription(
+        for violations: [Violation],
+        windowTitle: String
+    ) -> String {
+        let detail = violations.map { "  - \($0.description)" }.joined(separator: "\n")
+        return """
+            Theme boundary violation in \(windowTitle):
+            \(detail)
+            App-owned window content must use UI/Design components or a named system-chrome boundary.
+            """
+    }
+
     private static func inspect(
         _ view: NSView,
         path: String,

@@ -5,8 +5,8 @@ import AppKit
 ///
 /// It exists because every place a theme is *chosen* — a menu item, a list row — otherwise
 /// offers only its name, and a name says nothing about what the theme looks like. Drawn rather
-/// than composed from views so it can be an `NSMenuItem.image`, which is the one surface that
-/// takes no view at all.
+/// than composed from views so the same compact preview can be painted by a themed dropdown row
+/// or a list without either rebuilding a miniature terminal hierarchy.
 enum ThemeSwatchImage {
 
     private enum Layout {

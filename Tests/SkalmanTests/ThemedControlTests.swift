@@ -8,6 +8,10 @@ import XCTest
 final class ThemedControlTests: XCTestCase {
 
     override func tearDown() {
+        Design.Accessibility.increaseContrastOverrideForTesting = nil
+        Design.Accessibility.differentiateWithoutColorOverrideForTesting = nil
+        Design.Motion.reduceMotionOverrideForTesting = nil
+        AppThemeLibrary.apply(.system)
         AppThemePalette.set(.system)
         super.tearDown()
     }
@@ -44,11 +48,116 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(toggle.state, .off, "a disabled toggle changed state")
     }
 
+    func testToggleCanBeReachedAndActivatedWithoutAPointer() throws {
+        let toggle = ThemedToggle()
+        let target = ActionSpy()
+        toggle.target = target
+        toggle.action = #selector(ActionSpy.fire)
+
+        XCTAssertTrue(toggle.acceptsFirstResponder)
+        XCTAssertTrue(toggle.isAccessibilityEnabled())
+
+        toggle.keyDown(with: try keyEvent(" ", keyCode: 49))
+
+        XCTAssertEqual(toggle.state, .on)
+        XCTAssertEqual(target.count, 1)
+
+        toggle.isEnabled = false
+        XCTAssertFalse(toggle.acceptsFirstResponder)
+        XCTAssertFalse(toggle.isAccessibilityEnabled())
+    }
+
+    func testDifferentiateWithoutColorAddsAVisibleOnStateMark() throws {
+        let toggle = ThemedToggle(frame: NSRect(x: 0, y: 0, width: 38, height: 22))
+        toggle.state = .on
+
+        Design.Accessibility.differentiateWithoutColorOverrideForTesting = false
+        let colorOnly = try renderedPNG(of: toggle)
+
+        Design.Accessibility.differentiateWithoutColorOverrideForTesting = true
+        let differentiated = try renderedPNG(of: toggle)
+
+        XCTAssertNotEqual(colorOnly, differentiated, "the on state remained colour-only")
+    }
+
     func testTheHelperBuildsAThemedToggleNotAnNSSwitch() {
         let spy = ActionSpy()
         let control = SettingsUI.toggle(isOn: true, target: spy, action: #selector(ActionSpy.fire))
         XCTAssertTrue(control is ThemedToggle, "SettingsUI.toggle still hands back a raw switch")
         XCTAssertEqual(control.state, .on)
+    }
+
+    // MARK: - Toggle Motion
+
+    /// The flip animates behind an interaction while the *state* still lands synchronously —
+    /// the drop-in contract above — and a programmatic assignment does not animate at all, so
+    /// a settings page configuring itself never sweeps the switches it builds.
+    func testAClickAnimatesTheKnobWhereAConfiguredStateLandsAtOnce() {
+        Design.Motion.reduceMotionOverrideForTesting = false
+        let toggle = ThemedToggle(frame: NSRect(x: 0, y: 0, width: 38, height: 22))
+        let window = NSWindow(
+            contentRect: toggle.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = toggle
+        defer { window.orderOut(nil) }
+
+        toggle.mouseDown(with: .init())
+        XCTAssertEqual(toggle.state, .on, "the state waited for the animation")
+        XCTAssertLessThan(toggle.knobProgress, 1, "the knob teleported to its end")
+
+        toggle.advanceAnimation(now: CACurrentMediaTime() + 1)
+        XCTAssertEqual(toggle.knobProgress, 1, "the animation never landed")
+
+        toggle.state = .off
+        XCTAssertEqual(toggle.knobProgress, 0, "a programmatic state change animated")
+    }
+
+    /// Reduce Motion zeroes the travel through `Design.Motion`: one path, one final state, no
+    /// separate accessibility branch for callers to remember.
+    func testReduceMotionLandsTheKnobInOneFrame() {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        let toggle = ThemedToggle(frame: NSRect(x: 0, y: 0, width: 38, height: 22))
+        let window = NSWindow(
+            contentRect: toggle.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = toggle
+        defer { window.orderOut(nil) }
+
+        toggle.mouseDown(with: .init())
+        XCTAssertEqual(toggle.knobProgress, 1, "Reduce Motion still animated the knob")
+    }
+
+    /// The curves' endpoints are exact — the knob leaves from and lands at its resting
+    /// geometry — and the settle-plus-swell worst case stays inside the track. Overshoot and
+    /// swell both spend the knob inset and peak near each other, so the compound bound is the
+    /// one a retuned constant would silently break.
+    func testTheKnobCurveLandsExactlyAndNeverLeavesTheTrack() {
+        XCTAssertEqual(ThemedToggle.Motion.position(at: 0), 0, accuracy: 0.0001)
+        XCTAssertEqual(ThemedToggle.Motion.position(at: 1), 1, accuracy: 0.0001)
+        XCTAssertEqual(ThemedToggle.Motion.knobScale(at: 0), 1, accuracy: 0.0001)
+        XCTAssertEqual(ThemedToggle.Motion.knobScale(at: 1), 1, accuracy: 0.0001)
+
+        let knobDiameter = ThemedToggle.Layout.height - ThemedToggle.Layout.knobInset * 2
+        let travel = ThemedToggle.Layout.width - knobDiameter - ThemedToggle.Layout.knobInset * 2
+        for step in 0...100 {
+            let phase = CGFloat(step) / 100
+            let grow = knobDiameter * (ThemedToggle.Motion.knobScale(at: phase) - 1) / 2
+            let pastEnd = travel * (ThemedToggle.Motion.position(at: phase) - 1) + grow
+            XCTAssertLessThanOrEqual(
+                pastEnd, ThemedToggle.Layout.knobInset,
+                "the knob leaves the track at phase \(phase)"
+            )
+            XCTAssertLessThanOrEqual(
+                grow, ThemedToggle.Layout.knobInset,
+                "the swell leaves the track at phase \(phase)"
+            )
+        }
     }
 
     // MARK: - Theming
@@ -95,7 +204,7 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(popUp.numberOfItems, 2)
         XCTAssertEqual(popUp.indexOfSelectedItem, 0, "the first item was not selected")
         XCTAssertEqual(popUp.selectedItem?.title, "Claude Code")
-        XCTAssertEqual(popUp.lastItem?.title, "Codex")
+        XCTAssertEqual(popUp.item(at: 1)?.title, "Codex")
 
         popUp.selectItem(at: 1)
         XCTAssertEqual(popUp.selectedItem?.title, "Codex")
@@ -123,7 +232,7 @@ final class ThemedControlTests: XCTestCase {
         popUp.target = target
         popUp.action = #selector(ActionSpy.fire)
 
-        popUp.itemChosen(popUp.item(at: 1)!)
+        popUp.chooseItem(at: 1)
 
         XCTAssertEqual(popUp.indexOfSelectedItem, 1, "the choice was not recorded")
         XCTAssertEqual(target.count, 1, "the action did not fire")
@@ -137,34 +246,512 @@ final class ThemedControlTests: XCTestCase {
         popUp.addItem(withTitle: "")
         popUp.addItem(withTitle: "Duplicate")
 
-        popUp.itemChosen(popUp.item(at: 1)!)
+        popUp.chooseItem(at: 1)
 
         XCTAssertNil(popUp.selectedItem, "a pull-down recorded a selection")
         XCTAssertEqual(popUp.accessibilityValue() as? String, "",
                        "a pull-down stopped showing its own first item")
     }
 
-    /// The retargeting rule, which is why a pull-down works at all: an item that already knows
-    /// what to do keeps its action, and only an unclaimed one is routed through the control.
-    func testOnlyUnclaimedItemsAreRoutedThroughTheControl() {
+    /// A pull-down action is app-owned behavior on the semantic item. It runs without also
+    /// firing the pop-up's selection target/action, which belongs to ordinary choices.
+    func testAPerItemActionRunsWithoutFiringTheSelectionAction() {
         let popUp = ThemedPopUp()
-        let owner = ActionSpy()
-        let claimed = NSMenuItem(title: "Rename…", action: #selector(ActionSpy.fire), keyEquivalent: "")
-        claimed.target = owner
-        popUp.menu?.addItem(claimed)
-        popUp.addItem(withTitle: "Unclaimed")
+        let selectionTarget = ActionSpy()
+        var itemActions = 0
+        popUp.target = selectionTarget
+        popUp.action = #selector(ActionSpy.fire)
+        popUp.addItem(ThemedMenuItem(title: "Rename…", onChoose: { itemActions += 1 }))
 
-        popUp.adoptUnclaimedItems()
+        popUp.chooseItem(at: 0)
 
-        XCTAssertTrue(claimed.target === owner, "an item's own target was taken over")
-        XCTAssertEqual(claimed.action, #selector(ActionSpy.fire))
-        XCTAssertTrue(popUp.item(at: 1)?.target === popUp, "an unclaimed item was left unrouted")
+        XCTAssertEqual(itemActions, 1)
+        XCTAssertEqual(selectionTarget.count, 0)
     }
 
     func testTheHelperBuildsAThemedPopUpNotAnNSPopUpButton() {
         let spy = ActionSpy()
         let control = SettingsUI.popUp(target: spy, action: #selector(ActionSpy.fire))
         XCTAssertTrue(control is ThemedPopUp, "SettingsUI.popUp still hands back a raw pop-up")
+    }
+
+    func testThemedMenuChoosesWithArrowKeysAndReturn() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let popUp = ThemedPopUp(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        popUp.addItem(withTitle: "System")
+        popUp.addItem(ThemedMenuItem(
+            title: "Cyberpunk",
+            subtitle: "Neon and deep black"
+        ))
+        popUp.addSeparator()
+        popUp.addItem(ThemedMenuItem(title: "Unavailable", isEnabled: false))
+        let target = ActionSpy()
+        popUp.target = target
+        popUp.action = #selector(ActionSpy.fire)
+        root.addSubview(popUp)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        XCTAssertTrue(popUp.accessibilityPerformShowMenu())
+
+        let responder = try XCTUnwrap(window.firstResponder)
+        responder.keyDown(with: try keyEvent("", keyCode: 125))
+        responder.keyDown(with: try keyEvent("\r", keyCode: 36))
+
+        XCTAssertEqual(popUp.selectedItem?.title, "Cyberpunk")
+        XCTAssertEqual(target.count, 1)
+        XCTAssertFalse(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "choosing left the dropdown attached to the window"
+        )
+    }
+
+    func testThemedMenuExposesMenuRowsToAccessibility() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let source = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(title: "Enabled")),
+                    .item(ThemedMenuItem(title: "Disabled", isEnabled: false))
+                ],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        let menu = try XCTUnwrap(
+            descendants(in: root).first { $0.accessibilityRole() == .menu }
+        )
+        let rows = descendants(in: menu).filter { $0.accessibilityRole() == .menuItem }
+
+        XCTAssertEqual(rows.compactMap { $0.accessibilityTitle() }, ["Enabled", "Disabled"])
+        XCTAssertEqual(rows.map { $0.isAccessibilityEnabled() }, [true, false])
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
+    }
+
+    func testThemedMenuSurfaceUsesTheSourceViewsLocalAppearance() throws {
+        let originalAppAppearance = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        defer { NSApp.appearance = originalAppAppearance }
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        root.appearance = NSAppearance(named: .aqua)
+        let source = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [.item(ThemedMenuItem(title: "Light item"))],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        let menu = try XCTUnwrap(
+            descendants(in: root).first { $0.accessibilityRole() == .menu }
+        )
+        let actual = try XCTUnwrap(
+            menu.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))
+        )
+        var expected: NSColor?
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            expected = NSColor(cgColor: Design.Surface.elevated.cgColor)
+        }
+        let resolvedExpected = try XCTUnwrap(expected)
+        XCTAssertEqual(actual.hexString, resolvedExpected.hexString)
+    }
+
+    func testPullDownOmitsItsDisplayOnlyLabelFromTheCustomMenu() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 220))
+        let popUp = ThemedPopUp(frame: NSRect(x: 20, y: 160, width: 90, height: 26))
+        popUp.pullsDown = true
+        popUp.addItem(withTitle: "Actions")
+        var actionCount = 0
+        popUp.addItem(ThemedMenuItem(title: "Duplicate", onChoose: { actionCount += 1 }))
+        root.addSubview(popUp)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        XCTAssertTrue(popUp.accessibilityPerformShowMenu())
+        let rows = descendants(in: root).filter { $0.accessibilityRole() == .menuItem }
+        XCTAssertEqual(rows.compactMap { $0.accessibilityTitle() }, ["Duplicate"])
+
+        try XCTUnwrap(window.firstResponder).keyDown(
+            with: try keyEvent("\r", keyCode: 36)
+        )
+        XCTAssertEqual(actionCount, 1)
+        XCTAssertEqual(popUp.accessibilityValue() as? String, "Actions")
+    }
+
+    func testThemedMenuLayoutOpensWhereThereIsRoomAndClampsToThePane() {
+        let bounds = NSRect(x: 0, y: 0, width: 400, height: 300)
+        let size = NSSize(width: 180, height: 120)
+
+        let highAnchor = NSRect(x: 350, y: 230, width: 40, height: 26)
+        let below = ThemedMenuLayout.frame(
+            anchor: highAnchor,
+            desiredSize: size,
+            in: bounds,
+            flipped: false
+        )
+        XCTAssertLessThan(below.maxY, highAnchor.minY)
+        XCTAssertLessThanOrEqual(below.maxX, bounds.maxX - ThemedMenuLayout.screenInset)
+
+        let lowAnchor = NSRect(x: 20, y: 12, width: 100, height: 26)
+        let above = ThemedMenuLayout.frame(
+            anchor: lowAnchor,
+            desiredSize: size,
+            in: bounds,
+            flipped: false
+        )
+        XCTAssertGreaterThan(above.minY, lowAnchor.maxY)
+        XCTAssertGreaterThanOrEqual(above.minX, bounds.minX + ThemedMenuLayout.screenInset)
+    }
+
+    // MARK: - Menu Motion
+
+    /// The dropdown arrives with a fade-and-grow rather than snapping in. The animation rides
+    /// on the surface's shadow chassis, so panel and shadow arrive as one.
+    func testTheMenuAnimatesInWhenMotionIsAllowed() throws {
+        Design.Motion.reduceMotionOverrideForTesting = false
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        let token = try XCTUnwrap(present(from: source))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        let menu = try XCTUnwrap(
+            descendants(in: root).first { $0.accessibilityRole() == .menu }
+        )
+        XCTAssertNotNil(
+            menu.superview?.layer?.animation(forKey: ThemedMenuMotion.appearAnimationKey),
+            "the menu appeared with no entrance animation"
+        )
+    }
+
+    /// An animated dismissal defers only pixels. The session's observable end — the menu role
+    /// leaving the accessibility tree, events no longer landing — is synchronous, and the
+    /// faded overlay leaves the view tree shortly after.
+    func testAnAnimatedDismissalEndsTheSessionSynchronously() throws {
+        Design.Motion.reduceMotionOverrideForTesting = false
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        var dismissed = false
+        // The token is the session — held for the test the way `ChipView` holds it, since the
+        // overlay only references it weakly.
+        let token = try XCTUnwrap(present(from: source, onDismiss: { dismissed = true }))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        let overlay = try XCTUnwrap(
+            descendants(in: root)
+                .first { $0.accessibilityRole() == .menu }?.superview?.superview
+        )
+
+        try XCTUnwrap(window.firstResponder).keyDown(
+            with: try keyEvent("\u{1b}", keyCode: 53)
+        )
+
+        XCTAssertTrue(dismissed, "onDismiss waited for the fade")
+        XCTAssertFalse(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "a closing menu is still a menu to the accessibility tree"
+        )
+        XCTAssertNil(
+            overlay.hitTest(NSPoint(x: 10, y: 10)),
+            "a closing menu still takes events"
+        )
+
+        let deadline = Date().addingTimeInterval(2)
+        while overlay.superview != nil, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertNil(overlay.superview, "the faded overlay never left the view tree")
+    }
+
+    /// Under Reduce Motion every dismissal is immediate — no fade to wait out.
+    func testReduceMotionDismissesTheMenuImmediately() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        let token = try XCTUnwrap(present(from: source))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        let overlay = try XCTUnwrap(
+            descendants(in: root)
+                .first { $0.accessibilityRole() == .menu }?.superview?.superview
+        )
+
+        try XCTUnwrap(window.firstResponder).keyDown(
+            with: try keyEvent("\u{1b}", keyCode: 53)
+        )
+
+        XCTAssertNil(overlay.superview, "an instant dismissal left the overlay attached")
+    }
+
+    // MARK: - Press-Drag-Release
+
+    /// The other half of how a platform menu tracks a press: button down on the control, held
+    /// through the open, released over a row. The control keeps receiving the held press's
+    /// events and forwards them, so the release chooses the row it lands on.
+    func testAHeldPressDraggedOntoARowChoosesItOnRelease() throws {
+        let (window, root, popUp) = try openedPopUp(titles: ["System", "Cyberpunk"])
+        defer { window.close() }
+
+        let row = try XCTUnwrap(
+            descendants(in: root).first {
+                $0.accessibilityRole() == .menuItem && $0.accessibilityTitle() == "Cyberpunk"
+            }
+        )
+        let target = windowCentre(of: row)
+        popUp.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: target, in: window))
+        popUp.mouseUp(with: try mouseEvent(.leftMouseUp, at: target, in: window))
+
+        XCTAssertEqual(popUp.selectedItem?.title, "Cyberpunk")
+        XCTAssertFalse(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "the release chose a row, so the menu should have closed"
+        )
+    }
+
+    /// Releasing the held press back on the control is the ordinary click-to-open: the menu
+    /// stays for browsing rather than reading the release as a choice or a dismissal.
+    func testAHeldPressReleasedOnTheSourceLeavesTheMenuOpen() throws {
+        let (window, root, popUp) = try openedPopUp(titles: ["System", "Cyberpunk"])
+        defer { window.close() }
+
+        let onControl = windowCentre(of: popUp)
+        popUp.mouseUp(with: try mouseEvent(.leftMouseUp, at: onControl, in: window))
+
+        XCTAssertTrue(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "releasing on the control dismissed the menu it had just opened"
+        )
+        XCTAssertEqual(popUp.selectedItem?.title, "System", "a release on the control chose")
+    }
+
+    /// A press dragged off the menu and released over nothing lets the menu go, the way a
+    /// held `NSMenu` closes when the press ends outside it.
+    func testAHeldPressReleasedOutsideLetsTheMenuGo() throws {
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        var dismissed = false
+        let token = try XCTUnwrap(present(from: source, onDismiss: { dismissed = true }))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
+
+        ThemedMenuPresenter.dragEnded(
+            token,
+            event: try mouseEvent(.leftMouseUp, at: NSPoint(x: 2, y: 2), in: window)
+        )
+
+        XCTAssertTrue(dismissed, "an outside release did not let the menu go")
+        XCTAssertFalse(descendants(in: root).contains { $0.accessibilityRole() == .menu })
+    }
+
+    // MARK: - Type-To-Filter
+
+    /// Typing narrows the menu: the highlight lands on the first match and Return chooses it.
+    /// The rows keep their places — a filter dims non-matches rather than reflowing the panel.
+    func testTypingFiltersAndReturnChoosesTheFirstMatch() throws {
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        var chosen: String?
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(title: "System")),
+                    .item(ThemedMenuItem(title: "Cyberpunk")),
+                    .item(ThemedMenuItem(title: "Swiss"))
+                ],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in chosen = item.title },
+            onDismiss: {}
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        let responder = try XCTUnwrap(window.firstResponder)
+        responder.keyDown(with: try keyEvent("s", keyCode: 1))
+        responder.keyDown(with: try keyEvent("w", keyCode: 13))
+        responder.keyDown(with: try keyEvent("\r", keyCode: 36))
+
+        XCTAssertEqual(chosen, "Swiss")
+        XCTAssertFalse(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "Return on the filtered highlight left the menu open"
+        )
+    }
+
+    /// Escape backs out one layer at a time: the first press clears a live filter, and only
+    /// the second lets the menu go — a half-typed query should not cost the menu too.
+    func testEscapeClearsTheFilterBeforeClosingTheMenu() throws {
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        var dismissed = false
+        let token = try XCTUnwrap(present(from: source, onDismiss: { dismissed = true }))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        let responder = try XCTUnwrap(window.firstResponder)
+        responder.keyDown(with: try keyEvent("f", keyCode: 3))
+
+        let echo = try XCTUnwrap(
+            descendants(in: root).compactMap { $0 as? NSTextField }
+                .first { $0.stringValue.hasPrefix("Filter:") },
+            "typing showed no filter echo"
+        )
+        XCTAssertFalse(echo.isHidden)
+
+        responder.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
+        XCTAssertFalse(dismissed, "escape closed the menu instead of clearing the filter")
+        XCTAssertTrue(echo.isHidden, "clearing the filter left its echo up")
+
+        responder.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
+        XCTAssertTrue(dismissed, "escape with no filter should let the menu go")
+    }
+
+    /// A pop-up whose menu is already open, laid out, and ready for the drag lookups.
+    private func openedPopUp(titles: [String]) throws -> (NSWindow, NSView, ThemedPopUp) {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let popUp = ThemedPopUp(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        for title in titles { popUp.addItem(withTitle: title) }
+        root.addSubview(popUp)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+
+        XCTAssertTrue(popUp.accessibilityPerformShowMenu())
+        layOutMenu(in: root)
+        return (window, root, popUp)
+    }
+
+    /// The drag lookup reads row frames, which only a layout pass assigns; a test window never
+    /// displays, so the pass is run by hand.
+    private func layOutMenu(in root: NSView) {
+        for view in [root] + descendants(in: root) { view.needsLayout = true }
+        root.layoutSubtreeIfNeeded()
+    }
+
+    private func windowCentre(of view: NSView) -> NSPoint {
+        view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+    }
+
+    private func mouseEvent(
+        _ type: NSEvent.EventType,
+        at point: NSPoint,
+        in window: NSWindow
+    ) throws -> NSEvent {
+        try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: type,
+                location: point,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            )
+        )
+    }
+
+    private func menuHarness() throws -> (NSWindow, NSView, NSView) {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let source = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        return (window, root, source)
+    }
+
+    private func present(
+        from source: NSView,
+        onDismiss: @escaping () -> Void = {}
+    ) -> AnyObject? {
+        ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(title: "First", isSelected: true)),
+                    .item(ThemedMenuItem(title: "Second"))
+                ],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: 0,
+            onChoose: { _, _ in },
+            onDismiss: onDismiss
+        )
     }
 
     // MARK: - Pop-Up Theming
@@ -233,6 +820,222 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(target.count, 2, "the second click inside the bounds did not fire")
     }
 
+    func testButtonCanBeReachedAndActivatedWithoutAPointer() throws {
+        let target = ActionSpy()
+        let button = ThemedButton(title: "Continue", target: target, action: #selector(ActionSpy.fire))
+
+        XCTAssertTrue(button.acceptsFirstResponder)
+        XCTAssertTrue(button.isAccessibilityEnabled())
+
+        button.keyDown(with: try keyEvent("\r", keyCode: 36))
+        XCTAssertEqual(target.count, 1)
+
+        button.isEnabled = false
+        XCTAssertFalse(button.acceptsFirstResponder)
+        XCTAssertFalse(button.isAccessibilityEnabled())
+        XCTAssertFalse(button.accessibilityPerformPress())
+    }
+
+    func testTabItemSharesSelectionSemanticsAcrossKeyboardAndAccessibility() throws {
+        let tab = ThemedTabItemView(
+            title: "Browser",
+            symbolName: "globe",
+            placement: .horizontal
+        )
+        var selections = 0
+        tab.onSelect = { selections += 1 }
+
+        XCTAssertEqual(tab.accessibilityRole(), .radioButton)
+        XCTAssertEqual(tab.accessibilityTitle(), "Browser")
+        XCTAssertEqual(tab.accessibilityValue() as? Bool, false)
+
+        tab.keyDown(with: try keyEvent("\r", keyCode: 36))
+        XCTAssertEqual(selections, 1)
+
+        tab.isSelected = true
+        XCTAssertEqual(tab.accessibilityValue() as? Bool, true)
+    }
+
+    func testAnOffsetTabItemReceivesPointerHitTesting() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
+        let tab = ThemedTabItemView(
+            title: "Accounts",
+            symbolName: "person.2",
+            placement: .sidebar
+        )
+        tab.frame = NSRect(x: 28, y: 92, width: 240, height: Design.Size.sidebarTabHeight)
+        root.addSubview(tab)
+
+        let hit = root.hitTest(NSPoint(x: tab.frame.midX, y: tab.frame.midY))
+
+        XCTAssertTrue(hit === tab, "an offset sidebar tab dropped a click inside its bounds")
+    }
+
+    func testToolbarButtonIsKeyboardReachableAndReportsSelectedState() throws {
+        let button = ToolbarButtonView(
+            symbolName: "sidebar.trailing",
+            accessibility: "Display panel"
+        )
+        var presses = 0
+        button.onPress = { presses += 1 }
+
+        XCTAssertTrue(button.acceptsFirstResponder)
+        XCTAssertEqual(button.accessibilityRole(), .button)
+        XCTAssertEqual(button.accessibilityTitle(), "Display panel")
+
+        button.keyDown(with: try keyEvent(" ", keyCode: 49))
+        XCTAssertEqual(presses, 1)
+
+        button.isSelected = true
+        XCTAssertEqual(button.accessibilityValue() as? Bool, true)
+    }
+
+    func testMainToolbarUsesAppOwnedBackdropButtonsAndTracksPaneState() throws {
+        let controller = MainWindowController()
+        let items = try XCTUnwrap(controller.window?.toolbar?.items)
+        let orderedIdentifiers = items.map(\.itemIdentifier)
+        let identifiers: Set<NSToolbarItem.Identifier> = [
+            .skalmanToggleSidebar,
+            .newSessionPage,
+            .sessionContext,
+            .toggleShellDrawer,
+            .toggleDisplayPane
+        ]
+
+        for item in items where identifiers.contains(item.itemIdentifier) {
+            XCTAssertTrue(
+                item.view is ToolbarButtonView,
+                "\(item.itemIdentifier.rawValue) still uses system toolbar chrome"
+            )
+        }
+
+        let activePageIndex = try XCTUnwrap(orderedIdentifiers.firstIndex(of: .sessionTitle))
+        let newSessionIndex = try XCTUnwrap(orderedIdentifiers.firstIndex(of: .newSessionPage))
+        XCTAssertEqual(
+            newSessionIndex,
+            activePageIndex + 1,
+            "New Session must remain directly after the active page tab"
+        )
+
+        XCTAssertEqual(controller.displayPaneToolbarButton?.isSelected, false)
+        controller.toggleDisplayPane()
+        XCTAssertEqual(controller.displayPaneToolbarButton?.isSelected, true)
+        controller.toggleDisplayPane()
+        XCTAssertEqual(controller.displayPaneToolbarButton?.isSelected, false)
+    }
+
+    func testActivePageTabOwnsItsCloseAffordance() throws {
+        let tab = SessionTitleItemView()
+        var closes = 0
+        tab.onClose = { closes += 1 }
+        tab.configure(
+            title: "Themes",
+            symbolName: "paintpalette",
+            showsClose: true
+        )
+
+        let close = try XCTUnwrap(
+            descendants(in: tab).compactMap { $0 as? ToolbarButtonView }.first
+        )
+        XCTAssertFalse(tab.isHidden)
+        XCTAssertFalse(close.isHidden)
+        XCTAssertEqual(close.accessibilityTitle(), "Close active page")
+        XCTAssertTrue(close.accessibilityPerformPress())
+        XCTAssertEqual(closes, 1)
+
+        tab.configure(title: "Project", symbolName: "folder", showsClose: false)
+        XCTAssertTrue(close.isHidden, "a non-closable destination kept the × visible")
+    }
+
+    func testDisplayPaneHasNoDetachedHeaderCloseButton() {
+        let controller = DisplayPaneController()
+        controller.loadView()
+        controller.viewDidLoad()
+
+        let closeButtons = descendants(in: controller.view).filter {
+            $0.accessibilityTitle() == "Close" || $0.accessibilityLabel() == "Close"
+        }
+        XCTAssertEqual(
+            closeButtons,
+            [],
+            "the display pane kept a detached × instead of using the toolbar panel toggle"
+        )
+    }
+
+    func testKeyboardFocusChangesAButtonsVisibleDrawing() throws {
+        let button = ThemedButton(title: "Continue", target: nil, action: nil)
+        button.frame = NSRect(x: 20, y: 20, width: 100, height: 26)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 140, height: 66),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(button)
+
+        let unfocused = try renderedPNG(of: button)
+        XCTAssertTrue(window.makeFirstResponder(button))
+        let focused = try renderedPNG(of: button)
+
+        XCTAssertNotEqual(unfocused, focused, "keyboard focus drew no visible treatment")
+    }
+
+    // MARK: - Accessibility Display Options
+
+    func testIncreaseContrastStrengthensFaintRolesAndFocusGeometry() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        Design.Accessibility.increaseContrastOverrideForTesting = false
+
+        let regularControl = try resolvedLayerColor(Design.Surface.controlResting)
+        let regularInk = Design.Text.on(Design.Surface.ground)
+        let regularInkBorderAlpha = regularInk.border.alphaComponent
+        let regularWidth = Design.Radius.border
+
+        Design.Accessibility.increaseContrastOverrideForTesting = true
+
+        let strongControl = try resolvedLayerColor(Design.Surface.controlResting)
+        let strongInk = Design.Text.on(Design.Surface.ground)
+
+        XCTAssertGreaterThan(strongControl.alphaComponent, regularControl.alphaComponent)
+        XCTAssertGreaterThan(strongInk.secondary.alphaComponent, regularInk.secondary.alphaComponent)
+        XCTAssertGreaterThan(strongInk.border.alphaComponent, regularInkBorderAlpha)
+        XCTAssertGreaterThan(Design.Radius.border, regularWidth)
+        XCTAssertEqual(Design.Accessibility.focusRingWidth, 3)
+
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        Design.Accessibility.increaseContrastOverrideForTesting = false
+        let regularDivider = try resolvedLayerColor(Design.Surface.divider)
+        Design.Accessibility.increaseContrastOverrideForTesting = true
+        let strongDivider = try resolvedLayerColor(Design.Surface.divider)
+        XCTAssertGreaterThan(strongDivider.alphaComponent, regularDivider.alphaComponent)
+    }
+
+    func testAccessibilityRefreshReappliesRecordedLayerSurfaces() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        Design.Accessibility.increaseContrastOverrideForTesting = false
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 24))
+        view.applySurface(
+            fill: Design.Surface.controlResting,
+            radius: .control,
+            border: Design.Surface.border
+        )
+        let regular = try XCTUnwrap(
+            view.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))?.usingColorSpace(.sRGB)
+        )
+
+        Design.Accessibility.increaseContrastOverrideForTesting = true
+        view.reapplyRecordedSurfaceForTesting()
+        let increased = try XCTUnwrap(
+            view.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))?.usingColorSpace(.sRGB)
+        )
+
+        XCTAssertGreaterThan(increased.alphaComponent, regular.alphaComponent)
+        XCTAssertEqual(view.layer?.borderWidth, Design.Radius.border)
+    }
+
     /// The sheet buttons depend on this: Return confirms, Escape cancels, and nothing else in the
     /// window has to route it.
     func testAKeyEquivalentFiresTheAction() throws {
@@ -272,6 +1075,36 @@ final class ThemedControlTests: XCTestCase {
             button.intrinsicContentSize.width, ceil(drawn.width),
             "the button measured itself too narrow to draw its own title on one line"
         )
+    }
+
+    func testAPlainTemplateIconDoesNotTintItsBoundingBox() throws {
+        let button = ThemedButton(
+            symbol: "xmark",
+            accessibility: "Close",
+            target: nil,
+            action: nil
+        )
+        button.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
+
+        let rep = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+        button.cacheDisplay(in: button.bounds, to: rep)
+
+        let scale = CGFloat(rep.pixelsWide) / button.bounds.width
+        let quietPixel = try XCTUnwrap(
+            rep.colorAt(x: Int(5 * scale), y: Int(12 * scale))
+        )
+        var strongestAlpha: CGFloat = 0
+        for x in 0..<rep.pixelsWide {
+            for y in 0..<rep.pixelsHigh {
+                strongestAlpha = max(strongestAlpha, rep.colorAt(x: x, y: y)?.alphaComponent ?? 0)
+            }
+        }
+        XCTAssertLessThan(
+            quietPixel.alphaComponent,
+            0.1,
+            "tinting the template image painted its transparent bounding box"
+        )
+        XCTAssertGreaterThan(strongestAlpha, 0.2, "the icon itself did not draw")
     }
 
     /// Disabling dims. It stopped doing that once, in the one place it is most visible: a theme
@@ -536,6 +1369,358 @@ final class ThemedControlTests: XCTestCase {
 
     func testPromptUsesOnlyThemedRuntimeBoundaries() {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: PromptView()), [])
+    }
+
+    func testPromptCanTakeFocusAndShowsItOnTheWholeSurface() {
+        let prompt = PromptView(frame: NSRect(x: 20, y: 20, width: 720, height: 116))
+        prompt.placeholder = "Describe a task or ask a question"
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 760, height: 156))
+        root.addSubview(prompt)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = root
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        root.layoutSubtreeIfNeeded()
+        guard let editor = descendants(in: prompt).first(where: { $0 is NSTextView }) as? NSTextView else {
+            return XCTFail("PromptView did not contain its text editor")
+        }
+
+        XCTAssertTrue(editor.isEditable)
+        XCTAssertTrue(editor.isSelectable)
+        XCTAssertTrue(window.makeFirstResponder(editor))
+        XCTAssertTrue(window.firstResponder === editor)
+        XCTAssertEqual(prompt.layer?.borderWidth, Design.Accessibility.focusRingWidth)
+        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.accent.cgColor)
+
+        prompt.reapplyRecordedSurfaceForTesting()
+        XCTAssertEqual(
+            prompt.layer?.borderWidth,
+            Design.Accessibility.focusRingWidth,
+            "a theme refresh discarded the focused border geometry"
+        )
+
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        XCTAssertEqual(prompt.layer?.borderWidth, Design.Radius.border)
+        XCTAssertEqual(prompt.layer?.borderColor, Design.Surface.border.cgColor)
+    }
+
+    func testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary() {
+        let field = ThemedTextField(string: "Editable")
+        field.frame = NSRect(x: 20, y: 20, width: 240, height: 28)
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 68))
+        root.addSubview(field)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = root
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(field)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+        defer { window.orderOut(nil) }
+
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
+    }
+
+    // MARK: - Component Gallery
+
+    func testComponentGalleryCataloguesEveryConcreteDesignComponent() throws {
+        XCTAssertEqual(
+            ComponentGalleryViewController.componentNames,
+            [
+                "BackdropOverlay",
+                "BackdropThemedControl",
+                "ChipView",
+                "FileActivityMapView",
+                "MorphingTitleLabel",
+                "PromptView",
+                "SeparatorView",
+                "ShortcutRecorderView",
+                "ThemeSwatchImage",
+                "ThemeSwatchView",
+                "ThemedButton",
+                "ThemedClipView",
+                "ThemedControl",
+                "ThemedOutlineView",
+                "ThemedPopUp",
+                "ThemedProgressBar",
+                "ThemedScrollView",
+                "ThemedSpinner",
+                "ThemedTableHeaderView",
+                "ThemedTableView",
+                "ThemedTabItemView",
+                "ThemedTextField",
+                "ThemedSearchField",
+                "ThemedTextView",
+                "ThemedToggle",
+                "ThemedSurface",
+                "ThemeRedraw",
+                "ToolbarButtonView",
+                "WorkingOrbView",
+                "WindowBackdrop"
+            ]
+        )
+
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let designDirectory = root.appendingPathComponent("Sources/Skalman/UI/Design")
+        let declarations = try FileManager.default.contentsOfDirectory(
+            at: designDirectory,
+            includingPropertiesForKeys: nil
+        )
+        .filter { $0.pathExtension == "swift" }
+        .map { try String(contentsOf: $0, encoding: .utf8) }
+        .joined(separator: "\n")
+
+        let pattern = try NSRegularExpression(
+            pattern: #"(?m)^(?:final )?class\s+([A-Za-z_][A-Za-z0-9_]*)"#
+        )
+        let range = NSRange(declarations.startIndex..., in: declarations)
+        let declaredComponents: Set<String> = Set(
+            pattern.matches(in: declarations, range: range).compactMap { match -> String? in
+                guard let nameRange = Range(match.range(at: 1), in: declarations) else { return nil }
+                return String(declarations[nameRange])
+            }
+        )
+        let missing = declaredComponents.subtracting(ComponentGalleryViewController.componentNames)
+
+        XCTAssertEqual(
+            missing,
+            Set<String>(),
+            "new public design components need an interactive Component Gallery story"
+        )
+    }
+
+    func testComponentGalleryTreeContainsNoRawAppKitChrome() {
+        let controller = ComponentGalleryWindowController()
+        let window = controller.window!
+        window.setContentSize(NSSize(width: 1_020, height: 780))
+
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
+    }
+
+    func testMainWindowTreeContainsNoRawAppKitChrome() {
+        let controller = MainWindowController()
+        let window = controller.window!
+        window.setContentSize(NSSize(width: 1_200, height: 760))
+
+        let violations = ThemeBoundaryAudit.violations(in: window)
+        XCTAssertEqual(
+            violations,
+            [],
+            ThemeBoundaryAudit.failureDescription(
+                for: violations,
+                windowTitle: "MainWindowController"
+            )
+        )
+    }
+
+    func testComponentGalleryOpensAtTheFirstStory() throws {
+        let controller = ComponentGalleryViewController()
+        controller.loadView()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 1_020, height: 780)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let scroll = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.catalogue", in: controller.view) as? NSScrollView
+        )
+        let document = try XCTUnwrap(scroll.documentView)
+        let firstStory = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.story.ThemedButton", in: document)
+        )
+        let firstStoryFrame = document.convert(firstStory.bounds, from: firstStory)
+
+        XCTAssertTrue(
+            document.visibleRect.intersects(firstStoryFrame),
+            "the gallery opened away from its first component"
+        )
+    }
+
+    func testComponentGalleryAppearanceSwitchIsWindowLocal() {
+        let originalAppAppearance = NSApp.appearance
+        let controller = ComponentGalleryViewController()
+        controller.loadView()
+
+        controller.setAppearance(.dark)
+        XCTAssertEqual(controller.appearanceMode, .dark)
+        XCTAssertEqual(controller.view.appearance?.name, .darkAqua)
+        XCTAssertTrue(NSApp.appearance === originalAppAppearance)
+
+        controller.setAppearance(.light)
+        XCTAssertEqual(controller.appearanceMode, .light)
+        XCTAssertEqual(controller.view.appearance?.name, .aqua)
+        XCTAssertTrue(NSApp.appearance === originalAppAppearance)
+    }
+
+    func testComponentGalleryAppearanceSwitchReResolvesLayerBackedSurfaces() throws {
+        let originalAppAppearance = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        defer { NSApp.appearance = originalAppAppearance }
+
+        let controller = ComponentGalleryViewController()
+        controller.loadView()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 1_020, height: 780)
+        controller.setAppearance(.light)
+
+        let card = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.story.ThemedButton", in: controller.view)
+        )
+        let actual = try XCTUnwrap(
+            card.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))
+        )
+        var expected: NSColor?
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            expected = NSColor(cgColor: Design.Surface.panel.cgColor)
+        }
+        let resolvedExpected = try XCTUnwrap(expected)
+        XCTAssertEqual(actual.hexString, resolvedExpected.hexString)
+    }
+
+    func testComponentGalleryRendersEveryStockThemeInBothAppearances() throws {
+        let owner = ComponentGalleryWindowController()
+        let window = try XCTUnwrap(owner.window)
+        let controller = try XCTUnwrap(
+            window.contentViewController as? ComponentGalleryViewController
+        )
+        window.setContentSize(NSSize(width: 1_020, height: 780))
+        let chip = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.menu.chip", in: controller.view) as? ChipView
+        )
+
+        for theme in AppThemeLibrary.stock {
+            controller.setTheme(theme)
+            for appearance in ComponentGalleryViewController.AppearanceMode.allCases {
+                controller.setAppearance(appearance)
+
+                let fixtureStem = [
+                    "component-gallery",
+                    theme.id.rawValue,
+                    appearance.rawValue.lowercased()
+                ].joined(separator: "-")
+
+                try captureGalleryFixture(window, named: fixtureStem)
+
+                XCTAssertTrue(chip.accessibilityPerformShowMenu())
+                try captureGalleryFixture(window, named: "\(fixtureStem)-menu")
+                let responder = try XCTUnwrap(window.firstResponder)
+                responder.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
+                XCTAssertFalse(
+                    descendants(in: controller.view).contains {
+                        $0.accessibilityRole() == .menu
+                    },
+                    "\(fixtureStem) left its dropdown open after Escape"
+                )
+            }
+        }
+    }
+
+    private func captureGalleryFixture(_ window: NSWindow, named name: String) throws {
+        let rep = try captureAppOwnedWindowContent(window)
+        let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(
+            png.count,
+            20_000,
+            "\(name) rendered as an unexpectedly empty image"
+        )
+        attach(png, named: name)
+
+        if let directory = ProcessInfo.processInfo.environment["SKALMAN_RENDER_OUT"] {
+            let output = URL(fileURLWithPath: directory, isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: output,
+                withIntermediateDirectories: true
+            )
+            try png.write(to: output.appendingPathComponent("\(name).png"))
+        }
+    }
+
+    /// Captures the complete app-owned root used by `ThemeBoundaryAudit`. AppKit's frame view is
+    /// intentionally excluded: cacheDisplay cannot synchronously recover layer-backed window
+    /// compositor pixels, and the title bar/toolbar are system chrome outside our theme contract.
+    private func captureAppOwnedWindowContent(_ window: NSWindow) throws -> NSBitmapImageRep {
+        let root = try XCTUnwrap(window.contentViewController?.view ?? window.contentView)
+
+        // MainWindowController installs its split-view material containment on the next turn.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+        root.layoutSubtreeIfNeeded()
+
+        root.effectiveAppearance.performAsCurrentDrawingAppearance {
+            root.wantsLayer = true
+            root.layer?.backgroundColor = Design.Surface.ground.cgColor
+        }
+
+        let rep = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+        root.cacheDisplay(in: root.bounds, to: rep)
+        return rep
+    }
+
+    private func attach(_ png: Data, named name: String) {
+        // Data, not NSImage: XCTest may encode an image attachment after the fixture has moved
+        // to its next appearance, which makes a dynamic-colour AppKit hierarchy serialize black.
+        let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func descendant(withIdentifier identifier: String, in root: NSView) -> NSView? {
+        if root.accessibilityIdentifier() == identifier { return root }
+        for child in root.subviews {
+            if let match = descendant(withIdentifier: identifier, in: child) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    private func descendants(in root: NSView) -> [NSView] {
+        root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
+    private func keyEvent(_ characters: String, keyCode: UInt16) throws -> NSEvent {
+        try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: characters,
+                isARepeat: false,
+                keyCode: keyCode
+            )
+        )
+    }
+
+    private func renderedPNG(of view: NSView) throws -> Data {
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    }
+
+    private func resolvedLayerColor(_ color: NSColor) throws -> NSColor {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = color.cgColor
+        return try XCTUnwrap(
+            view.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) }?.usingColorSpace(.sRGB)
+        )
     }
 }
 

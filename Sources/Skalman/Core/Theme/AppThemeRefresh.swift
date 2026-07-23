@@ -16,14 +16,22 @@ import ObjectiveC
 private final class RecordedSurface {
     let fill: NSColor
     let border: NSColor?
+    let borderWidth: CGFloat?
     /// Recorded because a theme changes a surface's *shape* as well as its colour, and a layer
     /// keeps whatever radius it was last given.
     let radius: SurfaceRadius
     let glow: Bool
 
-    init(fill: NSColor, border: NSColor?, radius: SurfaceRadius, glow: Bool) {
+    init(
+        fill: NSColor,
+        border: NSColor?,
+        borderWidth: CGFloat?,
+        radius: SurfaceRadius,
+        glow: Bool
+    ) {
         self.fill = fill
         self.border = border
+        self.borderWidth = borderWidth
         self.radius = radius
         self.glow = glow
     }
@@ -68,6 +76,7 @@ extension NSView {
             fill: recorded.fill,
             radius: recorded.radius,
             border: recorded.border,
+            borderWidth: recorded.borderWidth,
             glow: recorded.glow
         )
     }
@@ -105,8 +114,20 @@ extension NSView {
 
     /// Remembers the colours a surface was drawn with. Called by `applySurface`, so its
     /// eighteen call sites need no change of their own.
-    func recordSurface(fill: NSColor, border: NSColor?, radius: SurfaceRadius, glow: Bool) {
-        recordedSurface = RecordedSurface(fill: fill, border: border, radius: radius, glow: glow)
+    func recordSurface(
+        fill: NSColor,
+        border: NSColor?,
+        borderWidth: CGFloat?,
+        radius: SurfaceRadius,
+        glow: Bool
+    ) {
+        recordedSurface = RecordedSurface(
+            fill: fill,
+            border: border,
+            borderWidth: borderWidth,
+            radius: radius,
+            glow: glow
+        )
     }
 
     /// The re-apply on its own, for the test that pins the `CGColor` freeze this exists to fix.
@@ -138,6 +159,28 @@ extension NSView {
 @MainActor
 enum AppThemeRefresh {
 
+    private static let accessibilityObserver = AccessibilityDisplayOptionsObserver()
+    private static var observesAccessibilityDisplayOptions = false
+
+    /// AppKit refreshes stock controls when these preferences move; app-owned chrome needs the
+    /// same signal. Installed once at launch, after the palette is restored and before windows
+    /// are built.
+    static func startObservingAccessibilityDisplayOptions() {
+        guard !observesAccessibilityDisplayOptions else { return }
+        observesAccessibilityDisplayOptions = true
+        NSWorkspace.shared.notificationCenter.addObserver(
+            accessibilityObserver,
+            selector: #selector(AccessibilityDisplayOptionsObserver.displayOptionsChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
+    }
+
+    static func accessibilityDisplayOptionsChanged() {
+        repaintEverything()
+        NotificationCenter.default.post(AccessibilityDisplayOptionsDidChange())
+    }
+
     static func repaintEverything() {
         for window in NSApp.windows {
             window.appearance = NSApp.appearance
@@ -147,19 +190,39 @@ enum AppThemeRefresh {
         }
     }
 
-    private static func repaint(_ view: NSView) {
-        view.reapplyRecordedSurface()
-        // A state-specific layer colour is applied after the base surface, because it represents
-        // the most recent visible state (hovered, selected, and so on).
-        view.reapplyRecordedLayerColors()
-        view.needsDisplay = true
+    /// Re-resolves one view tree in that tree's own effective appearance.
+    ///
+    /// Most windows follow `NSApp.appearance`, but the Component Gallery deliberately previews
+    /// Aqua and Dark Aqua locally. Layer colours are frozen `CGColor`s, so changing a root
+    /// view's appearance without this pass leaves dark surfaces behind light text (or vice
+    /// versa). Keeping the scoped repaint here gives local previews the same complete refresh
+    /// as an app-wide theme change without mutating any other window.
+    static func repaint(_ view: NSView) {
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            view.reapplyRecordedSurface()
+            // A state-specific layer colour is applied after the base surface, because it
+            // represents the most recent visible state (hovered, selected, and so on).
+            view.reapplyRecordedLayerColors()
+            view.needsDisplay = true
 
-        // Effect views and anything else deriving from the appearance need their own nudge, and
-        // a view that draws into its layer will not redraw from `needsDisplay` alone.
-        if view.wantsLayer, view.layerContentsRedrawPolicy != .never {
-            view.layer?.setNeedsDisplay()
+            // Effect views and anything else deriving from the appearance need their own nudge,
+            // and a view that draws into its layer will not redraw from `needsDisplay` alone.
+            if view.wantsLayer, view.layerContentsRedrawPolicy != .never {
+                view.layer?.setNeedsDisplay()
+            }
         }
 
         for subview in view.subviews { repaint(subview) }
     }
+}
+
+@MainActor
+private final class AccessibilityDisplayOptionsObserver: NSObject {
+    @objc func displayOptionsChanged() {
+        AppThemeRefresh.accessibilityDisplayOptionsChanged()
+    }
+}
+
+struct AccessibilityDisplayOptionsDidChange: AppEvent {
+    static let name = Notification.Name("accessibilityDisplayOptionsDidChange")
 }

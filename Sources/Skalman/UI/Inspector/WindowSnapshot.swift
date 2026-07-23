@@ -13,7 +13,7 @@ enum WindowSnapshot {
     /// Captures from the window's frame view rather than `contentView`, so the toolbar is in
     /// the shot. The indicator is in window coordinates, which are also the frame view's —
     /// `cacheDisplay` renders the tree upright, so window space maps straight onto the
-    /// unflipped bitmap context with only the backing scale between them.
+    /// unflipped bitmap context.
     static func capture(window: NSWindow, annotating indicator: InspectorIndicator?) -> NSBitmapImageRep? {
         guard let contentView = window.contentView else { return nil }
         let frameView = contentView.superview ?? contentView
@@ -45,13 +45,10 @@ enum WindowSnapshot {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
 
-        // The rep is at backing-store scale and its context speaks pixels; the transform
-        // lets the indicator draw in the point space it was measured in.
-        let scale = CGFloat(rep.pixelsWide) / bounds.width
-        let transform = NSAffineTransform()
-        transform.scale(by: scale)
-        transform.concat()
-
+        // No scale transform, deliberately: the context speaks the rep's `size` units — the
+        // point space set above — and maps them onto the backing pixels itself. Scaling here
+        // as well drew every marker displaced and doubled on retina. Measured, and pinned by
+        // `testBitmapContextSpeaksTheRepsSizeUnits`.
         InspectorIndicatorDrawing.draw(indicator, within: bounds)
 
         context.flushGraphics()
@@ -77,6 +74,9 @@ enum WindowSnapshot {
 
     private static let timestamp: DateFormatter = {
         let formatter = DateFormatter()
+        // Pinned, or the filename inherits the user's numerals and calendar — a Buddhist-era
+        // year is a valid path and a wrong name.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         return formatter
     }()

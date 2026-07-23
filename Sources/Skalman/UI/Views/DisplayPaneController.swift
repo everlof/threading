@@ -40,6 +40,9 @@ final class DisplayTab {
         case content(DisplayContent)
         case browser(BrowserViewController)
         case review(GitReviewViewController)
+        case info(SessionInfoViewController)
+        case terminal(ShellDrawerViewController)
+        case files(FileTreeViewController)
     }
 
     let id: UUID
@@ -69,12 +72,30 @@ final class DisplayTab {
         return nil
     }
 
+    var info: SessionInfoViewController? {
+        if case .info(let info) = body { return info }
+        return nil
+    }
+
+    var terminal: ShellDrawerViewController? {
+        if case .terminal(let terminal) = body { return terminal }
+        return nil
+    }
+
+    var files: FileTreeViewController? {
+        if case .files(let files) = body { return files }
+        return nil
+    }
+
     /// The tab's view controller, when its body is a live surface rather than rendered content.
     var hostedController: NSViewController? {
         switch body {
         case .content: return nil
         case .browser(let browser): return browser
         case .review(let review): return review
+        case .info(let info): return info
+        case .terminal(let terminal): return terminal
+        case .files(let files): return files
         }
     }
 
@@ -88,6 +109,12 @@ final class DisplayTab {
             return "globe"
         case .review:
             return "plus.forwardslash.minus"
+        case .info:
+            return "info.circle"
+        case .terminal:
+            return "terminal"
+        case .files:
+            return "folder"
         }
     }
 
@@ -104,6 +131,12 @@ final class DisplayTab {
             return browser.currentURL?.host ?? "Browser"
         case .review:
             return "Review"
+        case .info:
+            return "Info"
+        case .terminal:
+            return "Terminal"
+        case .files:
+            return "Files"
         }
     }
 }
@@ -122,7 +155,12 @@ final class DisplayPaneController: NSViewController {
 
     private var headerView: NSView!
     private var titleLabel: NSTextField!
-    private var closeButton: ThemedButton!
+
+    /// Opens a new tab. It lives in the header rather than in the tab strip because the strip
+    /// collapses to nothing below `tabBarMinimumTabs` — a `+` inside it would be invisible in
+    /// exactly the empty and one-tab states where it is most wanted.
+    private var newTabButton: ThemedButton!
+    private var newTabMenuSession: AnyObject?
     private var tabBar: DisplayTabBar!
     private var tabBarHeight: NSLayoutConstraint!
     private var imageView: NSImageView!
@@ -148,8 +186,16 @@ final class DisplayPaneController: NSViewController {
         activeTab(for: currentSessionID)?.content
     }
 
-    /// Called when the user dismisses the panel, or closes its last tab.
+    /// Called when the user closes the pane's last content tab.
     var onClose: (() -> Void)?
+
+    /// Reports an active review's background read and main-thread render as one operation.
+    var onReviewLoadingChange: ((SessionID, Bool) -> Void)?
+
+    /// Resolves a session's shell-drawer root pid, so the info panel can attribute a port to the
+    /// shell rather than to the agent. The drawer belongs to the terminal container, which the
+    /// window owns — this is wired from there rather than reached for across the split.
+    var shellRootResolver: ((SessionID) -> pid_t?)?
 
     // MARK: - Lifecycle
 
@@ -175,19 +221,50 @@ final class DisplayPaneController: NSViewController {
 
         titleLabel = NSTextField(labelWithString: "Display")
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = .systemFont(ofSize: DisplayPaneDefaults.titleFontSize, weight: .semibold)
+        titleLabel.font = Design.Typography.caption()
         titleLabel.textColor = Design.Text.secondary
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        closeButton = ThemedButton(symbol: "xmark", accessibility: "Close", target: self, action: #selector(closeTapped)
+        newTabButton = ThemedButton(
+            symbol: "plus",
+            accessibility: "New tab",
+            target: self,
+            action: #selector(newTabButtonClicked(_:))
         )
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.isBordered = false
-        closeButton.toolTip = "Hide panel"
+        newTabButton.translatesAutoresizingMaskIntoConstraints = false
+        newTabButton.isBordered = false
+        newTabButton.toolTip = "New tab"
 
         headerView.addSubview(titleLabel)
-        headerView.addSubview(closeButton)
+        headerView.addSubview(newTabButton)
         view.addSubview(headerView)
+    }
+
+    @objc private func newTabButtonClicked(_ sender: NSView) {
+        guard let sessionID = currentSessionID else { return }
+
+        let choices: [(String, String, () -> Void)] = [
+            ("Terminal", "terminal", { [weak self] in _ = self?.addTerminalTab(for: sessionID) }),
+            ("Browser", "globe", { [weak self] in _ = self?.activateBrowser(for: sessionID) }),
+            ("Files", "folder", { [weak self] in _ = self?.activateFiles(for: sessionID) }),
+            ("Review", "plus.forwardslash.minus", { [weak self] in _ = self?.activateReview(for: sessionID) }),
+            ("Info", "info.circle", { [weak self] in _ = self?.activateInfo(for: sessionID) })
+        ]
+        let entries = choices.map { title, symbol, action in
+            ThemedMenuEntry.item(ThemedMenuItem(
+                title: title,
+                image: NSImage(systemSymbolName: symbol, accessibilityDescription: title),
+                onChoose: action
+            ))
+        }
+
+        newTabMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 160),
+            from: sender,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.newTabMenuSession = nil }
+        )
     }
 
     private func setupTabBar() {
@@ -232,10 +309,7 @@ final class DisplayPaneController: NSViewController {
 
         captionLabel = NSTextField(labelWithString: "")
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
-        captionLabel.font = .monospacedSystemFont(
-            ofSize: DisplayPaneDefaults.captionFontSize,
-            weight: .regular
-        )
+        captionLabel.font = Design.Typography.compactCode()
         captionLabel.textColor = Design.Text.tertiary
         captionLabel.lineBreakMode = .byTruncatingMiddle
         captionLabel.alignment = .right
@@ -251,7 +325,7 @@ final class DisplayPaneController: NSViewController {
 
         placeholderLabel = NSTextField(labelWithString: "Nothing to show yet.")
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
-        placeholderLabel.font = .systemFont(ofSize: DisplayPaneDefaults.titleFontSize)
+        placeholderLabel.font = Design.Typography.detail()
         placeholderLabel.textColor = Design.Text.tertiary
         placeholderLabel.alignment = .center
 
@@ -280,14 +354,14 @@ final class DisplayPaneController: NSViewController {
             titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: padding),
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             titleLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: closeButton.leadingAnchor,
-                constant: -padding
+                lessThanOrEqualTo: newTabButton.leadingAnchor,
+                constant: -4
             ),
 
-            closeButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -padding),
-            closeButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
-            closeButton.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
+            newTabButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -padding),
+            newTabButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            newTabButton.widthAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
+            newTabButton.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
 
             // The strip sits between the header and the content; its height collapses to zero
             // when there are too few tabs to be worth a row (see `render`).
@@ -456,11 +530,61 @@ final class DisplayPaneController: NSViewController {
     }
 
     /// A session that just stopped working probably changed the tree; its review, if on
-    /// screen, should say so without being asked.
+    /// screen, should say so without being asked. The info panel gets the same treatment for the
+    /// same reason: a turn that ends is a turn that may have just started or killed a server.
     func noteSessionStoppedWorking(_ sessionID: SessionID) {
-        guard sessionID == currentSessionID,
-              let review = activeTab(for: sessionID)?.review else { return }
-        review.refresh(force: false)
+        guard sessionID == currentSessionID else { return }
+
+        activeTab(for: sessionID)?.review?.refresh(force: false)
+        activeTab(for: sessionID)?.info?.refresh()
+    }
+
+    // MARK: - Public — Info Tab
+
+    /// Returns the session's info tab, creating and activating one if it has none — the same
+    /// one-per-session shape as the browser and the review.
+    @discardableResult
+    func activateInfo(for sessionID: SessionID) -> SessionInfoViewController? {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+
+        if let existing = tabs.first(where: { $0.info != nil }) {
+            activeTabIDBySession[sessionID] = existing.id
+            persist(sessionID)
+            if sessionID == currentSessionID { render() }
+            return existing.info
+        }
+
+        guard let controller = makeInfo(for: sessionID) else { return nil }
+        let tab = DisplayTab(body: .info(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+        persist(sessionID)
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// Builds an info view controller for the session's project folder. Returns nil for a session
+    /// with no project — there is no directory to describe.
+    private func makeInfo(for sessionID: SessionID) -> SessionInfoViewController? {
+        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+
+        let controller = SessionInfoViewController(sessionID: sessionID, folderPath: project.folderPath)
+        addChild(controller)
+
+        // The shell drawer lives on the terminal container, which the window owns and this pane
+        // does not see; the resolver is wired in from there.
+        controller.shellRootProvider = { [weak self] in self?.shellRootResolver?(sessionID) }
+
+        // A port the user clicks lands in this session's browser tab, which is the surface that
+        // already exists for showing a page.
+        controller.onOpenURL = { [weak self] url in
+            self?.activateBrowser(for: sessionID).navigate(to: url.absoluteString)
+        }
+
+        return controller
     }
 
     /// Builds a review view controller for the session's project folder, wired to persist its
@@ -475,6 +599,88 @@ final class DisplayPaneController: NSViewController {
         )
         addChild(controller)
         controller.onModeChange = { [weak self] in self?.persist(sessionID) }
+        controller.onLoadingChange = { [weak self] isLoading in
+            self?.onReviewLoadingChange?(sessionID, isLoading)
+        }
+        return controller
+    }
+
+    // MARK: - Public — Terminal Tab
+
+    /// Adds a terminal tab and brings it to the front.
+    ///
+    /// Multi-instance, unlike the browser, review and info tabs: those answer a question about
+    /// the session and there is only one answer, while shells are the thing you want two of —
+    /// one running a server, one to type in.
+    @discardableResult
+    func addTerminalTab(for sessionID: SessionID) -> ShellDrawerViewController? {
+        restoreIfNeeded(sessionID)
+        guard let controller = makeTerminal(for: sessionID) else { return nil }
+
+        var tabs = tabsBySession[sessionID] ?? []
+        let tab = DisplayTab(body: .terminal(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+        persist(sessionID)
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// Builds a terminal for the session's project folder. Nil for a session with no project —
+    /// there is no directory to open a shell in.
+    ///
+    /// It opens in the project folder rather than where the agent has wandered to: the pane
+    /// cannot see the terminal container that owns the PTY to ask it over OSC 7, and the folder
+    /// is the same fallback the shell drawer already documents.
+    private func makeTerminal(for sessionID: SessionID) -> ShellDrawerViewController? {
+        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+
+        let folder = project.folderPath
+        let controller = ShellDrawerViewController(
+            sessionID: sessionID,
+            directory: { URL(fileURLWithPath: folder) }
+        )
+        addChild(controller)
+        return controller
+    }
+
+    // MARK: - Public — Files Tab
+
+    /// Returns the session's file tree, creating and activating one if it has none — the same
+    /// one-per-session shape as the browser, review and info. One project has one tree; a second
+    /// would show the same directory twice.
+    @discardableResult
+    func activateFiles(for sessionID: SessionID) -> FileTreeViewController? {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+
+        if let existing = tabs.first(where: { $0.files != nil }) {
+            activeTabIDBySession[sessionID] = existing.id
+            persist(sessionID)
+            if sessionID == currentSessionID { render() }
+            return existing.files
+        }
+
+        guard let controller = makeFiles(for: sessionID) else { return nil }
+        let tab = DisplayTab(id: UUID(), body: .files(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+        persist(sessionID)
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// Builds a file tree rooted at the session's project folder. Nil for a session with no
+    /// project — there is no directory to show.
+    private func makeFiles(for sessionID: SessionID) -> FileTreeViewController? {
+        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
+
+        let controller = FileTreeViewController(folderPath: project.folderPath)
+        addChild(controller)
         return controller
     }
 
@@ -575,12 +781,17 @@ final class DisplayPaneController: NSViewController {
 
         render()
 
-        // Closing the final tab collapses the pane, the same as the header's close button.
+        // Closing the final content tab collapses the pane.
         if tabs.isEmpty { onClose?() }
     }
 
     /// Detaches a live tab's view controller. Content tabs need nothing.
+    ///
+    /// A terminal is the one kind holding something a detach does not release: closing its tab
+    /// has to kill the shell, or the process outlives every view that could reach it.
     private func teardownHosted(_ tab: DisplayTab) {
+        tab.terminal?.terminate()
+
         guard let controller = tab.hostedController else { return }
         if installedController === controller { installHosted(nil) }
         controller.view.removeFromSuperview()
@@ -660,6 +871,39 @@ final class DisplayPaneController: NSViewController {
             installHosted(review)
             // Loads only when actually shown, the same deferred rule as the browser's page.
             review.refresh(force: false)
+
+        case .info(let info):
+            imageView.image = nil
+            imageView.isHidden = true
+            hideHTML()
+            captionLabel.isHidden = true
+            contentMenuButton.isHidden = true
+            installHosted(info)
+            // The panel's own on-screen gate starts its polling; this is the immediate first
+            // reading, so switching to the tab does not show a two-second-stale one.
+            info.refresh()
+
+        case .terminal(let terminal):
+            imageView.image = nil
+            imageView.isHidden = true
+            hideHTML()
+            captionLabel.isHidden = true
+            contentMenuButton.isHidden = true
+            installHosted(terminal)
+            // The same deferred rule the browser's page and the review's git call follow: a
+            // restored terminal tab costs no process until it is actually looked at.
+            terminal.startIfNeeded()
+
+        case .files(let files):
+            imageView.image = nil
+            imageView.isHidden = true
+            hideHTML()
+            captionLabel.isHidden = true
+            contentMenuButton.isHidden = true
+            installHosted(files)
+            // Reads the root on first show and re-reads what is open on later ones, so a file an
+            // agent just wrote is there without the folder being collapsed and reopened.
+            files.refresh()
 
         case nil:
             installHosted(nil)
@@ -754,6 +998,23 @@ final class DisplayPaneController: NSViewController {
                 let mode = persisted.mode.flatMap(GitReviewMode.init(rawValue:)) ?? .uncommitted
                 guard let controller = makeReview(for: sessionID, mode: mode) else { continue }
                 tabs.append(DisplayTab(id: id, body: .review(controller)))
+
+            case .info:
+                // Nothing is read until the tab is shown: the panel polls off its own visibility.
+                guard let controller = makeInfo(for: sessionID) else { continue }
+                tabs.append(DisplayTab(id: id, body: .info(controller)))
+
+            case .terminal:
+                // The tab comes back, the process does not — a shell's state was never on disk.
+                // No child is spawned until the tab is shown (`startIfNeeded`).
+                guard let controller = makeTerminal(for: sessionID) else { continue }
+                tabs.append(DisplayTab(id: id, body: .terminal(controller)))
+
+            case .files:
+                // No directory is read until the tab is shown, so a background session's tree
+                // costs nothing but the controller.
+                guard let controller = makeFiles(for: sessionID) else { continue }
+                tabs.append(DisplayTab(id: id, body: .files(controller)))
             }
         }
 
@@ -794,6 +1055,27 @@ final class DisplayPaneController: NSViewController {
             )
         }
 
+        if tab.info != nil {
+            return PersistedTab(
+                id: tab.id.uuidString, kind: .info, title: tab.title,
+                subtitle: "", url: nil, html: nil, cacheFile: nil
+            )
+        }
+
+        if tab.terminal != nil {
+            return PersistedTab(
+                id: tab.id.uuidString, kind: .terminal, title: tab.title,
+                subtitle: "", url: nil, html: nil, cacheFile: nil
+            )
+        }
+
+        if tab.files != nil {
+            return PersistedTab(
+                id: tab.id.uuidString, kind: .files, title: tab.title,
+                subtitle: "", url: nil, html: nil, cacheFile: nil
+            )
+        }
+
         guard let content = tab.content else { return nil }
         switch content.body {
         case .html(let html):
@@ -820,9 +1102,6 @@ final class DisplayPaneController: NSViewController {
         return "<meta name=\"color-scheme\" content=\"light dark\">\n" + html
     }
 
-    @objc private func closeTapped() {
-        onClose?()
-    }
 }
 
 // MARK: - WKNavigationDelegate

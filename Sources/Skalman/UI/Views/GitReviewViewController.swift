@@ -22,10 +22,14 @@ final class GitReviewViewController: NSViewController {
     /// Called when the user picks a different mode, so the pane can persist the tab with it.
     var onModeChange: (() -> Void)?
 
+    /// Feeds the selected sidebar row. It stays true through main-thread view construction,
+    /// not merely through the background git read.
+    var onLoadingChange: ((Bool) -> Void)?
+
     var modeChip: ChipView!
     var backButton: ThemedButton!
     var counterLabel: NSTextField!
-    private var refreshButton: ThemedButton!
+    private var menuButton: ThemedButton!
     var scrollView: NSScrollView!
     var stack: NSStackView!
     var placeholderLabel: NSTextField!
@@ -47,7 +51,12 @@ final class GitReviewViewController: NSViewController {
 
     /// Stale async results are dropped by generation, not cancelled — git is already running.
     private var generation = 0
-    private var isLoading = false
+    private var isLoading = false {
+        didSet {
+            guard isLoading != oldValue else { return }
+            onLoadingChange?(isLoading)
+        }
+    }
     private var lastLoadedAt: Date?
 
     /// The mode the body on screen was drawn for, so a reload of the same surface can keep the
@@ -57,6 +66,15 @@ final class GitReviewViewController: NSViewController {
     /// Which files the user has opened or closed by hand. Consulted ahead of the auto-expand
     /// heuristic, so a watched checkout re-reading itself does not close what is being read.
     var expansionOverrides: [String: Bool] = [:]
+
+    /// Whether a long line wraps to the pane or runs off it into a horizontal scroller. Wrapping
+    /// is the default because the pane is often narrow, and hiding half a changed line off the
+    /// right edge is worse — but a wide window reading long lines wants the other trade.
+    var wrapsDiffLines = true
+
+    /// Whether git is asked to fold away whitespace-only changes. A re-read rather than a
+    /// display filter: what counts as a changed line is git's judgement, not the view's.
+    var ignoresWhitespace = false
 
     /// The checkout changed while a load was in flight or the pane was off screen; the next
     /// opportunity re-reads regardless of the debounce.
@@ -108,6 +126,7 @@ final class GitReviewViewController: NSViewController {
     }
 
     deinit {
+        if isLoading { onLoadingChange?(false) }
         watcher?.stop()
     }
 
@@ -122,9 +141,9 @@ final class GitReviewViewController: NSViewController {
 
         modeChip = ChipView()
         modeChip.configure(symbolName: GitReviewUIDefaults.modeSymbol, title: mode.title)
-        modeChip.menuProvider = { [weak self] in self?.modeMenu() ?? NSMenu() }
+        modeChip.itemsProvider = { [weak self] in self?.modeItems() ?? [] }
         modeChip.onSelect = { [weak self] item in
-            guard let raw = item.representedObject as? String,
+            guard let raw = item.representedValue as? String,
                   let mode = GitReviewMode(rawValue: raw) else { return }
             self?.switchMode(to: mode)
         }
@@ -133,12 +152,19 @@ final class GitReviewViewController: NSViewController {
         counterLabel.font = Design.Typography.caption()
         counterLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        refreshButton = ThemedButton(symbol: "arrow.clockwise", accessibility: "Refresh", target: self, action: #selector(refreshTapped)
+        // One overflow rather than a row of icons: refreshing, collapsing, wrapping and the
+        // whitespace fold are all things asked of the diff occasionally, and a header of five
+        // glyphs would compete with the mode chip, which is the control that matters here.
+        menuButton = ThemedButton(
+            symbol: "ellipsis",
+            accessibility: "Diff options",
+            target: self,
+            action: #selector(showOverflowMenu(_:))
         )
-        refreshButton.isBordered = false
-        refreshButton.toolTip = "Refresh"
+        menuButton.isBordered = false
+        menuButton.toolTip = "Diff options"
 
-        [backButton, modeChip, counterLabel, refreshButton].forEach {
+        [backButton, modeChip, counterLabel, menuButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview($0)
         }
@@ -197,12 +223,12 @@ final class GitReviewViewController: NSViewController {
             counterLabel.leadingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: Design.Spacing.medium),
             counterLabel.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
             counterLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: refreshButton.leadingAnchor,
+                lessThanOrEqualTo: menuButton.leadingAnchor,
                 constant: -Design.Spacing.small
             ),
 
-            refreshButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
-            refreshButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
+            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
+            menuButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
 
             scrollView.topAnchor.constraint(equalTo: modeChip.bottomAnchor, constant: Design.Spacing.small),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -320,9 +346,8 @@ final class GitReviewViewController: NSViewController {
         let expected = generation
         isLoading = true
 
-        GitReviewReader.diff(request, in: root) { [weak self] result in
+        GitReviewReader.diff(request, in: root, ignoringWhitespace: ignoresWhitespace) { [weak self] result in
             guard let self, expected == self.generation else { return }
-            self.isLoading = false
             self.lastLoadedAt = Date()
 
             switch result {
@@ -331,6 +356,7 @@ final class GitReviewViewController: NSViewController {
             case .failure(let failure):
                 self.show(.message(failure.errorDescription ?? "git failed."))
             }
+            self.isLoading = false
             self.reloadIfPending()
         }
     }
@@ -342,7 +368,6 @@ final class GitReviewViewController: NSViewController {
 
         GitReviewReader.log(skip: skip, in: root) { [weak self] result in
             guard let self, expected == self.generation else { return }
-            self.isLoading = false
             self.lastLoadedAt = Date()
 
             switch result {
@@ -355,6 +380,7 @@ final class GitReviewViewController: NSViewController {
             case .failure(let failure):
                 self.show(.message(failure.errorDescription ?? "git failed."))
             }
+            self.isLoading = false
             self.reloadIfPending()
         }
     }
@@ -365,9 +391,12 @@ final class GitReviewViewController: NSViewController {
         let expected = generation
         isLoading = true
 
-        GitReviewReader.diff(.commit(hash: commit.hash), in: root) { [weak self] result in
+        GitReviewReader.diff(
+            .commit(hash: commit.hash),
+            in: root,
+            ignoringWhitespace: ignoresWhitespace
+        ) { [weak self] result in
             guard let self, expected == self.generation else { return }
-            self.isLoading = false
 
             switch result {
             case .success(let files):
@@ -379,20 +408,22 @@ final class GitReviewViewController: NSViewController {
             case .failure(let failure):
                 self.show(.message(failure.errorDescription ?? "git failed."))
             }
+            self.isLoading = false
         }
     }
 
     // MARK: - Mode
 
-    private func modeMenu() -> NSMenu {
-        let menu = NSMenu()
-        for candidate in GitReviewMode.allCases {
-            let item = NSMenuItem(title: candidate.title, action: nil, keyEquivalent: "")
-            item.representedObject = candidate.rawValue
-            item.state = candidate == mode ? .on : .off
-            menu.addItem(item)
+    private func modeItems() -> [ThemedMenuEntry] {
+        GitReviewMode.allCases.map { candidate in
+            .item(
+                ThemedMenuItem(
+                    title: candidate.title,
+                    representedValue: candidate.rawValue,
+                    isSelected: candidate == mode
+                )
+            )
         }
-        return menu
     }
 
     private func switchMode(to newMode: GitReviewMode) {
@@ -407,10 +438,6 @@ final class GitReviewViewController: NSViewController {
     }
 
     // MARK: - Actions
-
-    @objc private func refreshTapped() {
-        refresh(force: true)
-    }
 
     @objc func loadMoreCommits() {
         guard let root = repositoryRoot, !isLoading else { return }
@@ -427,15 +454,6 @@ final class GitReviewViewController: NSViewController {
 /// Reports when it lands in, or leaves, a window. The display pane parents a live tab's *view*
 /// without adopting its controller, so `viewDidAppear` never fires for one — this is the signal
 /// that stands in for it.
-private final class WindowAwareView: NSView {
-    var onWindowChange: ((NSWindow?) -> Void)?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        onWindowChange?(window)
-    }
-}
-
 // MARK: - Defaults
 
 enum GitReviewUIDefaults {
@@ -443,4 +461,8 @@ enum GitReviewUIDefaults {
     static let modeSymbol = "plus.forwardslash.minus"
 
     static let commitPlaceholder = "Commit staged changes…"
+
+    /// Delimits the patch in the copied `git apply` heredoc. Distinctive enough that a diff
+    /// containing the word cannot close it early.
+    static let patchHeredocDelimiter = "SKALMAN_PATCH_EOF"
 }

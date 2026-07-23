@@ -83,20 +83,25 @@ final class ThemePreferencesViewController: NSViewController {
         button.pullsDown = true
         button.isBordered = false
 
-        let menu = NSMenu()
-        menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
-        menu.addItem(withTitle: "Duplicate", action: #selector(duplicateTheme), keyEquivalent: "")
-        menu.addItem(withTitle: "Rename…", action: #selector(renameTheme), keyEquivalent: "")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Import from Terminal.app…", action: #selector(importFromTerminal), keyEquivalent: "")
-        menu.addItem(withTitle: "Export…", action: #selector(exportTheme), keyEquivalent: "")
-
-        for item in menu.items { item.target = self }
-        button.menu = menu
-
-        if let gear = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Actions") {
-            button.item(at: 0)?.image = gear
-        }
+        button.addItem(
+            ThemedMenuItem(
+                title: "",
+                image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Actions")
+            )
+        )
+        button.addItem(ThemedMenuItem(title: "Duplicate", onChoose: { [weak self] in
+            self?.duplicateTheme()
+        }))
+        button.addItem(ThemedMenuItem(title: "Rename…", onChoose: { [weak self] in
+            self?.renameTheme()
+        }))
+        button.addSeparator()
+        button.addItem(ThemedMenuItem(title: "Import from Terminal.app…", onChoose: { [weak self] in
+            self?.importFromTerminal()
+        }))
+        button.addItem(ThemedMenuItem(title: "Export…", onChoose: { [weak self] in
+            self?.exportTheme()
+        }))
 
         return button
     }()
@@ -190,9 +195,9 @@ final class ThemePreferencesViewController: NSViewController {
     private func appThemeSection() -> NSView {
         let popUp = SettingsUI.popUp(target: self, action: #selector(appThemeChanged))
         for theme in AppThemeLibrary.stock {
-            let item = NSMenuItem(title: theme.name, action: nil, keyEquivalent: "")
-            item.representedObject = theme.id.rawValue
-            popUp.menu?.addItem(item)
+            popUp.addItem(
+                ThemedMenuItem(title: theme.name, representedValue: theme.id.rawValue)
+            )
         }
         popUp.selectItem(at: AppThemeLibrary.stock.firstIndex { $0.id == AppThemeLibrary.current.id } ?? 0)
         appThemePopUp = popUp
@@ -209,7 +214,7 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     @objc private func appThemeChanged(_ sender: ThemedPopUp) {
-        guard let raw = sender.selectedItem?.representedObject as? String,
+        guard let raw = sender.selectedItem?.representedValue as? String,
               let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
 
         AppThemeLibrary.apply(theme)

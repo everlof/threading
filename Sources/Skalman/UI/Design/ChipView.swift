@@ -18,22 +18,24 @@ final class ChipView: ThemedControl {
     private var trackingArea: NSTrackingArea?
     private var isHovered = false { didSet { updateHoverState() } }
     private var isPresentingMenu = false { didSet { updateBackground() } }
+    private var menuSession: AnyObject?
 
     /// Widens the chip to its full contents while hovered, so a label truncated to fit the row
     /// (`Default m…`) becomes readable. Held so it can be removed on exit.
     private var hoverWidthConstraint: NSLayoutConstraint?
 
-    /// Items to offer, rebuilt each time so the menu always reflects current state.
-    var menuProvider: (() -> NSMenu)?
+    /// Choices to offer, rebuilt each time so the menu always reflects current state.
+    var itemsProvider: (() -> [ThemedMenuEntry])?
 
     /// The item currently represented, so callers can read the selection back.
-    private(set) var selectedItem: NSMenuItem?
+    private(set) var selectedItem: ThemedMenuItem?
 
     /// Called after a menu item is chosen.
-    var onSelect: ((NSMenuItem) -> Void)?
+    var onSelect: ((ThemedMenuItem) -> Void)?
 
-    /// Replaces AppKit presentation in behavior tests. Production leaves this nil.
-    var menuPresentationOverride: ((NSMenu) -> Void)?
+    /// Replaces AppKit presentation in behavior tests. Returning a choice simulates selecting it.
+    /// Production leaves this nil.
+    var menuPresentationOverride: ((ThemedMenuPresentation) -> ThemedMenuItem?)?
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: Design.Size.chipHeight)
@@ -48,6 +50,13 @@ final class ChipView: ThemedControl {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupViews()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            ThemedMenuPresenter.dismiss(menuSession)
+        }
+        super.viewWillMove(toWindow: newWindow)
     }
 
     @available(*, unavailable)
@@ -127,7 +136,7 @@ final class ChipView: ThemedControl {
     }
 
     /// Selects an item by its represented value, so a rebuilt menu keeps its choice.
-    func select(_ item: NSMenuItem?) {
+    func select(_ item: ThemedMenuItem?) {
         selectedItem = item
     }
 
@@ -158,6 +167,19 @@ final class ChipView: ThemedControl {
         _ = presentMenu()
     }
 
+    // The press that opened the menu may still be held. AppKit keeps routing its drag and
+    // release here — the mouse-down view — so both are forwarded to the menu, which is what
+    // makes press-drag-release choose a row the way every platform menu does.
+    override func mouseDragged(with event: NSEvent) {
+        guard let menuSession else { return }
+        ThemedMenuPresenter.dragUpdated(menuSession, event: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let menuSession else { return }
+        ThemedMenuPresenter.dragEnded(menuSession, event: event)
+    }
+
     override var acceptsFirstResponder: Bool { isEnabled }
 
     override func becomeFirstResponder() -> Bool {
@@ -186,45 +208,60 @@ final class ChipView: ThemedControl {
         }
     }
 
-    /// Builds the menu and claims it, separately from showing it.
-    ///
-    /// Split out because `popUp` runs a modal event loop: the routing rule below — which items
-    /// the chip takes over and which it leaves alone — is the part most likely to break, and
-    /// inside `mouseDown` it was reachable only by opening a real menu and never tested.
-    func preparedMenu() -> NSMenu? {
-        guard let menu = menuProvider?() else { return nil }
+    /// Builds the semantic presentation separately from showing it. Kept internal for behavior
+    /// tests without exposing the contained AppKit menu.
+    func preparedPresentation() -> ThemedMenuPresentation? {
+        guard let entries = itemsProvider?(),
+              entries.contains(where: {
+                  if case .item = $0 { return true }
+                  return false
+              })
+        else { return nil }
 
-        for item in menu.items where item.action == nil && !item.isSeparatorItem {
-            item.target = self
-            item.action = #selector(menuItemChosen(_:))
-        }
-
-        menu.minimumWidth = bounds.width
-        return menu
+        return ThemedMenuPresentation(entries: entries, minimumWidth: bounds.width)
     }
 
     @discardableResult
     private func presentMenu() -> Bool {
-        guard isEnabled, let menu = preparedMenu() else { return false }
-
-        isPresentingMenu = true
-        defer { isPresentingMenu = false }
+        guard isEnabled, menuSession == nil, let presentation = preparedPresentation() else {
+            return false
+        }
 
         if let menuPresentationOverride {
-            menuPresentationOverride(menu)
+            isPresentingMenu = true
+            defer { isPresentingMenu = false }
+            if let selected = menuPresentationOverride(presentation) {
+                choose(selected)
+            }
         } else {
-            menu.popUp(
-                positioning: nil,
-                at: NSPoint(x: 0, y: bounds.height + Design.Spacing.tight),
-                in: self
+            let selectedIndex = presentation.entries.firstIndex { entry in
+                guard case .item(let item) = entry else { return false }
+                return item.isSelected
+            }
+            isPresentingMenu = true
+            menuSession = ThemedMenuPresenter.present(
+                presentation,
+                from: self,
+                selectedEntryIndex: selectedIndex,
+                onChoose: { [weak self] _, item in self?.choose(item) },
+                onDismiss: { [weak self] in
+                    self?.menuSession = nil
+                    self?.isPresentingMenu = false
+                }
             )
+            if menuSession == nil {
+                isPresentingMenu = false
+                return false
+            }
         }
         return true
     }
 
-    @objc private func menuItemChosen(_ sender: NSMenuItem) {
-        selectedItem = sender
-        onSelect?(sender)
+    private func choose(_ item: ThemedMenuItem) {
+        selectedItem = item
+        item.onChoose?()
+        onSelect?(item)
+        NSAccessibility.post(element: self, notification: .valueChanged)
     }
 
     // MARK: - Private Methods

@@ -106,6 +106,12 @@ final class ThemeMenuTests: XCTestCase {
     /// End to end through AppKit's own dispatch: picking an item reaches the assignment layer.
     /// The session identifier is one no store knows, so the write itself is a no-op — what is
     /// under test is that the item, its target and its selector are connected at all.
+    ///
+    /// Dispatch goes through the item's *own* target rather than through the sidebar, which is
+    /// what AppKit does when the menu fires. The handler lives on `ThemeMenuBuilder`, since the
+    /// submenu is built from four places and the items need one stable target between them —
+    /// asserting the sidebar handles it pins the owner rather than the connection, and this
+    /// test failed for exactly that reason once the builder was extracted.
     func testChoosingAThemeFiresTheAssignmentEvent() throws {
         let sidebar = ProjectSidebarViewController()
         let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
@@ -115,15 +121,34 @@ final class ThemeMenuTests: XCTestCase {
             "no theme item in the menu"
         )
         let action = try XCTUnwrap(themeItem.action)
-        XCTAssertTrue(sidebar.responds(to: action), "the sidebar does not implement \(action)")
-        XCTAssertTrue(themeItem.target === sidebar)
+        let target = try XCTUnwrap(themeItem.target as? NSObject, "the item carries no target")
+        XCTAssertTrue(target.responds(to: action), "the target does not implement \(action)")
 
         let fired = expectation(description: "ThemeAssignmentsDidChange")
         let observations = AppEventObservations()
         observations.observe(ThemeAssignmentsDidChange.self) { _ in fired.fulfill() }
 
-        _ = sidebar.perform(action, with: themeItem)
+        _ = target.perform(action, with: themeItem)
 
         wait(for: [fired], timeout: 1)
+    }
+
+    /// `NSMenuItem.target` is a *weak* reference, so a builder owned by nothing leaves every
+    /// item in the submenu pointing at nil and the menu silently does nothing when clicked.
+    /// The sidebar therefore has to hold its builder, which is invisible at the call site —
+    /// `sidebarThemeBuilder()` returning a fresh instance would read identically and be dead.
+    func testTheSidebarKeepsTheBuilderItsItemsTargetAlive() throws {
+        let sidebar = ProjectSidebarViewController()
+        let item = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
+            .items
+            .first { ($0.representedObject as? ThemeMenuChoice)?.themeName != nil }
+        let themeItem = try XCTUnwrap(item, "no theme item in the menu")
+
+        // Anything transient would already be gone by the time the menu is shown.
+        autoreleasepool { _ = sidebar.makeProjectThemeItem(for: ProjectID()) }
+
+        XCTAssertNotNil(themeItem.target, "the items' target was not retained by the sidebar")
+        XCTAssertTrue(themeItem.target as? ThemeMenuBuilder === sidebar.themeMenuBuilder,
+                      "the items point at a builder the sidebar does not own")
     }
 }

@@ -11,7 +11,7 @@ import AppKit
 /// A label is deliberately *not* this. `NSTextField(labelWithString:)` draws no bezel and no
 /// background, so it is already nothing but text in a themed colour; the erosion this exists to
 /// stop is the bezel, not the type.
-class ThemedTextField: NSTextField, ThemedComponent {
+class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
 
     // MARK: - Geometry
 
@@ -19,7 +19,6 @@ class ThemedTextField: NSTextField, ThemedComponent {
         static let height: CGFloat = Design.Size.chipHeight
         /// Clear of the border, and roughly where a stock field puts its own text.
         static let inset: CGFloat = Design.Spacing.small + 2
-        static let focusRingWidth: CGFloat = 2
     }
 
     // MARK: - State
@@ -68,6 +67,20 @@ class ThemedTextField: NSTextField, ThemedComponent {
         font = Design.Typography.body()
         textColor = Design.Text.label
         themeRedraw = ThemeRedraw(self)
+    }
+
+    /// On recent AppKit releases an on-screen text field expands into a private clip view and
+    /// text view. They are the field editor that preserves selection, input methods and undo—not
+    /// application chrome. Permit only that exact direct hierarchy; a text view elsewhere under
+    /// the component is still a violation.
+    func permitsSystemChrome(_ view: NSView) -> Bool {
+        if let clip = view as? NSClipView {
+            return clip.superview === self
+        }
+        if view is NSTextView, let clip = view.superview as? NSClipView {
+            return clip.superview === self
+        }
+        return false
     }
 
     // MARK: - Placeholder
@@ -131,7 +144,7 @@ class ThemedTextField: NSTextField, ThemedComponent {
         // A second pass on the same shape rather than a wider single stroke: half of a thick
         // stroke falls outside the path, which on a squared theme clips against the bounds.
         Design.Surface.accent.setStroke()
-        path.lineWidth = Layout.focusRingWidth
+        path.lineWidth = Design.Accessibility.focusRingWidth
         path.stroke()
     }
 }

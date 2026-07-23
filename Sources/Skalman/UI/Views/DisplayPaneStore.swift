@@ -21,6 +21,9 @@ struct PersistedTab: Codable {
         case html
         case image
         case review
+        case info
+        case terminal
+        case files
     }
 
     var id: String
@@ -49,6 +52,9 @@ extension PersistedPanel {
             case .html: return "h:\(tab.title ?? "")·\(tab.subtitle)"
             case .image: return "i:\(tab.title ?? tab.url ?? "")"
             case .review: return "r:\(tab.mode ?? "")"
+            case .info: return "n"
+            case .terminal: return "t"
+            case .files: return "f"
             }
         }
         return parts.joined(separator: "|") + "#" + (activeTabID ?? "")
@@ -74,6 +80,15 @@ extension PersistedPanel {
                 detail = "image \"\(name)\""
             case .review:
                 detail = "git review panel (the user's diff view; they may stage and commit from it)"
+            case .info:
+                detail = "session info panel (the user can see this session's processes and "
+                    + "listening ports, so a dev server you start is visible to them)"
+            case .terminal:
+                detail = "a shell the user opened in this project (their own terminal — you "
+                    + "cannot type into it, and what they run there is not in your transcript)"
+            case .files:
+                detail = "a file tree of the project folder (the user is browsing the files "
+                    + "you are working in)"
             }
             lines.append("\(index). \(detail)\(active)")
         }

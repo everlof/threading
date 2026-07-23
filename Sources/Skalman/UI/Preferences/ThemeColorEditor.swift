@@ -73,7 +73,7 @@ final class ThemeColorEditor: NSView {
             name.textColor = Design.Text.secondary
 
             let hex = NSTextField(labelWithString: "")
-            hex.font = .monospacedSystemFont(ofSize: ThemeEditorLayout.hexFontSize, weight: .regular)
+            hex.font = Design.Typography.compactCode()
             hex.textColor = Design.Text.tertiary
             hexLabels[key] = hex
 

@@ -69,6 +69,7 @@ final class StateManagerTests: XCTestCase {
         XCTAssertNil(session.forkedFrom)
         XCTAssertEqual(session.resumeState, .awaitingIdentifier)
         XCTAssertNil(session.model)
+        XCTAssertNil(session.fastMode)
         XCTAssertNil(session.branch)
     }
 
@@ -109,10 +110,11 @@ final class StateManagerTests: XCTestCase {
             forkedFrom: parentID
         )
         session.customTitle = "Renamed"
-        session.terminalTitle = "Terminal title"
+        session.agentTitle = "Terminal title"
         session.resumeState = .resumable(TranscriptID("thread-test"))
         session.hasLaunched = true
         session.lastExitCode = 7
+        session.fastMode = true
         session.branch = "feature/test"
         session.isArchived = true
 
@@ -133,6 +135,10 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(encodedSession["agentSessionID"] as? String, "thread-test")
         XCTAssertNil(encodedSession["resumeState"])
 
+        // The agent title still travels under the key it had when the terminal was its only
+        // transport, so records written before the rename decode unchanged.
+        XCTAssertEqual(encodedSession["terminalTitle"] as? String, "Terminal title")
+
         let restored = try JSONDecoder().decode(Project.self, from: data)
         let restoredSession = try XCTUnwrap(restored.sessions.first)
 
@@ -141,10 +147,11 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(restored.icon, project.icon)
         XCTAssertEqual(restoredSession.id, session.id)
         XCTAssertEqual(restoredSession.customTitle, "Renamed")
-        XCTAssertEqual(restoredSession.terminalTitle, "Terminal title")
+        XCTAssertEqual(restoredSession.agentTitle, "Terminal title")
         XCTAssertEqual(restoredSession.resumeState, .resumable(TranscriptID("thread-test")))
         XCTAssertEqual(restoredSession.accountHandle, .named("codex-work"))
         XCTAssertEqual(restoredSession.model, "gpt-test")
+        XCTAssertEqual(restoredSession.fastMode, true)
         XCTAssertEqual(restoredSession.branch, "feature/test")
         XCTAssertEqual(restoredSession.lastExitCode, 7)
         XCTAssertEqual(restoredSession.forkedFrom, parentID)

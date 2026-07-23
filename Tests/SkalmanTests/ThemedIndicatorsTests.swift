@@ -11,6 +11,8 @@ final class ThemedIndicatorsTests: XCTestCase {
 
     override func tearDown() {
         Design.Motion.reduceMotionOverrideForTesting = nil
+        Design.Accessibility.increaseContrastOverrideForTesting = nil
+        Design.Accessibility.differentiateWithoutColorOverrideForTesting = nil
         AppThemePalette.set(.system)
         super.tearDown()
     }
@@ -245,5 +247,36 @@ final class ThemedIndicatorsTests: XCTestCase {
         bar.progress = 0.5
 
         XCTAssertTrue(bar.needsDisplay, "the bar did not repaint when its fraction moved")
+    }
+
+    func testIndicatorsExposeProgressSemantics() {
+        let spinner = ThemedSpinner()
+        XCTAssertTrue(spinner.isAccessibilityElement())
+        XCTAssertEqual(spinner.accessibilityRole(), .progressIndicator)
+        XCTAssertEqual(spinner.accessibilityLabel(), "Working")
+
+        let bar = ThemedProgressBar()
+        bar.progress = 1.4
+        XCTAssertTrue(bar.isAccessibilityElement())
+        XCTAssertEqual(bar.accessibilityRole(), .progressIndicator)
+        XCTAssertEqual(bar.accessibilityLabel(), "Progress")
+        XCTAssertEqual(bar.accessibilityValue() as? Double, 1)
+    }
+
+    func testSessionLoadingUsesTheSpinnerEvenWhenTheAgentIsDormant() throws {
+        let indicator = SessionStatusIndicator()
+        let spinner = try XCTUnwrap(
+            indicator.subviews.compactMap { $0 as? ThemedSpinner }.first
+        )
+
+        indicator.update(for: .dormant, isLoading: true)
+        XCTAssertTrue(spinner.isAnimating)
+        XCTAssertEqual(spinner.accessibilityLabel(), "Loading session")
+
+        // The activity did not change; only the asynchronous activation state did. That still
+        // has to stop the spinner, which is why the indicator caches both values.
+        indicator.update(for: .dormant, isLoading: false)
+        XCTAssertFalse(spinner.isAnimating)
+        XCTAssertTrue(spinner.isHidden)
     }
 }

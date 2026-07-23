@@ -51,12 +51,8 @@ final class ChipViewTests: XCTestCase {
         return (chip, container)
     }
 
-    private func menu(titles: [String]) -> NSMenu {
-        let menu = NSMenu()
-        for title in titles {
-            menu.addItem(NSMenuItem(title: title, action: nil, keyEquivalent: ""))
-        }
-        return menu
+    private func entries(titles: [String]) -> [ThemedMenuEntry] {
+        titles.map { .item(ThemedMenuItem(title: $0, representedValue: $0)) }
     }
 
     /// The chip's own fill, read back off the layer it sets rather than from the token, so the
@@ -115,13 +111,13 @@ final class ChipViewTests: XCTestCase {
         let (chip, _) = hostedChip()
 
         var builds = 0
-        chip.menuProvider = { [self] in
+        chip.itemsProvider = { [self] in
             builds += 1
-            return menu(titles: ["One"])
+            return entries(titles: ["One"])
         }
 
-        _ = chip.preparedMenu()
-        _ = chip.preparedMenu()
+        _ = chip.preparedPresentation()
+        _ = chip.preparedPresentation()
 
         XCTAssertEqual(builds, 2, "the chip cached a menu instead of rebuilding it")
     }
@@ -131,7 +127,7 @@ final class ChipViewTests: XCTestCase {
     func testAChipWithNoProviderOpensNothing() {
         let chip = ChipView()
 
-        XCTAssertNil(chip.preparedMenu(), "a chip with no provider still built a menu")
+        XCTAssertNil(chip.preparedPresentation(), "a chip with no provider still built a menu")
         XCTAssertNil(chip.selectedItem)
     }
 
@@ -139,38 +135,40 @@ final class ChipViewTests: XCTestCase {
     /// the control rather than shrinking to its longest title.
     func testTheMenuIsNoNarrowerThanTheChip() throws {
         let (chip, _) = hostedChip(width: 140)
-        chip.menuProvider = { [self] in menu(titles: ["Short"]) }
+        chip.itemsProvider = { [self] in entries(titles: ["Short"]) }
 
-        let built = try XCTUnwrap(chip.preparedMenu())
-        XCTAssertEqual(built.minimumWidth, chip.bounds.width, accuracy: 0.5)
+        let presentation = try XCTUnwrap(chip.preparedPresentation())
+        XCTAssertEqual(presentation.minimumWidth, chip.bounds.width, accuracy: 0.5)
     }
 
-    /// Items arrive unclaimed and the chip routes them through itself; an item that already
-    /// carries its own action keeps it. Same rule as `ThemedPopUp`, and for the same reason —
-    /// a menu is built from items that sometimes know their own destination.
-    func testOnlyUnclaimedItemsAreRoutedThroughTheChip() throws {
+    /// The semantic model carries every piece feature code may state without exposing system
+    /// menu chrome: selection, enabled state, subtitle, image, value, and separators.
+    func testThePresentationPreservesSemanticItemState() throws {
         let (chip, _) = hostedChip()
+        let image = NSImage(size: NSSize(width: 8, height: 8))
+        let choice = ThemedMenuItem(
+            title: "Account",
+            subtitle: "42% left",
+            image: image,
+            representedValue: 7,
+            isSelected: true,
+            isEnabled: false
+        )
+        chip.itemsProvider = { [.item(choice), .separator] }
 
-        let spy = ChipActionSpy()
-        let claimed = NSMenuItem(title: "Claimed", action: #selector(ChipActionSpy.fire), keyEquivalent: "")
-        claimed.target = spy
-
-        let built = menu(titles: ["Unclaimed"])
-        built.addItem(.separator())
-        built.addItem(claimed)
-        chip.menuProvider = { built }
-
-        _ = chip.preparedMenu()
-
-        let unclaimed = try XCTUnwrap(built.items.first)
-        XCTAssertTrue(unclaimed.target === chip, "the chip did not claim a free item")
-        XCTAssertNotNil(unclaimed.action)
-
-        XCTAssertTrue(claimed.target === spy, "the chip stole an item that had its own target")
-        XCTAssertEqual(claimed.action, #selector(ChipActionSpy.fire))
-
-        let separator = try XCTUnwrap(built.items.first { $0.isSeparatorItem })
-        XCTAssertNil(separator.action, "the chip gave a separator an action")
+        let presentation = try XCTUnwrap(chip.preparedPresentation())
+        guard case .item(let preserved) = presentation.entries[0] else {
+            return XCTFail("the choice became a separator")
+        }
+        XCTAssertEqual(preserved.title, "Account")
+        XCTAssertEqual(preserved.subtitle, "42% left")
+        XCTAssertTrue(preserved.image === image)
+        XCTAssertEqual(preserved.representedValue as? Int, 7)
+        XCTAssertTrue(preserved.isSelected)
+        XCTAssertFalse(preserved.isEnabled)
+        guard case .separator = presentation.entries[1] else {
+            return XCTFail("the separator became a choice")
+        }
     }
 
     /// Choosing records the selection *and* reports it, in that order — a caller reading
@@ -178,20 +176,17 @@ final class ChipViewTests: XCTestCase {
     func testChoosingRecordsTheSelectionBeforeReportingIt() throws {
         let (chip, _) = hostedChip()
 
-        let built = menu(titles: ["Chosen"])
-        chip.menuProvider = { built }
-        _ = chip.preparedMenu()
+        let choice = ThemedMenuItem(title: "Chosen", representedValue: "chosen")
+        chip.itemsProvider = { [.item(choice)] }
 
-        var seenDuringCallback: NSMenuItem?
+        var seenDuringCallback: ThemedMenuItem?
         chip.onSelect = { _ in seenDuringCallback = chip.selectedItem }
+        chip.menuPresentationOverride = { _ in choice }
 
-        let item = try XCTUnwrap(built.items.first)
-        let action = try XCTUnwrap(item.action)
-        _ = chip.perform(action, with: item)
-
-        XCTAssertTrue(chip.selectedItem === item, "the selection was not recorded")
-        XCTAssertTrue(seenDuringCallback === item,
-                      "onSelect ran before the selection was recorded")
+        XCTAssertTrue(chip.accessibilityPerformPress())
+        XCTAssertEqual(chip.selectedItem?.title, "Chosen", "the selection was not recorded")
+        XCTAssertEqual(seenDuringCallback?.title, "Chosen",
+                       "onSelect ran before the selection was recorded")
     }
 
     /// `select(_:)` exists so a rebuilt menu keeps its choice; it must not fire `onSelect`,
@@ -201,7 +196,7 @@ final class ChipViewTests: XCTestCase {
         var reported = false
         chip.onSelect = { _ in reported = true }
 
-        chip.select(NSMenuItem(title: "Restored", action: nil, keyEquivalent: ""))
+        chip.select(ThemedMenuItem(title: "Restored", representedValue: "restored"))
 
         XCTAssertEqual(chip.selectedItem?.title, "Restored")
         XCTAssertFalse(reported, "restoring a selection reported it as a choice")
@@ -219,7 +214,7 @@ final class ChipViewTests: XCTestCase {
         XCTAssertEqual(chip.accessibilityValue() as? String, "Model")
         XCTAssertTrue(chip.isAccessibilityEnabled())
 
-        chip.select(NSMenuItem(title: "Selected model", action: nil, keyEquivalent: ""))
+        chip.select(ThemedMenuItem(title: "Selected model"))
         XCTAssertEqual(chip.accessibilityValue() as? String, "Selected model")
 
         chip.isEnabled = false
@@ -230,10 +225,14 @@ final class ChipViewTests: XCTestCase {
 
     func testKeyboardAndAccessibilityActionsOpenTheMenu() throws {
         let chip = ChipView()
-        chip.menuProvider = { [self] in menu(titles: ["One"]) }
+        chip.itemsProvider = { [self] in entries(titles: ["One"]) }
 
         var presentations = 0
-        chip.menuPresentationOverride = { _ in presentations += 1 }
+        chip.menuPresentationOverride = {
+            _ in
+            presentations += 1
+            return nil
+        }
 
         chip.keyDown(with: try keyEvent(" ", keyCode: 49))
         chip.keyDown(with: try keyEvent("\r", keyCode: 36))
@@ -241,6 +240,49 @@ final class ChipViewTests: XCTestCase {
         XCTAssertTrue(chip.accessibilityPerformShowMenu())
 
         XCTAssertEqual(presentations, 4)
+    }
+
+    /// The press that opened the menu may still be held. AppKit keeps routing its drag and
+    /// release to the chip, which forwards both to the open menu — so press-drag-release
+    /// chooses a row the way every platform menu does.
+    func testAHeldPressReleasedOverARowChoosesThroughTheChip() throws {
+        let chip = ChipView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        chip.itemsProvider = { [self] in entries(titles: ["One", "Two"]) }
+        var chosen: String?
+        chip.onSelect = { chosen = $0.representedValue as? String }
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        root.addSubview(chip)
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        XCTAssertTrue(chip.accessibilityPerformShowMenu())
+        // Row frames come from a layout pass a never-displayed test window won't run itself.
+        for view in [root] + descendants(in: root) { view.needsLayout = true }
+        root.layoutSubtreeIfNeeded()
+
+        let row = try XCTUnwrap(
+            descendants(in: root).first {
+                $0.accessibilityRole() == .menuItem && $0.accessibilityTitle() == "Two"
+            }
+        )
+        let target = row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil)
+        chip.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: target, in: window))
+        chip.mouseUp(with: try mouseEvent(.leftMouseUp, at: target, in: window))
+
+        XCTAssertEqual(chosen, "Two")
+        XCTAssertEqual(chip.selectedItem?.title, "Two")
+        XCTAssertFalse(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "the release chose a row, so the menu should have closed"
+        )
     }
 
     func testFocusDrawsAnAccentRingAndResigningClearsIt() {
@@ -381,6 +423,30 @@ final class ChipViewTests: XCTestCase {
                           "the chip's label kept its old theme's colour through a live switch")
     }
 
+    private func descendants(in root: NSView) -> [NSView] {
+        root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
+    private func mouseEvent(
+        _ type: NSEvent.EventType,
+        at point: NSPoint,
+        in window: NSWindow
+    ) throws -> NSEvent {
+        try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: type,
+                location: point,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            )
+        )
+    }
+
     private func keyEvent(_ characters: String, keyCode: UInt16) throws -> NSEvent {
         try XCTUnwrap(
             NSEvent.keyEvent(
@@ -397,12 +463,4 @@ final class ChipViewTests: XCTestCase {
             )
         )
     }
-}
-
-// MARK: - Test Support
-
-/// A menu item's own target, to prove the chip leaves claimed items alone.
-private final class ChipActionSpy: NSObject {
-    private(set) var count = 0
-    @objc func fire() { count += 1 }
 }

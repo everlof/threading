@@ -92,6 +92,15 @@ final class ShellDrawerViewController: NSViewController {
         view.window?.makeFirstResponder(session.terminalView)
     }
 
+    /// The shell's own root process, for the info panel's attribution of processes and ports.
+    ///
+    /// Nil until the drawer has actually been revealed: a shell nobody opened has no process, and
+    /// the panel should then say the session has one origin rather than an empty second one.
+    var shellRootPid: pid_t? {
+        guard hasStarted, isViewLoaded, let session, session.shellPid > 0 else { return nil }
+        return session.shellPid
+    }
+
     func terminate() {
         guard hasStarted else { return }
         session.terminate()

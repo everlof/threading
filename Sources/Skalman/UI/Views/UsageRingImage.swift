@@ -8,7 +8,7 @@ import AppKit
 /// colour says whether that matters. The numbers stay — they are the precise answer — but they
 /// stop being the *only* answer.
 ///
-/// Drawn rather than built from views because `NSMenuItem` takes an image and no view at all,
+/// Drawn rather than built from views because a 14pt menu-row mark should be one reusable image,
 /// which is the same reason `ThemeSwatchImage` exists.
 enum UsageRingImage {
 

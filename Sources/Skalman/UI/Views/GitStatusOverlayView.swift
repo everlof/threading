@@ -126,10 +126,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         for reading: GitChangeMonitor.Reading,
         ink: Design.Ink
     ) -> NSAttributedString {
-        let font = NSFont.monospacedDigitSystemFont(
-            ofSize: GitStatusOverlayDefaults.fontSize,
-            weight: .medium
-        )
+        let font = Design.Typography.numericDetail(weight: .medium)
         let text = NSMutableAttributedString()
 
         if let branch = reading.branch {

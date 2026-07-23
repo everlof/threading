@@ -57,7 +57,7 @@ extension Markdown {
     // MARK: - Font Variants
 
     private static func headingFont(_ base: NSFont) -> NSFont {
-        .systemFont(ofSize: base.pointSize + MarkdownDefaults.headingBump, weight: .semibold)
+        Design.Typography.markdownHeading(from: base)
     }
 
     private static func bold(_ base: NSFont) -> NSFont {

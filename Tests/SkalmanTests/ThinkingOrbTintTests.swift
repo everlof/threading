@@ -7,6 +7,7 @@ import ThinkingOrbs
 /// the accent hue, not grey" — which no assertion about the drawing math can
 /// make, so it is checked against rendered pixels, the same way the
 /// conversation and git-review renders are.
+@MainActor
 final class ThinkingOrbTintTests: XCTestCase {
 
     // MARK: - Helpers
@@ -119,5 +120,71 @@ final class ThinkingOrbTintTests: XCTestCase {
             abs(c.redComponent - c.greenComponent) > 0.03 || abs(c.greenComponent - c.blueComponent) > 0.03
         }
         XCTAssertTrue(colouredInk, "wrapper ink is grey despite a coloured accent — tint not applied")
+    }
+
+    func testWrapperCanDisplayEveryVariant() {
+        XCTAssertEqual(
+            OrbState.allCases.map { WorkingOrbView(state: $0).state },
+            OrbState.allCases
+        )
+    }
+
+    func testRandomVariantStaysStableUntilSelectedAgainAndDoesNotRepeat() {
+        let orb = WorkingOrbView()
+
+        orb.selectRandomVariant(choosingIndex: { _ in 0 })
+        let first = orb.state
+        XCTAssertEqual(first, .working)
+
+        // The second candidate list excludes the current state. Choosing its
+        // first entry therefore proves consecutive turns cannot repeat.
+        orb.selectRandomVariant(choosingIndex: { _ in 0 })
+        XCTAssertNotEqual(orb.state, first)
+    }
+
+    func testEveryFixedOrbPreferenceSelectsItsMatchingVariant() {
+        let orb = WorkingOrbView()
+
+        for style in WorkingOrbStyle.allCases where style != .random {
+            orb.prepareForWorking(style: style)
+            XCTAssertEqual(orb.state.rawValue, style.rawValue)
+        }
+    }
+
+    func testMotionPreferencesDefaultAndPersist() throws {
+        let suiteName = "ThinkingOrbTintTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.workingOrbStyle, .random)
+        XCTAssertEqual(settings.chatNameMorphStyle, .shapeMorph)
+
+        settings.workingOrbStyle = .shaping
+        settings.chatNameMorphStyle = .scramble
+        XCTAssertEqual(settings.workingOrbStyle, .shaping)
+        XCTAssertEqual(settings.chatNameMorphStyle, .scramble)
+    }
+
+    func testMorphingTitleAcceptsEverySelectableStyle() {
+        let label = MorphingTitleLabel()
+        label.setStringValue("Before", animated: false)
+
+        for style in ChatNameMorphStyle.allCases {
+            label.morphStyleOverride = style
+            label.setStringValue("After \(style.displayName)", animated: true)
+            XCTAssertEqual(label.morphStyleOverride, style)
+            XCTAssertEqual(label.stringValue, "After \(style.displayName)")
+        }
+    }
+
+    func testMotionPreferencesPageLaysOutWithinThemeBoundary() {
+        let controller = MotionPreferencesViewController()
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 680)
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(controller.view.hasAmbiguousLayout)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
     }
 }

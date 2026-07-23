@@ -191,8 +191,11 @@ final class BrowserViewController: NSViewController {
         completion?(success, message)
     }
 
-    var currentURL: URL? { webView.url }
-    var currentTitle: String? { webView.title }
+    // Load-safe, or persisting a restored tab that was never shown crashes: the deferred-load
+    // rule means `webView` does not exist until the surface first appears, and `persisted(_:)`
+    // asks every tab — its `restoredURL` fallback is the answer for exactly this state.
+    var currentURL: URL? { isViewLoaded ? webView.url : nil }
+    var currentTitle: String? { isViewLoaded ? webView.title : nil }
 
     // MARK: - Public — Agent Bridge
 

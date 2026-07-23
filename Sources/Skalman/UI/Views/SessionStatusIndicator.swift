@@ -13,8 +13,8 @@ final class SessionStatusIndicator: NSView {
     private let attentionDot = NSView()
 
     /// Rows are reconfigured far more often than their state changes, so repeated updates
-    /// for the same activity are ignored — otherwise the dot's entrance would replay.
-    private var currentActivity: SessionActivity?
+    /// for the same state are ignored — otherwise the dot's entrance would replay.
+    private var currentState: (activity: SessionActivity, isLoading: Bool)?
 
     // MARK: - Initialization
 
@@ -35,6 +35,7 @@ final class SessionStatusIndicator: NSView {
 
     private func setupViews() {
         spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.setAccessibilityLabel("Session working")
 
         // Through `applySurface` rather than straight onto the layer: a `cgColor` resolves once,
         // and the dot would keep the previous theme's accent until the session changed state.
@@ -44,6 +45,9 @@ final class SessionStatusIndicator: NSView {
         )
         attentionDot.isHidden = true
         attentionDot.translatesAutoresizingMaskIntoConstraints = false
+        attentionDot.setAccessibilityElement(true)
+        attentionDot.setAccessibilityRole(.staticText)
+        attentionDot.setAccessibilityLabel("Session needs attention")
 
         addSubview(spinner)
         addSubview(attentionDot)
@@ -63,10 +67,26 @@ final class SessionStatusIndicator: NSView {
 
     // MARK: - Public Methods
 
-    func update(for activity: SessionActivity) {
-        guard activity != currentActivity else { return }
-        let isFirstUpdate = currentActivity == nil
-        currentActivity = activity
+    func update(for activity: SessionActivity, isLoading: Bool = false) {
+        if let currentState,
+           currentState.activity == activity,
+           currentState.isLoading == isLoading {
+            return
+        }
+        let isFirstUpdate = currentState == nil
+        currentState = (activity, isLoading)
+
+        // Session activation is separate from agent activity: a dormant conversation can still
+        // be resolving the checkout summary needed by its chrome. The same themed spinner says
+        // "work is pending" without adding a second competing status glyph to the row.
+        if isLoading {
+            attentionDot.isHidden = true
+            spinner.setAccessibilityLabel("Loading session")
+            spinner.isAnimating = true
+            return
+        }
+
+        spinner.setAccessibilityLabel("Session working")
 
         switch activity {
         case .working:
@@ -97,7 +117,7 @@ final class SessionStatusIndicator: NSView {
 
         attentionDot.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = StatusIndicatorDefaults.appearDuration
+            context.duration = Design.Motion.standard
             attentionDot.animator().alphaValue = 1
         }
     }
@@ -119,5 +139,4 @@ enum StatusIndicatorDefaults {
     static let size: CGFloat = 12
     static let spinnerSize: CGFloat = 12
     static let dotSize: CGFloat = 6
-    static let appearDuration: TimeInterval = 0.25
 }

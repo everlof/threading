@@ -16,6 +16,23 @@ extension ProjectSidebarViewController {
 
         let menu = NSMenu()
         actionSessionID = sessionID
+        populateSessionActions(menu, for: session)
+
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: anchor.bounds.maxY),
+            in: anchor
+        )
+    }
+
+    /// The full set of a session row's actions, shared by its `⋯` hover button and its
+    /// right-click context menu so the two can never drift — a right-click that offered fewer
+    /// actions than the button beside it is exactly the kind of gap that grows silently.
+    ///
+    /// The caller sets `actionSessionID` first: every handler here reads it, and it is set as
+    /// the menu opens, so whichever surface presents the menu targets the right session.
+    func populateSessionActions(_ menu: NSMenu, for session: AgentSession) {
+        let sessionID = session.id
 
         // The sidebar only ever lists unarchived sessions, so this is always "Archive";
         // restoring one happens from Settings, where the archived sessions live.
@@ -35,12 +52,6 @@ extension ProjectSidebarViewController {
         menu.addItem(withTitle: "Delete Session", action: #selector(deleteSessionClicked), keyEquivalent: "")
 
         for item in menu.items { item.target = self }
-
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: 0, y: anchor.bounds.maxY),
-            in: anchor
-        )
     }
 
     /// Adds the side-chat items: fork this conversation into one that starts with its context

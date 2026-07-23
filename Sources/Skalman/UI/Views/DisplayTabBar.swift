@@ -47,7 +47,7 @@ final class DisplayTabBar: NSView {
 
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = Design.Spacing.hairline
+        stack.spacing = Design.Spacing.tight
         stack.edgeInsets = NSEdgeInsets(
             top: 0, left: Design.Spacing.small,
             bottom: 0, right: Design.Spacing.small
@@ -97,126 +97,19 @@ final class DisplayTabBar: NSView {
         }
 
         for item in items {
-            let chip = DisplayTabChip(item: item)
-            chip.onSelect = { [weak self] in self?.onSelect?(item.id) }
-            chip.onClose = { [weak self] in self?.onClose?(item.id) }
-            stack.addArrangedSubview(chip)
+            let tab = ThemedTabItemView(
+                title: item.title,
+                symbolName: item.symbolName,
+                placement: .horizontal,
+                showsClose: true
+            )
+            tab.isSelected = item.isActive
+            tab.onSelect = { [weak self] in self?.onSelect?(item.id) }
+            tab.onClose = { [weak self] in self?.onClose?(item.id) }
+            tab.widthAnchor.constraint(
+                lessThanOrEqualToConstant: DisplayPaneDefaults.tabChipMaxWidth
+            ).isActive = true
+            stack.addArrangedSubview(tab)
         }
     }
-}
-
-// MARK: - Display Tab Chip
-
-/// One tab in the strip: an icon, a truncated title, and a close control that stays quiet until
-/// the tab is active or hovered — the same crossfade-not-hide trick the sidebar rows use, so a
-/// pointer crossing the strip does not relayout it.
-final class DisplayTabChip: NSView {
-
-    var onSelect: (() -> Void)?
-    var onClose: (() -> Void)?
-
-    private let item: DisplayTabBarItem
-    private let iconView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let closeButton = ThemedButton()
-    private var trackingArea: NSTrackingArea?
-    private var hovered = false
-
-    init(item: DisplayTabBarItem) {
-        self.item = item
-        super.init(frame: .zero)
-        setup()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    private func setup() {
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.cornerCurve = .continuous
-        layer?.cornerRadius = Design.Radius.control
-
-        iconView.image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: nil)
-        iconView.symbolConfiguration = .init(pointSize: DisplayPaneDefaults.tabChipFontSize, weight: .regular)
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.setContentHuggingPriority(.required, for: .horizontal)
-
-        titleLabel.stringValue = item.title
-        titleLabel.font = .systemFont(ofSize: DisplayPaneDefaults.tabChipFontSize, weight: item.isActive ? .semibold : .regular)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-
-        let closeConfig = NSImage.SymbolConfiguration(pointSize: DisplayPaneDefaults.tabChipFontSize - 2, weight: .semibold)
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")?
-            .withSymbolConfiguration(closeConfig)
-        closeButton.isBordered = false
-        closeButton.target = self
-        closeButton.action = #selector(closeClicked)
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.setContentHuggingPriority(.required, for: .horizontal)
-
-        let content = NSStackView(views: [iconView, titleLabel, closeButton])
-        content.orientation = .horizontal
-        content.alignment = .centerY
-        content.spacing = Design.Spacing.hairline
-        content.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(content)
-
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.hairline),
-            content.centerYAnchor.constraint(equalTo: centerYAnchor),
-            heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.tabBarHeight - Design.Spacing.small),
-            widthAnchor.constraint(lessThanOrEqualToConstant: DisplayPaneDefaults.tabChipMaxWidth),
-            closeButton.widthAnchor.constraint(equalToConstant: 16),
-            closeButton.heightAnchor.constraint(equalToConstant: 16)
-        ])
-
-        applyColours()
-    }
-
-    // MARK: - Appearance
-
-    private func applyColours() {
-        let emphasised = item.isActive || hovered
-        titleLabel.textColor = item.isActive ? Design.Text.label : Design.Text.secondary
-        iconView.contentTintColor = item.isActive ? Design.Text.label : Design.Text.secondary
-
-        let fill: NSColor = item.isActive
-            ? Design.Surface.controlHover
-            : (hovered ? Design.Surface.controlResting : .clear)
-        applyLayerBackground(fill)
-
-        // The close control is reserved a slot always, so raising it on hover does not relayout
-        // the strip; it simply fades in.
-        closeButton.animator().alphaValue = emphasised ? 1 : 0
-    }
-
-    // MARK: - Interaction
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { hovered = true; applyColours() }
-    override func mouseExited(with event: NSEvent) { hovered = false; applyColours() }
-
-    override func mouseDown(with event: NSEvent) {
-        // A click anywhere but the close control selects the tab.
-        onSelect?()
-    }
-
-    @objc private func closeClicked() { onClose?() }
 }

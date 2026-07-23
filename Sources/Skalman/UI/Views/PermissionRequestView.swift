@@ -47,7 +47,7 @@ final class PermissionRequestView: NSView {
         title.translatesAutoresizingMaskIntoConstraints = false
 
         let detail = NSTextField(wrappingLabelWithString: request.summary)
-        detail.font = .monospacedSystemFont(ofSize: ToolCallDefaults.fontSize, weight: .regular)
+        detail.font = Design.Typography.code()
         detail.textColor = Design.Text.secondary
         detail.isSelectable = true
         detail.translatesAutoresizingMaskIntoConstraints = false

@@ -1,0 +1,11 @@
+{
+  "formatVersion": 1,
+  "identifier": "se.mjukis.hello-status",
+  "name": "Hello Status",
+  "version": "0.1.0",
+  "executable": "bin/hello-status",
+  "capabilities": [
+    "commands",
+    "panels"
+  ]
+}

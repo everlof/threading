@@ -122,7 +122,7 @@ extension GitReviewViewController {
     /// Small files open ready to read; everything else opens on click. Both limits exist to
     /// bound the view count a huge diff builds, which is what keeps the pane responsive.
     func renderFiles(_ files: [GitFileDiff]) {
-        var expandBudget = GitReviewDefaults.autoExpandTotalLineLimit
+        var expandBudget = Self.initialExpandBudget(for: files)
 
         for file in files {
             let lineCount = file.hunks.reduce(0) { $0 + $1.lines.count }
@@ -135,7 +135,7 @@ extension GitReviewViewController {
             let expand = expansionOverrides[file.path] ?? fitsBudget
             if expand { expandBudget -= lineCount }
 
-            let row = GitReviewFileRow(file: file, expanded: expand, staging: staging)
+            let row = GitReviewFileRow(file: file, expanded: expand, staging: staging, wraps: wrapsDiffLines)
             row.onToggle = { [weak self] expanded in
                 self?.expansionOverrides[file.path] = expanded
             }
@@ -143,6 +143,13 @@ extension GitReviewViewController {
             row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
             addRow(row)
         }
+    }
+
+    static func initialExpandBudget(for files: [GitFileDiff]) -> Int {
+        let changedLines = files.reduce(0) { $0 + $1.added + $1.removed }
+        let isLargeComparison = files.count > GitReviewDefaults.largeDiffFileThreshold
+            || changedLines > GitReviewDefaults.largeDiffChangedLineThreshold
+        return isLargeComparison ? 0 : GitReviewDefaults.autoExpandTotalLineLimit
     }
 
     /// What this mode's diff can do to the index, which is nothing in most of them.

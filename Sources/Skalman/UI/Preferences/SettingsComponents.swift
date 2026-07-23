@@ -31,9 +31,14 @@ enum SettingsUI {
             document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
 
+            // The column keeps `Design.Size.glowGutter` clear of the scroll view's edges: a
+            // card's halo is a layer shadow, and the scroll view clips at its own bounds, so
+            // a card pinned flush to them loses its glow on that side — cut off flat, while
+            // the vertical spill survives in the section spacing. The top and bottom padding
+            // double as the gutter for the first and last card.
             stack.topAnchor.constraint(equalTo: document.topAnchor, constant: Design.Spacing.large),
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: Design.Size.glowGutter),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -Design.Size.glowGutter),
             stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -Design.Spacing.large)
         ])
 
@@ -117,15 +122,21 @@ enum SettingsUI {
         labels.alignment = .leading
         labels.spacing = Design.Spacing.hairline
 
+        // The labels take the row's slack, rather than a spacer taking it.
+        //
+        // A wrapping subtitle has no intrinsic *width* — the trap this project has already hit
+        // once — so it cannot argue for any. Against a spacer that was willing to grow, it lost
+        // every time and collapsed to its narrowest wrap: measured, the App theme row's
+        // description wrapped to the same six lines at 420pt and at 620pt, with most of the row
+        // empty beside it. The control still sits trailing, because the row fills its width
+        // either way; what changed is which view absorbs what is left over.
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Design.Spacing.medium
         row.addArrangedSubview(labels)
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        row.addArrangedSubview(spacer)
 
         if let control {
             control.setContentHuggingPriority(.required, for: .horizontal)
@@ -273,4 +284,9 @@ final class SettingsFlippedView: NSView {
 enum SettingsUIDefaults {
     static let rowHeight: CGFloat = 44
     static let controlWidth: CGFloat = 220
+
+    /// The width a settings page asks its pane for: the readable measure the cards keep,
+    /// plus the halo gutter `SettingsUI.page` holds clear on either side. Stated here so the
+    /// pane that caps the page and the render tests that draw it read one number.
+    static var pageWidth: CGFloat { Design.Size.readableWidth + Design.Size.glowGutter * 2 }
 }

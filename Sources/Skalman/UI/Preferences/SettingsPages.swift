@@ -15,6 +15,7 @@ enum SettingsPages {
     static let storageTitle = "Storage"
     static let usageTitle = "Usage"
     static let themesTitle = "Themes"
+    static let keyboardTitle = "Keyboard"
 
     static func index(ofTitle title: String) -> Int? {
         all.firstIndex { $0.title == title }
@@ -25,7 +26,9 @@ enum SettingsPages {
         Page(title: "Accounts", symbol: "person.2") { AccountsPreferencesViewController() },
         Page(title: "Profiles", symbol: "person.crop.circle") { ProfilePreferencesViewController() },
         Page(title: themesTitle, symbol: "paintpalette") { ThemePreferencesViewController() },
+        Page(title: "Motion", symbol: "sparkles") { MotionPreferencesViewController() },
         Page(title: "Tools", symbol: "wrench.and.screwdriver") { ToolsPreferencesViewController() },
+        Page(title: keyboardTitle, symbol: "keyboard") { KeyboardPreferencesViewController() },
         Page(title: usageTitle, symbol: "chart.bar") { UsagePreferencesViewController() },
         Page(title: storageTitle, symbol: "internaldrive") { StoragePreferencesViewController() },
         Page(title: "Archived", symbol: "archivebox") { ArchivedPreferencesViewController() }

@@ -13,7 +13,7 @@ final class AppSettings {
 
     private let defaults: UserDefaults
 
-    private init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         registerDefaults()
     }
@@ -51,9 +51,10 @@ final class AppSettings {
         }
     }
 
-    /// Whether the sidebar follows the title reported by the terminal.
-    var usesTerminalTitleInSidebar: Bool {
-        get { Self.usesTerminalTitleInSidebar }
+    /// Whether the sidebar follows the agent's own name for the conversation — the terminal
+    /// title while a PTY is attached, the transcript's title records otherwise.
+    var usesAgentTitleInSidebar: Bool {
+        get { Self.usesAgentTitleInSidebar }
         set {
             defaults.set(newValue, forKey: Keys.usesTerminalTitleInSidebar)
             notifyChanged()
@@ -66,7 +67,10 @@ final class AppSettings {
     /// a session is — including from the transcript scan and the importer, neither of which is
     /// main-actor isolated. `UserDefaults` is thread-safe, so the isolation buys nothing for a
     /// read; only the setter needs it, because it posts a notification the UI observes.
-    nonisolated static var usesTerminalTitleInSidebar: Bool {
+    ///
+    /// The defaults key keeps its old name — the terminal was once the only transport, and
+    /// renaming the key would silently reset the user's choice.
+    nonisolated static var usesAgentTitleInSidebar: Bool {
         UserDefaults.standard.bool(forKey: Keys.usesTerminalTitleInSidebar)
     }
 
@@ -103,6 +107,32 @@ final class AppSettings {
         get { defaults.bool(forKey: Keys.discoversAccountAvatars) }
         set {
             defaults.set(newValue, forKey: Keys.discoversAccountAvatars)
+            notifyChanged()
+        }
+    }
+
+    /// The working indicator shown for each newly-started conversation turn.
+    var workingOrbStyle: WorkingOrbStyle {
+        get {
+            defaults.string(forKey: Keys.workingOrbStyle)
+                .flatMap(WorkingOrbStyle.init(rawValue:))
+                ?? MotionPreferencesDefaults.workingOrbStyle
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.workingOrbStyle)
+            notifyChanged()
+        }
+    }
+
+    /// The character animation used when the active chat's visible name changes.
+    var chatNameMorphStyle: ChatNameMorphStyle {
+        get {
+            defaults.string(forKey: Keys.chatNameMorphStyle)
+                .flatMap(ChatNameMorphStyle.init(rawValue:))
+                ?? MotionPreferencesDefaults.chatNameMorphStyle
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.chatNameMorphStyle)
             notifyChanged()
         }
     }
@@ -180,7 +210,9 @@ final class AppSettings {
             Keys.usesTerminalTitleInSidebar: true,
             Keys.groupsSessionsByBranch: true,
             Keys.discoversProjectIcons: true,
-            Keys.discoversAccountAvatars: true
+            Keys.discoversAccountAvatars: true,
+            Keys.workingOrbStyle: MotionPreferencesDefaults.workingOrbStyle.rawValue,
+            Keys.chatNameMorphStyle: MotionPreferencesDefaults.chatNameMorphStyle.rawValue
         ])
     }
 
@@ -201,5 +233,7 @@ final class AppSettings {
         static let disabledToolGroupIDs = "disabledToolGroupIDs"
         static let installsCodexHooks = "installsCodexHooks"
         static let bypassesCodexHookTrust = "bypassesCodexHookTrust"
+        static let workingOrbStyle = "workingOrbStyle"
+        static let chatNameMorphStyle = "chatNameMorphStyle"
     }
 }

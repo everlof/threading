@@ -1,0 +1,149 @@
+import AppKit
+
+/// The Keyboard page: every command the menu bar offers, and the chord it answers to.
+///
+/// It lists the fixed commands alongside the editable ones on purpose. Most of why a shortcuts
+/// page gets opened is "what is this key already doing" — a page that showed only what it would
+/// let you change could not answer that, and would make a conflict with ⌘Q look like a free slot.
+final class KeyboardPreferencesViewController: NSViewController {
+
+    // MARK: - Properties
+
+    private let store = ShortcutOverrideStore.shared
+
+    /// Rebuilt wholesale on any change, following `ArchivedPreferencesViewController`: a rebind
+    /// can move a conflict warning onto a row far from the one that was edited, so redrawing the
+    /// page is both simpler and more correct than patching the row that changed.
+    private var recorders: [String: ShortcutRecorderView] = [:]
+
+    // MARK: - Lifecycle
+
+    override func loadView() {
+        view = NSView()
+        rebuild()
+    }
+
+    // MARK: - Building
+
+    private func rebuild() {
+        view.subviews.forEach { $0.removeFromSuperview() }
+        recorders.removeAll()
+
+        var sections: [NSView] = [
+            SettingsUI.heading(Strings.heading),
+            SettingsUI.note(Strings.note)
+        ]
+
+        for (group, commands) in AppCommands.grouped() {
+            let rows = commands.map(makeRow)
+            sections.append(SettingsUI.section(group.rawValue, SettingsCard(rows: rows)))
+        }
+
+        sections.append(SettingsUI.section(nil, SettingsCard(rows: [
+            SettingsUI.row(
+                title: Strings.resetTitle,
+                subtitle: Strings.resetSubtitle,
+                control: SettingsUI.button(Strings.resetButton, target: self, action: #selector(resetAllClicked))
+            )
+        ])))
+
+        let page = SettingsUI.page(sections)
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
+
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    private func makeRow(_ command: AppCommand) -> NSView {
+        let shortcut = store.shortcut(for: command)
+
+        guard command.isEditable else {
+            // A plain label, not a disabled recorder: a dimmed control still invites a click,
+            // and these can never be clicked to any effect.
+            let label = NSTextField(labelWithString: shortcut?.displayString ?? ShortcutRecorderStrings.unbound)
+            label.font = Design.Typography.code()
+            label.textColor = Design.Text.tertiary
+            return SettingsUI.row(title: command.title, subtitle: nil, control: label)
+        }
+
+        let recorder = ShortcutRecorderView(shortcut: shortcut)
+        recorder.onRecord = { [weak self] captured in
+            self?.record(captured, for: command)
+        }
+        recorders[command.id] = recorder
+
+        return SettingsUI.row(
+            title: command.title,
+            subtitle: subtitle(for: command, shortcut: shortcut),
+            control: recorder
+        )
+    }
+
+    /// The row's second line carries the two things that are not visible in the chord itself:
+    /// that it collides with something, and that it is no longer the default.
+    private func subtitle(for command: AppCommand, shortcut: KeyboardShortcut?) -> String? {
+        if let shortcut, let other = store.conflict(for: shortcut, excluding: command) {
+            return String(format: Strings.conflictFormat, other.title)
+        }
+        guard store.isOverridden(command) else { return nil }
+
+        guard let fallback = command.defaultShortcut else { return Strings.changedNoDefault }
+        return String(format: Strings.changedFormat, fallback.displayString)
+    }
+
+    // MARK: - Actions
+
+    /// A chord already spoken for is refused rather than taken.
+    ///
+    /// Stealing it would be the other reasonable design, and is worse here: the command that lost
+    /// its shortcut is somewhere else on a long page, so the user would be told nothing and would
+    /// discover it the next time they reached for the key that no longer works.
+    private func record(_ shortcut: KeyboardShortcut?, for command: AppCommand) {
+        if let shortcut, let other = store.conflict(for: shortcut, excluding: command) {
+            presentConflict(shortcut, taken: other)
+            rebuild()
+            return
+        }
+
+        store.setShortcut(shortcut, for: command)
+        rebuild()
+    }
+
+    private func presentConflict(_ shortcut: KeyboardShortcut, taken other: AppCommand) {
+        let alert = NSAlert()
+        alert.messageText = String(format: Strings.conflictTitle, shortcut.displayString)
+        alert.informativeText = String(format: Strings.conflictBody, other.title)
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
+    @objc private func resetAllClicked() {
+        store.resetAll()
+        rebuild()
+    }
+}
+
+// MARK: - Strings
+
+private enum Strings {
+    static let heading = "Keyboard"
+    static let note = "Click a shortcut and press the keys you want. "
+        + "Escape cancels, Delete removes the shortcut."
+
+    static let conflictFormat = "Already used by %@"
+    static let changedFormat = "Changed from %@"
+    static let changedNoDefault = "Changed"
+
+    static let conflictTitle = "%@ is already in use"
+    static let conflictBody = "That combination belongs to “%@”. "
+        + "Choose a different one, or clear that shortcut first."
+
+    static let resetTitle = "Reset Shortcuts"
+    static let resetSubtitle = "Puts every shortcut back to its default."
+    static let resetButton = "Reset All"
+}

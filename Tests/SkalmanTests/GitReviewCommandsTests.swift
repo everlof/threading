@@ -59,4 +59,38 @@ final class GitReviewCommandsTests: XCTestCase {
             ["-c", "core.quotepath=false", "--no-optional-locks"]
         )
     }
+
+    // MARK: - Hide Whitespace
+
+    /// The toggle is off by default, so every read the pane already made is argv-identical to
+    /// what it was — the flag is opt-in, never a quiet change to what a diff reports.
+    func testWhitespaceIsNotIgnoredByDefault() {
+        XCTAssertFalse(GitReviewCommands.diff(against: nil).contains("-w"))
+        XCTAssertFalse(GitReviewCommands.diff(against: "HEAD").contains("-w"))
+        XCTAssertFalse(GitReviewCommands.diffStaged().contains("-w"))
+        XCTAssertFalse(GitReviewCommands.show("abc123").contains("-w"))
+    }
+
+    func testIgnoringWhitespaceAddsTheFlagToEveryDiffShape() {
+        XCTAssertEqual(
+            GitReviewCommands.diff(against: nil, ignoringWhitespace: true),
+            ["diff"] + GitReviewCommands.diffFlags + ["-w"]
+        )
+        XCTAssertEqual(
+            GitReviewCommands.diffStaged(ignoringWhitespace: true),
+            ["diff", "--cached"] + GitReviewCommands.diffFlags + ["-w"]
+        )
+        XCTAssertEqual(
+            GitReviewCommands.show("abc123", ignoringWhitespace: true),
+            ["show", "abc123", "--format="] + GitReviewCommands.diffFlags + ["-w"]
+        )
+    }
+
+    /// The ref stays the last argument. A flag appended after it reads as the start of the
+    /// pathspec list, which would silently scope the diff to a file named `-w`.
+    func testIgnoringWhitespaceKeepsTheRefLast() {
+        let arguments = GitReviewCommands.diff(against: "HEAD", ignoringWhitespace: true)
+        XCTAssertEqual(arguments.last, "HEAD")
+        XCTAssertEqual(arguments, ["diff"] + GitReviewCommands.diffFlags + ["-w", "HEAD"])
+    }
 }

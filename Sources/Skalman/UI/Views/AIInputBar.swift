@@ -27,7 +27,7 @@ final class AIInputBar: NSView {
 
     private lazy var providerLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
-        label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        label.font = Design.Typography.detail(weight: .medium)
         label.textColor = Design.Text.secondary
         label.setContentHuggingPriority(.required, for: .horizontal)
         return label
@@ -36,7 +36,7 @@ final class AIInputBar: NSView {
     private lazy var inputField: NSTextField = {
         let field = ThemedTextField()
         field.placeholderString = "Ask AI to generate a command..."
-        field.font = NSFont.systemFont(ofSize: 13)
+        field.font = Design.Typography.body()
         field.delegate = self
         field.focusRingType = .none
         return field

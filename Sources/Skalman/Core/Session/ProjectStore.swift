@@ -32,7 +32,9 @@ final class ProjectStore {
     var selectedSessionID: SessionID? {
         didSet {
             guard !isRestoringState, selectedSessionID != oldValue else { return }
-            save()
+            // Selection is navigation state, not a structural edit. Rewriting every project
+            // and session here made sidebar clicks progressively slower as the store grew.
+            stateManager.saveSelectedSessionID(selectedSessionID)
         }
     }
 
@@ -124,13 +126,12 @@ final class ProjectStore {
     ) -> AgentSession? {
         guard let index = index(ofProject: projectID) else { return nil }
 
+        // No title means unnamed, not named after the agent: the display falls back to a
+        // generic label until the first prompt supplies a name (`applyPromptTitle`). The
+        // agent and account are the row's icon slot's job, not the name's.
         var session = AgentSession(
             kind: kind,
-            title: title ?? defaultSessionTitle(
-                for: kind,
-                accountHandle: accountHandle,
-                in: projects[index]
-            ),
+            title: title ?? "",
             accountHandle: accountHandle,
             model: model,
             usesNativeUI: usesNativeUI
@@ -296,19 +297,67 @@ final class ProjectStore {
         notifyChanged()
     }
 
-    /// Records the title reported by a session's terminal.
+    /// Records the agent's own name for a conversation, from either transport — the terminal
+    /// title while a PTY is attached, or the transcript's title records read at turn end.
+    ///
+    /// A title that is really the product, account or project name is ignored rather than
+    /// stored: Claude's TUI titles itself "Claude Code" until it has an AI title, and Codex
+    /// titles itself after the working directory. Neither names the conversation, and neither
+    /// is worth displacing a real title that arrived earlier.
     ///
     /// Agents update this frequently, so the write is coalesced rather than hitting disk on
     /// every change.
-    func updateTerminalTitle(_ title: String, for sessionID: SessionID) {
+    func updateAgentTitle(_ title: String, for sessionID: SessionID) {
         guard let location = locate(sessionID: sessionID) else { return }
 
+        let project = projects[location.projectIndex]
+        let session = project.sessions[location.sessionIndex]
+
         let cleaned = Self.strippingDecoration(from: title)
-        guard projects[location.projectIndex].sessions[location.sessionIndex].terminalTitle != cleaned
+        guard session.agentTitle != cleaned else { return }
+
+        if let cleaned {
+            let account = AgentAccountDiscovery.account(
+                for: session.kind,
+                handle: session.accountHandle
+            )
+            guard !SessionNaming.isNoiseTitle(
+                cleaned,
+                kind: session.kind,
+                accountDisplayName: account?.displayName,
+                projectName: project.name,
+                folderBasename: project.folderURL.lastPathComponent
+            ) else { return }
+        }
+
+        projects[location.projectIndex].sessions[location.sessionIndex].agentTitle = cleaned
+        scheduleSave()
+    }
+
+    /// Names a session after its first prompt, once.
+    ///
+    /// Applies only while the title still says nothing — empty, or a leftover of the old
+    /// agent-name scheme — so a name derived from a prompt never replaces one the user chose
+    /// or an earlier prompt already supplied.
+    func applyPromptTitle(_ prompt: String, forSessionID sessionID: SessionID) {
+        guard let location = locate(sessionID: sessionID) else { return }
+
+        let session = projects[location.projectIndex].sessions[location.sessionIndex]
+        let account = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
+        )
+
+        guard SessionNaming.isPlaceholderTitle(
+            session.title,
+            kind: session.kind,
+            accountDisplayName: account?.displayName
+        ), let title = SessionNaming.promptTitle(from: prompt), title != session.title
         else { return }
 
-        projects[location.projectIndex].sessions[location.sessionIndex].terminalTitle = cleaned
-        scheduleSave()
+        projects[location.projectIndex].sessions[location.sessionIndex].title = title
+        save()
+        notifyChanged()
     }
 
     /// Removes the decorative glyph agents prefix their terminal title with.
@@ -390,27 +439,6 @@ final class ProjectStore {
             }
         }
         return nil
-    }
-
-    /// Names a new session after its agent, numbering repeats within the same project.
-    ///
-    /// Sessions on an alternate account are named after that account, since the user already
-    /// knows it by that name and the account is the meaningful distinction between them.
-    private func defaultSessionTitle(
-        for kind: AgentKind,
-        accountHandle: AccountHandle,
-        in project: Project
-    ) -> String {
-        let account = AgentAccountDiscovery.account(for: kind, handle: accountHandle)
-        let baseName = (account.map { $0.isDefault } ?? true)
-            ? kind.displayName
-            : account?.displayName ?? kind.displayName
-
-        let sameNameCount = project.sessions.filter {
-            $0.kind == kind && $0.accountHandle == accountHandle
-        }.count
-
-        return sameNameCount == 0 ? baseName : "\(baseName) \(sameNameCount + 1)"
     }
 
     private func notifyChanged() {

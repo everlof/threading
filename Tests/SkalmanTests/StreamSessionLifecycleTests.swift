@@ -39,7 +39,7 @@ final class StreamSessionLifecycleTests: XCTestCase {
             )
         }
         session.onEvent = { event in
-            guard case .turnFinished(let text, let isError) = event else { return }
+            guard case .turnFinished(let text, let isError, _) = event else { return }
             XCTAssertTrue(Thread.isMainThread)
             XCTAssertEqual(text, "claude exploded")
             XCTAssertTrue(isError)
@@ -94,12 +94,166 @@ final class StreamSessionLifecycleTests: XCTestCase {
         session.terminate()
     }
 
+    func testSetModelSendsControlRequestAndResolvesOnSuccessResponse() {
+        let resolved = expectation(description: "control response resolved")
+
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            // Consume the one control request, answer it (the first id is deterministic), then idle
+            // so the child stays alive until the test tears it down.
+            self.shellPlan(
+                "read -r line; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"skalman-ctrl-1\"}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+
+        session.start()
+        session.setModel("claude-sonnet-5") { result in
+            XCTAssertTrue(Thread.isMainThread)
+            if case .failure(let error) = result {
+                XCTFail("Expected success, got \(error)")
+            }
+            resolved.fulfill()
+        }
+
+        wait(for: [resolved], timeout: 2)
+        session.terminate()
+    }
+
+    func testSetModelSurfacesRejectionFromErrorResponse() {
+        let resolved = expectation(description: "control rejection resolved")
+
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r line; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\","
+                    + "\"request_id\":\"skalman-ctrl-1\",\"error\":\"unrecognized model\"}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+
+        session.start()
+        session.setModel("bogus-model") { result in
+            guard case .failure(let error) = result else {
+                return XCTFail("Expected a rejection")
+            }
+            XCTAssertEqual(error.localizedDescription, "unrecognized model")
+            resolved.fulfill()
+        }
+
+        wait(for: [resolved], timeout: 2)
+        session.terminate()
+    }
+
+    func testPendingControlRequestFailsWhenProcessExits() {
+        let resolved = expectation(description: "pending control request failed on exit")
+
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            // Take the request but never answer, then exit — the pending completion must fail
+            // rather than sit on its timeout.
+            self.shellPlan("read -r line; exit 0")
+        }
+
+        session.start()
+        session.setModel("claude-sonnet-5") { result in
+            guard case .failure(let error) = result else {
+                return XCTFail("Expected failure when the process exits")
+            }
+            guard case ClaudeControlError.notRunning = error else {
+                return XCTFail("Expected notRunning, got \(error)")
+            }
+            resolved.fulfill()
+        }
+
+        wait(for: [resolved], timeout: 2)
+    }
+
+    func testControlRequestBeforeStartFailsImmediately() {
+        let session = ClaudeStreamSession(sessionID: SessionID()) {
+            self.shellPlan("cat >/dev/null")
+        }
+
+        var received: Result<Void, Error>?
+        session.setModel("claude-sonnet-5") { received = $0 }
+
+        // No process, so the failure is synchronous.
+        guard case .failure(let error)? = received, case ClaudeControlError.notRunning = error else {
+            return XCTFail("Expected an immediate notRunning failure, got \(String(describing: received))")
+        }
+    }
+
     private func shellPlan(_ script: String) -> AgentLaunchPlan {
         AgentLaunchPlan(
             executable: "/bin/sh",
             arguments: ["-c", script],
             resumeState: .unavailable
         )
+    }
+}
+
+final class ClaudeControlRequestTests: XCTestCase {
+
+    func testSetModelProducesControlRequestEnvelope() throws {
+        let data = try XCTUnwrap(ClaudeControlRequest.line(
+            subtype: ClaudeControlRequest.setModel,
+            requestID: "skalman-ctrl-3",
+            body: ["model": "claude-sonnet-5"]
+        ))
+        XCTAssertEqual(data.last, 0x0A, "The line must be newline-terminated like a turn")
+
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["type"] as? String, "control_request")
+        XCTAssertEqual(object["request_id"] as? String, "skalman-ctrl-3")
+
+        let request = try XCTUnwrap(object["request"] as? [String: Any])
+        XCTAssertEqual(request["subtype"] as? String, "set_model")
+        XCTAssertEqual(request["model"] as? String, "claude-sonnet-5")
+    }
+
+    func testFastModeProducesApplyFlagSettingsEnvelope() throws {
+        let data = try XCTUnwrap(ClaudeControlRequest.line(
+            subtype: ClaudeControlRequest.applyFlagSettings,
+            requestID: "skalman-ctrl-4",
+            body: ["settings": ["fastMode": true]]
+        ))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let request = try XCTUnwrap(object["request"] as? [String: Any])
+        XCTAssertEqual(request["subtype"] as? String, "apply_flag_settings")
+        let settings = try XCTUnwrap(request["settings"] as? [String: Any])
+        XCTAssertEqual(settings["fastMode"] as? Bool, true)
+    }
+
+    func testNilModelSerializesAsJSONNullToResetToDefault() throws {
+        let data = try XCTUnwrap(ClaudeControlRequest.line(
+            subtype: ClaudeControlRequest.setModel,
+            requestID: "skalman-ctrl-5",
+            body: ["model": NSNull()]
+        ))
+        // The CLI resets to the default on null; the key must be present as null, not omitted.
+        let text = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(text.contains("\"model\":null"), "Expected a null model, got: \(text)")
+    }
+
+    func testControlResponseParsesSuccess() throws {
+        let response = try XCTUnwrap(ControlResponse.parse(
+            #"{"type":"control_response","response":{"subtype":"success","request_id":"skalman-ctrl-1"}}"#))
+        XCTAssertEqual(response.requestID, "skalman-ctrl-1")
+        XCTAssertFalse(response.isError)
+    }
+
+    func testControlResponseParsesErrorWithMessage() throws {
+        let response = try XCTUnwrap(ControlResponse.parse(
+            #"{"type":"control_response","response":{"subtype":"error","request_id":"skalman-ctrl-1","error":"unrecognized model"}}"#))
+        XCTAssertTrue(response.isError)
+        XCTAssertEqual(response.error, "unrecognized model")
+    }
+
+    func testControlResponseIgnoresOrdinaryEvents() {
+        XCTAssertNil(ControlResponse.parse(#"{"type":"assistant","message":{"content":[]}}"#))
+        XCTAssertNil(ControlResponse.parse(#"{"type":"result","result":"done"}"#))
+        XCTAssertNil(ControlResponse.parse("not json at all"))
     }
 }
 
@@ -160,11 +314,37 @@ final class StreamEventParserTests: XCTestCase {
         let failed = try onlyEvent(CodexStreamEvent.parse("""
             {"type":"turn.failed","error":{"message":"sandbox denied","code":17}}
             """))
-        guard case .turnFinished(let text, let isError) = failed else {
+        guard case .turnFinished(let text, let isError, _) = failed else {
             return XCTFail("Expected failed Codex turn")
         }
         XCTAssertEqual(text, "sandbox denied")
         XCTAssertTrue(isError)
+    }
+
+    func testBothProvidersDecodeExactTurnReceipts() throws {
+        let claude = try onlyEvent(StreamEvent.parse("""
+            {"type":"result","is_error":false,"duration_ms":89432,
+             "usage":{"input_tokens":12000,"output_tokens":3149}}
+            """))
+        guard case .turnFinished(_, false, let claudeMetrics) = claude else {
+            return XCTFail("Expected Claude result")
+        }
+        XCTAssertEqual(
+            try XCTUnwrap(claudeMetrics.duration),
+            89.432,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(claudeMetrics.outputTokens, 3_149)
+
+        let codex = try onlyEvent(CodexStreamEvent.parse("""
+            {"type":"turn.completed",
+             "usage":{"input_tokens":12000,"cached_input_tokens":9000,"output_tokens":3149}}
+            """))
+        guard case .turnFinished(_, false, let codexMetrics) = codex else {
+            return XCTFail("Expected Codex result")
+        }
+        XCTAssertNil(codexMetrics.duration, "Codex duration comes from the wrapper's local clock")
+        XCTAssertEqual(codexMetrics.outputTokens, 3_149)
     }
 
     func testUnknownKindsAreEventsButMalformedLinesAreCountable() throws {

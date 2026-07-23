@@ -391,11 +391,19 @@ final class ConversationTimelineTests: XCTestCase {
 
     func testAFailedTurnIsReportedButASuccessfulOneIsNot() {
         var succeeded = ConversationTimeline(sessionID: SessionID())
-        _ = succeeded.apply(.turnFinished(text: "All done.", isError: false))
+        _ = succeeded.apply(.turnFinished(
+            text: "All done.",
+            isError: false,
+            metrics: .empty
+        ))
         XCTAssertTrue(succeeded.rows.isEmpty, "A successful turn repeated itself")
 
         var failed = ConversationTimeline(sessionID: SessionID())
-        _ = failed.apply(.turnFinished(text: "Rate limited.", isError: true))
+        _ = failed.apply(.turnFinished(
+            text: "Rate limited.",
+            isError: true,
+            metrics: .empty
+        ))
         XCTAssertEqual(failed.rows, [.notice("Rate limited.", kind: .error)])
     }
 
@@ -408,7 +416,10 @@ final class ConversationTimelineTests: XCTestCase {
         let transcriptID = TranscriptID("settled-on-this")
         let changes = timeline.apply(.initialised(sessionID: transcriptID, model: "opus"))
 
-        XCTAssertEqual(changes, [.adoptedSessionID(transcriptID), .status(.ready(model: "opus"))])
+        XCTAssertEqual(changes, [
+            .adoptedSessionID(transcriptID),
+            .status(.ready(model: "opus", lastTurn: nil))
+        ])
     }
 
     func testCodexThreadRestartsDoNotOverwriteWorking() {

@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Properties
 
     private var mainWindowController: MainWindowController!
+    private var componentGalleryWindowController: ComponentGalleryWindowController?
 
     /// Whether this process won the single-instance lock and therefore owns the state.
     private var ownsSingleInstanceLock = false
@@ -39,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before the first window is built, so everything is created already themed and nothing
         // has to be repainted at launch. `AppThemeRefresh` exists for the *later* changes.
         AppThemeLibrary.restore()
+        AppThemeRefresh.startObservingAccessibilityDisplayOptions()
 
         setupMenuBar()
 
@@ -83,6 +85,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // delay — it is the least urgent thing the app does, and the Storage page is only ever
         // reading what it has already found.
         ArtifactScanService.shared.startPassiveScanning()
+
+        // Replaces names the old agent-name scheme left behind ("Claude Code 2") with what
+        // the transcripts still hold. Idempotent: a backfilled session no longer carries a
+        // placeholder title, so later launches skip it without reading anything.
+        SessionNaming.backfillLegacyNames()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -175,6 +182,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu Setup
 
+    // MARK: - Command Bindings
+
+    /// The menu items whose key equivalent comes from `AppCommands`, kept so a rebinding can be
+    /// applied to them directly.
+    ///
+    /// Re-applying beats rebuilding the menu bar: `setupMenuBar` also re-points `NSApp.windowsMenu`
+    /// and `NSApp.helpMenu`, and running all of that again to change one character is both more
+    /// work and more ways to be wrong.
+    private var commandItems: [String: NSMenuItem] = [:]
+
+    /// Holds the shortcut-change subscription for the process lifetime.
+    private let menuEvents = AppEventObservations()
+
+    /// Builds a menu item that takes its shortcut from the command table instead of a literal.
+    private func commandItem(_ id: String, action: Selector) -> NSMenuItem {
+        guard let command = AppCommands.command(id: id) else {
+            return NSMenuItem(title: id, action: action, keyEquivalent: "")
+        }
+
+        let item = NSMenuItem(title: command.title, action: action, keyEquivalent: "")
+        apply(ShortcutOverrideStore.shared.shortcut(for: command), to: item)
+        commandItems[id] = item
+        return item
+    }
+
+    private func apply(_ shortcut: KeyboardShortcut?, to item: NSMenuItem) {
+        item.keyEquivalent = shortcut?.key ?? ""
+        item.keyEquivalentModifierMask = shortcut?.modifiers ?? []
+    }
+
+    /// Re-reads every bound item. Called on the change event, so a shortcut edited in Settings
+    /// works immediately rather than after a relaunch.
+    func applyShortcutBindings() {
+        for (id, item) in commandItems {
+            guard let command = AppCommands.command(id: id) else { continue }
+            apply(ShortcutOverrideStore.shared.shortcut(for: command), to: item)
+        }
+    }
+
     private func setupMenuBar() {
         let mainMenu = NSMenu()
 
@@ -192,6 +238,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.helpMenu = helpMenuItem.submenu
 
         NSApp.mainMenu = mainMenu
+
+        // The menu is built once, so a rebinding has to be pushed into the items that already
+        // exist — otherwise a shortcut changed in Settings would not work until the next launch.
+        menuEvents.observe(KeyboardShortcutsDidChange.self) { [weak self] _ in
+            self?.applyShortcutBindings()
+        }
     }
 
     private func makeApplicationMenuItem() -> NSMenuItem {
@@ -243,24 +295,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Opens the project's composer rather than creating anything: agent, account, model
         // and checkout are chosen there. The per-agent entries that used to sit here answered
         // all four silently, which is the friction this menu should not remove.
-        menu.addItem(withTitle: "New Session", action: #selector(newSession), keyEquivalent: "n")
+        menu.addItem(commandItem(AppCommands.ID.newSession, action: #selector(newSession)))
 
         menu.addItem(.separator())
 
         // Two ways to a project, matching the sidebar's `+` menu: create the folder, or
         // adopt one that exists. Add Project keeps its shortcut and its meaning.
-        menu.addItem(withTitle: "New Project…", action: #selector(newProject), keyEquivalent: "")
-
-        let addProjectItem = NSMenuItem(
-            title: "Add Existing Project…",
-            action: #selector(addProject),
-            keyEquivalent: "n"
-        )
-        addProjectItem.keyEquivalentModifierMask = [.command, .shift]
-        menu.addItem(addProjectItem)
+        menu.addItem(commandItem(AppCommands.ID.newProject, action: #selector(newProject)))
+        menu.addItem(commandItem(AppCommands.ID.addProject, action: #selector(addProject)))
 
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Close Session", action: #selector(closeSession), keyEquivalent: "w")
+        menu.addItem(commandItem(AppCommands.ID.closeSession, action: #selector(closeSession)))
 
         let item = NSMenuItem()
         item.submenu = menu
@@ -278,7 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Find…", action: #selector(showFind), keyEquivalent: "f")
+        menu.addItem(commandItem(AppCommands.ID.find, action: #selector(showFind)))
 
         let item = NSMenuItem()
         item.submenu = menu
@@ -288,38 +333,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeViewMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: MenuIdentifiers.viewMenu)
 
-        let toggleSidebarItem = NSMenuItem(
-            title: "Toggle Sidebar",
-            action: #selector(toggleSidebar),
-            keyEquivalent: "s"
-        )
-        toggleSidebarItem.keyEquivalentModifierMask = [.command, .control]
-        menu.addItem(toggleSidebarItem)
+        menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
 
-        let browserItem = NSMenuItem(
-            title: "Browser",
-            action: #selector(openBrowser),
-            keyEquivalent: "b"
-        )
-        browserItem.keyEquivalentModifierMask = [.command, .shift]
-        menu.addItem(browserItem)
+        // The display pane's family. Their defaults live in `AppCommands`, which is also where
+        // the reasoning for each now sits — ⇧⌘R rather than ⇧⌘G (the platform's Find Previous),
+        // ⇧⌘I rather than ⌘I (Get Info) or ⌥⌘I (the element inspector), and ⌃` for the shell,
+        // free because ⌘` is the platform's cycle-windows.
+        menu.addItem(commandItem(AppCommands.ID.newTerminalTab, action: #selector(openTerminalTab)))
+        menu.addItem(commandItem(AppCommands.ID.browser, action: #selector(openBrowser)))
+        menu.addItem(commandItem(AppCommands.ID.files, action: #selector(openFilesTab)))
+        menu.addItem(commandItem(AppCommands.ID.review, action: #selector(openReview)))
+        menu.addItem(commandItem(AppCommands.ID.sessionInfo, action: #selector(openInfo)))
+        menu.addItem(commandItem(AppCommands.ID.shell, action: #selector(toggleShell)))
+        menu.addItem(commandItem(AppCommands.ID.displayPanel, action: #selector(toggleDisplayPanel)))
 
-        // ⇧⌘R, deliberately not ⇧⌘G — that is the platform's Find Previous.
-        let reviewItem = NSMenuItem(
-            title: "Git Review",
-            action: #selector(openReview),
-            keyEquivalent: "r"
-        )
-        reviewItem.keyEquivalentModifierMask = [.command, .shift]
-        menu.addItem(reviewItem)
+        menu.addItem(.separator())
 
-        // ⌃` — the shortcut every editor with a terminal drawer uses, and free here because
-        // ⌘` is the platform's cycle-windows.
-        let shellItem = NSMenuItem(title: "Shell", action: #selector(toggleShell), keyEquivalent: "`")
-        shellItem.keyEquivalentModifierMask = [.control]
-        menu.addItem(shellItem)
-
-        menu.addItem(withTitle: "Display Panel", action: #selector(toggleDisplayPanel), keyEquivalent: "")
+        menu.addItem(commandItem(AppCommands.ID.componentGallery, action: #selector(showComponentGallery)))
 
         menu.addItem(.separator())
 
@@ -332,29 +362,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(fullScreenItem)
 
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Bigger", action: #selector(increaseFontSize), keyEquivalent: "+")
-        menu.addItem(withTitle: "Smaller", action: #selector(decreaseFontSize), keyEquivalent: "-")
+        menu.addItem(commandItem(AppCommands.ID.biggerText, action: #selector(increaseFontSize)))
+        menu.addItem(commandItem(AppCommands.ID.smallerText, action: #selector(decreaseFontSize)))
 
         menu.addItem(.separator())
 
         // ⌥⌘I — the browser devtools shortcut, for the same gesture: point at the thing on
         // screen and get something you can paste into a conversation about it. The shifted
         // variant is the freeflow twin; invoking one while the other is active switches mode.
-        let inspectElementItem = NSMenuItem(
-            title: "Inspect Element",
-            action: #selector(inspectElement),
-            keyEquivalent: "i"
-        )
-        inspectElementItem.keyEquivalentModifierMask = [.command, .option]
-        menu.addItem(inspectElementItem)
-
-        let inspectPointItem = NSMenuItem(
-            title: "Inspect Point",
-            action: #selector(inspectPoint),
-            keyEquivalent: "i"
-        )
-        inspectPointItem.keyEquivalentModifierMask = [.command, .option, .shift]
-        menu.addItem(inspectPointItem)
+        menu.addItem(commandItem(AppCommands.ID.inspectElement, action: #selector(inspectElement)))
+        menu.addItem(commandItem(AppCommands.ID.inspectGeometry, action: #selector(inspectPoint)))
 
         let item = NSMenuItem()
         item.submenu = menu
@@ -413,6 +430,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController.showSettings()
     }
 
+    @objc private func openTerminalTab() {
+        mainWindowController.showTerminalTab()
+    }
+
+    @objc private func openFilesTab() {
+        mainWindowController.showFilesTab()
+    }
+
     /// Reveals today's journal rather than opening it: `.jsonl` has no owning app, and what
     /// is usually wanted is the folder, where the previous days sit alongside it.
     @objc private func revealDiagnosticsLog() {
@@ -434,12 +459,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController.showReview()
     }
 
+    @objc private func openInfo() {
+        mainWindowController.showInfo()
+    }
+
     @objc private func toggleShell() {
         mainWindowController.toggleShellDrawer()
     }
 
     @objc private func toggleDisplayPanel() {
         mainWindowController.toggleDisplayPane()
+    }
+
+    @objc private func showComponentGallery() {
+        let controller = componentGalleryWindowController ?? ComponentGalleryWindowController()
+        componentGalleryWindowController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func newSession() {

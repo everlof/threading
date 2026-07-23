@@ -3,8 +3,8 @@ import AppKit
 /// The inspect mode: a transparent child window over the main window, capturing in one of
 /// two ways. In **element** mode the view under the pointer is detected and outlined, and
 /// clicking hands that view back. In **freeflow** mode nothing is detected — crosshair
-/// guides follow the pointer and clicking hands back the exact point. Esc backs out of
-/// either.
+/// guides follow the pointer, a click hands back the exact point, and a drag hands back the
+/// rectangle it drew. Esc backs out of either.
 ///
 /// A *child window*, not an overlay subview, for three reasons: it sits above everything
 /// including the toolbar, it swallows the click so inspecting a button does not press it,
@@ -18,8 +18,11 @@ final class ElementInspector {
     /// Called with the picked view once the mode has been dismissed. Element mode.
     var onPick: ((NSView) -> Void)?
 
-    /// Called with the picked point, in window coordinates. Freeflow mode.
+    /// Called with the picked point, in window coordinates. A freeflow click.
     var onPickPoint: ((NSPoint) -> Void)?
+
+    /// Called with the dragged rectangle, in window coordinates. A freeflow drag.
+    var onPickRegion: ((NSRect) -> Void)?
 
     private(set) var isActive = false
     private(set) var mode: InspectorMode = .element
@@ -27,6 +30,10 @@ final class ElementInspector {
     private weak var host: NSWindow?
     private var overlay: InspectorOverlayWindow?
     private var observers: [NSObjectProtocol] = []
+
+    /// Where the current press began, and whether it has travelled far enough to be a drag.
+    private var dragAnchor: NSPoint?
+    private var isDraggingRegion = false
 
     // MARK: - Public Methods
 
@@ -54,7 +61,9 @@ final class ElementInspector {
 
         let overlay = InspectorOverlayWindow(host: window)
         overlay.inspectorView.onPointerMoved = { [weak self] point in self?.pointerMoved(to: point) }
-        overlay.inspectorView.onPick = { [weak self] point in self?.pick(at: point) }
+        overlay.inspectorView.onMouseDown = { [weak self] point in self?.gestureBegan(at: point) }
+        overlay.inspectorView.onMouseDragged = { [weak self] point in self?.gestureMoved(to: point) }
+        overlay.inspectorView.onMouseUp = { [weak self] point in self?.gestureEnded(at: point) }
         overlay.inspectorView.onCancel = { [weak self] in self?.cancel() }
 
         window.addChildWindow(overlay, ordered: .above)
@@ -100,12 +109,16 @@ final class ElementInspector {
         }
         overlay = nil
         isActive = false
+        dragAnchor = nil
+        isDraggingRegion = false
 
         host?.makeKey()
     }
 
     private func switchMode(to mode: InspectorMode) {
         self.mode = mode
+        dragAnchor = nil
+        isDraggingRegion = false
         refreshIndicator()
     }
 
@@ -157,7 +170,48 @@ final class ElementInspector {
         }
     }
 
-    private func pick(at point: NSPoint) {
+    // MARK: - Gesture
+
+    private func gestureBegan(at point: NSPoint) {
+        dragAnchor = point
+        isDraggingRegion = false
+    }
+
+    /// A drag refines rather than commits: element mode keeps tracking whatever is under
+    /// the pointer, freeflow rubber-bands the region once the press has travelled far
+    /// enough to mean one.
+    private func gestureMoved(to point: NSPoint) {
+        switch mode {
+        case .element:
+            pointerMoved(to: point)
+
+        case .freeflow:
+            guard let anchor = dragAnchor else { return }
+
+            if !isDraggingRegion {
+                let travelled = max(abs(point.x - anchor.x), abs(point.y - anchor.y))
+                guard travelled > InspectorDefaults.dragThreshold else { return }
+                isDraggingRegion = true
+            }
+
+            let rect = InspectorGeometry.rect(from: anchor, to: point)
+            overlay?.inspectorView.indicator = .region(
+                rect,
+                label: InspectorGeometry.describe(rect.size)
+            )
+        }
+    }
+
+    /// Capture happens on release, which is what lets one press mean either a click or a
+    /// drag — nothing is committed until the pointer says which it was.
+    private func gestureEnded(at point: NSPoint) {
+        guard isActive else { return }
+
+        let anchor = dragAnchor
+        let dragged = isDraggingRegion
+        dragAnchor = nil
+        isDraggingRegion = false
+
         switch mode {
         case .element:
             let picked = target(atWindowPoint: point)
@@ -167,8 +221,18 @@ final class ElementInspector {
             }
 
         case .freeflow:
-            deactivate()
-            onPickPoint?(point)
+            guard let bounds = overlay?.inspectorView.bounds else { return }
+
+            if dragged, let anchor {
+                // Clamped to the window: the screenshot cannot show what a drag past the
+                // edge asked for, and a region half off-frame is a wrong answer.
+                let rect = InspectorGeometry.rect(from: anchor, to: point).intersection(bounds)
+                deactivate()
+                onPickRegion?(rect)
+            } else {
+                deactivate()
+                onPickPoint?(point)
+            }
         }
     }
 }
@@ -202,10 +266,11 @@ final class InspectorOverlayWindow: NSWindow {
 
 // MARK: - Indicator
 
-/// What the overlay shows and the snapshot keeps, in window coordinates either way.
+/// What the overlay shows and the snapshot keeps, in window coordinates throughout.
 enum InspectorIndicator {
     case element(rect: NSRect, label: String)
     case point(NSPoint, label: String)
+    case region(NSRect, label: String)
 
     static func label(for view: NSView) -> String {
         let rect = view.convert(view.bounds, to: nil)
@@ -219,7 +284,9 @@ enum InspectorIndicator {
 final class InspectorOverlayView: NSView {
 
     var onPointerMoved: ((NSPoint) -> Void)?
-    var onPick: ((NSPoint) -> Void)?
+    var onMouseDown: ((NSPoint) -> Void)?
+    var onMouseDragged: ((NSPoint) -> Void)?
+    var onMouseUp: ((NSPoint) -> Void)?
     var onCancel: (() -> Void)?
 
     var indicator: InspectorIndicator? {
@@ -259,7 +326,15 @@ final class InspectorOverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        onPick?(event.locationInWindow)
+        onMouseDown?(event.locationInWindow)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onMouseDragged?(event.locationInWindow)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onMouseUp?(event.locationInWindow)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -284,16 +359,18 @@ enum InspectorIndicatorDrawing {
 
     static func draw(_ indicator: InspectorIndicator, within bounds: NSRect) {
         switch indicator {
-        case .element(let rect, let label):
-            drawElement(rect, label: label, within: bounds)
+        case .element(let rect, let label), .region(let rect, let label):
+            // One visual for both: an outlined rectangle is an outlined rectangle, whether
+            // a view was found under it or the pointer drew it.
+            drawOutlined(rect, label: label, within: bounds)
         case .point(let point, let label):
             drawPoint(point, label: label, within: bounds)
         }
     }
 
-    // MARK: - Element
+    // MARK: - Outlined Rectangle
 
-    private static func drawElement(_ rect: NSRect, label: String, within bounds: NSRect) {
+    private static func drawOutlined(_ rect: NSRect, label: String, within bounds: NSRect) {
         let accent = resolvedAccent()
 
         accent.withAlphaComponent(accent.alphaComponent * InspectorDefaults.fillAlpha).setFill()

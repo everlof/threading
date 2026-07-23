@@ -15,6 +15,15 @@ struct Policy: Decodable {
     let bannedFactories: [String: String]
     let interactiveComponentDirectories: [String]
     let interactiveBaseTypes: Set<String>
+    let fontFactories: Set<String>
+    let systemChromeContractDirectories: [String]
+    let systemChromeContractTypes: Set<String>
+    let implementationBanDirectories: [String]
+    let implementationBannedTypes: [String: String]
+    let windowControllerDirectories: [String]
+    let windowControllerBaseType: String
+    let motionDirectories: [String]
+    let motionDurationNamespace: String
     let systemColors: Set<String>
     let exceptions: [Exception]
 
@@ -54,14 +63,14 @@ final class BoundaryVisitor: SyntaxVisitor {
 
     override func visit(_ node: TypeAliasDeclSyntax) -> SyntaxVisitorContinueKind {
         let target = terminalTypeName(node.initializer.value.trimmedDescription)
-        if policy.bannedTypes[target] != nil {
+        if replacement(for: target) != nil {
             aliases[node.name.text] = target
             report(
                 node: node,
                 kind: "alias",
                 symbol: target,
                 message: "typealias \(node.name.text) hides banned AppKit type \(target); "
-                    + "use \(policy.bannedTypes[target] ?? "its UI/Design replacement") directly"
+                    + "use \(replacement(for: target) ?? "its UI/Design replacement") directly"
             )
         }
         return .visitChildren
@@ -72,18 +81,49 @@ final class BoundaryVisitor: SyntaxVisitor {
             for item in inherited {
                 let written = terminalTypeName(item.type.trimmedDescription)
                 let resolved = aliases[written] ?? written
-                guard policy.bannedTypes[resolved] != nil else { continue }
+                guard let replacement = replacement(for: resolved) else { continue }
                 report(
                     node: item.type,
                     kind: "inherit",
                     symbol: resolved,
                     message: "subclassing \(resolved) bypasses the themed boundary; "
-                        + "subclass \(policy.bannedTypes[resolved] ?? "its UI/Design replacement") instead"
+                        + "subclass \(replacement) instead"
                 )
             }
         }
 
         checkInteractiveContract(node)
+        checkThemedControlAccessibilityContract(node)
+        checkWindowControllerContract(node)
+        return .visitChildren
+    }
+
+    override func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
+        for binding in node.bindings {
+            guard let type = binding.typeAnnotation?.type.trimmedDescription else { continue }
+            if checksSystemChromeContracts, !isPrivate(node.modifiers) {
+                checkSystemChromeContract(type: type, node: binding)
+            }
+            checkImplementationType(type: type, node: binding)
+        }
+        return .visitChildren
+    }
+
+    override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
+        for parameter in node.signature.parameterClause.parameters {
+            let type = parameter.type.trimmedDescription
+            if checksSystemChromeContracts, !isPrivate(node.modifiers) {
+                checkSystemChromeContract(type: type, node: parameter.type)
+            }
+            checkImplementationType(type: type, node: parameter.type)
+        }
+        if let returnType = node.signature.returnClause?.type {
+            let type = returnType.trimmedDescription
+            if checksSystemChromeContracts, !isPrivate(node.modifiers) {
+                checkSystemChromeContract(type: type, node: returnType)
+            }
+            checkImplementationType(type: type, node: returnType)
+        }
         return .visitChildren
     }
 
@@ -101,9 +141,20 @@ final class BoundaryVisitor: SyntaxVisitor {
             let base = member.base?.trimmedDescription ?? ""
             let baseName = terminalTypeName(base)
 
+            if policy.fontFactories.contains(memberName),
+               base.isEmpty || baseName == "NSFont" {
+                report(
+                    node: node,
+                    kind: "fontFactory",
+                    symbol: memberName,
+                    message: "\(memberName) chooses typography in feature code; "
+                        + "read a semantic Design.Typography role"
+                )
+            }
+
             if memberName == "init" {
                 checkConstruction(writtenName: baseName, firstArgumentLabel: arguments.first?.label?.text, node: node)
-            } else if policy.bannedTypes[memberName] != nil {
+            } else if replacement(for: memberName) != nil {
                 // `AppKit.NSButton(...)`.
                 checkConstruction(writtenName: memberName, firstArgumentLabel: arguments.first?.label?.text, node: node)
             }
@@ -133,13 +184,13 @@ final class BoundaryVisitor: SyntaxVisitor {
 
         let written = terminalTypeName(type.trimmedDescription)
         let resolved = aliases[written] ?? written
-        guard policy.bannedTypes[resolved] != nil else { return .visitChildren }
+        guard let replacement = replacement(for: resolved) else { return .visitChildren }
         report(
             node: call,
             kind: "construct",
             symbol: resolved,
             message: "inferred .init() constructs \(resolved); use "
-                + (policy.bannedTypes[resolved] ?? "its UI/Design replacement")
+                + replacement
         )
         return .visitChildren
     }
@@ -170,19 +221,30 @@ final class BoundaryVisitor: SyntaxVisitor {
 
         let left = elements[..<assignment].map(\.trimmedDescription).joined()
         let right = elements[(assignment + 1)...].map(\.trimmedDescription).joined()
-        guard right.contains(".cgColor") else { return .visitChildren }
-
-        let properties = ["backgroundColor", "borderColor", "shadowColor", "strokeColor", "fillColor"]
-        guard let property = properties.first(where: { left.hasSuffix(".\($0)") }) else {
-            return .visitChildren
+        if right.contains(".cgColor") {
+            let properties = ["backgroundColor", "borderColor", "shadowColor", "strokeColor", "fillColor"]
+            if let property = properties.first(where: { left.hasSuffix(".\($0)") }) {
+                report(
+                    node: node,
+                    kind: "frozenLayerColor",
+                    symbol: property,
+                    message: "\(property) stores a frozen CGColor; "
+                        + "use the refresh-aware NSView layer-colour helper"
+                )
+            }
         }
 
-        report(
-            node: node,
-            kind: "frozenLayerColor",
-            symbol: property,
-            message: "\(property) stores a frozen CGColor; use the refresh-aware NSView layer-colour helper"
-        )
+        if checksMotionContracts,
+           left.hasSuffix(".duration"),
+           !right.contains(policy.motionDurationNamespace) {
+            report(
+                node: node,
+                kind: "motionDuration",
+                symbol: "duration",
+                message: "animation duration bypasses \(policy.motionDurationNamespace); "
+                    + "Reduce Motion would leave it running"
+            )
+        }
         return .visitChildren
     }
 
@@ -192,7 +254,7 @@ final class BoundaryVisitor: SyntaxVisitor {
         node: some SyntaxProtocol
     ) {
         let name = aliases[writtenName] ?? terminalTypeName(writtenName)
-        guard let replacement = policy.bannedTypes[name] else { return }
+        guard let replacement = replacement(for: name) else { return }
         if name == "NSTextField", let firstArgumentLabel,
            policy.allowedTextFieldLabels.contains(firstArgumentLabel) {
             return
@@ -233,6 +295,126 @@ final class BoundaryVisitor: SyntaxVisitor {
                 + "subclass \(requiredBases) "
                 + "so keyboard, focus, enabled state, and accessibility remain part of the contract"
         )
+    }
+
+    /// The base supplies keyboard focus, activation routing and enabled state, but it cannot
+    /// guess whether a concrete control is a button, checkbox, or pop-up. Require every direct
+    /// subclass to state its semantic role and accessibility action.
+    private func checkThemedControlAccessibilityContract(_ node: ClassDeclSyntax) {
+        guard policy.interactiveComponentDirectories.contains(where: {
+            relativePath == $0 || relativePath.hasPrefix("\($0)/")
+        }) else { return }
+
+        let inherited = Set(node.inheritanceClause?.inheritedTypes.map {
+            terminalTypeName($0.type.trimmedDescription)
+        } ?? [])
+        guard !inherited.isDisjoint(with: policy.interactiveBaseTypes) else { return }
+
+        let functions = Set(node.memberBlock.members.compactMap {
+            $0.decl.as(FunctionDeclSyntax.self)?.name.text
+        })
+        let required = ["accessibilityRole", "accessibilityPerformPress"]
+        for function in required where !functions.contains(function) {
+            report(
+                node: node,
+                kind: "accessibilityContract",
+                symbol: function,
+                message: "\(node.name.text) does not implement \(function); "
+                    + "a themed control must expose its semantic role and primary action"
+            )
+        }
+    }
+
+    /// Every top-level app window inherits the same delayed runtime audit. Making that a source
+    /// contract means a newly added window cannot silently omit the audit by forgetting a call.
+    private func checkWindowControllerContract(_ node: ClassDeclSyntax) {
+        guard policy.windowControllerDirectories.contains(where: {
+            relativePath == $0 || relativePath.hasPrefix("\($0)/")
+        }) else { return }
+
+        let inherited = Set(node.inheritanceClause?.inheritedTypes.map {
+            terminalTypeName($0.type.trimmedDescription)
+        } ?? [])
+        guard inherited.contains("NSWindowController") else { return }
+        guard node.name.text != policy.windowControllerBaseType else { return }
+
+        report(
+            node: node,
+            kind: "windowController",
+            symbol: node.name.text,
+            message: "\(node.name.text) bypasses whole-window runtime auditing; "
+                + "subclass \(policy.windowControllerBaseType)"
+        )
+    }
+
+    private var checksSystemChromeContracts: Bool {
+        policy.systemChromeContractDirectories.contains {
+            relativePath == $0 || relativePath.hasPrefix("\($0)/")
+        }
+    }
+
+    private var checksImplementationBans: Bool {
+        policy.implementationBanDirectories.contains {
+            relativePath == $0 || relativePath.hasPrefix("\($0)/")
+        }
+    }
+
+    private var checksMotionContracts: Bool {
+        policy.motionDirectories.contains {
+            relativePath == $0 || relativePath.hasPrefix("\($0)/")
+        }
+    }
+
+    private func isPrivate(_ modifiers: DeclModifierListSyntax) -> Bool {
+        modifiers.contains {
+            $0.name.text == "private" || $0.name.text == "fileprivate"
+        }
+    }
+
+    /// A design component may contain system chrome, but its callers must not build against
+    /// that system type. Private implementation details are the containment boundary.
+    private func checkSystemChromeContract(type: String, node: some SyntaxProtocol) {
+        for forbidden in policy.systemChromeContractTypes where containsType(forbidden, in: type) {
+            report(
+                node: node,
+                kind: "systemChromeContract",
+                symbol: forbidden,
+                message: "\(forbidden) escapes a UI/Design component contract; "
+                    + "expose a semantic app-owned model and keep system chrome private"
+            )
+        }
+    }
+
+    /// App-owned design components may not quietly fall back to the system dropdown stack.
+    /// Unlike contract checking, this includes private declarations: the visible implementation
+    /// itself is the thing being protected.
+    private func checkImplementationType(type: String, node: some SyntaxProtocol) {
+        guard checksImplementationBans else { return }
+        for (forbidden, replacement) in policy.implementationBannedTypes
+        where containsType(forbidden, in: type) {
+            report(
+                node: node,
+                kind: "implementationType",
+                symbol: forbidden,
+                message: "\(forbidden) is forbidden inside an app-owned design component; "
+                    + "use \(replacement)"
+            )
+        }
+    }
+
+    private func replacement(for type: String) -> String? {
+        if let replacement = policy.bannedTypes[type] {
+            return replacement
+        }
+        if checksImplementationBans {
+            return policy.implementationBannedTypes[type]
+        }
+        return nil
+    }
+
+    private func containsType(_ name: String, in written: String) -> Bool {
+        let parts = written.split { !$0.isLetter && !$0.isNumber && $0 != "_" }
+        return parts.contains(Substring(name))
     }
 
     private func report(
@@ -311,6 +493,8 @@ func verifyChecker(_ policy: Policy) {
         ("let value = NSTextView.scrollableTextView()", "factory"),
         ("let value = NSColor.labelColor", "systemColor"),
         ("let value = NSColor.placeholderTextColor", "systemColor"),
+        ("let value = NSFont.systemFont(ofSize: 13)", "fontFactory"),
+        ("label.font = .monospacedSystemFont(ofSize: 11, weight: .regular)", "fontFactory"),
         ("view.layer?.backgroundColor = Design.Surface.panel.cgColor", "frozenLayerColor")
     ]
 
@@ -347,10 +531,70 @@ func verifyChecker(_ policy: Policy) {
     let themedInteractive = """
         final class AccessibleControl: ThemedControl {
             override func mouseDown(with event: NSEvent) {}
+            override func accessibilityRole() -> NSAccessibility.Role? { .button }
+            override func accessibilityPerformPress() -> Bool { true }
         }
         """
     if !lint(source: themedInteractive, path: interactivePath, policy: policy).isEmpty {
         fail("checker self-test rejected a ThemedControl interaction")
+    }
+
+    let inaccessibleControl = """
+        final class MouseOnlyThemedControl: ThemedControl {
+            override func mouseDown(with event: NSEvent) {}
+        }
+        """
+    if lint(source: inaccessibleControl, path: interactivePath, policy: policy)
+        .filter({ $0.kind == "accessibilityContract" }).count != 2 {
+        fail("checker self-test missed a themed control without accessibility semantics")
+    }
+
+    let rawMotion = "context.duration = 0.2"
+    if !lint(source: rawMotion, path: interactivePath, policy: policy)
+        .contains(where: { $0.kind == "motionDuration" }) {
+        fail("checker self-test missed an animation duration outside Design.Motion")
+    }
+
+    let reducedMotion = "context.duration = Design.Motion.quick"
+    if !lint(source: reducedMotion, path: interactivePath, policy: policy).isEmpty {
+        fail("checker self-test rejected a Design.Motion duration")
+    }
+
+    let escapingMenu = """
+        final class LeakyChoice: ThemedControl {
+            var menuProvider: (() -> NSMenu)?
+            func selectedItem() -> NSMenuItem? { nil }
+        }
+        """
+    let contractOffences = lint(source: escapingMenu, path: interactivePath, policy: policy)
+    if contractOffences.filter({ $0.kind == "systemChromeContract" }).count != 2 {
+        fail("checker self-test missed system chrome escaping a design-component contract")
+    }
+
+    let containedMenu = """
+        final class SystemDropdownChoice: ThemedControl {
+            private func makeMenu() -> NSMenu { NSMenu() }
+            override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
+            override func accessibilityPerformPress() -> Bool { true }
+        }
+        """
+    let implementationOffences = lint(source: containedMenu, path: interactivePath, policy: policy)
+    if !implementationOffences.contains(where: {
+        $0.kind == "implementationType" && $0.message.contains("ThemedMenuPresenter")
+    }) {
+        fail("checker self-test missed private system dropdown chrome inside a design component")
+    }
+
+    let windowPath = "Sources/Skalman/UI/Windows/CheckerFixture.swift"
+    let rawWindow = "final class UncheckedWindow: NSWindowController {}"
+    if !lint(source: rawWindow, path: windowPath, policy: policy)
+        .contains(where: { $0.kind == "windowController" }) {
+        fail("checker self-test missed a window outside the runtime-audited base class")
+    }
+
+    let auditedWindow = "final class CheckedWindow: ThemedWindowController {}"
+    if !lint(source: auditedWindow, path: windowPath, policy: policy).isEmpty {
+        fail("checker self-test rejected the runtime-audited window base class")
     }
 }
 

@@ -198,6 +198,7 @@ enum AgentLauncher {
     ) -> AgentLaunchPlan {
         var command = ShellCommand(word: AgentDefaults.codexExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
+        appendCodexConversationOverrides(for: session, to: &command)
         command.append(flag: "--sandbox", value: "workspace-write")
         appendCodexHookFlags(for: session, to: &command)
         command.append(word: "exec")
@@ -429,7 +430,7 @@ enum AgentLauncher {
 
         if let fork = claudeForkFlags(for: session, in: project) {
             command.append(contentsOf: fork.flags)
-            command.append(flag: "--name", value: session.launchName)
+            appendLaunchName(for: session, to: &command)
             appendPrompt(prompt, to: &command)
             return (command, .resumable(fork.sessionID))
         }
@@ -444,7 +445,7 @@ enum AgentLauncher {
         let mintedID = session.resumeState.transcriptID
             ?? TranscriptID(session.id.uuidString.lowercased())
         command.append(flag: "--session-id", value: mintedID.rawValue)
-        command.append(flag: "--name", value: session.launchName)
+        appendLaunchName(for: session, to: &command)
         appendPrompt(prompt, to: &command)
 
         return (command, .resumable(mintedID))
@@ -482,8 +483,8 @@ enum AgentLauncher {
     }
 
     /// Returns the flags and the child's identifier, so both surfaces can compose them into
-    /// their own command — the terminal adds `--name` and an opening prompt, the stream adds
-    /// its transport flags.
+    /// their own command — the terminal adds an opening prompt, the stream adds its
+    /// transport flags.
     private static func claudeForkFlags(
         for session: AgentSession,
         in project: Project
@@ -501,6 +502,21 @@ enum AgentLauncher {
         flags.append(flag: "--session-id", value: mintedID.rawValue)
 
         return (flags, mintedID)
+    }
+
+    /// Adds `--name` only when the user has explicitly renamed the session.
+    ///
+    /// The flag marks the conversation custom-titled in the CLI, which stops it generating
+    /// its own `ai-title` (measured: 9 of 10 transcripts launched under a default name held
+    /// none) — so anything less deliberate than the user's own choice would switch off the
+    /// agent-naming signal the sidebar prefers, and echo the fallback back as the terminal
+    /// title on top of it.
+    private static func appendLaunchName(
+        for session: AgentSession,
+        to command: inout ShellCommand
+    ) {
+        guard let name = session.launchName else { return }
+        command.append(flag: "--name", value: name)
     }
 
     /// Adds the model flag when the session does not use the CLI's default.
@@ -529,6 +545,7 @@ enum AgentLauncher {
     ) -> (ShellCommand, ResumeState) {
         var command = ShellCommand(word: AgentDefaults.codexExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
+        appendCodexConversationOverrides(for: session, to: &command)
         appendCodexHookFlags(for: session, to: &command)
 
         if let existingID = session.resumeState.transcriptID {
@@ -539,6 +556,54 @@ enum AgentLauncher {
 
         appendPrompt(prompt, to: &command)
         return (command, .awaitingIdentifier)
+    }
+
+    /// Maps Skalman's provider-neutral Fast choice onto Codex's per-run configuration.
+    ///
+    /// Native Codex is one `exec` process per turn, so changing this setting while idle needs
+    /// no control message and no new conversation: the next launch is already an
+    /// `exec resume <same-id>`. `default` is explicit rather than omission when the user chose
+    /// Standard, because omission would inherit an account configured for Fast.
+    private static func appendCodexConversationOverrides(
+        for session: AgentSession,
+        to command: inout ShellCommand
+    ) {
+        guard let fastMode = session.fastMode else { return }
+
+        if fastMode {
+            let account = AgentAccountDiscovery.account(
+                for: session.kind,
+                handle: session.accountHandle
+            )
+            let model = session.model ?? AgentModels.defaultModel(
+                for: session.kind,
+                account: account
+            )
+            let tier = AgentModels.option(
+                identifier: model,
+                for: session.kind,
+                account: account
+            )?.fastServiceTier ?? AgentDefaults.codexFastServiceTier
+
+            appendCodexConfigOverride(
+                AgentDefaults.codexServiceTierKey,
+                string: tier,
+                to: &command
+            )
+            // A deliberate Fast choice should still work when the account disabled the TUI
+            // selector. Managed configuration remains authoritative over this one-run layer.
+            appendCodexConfigOverride(
+                AgentDefaults.codexFastModeFeatureKey,
+                tomlValue: "true",
+                to: &command
+            )
+        } else {
+            appendCodexConfigOverride(
+                AgentDefaults.codexServiceTierKey,
+                string: AgentDefaults.codexStandardServiceTier,
+                to: &command
+            )
+        }
     }
 
     /// Installs the account's lifecycle hooks and, if the user asked for it, skips the review

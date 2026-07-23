@@ -105,7 +105,7 @@ final class AccountsPreferencesViewController: NSViewController {
             action: #selector(iconClicked(_:))
         )
         button.isBordered = false
-        button.font = .systemFont(ofSize: AccountsPreferencesLayout.emojiFontSize)
+        button.font = Design.Typography.accountEmoji()
         button.tag = index
         button.alphaValue = account.emoji == nil ? AccountsPreferencesLayout.unsetIconAlpha : 1
         button.toolTip = AccountsPreferencesStrings.iconWellTooltip

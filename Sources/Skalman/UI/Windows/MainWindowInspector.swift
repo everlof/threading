@@ -17,6 +17,9 @@ extension MainWindowController {
         elementInspector.onPickPoint = { [weak self] point in
             self?.presentPointReport(at: point)
         }
+        elementInspector.onPickRegion = { [weak self] rect in
+            self?.presentRegionReport(for: rect)
+        }
 
         elementInspector.toggle(mode, over: window)
     }
@@ -62,6 +65,30 @@ extension MainWindowController {
         presentReport(
             heading: InspectorStrings.pointHeading,
             subheading: InspectorGeometry.describe(point),
+            markdown: report.markdown,
+            screenshot: capture.image
+        )
+    }
+
+    private func presentRegionReport(for rect: NSRect) {
+        guard let window else { return }
+
+        var report = RegionReport(
+            rect: rect,
+            windowSize: window.frame.size,
+            screenshotPath: nil
+        )
+        let indicator = InspectorIndicator.region(
+            rect,
+            label: InspectorGeometry.describe(rect.size)
+        )
+
+        let capture = captureScreenshot(of: window, annotating: indicator)
+        report.screenshotPath = capture.path
+
+        presentReport(
+            heading: InspectorStrings.regionHeading,
+            subheading: InspectorGeometry.describe(rect),
             markdown: report.markdown,
             screenshot: capture.image
         )
