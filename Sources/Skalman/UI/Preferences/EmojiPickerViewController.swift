@@ -37,11 +37,7 @@ final class EmojiPickerViewController: NSViewController {
     override func loadView() {
         let grid = makeGrid()
 
-        let divider = NSView()
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = Design.Surface.border.cgColor
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        let divider = SeparatorView()
 
         let stack = NSStackView(views: [grid, divider, makeInputRow()])
         stack.orientation = .vertical

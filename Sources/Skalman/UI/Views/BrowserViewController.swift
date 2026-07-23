@@ -43,8 +43,7 @@ final class BrowserViewController: NSViewController {
 
     override func loadView() {
         view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = Design.Surface.ground.cgColor
+        view.applySurface(fill: Design.Surface.ground, radius: 0)
         setupWebView()
         setupChrome()
         observeWebView()

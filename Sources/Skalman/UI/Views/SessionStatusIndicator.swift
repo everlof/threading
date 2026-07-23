@@ -36,9 +36,9 @@ final class SessionStatusIndicator: NSView {
     private func setupViews() {
         spinner.translatesAutoresizingMaskIntoConstraints = false
 
-        attentionDot.wantsLayer = true
-        attentionDot.layer?.cornerRadius = StatusIndicatorDefaults.dotSize / 2
-        attentionDot.layer?.backgroundColor = Design.Surface.accent.cgColor
+        // Through `applySurface` rather than straight onto the layer: a `cgColor` resolves once,
+        // and the dot would keep the previous theme's accent until the session changed state.
+        attentionDot.applySurface(fill: Design.Surface.accent, radius: StatusIndicatorDefaults.dotSize / 2)
         attentionDot.isHidden = true
         attentionDot.translatesAutoresizingMaskIntoConstraints = false
 
@@ -103,7 +103,7 @@ final class SessionStatusIndicator: NSView {
     /// way an `NSColor`-backed view would, so it is refreshed here.
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        attentionDot.layer?.backgroundColor = Design.Surface.accent.cgColor
+        attentionDot.applySurface(fill: Design.Surface.accent, radius: StatusIndicatorDefaults.dotSize / 2)
     }
 }
 

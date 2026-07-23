@@ -77,15 +77,17 @@ final class AIInputBar: NSView {
     // MARK: - Setup
 
     private func setupUI() {
-        wantsLayer = true
-        layer?.backgroundColor = Design.Surface.elevated.cgColor
+        applySurface(fill: Design.Surface.elevated, radius: 0)
 
-        // Add a subtle top border
-        let borderLayer = CALayer()
-        borderLayer.backgroundColor = Design.Surface.border.cgColor
-        borderLayer.frame = CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
-        borderLayer.autoresizingMask = [.layerWidthSizable, .layerMinYMargin]
-        layer?.addSublayer(borderLayer)
+        // A rule rather than a bare `CALayer`: a layer's colour freezes at assignment and nothing
+        // re-reads it, where a `SeparatorView` redraws itself when the theme moves.
+        let topBorder = SeparatorView()
+        addSubview(topBorder)
+        NSLayoutConstraint.activate([
+            topBorder.topAnchor.constraint(equalTo: topAnchor),
+            topBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
+            topBorder.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
 
         let stackView = NSStackView()
         stackView.orientation = .horizontal
