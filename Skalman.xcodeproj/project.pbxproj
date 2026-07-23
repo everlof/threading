@@ -53,6 +53,7 @@
 		A98028EC99612E6E18C2CB28 /* ShellCommandPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */; };
 		A1D70C8F3554C9C81F2DCF48 /* AccountNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F73C717F854436EAC372592 /* AccountNameTests.swift */; };
 		B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */; };
+		D88B0FE7D311EE71390A842F /* ThemedControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -113,6 +114,7 @@
 		06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyTests.swift; sourceTree = "<group>"; };
 		5F73C717F854436EAC372592 /* AccountNameTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountNameTests.swift; sourceTree = "<group>"; };
 		8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyCorpusTests.swift; sourceTree = "<group>"; };
+		D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedControlTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -216,6 +218,7 @@
 				06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */,
 				5F73C717F854436EAC372592 /* AccountNameTests.swift */,
 				8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */,
+				D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -395,6 +398,7 @@
 				A98028EC99612E6E18C2CB28 /* ShellCommandPolicyTests.swift in Sources */,
 				A1D70C8F3554C9C81F2DCF48 /* AccountNameTests.swift in Sources */,
 				B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */,
+				D88B0FE7D311EE71390A842F /* ThemedControlTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

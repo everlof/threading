@@ -165,8 +165,8 @@ enum SettingsUI {
 
     // MARK: - Controls
 
-    static func toggle(isOn: Bool, target: AnyObject, action: Selector) -> NSSwitch {
-        let control = NSSwitch()
+    static func toggle(isOn: Bool, target: AnyObject, action: Selector) -> ThemedToggle {
+        let control = ThemedToggle()
         control.state = isOn ? .on : .off
         control.target = target
         control.action = action

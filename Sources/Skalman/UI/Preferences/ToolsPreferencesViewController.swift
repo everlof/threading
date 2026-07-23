@@ -50,7 +50,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private func groupSection(_ group: MCPToolGroup, index: Int) -> NSView {
         let enabled = MCPToolCatalog.isEnabled(group)
 
-        let toggle = NSSwitch()
+        let toggle = ThemedToggle()
         toggle.state = enabled ? .on : .off
         toggle.tag = index
         toggle.target = self
@@ -115,7 +115,7 @@ final class ToolsPreferencesViewController: NSViewController {
 
     // MARK: - Actions
 
-    @objc private func groupToggled(_ sender: NSSwitch) {
+    @objc private func groupToggled(_ sender: ThemedToggle) {
         let group = MCPToolCatalog.groups[sender.tag]
         let enabled = sender.state == .on
         AppSettings.shared.setToolGroup(group.id, enabled: enabled)

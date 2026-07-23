@@ -36,7 +36,7 @@ final class ProfilePreferencesViewController: NSViewController {
         return popup
     }()
 
-    private lazy var cursorBlinkToggle: NSSwitch =
+    private lazy var cursorBlinkToggle: ThemedToggle =
         SettingsUI.toggle(isOn: currentProfile.cursorBlink, target: self, action: #selector(cursorBlinkChanged))
 
     private lazy var scrollbackField: NSTextField = {

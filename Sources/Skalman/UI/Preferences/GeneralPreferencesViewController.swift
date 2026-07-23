@@ -6,14 +6,14 @@ final class GeneralPreferencesViewController: NSViewController {
     // MARK: - Controls
 
     private let defaultAgentPopUp = NSPopUpButton()
-    private let terminalTitleToggle = NSSwitch()
-    private let branchGroupingToggle = NSSwitch()
-    private let projectIconToggle = NSSwitch()
-    private let accountAvatarToggle = NSSwitch()
-    private let restoreSessionToggle = NSSwitch()
-    private let confirmCloseToggle = NSSwitch()
-    private let codexHookToggle = NSSwitch()
-    private let codexHookTrustToggle = NSSwitch()
+    private let terminalTitleToggle = ThemedToggle()
+    private let branchGroupingToggle = ThemedToggle()
+    private let projectIconToggle = ThemedToggle()
+    private let accountAvatarToggle = ThemedToggle()
+    private let restoreSessionToggle = ThemedToggle()
+    private let confirmCloseToggle = ThemedToggle()
+    private let codexHookToggle = ThemedToggle()
+    private let codexHookTrustToggle = ThemedToggle()
     private let shellField = NSTextField()
 
     // MARK: - Lifecycle
@@ -64,7 +64,7 @@ final class GeneralPreferencesViewController: NSViewController {
         shellField.action = #selector(shellPathChanged)
     }
 
-    private func configure(_ toggle: NSSwitch, isOn: Bool, action: Selector) {
+    private func configure(_ toggle: ThemedToggle, isOn: Bool, action: Selector) {
         toggle.state = isOn ? .on : .off
         toggle.target = self
         toggle.action = action
