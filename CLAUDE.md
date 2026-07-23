@@ -585,6 +585,48 @@ page had been written two minutes earlier, in a worktree with no Skalman session
 That is the second of two independent in-flight checks, the other being a running session in
 the project.
 
+### Code Stats
+
+Hovering a project row opens a popover of the project's code composition — total code lines
+and files, a language bar, a legend — counted by **scc**, which is a tool the user installed
+rather than a dependency: `CodeStatsRunner.locate` probes the known install paths and then
+the login shell (taking the last non-empty line, since a login shell is free to print a
+greeting before the answer). Runs pass `--no-min-gen` so vendored bundles do not dominate
+a bar about what was *written* here, and scc honours `.gitignore` on its own, which is what
+keeps `node_modules` out and the count honest.
+
+A machine **known** to have no scc gets the install hint in the popover's place — a feature
+whose only trace is a popover that never appears cannot be discovered, and the hover is the
+moment the user is already asking the question the hint answers. Three rules keep it honest:
+a project merely not counted *yet* still shows nothing ("not looked" is not "not
+installed"); the miss is cached with a timestamp and re-probed once it ages past
+`missingReprobeAfter`, so `brew install scc` starts counting within a minute with no
+relaunch and no button; and only the first miss is logged, not the re-probes repeating it.
+
+`CodeStatsService` is `ArtifactScanService`'s shape with the economics inverted: scc answers
+a repository in tens of milliseconds (measured: 18ms for this repo's ~90k lines), so the
+cache exists for the first glance after launch and for scc-less machines, not to amortise a
+walk. The freshest trigger is the stopped-working edge — the same
+`sessionStateDidChange` moment that re-reads the branch — because a session that just stopped
+working is a project whose code most likely just changed. A hover also recounts, guarded by
+`hoverRefreshAfter` so crossing rows does not launch a process per project; kicked at
+*entry* rather than at the dwell, the count is usually fresh again before the popover opens.
+
+`CodeStatsBar` holds the arithmetic apart from the drawing (the `ConversationMinimap` split):
+which languages become segments, what folds into "Other", and segment widths. Two rules are
+pinned by tests: **the fold never stands for one language** — with exactly one language past
+the cap, "Other" would be a name withheld for nothing, so `maximumSegments` is one fewer than
+`Design.Categorical.ramp` and the un-folded case colours it with the ramp's last hue — and
+**every segment draws visibly** (a floor of `minimumSegmentWidth`, paid for proportionally),
+because a 99%-one-language repository still has to show the others it names. Colours are the
+categorical ramp: languages are things told apart, not things with a meaning each; the fold
+draws in the quaternary text tone, visibly not a language of its own.
+
+The popover is `SessionRowView`'s dwell-timer popover on `ProjectRowView`, at the session
+popover's width on purpose — the two hang off neighbouring rows. `CodeStatsRenderTests`
+draws it to PNGs both ways, which is what caught the legend packing its values beside the
+names instead of into a column at the trailing edge.
+
 ### Git Layouts
 
 `GitInfo` reads git metadata from disk rather than shelling out. Three layouts matter, and

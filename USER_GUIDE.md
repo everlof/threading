@@ -149,6 +149,22 @@ Agents can also set the icon from inside a session through the `set_project_icon
 
 Icons are stored small (64px) under Application Support and never touch the project folder.
 
+### Code statistics
+**Rest the pointer on a project row** and a popover opens with what the project's code is
+made of: total lines of code and files, a **language-composition bar**, and a legend naming
+each language with its share and line count. Languages past the top five fold into a muted
+*Other* — unless only one would fold, which keeps its own name. The last line says when the
+count was taken.
+
+The counting is done by [`scc`](https://github.com/boyter/scc), which answers a whole
+repository in tens of milliseconds. **Without scc installed the popover says so instead** —
+it names the one command that gets it, `brew install scc`, and counting starts on its own
+within a minute of installing; no relaunch, no button. Counts refresh on their own: shortly
+after launch, when a session stops working (the moment the code most likely changed),
+periodically while the app runs, and on the hover itself when the reading is more than a
+minute old. A count honours `.gitignore`, skips minified and generated files, and never runs
+while a session in the project is working.
+
 ### Managing
 **Hover a project row** — a **⋯** fades in at its trailing edge, opening the project's
 actions. The same menu is on **right-click**. Either way it offers:

@@ -885,6 +885,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
             // This is the only way a *native* session's title arrives — no PTY, no OSC.
             SessionNaming.refreshAgentTitle(forSessionID: sessionID)
 
+            // And the project's code count: a session that just stopped working is a project
+            // whose code most likely just changed.
+            CodeStatsService.shared.refreshProject(forSessionID: sessionID)
+
             // The tree probably changed too; an on-screen review tab refreshes itself.
             displayPaneController.noteSessionStoppedWorking(sessionID)
 

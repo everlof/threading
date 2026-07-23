@@ -495,6 +495,12 @@ struct ArtifactScanDidChange: AppEvent {
     static let name = Notification.Name("artifactScanDidChange")
 }
 
+/// A project's code count finished, or its cached reading changed.
+struct CodeStatsDidChange: AppEvent {
+    static let name = Notification.Name("codeStatsDidChange")
+    let projectID: ProjectID
+}
+
 /// The transcript usage report was rebuilt.
 struct TranscriptUsageDidChange: AppEvent {
     static let name = Notification.Name("transcriptUsageDidChange")

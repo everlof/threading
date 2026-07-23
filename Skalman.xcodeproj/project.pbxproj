@@ -69,6 +69,8 @@
 		5D2B524A0BB67BC9416D3577 /* FileActivityMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */; };
 		7108C0A471D9CADAA9684DD6 /* FileActivityMapRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */; };
 		74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */; };
+		8302133C16D906CBE04BEBB2 /* CodeStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */; };
+		D881E6573F863795C4647846 /* CodeStatsRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7369922B60411865EA964277 /* CodeStatsRenderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -143,6 +145,8 @@
 		EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FileActivityMapTests.swift; sourceTree = "<group>"; };
 		FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FileActivityMapRenderTests.swift; sourceTree = "<group>"; };
 		9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutTests.swift; sourceTree = "<group>"; };
+		08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodeStatsTests.swift; sourceTree = "<group>"; };
+		7369922B60411865EA964277 /* CodeStatsRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodeStatsRenderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -262,6 +266,8 @@
 				EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */,
 				FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */,
 				9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */,
+				08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */,
+				7369922B60411865EA964277 /* CodeStatsRenderTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -490,6 +496,8 @@
 				5D2B524A0BB67BC9416D3577 /* FileActivityMapTests.swift in Sources */,
 				7108C0A471D9CADAA9684DD6 /* FileActivityMapRenderTests.swift in Sources */,
 				74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */,
+				8302133C16D906CBE04BEBB2 /* CodeStatsTests.swift in Sources */,
+				D881E6573F863795C4647846 /* CodeStatsRenderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -54,6 +54,13 @@ final class ProjectRowView: NSTableCellView {
     /// Invoked when the `⋯`/gear is pressed, carrying the anchor to hang a menu from.
     var onHoverAction: ((NSView) -> Void)?
 
+    /// The project behind the hover popover — set only for project rows, so headings show
+    /// none. The popover's content is built at dwell time rather than configure time, because
+    /// hovering is what refreshes the count it shows.
+    private var popoverProject: Project?
+    private var hoverTimer: Timer?
+    private var popover: NSPopover?
+
     /// Retained so colours can be reapplied when the selection state changes.
     private var isHeading = false
 
@@ -89,6 +96,14 @@ final class ProjectRowView: NSTableCellView {
 
     func configure(with project: Project, style: Style = .standalone, collapsedSessionCount: Int = 0) {
         isHeading = false
+
+        // Rows reconfigure while the pointer sits on them, so an open popover survives a
+        // same-project refresh; only reuse for a different project dismisses it.
+        if popoverProject?.id != project.id {
+            dismissPopover()
+        }
+        popoverProject = project
+
         setHoverControls(
             moreSymbol: SidebarRowDefaults.actionSymbol,
             moreAccessibility: "Project actions"
@@ -115,6 +130,8 @@ final class ProjectRowView: NSTableCellView {
     /// optional count of what it contains.
     func configureAsRepository(named name: String, count: Int = 0) {
         isHeading = true
+        popoverProject = nil
+        dismissPopover()
         hideIcon()
         setHoverControls(moreSymbol: nil)
         nameLabel.font = Design.Typography.caption()
@@ -129,6 +146,8 @@ final class ProjectRowView: NSTableCellView {
     /// with the grouping's own gear appearing under the pointer.
     func configureAsBranch(named branch: String, collapsedSessionCount: Int = 0) {
         isHeading = true
+        popoverProject = nil
+        dismissPopover()
         hideIcon()
         setHoverControls(
             moreSymbol: SidebarRowDefaults.settingsSymbol,
@@ -331,11 +350,62 @@ final class ProjectRowView: NSTableCellView {
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
         setHoverButtonVisible(true, animated: true)
+
+        guard let project = popoverProject else { return }
+
+        // Kicked at entry rather than at dwell: scc answers in tens of milliseconds, so the
+        // count is usually fresh again by the time the popover opens.
+        CodeStatsService.shared.refreshIfAged(project)
+
+        hoverTimer?.invalidate()
+        hoverTimer = Timer.scheduledTimer(
+            withTimeInterval: SessionPopoverDefaults.hoverDelay,
+            repeats: false
+        ) { [weak self] _ in
+            self?.presentPopover()
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
         setHoverButtonVisible(false, animated: true)
+        dismissPopover()
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        dismissPopover()
+    }
+
+    private func presentPopover() {
+        guard let project = popoverProject, window != nil, popover == nil else { return }
+
+        // A reading shows itself; a machine known to have no scc shows how to get one. A
+        // project merely not counted yet shows nothing — "not looked" is not "not installed".
+        let controller: ProjectStatsPopoverViewController
+        if let info = ProjectStatsPopoverViewController.Info(project: project) {
+            controller = ProjectStatsPopoverViewController(info: info)
+        } else if CodeStatsService.shared.toolIsMissing {
+            controller = ProjectStatsPopoverViewController(missingToolFor: project.name)
+        } else {
+            return
+        }
+
+        let content = NSPopover()
+        // Closed by hand on exit and reuse, matching the session popover's reasoning.
+        content.behavior = .applicationDefined
+        content.animates = false
+        content.contentViewController = controller
+        content.show(relativeTo: bounds, of: self, preferredEdge: .maxX)
+
+        popover = content
+    }
+
+    private func dismissPopover() {
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        popover?.close()
+        popover = nil
     }
 
     /// Crossfades the trailing slot between the count and the hover controls. Alpha rather than
