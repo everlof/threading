@@ -7,6 +7,9 @@ import NativeDiffCore
 /// Git loading, staging and app theming stay in the app. The actual line rendering, syntax
 /// highlighting, wrapping and sizing live in NativeDiffKit and are shared with the UIKit view.
 final class DiffView: DiffAppKitView {
+    private let appEvents = AppEventObservations()
+    private var observesTheme = false
+
     convenience init(lines: [DiffLine], path: String? = nil, wraps: Bool = true) {
         self.init(
             lines: lines,
@@ -22,6 +25,7 @@ final class DiffView: DiffAppKitView {
             ),
             theme: .skalman
         )
+        beginObservingTheme()
     }
 
     convenience init(
@@ -44,6 +48,15 @@ final class DiffView: DiffAppKitView {
             ),
             theme: .skalman
         )
+        beginObservingTheme()
+    }
+
+    private func beginObservingTheme() {
+        guard !observesTheme else { return }
+        observesTheme = true
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.update(theme: .skalman)
+        }
     }
 }
 
