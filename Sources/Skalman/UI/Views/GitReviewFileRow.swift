@@ -1,5 +1,5 @@
 import AppKit
-import SkalmanDiffCore
+import NativeDiffCore
 
 /// One changed file in the review pane: a collapsible section whose header names the file and
 /// its `+/−` weight, and whose body is the diff itself.

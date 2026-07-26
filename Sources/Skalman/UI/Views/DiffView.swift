@@ -1,11 +1,11 @@
 import AppKit
-import SkalmanDiffAppKit
-import SkalmanDiffCore
+import NativeDiffAppKit
+import NativeDiffCore
 
 /// Skalman's theme/default adapter around the package renderer.
 ///
 /// Git loading, staging and app theming stay in the app. The actual line rendering, syntax
-/// highlighting, wrapping and sizing live in SkalmanDiffKit and are shared with the UIKit view.
+/// highlighting, wrapping and sizing live in NativeDiffKit and are shared with the UIKit view.
 final class DiffView: DiffAppKitView {
     convenience init(lines: [DiffLine], path: String? = nil, wraps: Bool = true) {
         self.init(

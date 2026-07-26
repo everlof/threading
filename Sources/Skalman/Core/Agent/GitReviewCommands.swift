@@ -1,5 +1,5 @@
 import Foundation
-import SkalmanDiffCore
+import NativeDiffCore
 
 // MARK: - Commands
 

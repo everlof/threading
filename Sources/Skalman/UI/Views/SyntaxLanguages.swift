@@ -1,3 +1,3 @@
-import SkalmanDiffCore
+import NativeDiffCore
 
 typealias SyntaxLanguages = DiffSyntaxLanguages

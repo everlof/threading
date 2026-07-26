@@ -1,4 +1,4 @@
-import SkalmanDiffCore
+import NativeDiffCore
 
 typealias SyntaxRole = DiffSyntaxRole
 typealias SyntaxToken = DiffSyntaxToken

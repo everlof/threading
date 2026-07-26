@@ -1,6 +1,15 @@
 {
-  "originHash" : "65dc8123be37f024e1eaefe8bb2ad3664a65ef4dfae91cd494653a6d60534922",
+  "originHash" : "6e62a8667da4cff3f22080521b7b46990b1f6f547976a27b773e1ceb1684b40a",
   "pins" : [
+    {
+      "identity" : "nativediffkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/everlof/NativeDiffKit.git",
+      "state" : {
+        "revision" : "04ce3de3d9e7f3bae55327a904c7bf0cc8116c57",
+        "version" : "0.1.0"
+      }
+    },
     {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",

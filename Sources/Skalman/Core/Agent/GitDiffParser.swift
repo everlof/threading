@@ -1,5 +1,5 @@
 import Foundation
-import SkalmanDiffCore
+import NativeDiffCore
 
 /// Parses git's own output formats into the review models. Pure text transforms — nothing
 /// here runs git or touches disk, which is what keeps every branch of it unit-testable.
