@@ -73,6 +73,7 @@
 		74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */; };
 		8302133C16D906CBE04BEBB2 /* CodeStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */; };
 		D881E6573F863795C4647846 /* CodeStatsRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7369922B60411865EA964277 /* CodeStatsRenderTests.swift */; };
+		C759CA85DB7CF715E0E836F0 /* BrowserAgentBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -149,6 +150,7 @@
 		9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutTests.swift; sourceTree = "<group>"; };
 		08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodeStatsTests.swift; sourceTree = "<group>"; };
 		7369922B60411865EA964277 /* CodeStatsRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodeStatsRenderTests.swift; sourceTree = "<group>"; };
+		0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserAgentBridgeTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -170,6 +172,7 @@
 			explicitFileTypes = {
 			};
 			explicitFolders = (
+				Skalman/Resources/BrowserAutomation,
 				Skalman/Resources/Icons,
 			);
 			path = Sources;
@@ -272,6 +275,7 @@
 				9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */,
 				08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */,
 				7369922B60411865EA964277 /* CodeStatsRenderTests.swift */,
+				0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -505,6 +509,7 @@
 				74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */,
 				8302133C16D906CBE04BEBB2 /* CodeStatsTests.swift in Sources */,
 				D881E6573F863795C4647846 /* CodeStatsRenderTests.swift in Sources */,
+				C759CA85DB7CF715E0E836F0 /* BrowserAgentBridgeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -189,6 +189,96 @@ final class DisplayPaneStore {
         try? fileManager.removeItem(at: cacheDirectory(sessionID).appendingPathComponent(name))
     }
 
+    /// Saves a browser capture at a real path the terminal agent can read in addition to the MCP
+    /// image block. These are evidence, not panel layout, so retain only a small rolling set.
+    func cacheBrowserScreenshot(_ data: Data, for sessionID: SessionID) -> URL? {
+        cacheBrowserArtifact(
+            data,
+            prefix: "browser-shot-",
+            fileExtension: "png",
+            maximumCount: DisplayPaneStoreDefaults.maximumBrowserScreenshots,
+            for: sessionID
+        )
+    }
+
+    func cacheBrowserTrace(_ data: Data, for sessionID: SessionID) -> URL? {
+        cacheBrowserArtifact(
+            data,
+            prefix: "browser-trace-",
+            fileExtension: "json",
+            maximumCount: DisplayPaneStoreDefaults.maximumBrowserTraces,
+            for: sessionID
+        )
+    }
+
+    func cacheBrowserVisualArtifact(
+        _ data: Data,
+        kind: String,
+        for sessionID: SessionID
+    ) -> URL? {
+        let safeKind = kind == "diff" ? "diff" : "actual"
+        return cacheBrowserArtifact(
+            data,
+            prefix: "browser-visual-\(safeKind)-",
+            fileExtension: "png",
+            maximumCount: DisplayPaneStoreDefaults.maximumBrowserVisualArtifacts,
+            for: sessionID
+        )
+    }
+
+    private func cacheBrowserArtifact(
+        _ data: Data,
+        prefix: String,
+        fileExtension: String,
+        maximumCount: Int,
+        for sessionID: SessionID
+    ) -> URL? {
+        let directory = cacheDirectory(sessionID)
+        let name = prefix + UUID().uuidString.lowercased() + "." + fileExtension
+        let url = directory.appendingPathComponent(name)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            pruneBrowserArtifacts(
+                in: directory,
+                prefix: prefix,
+                fileExtension: fileExtension,
+                maximumCount: maximumCount
+            )
+            return url
+        } catch {
+            SkalmanLogger.mcp.error(
+                "Could not cache browser artifact: \(error.localizedDescription)"
+            )
+            return nil
+        }
+    }
+
+    private func pruneBrowserArtifacts(
+        in directory: URL,
+        prefix: String,
+        fileExtension: String,
+        maximumCount: Int
+    ) {
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey]
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys)
+        ) else { return }
+        let captures = files
+            .filter {
+                $0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == fileExtension
+            }
+            .sorted {
+                let left = (try? $0.resourceValues(forKeys: keys).contentModificationDate) ?? .distantPast
+                let right = (try? $1.resourceValues(forKeys: keys).contentModificationDate) ?? .distantPast
+                return left < right
+            }
+        for stale in captures.dropLast(maximumCount) {
+            try? fileManager.removeItem(at: stale)
+        }
+    }
+
     // MARK: Cleanup
 
     /// Drops the stored layout and cache of every session not in the set, called when sessions are
@@ -233,6 +323,9 @@ enum DisplayPaneStoreDefaults {
     static let rootDirectory = "panels"
     static let layoutExtension = "json"
     static let imageExtension = "png"
+    static let maximumBrowserScreenshots = 8
+    static let maximumBrowserTraces = 4
+    static let maximumBrowserVisualArtifacts = 8
 }
 
 // MARK: - PNG Encoding

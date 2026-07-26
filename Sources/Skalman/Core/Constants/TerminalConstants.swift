@@ -306,6 +306,7 @@ enum DisplayPaneDefaults {
     /// Content tabs an agent stacks up are capped so a session that keeps displaying charts
     /// does not grow an unbounded strip; the oldest content tab is dropped, never the browser.
     static let maximumContentTabs = 8
+    static let maximumBrowserTabs = 8
 }
 
 // MARK: - Codex Discovery Defaults

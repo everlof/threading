@@ -6,23 +6,51 @@ import AppKit
 /// The switch is per group rather than per tool on purpose — several tools only make sense as a
 /// set (clicking a page you never opened, activating a tab you never listed) — and each group
 /// lists the tools it carries so the page doubles as documentation of what an agent can reach.
+@MainActor
 final class ToolsPreferencesViewController: NSViewController {
 
     // MARK: - Properties
 
     /// The tool rows of each group, kept so toggling the group can dim them together.
     private var toolRowsByGroup: [String: [NSView]] = [:]
+    private var pageView: NSView?
+    private let groupOverride: [MCPToolGroup]?
+    private let browserAccessStore: BrowserAccessStore
+    private var persistentOriginKeys: [String] = []
+
+    convenience init(groups: [MCPToolGroup]? = nil) {
+        self.init(groups: groups, browserAccessStore: BrowserAccessStore())
+    }
+
+    init(groups: [MCPToolGroup]?, browserAccessStore: BrowserAccessStore) {
+        groupOverride = groups
+        self.browserAccessStore = browserAccessStore
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private var displayedGroups: [MCPToolGroup] {
+        groupOverride ?? MCPToolCatalog.groups
+    }
 
     // MARK: - Lifecycle
 
     override func loadView() {
         view = NSView()
-        setupLayout()
+        render()
     }
 
     // MARK: - Setup
 
-    private func setupLayout() {
+    private func render() {
+        guard isViewLoaded else { return }
+        pageView?.removeFromSuperview()
+        toolRowsByGroup.removeAll()
+
         var sections: [NSView] = [
             SettingsUI.heading("Tools"),
             SettingsUI.note(
@@ -32,11 +60,13 @@ final class ToolsPreferencesViewController: NSViewController {
             )
         ]
 
-        for (index, group) in MCPToolCatalog.groups.enumerated() {
+        for (index, group) in displayedGroups.enumerated() {
             sections.append(groupSection(group, index: index))
         }
+        sections.append(websiteAccessSection())
 
         let page = SettingsUI.page(sections)
+        pageView = page
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([
@@ -113,13 +143,84 @@ final class ToolsPreferencesViewController: NSViewController {
         return row
     }
 
+    private func websiteAccessSection() -> NSView {
+        persistentOriginKeys = browserAccessStore.allowedOrigins.sorted()
+        guard !persistentOriginKeys.isEmpty else {
+            return SettingsUI.section(
+                "Website Access",
+                SettingsCard(rows: [
+                    SettingsUI.row(
+                        title: "No websites always allowed",
+                        subtitle: """
+                            Agents can still ask for one-time access. Persistent website grants \
+                            will appear here.
+                            """
+                    )
+                ])
+            )
+        }
+
+        var rows = persistentOriginKeys.enumerated().map { index, origin -> NSView in
+            let revoke = SettingsUI.button(
+                "Revoke",
+                target: self,
+                action: #selector(revokeWebsiteAccess(_:))
+            )
+            revoke.tag = index
+            return SettingsUI.row(
+                title: origin,
+                subtitle: "Agents may use this origin in Skalman's signed-in browser.",
+                control: revoke
+            )
+        }
+        rows.append(SettingsUI.row(
+            title: "All persistent access",
+            subtitle: "One-time grants end with the running app and are not listed here.",
+            control: SettingsUI.button(
+                "Revoke All…",
+                target: self,
+                action: #selector(revokeAllWebsiteAccess)
+            )
+        ))
+        return SettingsUI.section("Website Access", SettingsCard(rows: rows))
+    }
+
     // MARK: - Actions
 
     @objc private func groupToggled(_ sender: ThemedToggle) {
-        let group = MCPToolCatalog.groups[sender.tag]
+        let group = displayedGroups[sender.tag]
         let enabled = sender.state == .on
         AppSettings.shared.setToolGroup(group.id, enabled: enabled)
         applyEnabled(enabled, to: toolRowsByGroup[group.id] ?? [])
+    }
+
+    @objc private func revokeWebsiteAccess(_ sender: ThemedButton) {
+        guard persistentOriginKeys.indices.contains(sender.tag) else { return }
+        browserAccessStore.revoke(key: persistentOriginKeys[sender.tag])
+        render()
+    }
+
+    @objc private func revokeAllWebsiteAccess() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Revoke Persistent Website Access?"
+        alert.informativeText = """
+            Agents will need to ask again before using these websites in Skalman's signed-in \
+            browser. One-time grants are unaffected.
+            """
+        alert.addButton(withTitle: "Revoke All")
+        alert.addButton(withTitle: "Cancel")
+
+        let decided: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.browserAccessStore.revokeAll()
+            self?.render()
+        }
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: decided)
+        } else {
+            decided(alert.runModal())
+        }
     }
 
     /// Dims a group's tool rows when it is off — the tools are still listed, since the page is

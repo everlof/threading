@@ -34,6 +34,7 @@ struct DisplayContent {
 /// A reference type, because a live tab owns a view controller whose state — a browser's page
 /// and history, a review's mode and scroll position — must survive the tab being switched off
 /// screen and back.
+@MainActor
 final class DisplayTab {
 
     enum Body {
@@ -105,8 +106,8 @@ final class DisplayTab {
         case .content(let content):
             if case .image = content.body { return "photo" }
             return "doc.richtext"
-        case .browser:
-            return "globe"
+        case .browser(let browser):
+            return browser.contextKind == .private ? "hand.raised.fill" : "globe"
         case .review:
             return "plus.forwardslash.minus"
         case .info:
@@ -128,7 +129,8 @@ final class DisplayTab {
             return "Document"
         case .browser(let browser):
             if let title = browser.currentTitle, !title.isEmpty { return title }
-            return browser.currentURL?.host ?? "Browser"
+            return browser.currentURL?.host
+                ?? (browser.contextKind == .private ? "Private Browser" : "Browser")
         case .review:
             return "Review"
         case .info:
@@ -149,6 +151,7 @@ final class DisplayTab {
 /// coexist: every image, every document, and one live browser share the pane, switched between by
 /// a strip along the top. A background session that displays something does not take over the
 /// panel from the session on screen; its tabs are waiting when it is selected, as its scrollback is.
+@MainActor
 final class DisplayPaneController: NSViewController {
 
     // MARK: - Properties
@@ -176,6 +179,9 @@ final class DisplayPaneController: NSViewController {
 
     private var tabsBySession: [SessionID: [DisplayTab]] = [:]
     private var activeTabIDBySession: [SessionID: UUID] = [:]
+    /// The browser most recently selected, independent of a screenshot or document in front.
+    private var activeBrowserTabIDBySession: [SessionID: UUID] = [:]
+    private let browserFactory: @MainActor (BrowserContextKind) -> BrowserViewController
 
     /// Not private: the actions in `DisplayPaneMenu` name the session they write files for.
     private(set) var currentSessionID: SessionID?
@@ -198,6 +204,20 @@ final class DisplayPaneController: NSViewController {
     var shellRootResolver: ((SessionID) -> pid_t?)?
 
     // MARK: - Lifecycle
+
+    init(
+        browserFactory: @escaping @MainActor (BrowserContextKind) -> BrowserViewController = {
+            BrowserViewController(contextKind: $0)
+        }
+    ) {
+        self.browserFactory = browserFactory
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func loadView() {
         view = NSView()
@@ -245,7 +265,10 @@ final class DisplayPaneController: NSViewController {
 
         let choices: [(String, String, () -> Void)] = [
             ("Terminal", "terminal", { [weak self] in _ = self?.addTerminalTab(for: sessionID) }),
-            ("Browser", "globe", { [weak self] in _ = self?.activateBrowser(for: sessionID) }),
+            ("Browser", "globe", { [weak self] in _ = self?.addBrowserTab(for: sessionID) }),
+            ("Private Browser", "hand.raised.fill", { [weak self] in
+                _ = self?.addBrowserTab(for: sessionID, contextKind: .private)
+            }),
             ("Files", "folder", { [weak self] in _ = self?.activateFiles(for: sessionID) }),
             ("Review", "plus.forwardslash.minus", { [weak self] in _ = self?.activateReview(for: sessionID) }),
             ("Info", "info.circle", { [weak self] in _ = self?.activateInfo(for: sessionID) })
@@ -455,17 +478,23 @@ final class DisplayPaneController: NSViewController {
         if sessionID == currentSessionID { render() }
     }
 
-    // MARK: - Public — Browser Tab
+    // MARK: - Public — Browser Tabs
 
-    /// Returns the session's browser tab, creating and activating one if it has none. The agent's
-    /// navigate tool calls this so a page always has a tab to land in.
+    /// Returns the active browser tab, or activates the first existing browser, creating one only
+    /// when the session has none. The agent's navigate tool calls this so a page always has a tab.
     @discardableResult
     func activateBrowser(for sessionID: SessionID) -> BrowserViewController {
         restoreIfNeeded(sessionID)
         var tabs = tabsBySession[sessionID] ?? []
 
+        if let activeID = activeTabIDBySession[sessionID],
+           let active = tabs.first(where: { $0.id == activeID })?.browser {
+            activeBrowserTabIDBySession[sessionID] = activeID
+            return active
+        }
         if let existing = tabs.first(where: { $0.browser != nil }) {
             activeTabIDBySession[sessionID] = existing.id
+            activeBrowserTabIDBySession[sessionID] = existing.id
             persist(sessionID)
             if sessionID == currentSessionID { render() }
             return existing.browser!
@@ -476,6 +505,34 @@ final class DisplayPaneController: NSViewController {
         tabs.append(tab)
         tabsBySession[sessionID] = tabs
         activeTabIDBySession[sessionID] = tab.id
+        activeBrowserTabIDBySession[sessionID] = tab.id
+        persist(sessionID)
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// Adds and activates a distinct browser tab. Nil means the per-session browser cap was
+    /// reached; unlike content tabs, a live browser is never silently evicted because it may hold
+    /// an authenticated workflow or unsaved form state.
+    @discardableResult
+    func addBrowserTab(
+        for sessionID: SessionID,
+        contextKind: BrowserContextKind = .shared
+    ) -> BrowserViewController? {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+        guard tabs.lazy.filter({ $0.browser != nil }).count
+                < DisplayPaneDefaults.maximumBrowserTabs else {
+            return nil
+        }
+
+        let controller = makeBrowser(for: sessionID, contextKind: contextKind)
+        let tab = DisplayTab(body: .browser(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+        activeBrowserTabIDBySession[sessionID] = tab.id
         persist(sessionID)
 
         if sessionID == currentSessionID { render() }
@@ -484,8 +541,11 @@ final class DisplayPaneController: NSViewController {
 
     /// Builds a browser view controller wired to persist and re-render when its page changes, so a
     /// navigation — the agent's or the user's — is saved and reflected in the tab strip.
-    private func makeBrowser(for sessionID: SessionID) -> BrowserViewController {
-        let controller = BrowserViewController()
+    private func makeBrowser(
+        for sessionID: SessionID,
+        contextKind: BrowserContextKind = .shared
+    ) -> BrowserViewController {
+        let controller = browserFactory(contextKind)
         addChild(controller)
         controller.onPageChange = { [weak self] in
             guard let self else { return }
@@ -495,11 +555,22 @@ final class DisplayPaneController: NSViewController {
         return controller
     }
 
-    /// The session's browser tab if it has one, without creating it — for tools that should fail
-    /// rather than silently open a blank page.
+    /// The most recently selected browser. A content tool may put a screenshot or document in
+    /// front of it, but that output must not change which independent browser receives the next
+    /// browser action.
     func browser(for sessionID: SessionID) -> BrowserViewController? {
         restoreIfNeeded(sessionID)
-        return tabsBySession[sessionID]?.first(where: { $0.browser != nil })?.browser
+        let tabs = tabsBySession[sessionID] ?? []
+        if let activeID = activeTabIDBySession[sessionID],
+           let active = tabs.first(where: { $0.id == activeID })?.browser {
+            activeBrowserTabIDBySession[sessionID] = activeID
+            return active
+        }
+        if let browserID = activeBrowserTabIDBySession[sessionID],
+           let recent = tabs.first(where: { $0.id == browserID })?.browser {
+            return recent
+        }
+        return tabs.first(where: { $0.browser != nil })?.browser
     }
 
     // MARK: - Public — Review Tab
@@ -705,6 +776,9 @@ final class DisplayPaneController: NSViewController {
             return false
         }
         activeTabIDBySession[sessionID] = id
+        if tabs.first(where: { $0.id == id })?.browser != nil {
+            activeBrowserTabIDBySession[sessionID] = id
+        }
         persist(sessionID)
         if sessionID == currentSessionID { render() }
         return true
@@ -716,6 +790,39 @@ final class DisplayPaneController: NSViewController {
         restoreIfNeeded(sessionID)
         guard let tabs = tabsBySession[sessionID], tabs.indices.contains(index) else { return false }
         return activateTab(id: tabs[index].id, for: sessionID)
+    }
+
+    /// Closes a tab by id. Returns false when the id is stale or belongs to another session.
+    @discardableResult
+    func closeTab(id: UUID, for sessionID: SessionID) -> Bool {
+        restoreIfNeeded(sessionID)
+        guard var tabs = tabsBySession[sessionID],
+              let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+
+        let removed = tabs.remove(at: index)
+        teardownHosted(removed)
+        if let cacheFile = removed.cacheFile {
+            DisplayPaneStore.shared.removeCachedImage(cacheFile, for: sessionID)
+        }
+        tabsBySession[sessionID] = tabs
+
+        // Move selection to the neighbour that slid into this slot, else the new last tab.
+        if activeTabIDBySession[sessionID] == id {
+            let neighbour = tabs.indices.contains(index) ? tabs[index] : tabs.last
+            activeTabIDBySession[sessionID] = neighbour?.id
+        }
+        if activeBrowserTabIDBySession[sessionID] == id {
+            let nextBrowser = tabs.enumerated()
+                .filter { $0.element.browser != nil }
+                .min { abs($0.offset - index) < abs($1.offset - index) }?
+                .element
+            activeBrowserTabIDBySession[sessionID] = nextBrowser?.id
+        }
+        persist(sessionID)
+
+        if sessionID == currentSessionID { render() }
+        if tabs.isEmpty { onClose?() }
+        return true
     }
 
     // MARK: - Public — Session Lifecycle
@@ -742,6 +849,9 @@ final class DisplayPaneController: NSViewController {
 
         tabsBySession = tabsBySession.filter { sessionIDs.contains($0.key) }
         activeTabIDBySession = activeTabIDBySession.filter { sessionIDs.contains($0.key) }
+        activeBrowserTabIDBySession = activeBrowserTabIDBySession.filter {
+            sessionIDs.contains($0.key)
+        }
 
         if let currentSessionID, !sessionIDs.contains(currentSessionID) {
             self.currentSessionID = nil
@@ -761,28 +871,8 @@ final class DisplayPaneController: NSViewController {
     }
 
     private func userClosedTab(_ id: UUID) {
-        guard let sessionID = currentSessionID,
-              var tabs = tabsBySession[sessionID],
-              let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-
-        let removed = tabs.remove(at: index)
-        teardownHosted(removed)
-        if let cacheFile = removed.cacheFile {
-            DisplayPaneStore.shared.removeCachedImage(cacheFile, for: sessionID)
-        }
-        tabsBySession[sessionID] = tabs
-
-        // Move selection to the neighbour that slid into this slot, else the new last tab.
-        if activeTabIDBySession[sessionID] == id {
-            let neighbour = tabs.indices.contains(index) ? tabs[index] : tabs.last
-            activeTabIDBySession[sessionID] = neighbour?.id
-        }
-        persist(sessionID)
-
-        render()
-
-        // Closing the final content tab collapses the pane.
-        if tabs.isEmpty { onClose?() }
+        guard let sessionID = currentSessionID else { return }
+        closeTab(id: id, for: sessionID)
     }
 
     /// Detaches a live tab's view controller. Content tabs need nothing.
@@ -1027,18 +1117,30 @@ final class DisplayPaneController: NSViewController {
         } else {
             activeTabIDBySession[sessionID] = tabs.last?.id
         }
+        let activeID = activeTabIDBySession[sessionID]
+        activeBrowserTabIDBySession[sessionID] = tabs.first {
+            $0.id == activeID && $0.browser != nil
+        }?.id ?? tabs.first(where: { $0.browser != nil })?.id
     }
 
     /// Writes the session's current tabs and selection to disk.
     private func persist(_ sessionID: SessionID) {
         let tabs = tabsBySession[sessionID] ?? []
         let persistedTabs = tabs.compactMap(persisted)
-        let active = activeTabIDBySession[sessionID]?.uuidString
+        let active = activeTabIDBySession[sessionID]
+            .flatMap { activeID in
+                persistedTabs.contains { $0.id == activeID.uuidString }
+                    ? activeID.uuidString
+                    : nil
+            }
+            ?? persistedTabs.first?.id
         DisplayPaneStore.shared.saveLayout(tabs: persistedTabs, activeID: active, for: sessionID)
     }
 
     private func persisted(_ tab: DisplayTab) -> PersistedTab? {
         if let browser = tab.browser {
+            // Private contexts and even their URLs are runtime-only.
+            guard browser.contextKind == .shared else { return nil }
             // An empty browser (never navigated) has nothing worth restoring.
             guard let url = browser.currentURL?.absoluteString ?? browser.restoredURL else { return nil }
             return PersistedTab(

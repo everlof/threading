@@ -2,6 +2,7 @@ import AppKit
 
 /// The settings pages, in order — the single source of truth shared by the sidebar (which
 /// lists them) and the content pane (which builds the chosen one).
+@MainActor
 enum SettingsPages {
 
     struct Page {
