@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanDiffCore
 
 /// One changed file in the review pane: a collapsible section whose header names the file and
 /// its `+/−` weight, and whose body is the diff itself.
@@ -73,15 +74,26 @@ final class GitReviewFileRow: NSView {
         glyphLabel.alignment = .center
         glyphLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let pathLabel = NSTextField(labelWithString: pathText)
-        pathLabel.font = Design.Typography.code()
-        pathLabel.textColor = Design.Text.secondary
-        pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.usesSingleLineMode = true
-        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        pathLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        pathLabel.toolTip = pathText
-        pathLabel.translatesAutoresizingMaskIntoConstraints = false
+        let nameLabel = NSTextField(labelWithString: fileNameText)
+        nameLabel.font = Design.Typography.control()
+        nameLabel.textColor = Design.Text.label
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.usesSingleLineMode = true
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        nameLabel.toolTip = pathText
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let directoryLabel = NSTextField(labelWithString: directoryText)
+        directoryLabel.font = Design.Typography.detail()
+        directoryLabel.textColor = Design.Text.tertiary
+        directoryLabel.lineBreakMode = .byTruncatingMiddle
+        directoryLabel.usesSingleLineMode = true
+        directoryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        directoryLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        directoryLabel.toolTip = pathText
+        directoryLabel.translatesAutoresizingMaskIntoConstraints = false
+        directoryLabel.isHidden = directoryText.isEmpty
 
         let metaLabel = NSTextField.label(attributed: metaText)
         metaLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -107,10 +119,15 @@ final class GitReviewFileRow: NSView {
         bodyContainer.translatesAutoresizingMaskIntoConstraints = false
         bodyContainer.isHidden = true
 
-        [glyphLabel, pathLabel, metaLabel, stageButton, chevron, bodyContainer].compactMap { $0 }.forEach(addSubview)
+        [glyphLabel, nameLabel, directoryLabel, metaLabel, stageButton, chevron, bodyContainer]
+            .compactMap { $0 }
+            .forEach(addSubview)
 
         let inset = Design.Spacing.small
-        headerBottom = pathLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
+        let headerContentBottom = directoryText.isEmpty
+            ? nameLabel.bottomAnchor
+            : directoryLabel.bottomAnchor
+        headerBottom = headerContentBottom.constraint(equalTo: bottomAnchor, constant: -inset)
         headerBottom.isActive = true
         bodyBottom = bodyContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
 
@@ -119,11 +136,11 @@ final class GitReviewFileRow: NSView {
             glyphLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
             glyphLabel.widthAnchor.constraint(equalToConstant: Design.Chat.toolIconWidth),
 
-            pathLabel.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: inset),
-            pathLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
+            nameLabel.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: inset),
+            nameLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
 
             metaLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: pathLabel.trailingAnchor,
+                greaterThanOrEqualTo: nameLabel.trailingAnchor,
                 constant: Design.Spacing.small
             ),
             metaLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
@@ -133,17 +150,31 @@ final class GitReviewFileRow: NSView {
                 constant: Design.Spacing.small
             ),
             chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            chevron.centerYAnchor.constraint(equalTo: pathLabel.centerYAnchor),
+            chevron.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
 
-            bodyContainer.topAnchor.constraint(equalTo: pathLabel.bottomAnchor, constant: inset),
+            bodyContainer.topAnchor.constraint(equalTo: headerContentBottom, constant: inset),
             bodyContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
             bodyContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
         ])
 
+        if !directoryText.isEmpty {
+            NSLayoutConstraint.activate([
+                directoryLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
+                directoryLabel.trailingAnchor.constraint(
+                    lessThanOrEqualTo: metaLabel.leadingAnchor,
+                    constant: -Design.Spacing.small
+                ),
+                directoryLabel.topAnchor.constraint(
+                    equalTo: nameLabel.bottomAnchor,
+                    constant: Design.Spacing.hairline
+                ),
+            ])
+        }
+
         if let stageButton {
             NSLayoutConstraint.activate([
                 stageButton.leadingAnchor.constraint(equalTo: metaLabel.trailingAnchor, constant: Design.Spacing.small),
-                stageButton.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor)
+                stageButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor)
             ])
         }
 
@@ -204,7 +235,7 @@ final class GitReviewFileRow: NSView {
             }
 
             if file.hunks.count > 1 || file.change != .untracked {
-                addBodyRow(makeHunkHeader(hunk.header, index: index))
+                addBodyRow(makeHunkHeader(hunk, index: index))
             }
             let diff = DiffView(gitLines: hunk.lines, displayCap: remaining, path: file.path, wraps: wraps)
             addBodyRow(wraps ? diff : Self.horizontallyScrolling(diff))
@@ -244,36 +275,97 @@ final class GitReviewFileRow: NSView {
 
     /// The `@@` line, and — where a hunk is a thing the index can be given on its own — the
     /// one control that gives it.
-    private func makeHunkHeader(_ text: String, index: Int) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.font = Design.Typography.code()
-        label.textColor = Design.Text.tertiary
+    private func makeHunkHeader(_ hunk: GitHunk, index: Int) -> NSView {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+
+        let disclosure = NSImageView()
+        disclosure.image = NSImage(
+            systemSymbolName: "chevron.down",
+            accessibilityDescription: nil
+        )
+        disclosure.contentTintColor = Design.Text.tertiary
+        disclosure.symbolConfiguration = Design.Symbol.configuration(
+            Design.Symbol.chevron,
+            weight: .semibold
+        )
+        disclosure.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = NSTextField(labelWithString: DiffPresentation.rangeTitle(for: hunk))
+        label.font = Design.Typography.caption()
+        label.textColor = Design.Text.secondary
         label.lineBreakMode = .byTruncatingTail
         label.usesSingleLineMode = true
         label.translatesAutoresizingMaskIntoConstraints = false
+        label.toolTip = hunk.header
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        guard let staging, staging.allowsHunks, GitPatch.supportsHunkStaging(file) else { return label }
+        let summary = hunk.summary
+        let countText = NSMutableAttributedString()
+        countText.append(NSAttributedString(string: "+\(summary.added)", attributes: [
+            .foregroundColor: Design.Diff.added,
+            .font: Design.Typography.caption(),
+        ]))
+        countText.append(NSAttributedString(string: " −\(summary.removed)", attributes: [
+            .foregroundColor: Design.Diff.removed,
+            .font: Design.Typography.caption(),
+        ]))
+        let counts = NSTextField.label(attributed: countText)
+        counts.setContentHuggingPriority(.required, for: .horizontal)
 
-        let button = Self.makeActionButton(staging.action.hunkTitle, target: self, action: #selector(stageHunkClicked))
-        button.tag = index
+        let button: ThemedButton?
+        if let staging, staging.allowsHunks, GitPatch.supportsHunkStaging(file) {
+            let action = Self.makeActionButton(
+                staging.action.hunkTitle,
+                target: self,
+                action: #selector(stageHunkClicked)
+            )
+            action.tag = index
+            button = action
+        } else {
+            button = nil
+        }
 
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(label)
-        row.addSubview(button)
+        [disclosure, label, counts, button].compactMap { $0 }.forEach(row.addSubview)
+        let trailingView: NSView = button ?? counts
 
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            label.topAnchor.constraint(equalTo: row.topAnchor),
-            label.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+            disclosure.leadingAnchor.constraint(
+                equalTo: row.leadingAnchor,
+                constant: Design.Spacing.small
+            ),
+            disclosure.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            disclosure.widthAnchor.constraint(equalToConstant: 10),
 
-            button.leadingAnchor.constraint(
+            label.leadingAnchor.constraint(
+                equalTo: disclosure.trailingAnchor,
+                constant: Design.Spacing.small
+            ),
+            label.topAnchor.constraint(equalTo: row.topAnchor, constant: Design.Spacing.small),
+            label.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -Design.Spacing.small),
+
+            counts.leadingAnchor.constraint(
                 greaterThanOrEqualTo: label.trailingAnchor,
                 constant: Design.Spacing.small
             ),
-            button.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            button.centerYAnchor.constraint(equalTo: label.centerYAnchor)
+            counts.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+
+            trailingView.trailingAnchor.constraint(
+                equalTo: row.trailingAnchor,
+                constant: -Design.Spacing.small
+            ),
         ])
+
+        if let button {
+            NSLayoutConstraint.activate([
+                button.leadingAnchor.constraint(
+                    equalTo: counts.trailingAnchor,
+                    constant: Design.Spacing.small
+                ),
+                button.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            ])
+        }
         return row
     }
 
@@ -324,6 +416,17 @@ final class GitReviewFileRow: NSView {
             return "\(from) → \(file.path)"
         }
         return file.path
+    }
+
+    private var fileNameText: String {
+        if case .renamed(let from) = file.change {
+            return "\((from as NSString).lastPathComponent) → \(file.fileName)"
+        }
+        return file.fileName
+    }
+
+    private var directoryText: String {
+        file.directory
     }
 
     /// `+A −R` with each count in its own colour, or what stands in for a body that cannot

@@ -28,6 +28,9 @@ extension GitReviewViewController {
         placeholderLabel.isHidden = true
         backButton.isHidden = true
         counterLabel.isHidden = true
+        summaryPill.isHidden = true
+        jumpToEndButton.isHidden = true
+        scrollView.contentInsets.bottom = 0
 
         if let notice {
             addRow(makeNotice(notice.text, isError: notice.isError))
@@ -59,6 +62,9 @@ extension GitReviewViewController {
         }
 
         restoreScroll(to: keepsPlace ? offset.y : 0)
+        DispatchQueue.main.async { [weak self] in
+            self?.updateScrollControls()
+        }
     }
 
     /// Two phases showing the same kind of page — the test for whether a scroll offset taken
@@ -117,6 +123,9 @@ extension GitReviewViewController {
         counterLabel.stringValue = text.string
         counterLabel.attributedStringValue = text
         counterLabel.isHidden = false
+        summaryPill.configure(files: files.count, added: added, removed: removed)
+        summaryPill.isHidden = false
+        scrollView.contentInsets.bottom = 54
     }
 
     /// Small files open ready to read; everything else opens on click. Both limits exist to

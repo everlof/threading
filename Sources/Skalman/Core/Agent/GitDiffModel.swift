@@ -1,4 +1,14 @@
 import Foundation
+import SkalmanDiffCore
+
+// MARK: - Shared Diff Model
+
+/// Compatibility names for the app's existing git/staging code. The value types themselves
+/// live in SkalmanDiffCore and are the same ones rendered by AppKit and UIKit.
+typealias DiffLine = SkalmanDiffCore.DiffLine
+typealias GitFileDiff = SkalmanDiffCore.DiffFile
+typealias GitHunk = SkalmanDiffCore.DiffHunk
+typealias GitDiffLine = SkalmanDiffCore.DiffLine
 
 // MARK: - Review Mode
 
@@ -58,46 +68,6 @@ struct GitStaging {
         case .lastTurn, .branch, .commit: return nil
         }
     }
-}
-
-// MARK: - File Diff
-
-/// One changed file in a git diff: what happened to it and the hunks showing how.
-struct GitFileDiff {
-    enum Change: Equatable {
-        case modified
-        case added
-        case deleted
-        /// Present in the worktree but unknown to git. `git diff` omits these, so they are
-        /// synthesized from the file's own content.
-        case untracked
-        case renamed(from: String)
-        case binary
-    }
-
-    let path: String
-    let change: Change
-    let hunks: [GitHunk]
-    let added: Int
-    let removed: Int
-}
-
-/// One `@@` section of a file's diff.
-struct GitHunk {
-    /// The full header line, e.g. `@@ -12,7 +12,9 @@ func foo()`.
-    let header: String
-    let lines: [GitDiffLine]
-}
-
-/// One line of a git diff. Reuses `DiffLine.Kind` so the review pane and the tool rows share
-/// one vocabulary; the numbers are what a real diff carries that an edit-tool diff does not.
-struct GitDiffLine {
-    let kind: DiffLine.Kind
-    let text: String
-    /// Line number on the old side; nil for added lines and note rows.
-    let oldNumber: Int?
-    /// Line number on the new side; nil for removed lines and note rows.
-    let newNumber: Int?
 }
 
 // MARK: - Commit Summary

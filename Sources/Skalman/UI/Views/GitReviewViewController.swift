@@ -33,6 +33,9 @@ final class GitReviewViewController: NSViewController {
     var scrollView: NSScrollView!
     var stack: NSStackView!
     var placeholderLabel: NSTextField!
+    var summaryPill: GitReviewSummaryPill!
+    var jumpToEndButton: ThemedButton!
+    private var scrollObserver: NSObjectProtocol?
 
     /// What the body is currently showing. Commit mode is two phases deep: the history list,
     /// and one commit opened out of it.
@@ -128,6 +131,9 @@ final class GitReviewViewController: NSViewController {
     deinit {
         if isLoading { onLoadingChange?(false) }
         watcher?.stop()
+        if let scrollObserver {
+            NotificationCenter.default.removeObserver(scrollObserver)
+        }
     }
 
     // MARK: - Setup
@@ -192,6 +198,14 @@ final class GitReviewViewController: NSViewController {
         scrollView.documentView = stack
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
+        clipView.postsBoundsChangedNotifications = true
+        scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: clipView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateScrollControls()
+        }
 
         placeholderLabel = NSTextField(labelWithString: "")
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -201,8 +215,31 @@ final class GitReviewViewController: NSViewController {
         placeholderLabel.lineBreakMode = .byWordWrapping
         placeholderLabel.maximumNumberOfLines = 0
 
+        summaryPill = GitReviewSummaryPill()
+        summaryPill.translatesAutoresizingMaskIntoConstraints = false
+        summaryPill.isHidden = true
+
+        jumpToEndButton = ThemedButton(
+            symbol: "arrow.down",
+            accessibility: "Scroll to the end of the diff",
+            target: self,
+            action: #selector(scrollToDiffEnd)
+        )
+        jumpToEndButton.translatesAutoresizingMaskIntoConstraints = false
+        jumpToEndButton.isBordered = false
+        jumpToEndButton.toolTip = "Scroll to end"
+        jumpToEndButton.applySurface(
+            fill: Design.Surface.elevated,
+            radius: .fixed(20),
+            border: Design.Surface.border,
+            glow: true
+        )
+        jumpToEndButton.isHidden = true
+
         view.addSubview(scrollView)
         view.addSubview(placeholderLabel)
+        view.addSubview(summaryPill)
+        view.addSubview(jumpToEndButton)
     }
 
     private func setupConstraints() {
@@ -240,8 +277,44 @@ final class GitReviewViewController: NSViewController {
 
             placeholderLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             placeholderLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            placeholderLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: inset)
+            placeholderLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: inset),
+
+            summaryPill.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            summaryPill.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Design.Spacing.inset),
+            summaryPill.heightAnchor.constraint(equalToConstant: 34),
+
+            jumpToEndButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            jumpToEndButton.bottomAnchor.constraint(
+                equalTo: summaryPill.topAnchor,
+                constant: -Design.Spacing.small
+            ),
+            jumpToEndButton.widthAnchor.constraint(equalToConstant: 40),
+            jumpToEndButton.heightAnchor.constraint(equalToConstant: 40)
         ])
+    }
+
+    @objc func scrollToDiffEnd() {
+        view.layoutSubtreeIfNeeded()
+        let overflow = max(
+            0,
+            (scrollView.documentView?.frame.height ?? 0) - scrollView.contentView.bounds.height
+        )
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: overflow))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        updateScrollControls()
+    }
+
+    func updateScrollControls() {
+        guard isViewLoaded, summaryPill != nil, !summaryPill.isHidden else {
+            jumpToEndButton?.isHidden = true
+            return
+        }
+        let overflow = max(
+            0,
+            (scrollView.documentView?.frame.height ?? 0) - scrollView.contentView.bounds.height
+        )
+        let distanceFromEnd = overflow - scrollView.contentView.bounds.origin.y
+        jumpToEndButton.isHidden = overflow <= 1 || distanceFromEnd <= 4
     }
 
     // MARK: - Public Methods
@@ -446,6 +519,61 @@ final class GitReviewViewController: NSViewController {
 
     @objc private func backToCommits() {
         show(.commits(canLoadMore: lastPageWasFull))
+    }
+}
+
+/// The compact total that remains visible while reading a long diff, mirroring the mobile
+/// review surface without making the Mac renderer depend on the phone's view layer.
+final class GitReviewSummaryPill: NSView {
+    private let filesLabel = NSTextField(labelWithString: "")
+    private let addedLabel = NSTextField(labelWithString: "")
+    private let removedLabel = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let labels = [filesLabel, addedLabel, removedLabel]
+        labels.forEach {
+            $0.font = Design.Typography.caption()
+            $0.setContentHuggingPriority(.required, for: .horizontal)
+        }
+
+        let stack = NSStackView(views: labels)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = Design.Spacing.medium
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        setAccessibilityElement(true)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(files: Int, added: Int, removed: Int) {
+        filesLabel.stringValue = "\(files) \(files == 1 ? "file" : "files")"
+        filesLabel.textColor = Design.Text.secondary
+        addedLabel.stringValue = "+\(added.formatted(.number.notation(.compactName)))"
+        addedLabel.textColor = Design.Diff.added
+        removedLabel.stringValue = "−\(removed.formatted(.number.notation(.compactName)))"
+        removedLabel.textColor = Design.Diff.removed
+        setAccessibilityLabel(
+            "\(files) changed files, \(added) additions, \(removed) deletions"
+        )
+        applySurface(
+            fill: Design.Surface.elevated,
+            radius: .fixed(17),
+            border: Design.Surface.border,
+            glow: true
+        )
     }
 }
 

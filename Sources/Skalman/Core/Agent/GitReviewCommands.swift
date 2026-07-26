@@ -1,4 +1,5 @@
 import Foundation
+import SkalmanDiffCore
 
 // MARK: - Commands
 
@@ -105,22 +106,23 @@ enum GitReviewDefaults {
     static let fileDisplayCap = 400
 
     /// A file auto-expands only under this many lines…
-    static let autoExpandFileLineLimit = 200
+    static let autoExpandFileLineLimit = DiffPresentationPolicy.default.fileLineLimit
     /// …and only until this many lines are expanded across the whole diff.
-    static let autoExpandTotalLineLimit = 600
+    static let autoExpandTotalLineLimit = DiffPresentationPolicy.default.totalLineLimit
 
     /// A large comparison opens as a file index rather than constructing hundreds of diff-line
     /// views before the user has chosen a file. Headers remain available and each file can still
     /// be expanded on demand.
-    static let largeDiffFileThreshold = 100
-    static let largeDiffChangedLineThreshold = 5_000
+    static let largeDiffFileThreshold = DiffPresentationPolicy.default.largeFileThreshold
+    static let largeDiffChangedLineThreshold =
+        DiffPresentationPolicy.default.largeChangedLineThreshold
 
     /// Untracked files larger than this get a row but no synthesized preview.
     static let untrackedByteCap = 256 * 1024
     /// git's own heuristic: a NUL within the first this-many bytes means binary.
     static let binarySniffBytes = 8000
     /// Characters of one line the pane will draw; minified sources are cut, not wrapped forever.
-    static let lineCharacterCap = 2000
+    static let lineCharacterCap = DiffPresentationPolicy.default.lineCharacterLimit
     /// Diffs past this size fail as too large rather than stall the app.
     static let maximumDiffBytes = 8 * 1024 * 1024
 

@@ -308,11 +308,3 @@ struct ConversationTimeline {
         return .appended(index: rows.count - 1)
     }
 }
-
-// MARK: - Equatable
-
-extension DiffLine: Equatable {
-    static func == (lhs: DiffLine, rhs: DiffLine) -> Bool {
-        lhs.kind == rhs.kind && lhs.text == rhs.text
-    }
-}

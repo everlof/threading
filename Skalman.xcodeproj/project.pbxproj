@@ -30,6 +30,8 @@
 		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
 		F1000001000000000000037 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
 		F1000001000000000000038 /* LabelMorph in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000005 /* LabelMorph */; };
+		D1FF00010000000000000011 /* SkalmanDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000001 /* SkalmanDiffCore */; };
+		D1FF00010000000000000012 /* SkalmanDiffAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000002 /* SkalmanDiffAppKit */; };
 		2A84B6880DED3F071BEF4857 /* ConversationTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */; };
 		8CDE135AB43AE5B76A4E2CBD /* ConversationRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */; };
 		E15000010000000000000002 /* HotPathCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15000010000000000000001 /* HotPathCacheTests.swift */; };
@@ -191,6 +193,8 @@
 				F1000001000000000000036 /* SwiftTerm in Frameworks */,
 				F1000001000000000000037 /* ThinkingOrbs in Frameworks */,
 				F1000001000000000000038 /* LabelMorph in Frameworks */,
+				D1FF00010000000000000011 /* SkalmanDiffCore in Frameworks */,
+				D1FF00010000000000000012 /* SkalmanDiffAppKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -342,6 +346,8 @@
 				F4000001000000000000001 /* SwiftTerm */,
 				F4000001000000000000003 /* ThinkingOrbs */,
 				F4000001000000000000005 /* LabelMorph */,
+				D1FF00010000000000000001 /* SkalmanDiffCore */,
+				D1FF00010000000000000002 /* SkalmanDiffAppKit */,
 			);
 			productName = Skalman;
 			productReference = F2000001000000000000038 /* Skalman.app */;
@@ -375,6 +381,7 @@
 				F4000001000000000000002 /* XCLocalSwiftPackageReference "SwiftTerm" */,
 				F4000001000000000000004 /* XCLocalSwiftPackageReference "ThinkingOrbs" */,
 				F4000001000000000000006 /* XCLocalSwiftPackageReference "LabelMorph" */,
+				D1FF00010000000000000020 /* XCLocalSwiftPackageReference "SkalmanDiffKit" */,
 			);
 			productRefGroup = F5000001000000000000020 /* Products */;
 			projectDirPath = "";
@@ -798,6 +805,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LabelMorph;
 		};
+		D1FF00010000000000000020 /* XCLocalSwiftPackageReference "SkalmanDiffKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SkalmanDiffKit;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -812,6 +823,14 @@
 		F4000001000000000000005 /* LabelMorph */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LabelMorph;
+		};
+		D1FF00010000000000000001 /* SkalmanDiffCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SkalmanDiffCore;
+		};
+		D1FF00010000000000000002 /* SkalmanDiffAppKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SkalmanDiffAppKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

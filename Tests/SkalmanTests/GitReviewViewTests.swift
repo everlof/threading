@@ -86,4 +86,43 @@ final class GitReviewViewTests: XCTestCase {
             GitReviewDefaults.autoExpandTotalLineLimit
         )
     }
+
+    func testLongDiffShowsSummaryAndScrollToEndControl() {
+        let lines = (1...80).map { number in
+            GitDiffLine(
+                kind: .context,
+                text: "let value\(String(number)) = \(String(number))",
+                oldNumber: number,
+                newNumber: number
+            )
+        }
+        let file = GitFileDiff(
+            path: "Sources/Long.swift",
+            change: .modified,
+            hunks: [GitHunk(header: "@@ -1,80 +1,80 @@", lines: lines)],
+            added: 0,
+            removed: 0
+        )
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .unstaged
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 520, height: 280)
+        controller.show(.files([file]))
+        controller.view.layoutSubtreeIfNeeded()
+        controller.updateScrollControls()
+
+        XCTAssertFalse(controller.summaryPill.isHidden)
+        XCTAssertFalse(controller.jumpToEndButton.isHidden)
+
+        controller.scrollToDiffEnd()
+        XCTAssertTrue(
+            controller.jumpToEndButton.isHidden,
+            "document=\(controller.scrollView.documentView?.frame.height ?? -1), "
+                + "viewport=\(controller.scrollView.contentView.bounds.height), "
+                + "offset=\(controller.scrollView.contentView.bounds.origin.y)"
+        )
+    }
 }

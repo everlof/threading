@@ -1,19 +1,5 @@
 import Foundation
 
-// MARK: - Diff Line
-
-/// One line of a rendered change.
-struct DiffLine {
-    enum Kind {
-        case context   // unchanged, shown for orientation
-        case added
-        case removed
-    }
-
-    let kind: Kind
-    let text: String
-}
-
 // MARK: - Edit Diff
 
 /// Turns an edit tool's arguments into a line diff, so an approval or a tool row can show the
