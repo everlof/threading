@@ -14,6 +14,12 @@ final class TerminalSession: NSObject {
 
     weak var delegate: TerminalSessionDelegate?
 
+    /// Raw PTY output, for the remote-access mirror. Single-consumer, same doctrine as
+    /// `ConversationStreamSession.onEvent`: the mirror registry is the one consumer and fans
+    /// out from there. Fired on the main thread inside SwiftTerm's synchronous read hop, so the
+    /// closure copies and hands off to its own queue — it must never block the PTY read loop.
+    var onRawOutput: ((Data) -> Void)?
+
     private var profile: TerminalProfile
 
     /// The PID of the shell process, captured after starting.
@@ -57,6 +63,21 @@ final class TerminalSession: NSObject {
         terminalView.onWheelForwarded = { [weak self] in
             guard let self else { return }
             self.delegate?.terminalSessionDidForwardScroll(self)
+        }
+
+        terminalView.onUserInput = { [weak self] in
+            guard let sessionID = self?.identifier else { return }
+            Task { @MainActor in
+                RemoteNotificationService.shared.recordOwnerInteraction(
+                    sessionID: sessionID
+                )
+            }
+        }
+
+        terminalView.onOutputBytes = { [weak self] slice in
+            guard let self, let onRawOutput = self.onRawOutput else { return }
+            // Copy the slice out of SwiftTerm's reused buffer before it hands off.
+            onRawOutput(Data(slice))
         }
 
         applyProfile()
@@ -303,6 +324,31 @@ final class TerminalSession: NSObject {
         terminalView.send(txt: text)
     }
 
+    /// Sends raw bytes to the PTY as if typed — the entry point for remote keyboard input.
+    func sendRemoteInput(_ bytes: [UInt8]) {
+        terminalView.sendRemote(bytes[...])
+    }
+
+    /// Lets the actively controlling phone own the shared PTY grid. SwiftTerm's ordinary resize
+    /// path applies the winsize and raises SIGWINCH, so Claude Code/Codex redraw at mobile width.
+    func setRemoteViewport(cols: Int, rows: Int) {
+        terminalView.setRemoteGrid(cols: cols, rows: rows)
+        delegate?.terminalSession(self, remoteViewportChangedTo: (cols, rows))
+    }
+
+    /// Restores the natural Mac grid after the phone closes or loses its interactive socket.
+    func clearRemoteViewport() {
+        terminalView.clearRemoteGrid()
+        delegate?.terminalSession(self, remoteViewportChangedTo: nil)
+    }
+
+    /// The terminal's current character grid, sent to a joining remote client so it sizes its
+    /// own renderer to match rather than reflowing the shared PTY.
+    var characterGrid: (cols: Int, rows: Int) {
+        let terminal = terminalView.getTerminal()
+        return (terminal.cols, terminal.rows)
+    }
+
 }
 
 // MARK: - LocalProcessTerminalViewDelegate
@@ -340,6 +386,10 @@ protocol TerminalSessionDelegate: AnyObject {
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String)
     func terminalSession(_ session: TerminalSession, directoryChangedTo directory: URL?)
     func terminalSession(_ session: TerminalSession, sizeChangedTo cols: Int, rows: Int)
+    func terminalSession(
+        _ session: TerminalSession,
+        remoteViewportChangedTo grid: (cols: Int, rows: Int)?
+    )
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?)
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int)
     func terminalSessionDidRingBell(_ session: TerminalSession)
@@ -353,6 +403,10 @@ extension TerminalSessionDelegate {
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String) {}
     func terminalSession(_ session: TerminalSession, directoryChangedTo directory: URL?) {}
     func terminalSession(_ session: TerminalSession, sizeChangedTo cols: Int, rows: Int) {}
+    func terminalSession(
+        _ session: TerminalSession,
+        remoteViewportChangedTo grid: (cols: Int, rows: Int)?
+    ) {}
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {}
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {}
     func terminalSessionDidRingBell(_ session: TerminalSession) {}

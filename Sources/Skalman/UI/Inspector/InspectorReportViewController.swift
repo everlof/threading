@@ -16,7 +16,7 @@ final class InspectorReportViewController: NSViewController {
     private let markdown: String
     private let screenshot: NSImage?
 
-    private let noteField = ThemedTextField()
+    private let noteField = PromptView()
     private let copyButton = ThemedButton()
 
     /// Called when the sheet is done, however it was closed.
@@ -153,15 +153,31 @@ final class InspectorReportViewController: NSViewController {
         return scrollView
     }
 
-    /// One line, deliberately: the note is the sentence that turns evidence into a request —
-    /// "make this padding smaller" — and anything longer belongs in the composer the report
-    /// is about to be pasted into. Return copies, so type-and-Return is the whole gesture.
+    /// The composer's own input, not a one-line field.
+    ///
+    /// A note was assumed to be one sentence — "make this padding smaller" — and often is not:
+    /// a second line went on being typed into a box with no room for it and was clipped mid-
+    /// glyph, which is a field losing text the user can see it has. `PromptView` grows with what
+    /// is in it and already answers Return and Shift-Return the way every composer here does, so
+    /// the sheet inherits the behaviour rather than restating it.
     private func makeNoteField() -> NSView {
-        noteField.placeholderString = InspectorStrings.notePlaceholder
-        noteField.target = self
-        noteField.action = #selector(copyReport)
+        noteField.placeholder = InspectorStrings.notePlaceholder
+        noteField.onSubmit = { [weak self] _ in self?.copyReport() }
         noteField.translatesAutoresizingMaskIntoConstraints = false
-        return noteField
+
+        // Said rather than left to be discovered: a growing box is the only clue that a second
+        // line is possible, and it appears after the key that would have submitted was pressed.
+        let hint = NSTextField(labelWithString: InspectorStrings.noteHint)
+        hint.font = Design.Typography.caption()
+        hint.textColor = Design.Text.tertiary
+
+        let stack = NSStackView(views: [noteField, hint])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.tight
+        noteField.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        return stack
     }
 
     private func makeFooter() -> NSView {
@@ -244,7 +260,18 @@ enum InspectorStrings {
     static let pointHeading = "Point Report"
     static let regionHeading = "Region Report"
     static let notePlaceholder = "Add a note — it leads the copied report"
+    static let noteHint = "Return copies the report · ⇧Return adds a line"
     static let copyTitle = "Copy Report"
     static let copiedTitle = "Copied"
     static let closeTitle = "Close"
+
+    /// Drawn on the overlay whether anything is held or not: a modifier nothing mentions is a
+    /// feature nobody finds, and element mode is where the question it answers gets asked.
+    static let layerHint = "⌃ hierarchy · ⌥ spacing"
+    static let flushOnEverySide = "flush on every side"
+
+    /// The key is bounded by the window; the drawing and the report are not.
+    static func legendFold(_ count: Int) -> String {
+        "+\(count) more — see the report"
+    }
 }

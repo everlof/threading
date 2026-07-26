@@ -110,7 +110,7 @@ final class ProfilePreferencesViewController: NSViewController {
             SettingsUI.section("Cursor", cursor),
             SettingsUI.section("Scrollback", scrollback),
             SettingsUI.section("Preview", preview)
-        ])
+        ], hostPage: .profiles)
 
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)

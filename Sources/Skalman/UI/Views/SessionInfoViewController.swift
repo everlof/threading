@@ -290,9 +290,12 @@ final class SessionInfoViewController: NSViewController {
     }
 
     private func add(process: SessionProcess) {
+        // The positive status role, not the accent: a running process is a *state*, and the
+        // accent already means "this session wants you" in the sidebar it sits beside. A column
+        // of accent dots said that about four processes doing nothing but running.
         let row = SessionInfoRowView(
             symbolName: SessionInfoSymbols.process,
-            symbolColor: Design.Surface.accent,
+            symbolColor: Design.Status.positive,
             primary: process.command,
             secondary: "\(process.pid)",
             value: "\(process.formattedCPU) · \(process.formattedMemory)"

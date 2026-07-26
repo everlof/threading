@@ -1,4 +1,6 @@
 import AppKit
+import ImageIO
+import SkalmanExtensionKit
 
 // MARK: - Session Row View
 
@@ -8,8 +10,19 @@ final class SessionRowView: NSTableCellView {
 
     // MARK: - Properties
 
+    typealias SessionHoverContentProvider =
+        @MainActor (SessionInfoPopoverViewController.Info) -> NSViewController?
+
     private let statusIndicator = SessionStatusIndicator()
-    private let actionButton = ThemedButton()
+    /// The row's `⋯`, the same nested icon button a tab's `×` is — see `ThemedIconButton`.
+    /// It inks from the chrome because the sidebar sits on the chrome's ground, not the
+    /// terminal's backdrop.
+    private let actionButton = ThemedIconButton(
+        symbolName: SidebarRowDefaults.actionSymbol,
+        accessibility: "Session actions",
+        target: .inline,
+        inkSource: .chrome
+    )
 
     /// Fixed-size container holding the status indicator and the action button overlaid,
     /// so swapping between them on hover never re-lays out the row.
@@ -22,9 +35,12 @@ final class SessionRowView: NSTableCellView {
     private var popoverInfo: SessionInfoPopoverViewController.Info?
     private var hoverTimer: Timer?
     private var popover: NSPopover?
+    private let sessionHoverContentProvider: SessionHoverContentProvider
 
     /// Invoked when the row's action button is pressed, carrying the row's session.
     var onAction: ((SessionID, NSView) -> Void)?
+    /// Invoked for semantic actions inside extension-rendered content.
+    var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
     private var sessionID: SessionID?
 
     private let iconView = NSImageView()
@@ -34,10 +50,34 @@ final class SessionRowView: NSTableCellView {
     /// is that it rides the mark rather than standing beside it.
     private let accountChipView = NSImageView()
 
-    private let titleLabel = NSTextField(labelWithString: "")
+    private let titleLabel = MorphingTitleLabel()
+    private let nativeIdentityContent = NSView()
+    private let nativeContent = NSView()
+    private let afterTitleSlot = NSStackView()
+    private var identityContentContainer: ComponentContentContainer!
+    private var contentContainer: ComponentContentContainer!
+    private var rowContentStack: NSStackView!
+    private var identityCustomizationHost: ComponentCustomizationHost!
+    private var customizationHost: ComponentCustomizationHost!
+    private let customizationLookup: ComponentCustomizationHost.Lookup
+
+    private var nativeTitle = ""
+    private var nativeToolTip: String?
+    private var nativeIcon: NSImage?
+    private var nativeIconTint: NSColor?
+    private var nativeIconAlpha: CGFloat = 1
 
     /// Retained so colours can be reapplied when the selection state changes.
     private var isDormant = false
+
+    /// Whether the title landing on the next content pass is a **rename** of the name this
+    /// row is already showing, rather than a row being filled in.
+    ///
+    /// Decided in `configure`, spent in `applyCustomizationProperties` — the two are one
+    /// pass apart, and the property is what carries the answer across. A morph from a name
+    /// this row never showed reads as a glitch rather than as a rename, so this is false
+    /// for a first fill and for a cell recycled from another session.
+    private var animatesNextTitle = false
 
     /// Assigning `textField` lets the table restyle it on selection, which tints an
     /// unemphasized source-list row with the accent colour. The row already shows selection
@@ -49,7 +89,24 @@ final class SessionRowView: NSTableCellView {
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
+        customizationLookup = {
+            ComponentCustomizationProviderSlot.shared.customization(for: $0)
+        }
+        sessionHoverContentProvider = Self.nativeSessionHoverContent(for:)
         super.init(frame: frameRect)
+        setupViews()
+    }
+
+    /// Injection point used by the Component Gallery and focused shell tests. Product rows use
+    /// the process-wide provider slot through `init(frame:)`.
+    init(
+        customizationLookup: @escaping ComponentCustomizationHost.Lookup,
+        sessionHoverContentProvider: @escaping SessionHoverContentProvider =
+            SessionRowView.nativeSessionHoverContent(for:)
+    ) {
+        self.customizationLookup = customizationLookup
+        self.sessionHoverContentProvider = sessionHoverContentProvider
+        super.init(frame: .zero)
         setupViews()
     }
 
@@ -68,12 +125,23 @@ final class SessionRowView: NSTableCellView {
             weight: .regular
         )
         iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.setAccessibilityIdentifier("sidebar.session.identity")
 
         accountChipView.imageScaling = .scaleProportionallyDown
         accountChipView.translatesAutoresizingMaskIntoConstraints = false
+        accountChipView.setAccessibilityIdentifier("sidebar.session.account")
 
         titleLabel.font = Design.Typography.controlRegular()
-        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setAccessibilityIdentifier("sidebar.session.title")
+
+        // The ink is stated once, as a rule: the row's dormancy and selection both move
+        // under it, and a theme switch replaces the colours it resolves to. See
+        // `applyTextColors`.
+        titleLabel.setTextColor { [weak self] in
+            guard let self else { return Design.Text.label }
+            if backgroundStyle == .emphasized { return Design.Text.selected }
+            return isDormant ? Design.Text.secondary : Design.Text.label
+        }
 
         // The lowest hugging in the stack, unambiguously: the title absorbs all slack, which
         // is what pins the status/actions slot to the row's trailing edge. Left at the
@@ -84,15 +152,7 @@ final class SessionRowView: NSTableCellView {
         )
 
         setupTrailingSlot()
-
-        let stack = NSStackView(views: [iconView, titleLabel, trailingSlot])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = SidebarRowDefaults.horizontalSpacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(stack)
-        addSubview(accountChipView)
+        setupCustomizableContent()
 
         // `textField` is deliberately left unset. Assigning it lets the table restyle the
         // label on selection, which tints an unemphasized source-list row with the accent
@@ -101,22 +161,49 @@ final class SessionRowView: NSTableCellView {
         setAccessibilityRole(.staticText)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(
+            rowContentStack.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: SidebarRowDefaults.leadingInset
             ),
-            stack.trailingAnchor.constraint(
+            rowContentStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingSlot.leadingAnchor,
+                constant: -SidebarRowDefaults.horizontalSpacing
+            ),
+            rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            trailingSlot.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -SidebarRowDefaults.trailingInset
             ),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
-            iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
+            trailingSlot.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
 
-            // Hung off the slot's bottom-trailing corner into the gap before the title,
-            // rather than laid out beside the mark: no title shifts to make room for it, so
-            // rows with and without an alternate account still align. Flush inside the slot
-            // the chip covered the middle of a 13pt mark, which is what the overhang buys back.
+    /// Builds the one visual subtree extensions may customize. The activity/actions slot is a
+    /// sibling outside the container, so replacing or invalidating content cannot disturb it.
+    private func setupCustomizableContent() {
+        nativeIdentityContent.translatesAutoresizingMaskIntoConstraints = false
+        nativeIdentityContent.addSubview(iconView)
+        nativeIdentityContent.addSubview(accountChipView)
+        nativeIdentityContent.setAccessibilityIdentifier(
+            "sidebar.session.identity.default-content"
+        )
+
+        NSLayoutConstraint.activate([
+            nativeIdentityContent.widthAnchor.constraint(
+                equalToConstant: SidebarRowDefaults.iconSlotWidth
+            ),
+            nativeIdentityContent.heightAnchor.constraint(
+                equalToConstant: SidebarRowDefaults.iconSlotWidth
+            ),
+            iconView.topAnchor.constraint(equalTo: nativeIdentityContent.topAnchor),
+            iconView.bottomAnchor.constraint(equalTo: nativeIdentityContent.bottomAnchor),
+            iconView.leadingAnchor.constraint(equalTo: nativeIdentityContent.leadingAnchor),
+            iconView.trailingAnchor.constraint(equalTo: nativeIdentityContent.trailingAnchor),
+
+            // Hung off the provider mark rather than laid out beside it, so the native
+            // composition remains compact. A selected identity renderer may choose a HStack
+            // instead by replacing this entire inner container.
             accountChipView.widthAnchor.constraint(
                 equalToConstant: AccountBadgeDefaults.chipSize
             ),
@@ -132,6 +219,103 @@ final class SessionRowView: NSTableCellView {
                 constant: AccountBadgeDefaults.cornerOverhang
             )
         ])
+
+        identityContentContainer = ComponentContentContainer(
+            defaultContent: nativeIdentityContent
+        )
+        identityContentContainer.setAccessibilityIdentifier(
+            "sidebar.session.identity.content"
+        )
+        identityContentContainer.onReplacementChanged = { [weak self] replacement in
+            self?.applyIdentityReplacementState(replacement)
+        }
+
+        let nativeStack = NSStackView(views: [identityContentContainer, titleLabel])
+        nativeStack.orientation = .horizontal
+        nativeStack.alignment = .centerY
+        nativeStack.spacing = SidebarRowDefaults.horizontalSpacing
+        nativeStack.translatesAutoresizingMaskIntoConstraints = false
+
+        nativeContent.translatesAutoresizingMaskIntoConstraints = false
+        nativeContent.addSubview(nativeStack)
+
+        NSLayoutConstraint.activate([
+            nativeStack.topAnchor.constraint(equalTo: nativeContent.topAnchor),
+            nativeStack.bottomAnchor.constraint(equalTo: nativeContent.bottomAnchor),
+            nativeStack.leadingAnchor.constraint(equalTo: nativeContent.leadingAnchor),
+            nativeStack.trailingAnchor.constraint(equalTo: nativeContent.trailingAnchor)
+        ])
+
+        nativeContent.setAccessibilityIdentifier("sidebar.session.default-content")
+        contentContainer = ComponentContentContainer(defaultContent: nativeContent)
+        contentContainer.setAccessibilityIdentifier("sidebar.session.content")
+        contentContainer.setContentHuggingPriority(
+            SidebarRowDefaults.stretchableHugging,
+            for: .horizontal
+        )
+        contentContainer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        afterTitleSlot.orientation = .horizontal
+        afterTitleSlot.alignment = .centerY
+        afterTitleSlot.spacing = Design.Spacing.tight
+        afterTitleSlot.isHidden = true
+        afterTitleSlot.setAccessibilityIdentifier("sidebar.session.slot.after-title")
+
+        // The trailing slot is **not** in the stack.
+        //
+        // As an arranged view it landed wherever the stack's packing left it: the stack pushes it
+        // to the edge only by stretching something to its left, and hugging can only stretch a
+        // view that has an intrinsic size to hug. A row whose identity content an extension has
+        // replaced has no such view, so the stack packed everything at the leading edge and the ⋯
+        // came to rest against the title — mid-row on some rows and at the edge on others, for a
+        // reason nothing in the row could show. Pinned to the row it is always where the eye
+        // looks for it, whatever the row is made of.
+        rowContentStack = NSStackView(views: [contentContainer, afterTitleSlot])
+        rowContentStack.orientation = .horizontal
+        rowContentStack.alignment = .centerY
+        rowContentStack.spacing = SidebarRowDefaults.horizontalSpacing
+        rowContentStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rowContentStack)
+        addSubview(trailingSlot)
+
+        identityCustomizationHost = ComponentCustomizationHost(
+            target: .sessionIdentity(),
+            contentContainer: identityContentContainer,
+            lookup: customizationLookup,
+            imageResolver: { [weak self] reference, extensionIdentifier in
+                self?.resolveCustomizationImage(
+                    reference,
+                    extensionIdentifier: extensionIdentifier
+                )
+            }
+        )
+
+        customizationHost = ComponentCustomizationHost(
+            target: .init(
+                component: HostComponentContracts.sidebarSessionRow.id,
+                contractVersion: HostComponentContracts.sidebarSessionRow.version
+            ),
+            contentContainer: contentContainer,
+            slots: ["after-title": afterTitleSlot],
+            lookup: customizationLookup,
+            imageResolver: { [weak self] reference, extensionIdentifier in
+                self?.resolveCustomizationImage(
+                    reference,
+                    extensionIdentifier: extensionIdentifier
+                )
+            },
+            onAction: { [weak self] action in
+                guard let self else { return }
+                if let onCustomizationAction {
+                    onCustomizationAction(action)
+                } else {
+                    ComponentCustomizationProviderSlot.shared.perform(action)
+                }
+            },
+            onProperties: { [weak self] properties in
+                self?.applyCustomizationProperties(properties)
+            }
+        )
     }
 
     /// The slot sits at the trailing edge, where it reads as status rather than as another
@@ -139,17 +323,14 @@ final class SessionRowView: NSTableCellView {
     private func setupTrailingSlot() {
         statusIndicator.translatesAutoresizingMaskIntoConstraints = false
 
-        actionButton.image = NSImage(
-            systemSymbolName: SidebarRowDefaults.actionSymbol,
-            accessibilityDescription: "Session actions"
-        )
-        actionButton.isBordered = false
-        actionButton.target = self
-        actionButton.action = #selector(actionClicked)
+        actionButton.onPress = { [weak self] in self?.actionClicked() }
         actionButton.alphaValue = 0
         actionButton.translatesAutoresizingMaskIntoConstraints = false
 
         trailingSlot.translatesAutoresizingMaskIntoConstraints = false
+        trailingSlot.setAccessibilityIdentifier("sidebar.session.trailing")
+        statusIndicator.setAccessibilityIdentifier("sidebar.session.status")
+        actionButton.setAccessibilityIdentifier("sidebar.session.actions")
         trailingSlot.addSubview(statusIndicator)
         trailingSlot.addSubview(actionButton)
 
@@ -161,9 +342,7 @@ final class SessionRowView: NSTableCellView {
             statusIndicator.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
             statusIndicator.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
             actionButton.centerXAnchor.constraint(equalTo: trailingSlot.centerXAnchor),
-            actionButton.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
-            actionButton.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
-            actionButton.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize)
+            actionButton.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
         ])
     }
 
@@ -213,17 +392,73 @@ final class SessionRowView: NSTableCellView {
     }
 
     private func presentPopover() {
-        guard let popoverInfo, window != nil, popover == nil else { return }
+        guard let popoverInfo, let sessionID, window != nil, popover == nil else { return }
+        guard let controller = makeSessionHoverCard(
+            info: popoverInfo,
+            sessionID: sessionID
+        ) else {
+            return
+        }
 
-        let content = NSPopover()
+        let content = HostPopoverFactory.make(.sidebarSessionHoverCard)
         // Closed by hand on exit and reuse; a transient popover would instead close on the
         // next click anywhere, which is not the gesture that should dismiss it.
         content.behavior = .applicationDefined
         content.animates = false
-        content.contentViewController = SessionInfoPopoverViewController(info: popoverInfo)
+        content.contentViewController = controller
         content.show(relativeTo: bounds, of: self, preferredEdge: .maxX)
 
         popover = content
+    }
+
+    /// Builds the customizable presentation independently from its hover trigger. The row keeps
+    /// ownership of timing, placement and dismissal; extensions compose only the card content.
+    func makeSessionHoverCard(
+        info: SessionInfoPopoverViewController.Info,
+        sessionID: SessionID
+    ) -> NSViewController? {
+        let target = ExtensionComponentTarget.sessionHoverCard(
+            sessionID: sessionID.uuidString.lowercased()
+        )
+        let native = sessionHoverContentProvider(info)
+        let initialResolution = customizationLookup(target)
+        guard native != nil || !initialResolution.isEmpty else { return nil }
+
+        let hasNativeContent = native != nil
+        let child = native ?? EmptyComponentContentViewController()
+        let controller = ExtensionComponentHookViewController(
+            target: target,
+            child: child,
+            contentInsets: NSEdgeInsets(
+                top: Design.Spacing.inset,
+                left: Design.Spacing.inset,
+                bottom: Design.Spacing.inset,
+                right: Design.Spacing.inset
+            ),
+            fixedWidth: SessionPopoverDefaults.width,
+            lookup: customizationLookup,
+            onAction: { [weak self] action in
+                guard let self else { return }
+                if let onCustomizationAction {
+                    onCustomizationAction(action)
+                } else {
+                    ComponentCustomizationProviderSlot.shared.perform(action)
+                }
+            },
+            onResolution: { [weak self] resolution in
+                if !hasNativeContent, resolution.isEmpty {
+                    self?.dismissPopover()
+                }
+            }
+        )
+        controller.view.setAccessibilityIdentifier("sidebar.session-hover-card")
+        return controller
+    }
+
+    private static func nativeSessionHoverContent(
+        for info: SessionInfoPopoverViewController.Info
+    ) -> NSViewController? {
+        SessionInfoPopoverViewController(info: info, isEmbedded: true)
     }
 
     private func dismissPopover() {
@@ -249,7 +484,7 @@ final class SessionRowView: NSTableCellView {
         }
     }
 
-    @objc private func actionClicked() {
+    private func actionClicked() {
         guard let sessionID else { return }
         onAction?(sessionID, actionButton)
     }
@@ -268,11 +503,18 @@ final class SessionRowView: NSTableCellView {
         }
         popoverInfo = SessionInfoPopoverViewController.Info(session: session, activity: activity)
 
+        // Read before the id is overwritten: a morph is only honest when the name being
+        // replaced is the one this row is showing, which means the *same* session with a
+        // *different* title. Everything else — a first fill, a row reconfigured while an
+        // agent works, a cell recycled from another session — lands the title directly.
+        animatesNextTitle = sessionID == session.id
+            && titleLabel.stringValue != session.displayTitle
+
         sessionID = session.id
-        titleLabel.stringValue = session.displayTitle
+        nativeTitle = session.displayTitle
+        nativeToolTip = nil
 
         isDormant = activity == .dormant
-        applyTextColors()
 
         statusIndicator.update(for: activity, isLoading: isLoading)
 
@@ -282,10 +524,20 @@ final class SessionRowView: NSTableCellView {
 
         // The hover popover carries the full title and account, so a tooltip would only
         // duplicate it more slowly.
-        toolTip = nil
-
         let account = AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle)
         applyAgentIcon(for: session, account: account)
+        applyTextColors()
+
+        identityCustomizationHost.updateTarget(
+            .sessionIdentity(sessionID: session.id.uuidString.lowercased())
+        )
+        customizationHost.updateTarget(
+            .init(
+                component: HostComponentContracts.sidebarSessionRow.id,
+                contractVersion: HostComponentContracts.sidebarSessionRow.version,
+                entityID: session.id.uuidString.lowercased()
+            )
+        )
     }
 
     /// The icon slot carries the *agent* — Claude's starburst, OpenAI's knot, a shell's
@@ -303,22 +555,158 @@ final class SessionRowView: NSTableCellView {
     /// the chip keep their own colours — tinting does not touch a non-template image — so
     /// they dim through their view's alpha instead.
     private func applyAgentIcon(for session: AgentSession, account: AgentAccount?) {
-        let image = session.isSideChat
-            ? NSImage(
+        let builtInProviderImage = session.kind.icon
+        let image: NSImage?
+        if session.isSideChat {
+            image = NSImage(
                 systemSymbolName: SidebarRowDefaults.sideChatSymbol,
                 accessibilityDescription: SidebarRowDefaults.sideChatAccessibilityLabel
             )
-            : session.kind.icon
+        } else if let resolution = ExtensionIdentityResolverProviderSlot.shared.providerIcon(
+            providerID: session.kind.rawValue
+        ) {
+            image = resolveIdentityImage(
+                resolution.image,
+                extensionIdentifier: resolution.extensionIdentifier
+            ) ?? builtInProviderImage
+        } else {
+            image = builtInProviderImage
+        }
         iconView.image = image
+        iconView.setAccessibilityLabel(
+            session.isSideChat
+                ? SidebarRowDefaults.sideChatAccessibilityLabel
+                : session.kind.displayName
+        )
         iconView.contentTintColor = isDormant ? Design.Text.tertiary : Design.Text.secondary
 
         let dimsThroughAlpha = image.map { !$0.isTemplate } ?? false
         iconView.alphaValue = (isDormant && dimsThroughAlpha) ? AgentIconDefaults.dormantAlpha : 1
 
-        let chip = AccountBadge.chip(for: account)
+        let builtInChip = AccountBadge.chip(for: account)
+        let chip: NSImage?
+        if let account, account.emoji == nil,
+           let resolution = ExtensionIdentityResolverProviderSlot.shared.accountIcon(
+               accountID: account.id.rawValue
+           ) {
+            chip = resolveIdentityImage(
+                resolution.image,
+                extensionIdentifier: resolution.extensionIdentifier
+            ) ?? builtInChip
+        } else {
+            // An explicit user emoji remains above an extension resolver in precedence.
+            chip = builtInChip
+        }
         accountChipView.image = chip
+        accountChipView.setAccessibilityLabel(account?.displayName)
         accountChipView.isHidden = chip == nil
         accountChipView.alphaValue = isDormant ? AgentIconDefaults.dormantAlpha : 1
+
+        nativeIcon = iconView.image
+        nativeIconTint = iconView.contentTintColor
+        nativeIconAlpha = iconView.alphaValue
+    }
+
+    private func resolveIdentityImage(
+        _ reference: ExtensionImageReference,
+        extensionIdentifier: String
+    ) -> NSImage? {
+        switch reference {
+        case .systemSymbol(let name):
+            return NSImage(systemSymbolName: name, accessibilityDescription: name)
+
+        case .extensionResource(let relativePath):
+            guard let url = ExtensionManager.shared.imageResourceURL(
+                relativePath: relativePath,
+                extensionIdentifier: extensionIdentifier
+            ),
+            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            CGImageSourceGetCount(source) == 1,
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+            let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+            width.intValue > 0,
+            height.intValue > 0,
+            width.intValue <= ExtensionIdentityImageDefaults.maximumPixelDimension,
+            height.intValue <= ExtensionIdentityImageDefaults.maximumPixelDimension else {
+                return nil
+            }
+            return NSImage(contentsOf: url)
+
+        case .hostAsset(let assetID):
+            if let providerID = ExtensionIdentityAssetID.providerID(from: assetID),
+               let provider = AgentKind(rawValue: providerID) {
+                return provider.icon
+            }
+            if let accountID = ExtensionIdentityAssetID.accountID(from: assetID),
+               let parsed = AccountID(rawValue: accountID),
+               let account = AgentAccountDiscovery.account(
+                   for: parsed.provider,
+                   handle: parsed.handle
+               ) {
+                return AccountBadge.chip(for: account)
+            }
+            return nil
+        }
+    }
+
+    private func applyCustomizationProperties(
+        _ properties: [
+            ExtensionComponentPropertyID: ExtensionComponentPropertyValue
+        ]
+    ) {
+        toolTip = nativeToolTip
+        iconView.image = nativeIcon
+        iconView.contentTintColor = nativeIconTint
+        iconView.alphaValue = nativeIconAlpha
+
+        // The title is resolved before it is set, not set twice: an extension's override
+        // landing on top of the native name would morph the row through a name nobody
+        // chose to show.
+        var title = nativeTitle
+        if case .text(let customized) = properties[.title] {
+            title = customized
+        }
+        titleLabel.setStringValue(title, animated: animatesNextTitle)
+        animatesNextTitle = false
+
+        if case .text(let value) = properties[.toolTip] {
+            toolTip = value
+        }
+        if case .image(let reference) = properties[.identityImage],
+           let image = resolveCustomizationImage(reference) {
+            iconView.image = image
+        }
+    }
+
+    private func resolveCustomizationImage(
+        _ reference: ExtensionImageReference,
+        extensionIdentifier: String? = nil
+    ) -> NSImage? {
+        switch reference {
+        case .systemSymbol(let name):
+            return NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        case .hostAsset(let identifier):
+            switch identifier {
+            case "session.provider-image":
+                return nativeIcon
+            case "session.account-image":
+                return accountChipView.image
+            default:
+                return nil
+            }
+        case .extensionResource:
+            guard let extensionIdentifier else { return nil }
+            return resolveIdentityImage(
+                reference,
+                extensionIdentifier: extensionIdentifier
+            )
+        }
+    }
+
+    private func applyIdentityReplacementState(_ replacement: NSView?) {
+        replacement?.alphaValue = isDormant ? AgentIconDefaults.dormantAlpha : 1
     }
 
     // MARK: - Private Methods
@@ -330,13 +718,12 @@ final class SessionRowView: NSTableCellView {
     /// Every other state keeps the ordinary label colours, so selection is shown by the
     /// filled shape alone.
     private func applyTextColors() {
-        if backgroundStyle == .emphasized {
-            titleLabel.textColor = Design.Text.selected
-            return
-        }
-
-        titleLabel.textColor = isDormant ? Design.Text.secondary : Design.Text.label
+        titleLabel.refreshTextColor()
     }
+}
+
+private enum ExtensionIdentityImageDefaults {
+    static let maximumPixelDimension = 1_024
 }
 
 // MARK: - Agent Kind Symbols

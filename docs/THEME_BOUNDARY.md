@@ -44,23 +44,42 @@ records why it cannot be removed.
 6. Pass a semantic `SurfaceRadius` (`.panel`, `.control`, `.pill`, or an intentional `.fixed`)
    to `applySurface`. Never resolve a role to a `CGFloat` first: two roles can share a number in
    one theme and diverge after a live theme switch.
-7. Never assign a theme-derived `CGColor` directly to a layer. Draw at display time, use
+7. Geometry that a second pane could repeat — a footer band, a tab strip, a slot beside a
+   title — is a component's to own. State the height, the hairline, the insets and the
+   centring once in `UI/Design/`; a host pins edges and contributes content. A feature call
+   site doing constraint arithmetic with shared constants is the same erosion as a hardcoded
+   colour, one step slower.
+8. Margins that meet a window edge are measured from the corner-adapted layout region
+   (`layoutGuide(for: .safeArea(cornerAdaptation:))` on macOS 26; the view's own edge
+   earlier), never widened by hand to clear the curve. The platform states what each corner
+   needs — and states zero for an edge that meets another pane — so "equal spacing" is
+   measured from the region the eye reads as usable, not from the frame. Probe
+   platform-dependent geometry in a real window rather than transcribing a measured value
+   into a constant that goes stale. `PaneFooterView` is the reference.
+9. Containers place controls by their ink, not their frames. A control whose frame carries
+   invisible padding — a plain button's hover surface, an icon button's click target — states
+   it through `OpticalInsetProviding`, and the container subtracts it, so a titled button and
+   a bare glyph land on the same visual margin. Equal frame margins are not equal visual
+   margins.
+10. Never assign a theme-derived `CGColor` directly to a layer. Draw at display time, use
    `applySurface`, or use the refresh-aware layer-colour helpers.
-8. Preserve accessibility. A custom-drawn control must expose its role, title/value, enabled
+11. Preserve accessibility. A custom-drawn control must expose its role, title/value, enabled
    state, and action. Status, selection, additions/removals, and errors must remain identifiable
    without colour alone.
-9. A component in `UI/Design/` that handles pointer input must inherit `ThemedControl`, so
+12. A component in `UI/Design/` that handles pointer input must inherit `ThemedControl`, so
    keyboard activation, visible focus, enabled state, and accessibility cannot be omitted
    accidentally. Every concrete subclass still states its semantic accessibility role and
    primary action; the source checker rejects one that does not.
-10. Read transition durations from `Design.Motion`; it collapses them under Reduce Motion.
+13. Read transition durations from `Design.Motion`; it collapses them under Reduce Motion.
    Indeterminate status views may stay visible, but must stop perpetual animation.
-11. Read contrast-sensitive colours and focus geometry through `Design.Surface`, `Design.Text`,
+14. Read contrast-sensitive colours and focus geometry through `Design.Surface`, `Design.Text`,
    and `Design.Accessibility`. Increase Contrast must strengthen faint borders, dividers,
    controls, secondary ink, and focus without replacing the active theme.
-12. Add behavior tests and render the component under at least System plus two deliberately
-   different app themes. Include focus, selection and disabled states when applicable.
-13. Top-level app windows subclass `ThemedWindowController`. It audits the app-owned content
+15. Add behavior tests and render the component under at least System plus two deliberately
+   different app themes. Include focus, selection and disabled states when applicable. A claim
+   about balance, alignment or legibility is checked by looking at a render, not by asserting
+   about the constraints that were meant to produce it.
+16. Top-level app windows subclass `ThemedWindowController`. It audits the app-owned content
     root after AppKit expands it; never opt a window out or start the audit at the system frame
     view.
 

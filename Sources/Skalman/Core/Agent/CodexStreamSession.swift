@@ -26,7 +26,7 @@ final class CodexStreamSession: ConversationStreamSession {
     }
 
     private let plan: () -> AgentLaunchPlan
-    private let effort: String?
+    private let effortProvider: () -> String?
     private var process: Process?
     private var buffer = Data()
     private var errorBuffer = Data()
@@ -35,16 +35,17 @@ final class CodexStreamSession: ConversationStreamSession {
     private var receivedTurnFinished = false
     private var isTerminating = false
     private var turnStartedAt: TimeInterval?
+    private var turnEffort: String?
 
     // MARK: - Initialization
 
     init(
         sessionID: SessionID,
-        effort: String? = nil,
+        effortProvider: @escaping () -> String? = { nil },
         plan: @escaping () -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
-        self.effort = effort
+        self.effortProvider = effortProvider
         self.plan = plan
     }
 
@@ -65,6 +66,7 @@ final class CodexStreamSession: ConversationStreamSession {
         guard canSend else { return false }
 
         turnStartedAt = ProcessInfo.processInfo.systemUptime
+        turnEffort = effortProvider()
         let launchPlan = plan()
         let process = Process()
         let input = Pipe()
@@ -231,6 +233,8 @@ final class CodexStreamSession: ConversationStreamSession {
             max(0, ProcessInfo.processInfo.systemUptime - $0)
         }
         turnStartedAt = nil
+        let effort = turnEffort
+        turnEffort = nil
 
         return .turnFinished(
             text: text,

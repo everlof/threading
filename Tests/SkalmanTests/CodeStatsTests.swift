@@ -152,30 +152,23 @@ final class CodeStatsTests: XCTestCase {
 
     /// A login shell is free to print a greeting or a version-manager warning before the
     /// answer; only the last non-empty line is the path.
-    func testLocateReadsPastALoginShellGreeting() throws {
-        let shell = try stubShell("echo 'Welcome to this machine'; echo '/usr/bin/true'")
-        defer { try? FileManager.default.removeItem(at: shell) }
-
+    func testLocateReadsPastALoginShellGreeting() {
         XCTAssertEqual(
-            CodeStatsRunner.locate(shell: shell.path, fileManager: OnlyTrueIsExecutable()),
+            CodeStatsRunner.locate(
+                shell: "/bin/sh",
+                fileManager: OnlyTrueIsExecutable(),
+                shellOutput: { _ in "Welcome to this machine\n\n/usr/bin/true\n" }
+            ),
             "/usr/bin/true"
         )
     }
 
-    func testLocateAnswersNilWhenTheShellFindsNothing() throws {
-        let shell = try stubShell("exit 1")
-        defer { try? FileManager.default.removeItem(at: shell) }
-
-        XCTAssertNil(CodeStatsRunner.locate(shell: shell.path, fileManager: OnlyTrueIsExecutable()))
-    }
-
-    /// Stands in for the login shell: ignores its `-l -c` arguments and runs `body`.
-    private func stubShell(_ body: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("stub-shell-\(UUID().uuidString).sh")
-        try "#!/bin/sh\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-        return url
+    func testLocateAnswersNilWhenTheShellFindsNothing() {
+        XCTAssertNil(CodeStatsRunner.locate(
+            shell: "/bin/sh",
+            fileManager: OnlyTrueIsExecutable(),
+            shellOutput: { _ in nil }
+        ))
     }
 
     /// Denies the fixed candidate paths — this machine may genuinely have scc installed — so

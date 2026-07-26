@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Identical to skalman-extension-helper.entitlements but for network.client. Two signed
+	     variants rather than one is the price of App Sandbox expressing network access at
+	     signing time; the choice between them is made from ExtensionCapability.networkClient
+	     alone, and every finer distinction stays with the host broker. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>/Library/Application Support/Skalman/Extensions/Packages/</string>
+	</array>
+</dict>
+</plist>

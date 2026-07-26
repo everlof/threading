@@ -5,99 +5,102 @@ import XCTest
 /// The scope chain, and the guard that stops a theme making the terminal unusable.
 ///
 /// Both are pure, which is the reason they are testable at all: resolution reads three
-/// optional names and a set, rather than three singletons and a window.
+/// optional IDs and a set, rather than three singletons and a window.
 final class ThemeResolutionTests: XCTestCase {
 
-    private let available: Set<String> = ["Basic", "Pro", "Ocean", "Homebrew"]
+    private let available: Set<TerminalThemeID> = [.basic, .pro, .ocean, .homebrew]
 
     // MARK: - Order
 
     func testSessionWinsOverProjectAndGlobal() {
         let resolved = ThemeResolution.resolve(
-            session: "Ocean",
-            project: "Pro",
-            global: "Basic",
+            session: .ocean,
+            project: .pro,
+            global: .basic,
             available: available
         )
 
-        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .session, themeName: "Ocean"))
+        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .session, themeID: .ocean))
     }
 
     func testProjectWinsWhenSessionHasNoTheme() {
         let resolved = ThemeResolution.resolve(
             session: nil,
-            project: "Pro",
-            global: "Basic",
+            project: .pro,
+            global: .basic,
             available: available
         )
 
-        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .project, themeName: "Pro"))
+        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .project, themeID: .pro))
     }
 
     func testGlobalAppliesWhenNothingNarrowerIsAssigned() {
         let resolved = ThemeResolution.resolve(
             session: nil,
             project: nil,
-            global: "Basic",
+            global: .basic,
             available: available
         )
 
-        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .global, themeName: "Basic"))
+        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .global, themeID: .basic))
     }
 
     /// Absent means *inherit*, not "copy the default at creation": a session that never chose
     /// follows the default wherever it moves.
     func testUnassignedSessionFollowsAChangedGlobal() {
         let before = ThemeResolution.resolve(
-            session: nil, project: nil, global: "Basic", available: available
+            session: nil, project: nil, global: .basic, available: available
         )
         let after = ThemeResolution.resolve(
-            session: nil, project: nil, global: "Ocean", available: available
+            session: nil, project: nil, global: .ocean, available: available
         )
 
-        XCTAssertEqual(before?.themeName, "Basic")
-        XCTAssertEqual(after?.themeName, "Ocean")
+        XCTAssertEqual(before?.themeID, .basic)
+        XCTAssertEqual(after?.themeID, .ocean)
     }
 
-    // MARK: - Dangling Names
+    // MARK: - Dangling IDs
 
-    /// A deleted theme leaves its name behind on every record that named it. That degrades to
+    /// A deleted theme leaves its ID behind on every record that selected it. That degrades to
     /// inheriting from the next scope out — never to a terminal with no theme at all.
     func testDeletedSessionThemeFallsBackToTheProject() {
         let resolved = ThemeResolution.resolve(
-            session: "Deleted",
-            project: "Pro",
-            global: "Basic",
+            session: TerminalThemeID("deleted"),
+            project: .pro,
+            global: .basic,
             available: available
         )
 
-        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .project, themeName: "Pro"))
+        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .project, themeID: .pro))
     }
 
     func testDeletedSessionAndProjectThemesFallBackToTheGlobal() {
         let resolved = ThemeResolution.resolve(
-            session: "Deleted",
-            project: "AlsoDeleted",
-            global: "Basic",
+            session: TerminalThemeID("deleted"),
+            project: TerminalThemeID("also-deleted"),
+            global: .basic,
             available: available
         )
 
-        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .global, themeName: "Basic"))
+        XCTAssertEqual(resolved, ThemeResolution.Assignment(scope: .global, themeID: .basic))
     }
 
     /// Nothing valid anywhere is reported as nothing, so the caller can answer with the
     /// profile's own embedded copy rather than being handed a name it cannot look up.
-    func testNothingResolvesWhenEveryNameIsUnknown() {
+    func testNothingResolvesWhenEveryIDIsUnknown() {
         XCTAssertNil(
             ThemeResolution.resolve(
-                session: "Gone", project: "Gone", global: "Gone", available: available
+                session: TerminalThemeID("gone"),
+                project: TerminalThemeID("gone"),
+                global: TerminalThemeID("gone"),
+                available: available
             )
         )
     }
 
     func testEmptyThemeListResolvesToNothing() {
         XCTAssertNil(
-            ThemeResolution.resolve(session: nil, project: nil, global: "Basic", available: [])
+            ThemeResolution.resolve(session: nil, project: nil, global: .basic, available: [])
         )
     }
 
@@ -179,10 +182,166 @@ final class ThemeResolutionTests: XCTestCase {
     }
 }
 
+// MARK: - Identity and Migration
+
+@MainActor
+final class TerminalThemeIdentityTests: XCTestCase {
+
+    func testBuiltInThemeIDsAreStableAndUnique() {
+        XCTAssertEqual(TerminalTheme.basic.id, .basic)
+        XCTAssertEqual(TerminalTheme.pro.id, .pro)
+        XCTAssertEqual(TerminalTheme.homebrew.id, .homebrew)
+        XCTAssertEqual(TerminalTheme.ocean.id, .ocean)
+        XCTAssertEqual(
+            Set(TerminalTheme.builtInThemes.map(\.id)).count,
+            TerminalTheme.builtInThemes.count
+        )
+    }
+
+    func testDuplicatingCreatesANewIdentityWhileRenamingPreservesIt() {
+        let source = TerminalTheme.ocean
+        let duplicate = source.duplicated(named: "Ocean Variant")
+        let renamed = duplicate.renamed("Ocean Variant Renamed")
+
+        XCTAssertNotEqual(duplicate.id, source.id)
+        XCTAssertEqual(renamed.id, duplicate.id)
+        XCTAssertEqual(renamed.name, "Ocean Variant Renamed")
+    }
+
+    func testStoredCustomThemeKeepsItsIDAcrossRename() throws {
+        let manager = ThemeManager.shared
+        let original = TerminalTheme.basic.duplicated(
+            named: "Identity Probe \(UUID().uuidString)"
+        )
+        XCTAssertTrue(ThemeAssignments.create(original))
+        defer {
+            if let stored = manager.theme(withID: original.id) {
+                _ = manager.deleteTheme(stored)
+            }
+        }
+
+        XCTAssertTrue(
+            ThemeAssignments.rename(original, to: "\(original.name) Renamed")
+        )
+        let renamed = try XCTUnwrap(manager.theme(withID: original.id))
+        XCTAssertEqual(renamed.id, original.id)
+        XCTAssertEqual(renamed.name, "\(original.name) Renamed")
+    }
+
+    func testNamesAreUniqueCaseInsensitively() {
+        let colliding = TerminalTheme.basic.duplicated(named: "oCeAn")
+
+        XCTAssertFalse(ThemeAssignments.create(colliding))
+        XCTAssertNil(ThemeManager.shared.theme(withID: colliding.id))
+    }
+
+    /// A colour that will not parse falls back to the stock palette's value *for that role*.
+    ///
+    /// It used to fall back to white, which is the one answer that can make the terminal
+    /// unusable: a dark theme whose background failed to parse drew paper, and the palette
+    /// written to read on a dark ground was invisible on it. White is also indistinguishable
+    /// from a theme that is genuinely white, so nothing reported the loss.
+    func testAnUnparseableColourFallsBackToItsRoleRatherThanToWhite() throws {
+        let source = TerminalTheme.ocean
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(source))
+                as? [String: Any]
+        )
+        object["background"] = "not-a-colour"
+        object["red"] = "#gg0000"
+
+        let decoded = try JSONDecoder().decode(
+            TerminalTheme.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(
+            decoded.background.hexString,
+            TerminalTheme.basic.background.hexString,
+            "an unparseable background did not fall back to a background"
+        )
+        XCTAssertEqual(
+            decoded.red.hexString,
+            TerminalTheme.basic.red.hexString,
+            "an unparseable red did not fall back to a red"
+        )
+        XCTAssertNotEqual(
+            decoded.background.hexString,
+            NSColor.white.hexString,
+            "the background fell back to white, which is what made a dark theme unreadable"
+        )
+
+        // Everything that *did* parse is untouched: one bad value costs one colour.
+        XCTAssertEqual(decoded.foreground.hexString, source.foreground.hexString)
+        XCTAssertEqual(decoded.green.hexString, source.green.hexString)
+    }
+
+    func testLegacyThemeWithoutIDGetsDeterministicTaggedIdentity() throws {
+        let oldName = "Old Custom \(UUID().uuidString)"
+        let source = TerminalTheme.basic.duplicated(named: oldName)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(source))
+                as? [String: Any]
+        )
+        object.removeValue(forKey: "id")
+
+        let decoded = try JSONDecoder().decode(
+            TerminalTheme.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(decoded.id, .legacyName(oldName))
+        XCTAssertEqual(decoded.id.legacyName, oldName)
+
+        let rewritten = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded))
+                as? [String: Any]
+        )
+        XCTAssertEqual(rewritten["id"] as? String, decoded.id.rawValue)
+    }
+
+    func testLegacyCaseOnlyNameCollisionKeepsItsTaggedIdentity() {
+        var custom = TerminalTheme.basic.renamed("ocean")
+        custom.id = .legacyName("ocean")
+
+        let migration = ThemeManager.normaliseLegacyThemes([custom])
+
+        XCTAssertEqual(migration.first?.name, "ocean 2")
+        XCTAssertEqual(migration.first?.id, .legacyName("ocean"))
+    }
+
+    func testLegacySessionAndProjectNamesDecodeButOnlyIDsAreReencoded() throws {
+        let session = try JSONDecoder().decode(
+            AgentSession.self,
+            from: Data(#"{"kind":"claude","themeName":"Ocean"}"#.utf8)
+        )
+        let project = try JSONDecoder().decode(
+            Project.self,
+            from: Data(#"{"folderPath":"/tmp/theme-probe","themeName":"Homebrew"}"#.utf8)
+        )
+
+        XCTAssertEqual(session.themeID, .ocean)
+        XCTAssertEqual(project.themeID, .homebrew)
+
+        let sessionJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(session))
+                as? [String: Any]
+        )
+        let projectJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(project))
+                as? [String: Any]
+        )
+        XCTAssertEqual(sessionJSON["themeID"] as? String, TerminalThemeID.ocean.rawValue)
+        XCTAssertEqual(projectJSON["themeID"] as? String, TerminalThemeID.homebrew.rawValue)
+        XCTAssertNil(sessionJSON["themeName"])
+        XCTAssertNil(projectJSON["themeName"])
+    }
+}
+
 // MARK: - Follow App Theme
 
-/// The terminal-theme list's app-theme entry, which is a reserved *name* rather than a fourth
-/// setting — that is what lets it inherit down the same three scopes as any palette.
+/// The terminal-theme list's app-theme entry is a reserved ID rather than a fourth setting —
+/// that is what lets it inherit down the same three scopes as any palette.
 @MainActor
 final class FollowsAppThemeTests: XCTestCase {
 
@@ -191,31 +350,31 @@ final class FollowsAppThemeTests: XCTestCase {
         super.tearDown()
     }
 
-    /// The whole point of making it a name: `ThemeResolution` needs no case for it, so a session
+    /// The whole point of making it an ID: `ThemeResolution` needs no case for it, so a session
     /// can follow the chrome while its project names a palette, and the narrowest scope still
     /// wins.
     func testTheEntryResolvesLikeAnyOtherNameInTheChain() {
-        let available: Set<String> = ["Basic", "Pro", TerminalThemeNames.followsAppTheme]
+        let available: Set<TerminalThemeID> = [.basic, .pro, .followsAppTheme]
 
         let session = ThemeResolution.resolve(
-            session: TerminalThemeNames.followsAppTheme, project: "Pro", global: "Basic",
+            session: .followsAppTheme, project: .pro, global: .basic,
             available: available
         )
         XCTAssertEqual(session?.scope, .session)
-        XCTAssertEqual(session?.themeName, TerminalThemeNames.followsAppTheme)
+        XCTAssertEqual(session?.themeID, .followsAppTheme)
 
         let project = ThemeResolution.resolve(
-            session: nil, project: TerminalThemeNames.followsAppTheme, global: "Basic",
+            session: nil, project: .followsAppTheme, global: .basic,
             available: available
         )
         XCTAssertEqual(project?.scope, .project)
-        XCTAssertEqual(project?.themeName, TerminalThemeNames.followsAppTheme)
+        XCTAssertEqual(project?.themeID, .followsAppTheme)
     }
 
-    /// It has to be in `availableNames`, or resolution treats a scope that chose it as a dangling
-    /// name and silently inherits past it — which would look exactly like the choice not sticking.
+    /// It has to be in `availableIDs`, or resolution treats a scope that chose it as dangling
+    /// and silently inherits past it — which would look exactly like the choice not sticking.
     func testTheEntryIsAvailableToResolveAgainst() {
-        XCTAssertTrue(ThemeAssignments.availableNames.contains(TerminalThemeNames.followsAppTheme))
+        XCTAssertTrue(ThemeAssignments.availableIDs.contains(.followsAppTheme))
     }
 
     /// The palette is the live one, not a copy taken when the choice was made.

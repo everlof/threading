@@ -44,6 +44,63 @@ final class PermissionRequestViewTests: XCTestCase {
         XCTAssertNil(cardReference)
     }
 
+    func testRemoteRequestIncludesTheEditDiffNeededForAnInformedDecision() {
+        let request = PermissionRequest(
+            sessionID: SessionID(),
+            toolName: "Edit",
+            input: [
+                "file_path": "/tmp/App.swift",
+                "old_string": "let old = true",
+                "new_string": "let fixed = true",
+            ]
+        )
+        let card = PermissionRequestView(request: request) { _ in }
+
+        XCTAssertEqual(card.remoteRequest.toolName, "Edit")
+        XCTAssertEqual(card.remoteRequest.filePath, "/tmp/App.swift")
+        XCTAssertEqual(card.remoteRequest.diff.map(\.kind), ["removal", "addition"])
+    }
+
+    func testRemoteDecisionMustMatchTheActiveCardAndSettlesOnlyOnce() {
+        var decisions: [String] = []
+        let card = PermissionRequestView(request: makeRequest()) { decision in
+            switch decision {
+            case .allow: decisions.append("allow")
+            case .deny: decisions.append("deny")
+            }
+        }
+        let id = card.remoteRequest.id
+
+        XCTAssertFalse(card.resolveRemote(id: "stale-id", decision: "allow"))
+        XCTAssertFalse(card.resolveRemote(id: id, decision: "always"))
+        XCTAssertTrue(card.resolveRemote(id: id, decision: "allow"))
+        XCTAssertFalse(card.resolveRemote(id: id, decision: "deny"))
+        XCTAssertEqual(decisions, ["allow"])
+    }
+
+    func testOversizedRemoteDiffRequiresReviewOnTheMac() {
+        let request = PermissionRequest(
+            sessionID: SessionID(),
+            toolName: "Write",
+            input: [
+                "file_path": "/tmp/generated.swift",
+                "content": String(
+                    repeating: "let generated = true // remote review evidence\n",
+                    count: 4_000
+                ),
+            ]
+        )
+        var decisionCount = 0
+        let card = PermissionRequestView(request: request) { _ in decisionCount += 1 }
+        let remote = card.remoteRequest
+
+        XCTAssertFalse(remote.canDecide)
+        XCTAssertEqual(remote.unavailableReason, RemoteConversationWirePolicy.localReviewReason)
+        XCTAssertTrue(remote.diff.isEmpty)
+        XCTAssertFalse(card.resolveRemote(id: remote.id, decision: "allow"))
+        XCTAssertEqual(decisionCount, 0)
+    }
+
     func testToolIdentityPreservesNamesItDoesNotKnow() {
         let tool = ToolIdentity("FutureProviderTool")
 

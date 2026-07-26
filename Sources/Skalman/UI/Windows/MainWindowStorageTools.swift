@@ -93,40 +93,26 @@ extension AgentToolCoordinator {
         _ arguments: StorageCleanupArguments,
         completion: @escaping (MCPToolResult) -> Void
     ) {
-        let requested = (arguments.paths ?? "")
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        let vetted = ProjectStore.shared.projects.flatMap {
+            ArtifactScanService.shared.artifacts(for: $0.id)
+        }
 
-        guard !requested.isEmpty else {
+        let resolution = StorageCleanupGate.resolve(arguments.paths, against: vetted)
+
+        guard !resolution.isEmptyRequest else {
             completion(.failure(StorageToolStrings.noPaths))
             return
         }
 
-        // The gate that keeps this from being an arbitrary delete: a path is only actionable if
-        // the scanner already vetted it. An unknown path is refused by name, so the agent can
-        // tell a typo from a rejection.
-        let known = Dictionary(
-            uniqueKeysWithValues: ProjectStore.shared.projects
-                .flatMap { project in
-                    ArtifactScanService.shared.artifacts(for: project.id).map {
-                        ($0.url.path, (artifact: $0, project: project))
-                    }
-                }
-        )
-
-        let matched = requested.compactMap { known[$0] }
-        let unknown = requested.filter { known[$0] == nil }
-
-        guard !matched.isEmpty else {
-            completion(.failure(StorageToolStrings.unknownPaths(unknown)))
+        guard !resolution.matched.isEmpty else {
+            completion(.failure(StorageToolStrings.unknownPaths(resolution.unknown)))
             return
         }
 
         presentCleanupProposal(
-            matched.map(\.artifact),
+            resolution.matched,
             reason: arguments.reason,
-            unknown: unknown,
+            unknown: resolution.unknown,
             completion: completion
         )
     }

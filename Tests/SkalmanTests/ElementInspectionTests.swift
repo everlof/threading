@@ -211,6 +211,48 @@ final class ElementInspectionTests: XCTestCase {
         XCTAssertFalse(isRed(10, 90), "outside the rect entirely")
     }
 
+    /// A sidebar split item's material is drawn for the window from outside the process, so a
+    /// `cacheDisplay` capture writes opaque white across the whole column and the sidebar's own
+    /// light-on-dark rows vanish into it. Every report was shipping a screenshot with a blank
+    /// band where the sidebar should be, which is worse than no screenshot: it looks like a
+    /// rendering bug in the app rather than in the capture.
+    @MainActor
+    func testCaptureSuppliesTheSidebarGroundTheWindowServerDrew() throws {
+        let original = WindowBackdrop.color
+        defer { WindowBackdrop.set(original) }
+        WindowBackdrop.set(NSColor(red: 0.04, green: 0.04, blue: 0.06, alpha: 1))
+
+        let split = NSSplitViewController()
+        split.addSplitViewItem(NSSplitViewItem(sidebarWithViewController: NSViewController()))
+        split.addSplitViewItem(NSSplitViewItem(viewController: NSViewController()))
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 300),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        window.contentViewController = split
+        // Assigning a content view controller resizes the window to its fitting size, so the
+        // intended size lands afterwards — the same order `applyInitialFrame` keeps.
+        window.setContentSize(NSSize(width: 600, height: 300))
+        window.layoutIfNeeded()
+
+        let rep = try XCTUnwrap(WindowSnapshot.capture(window: window, annotating: nil))
+
+        // Two samples down the sidebar's column: its pane, and the strip above it where the
+        // traffic lights float over a full-height sidebar.
+        for y in [rep.pixelsHigh / 2, rep.pixelsHigh / 12] {
+            let pixel = try XCTUnwrap(rep.colorAt(x: 40, y: y)?.usingColorSpace(.sRGB))
+            XCTAssertLessThan(
+                pixel.brightnessComponent,
+                0.5,
+                "the sidebar column captured as white at row \(y) — its ground is missing again"
+            )
+        }
+    }
+
     func testPointMarkdownCarriesTheScreenshotPathWhenPresent() {
         var report = PointReport(
             point: .zero,
@@ -250,6 +292,206 @@ final class ElementInspectionTests: XCTestCase {
 
         XCTAssertEqual(downRight, expected)
         XCTAssertEqual(upLeft, expected)
+    }
+
+    // MARK: - Layers
+
+    func testLayersReadTheModifiersHeld() {
+        XCTAssertEqual(InspectorLayers.held([]), [])
+        XCTAssertEqual(InspectorLayers.held(.control), .hierarchy)
+        XCTAssertEqual(InspectorLayers.held(.option), .spacing)
+        XCTAssertEqual(InspectorLayers.held([.control, .option]), [.hierarchy, .spacing])
+        // A modifier the inspector says nothing about changes nothing.
+        XCTAssertEqual(InspectorLayers.held([.command, .shift]), [])
+    }
+
+    // MARK: - Hierarchy Levels
+
+    /// A wrapper that exactly fills its parent is *one rectangle on screen*, so it is one
+    /// level with two names — a second outline over the same pixels and a second legend row
+    /// claim there are two things to look at when there is one.
+    func testCoincidentWrappersCollapseIntoOneLevel() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let wrapper = ProbeView(frame: NSRect(x: 20, y: 20, width: 100, height: 60))
+        let filling = InnerProbeView(frame: NSRect(x: 0, y: 0, width: 100, height: 60))
+        root.addSubview(wrapper)
+        wrapper.addSubview(filling)
+
+        let levels = InspectorHierarchy.levels(for: filling)
+
+        XCTAssertEqual(levels.count, 2)
+        XCTAssertEqual(levels[0].classNames, ["InnerProbeView", "ProbeView"])
+        XCTAssertEqual(levels[0].title, "InnerProbeView = ProbeView")
+        XCTAssertEqual(levels[0].depth, 0)
+        XCTAssertEqual(levels[1].classNames, ["NSView"])
+        XCTAssertEqual(levels[1].depth, 1)
+    }
+
+    /// Views land on half points routinely, so "the same rectangle" is a tolerance.
+    func testHalfPointDriftStillReadsAsOneRectangle() {
+        XCTAssertTrue(InspectorHierarchy.coincide(
+            NSRect(x: 10, y: 10, width: 100, height: 40),
+            NSRect(x: 10.5, y: 10, width: 99.5, height: 40)
+        ))
+        XCTAssertFalse(InspectorHierarchy.coincide(
+            NSRect(x: 10, y: 10, width: 100, height: 40),
+            NSRect(x: 8, y: 10, width: 104, height: 40)
+        ))
+    }
+
+    func testLevelsRunLeafOutwardWithRectsInWindowSpace() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let middle = ProbeView(frame: NSRect(x: 20, y: 20, width: 120, height: 100))
+        let leaf = InnerProbeView(frame: NSRect(x: 10, y: 10, width: 40, height: 20))
+        root.addSubview(middle)
+        middle.addSubview(leaf)
+
+        let levels = InspectorHierarchy.levels(for: leaf)
+
+        XCTAssertEqual(levels.map(\.depth), [0, 1, 2])
+        XCTAssertEqual(levels.map(\.title), ["InnerProbeView", "ProbeView", "NSView"])
+        XCTAssertEqual(levels[0].rect, NSRect(x: 30, y: 30, width: 40, height: 20))
+        XCTAssertEqual(levels[1].rect, NSRect(x: 20, y: 20, width: 120, height: 100))
+    }
+
+    /// ⌥ alone is the common ask — "why is this inset like that" — and a measure needs
+    /// something to measure to, so it draws one level out and stops there.
+    func testShownLevelsFollowWhatIsHeld() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let middle = ProbeView(frame: NSRect(x: 20, y: 20, width: 120, height: 100))
+        let leaf = InnerProbeView(frame: NSRect(x: 10, y: 10, width: 40, height: 20))
+        root.addSubview(middle)
+        middle.addSubview(leaf)
+        let levels = InspectorHierarchy.levels(for: leaf)
+
+        XCTAssertEqual(InspectorHierarchy.shown(levels, for: []).count, 1)
+        XCTAssertEqual(InspectorHierarchy.shown(levels, for: .spacing).count, 2)
+        XCTAssertEqual(InspectorHierarchy.shown(levels, for: .hierarchy).count, 3)
+        XCTAssertEqual(InspectorHierarchy.shown(levels, for: [.hierarchy, .spacing]).count, 3)
+    }
+
+    /// Hue means depth, and the ramp is shorter than a real view chain — so it cycles, and
+    /// the numbered chip on each rectangle is what tells depth 0 from depth 6.
+    func testDepthHuesCycleThroughTheCategoricalRamp() {
+        let count = Design.Categorical.hues.count
+
+        XCTAssertEqual(Design.Categorical.hue(at: 0).name, Design.Categorical.hues[0].name)
+        XCTAssertEqual(Design.Categorical.hue(at: count).name, Design.Categorical.hues[0].name)
+        XCTAssertEqual(Design.Categorical.hue(at: count + 1).name, Design.Categorical.hues[1].name)
+        XCTAssertEqual(Design.Categorical.ramp.count, count)
+    }
+
+    // MARK: - Spacing
+
+    /// Most views are pinned flush to at least one edge, and drawing `0` around a fitted view
+    /// is a number saying nothing. Only a gap someone chose earns a line.
+    func testGapsDropFlushEdgesAndKeepChosenOnes() {
+        let gaps = InspectorSpacing.gaps(
+            from: NSRect(x: 12, y: 0, width: 76, height: 40),
+            to: NSRect(x: 0, y: 0, width: 100, height: 40)
+        )
+
+        XCTAssertEqual(gaps.map(\.edge), [.leading, .trailing])
+        XCTAssertEqual(gaps.map(\.label), ["12", "12"])
+        XCTAssertEqual(InspectorSpacing.describe(gaps), "leading 12 · trailing 12")
+        XCTAssertEqual(InspectorSpacing.describe([]), InspectorStrings.flushOnEverySide)
+    }
+
+    /// The one measurement here that is a bug rather than a value to judge: a child wider
+    /// than the box holding it. It is reported, negative, rather than filtered out.
+    func testGapReportsAnOverflowAsNegative() {
+        let gaps = InspectorSpacing.gaps(
+            from: NSRect(x: -8, y: 4, width: 120, height: 32),
+            to: NSRect(x: 0, y: 0, width: 100, height: 40)
+        )
+
+        XCTAssertEqual(
+            gaps.first { $0.edge == .leading }?.label,
+            "-8"
+        )
+        XCTAssertEqual(gaps.first { $0.edge == .trailing }?.label, "-12")
+    }
+
+    func testMeasureLinesSpanTheGapTheyName() {
+        let gaps = InspectorSpacing.gaps(
+            from: NSRect(x: 20, y: 10, width: 60, height: 20),
+            to: NSRect(x: 0, y: 0, width: 100, height: 50)
+        )
+
+        let leading = try? XCTUnwrap(gaps.first { $0.edge == .leading })
+        XCTAssertEqual(leading?.start, NSPoint(x: 0, y: 20))
+        XCTAssertEqual(leading?.end, NSPoint(x: 20, y: 20))
+        XCTAssertEqual(leading?.isHorizontal, true)
+
+        let top = try? XCTUnwrap(gaps.first { $0.edge == .top })
+        XCTAssertEqual(top?.start, NSPoint(x: 50, y: 30))
+        XCTAssertEqual(top?.end, NSPoint(x: 50, y: 50))
+        XCTAssertEqual(top?.isHorizontal, false)
+    }
+
+    func testGapsAreMeasuredBetweenEveryConsecutivePair() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let middle = ProbeView(frame: NSRect(x: 20, y: 20, width: 120, height: 100))
+        let leaf = InnerProbeView(frame: NSRect(x: 10, y: 10, width: 40, height: 20))
+        root.addSubview(middle)
+        middle.addSubview(leaf)
+
+        let pairs = InspectorSpacing.gaps(across: InspectorHierarchy.levels(for: leaf))
+
+        XCTAssertEqual(pairs.count, 2)
+        XCTAssertEqual(pairs[0].parent.title, "ProbeView")
+        XCTAssertEqual(pairs[1].parent.title, "NSView")
+    }
+
+    // MARK: - Hierarchy Report
+
+    /// The screenshot carries the hierarchy as *colours*, which nobody reading the text can
+    /// see and no agent can name. The legend is what turns "the orange one is too wide" into
+    /// a class to open.
+    func testHierarchyMarkdownNamesEachColourAgainstItsClass() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let middle = ProbeView(frame: NSRect(x: 20, y: 20, width: 120, height: 100))
+        let leaf = InnerProbeView(frame: NSRect(x: 10, y: 10, width: 40, height: 20))
+        root.addSubview(middle)
+        middle.addSubview(leaf)
+
+        let markdown = ElementReport.build(for: leaf, layers: .hierarchy).markdown
+
+        XCTAssertTrue(markdown.contains("- Hierarchy, target outward"))
+        XCTAssertTrue(markdown.contains("Blue · 0 · InnerProbeView"))
+        XCTAssertTrue(markdown.contains("Orange · 1 · ProbeView"))
+        XCTAssertTrue(markdown.contains("Purple · 2 · NSView"))
+        // Spacing was not held, so no measures are claimed for a screenshot without them.
+        XCTAssertFalse(markdown.contains("- Spacing"))
+    }
+
+    func testSpacingMarkdownNamesTheParentTheGapLivesIn() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let middle = ProbeView(frame: NSRect(x: 20, y: 20, width: 120, height: 100))
+        let leaf = InnerProbeView(frame: NSRect(x: 10, y: 10, width: 40, height: 20))
+        root.addSubview(middle)
+        middle.addSubview(leaf)
+
+        let markdown = ElementReport.build(for: leaf, layers: .spacing).markdown
+
+        XCTAssertTrue(markdown.contains("- Spacing, inside each parent"))
+        XCTAssertTrue(markdown.contains("InnerProbeView inside ProbeView: "))
+        XCTAssertTrue(markdown.contains("leading 10"))
+        // ⌥ alone draws one level out, so it must not describe a pair it never drew.
+        XCTAssertFalse(markdown.contains("inside NSView"))
+    }
+
+    /// A plain pick is the report it always was: nothing was drawn in colour, so nothing
+    /// claims a colour was.
+    func testPlainPickCarriesNoLegend() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let leaf = ProbeView(frame: NSRect(x: 10, y: 10, width: 40, height: 20))
+        root.addSubview(leaf)
+
+        let markdown = ElementReport.build(for: leaf).markdown
+
+        XCTAssertFalse(markdown.contains("Hierarchy"))
+        XCTAssertFalse(markdown.contains("Spacing"))
     }
 
     func testRegionReportFlipsIntoScreenshotCoordinates() {

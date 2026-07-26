@@ -28,6 +28,22 @@
       "type": "string",
       "minLength": 1
     },
+    "dataVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "default": 1,
+      "description": "Monotonic schema version for extension-owned settings/KV/cache interpretation. The host commits it only after successful registration."
+    },
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "native",
+        "webAssembly"
+      ],
+      "default": "native",
+      "description": "Execution boundary. New distributable Swift extensions should use webAssembly; native is retained for format-1 compatibility."
+    },
     "executable": {
       "type": "string",
       "minLength": 1,
@@ -36,9 +52,174 @@
     "capabilities": {
       "type": "array",
       "uniqueItems": true,
+      "description": "Safe WebAssembly v1 values include commands, panels, mcp.tools, settings, services.provide, services.consume, companions.invoke, ui.components, ui.rendering.metal, appearance.provider-icons, appearance.account-icons, appearance.session-identity, host.projects.read, host.sessions.read, host.sessions.runtime.read, host.repositories.read, host.providers.read, host.accounts.presentation.read, host.events, storage.kv, storage.cache, and storage.secrets. companions.invoke addresses only operations declared by the same extension's companion. ui.rendering.metal permits constrained host-owned custom surfaces only; it does not grant Metal objects to the extension process. host.sessions.runtime.read returns only host-attributed process and listening-port rows for an exact session ID; it does not grant process-table access. network.client is reserved for deprecated native compatibility and is rejected for WebAssembly. Unknown values remain inspectable but are rejected by hosts that do not support them.",
       "items": {
         "type": "string",
         "minLength": 1
+      }
+    },
+    "mcpTools": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/mcpTool"
+      }
+    },
+    "settings": {
+      "$ref": "extension-settings.schema.json",
+      "default": {
+        "pages": [],
+        "sections": []
+      }
+    },
+    "services": {
+      "type": "array",
+      "maxItems": 32,
+      "default": [],
+      "items": {
+        "$ref": "extension-services.schema.json#/$defs/definition"
+      }
+    },
+    "serviceDependencies": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "default": [],
+      "items": {
+        "$ref": "extension-services.schema.json#/$defs/dependency"
+      }
+    },
+    "companions": {
+      "type": "array",
+      "maxItems": 4,
+      "default": [],
+      "description": "Optional separately signed macOS worker apps. Companions extend a WebAssembly core; they do not replace its settings, commands, panels, hooks, tools, storage, or host-data capability boundary.",
+      "items": {
+        "$ref": "#/$defs/companion"
+      }
+    }
+  },
+  "$defs": {
+    "contributionIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "mcpTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "description", "inputSchema"],
+      "properties": {
+        "id": { "$ref": "#/$defs/contributionIdentifier" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "inputSchema": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "object" }
+          }
+        }
+      }
+    },
+    "companion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "platform", "bundlePath", "capabilities"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/contributionIdentifier"
+        },
+        "platform": {
+          "const": "macOS"
+        },
+        "bundlePath": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/].*\\.app$",
+          "description": "Package-relative path to a nested app. The host rejects absolute paths, '.', '..', symlink escapes, malformed bundles, and mismatched derived bundle identifiers."
+        },
+        "activation": {
+          "type": "string",
+          "enum": ["onDemand", "whileExtensionEnabled"],
+          "default": "onDemand"
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "description": "OS-facing companion authority, independently approved from the WebAssembly core's Skalman host capabilities. SDK v1 values are background.service, process.spawn, network.client, network.listen, filesystem.user-selected.read, filesystem.user-selected.write, screen.capture, input.control, automation.apple-events, notifications.post, clipboard.read, clipboard.write, and ui.remote-surfaces.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "operations": {
+          "type": "array",
+          "maxItems": 64,
+          "default": [],
+          "description": "Named, schema-described operations the WebAssembly core may invoke through Skalman's host broker. Declaring any operation requires the core capability companions.invoke.",
+          "items": {
+            "$ref": "#/$defs/companionOperation"
+          }
+        },
+        "surfaces": {
+          "type": "array",
+          "maxItems": 16,
+          "default": [],
+          "description": "Bounded pixel surfaces rendered by this companion into host-owned views. Declaring any surface requires the companion capability ui.remote-surfaces.",
+          "items": {
+            "$ref": "#/$defs/remoteSurface"
+          }
+        }
+      }
+    },
+    "companionOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "description", "inputSchema", "outputSchema"],
+      "properties": {
+        "id": { "$ref": "#/$defs/contributionIdentifier" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "inputSchema": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "object" }
+          }
+        },
+        "outputSchema": {
+          "type": "object"
+        }
+      }
+    },
+    "remoteSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "accessibilityLabel"],
+      "properties": {
+        "id": { "$ref": "#/$defs/contributionIdentifier" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "accessibilityLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240,
+          "description": "Host-owned accessibility fallback for the pixel surface."
+        },
+        "maximumWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 2560
+        },
+        "maximumHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 1600
+        },
+        "acceptsPointer": { "type": "boolean", "default": false },
+        "acceptsKeyboard": { "type": "boolean", "default": false }
       }
     }
   }

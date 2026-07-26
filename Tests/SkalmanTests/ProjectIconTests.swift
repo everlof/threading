@@ -288,4 +288,44 @@ final class ProjectIconTests: XCTestCase {
     func testRemoteOriginURLNilOutsideRepository() {
         XCTAssertNil(GitInfo.remoteOriginURL(for: FileManager.default.temporaryDirectory.path))
     }
+
+    func testHeadRevisionReadsLoosePackedAndDetachedHeads() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("skalman-head-tests-\(UUID().uuidString)")
+        let gitDirectory = root.appendingPathComponent(".git")
+        let heads = gitDirectory.appendingPathComponent("refs/heads")
+        try FileManager.default.createDirectory(at: heads, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let looseRevision = String(repeating: "a", count: 40)
+        try "ref: refs/heads/main\n".write(
+            to: gitDirectory.appendingPathComponent("HEAD"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let mainRef = heads.appendingPathComponent("main")
+        try "\(looseRevision)\n".write(
+            to: mainRef,
+            atomically: true,
+            encoding: .utf8
+        )
+        XCTAssertEqual(GitInfo.headRevision(for: root.path), looseRevision)
+
+        try FileManager.default.removeItem(at: mainRef)
+        let packedRevision = String(repeating: "b", count: 40)
+        try "# pack-refs with: peeled\n\(packedRevision) refs/heads/main\n".write(
+            to: gitDirectory.appendingPathComponent("packed-refs"),
+            atomically: true,
+            encoding: .utf8
+        )
+        XCTAssertEqual(GitInfo.headRevision(for: root.path), packedRevision)
+
+        let detachedRevision = String(repeating: "c", count: 40)
+        try "\(detachedRevision)\n".write(
+            to: gitDirectory.appendingPathComponent("HEAD"),
+            atomically: true,
+            encoding: .utf8
+        )
+        XCTAssertEqual(GitInfo.headRevision(for: root.path), detachedRevision)
+    }
 }

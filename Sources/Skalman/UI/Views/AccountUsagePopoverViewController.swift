@@ -11,6 +11,7 @@ final class AccountUsagePopoverViewController: NSViewController {
     // MARK: - Properties
 
     private let account: AgentAccount
+    private let isEmbedded: Bool
     private let contentStack = NSStackView()
     private let appEvents = AppEventObservations()
 
@@ -20,8 +21,9 @@ final class AccountUsagePopoverViewController: NSViewController {
 
     // MARK: - Initialization
 
-    init(account: AgentAccount) {
+    init(account: AgentAccount, isEmbedded: Bool = false) {
         self.account = account
+        self.isEmbedded = isEmbedded
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -32,8 +34,17 @@ final class AccountUsagePopoverViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        let container = HoverTrackingView()
-        container.onHoverChange = { [weak self] hovering in self?.onHoverChange?(hovering) }
+        let container: NSView
+        if isEmbedded {
+            container = NSView()
+        } else {
+            let trackingContainer = HoverTrackingView()
+            trackingContainer.onHoverChange = { [weak self] hovering in
+                self?.onHoverChange?(hovering)
+            }
+            container = trackingContainer
+        }
+        let inset = isEmbedded ? 0 : Design.Spacing.inset
 
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
@@ -45,19 +56,19 @@ final class AccountUsagePopoverViewController: NSViewController {
         NSLayoutConstraint.activate([
             contentStack.topAnchor.constraint(
                 equalTo: container.topAnchor,
-                constant: Design.Spacing.inset
+                constant: inset
             ),
             contentStack.leadingAnchor.constraint(
                 equalTo: container.leadingAnchor,
-                constant: Design.Spacing.inset
+                constant: inset
             ),
             contentStack.trailingAnchor.constraint(
                 equalTo: container.trailingAnchor,
-                constant: -Design.Spacing.inset
+                constant: -inset
             ),
             contentStack.bottomAnchor.constraint(
                 equalTo: container.bottomAnchor,
-                constant: -Design.Spacing.inset
+                constant: -inset
             ),
             contentStack.widthAnchor.constraint(
                 equalToConstant: UsagePopoverDefaults.contentWidth
@@ -178,4 +189,5 @@ final class HoverTrackingView: NSView {
 
 enum UsagePopoverDefaults {
     static let contentWidth: CGFloat = 240
+    static let width = contentWidth + 2 * Design.Spacing.inset
 }

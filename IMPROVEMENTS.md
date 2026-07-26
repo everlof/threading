@@ -44,6 +44,16 @@ Same decode-fails → reset → next-save-overwrites shape, lower stakes, fix wi
 pattern: `AccountPreferencesStore.swift:92-103`, `ProfileStorage` (`TerminalProfile.swift:80-93`),
 `TokenUsageManager` (`TokenUsage.swift:48-61`), `AISettingsStorage` (encode side only).
 
+- [x] The *other* stores had the same hole, and worse odds. `ShortcutOverrideStore` and
+      `AccountPreferencesStore` keep their state as one encoded blob in `UserDefaults`, and a
+      decode failure fell through to **defaults** — where for a settings store the next save is
+      any ordinary edit, so a schema change erased every keyboard binding or account name the
+      first time the user touched one. Both now tell *missing* from *unreadable*, keep the
+      unreadable bytes under `<key>.unreadable` (`DefaultsQuarantine`) and permit writes only if
+      that succeeded, which is `ProjectStore`'s own rule. `AccountPreferencesStore.save` also
+      swallowed encode failures with `try?`, so an edit that never landed looked exactly like
+      one that did.
+
 ### 1.2 MCP: fix the session-registry data race
 - [x] `MCPSessionRegistry`'s `static var` dictionaries are written on main (token minting at
       launch; `retainOnly` on session deletion) and read on the `com.skalman.mcp` queue
@@ -187,28 +197,71 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
       authoritative, derive the rest. `currentSessionID` now drives runtime attention and a
       single chrome delegate event; the toolbar resolves its account from that session and its
       currently configured account instead of retaining another visibility key.
-- [ ] Settings pages are index-coupled (sidebar index → `SettingsPages.all[index]`) — give
-      `Page` an identity enum.
+- [x] Settings pages carry an identity (`SettingsPages.page(id:)` / `id(ofTitle:)`); nothing
+      indexes into `SettingsPages.all` any more, and the sidebar and container both route by id.
 
 ### 3.2 Retire the IUO init-order contracts
 - [ ] ~46 implicitly-unwrapped declarations whose safety hangs on `setupSplitViewController()`
-      running first. Known crash shape: `AppDelegate.mainWindowController!` if
-      `applicationShouldHandleReopen` beats `didFinishLaunching`
-      (`AppDelegate.swift:13,53-58`). Convert to `let` built in init, or a single lazy
-      view-tree builder per controller.
+      running first. Convert to `let` built in init, or a single lazy view-tree builder per
+      controller. **The `AppDelegate` half is done**: the named `applicationShouldHandleReopen`
+      crash is guarded, and all twenty window-scoped *menu actions* now route through
+      `mainWindowController?` — two processes run this delegate and never build a window (a
+      hosted test bundle, and a second instance that lost the single-instance lock), so a
+      command arriving in either has nothing to act on and doing nothing is the answer.
+      `AppDelegateTests` performs every one of them by selector on a window-less delegate. The
+      launch path deliberately keeps its force-unwraps: there, a silent no-op would hide a real
+      failure.
 
 ### 3.3 Tests where the code is already pure
 Currently: 3 tests (TranscriptReplay). The architecture has already extracted its logic —
 these need no UI harness:
 - [x] Persistence: round-trip, corrupt-file quarantine, old-schema fixtures (locks in 1.1).
-- [ ] `AgentLauncher` plan snapshots, including hostile strings (locks in 2.6).
+- [x] `AgentLauncher` hostile-string tests (`AgentLaunchQuotingTests`), locking in 2.6 two ways:
+      the quoter's output is tokenized by **`/bin/sh` itself** and must give back the same words
+      (with a second test proving no `$(…)` ran while doing so — the round-trip alone would
+      report the *result* of an expansion quite happily), and a whole plan built from hostile
+      project, session, model and prompt strings must leave nothing but `&&` when its quoted
+      spans are removed. The residue parser has its own test, having been wrong once: it read
+      the quoter's `'\''` escape as syntax.
 - [ ] Stream-event golden files from real Claude/Codex transcripts (locks in 2.4).
-- [ ] `SessionImporter.belongs` worktree fixtures — CLAUDE.md says the rules were "proven
-      against a built layout"; make that proof executable.
-- [ ] `SidebarTreeBuilder` grouping rules; `EditDiff` LCS; `Markdown` reader table;
-      usage-window normalizers (fraction clamping, expiry, window identity).
+- [x] `SessionImporter.belongs` worktree fixtures (`SessionImportBelongingTests`), built with
+      **git itself**: a main checkout, a linked worktree nested inside it, and one beside it. A
+      fixture assembled by hand from what the layout is believed to be would prove the belief;
+      the rule turns on where git puts a linked worktree's git directory and what it writes into
+      the `.git` file pointing there. Covers the case it exists for — `<repo>/.claude-worktrees/x`
+      is a *different* checkout, not a subdirectory — plus prefix-only lookalikes
+      (`/tmp/repo-notes` vs `/tmp/repo`) and a project outside git entirely.
+- [x] `SidebarTreeBuilder` grouping rules (`SidebarTreeBuilderTests`): a level appears only
+      where it earns one, a group keeps its first session's place, an orphaned side chat stays
+      visible, and a **cycle in the stored lineage** surfaces both rows rather than nesting —
+      the outline view asks for children lazily, so that one is a hang rather than a wrong row.
+      Writing them found a live bug: the `nonisolated static` readers on `AppSettings` went
+      straight to `UserDefaults.standard`, while the seeded defaults were registered only in
+      `init`, so a read before anything touched the singleton got `false` — the *opposite* of
+      the documented default for every seeded setting. Registration is now idempotent and done
+      by the readers themselves. (Usage-window normalizers were already covered by
+      `AccountUsageSummaryTests`; fraction clamping is at all four fetcher boundaries.)
+- [x] `EditDiff` LCS (`EditDiffTests`): one changed line leaves the rest as *context* — the
+      alignment's whole purpose, and the same view the permission sheet is approved on — plus
+      insertion, deletion, identical text, repeated lines (where an LCS walk classically drifts
+      and reads a one-line insert as a rewrite), and the past-the-cap fallback. Also the
+      argument reading, including that a `patch` is preferred over the tool *name*: Codex's
+      `apply_patch` arrives here renamed to `Edit`, so a name-first rule would hunt for an
+      `old_string` that call never carried and show no diff at all.
+- [x] `Markdown` reader table (`MarkdownTests`), which is mostly about *precedence*: fenced
+      code reads first and verbatim (a `*` in a shell glob is not emphasis, a `#` in a script is
+      not a heading), quote reads before list so `> - item` is a quote, blank lines are not
+      blocks, soft-wrapped lines flow into one paragraph, and an unterminated fence — which
+      agents produce constantly by being cut off — ends at the document instead of looping.
 - [ ] Pin a `.swiftlint.yml` (unconfigured runs are noisy and crash mid-lint) and add CI:
       `swift build && swift test && swiftlint`.
+
+- [x] `PermissionBroker`'s defaults are pinned (`PermissionBrokerTests`). The decision that
+      lets an agent's tool call run unasked had no test on any of its *unsure* answers: an
+      unrecognised tool prompts, a shell call whose command cannot be read prompts, a request
+      with no window to ask in is denied, only this app's own MCP tools are pre-approved (and
+      not a server whose name merely starts the same way), and a standing "always allow" belongs
+      to one session and is forgotten when it is discarded.
 
 ### 3.4 Smaller structural notes (fold into passing work)
 - [x] `ProjectStore.load()` fires `selectedSessionID.didSet` → redundant disk write during
@@ -217,20 +270,38 @@ these need no UI harness:
       `ShellCommand` words, then shares `ShellCommand.executing(_:in:)` with `AgentLauncher`
       for the fixed `cd … && exec …` wrapper. A real-shell regression test enters a directory
       containing quotes, semicolons, and command-substitution syntax without interpreting it.
-- [ ] PID capture is a timed guess with a "first child" fallback
-      (`TerminalSession.swift:157-167`); wrong-PID risk under concurrent launches. At
-      minimum, drop the fallback when the diff is empty.
-- [ ] `ProcessUtility` fixed 4096-PID buffer silently truncates on busy systems
-      (`ProcessUtility.swift:26,104`); full-system scans run on the main thread.
-- [ ] MCP HTTP parser: no chunked-encoding support, missing `Content-Length` treated as
-      empty body rather than 400 (`MCPConnection.swift:184-222`). Both clients send
-      well-formed requests today; fix opportunistically, not urgently.
-- [ ] `HistoryManager` logs errors with `print` instead of `SkalmanLogger`.
-- [ ] `TerminalTheme.decodeColor` silently turns unparseable stored colors white
-      (`TerminalTheme.swift:100-103`).
-- [ ] `NSImage(systemSymbolName:)!` force-unwraps in `BrowserViewController` /
-      `DisplayPaneController` chrome (`BrowserViewController.swift:248-251`,
-      `DisplayPaneController.swift:90,145`).
+- [x] PID capture. The "any child" fallback is gone (Skalman spawns short-lived helpers of its
+      own, so it adopted strangers), pids another live session has claimed are excluded, the
+      lowest new pid wins so a two-child launch resolves the same way twice, the capture retries,
+      and a claim is released on teardown so pid reuse cannot lock a later session out.
+- [x] `ProcessUtility` silent truncation: `liveProcessIdentifiers()` sizes the buffer from the
+      kernel's own count and grows when the reply comes back full, so a short list means "that is
+      all of them" rather than "the buffer ran out"; three copies of the fixed-4096 walk share it.
+- [ ] `ProcessUtility` main-thread scans — **narrower than it reads**. The info panel's walk is
+      already on `SessionInfoReader`'s own queue. What remains is `TerminalSession`: the two
+      snapshots around a launch (`:116`, `:205`) are synchronous *by requirement* — taken before
+      the child is spawned, or the child is mistaken for a pre-existing process and never adopted
+      — so only `captureShellPid`'s retry walk (`:174`) can move off the main thread, and it is
+      already delayed rather than blocking a launch.
+- [x] MCP HTTP parser. `parseRequest` answered `nil` for both "incomplete" and "impossible", so
+      framing it could not read was *defaulted* to a zero-length body — which leaves the real
+      body at the head of the buffer to be read as the next request's start line. It now returns
+      a three-case `ParseOutcome`; an unreadable, negative, oversized or absent `Content-Length`
+      on a body-bearing method, an unparseable head, and `Transfer-Encoding` (unimplemented) each
+      answer 400/411/413/501 and close. The negative case additionally *trapped* on the body
+      slice. Both callers — the loopback listener and the extension host channel — share it.
+- [x] `HistoryManager` logs through `SkalmanLogger.session` rather than `print`.
+- [x] `propose_storage_cleanup`'s "only paths the scanner already found" gate is now
+      `StorageCleanupGate`, a pure function with tests — it was inline in a handler needing a
+      window, a store and a modal sheet, so the security boundary of the storage feature was the
+      one part of it nothing exercised. Its lookup used `Dictionary(uniqueKeysWithValues:)`,
+      which **traps** on a duplicate key: two projects listing one artifact (the same folder
+      added twice, or a nested checkout) took the app down from a tool call.
+- [x] `TerminalTheme.decodeColor` fell back to **white**, which is the one answer that makes a
+      dark terminal unusable and is indistinguishable from a theme that is genuinely white. It
+      now falls back to the stock palette's colour *for the same role* and logs the loss.
+- [x] The `NSImage(systemSymbolName:)!` force-unwraps are gone: both files build their chrome
+      through `ThemedButton(symbol:accessibility:target:action:)`, which takes the optional.
 
 ---
 

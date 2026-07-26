@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skalman.invalid/schema/extension-host-data.schema.json",
+  "title": "Skalman extension host snapshot and event responses",
+  "oneOf": [
+    { "$ref": "#/$defs/projectPage" },
+    { "$ref": "#/$defs/projectResult" },
+    { "$ref": "#/$defs/sessionPage" },
+    { "$ref": "#/$defs/sessionResult" },
+    { "$ref": "#/$defs/providerPage" },
+    { "$ref": "#/$defs/providerResult" },
+    { "$ref": "#/$defs/accountPage" },
+    { "$ref": "#/$defs/accountResult" },
+    { "$ref": "#/$defs/eventPage" }
+  ],
+  "$defs": {
+    "cursor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remoteHost": { "type": "string", "minLength": 1 },
+        "repositoryPath": { "type": "string", "minLength": 1 },
+        "branch": { "type": "string", "minLength": 1 },
+        "headRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40,64}$"
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "id", "displayName"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "displayName": { "type": "string" },
+        "repository": { "$ref": "#/$defs/repository" }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "id",
+        "projectID",
+        "providerID",
+        "displayTitle",
+        "activity",
+        "isSideChat",
+        "isArchived",
+        "usesNativeUI"
+      ],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "projectID": { "type": "string", "minLength": 1 },
+        "providerID": { "type": "string", "minLength": 1 },
+        "accountID": { "type": "string", "minLength": 1 },
+        "displayTitle": { "type": "string" },
+        "activity": {
+          "enum": ["dormant", "idle", "working", "needs-attention"]
+        },
+        "branch": { "type": "string", "minLength": 1 },
+        "isSideChat": { "type": "boolean" },
+        "isArchived": { "type": "boolean" },
+        "usesNativeUI": { "type": "boolean" }
+      }
+    },
+    "imageReference": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "identifier"],
+          "properties": {
+            "type": { "const": "hostAsset" },
+            "identifier": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "extensionResource" },
+            "path": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "name"],
+          "properties": {
+            "type": { "const": "systemSymbol" },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "id", "displayName", "image"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "displayName": { "type": "string" },
+        "image": { "$ref": "#/$defs/imageReference" }
+      }
+    },
+    "account": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "id",
+        "providerID",
+        "displayName",
+        "isDefault",
+        "hasUserSelectedImage"
+      ],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "providerID": { "type": "string", "minLength": 1 },
+        "displayName": { "type": "string" },
+        "isDefault": { "type": "boolean" },
+        "hasUserSelectedImage": { "type": "boolean" },
+        "image": { "$ref": "#/$defs/imageReference" }
+      }
+    },
+    "projectPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "projects"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "projects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/project" }
+        }
+      }
+    },
+    "projectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "project"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "project": { "$ref": "#/$defs/project" }
+      }
+    },
+    "sessionPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "sessions"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "sessions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/session" }
+        }
+      }
+    },
+    "sessionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "session"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "session": { "$ref": "#/$defs/session" }
+      }
+    },
+    "providerPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "providers"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "providers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/provider" }
+        }
+      }
+    },
+    "providerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "provider"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "provider": { "$ref": "#/$defs/provider" }
+      }
+    },
+    "accountPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "accounts"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "accounts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/account" }
+        }
+      }
+    },
+    "accountResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "account"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "account": { "$ref": "#/$defs/account" }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "kind", "entityID", "recordedAt"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "kind": {
+          "enum": [
+            "project.changed",
+            "project.removed",
+            "session.changed",
+            "session.removed",
+            "provider.changed",
+            "account.changed",
+            "account.removed"
+          ]
+        },
+        "entityID": { "type": "string", "minLength": 1 },
+        "projectID": { "type": "string", "minLength": 1 },
+        "recordedAt": {
+          "type": "number",
+          "description": "Foundation Date seconds from the 2001-01-01 reference date."
+        }
+      }
+    },
+    "eventPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["events", "nextCursor", "hasMore"],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/event" }
+        },
+        "nextCursor": { "$ref": "#/$defs/cursor" },
+        "hasMore": { "type": "boolean" }
+      }
+    }
+  }
+}

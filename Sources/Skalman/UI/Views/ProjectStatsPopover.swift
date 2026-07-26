@@ -53,6 +53,9 @@ final class ProjectStatsPopoverViewController: NSViewController {
     // MARK: - Properties
 
     private let content: Content
+    /// The ordinary controller owns its popover width and insets. When it becomes the native
+    /// `.proceed` content of a customizable presentation, the outer host owns that chrome.
+    private let isEmbedded: Bool
 
     private static let count: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -68,13 +71,15 @@ final class ProjectStatsPopoverViewController: NSViewController {
 
     // MARK: - Initialization
 
-    init(info: Info) {
+    init(info: Info, isEmbedded: Bool = false) {
         self.content = .stats(info)
+        self.isEmbedded = isEmbedded
         super.init(nibName: nil, bundle: nil)
     }
 
-    init(missingToolFor projectName: String) {
+    init(missingToolFor projectName: String, isEmbedded: Bool = false) {
         self.content = .missingTool(projectName: projectName)
+        self.isEmbedded = isEmbedded
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -91,9 +96,10 @@ final class ProjectStatsPopoverViewController: NSViewController {
         rows.alignment = .leading
         rows.spacing = Design.Spacing.small
         rows.translatesAutoresizingMaskIntoConstraints = false
+        let inset = isEmbedded ? 0 : Design.Spacing.inset
         rows.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.inset, left: Design.Spacing.inset,
-            bottom: Design.Spacing.inset, right: Design.Spacing.inset
+            top: inset, left: inset,
+            bottom: inset, right: inset
         )
 
         let container = NSView()
@@ -106,7 +112,11 @@ final class ProjectStatsPopoverViewController: NSViewController {
             rows.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             rows.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             rows.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            container.widthAnchor.constraint(equalToConstant: ProjectPopoverDefaults.width)
+            container.widthAnchor.constraint(
+                equalToConstant: isEmbedded
+                    ? ProjectPopoverDefaults.contentWidth
+                    : ProjectPopoverDefaults.width
+            )
         ])
 
         view = container
@@ -269,6 +279,7 @@ private final class CodeStatsLegendDot: NSView {
 enum ProjectPopoverDefaults {
     /// The session popover's width, on purpose: the two hang off neighbouring rows.
     static let width: CGFloat = SessionPopoverDefaults.width
+    static let contentWidth = width - 2 * Design.Spacing.inset
 
     static let dotSize: CGFloat = 7
 

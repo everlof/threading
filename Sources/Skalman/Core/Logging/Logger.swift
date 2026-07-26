@@ -40,4 +40,10 @@ enum SkalmanLogger {
 
     /// The MCP server Skalman exposes to agents (listener lifecycle, tool calls)
     static let mcp = Logger(subsystem: subsystem, category: "mcp")
+
+    /// Installed extension processes and their private loopback host service.
+    static let extensions = Logger(subsystem: subsystem, category: "extensions")
+
+    /// Remote access — the tunnel, its loopback server, connections and auth decisions.
+    static let remote = Logger(subsystem: subsystem, category: "remote")
 }

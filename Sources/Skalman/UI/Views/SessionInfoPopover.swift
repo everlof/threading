@@ -74,11 +74,13 @@ final class SessionInfoPopoverViewController: NSViewController {
     // MARK: - Properties
 
     private let info: Info
+    private let isEmbedded: Bool
 
     // MARK: - Initialization
 
-    init(info: Info) {
+    init(info: Info, isEmbedded: Bool = false) {
         self.info = info
+        self.isEmbedded = isEmbedded
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -95,10 +97,14 @@ final class SessionInfoPopoverViewController: NSViewController {
         rows.alignment = .leading
         rows.spacing = Design.Spacing.small
         rows.translatesAutoresizingMaskIntoConstraints = false
-        rows.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.inset, left: Design.Spacing.inset,
-            bottom: Design.Spacing.inset, right: Design.Spacing.inset
-        )
+        if !isEmbedded {
+            rows.edgeInsets = NSEdgeInsets(
+                top: Design.Spacing.inset,
+                left: Design.Spacing.inset,
+                bottom: Design.Spacing.inset,
+                right: Design.Spacing.inset
+            )
+        }
 
         let container = NSView()
         container.addSubview(rows)
@@ -111,7 +117,11 @@ final class SessionInfoPopoverViewController: NSViewController {
             rows.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             rows.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             rows.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            container.widthAnchor.constraint(equalToConstant: SessionPopoverDefaults.width)
+            container.widthAnchor.constraint(
+                equalToConstant: isEmbedded
+                    ? SessionPopoverDefaults.contentWidth
+                    : SessionPopoverDefaults.width
+            )
         ])
 
         view = container
@@ -124,7 +134,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         let title = NSTextField(wrappingLabelWithString: info.title)
         title.font = Design.Typography.control()
         title.textColor = Design.Text.label
-        title.preferredMaxLayoutWidth = SessionPopoverDefaults.width - 2 * Design.Spacing.inset
+        title.preferredMaxLayoutWidth = SessionPopoverDefaults.contentWidth
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         var rows: [NSView] = [title]
@@ -198,6 +208,7 @@ final class SessionInfoPopoverViewController: NSViewController {
 
 enum SessionPopoverDefaults {
     static let width: CGFloat = 300
+    static let contentWidth = width - 2 * Design.Spacing.inset
     static let iconSlotWidth: CGFloat = 14
 
     static let folderSymbol = "folder"

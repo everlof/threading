@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 // MARK: - Tab Bar Item
 
@@ -9,15 +10,17 @@ struct DisplayTabBarItem {
     let title: String
     let symbolName: String
     let isActive: Bool
+    let customizationTarget: ExtensionComponentTarget
 }
 
 // MARK: - Display Tab Bar
 
 /// The strip of tabs along the top of the display pane, in the app's flat, quiet style.
 ///
-/// It appears only once surfaces coexist (see `DisplayPaneDefaults.tabBarMinimumTabs`), scrolls
-/// horizontally when it runs out of room rather than shrinking chips to nothing, and reports a
-/// selection or a close back to the pane — it owns no state of its own beyond what it is handed.
+/// It *is* the pane's header — there is no titled row above it — so it is always drawn, and a
+/// lone tab names the pane. It scrolls horizontally when it runs out of room rather than
+/// shrinking chips to nothing, and reports a selection or a close back to the pane; it owns no
+/// state of its own beyond what it is handed.
 final class DisplayTabBar: NSView {
 
     // MARK: - Callbacks
@@ -29,10 +32,23 @@ final class DisplayTabBar: NSView {
 
     private let stack = NSStackView()
     private let scrollView = ThemedScrollView()
+    private let customizationLookup: ComponentCustomizationHost.Lookup
 
     // MARK: - Init
 
     override init(frame frameRect: NSRect) {
+        customizationLookup = {
+            ComponentCustomizationProviderSlot.shared.customization(for: $0)
+        }
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    init(
+        frame frameRect: NSRect,
+        customizationLookup: @escaping ComponentCustomizationHost.Lookup
+    ) {
+        self.customizationLookup = customizationLookup
         super.init(frame: frameRect)
         setup()
     }
@@ -101,7 +117,8 @@ final class DisplayTabBar: NSView {
                 title: item.title,
                 symbolName: item.symbolName,
                 placement: .horizontal,
-                showsClose: true
+                showsClose: true,
+                inkSource: .chrome
             )
             tab.isSelected = item.isActive
             tab.onSelect = { [weak self] in self?.onSelect?(item.id) }
@@ -109,7 +126,12 @@ final class DisplayTabBar: NSView {
             tab.widthAnchor.constraint(
                 lessThanOrEqualToConstant: DisplayPaneDefaults.tabChipMaxWidth
             ).isActive = true
-            stack.addArrangedSubview(tab)
+            let customized = DisplayTabHeaderCustomizationView(
+                nativeContent: tab,
+                target: item.customizationTarget,
+                lookup: customizationLookup
+            )
+            stack.addArrangedSubview(customized)
         }
     }
 }

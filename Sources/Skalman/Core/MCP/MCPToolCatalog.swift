@@ -40,7 +40,23 @@ enum MCPToolCatalog {
 
     // MARK: Groups
 
-    static let groups: [MCPToolGroup] = [display, browser, tabs, project, storage, appearance]
+    static let groups: [MCPToolGroup] = [
+        display,
+        browser,
+        tabs,
+        project,
+        storage,
+        notifications,
+        appearance,
+        extensionAuthoring
+    ]
+
+    /// Includes optional-provider declarations even while a provider group is unavailable.
+    /// Settings therefore remains useful documentation before its backing service starts.
+    @MainActor
+    static var allGroups: [MCPToolGroup] {
+        groups + MCPExternalToolRegistry.shared.groups.map(externalGroup)
+    }
 
     static let display = MCPToolGroup(
         id: "display",
@@ -414,10 +430,34 @@ enum MCPToolCatalog {
             """
     )
 
+    static let notifications = MCPToolGroup(
+        id: "notifications",
+        title: "Notifications",
+        summary: "Let agents notify your paired devices when requested work is ready.",
+        symbol: "bell",
+        tools: [
+            MCPToolInfo(
+                name: MCPTools.notifyUser,
+                title: "Notify chat participants",
+                detail: "Send one requested, session-scoped result to its intended participant.",
+                symbol: "bell.badge"
+            )
+        ],
+        instruction: """
+            notify_user defaults to the participant who wrote the current turn, so “send me a \
+            summary when you are done” follows the speaker. `recipient` may explicitly name \
+            `owner`, `everyone`, or one chat member by exact display name when the requesting \
+            participant asks you to involve them. Use it only after that explicit request and \
+            only once the milestone is actually reached. Keep the message concise and useful on \
+            a lock screen. It cannot notify another chat. Still write the normal final response \
+            in the conversation after notifying.
+            """
+    )
+
     static let appearance = MCPToolGroup(
         id: "appearance",
-        title: "Terminal theme",
-        summary: "Let agents change the colours of this session, its project, or the app.",
+        title: "Themes",
+        summary: "Let agents style terminals and the app's own chrome.",
         symbol: "paintpalette",
         tools: [
             MCPToolInfo(
@@ -437,6 +477,42 @@ enum MCPToolCatalog {
                 title: "Create a theme",
                 detail: "Build a new palette from a description, guarded against unreadable text.",
                 symbol: "wand.and.stars"
+            ),
+            MCPToolInfo(
+                name: MCPTools.listAppThemes,
+                title: "List app themes",
+                detail: "Read the chrome themes and see which one is active.",
+                symbol: "rectangle.3.group"
+            ),
+            MCPToolInfo(
+                name: MCPTools.getAppTheme,
+                title: "Inspect app theme",
+                detail: "Read a chrome theme's exact semantic colours and material.",
+                symbol: "doc.text.magnifyingglass"
+            ),
+            MCPToolInfo(
+                name: MCPTools.setAppTheme,
+                title: "Set app theme",
+                detail: "Restyle the app's window chrome immediately.",
+                symbol: "paintbrush.pointed"
+            ),
+            MCPToolInfo(
+                name: MCPTools.createAppTheme,
+                title: "Create app theme",
+                detail: "Build a custom chrome theme from a base and a partial patch.",
+                symbol: "wand.and.rays"
+            ),
+            MCPToolInfo(
+                name: MCPTools.duplicateAppTheme,
+                title: "Duplicate app theme",
+                detail: "Make an editable custom copy before modifying a built-in style.",
+                symbol: "plus.square.on.square"
+            ),
+            MCPToolInfo(
+                name: MCPTools.updateAppTheme,
+                title: "Update app theme",
+                detail: "Patch an editable chrome theme while keeping its stable identity.",
+                symbol: "slider.horizontal.3"
             )
         ],
         instruction: """
@@ -455,6 +531,72 @@ enum MCPToolCatalog {
             Do not restyle anything unasked. This changes what the user is looking at while \
             they are looking at it, and the colours they chose are a preference, not a defect \
             to be fixed.
+
+            App-chrome themes are separate from terminal themes. list_app_themes and \
+            get_app_theme inspect the window/sidebar/panel style; set_app_theme applies one \
+            app-wide. Built-in app themes are immutable; custom app themes are editable. Theme \
+            creation and updates merge only the supplied values onto their base. A custom theme \
+            may have a light variant, a dark variant, or both; `appearance: "adaptive"` uses \
+            both and follows macOS.
+            """
+    )
+
+    static let extensionAuthoring = MCPToolGroup(
+        id: "extension-authoring",
+        title: "Extension authoring",
+        summary: "Let agents discover, validate and preview Skalman UI extension components.",
+        symbol: "puzzlepiece.extension",
+        tools: [
+            MCPToolInfo(
+                name: MCPTools.extensionListComponents,
+                title: "List components",
+                detail: "Read every public, versioned UI component contract.",
+                symbol: "list.bullet.rectangle"
+            ),
+            MCPToolInfo(
+                name: MCPTools.extensionScaffoldProject,
+                title: "Create extension project",
+                detail: "Create a separate project with the app-shipped SDK and starter panel.",
+                symbol: "plus.rectangle.on.folder"
+            ),
+            MCPToolInfo(
+                name: MCPTools.extensionProposeInstall,
+                title: "Propose extension install",
+                detail: "Show a package’s runtime and capabilities, then install it disabled if approved.",
+                symbol: "checkmark.shield"
+            ),
+            MCPToolInfo(
+                name: MCPTools.extensionDescribeComponent,
+                title: "Describe component",
+                detail: "Read one contract, its limits, host assets, example and JSON Schema.",
+                symbol: "doc.text.magnifyingglass"
+            ),
+            MCPToolInfo(
+                name: MCPTools.extensionValidateComponentPatch,
+                title: "Validate patch",
+                detail: "Check patch JSON using the same validator as the extension runtime.",
+                symbol: "checkmark.seal"
+            ),
+            MCPToolInfo(
+                name: MCPTools.extensionPreviewComponentPatch,
+                title: "Preview patch",
+                detail: "Render a safe native preview without installing or publishing it.",
+                symbol: "eye"
+            )
+        ],
+        instruction: """
+            You can create and author Skalman extensions without editing Skalman's own source. \
+            extension_scaffold_project creates a separate, self-contained project with the \
+            exact SDK snapshot this app ships; it never builds or installs it. \
+            extension_propose_install inspects an assembled package and asks the user before \
+            copying it into Skalman; it always remains disabled after installation. \
+            extension_list_components finds stable public component IDs; \
+            extension_describe_component returns the exact contract, generated patch schema, \
+            contextual host assets and an example; extension_validate_component_patch applies \
+            the same validator as the running extension host; and \
+            extension_preview_component_patch renders the patch in the display panel without \
+            installing or publishing it. Discover first, validate before writing source, then \
+            preview whenever appearance matters.
             """
     )
 
@@ -468,21 +610,49 @@ enum MCPToolCatalog {
     }
 
     @MainActor
+    static func isAvailable(_ group: MCPToolGroup) -> Bool {
+        MCPExternalToolRegistry.shared.groups.first {
+            $0.id == group.id
+        }?.isAvailable ?? true
+    }
+
+    @MainActor
     static var enabledGroups: [MCPToolGroup] {
-        groups.filter(isEnabled)
+        allGroups.filter { isEnabled($0) && isAvailable($0) }
     }
 
     /// The bare tool names an enabled launch advertises and pre-approves.
     @MainActor
     static var enabledToolNames: [String] {
-        enabledGroups.flatMap { $0.tools.map(\.name) }
+        let builtIn = groups
+            .filter(isEnabled)
+            .flatMap { $0.tools.map(\.name) }
+        let external = MCPExternalToolRegistry.shared.groups.flatMap { group in
+            guard group.isAvailable,
+                  AppSettings.shared.isToolGroupEnabled(group.id) else {
+                return [String]()
+            }
+            return group.tools.map(\.name)
+        }
+        return builtIn + external
     }
 
     /// The `tools/list` payload, filtered to the enabled groups.
     @MainActor
     static var enabledDefinitions: [MCPToolDefinition] {
         let names = Set(enabledToolNames)
-        return MCPTools.definitions.filter { names.contains($0.name) }
+        let builtIn = MCPTools.definitions.filter { names.contains($0.name) }
+        let external = MCPExternalToolRegistry.shared.groups.flatMap { group in
+            group.tools.compactMap { tool -> MCPToolDefinition? in
+                guard names.contains(tool.name) else { return nil }
+                return MCPToolDefinition(
+                    name: tool.name,
+                    description: tool.description,
+                    externalSchema: tool.inputSchema
+                )
+            }
+        }
+        return builtIn + external
     }
 
     /// The `initialize` instructions, assembled from the enabled groups so the model is told about
@@ -499,5 +669,24 @@ enum MCPToolCatalog {
             """
 
         return ([intro] + enabled.map(\.instruction)).joined(separator: "\n\n")
+    }
+
+    @MainActor
+    static func externalGroup(_ group: MCPExternalToolGroup) -> MCPToolGroup {
+        return MCPToolGroup(
+            id: group.id,
+            title: group.title,
+            summary: group.summary,
+            symbol: group.symbol,
+            tools: group.tools.map { tool in
+                MCPToolInfo(
+                    name: tool.name,
+                    title: tool.title,
+                    detail: tool.detail,
+                    symbol: tool.symbol
+                )
+            },
+            instruction: group.instruction
+        )
     }
 }

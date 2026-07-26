@@ -1,11 +1,34 @@
 import AppKit
 
-/// One selectable destination in either a horizontal tab strip or a sidebar.
+/// One selectable destination, wherever the app draws one: a document in the display pane's
+/// strip, a page in the settings sidebar, and the active page in the window's toolbar.
 ///
-/// The orientation changes only geometry. Selection, hover, keyboard access, close affordance,
-/// and theme treatment stay identical, so a page in the sidebar and a document in a pane read as
-/// the same navigation concept rather than two unrelated kinds of highlighted row.
-final class ThemedTabItemView: ThemedControl {
+/// # Why this is one class
+///
+/// It was two. The pane's strip read the chrome's roles and the toolbar's page tab read ink from
+/// the terminal backdrop (`BackdropOverlay`), and that single difference had been modelled as a
+/// *base class* — so everything else about a tab existed twice.
+///
+/// The intermediate fix was a shared constants enum: both sides read one radius, one type scale,
+/// one height. It did not hold, and the reason is worth keeping. **What drifted was never the
+/// metrics.** One side gained hover and press states and the other stayed inert; one faded its
+/// close button in on hover and the other showed it always; one was an `NSControl` with a
+/// `.radioButton` role and keyboard activation and the other was a plain `NSView` that could not
+/// be clicked at all; one grew a morphing title and the other kept a text field. A shared constant
+/// reaches none of that.
+///
+/// So the colour source became data (`InkSource`) rather than a superclass, and there is one tab.
+/// Two tabs cannot look different now for the same reason two instances of any class cannot: there
+/// is only one place that draws.
+final class ThemedTabItemView: BackdropThemedControl {
+
+    /// Rounded rect rather than pill: a tab is a small container in the window's furniture, which
+    /// is what `Design.Radius.control` names.
+    private static var radius: CGFloat { Design.Radius.control }
+
+    private static func font(isSelected: Bool) -> NSFont {
+        isSelected ? Design.Typography.control() : Design.Typography.controlRegular()
+    }
 
     enum Placement {
         case horizontal
@@ -17,6 +40,13 @@ final class ThemedTabItemView: ThemedControl {
             case .sidebar: Design.Size.sidebarTabHeight
             }
         }
+
+        var horizontalInset: CGFloat {
+            switch self {
+            case .horizontal: Design.Spacing.inset
+            case .sidebar: Design.Spacing.medium
+            }
+        }
     }
 
     var onSelect: (() -> Void)?
@@ -25,27 +55,42 @@ final class ThemedTabItemView: ThemedControl {
     var isSelected = false {
         didSet {
             guard isSelected != oldValue else { return }
-            titleLabel.font = Design.Typography.controlRegular()
+            titleLabel.font = Self.font(isSelected: isSelected)
+            invalidateIntrinsicContentSize()
             needsDisplay = true
         }
     }
 
     private let placement: Placement
     private let iconView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let closeButton = ThemedButton()
+    private let titleLabel = MorphingTitleLabel()
+    private let closeButton: ThemedIconButton
+    /// Public component content rendered after the title but still inside this native control.
+    /// Keeping the slot here means selection, hover, focus and close remain one host-owned tab.
+    let extensionAccessoryStack = NSStackView()
     private var trackingArea: NSTrackingArea?
     private var isHovered = false { didSet { needsDisplay = true } }
     private var isPressed = false { didSet { needsDisplay = true } }
+
+    /// What the current title names, so a *rename* can be told from a tab being reused for
+    /// something else. Only the first animates; see `update`.
+    private var identity: AnyHashable?
 
     init(
         title: String,
         symbolName: String,
         placement: Placement,
-        showsClose: Bool = false
+        showsClose: Bool = false,
+        inkSource: InkSource
     ) {
         self.placement = placement
-        super.init(frame: .zero)
+        self.closeButton = ThemedIconButton(
+            symbolName: "xmark",
+            accessibility: "Close \(title)",
+            target: .inline,
+            inkSource: inkSource
+        )
+        super.init(frame: .zero, inkSource: inkSource)
         setup(title: title, symbolName: symbolName, showsClose: showsClose)
     }
 
@@ -65,57 +110,116 @@ final class ThemedTabItemView: ThemedControl {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.setContentHuggingPriority(.required, for: .horizontal)
 
-        titleLabel.stringValue = title
-        titleLabel.font = Design.Typography.controlRegular()
-        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.font = Self.font(isSelected: isSelected)
+        titleLabel.setStringValue(title, animated: false)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
 
-        closeButton.image = NSImage(
-            systemSymbolName: "xmark",
-            accessibilityDescription: "Close \(title)"
-        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold))
-        closeButton.isBordered = false
-        closeButton.target = self
-        closeButton.action = #selector(closeClicked)
+        closeButton.onPress = { [weak self] in self?.onClose?() }
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.isHidden = !showsClose
-        closeButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        let content = NSStackView(views: [iconView, titleLabel, closeButton])
+        extensionAccessoryStack.orientation = .horizontal
+        extensionAccessoryStack.alignment = .centerY
+        extensionAccessoryStack.spacing = Design.Spacing.tight
+        extensionAccessoryStack.translatesAutoresizingMaskIntoConstraints = false
+        extensionAccessoryStack.setContentHuggingPriority(.required, for: .horizontal)
+        extensionAccessoryStack.isHidden = true
+
+        let content = NSStackView(
+            views: [iconView, titleLabel, extensionAccessoryStack, closeButton]
+        )
         content.orientation = .horizontal
         content.alignment = .centerY
         content.spacing = Design.Spacing.small
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
-        let horizontalInset = placement == .sidebar
-            ? Design.Spacing.medium
-            : Design.Spacing.inset
+        // Breakable, alone among these. A tab strip that collapses to nothing — the display pane
+        // hides its own until two surfaces coexist — otherwise leaves every tab inside it stating
+        // a height its host has just contradicted, which AppKit reports as a conflict and
+        // resolves by breaking one of them anyway.
+        let height = heightAnchor.constraint(equalToConstant: placement.height)
+        height.priority = .required - 1
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: placement.height),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalInset),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalInset),
+            height,
+            content.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: placement.horizontalInset
+            ),
+            content.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -placement.horizontalInset
+            ),
             content.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: Design.Size.tabIconSlot),
-            closeButton.widthAnchor.constraint(equalToConstant: Design.Size.tabCloseTarget),
-            closeButton.heightAnchor.constraint(equalToConstant: Design.Size.tabCloseTarget)
+            iconView.widthAnchor.constraint(equalToConstant: Design.Size.tabIconSlot)
         ])
     }
 
+    // MARK: - Content
+
+    /// Re-points an existing tab at something else, or renames what it already shows.
+    ///
+    /// `identity` is what tells those apart. A title that changed while the identity stayed put is
+    /// a rename and morphs; a tab handed a new identity is showing a different thing and lands its
+    /// title directly, because animating between two unrelated names reads as a glitch rather than
+    /// as a change. The display pane builds a fresh tab per update and passes none; the toolbar
+    /// keeps one instance for the life of the window and passes the session's id.
+    func update(
+        title: String,
+        symbolName: String,
+        showsClose: Bool,
+        identity: AnyHashable? = nil
+    ) {
+        let isRename = identity != nil
+            && identity == self.identity
+            && title != titleLabel.stringValue
+        self.identity = identity
+
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        titleLabel.setStringValue(title, animated: isRename)
+        closeButton.isHidden = !showsClose
+        closeButton.setAccessibilityTitle("Close \(title)")
+
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    /// Shows a template image in the icon slot — an agent's own mark, where a symbol name cannot
+    /// name what belongs there.
+    func setIcon(_ image: NSImage?) {
+        iconView.image = image
+    }
+
+    var title: String { titleLabel.stringValue }
+
+    // MARK: - Layout
+
     override var intrinsicContentSize: NSSize {
-        let titleWidth = ceil(
-            titleLabel.stringValue.size(withAttributes: [.font: titleLabel.font as Any]).width
-        )
         let closeWidth = closeButton.isHidden
             ? 0
-            : Design.Spacing.small + Design.Size.tabCloseTarget
-        let inset = placement == .sidebar ? Design.Spacing.medium : Design.Spacing.inset
-        return NSSize(
-            width: inset * 2 + Design.Size.tabIconSlot + Design.Spacing.small + titleWidth + closeWidth,
-            height: placement.height
-        )
+            : Design.Spacing.small + Design.Size.inlineButtonTarget
+        let accessoryWidth = extensionAccessoryStack.isHidden
+            ? 0
+            : Design.Spacing.small + ceil(extensionAccessoryStack.fittingSize.width)
+        let width = placement.horizontalInset * 2
+            + Design.Size.tabIconSlot
+            + Design.Spacing.small
+            + ceil(titleLabel.intrinsicContentSize.width)
+            + accessoryWidth
+            + closeWidth
+        return NSSize(width: width, height: placement.height)
+    }
+
+    // MARK: - Drawing
+
+    /// The label and the mark, from the ink this tab was told to read.
+    ///
+    /// `draw(_:)` sets these too, because the ink can move without the view being re-inked — a
+    /// hover changes which tier the label should be. This is the ground-change path.
+    override func applyInk(_ ink: Design.Ink) {
+        needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -124,27 +228,39 @@ final class ThemedTabItemView: ThemedControl {
         let border: NSColor?
 
         if isSelected {
-            foreground = Design.Text.label
-            fill = Design.Surface.controlHover
-            border = Design.Surface.border
+            foreground = ink.label
+            // The resting weight, not the hover one. A selected tab is a *place*, not a control
+            // being pressed: at the hover weight it read as the loudest thing in the pane and its
+            // own label had to compete with it.
+            fill = isHovered ? ink.surfaceHover : ink.surface
+            border = ink.border
         } else if isPressed || isHovered || hasKeyboardFocus {
-            foreground = Design.Text.label
-            fill = Design.Surface.controlResting
+            foreground = ink.label
+            fill = ink.surface
             border = nil
         } else {
-            foreground = Design.Text.secondary
+            foreground = ink.secondary
             fill = .clear
             border = nil
         }
 
-        let path = ThemedSurface.draw(bounds, fill: fill, border: border)
+        let path = ThemedSurface.draw(
+            bounds,
+            fill: fill,
+            border: border,
+            radius: Self.radius
+        )
         drawKeyboardFocus(around: path)
 
         titleLabel.textColor = foreground
-        iconView.contentTintColor = isSelected ? Design.Surface.accent : foreground
-        closeButton.contentTintColor = foreground
+        // The icon follows its label rather than taking the accent. The accent means "this needs
+        // you" everywhere else in the app — the sidebar's attention dot is the same colour — and
+        // spending it on whichever tab happens to be open says that about nothing.
+        iconView.contentTintColor = foreground
         closeButton.alphaValue = isSelected || isHovered ? 1 : 0
     }
+
+    // MARK: - Interaction
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -197,8 +313,4 @@ final class ThemedTabItemView: ThemedControl {
     override func accessibilityTitle() -> String? { titleLabel.stringValue }
     override func accessibilityValue() -> Any? { isSelected }
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
-
-    @objc private func closeClicked() {
-        onClose?()
-    }
 }

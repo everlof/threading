@@ -11,8 +11,8 @@ extension MainWindowController {
     func toggleElementInspector(mode: InspectorMode) {
         guard let window else { return }
 
-        elementInspector.onPick = { [weak self] picked in
-            self?.presentElementReport(for: picked)
+        elementInspector.onPick = { [weak self] picked, layers in
+            self?.presentElementReport(for: picked, layers: layers)
         }
         elementInspector.onPickPoint = { [weak self] point in
             self?.presentPointReport(at: point)
@@ -26,14 +26,11 @@ extension MainWindowController {
 
     // MARK: - Private Methods
 
-    private func presentElementReport(for target: NSView) {
+    private func presentElementReport(for target: NSView, layers: InspectorLayers) {
         guard let window else { return }
 
-        var report = ElementReport.build(for: target)
-        let indicator = InspectorIndicator.element(
-            rect: target.convert(target.bounds, to: nil),
-            label: InspectorIndicator.label(for: target)
-        )
+        var report = ElementReport.build(for: target, layers: layers)
+        let indicator = InspectorIndicator.element(levels: report.levels, layers: layers)
 
         let capture = captureScreenshot(of: window, annotating: indicator)
         report.screenshotPath = capture.path

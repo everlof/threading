@@ -11,8 +11,40 @@ class ThemedTextView: NSTextView, ThemedComponent {
 
     private var themeRedraw: ThemeRedraw?
 
+    /// The text network's root, when this view built one for itself.
+    ///
+    /// Ownership in TextKit 1 runs storage → layout manager → container, and the view holds
+    /// only the container — so without this the whole network would be released the moment
+    /// the initializer returned.
+    private let ownedTextStorage: NSTextStorage?
+
+    /// **A nil container is not "the default container".** `init(frame:textContainer:)` is the
+    /// designated initializer, and passing nil leaves the view outside any text network at
+    /// all: no storage, no layout manager, no container. Such a view still draws, still takes
+    /// focus and still shows a focus ring — and silently discards every keystroke, refuses
+    /// every selection, and reports a nil `layoutManager` to anything sizing itself to the
+    /// text. `NSTextView()` builds the network; this initializer did not, which is how the
+    /// composer's prompt became an inert box that looked focused.
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
-        super.init(frame: frameRect, textContainer: container)
+        if let container {
+            ownedTextStorage = nil
+            super.init(frame: frameRect, textContainer: container)
+        } else {
+            let storage = NSTextStorage()
+            let layoutManager = NSLayoutManager()
+            storage.addLayoutManager(layoutManager)
+
+            // The same shape `NSTextView.init(frame:)` gives its own container: as wide as the
+            // view, unbounded downward, and following the view's width.
+            let container = NSTextContainer(
+                size: NSSize(width: frameRect.width, height: .greatestFiniteMagnitude)
+            )
+            container.widthTracksTextView = true
+            layoutManager.addTextContainer(container)
+
+            ownedTextStorage = storage
+            super.init(frame: frameRect, textContainer: container)
+        }
         setup()
     }
 

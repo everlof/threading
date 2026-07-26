@@ -1,15 +1,75 @@
 import AppKit
 import SwiftTerm
 
-// MARK: - Reserved Names
+// MARK: - Identity
+
+/// A terminal theme's durable identity, separate from its editable display name.
+struct TerminalThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible {
+    let rawValue: String
+
+    init(rawValue: String) { self.rawValue = rawValue }
+    init(_ rawValue: String) { self.rawValue = rawValue }
+
+    init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    var description: String { rawValue }
+
+    static let basic = TerminalThemeID("basic")
+    static let pro = TerminalThemeID("pro")
+    static let homebrew = TerminalThemeID("homebrew")
+    static let ocean = TerminalThemeID("ocean")
+    static let followsAppTheme = TerminalThemeID("follow-app-theme")
+
+    static func makeCustom() -> TerminalThemeID {
+        TerminalThemeID("custom-\(UUID().uuidString.lowercased())")
+    }
+
+    /// State written before IDs existed is tagged with its old name. The tag cannot collide
+    /// with a real ID and lets the assignment layer resolve it once against the theme library.
+    static func legacyName(_ name: String) -> TerminalThemeID {
+        let encoded = Data(name.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return TerminalThemeID("legacy-name-\(encoded)")
+    }
+
+    var legacyName: String? {
+        let prefix = "legacy-name-"
+        guard rawValue.hasPrefix(prefix) else { return nil }
+        var encoded = String(rawValue.dropFirst(prefix.count))
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+        guard let data = Data(base64Encoded: encoded) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func migratedFromName(_ name: String) -> TerminalThemeID {
+        switch name {
+        case "Basic": return .basic
+        case "Pro": return .pro
+        case "Homebrew": return .homebrew
+        case "Ocean": return .ocean
+        case TerminalThemeNames.followsAppTheme: return .followsAppTheme
+        default: return .legacyName(name)
+        }
+    }
+}
+
+// MARK: - Reserved Entry
 
 enum TerminalThemeNames {
     /// The terminal-theme list's first entry: draw with the palette the *app* theme states.
     ///
-    /// A reserved name rather than a fourth setting, because terminal themes are already keyed
-    /// by name at three scopes — so choosing it is an ordinary assignment, and inheriting works
-    /// without a line of new resolution. `ThemeManager` refuses to create or rename a theme to
-    /// it, which is what keeps the name meaning one thing.
+    /// The ID is the identity; this name is only the label shown to people and older clients.
     static let followsAppTheme = "Follow App Theme"
 }
 
@@ -18,6 +78,7 @@ struct TerminalTheme: Codable, Equatable {
 
     // MARK: - Properties
 
+    var id: TerminalThemeID
     var name: String
     var foreground: NSColor
     var background: NSColor
@@ -47,7 +108,7 @@ struct TerminalTheme: Codable, Equatable {
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case name, foreground, background, cursor, selection
+        case id, name, foreground, background, cursor, selection
         case black, red, green, yellow, blue, magenta, cyan, white
         case brightBlack, brightRed, brightGreen, brightYellow
         case brightBlue, brightMagenta, brightCyan, brightWhite
@@ -57,6 +118,8 @@ struct TerminalTheme: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         name = try container.decode(String.self, forKey: .name)
+        id = try container.decodeIfPresent(TerminalThemeID.self, forKey: .id)
+            ?? TerminalThemeID.migratedFromName(name)
         foreground = try Self.decodeColor(from: container, forKey: .foreground)
         background = try Self.decodeColor(from: container, forKey: .background)
         cursor = try Self.decodeColor(from: container, forKey: .cursor)
@@ -84,6 +147,7 @@ struct TerminalTheme: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
+        try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try Self.encodeColor(foreground, to: &container, forKey: .foreground)
         try Self.encodeColor(background, to: &container, forKey: .background)
@@ -109,9 +173,36 @@ struct TerminalTheme: Codable, Equatable {
         try Self.encodeColor(brightWhite, to: &container, forKey: .brightWhite)
     }
 
+    /// A stored colour that cannot be parsed falls back to the stock palette's colour for the
+    /// **same role**, and says so in the log.
+    ///
+    /// It used to fall back to white, which is the one answer that can make the terminal unusable:
+    /// a dark theme whose `background` failed to parse drew *paper*, and the palette written to
+    /// read on a dark ground was suddenly invisible on it. White is also indistinguishable from a
+    /// theme that really is white, so nothing anywhere reported that a colour had been lost — the
+    /// user saw a broken terminal and the app believed it had loaded a theme.
+    ///
+    /// The role is what makes the fallback usable rather than merely safe: `background` falls back
+    /// to a background, `red` to a red. A key the palette does not name at all keeps the old
+    /// answer, since there is no role to borrow from.
     private static func decodeColor(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) throws -> NSColor {
         let hex = try container.decode(String.self, forKey: key)
-        return NSColor(hex: hex) ?? .white
+        if let colour = NSColor(hex: hex) { return colour }
+
+        guard let role = ThemeColorKey(rawValue: key.stringValue) else {
+            SkalmanLogger.terminal.error(
+                "Theme colour \(key.stringValue, privacy: .public) is unparseable and unnamed."
+            )
+            return .white
+        }
+
+        SkalmanLogger.terminal.error(
+            """
+            Theme colour \(key.stringValue, privacy: .public) could not be parsed; \
+            using the stock palette's own value for that role.
+            """
+        )
+        return TerminalTheme.basic[keyPath: role.keyPath]
     }
 
     private static func encodeColor(_ color: NSColor, to container: inout KeyedEncodingContainer<CodingKeys>, forKey key: CodingKeys) throws {
@@ -121,6 +212,7 @@ struct TerminalTheme: Codable, Equatable {
     // MARK: - Initializer
 
     init(
+        id: TerminalThemeID = .makeCustom(),
         name: String,
         foreground: NSColor,
         background: NSColor,
@@ -143,6 +235,7 @@ struct TerminalTheme: Codable, Equatable {
         brightCyan: NSColor,
         brightWhite: NSColor
     ) {
+        self.id = id
         self.name = name
         self.foreground = foreground
         self.background = background
@@ -172,6 +265,7 @@ struct TerminalTheme: Codable, Equatable {
 extension TerminalTheme {
 
     static let basic = TerminalTheme(
+        id: .basic,
         name: "Basic",
         foreground: .white,
         background: .black,
@@ -197,6 +291,7 @@ extension TerminalTheme {
 
     /// Pro theme - matches Terminal.app's Pro profile colors
     static let pro = TerminalTheme(
+        id: .pro,
         name: "Pro",
         foreground: NSColor(hex: "#5ADB57")!,  // Green text like Terminal Pro_DUP
         background: NSColor(hex: "#20222B")!,  // Dark blue-gray background
@@ -221,6 +316,7 @@ extension TerminalTheme {
     )
 
     static let homebrew = TerminalTheme(
+        id: .homebrew,
         name: "Homebrew",
         foreground: NSColor(hex: "#00FF00")!,
         background: .black,
@@ -245,6 +341,7 @@ extension TerminalTheme {
     )
 
     static let ocean = TerminalTheme(
+        id: .ocean,
         name: "Ocean",
         foreground: NSColor(hex: "#C0C5CE")!,
         background: NSColor(hex: "#2B303B")!,
@@ -277,6 +374,22 @@ extension TerminalTheme {
     func renamed(_ newName: String) -> TerminalTheme {
         var copy = self
         copy.name = newName
+        return copy
+    }
+
+    /// A new editable theme copied from this palette. Unlike `renamed`, this is a new identity.
+    func duplicated(named newName: String) -> TerminalTheme {
+        var copy = self
+        copy.id = .makeCustom()
+        copy.name = newName
+        return copy
+    }
+
+    /// Gives a virtual palette, such as Follow App Theme, its reserved identity.
+    func identified(_ id: TerminalThemeID, named newName: String? = nil) -> TerminalTheme {
+        var copy = self
+        copy.id = id
+        if let newName { copy.name = newName }
         return copy
     }
 

@@ -1,5 +1,29 @@
 import Foundation
 
+/// One reasoning level the installed Codex CLI says a model can use.
+struct AgentReasoningLevel: Equatable {
+    let effort: String
+    let description: String
+
+    /// Codex's config values are stable machine identifiers; the UI uses the names exposed by
+    /// its other surfaces while preserving an unfamiliar future value rather than dropping it.
+    var displayName: String {
+        switch effort {
+        case "low": return "Light"
+        case "medium": return "Medium"
+        case "high": return "High"
+        case "xhigh": return "Extra High"
+        case "max": return "Max"
+        case "ultra": return "Ultra"
+        default:
+            return effort
+                .replacingOccurrences(of: "_", with: " ")
+                .replacingOccurrences(of: "-", with: " ")
+                .capitalized
+        }
+    }
+}
+
 /// One model the installed CLI says the current account can use.
 struct AgentModelOption: Equatable {
     let identifier: String
@@ -13,7 +37,35 @@ struct AgentModelOption: Equatable {
     /// The service tier Codex selects when no caller overrides it.
     let defaultServiceTier: String?
 
+    /// The model's own fallback and the exact reasoning levels this account may select.
+    ///
+    /// These are catalog data, not a hard-coded enum: Sol and Terra currently expose Ultra,
+    /// Luna stops at Max, and older models stop at Extra High.
+    let defaultReasoningLevel: String?
+    let reasoningLevels: [AgentReasoningLevel]
+
+    init(
+        identifier: String,
+        displayName: String,
+        fastServiceTier: String?,
+        defaultServiceTier: String?,
+        defaultReasoningLevel: String? = nil,
+        reasoningLevels: [AgentReasoningLevel] = []
+    ) {
+        self.identifier = identifier
+        self.displayName = displayName
+        self.fastServiceTier = fastServiceTier
+        self.defaultServiceTier = defaultServiceTier
+        self.defaultReasoningLevel = defaultReasoningLevel
+        self.reasoningLevels = reasoningLevels
+    }
+
     var supportsFastMode: Bool { fastServiceTier != nil }
+
+    func supports(reasoningEffort: String?) -> Bool {
+        guard let reasoningEffort else { return true }
+        return reasoningLevels.contains { $0.effort == reasoningEffort }
+    }
 }
 
 /// The model choices offered when starting or reconfiguring a session.
@@ -95,6 +147,34 @@ enum AgentModels {
                 account: account
             )
         }
+    }
+
+    /// The effort a turn will actually request or inherit.
+    ///
+    /// An explicit session choice wins. The account config is next, but only when the selected
+    /// model advertises it; changing from Ultra-capable Sol to Luna must not leave an impossible
+    /// inherited Ultra label on screen. Without an account setting, the catalog's per-model
+    /// default is authoritative.
+    static func effectiveEffort(
+        for session: AgentSession,
+        model: String?,
+        account: AgentAccount?
+    ) -> String? {
+        let option = option(identifier: model, for: session.kind, account: account)
+
+        if let selected = session.reasoningEffort,
+           option?.reasoningLevels.isEmpty != false
+            || option?.supports(reasoningEffort: selected) == true {
+            return selected
+        }
+
+        if let configured = defaultEffort(for: session.kind, account: account),
+           option?.reasoningLevels.isEmpty != false
+            || option?.supports(reasoningEffort: configured) == true {
+            return configured
+        }
+
+        return option?.defaultReasoningLevel
     }
 
     /// The effective Fast setting inherited when a session has no explicit override.
@@ -255,7 +335,14 @@ enum AgentModels {
                     identifier: model.slug,
                     displayName: model.displayName,
                     fastServiceTier: fastTier,
-                    defaultServiceTier: model.defaultServiceTier
+                    defaultServiceTier: model.defaultServiceTier,
+                    defaultReasoningLevel: model.defaultReasoningLevel,
+                    reasoningLevels: model.supportedReasoningLevels?.map {
+                        AgentReasoningLevel(
+                            effort: $0.effort,
+                            description: $0.description
+                        )
+                    } ?? []
                 )
             }
     }
@@ -271,6 +358,8 @@ private struct CodexModelsCache: Decodable {
         let additionalSpeedTiers: [String]?
         let serviceTiers: [ServiceTier]?
         let defaultServiceTier: String?
+        let defaultReasoningLevel: String?
+        let supportedReasoningLevels: [ReasoningLevel]?
 
         private enum CodingKeys: String, CodingKey {
             case slug, visibility
@@ -278,11 +367,18 @@ private struct CodexModelsCache: Decodable {
             case additionalSpeedTiers = "additional_speed_tiers"
             case serviceTiers = "service_tiers"
             case defaultServiceTier = "default_service_tier"
+            case defaultReasoningLevel = "default_reasoning_level"
+            case supportedReasoningLevels = "supported_reasoning_levels"
         }
     }
 
     struct ServiceTier: Decodable {
         let id: String
         let name: String
+    }
+
+    struct ReasoningLevel: Decodable {
+        let effort: String
+        let description: String
     }
 }

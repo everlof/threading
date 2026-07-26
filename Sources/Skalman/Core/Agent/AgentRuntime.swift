@@ -179,6 +179,10 @@ final class AgentRuntime {
 
     /// Terminates the agent and releases its terminal, returning the session to dormant.
     func discard(sessionID: SessionID) {
+        // No notification exists for a discarded controller, so the mirror is told explicitly:
+        // a remote watcher must learn the session ended rather than wait on a dead socket.
+        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+
         if let conversation = conversations.removeValue(forKey: sessionID) {
             conversation.terminate()
             conversation.view.removeFromSuperview()
@@ -193,11 +197,13 @@ final class AgentRuntime {
     /// Tears down every live session, used on application exit.
     func terminateAll() {
         for sessionID in controllers.keys {
+            RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
             controllers[sessionID]?.terminate()
         }
         controllers.removeAll()
 
         for sessionID in conversations.keys {
+            RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
             conversations[sessionID]?.terminate()
         }
         conversations.removeAll()

@@ -1,6 +1,8 @@
 import AppKit
+import SkalmanExtensionKit
+import SkalmanRemoteKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Singleton
 
@@ -12,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var mainWindowController: MainWindowController!
     private var componentGalleryWindowController: ComponentGalleryWindowController?
+    private var componentCustomizationRegistry: ComponentCustomizationRegistry?
 
     /// Whether this process won the single-instance lock and therefore owns the state.
     private var ownsSingleInstanceLock = false
@@ -36,16 +39,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // After the lock, so only the instance that owns the state writes the journal — and
         // early, because the first thing it reports is how the *previous* launch ended.
         EventLog.shared.beginLaunch()
+        MacRemoteDiagnostics.record(.appLaunched, fields: [
+            .protocolVersion: String(RemoteProtocol.current),
+            .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
+        ])
 
         // Before the first window is built, so everything is created already themed and nothing
         // has to be repainted at launch. `AppThemeRefresh` exists for the *later* changes.
         AppThemeLibrary.restore()
         AppThemeRefresh.startObservingAccessibilityDisplayOptions()
+        AppThemeRefresh.startObservingSystemAppearance()
 
         setupMenuBar()
 
+        // Optional MCP systems are installed at the composition root. The MCP server itself
+        // knows only its replaceable provider seam and works unchanged when this remains nil.
+        MCPExternalToolRegistry.shared.provider = ExtensionMCPToolProvider()
+        installComponentCustomizationProvider()
+        ExtensionIdentityResolverProviderSlot.shared.provider =
+            ExtensionIdentityResolverRegistry.shared
+
         mainWindowController = MainWindowController()
         mainWindowController.showWindow(nil)
+        ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
+            [weak mainWindowController] sessionID in
+            mainWindowController?.extensionShellRootPid(for: sessionID)
+        }
+
+        // Installed extensions get a separate, tokenized host-data/service channel. It must be
+        // ready before a host-capable process starts, because that process receives the
+        // short-lived endpoint and bearer token only in its launch environment.
+        if let componentCustomizationRegistry {
+            ExtensionHostService.shared.start(
+                registry: componentCustomizationRegistry,
+                identityRegistry: .shared
+            ) {
+                ExtensionManager.shared.startEnabledExtensions()
+            }
+        } else {
+            ExtensionManager.shared.startEnabledExtensions()
+        }
 
         cleanupOrphanedHistoryFiles()
         StateManager.shared.clearLegacySessionState()
@@ -81,6 +114,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.mainWindowController.restoreSelectedSession()
         }
 
+        // Remote access is a separate loopback server behind a tunnel, independent of the MCP
+        // listener — no ordering dependency, and it starts only if the user has turned it on.
+        RemoteAccessCoordinator.shared.startIfEnabled()
+
         // The disk survey runs itself from here on, at background priority and on its own
         // delay — it is the least urgent thing the app does, and the Storage page is only ever
         // reading what it has already found.
@@ -106,6 +143,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // still be pending, so it is flushed before the agents are torn down.
         ProjectStore.shared.flushPendingSave()
         AgentRuntime.shared.terminateAll()
+        ExtensionManager.shared.terminateAll()
+        // Stops the tunnel child and closes remote sockets before the listeners go, so nothing
+        // spawned for remote access outlives the app.
+        RemoteAccessCoordinator.shared.stop()
+        ExtensionHostService.shared.stop()
         MCPServer.shared.stop()
 
         // Last, and only on this path: the marker it removes is what distinguishes a quit
@@ -116,7 +158,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // A hosted XCTest bundle runs inside the real application and creates short-lived
+        // windows for rendering and chrome tests. Closing one must not terminate the host
+        // process underneath whatever test XCTest scheduled next.
+        if NSClassFromString("XCTestCase") != nil { return false }
+        return true
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -153,7 +199,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Brings a remotely selected dormant session back on its configured surface. Going
+    /// through the window's ordinary selection path preserves the one-live-process invariant,
+    /// but deliberately does not activate the app: a phone should not steal focus from whoever
+    /// is using the Mac merely because it reopened a session.
+    @MainActor
+    func resumeRemoteSession(_ sessionID: SessionID) {
+        guard ownsSingleInstanceLock,
+              ProjectStore.shared.session(withID: sessionID) != nil else {
+            return
+        }
+        mainWindowController.resumeRemoteSession(sessionID)
+    }
+
+    @MainActor
+    func startRemoteSession(
+        in projectID: ProjectID,
+        kind: AgentKind,
+        accountHandle: AccountHandle,
+        model: String?,
+        reasoningEffort: String?,
+        usesNativeUI: Bool,
+        prompt: String
+    ) -> AgentSession? {
+        guard ownsSingleInstanceLock, mainWindowController != nil else { return nil }
+        return mainWindowController.startRemoteSession(
+            in: projectID,
+            kind: kind,
+            accountHandle: accountHandle,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            usesNativeUI: usesNativeUI,
+            prompt: prompt
+        )
+    }
+
+    @MainActor
+    func refreshAfterRemoteSessionMutation(sessionID: SessionID, archived: Bool) {
+        guard ownsSingleInstanceLock, mainWindowController != nil else { return }
+        mainWindowController.refreshAfterRemoteSessionMutation(
+            sessionID: sessionID,
+            archived: archived
+        )
+    }
+
+    @MainActor
+    func refreshAfterRemoteSurfaceMutation(sessionID: SessionID) {
+        guard ownsSingleInstanceLock, mainWindowController != nil else { return }
+        mainWindowController.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+    }
+
     // MARK: - Private Methods
+
+    /// Installs the optional UI customization seam before the first sidebar row is built.
+    ///
+    /// The registry starts empty. The tokenized extension host service writes accepted process
+    /// publications into it; tests and the Component Gallery use the same provider boundary
+    /// without opening IPC.
+    @MainActor
+    private func installComponentCustomizationProvider() {
+        let registry = ComponentCustomizationRegistry(selectionDefaults: .standard)
+        do {
+            for contract in HostComponentContracts.all {
+                try registry.register(contract)
+            }
+        } catch {
+            assertionFailure("Invalid host component contract: \(error)")
+            ComponentCustomizationProviderSlot.shared.provider = nil
+            return
+        }
+
+        componentCustomizationRegistry = registry
+        ComponentCustomizationProviderSlot.shared.provider = registry
+        ComponentCustomizationProviderSlot.shared.actionHandler = { action in
+            ExtensionManager.shared.invokeComponentAction(action)
+        }
+    }
 
     private func presentAlreadyRunningAlert() {
         let alert = NSAlert()
@@ -188,20 +309,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Command Bindings
 
-    /// The menu items whose key equivalent comes from `AppCommands`, kept so a rebinding can be
+    /// The menu items whose key equivalent comes from `CommandRegistry`, kept so a rebinding can be
     /// applied to them directly.
     ///
     /// Re-applying beats rebuilding the menu bar: `setupMenuBar` also re-points `NSApp.windowsMenu`
     /// and `NSApp.helpMenu`, and running all of that again to change one character is both more
     /// work and more ways to be wrong.
     private var commandItems: [String: NSMenuItem] = [:]
+    private var extensionMenu: NSMenu?
+    private var projectExtensionSeparator: NSMenuItem?
+    private var projectExtensionItem: NSMenuItem?
+    private var viewExtensionSeparator: NSMenuItem?
+    private var viewExtensionItem: NSMenuItem?
 
     /// Holds the shortcut-change subscription for the process lifetime.
     private let menuEvents = AppEventObservations()
 
     /// Builds a menu item that takes its shortcut from the command table instead of a literal.
     private func commandItem(_ id: String, action: Selector) -> NSMenuItem {
-        guard let command = AppCommands.command(id: id) else {
+        guard let command = CommandRegistry.shared.command(id: id) else {
             return NSMenuItem(title: id, action: action, keyEquivalent: "")
         }
 
@@ -220,18 +346,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// works immediately rather than after a relaunch.
     func applyShortcutBindings() {
         for (id, item) in commandItems {
-            guard let command = AppCommands.command(id: id) else { continue }
+            guard let command = CommandRegistry.shared.command(id: id) else { continue }
             apply(ShortcutOverrideStore.shared.shortcut(for: command), to: item)
         }
     }
 
-    private func setupMenuBar() {
+    /// Internal so the hosted app tests can verify the real AppKit menu tree. Production calls
+    /// this exactly once during launch.
+    func setupMenuBar() {
         let mainMenu = NSMenu()
 
         mainMenu.addItem(makeApplicationMenuItem())
         mainMenu.addItem(makeProjectMenuItem())
         mainMenu.addItem(makeEditMenuItem())
         mainMenu.addItem(makeViewMenuItem())
+        mainMenu.addItem(makeExtensionsMenuItem())
 
         let windowMenuItem = makeWindowMenuItem()
         mainMenu.addItem(windowMenuItem)
@@ -248,6 +377,132 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuEvents.observe(KeyboardShortcutsDidChange.self) { [weak self] _ in
             self?.applyShortcutBindings()
         }
+        menuEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
+            self?.rebuildExtensionMenus()
+        }
+    }
+
+    private func makeExtensionsMenuItem() -> NSMenuItem {
+        let menu = NSMenu(title: "Extensions")
+        extensionMenu = menu
+        rebuildExtensionMenus()
+
+        let item = NSMenuItem()
+        item.title = "Extensions"
+        item.submenu = menu
+        return item
+    }
+
+    /// Rebuilds only the dynamic menu. The Window and Help menu identities remain untouched.
+    private func rebuildExtensionMenus() {
+        guard let menu = extensionMenu else { return }
+        menu.removeAllItems()
+        for id in Array(commandItems.keys) where id.hasPrefix("extension.") {
+            commandItems.removeValue(forKey: id)
+        }
+
+        let allCommands = CommandRegistry.shared.extensionCommands
+        populate(
+            menu,
+            commands: allCommands,
+            placement: .extensions
+        )
+        populate(
+            projectExtensionItem?.submenu,
+            commands: allCommands,
+            placement: .project
+        )
+        populate(
+            viewExtensionItem?.submenu,
+            commands: allCommands,
+            placement: .view
+        )
+
+        let hasVisibleCommands = !menu.items.isEmpty
+        if !hasVisibleCommands {
+            let empty = NSMenuItem(
+                title: "No Extension Commands Here",
+                action: nil,
+                keyEquivalent: ""
+            )
+            empty.isEnabled = false
+            menu.addItem(empty)
+        }
+
+        updatePlacementVisibility(
+            item: projectExtensionItem,
+            separator: projectExtensionSeparator
+        )
+        updatePlacementVisibility(
+            item: viewExtensionItem,
+            separator: viewExtensionSeparator
+        )
+
+        // A command may deliberately omit every visible placement and still receive a
+        // user-assigned shortcut. AppKit dispatches key equivalents through menu items, so
+        // retain one hidden host-owned item instead of installing a global event monitor.
+        for command in allCommands where command.menuPlacements.isEmpty {
+            let item = extensionCommandMenuItem(command, bindsShortcut: true)
+            item.isHidden = true
+            item.allowsKeyEquivalentWhenHidden = true
+            menu.addItem(item)
+        }
+    }
+
+    private func populate(
+        _ menu: NSMenu?,
+        commands: [AppCommand],
+        placement: ExtensionMenuPlacement
+    ) {
+        guard let menu else { return }
+        menu.removeAllItems()
+
+        for group in ExtensionCommandMenuLayout.groups(
+            commands: commands,
+            placement: placement
+        ) {
+            let submenu = NSMenu(title: group.extensionName)
+            for command in group.commands {
+                submenu.addItem(extensionCommandMenuItem(
+                    command,
+                    bindsShortcut:
+                        ExtensionCommandMenuLayout.canonicalPlacement(for: command)
+                            == placement
+                ))
+            }
+
+            let groupItem = NSMenuItem()
+            groupItem.title = group.extensionName
+            groupItem.submenu = submenu
+            menu.addItem(groupItem)
+        }
+    }
+
+    private func updatePlacementVisibility(
+        item: NSMenuItem?,
+        separator: NSMenuItem?
+    ) {
+        let isVisible = item?.submenu?.items.isEmpty == false
+        item?.isHidden = !isVisible
+        separator?.isHidden = !isVisible
+    }
+
+    private func extensionCommandMenuItem(
+        _ command: AppCommand,
+        bindsShortcut: Bool
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: command.title,
+            action: #selector(performExtensionCommand(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = command.id
+        if bindsShortcut {
+            apply(ShortcutOverrideStore.shared.shortcut(for: command), to: item)
+            commandItems[command.id] = item
+        }
+        return item
     }
 
     private func makeApplicationMenuItem() -> NSMenuItem {
@@ -310,6 +565,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.closeSession, action: #selector(closeSession)))
+
+        let extensionSeparator = NSMenuItem.separator()
+        extensionSeparator.isHidden = true
+        menu.addItem(extensionSeparator)
+        projectExtensionSeparator = extensionSeparator
+
+        let extensionItem = NSMenuItem()
+        extensionItem.title = "Extensions"
+        extensionItem.submenu = NSMenu(title: "Project Extensions")
+        extensionItem.isHidden = true
+        menu.addItem(extensionItem)
+        projectExtensionItem = extensionItem
 
         let item = NSMenuItem()
         item.submenu = menu
@@ -377,6 +644,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(commandItem(AppCommands.ID.inspectElement, action: #selector(inspectElement)))
         menu.addItem(commandItem(AppCommands.ID.inspectGeometry, action: #selector(inspectPoint)))
 
+        let extensionSeparator = NSMenuItem.separator()
+        extensionSeparator.isHidden = true
+        menu.addItem(extensionSeparator)
+        viewExtensionSeparator = extensionSeparator
+
+        let extensionItem = NSMenuItem()
+        extensionItem.title = "Extensions"
+        extensionItem.submenu = NSMenu(title: "View Extensions")
+        extensionItem.isHidden = true
+        menu.addItem(extensionItem)
+        viewExtensionItem = extensionItem
+
         let item = NSMenuItem()
         item.submenu = menu
         return item
@@ -415,6 +694,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        let reportItem = NSMenuItem(
+            title: "Create Remote Support Report…",
+            action: #selector(createRemoteSupportReport),
+            keyEquivalent: ""
+        )
+        reportItem.target = self
+        menu.addItem(reportItem)
+
         let logItem = NSMenuItem(
             title: "Reveal Diagnostics Log",
             action: #selector(revealDiagnosticsLog),
@@ -430,16 +717,160 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu Actions
 
+    @MainActor @objc private func performExtensionCommand(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let command = CommandRegistry.shared.command(id: id),
+              case .extensionCommand(let identifier, _, let localID) = command.origin,
+              commandIsAvailable(command) else {
+            return
+        }
+
+        let context = ExtensionCommandContext(
+            projectID: mainWindowController?.currentProjectID?.uuidString,
+            sessionID: mainWindowController?.currentSessionID?.uuidString
+        )
+        ExtensionCommandExecutionGate.execute(
+            command,
+            present: { [weak self] presentation, completion in
+                guard let self else {
+                    completion(false)
+                    return
+                }
+                self.presentExtensionCommandConfirmation(
+                    presentation,
+                    completion: completion
+                )
+            },
+            invoke: { [weak self] in
+                self?.invokeExtensionCommand(
+                    command,
+                    extensionIdentifier: identifier,
+                    localID: localID,
+                    context: context
+                )
+            }
+        )
+    }
+
+    @MainActor
+    private func invokeExtensionCommand(
+        _ command: AppCommand,
+        extensionIdentifier: String,
+        localID: String,
+        context: ExtensionCommandContext
+    ) {
+        ExtensionManager.shared.invokeCommand(
+            extensionIdentifier: extensionIdentifier,
+            commandID: localID,
+            context: context
+        ) { [weak self] result in
+            switch result {
+            case .failure(let error):
+                self?.presentExtensionCommandResult(
+                    title: command.title,
+                    message: error.localizedDescription,
+                    isError: true
+                )
+            case .success(let response):
+                if let error = response.error {
+                    self?.presentExtensionCommandResult(
+                        title: command.title,
+                        message: error,
+                        isError: true
+                    )
+                } else if let message = response.message {
+                    self?.presentExtensionCommandResult(
+                        title: command.title,
+                        message: message,
+                        isError: false
+                    )
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func presentExtensionCommandConfirmation(
+        _ presentation: ExtensionCommandConfirmationPresentation,
+        completion: @escaping @MainActor (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = presentation.title
+        alert.informativeText = presentation.message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: presentation.acceptTitle)
+        alert.addButton(withTitle: presentation.cancelTitle)
+
+        // Destructive execution is deliberately not the Return-key default.
+        alert.buttons.first?.hasDestructiveAction = true
+        alert.buttons.first?.keyEquivalent = ""
+        alert.buttons.dropFirst().first?.keyEquivalent = "\r"
+
+        if let window = mainWindowController?.window {
+            alert.beginSheetModal(for: window) { response in
+                completion(response == .alertFirstButtonReturn)
+            }
+        } else {
+            completion(alert.runModal() == .alertFirstButtonReturn)
+        }
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(performExtensionCommand(_:)),
+              let id = menuItem.representedObject as? String,
+              let command = CommandRegistry.shared.command(id: id) else {
+            return true
+        }
+        return commandIsAvailable(command)
+    }
+
+    private func commandIsAvailable(_ command: AppCommand) -> Bool {
+        switch command.scope {
+        case .application:
+            return true
+        case .project:
+            return mainWindowController?.currentProjectID != nil
+        case .session:
+            return mainWindowController?.currentSessionID != nil
+        }
+    }
+
+    private func presentExtensionCommandResult(
+        title: String,
+        message: String,
+        isError: Bool
+    ) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = isError ? .warning : .informational
+        if let window = mainWindowController?.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
+
+    // MARK: - Menu Actions
+
+    /// Every action below routes through `mainWindowController?`, deliberately.
+    ///
+    /// Two processes run a real `NSApplication` with this delegate and never build a window: a
+    /// hosted test bundle, and a second instance that lost the single-instance lock. A command
+    /// arriving in either — a menu item validated a moment early, a key equivalent, a test that
+    /// pumps the run loop — has *nothing to act on*, and the honest answer to that is to do
+    /// nothing. It used to be a trap, which is how the same force-unwrap in
+    /// `applicationShouldHandleReopen` took a test run down.
     @objc private func showPreferences() {
-        mainWindowController.showSettings()
+        mainWindowController?.toggleSettingsFromCommand()
     }
 
     @objc private func openTerminalTab() {
-        mainWindowController.showTerminalTab()
+        mainWindowController?.showTerminalTab()
     }
 
     @objc private func openFilesTab() {
-        mainWindowController.showFilesTab()
+        mainWindowController?.showFilesTab()
     }
 
     /// Reveals today's journal rather than opening it: `.jsonl` has no owning app, and what
@@ -455,24 +886,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.activateFileViewerSelecting([journal])
     }
 
+    /// Creates the share-safe report, not a copy of the owner-local journal. The latter may
+    /// contain prompts, commands and paths and remains available separately for local diagnosis.
+    @objc private func createRemoteSupportReport() {
+        do {
+            let report = try MacRemoteDiagnostics.supportReport()
+            NSWorkspace.shared.activateFileViewerSelecting([report])
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Couldn’t create support report"
+            alert.informativeText = "Skalman could not prepare the remote diagnostics file."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
     @objc private func openBrowser() {
-        mainWindowController.showBrowser()
+        mainWindowController?.showBrowser()
     }
 
     @objc private func openReview() {
-        mainWindowController.showReview()
+        mainWindowController?.showReview()
     }
 
     @objc private func openInfo() {
-        mainWindowController.showInfo()
+        mainWindowController?.showInfo()
     }
 
     @objc private func toggleShell() {
-        mainWindowController.toggleShellDrawer()
+        mainWindowController?.toggleShellDrawer()
     }
 
     @objc private func toggleDisplayPanel() {
-        mainWindowController.toggleDisplayPane()
+        mainWindowController?.toggleDisplayPane()
     }
 
     @objc private func showComponentGallery() {
@@ -483,42 +930,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func newSession() {
-        mainWindowController.newSession()
+        mainWindowController?.newSession()
     }
 
     @objc private func addProject() {
-        mainWindowController.addProject()
+        mainWindowController?.addProject()
     }
 
     @objc private func newProject() {
-        mainWindowController.newProject()
+        mainWindowController?.newProject()
     }
 
     @objc private func closeSession() {
-        mainWindowController.closeCurrentSession()
+        mainWindowController?.closeCurrentSession()
     }
 
     @objc private func toggleSidebar() {
-        mainWindowController.toggleSidebar()
+        mainWindowController?.toggleSidebar()
     }
 
     @objc private func showFind() {
-        mainWindowController.showFind()
+        mainWindowController?.showFind()
     }
 
     @objc private func inspectElement() {
-        mainWindowController.toggleElementInspector(mode: .element)
+        mainWindowController?.toggleElementInspector(mode: .element)
     }
 
     @objc private func inspectPoint() {
-        mainWindowController.toggleElementInspector(mode: .freeflow)
+        mainWindowController?.toggleElementInspector(mode: .freeflow)
     }
 
     @objc private func increaseFontSize() {
-        mainWindowController.increaseFontSize()
+        mainWindowController?.increaseFontSize()
     }
 
     @objc private func decreaseFontSize() {
-        mainWindowController.decreaseFontSize()
+        mainWindowController?.decreaseFontSize()
     }
 }

@@ -407,6 +407,8 @@ final class AgentToolCoordinator: MCPToolHandling {
             // Answers only once the user has decided, so the agent's next turn knows the
             // outcome rather than assuming one.
             proposeStorageCleanup(arguments, completion: completion)
+        case .notifyUser(let arguments):
+            completion(notifyUser(arguments, for: sessionID))
         case .listThemes:
             // Not `observed`: a theme is not panel content, and marking the panel seen here
             // would suppress the description a later resume owes the agent.
@@ -415,6 +417,43 @@ final class AgentToolCoordinator: MCPToolHandling {
             completion(setTheme(arguments, for: sessionID))
         case .createTheme(let arguments):
             completion(createTheme(arguments, for: sessionID))
+        case .listAppThemes:
+            completion(listAppThemes())
+        case .getAppTheme(let arguments):
+            completion(getAppTheme(arguments))
+        case .setAppTheme(let arguments):
+            completion(setAppTheme(arguments))
+        case .createAppTheme(let arguments):
+            completion(createAppTheme(arguments))
+        case .duplicateAppTheme(let arguments):
+            completion(duplicateAppTheme(arguments))
+        case .updateAppTheme(let arguments):
+            completion(updateAppTheme(arguments))
+        case .extensionListComponents:
+            completion(extensionListComponents())
+        case .extensionScaffoldProject(let arguments):
+            completion(extensionScaffoldProject(arguments))
+        case .extensionProposeInstall(let arguments):
+            extensionProposeInstall(arguments, completion: completion)
+        case .extensionDescribeComponent(let arguments):
+            completion(extensionDescribeComponent(arguments))
+        case .extensionValidateComponentPatch(let arguments):
+            completion(extensionValidateComponentPatch(arguments))
+        case .extensionPreviewComponentPatch(let arguments):
+            observed(extensionPreviewComponentPatch(arguments, for: sessionID))
+        case .unknown(let name, let arguments):
+            let routed = MCPExternalToolRegistry.shared.invokeTool(
+                named: name,
+                arguments: arguments,
+                for: sessionID
+            ) { response in
+                completion(response.isError
+                    ? .failure(response.text)
+                    : .success(response.text))
+            }
+            if !routed {
+                completion(.failure("Unknown tool: \(name)"))
+            }
         default:
             observed(handle(call, for: sessionID))
         }
@@ -445,6 +484,38 @@ final class AgentToolCoordinator: MCPToolHandling {
             DisplayPaneStore.shared.signature(for: sessionID),
             for: sessionID
         )
+    }
+
+    private func notifyUser(
+        _ arguments: NotifyUserArguments,
+        for sessionID: SessionID
+    ) -> MCPToolResult {
+        guard let message = arguments.message?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !message.isEmpty else {
+            return .failure("message is required.")
+        }
+        guard message.utf8.count <= RemoteAccessDefaults.maximumNotificationBodyBytes else {
+            return .failure("message is too long for a notification.")
+        }
+        if let title = arguments.title,
+           title.utf8.count > RemoteAccessDefaults.maximumNotificationTitleBytes {
+            return .failure("title is too long for a notification.")
+        }
+        guard AppSettings.shared.remoteAccessEnabled else {
+            return .failure("Remote Access is off, so no paired device can be notified.")
+        }
+        switch RemoteNotificationService.shared.notifyRequested(
+            sessionID: sessionID,
+            title: arguments.title,
+            body: message,
+            recipient: arguments.recipient
+        ) {
+        case .delivered(let recipient):
+            return .success("Notification queued for \(recipient).")
+        case .unavailable(let reason):
+            return .failure(reason)
+        }
     }
 
     // MARK: Project Icon
@@ -3588,6 +3659,8 @@ final class AgentToolCoordinator: MCPToolHandling {
                 kind = "terminal"
             } else if tab.files != nil {
                 kind = "file tree"
+            } else if tab.attachments != nil {
+                kind = "attachments"
             } else if case .image? = tab.content?.body {
                 kind = "image"
             }
@@ -3741,6 +3814,187 @@ final class AgentToolCoordinator: MCPToolHandling {
 
     // MARK: Tools
 
+    private func extensionListComponents() -> MCPToolResult {
+        do {
+            return .success(try ExtensionComponentAuthoringService.listJSON())
+        } catch {
+            return .failure(
+                ExtensionComponentAuthoringService.validationMessage(for: error)
+            )
+        }
+    }
+
+    private func extensionScaffoldProject(
+        _ arguments: ExtensionScaffoldProjectArguments
+    ) -> MCPToolResult {
+        guard let name = arguments.name?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ), !name.isEmpty else {
+            return .failure("Missing required argument: name")
+        }
+        guard let identifier = arguments.identifier, !identifier.isEmpty else {
+            return .failure("Missing required argument: identifier")
+        }
+        guard let directory = arguments.directory, !directory.isEmpty else {
+            return .failure("Missing required argument: directory")
+        }
+        guard NSString(string: directory).isAbsolutePath else {
+            return .failure("directory must be an absolute path")
+        }
+        guard let sdk = Bundle.main.resourceURL?.appendingPathComponent(
+            "ExtensionSDK/SkalmanExtensionKit",
+            isDirectory: true
+        ) else {
+            return .failure("This Skalman build does not contain its extension SDK snapshot.")
+        }
+
+        do {
+            let project = try ExtensionProjectScaffolder.scaffold(
+                name: name,
+                identifier: identifier,
+                at: URL(fileURLWithPath: directory, isDirectory: true),
+                sdkSnapshotURL: sdk
+            )
+            _ = ProjectStore.shared.addProject(folderURL: project.directoryURL)
+            return .success(
+                "Created \(project.manifest.name) at \(project.directoryURL.path), vendored "
+                    + "SkalmanExtensionKit SDK \(project.sdkVersion) with its offline authoring "
+                    + "contract, and added it as a Skalman project. Start with "
+                    + "Vendor/docs/extensions/AGENT_AUTHORING.md. It is source only: build its "
+                    + "WebAssembly module, assemble a .skalmanextension, then propose "
+                    + "installation for capability approval."
+            )
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    private func extensionProposeInstall(
+        _ arguments: ExtensionProposeInstallArguments,
+        completion: @escaping (MCPToolResult) -> Void
+    ) {
+        guard let directory = arguments.directory, !directory.isEmpty else {
+            completion(.failure("Missing required argument: directory"))
+            return
+        }
+        guard NSString(string: directory).isAbsolutePath else {
+            completion(.failure("directory must be an absolute path"))
+            return
+        }
+
+        let packageURL = URL(fileURLWithPath: directory, isDirectory: true)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let inspection = Result {
+                try ExtensionBundleInspector.inspect(at: packageURL)
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else {
+                    completion(.failure("Skalman’s window closed before the package was reviewed."))
+                    return
+                }
+                switch inspection {
+                case .failure(let error):
+                    completion(.failure(error.localizedDescription))
+                case .success(let bundle):
+                    let proposal = ExtensionInstallProposal(bundle: bundle)
+                    let alert = NSAlert()
+                    alert.messageText = proposal.title
+                    alert.informativeText = proposal.message
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: proposal.acceptTitle)
+                    alert.addButton(withTitle: "Cancel")
+
+                    let decided: (NSApplication.ModalResponse) -> Void = { response in
+                        guard response == .alertFirstButtonReturn else {
+                            completion(.success("The user declined the extension installation."))
+                            return
+                        }
+                        ExtensionManager.shared.install(from: packageURL) { result in
+                            switch result {
+                            case .failure(let error):
+                                completion(.failure(error.localizedDescription))
+                            case .success(let installed):
+                                completion(.success(
+                                    "Installed \(installed.name) \(installed.version ?? "") "
+                                        + "as a disabled extension. The user can enable it in "
+                                        + "Settings → Extensions."
+                                ))
+                            }
+                        }
+                    }
+
+                    if let window = self.windowProvider() {
+                        alert.beginSheetModal(for: window, completionHandler: decided)
+                    } else {
+                        decided(alert.runModal())
+                    }
+                }
+            }
+        }
+    }
+
+    private func extensionDescribeComponent(
+        _ arguments: ExtensionComponentReferenceArguments
+    ) -> MCPToolResult {
+        guard let component = arguments.component, !component.isEmpty else {
+            return .failure("Missing required argument: component")
+        }
+        do {
+            return .success(
+                try ExtensionComponentAuthoringService.describeJSON(
+                    componentID: component,
+                    version: arguments.version
+                )
+            )
+        } catch {
+            return .failure(
+                ExtensionComponentAuthoringService.validationMessage(for: error)
+            )
+        }
+    }
+
+    private func extensionValidateComponentPatch(
+        _ arguments: ExtensionComponentPatchArguments
+    ) -> MCPToolResult {
+        guard let patch = arguments.patch, !patch.isEmpty else {
+            return .failure("Missing required argument: patch")
+        }
+        do {
+            return .success(
+                try ExtensionComponentAuthoringService.validateJSON(patch)
+            )
+        } catch {
+            return .failure(
+                ExtensionComponentAuthoringService.validationMessage(for: error)
+            )
+        }
+    }
+
+    private func extensionPreviewComponentPatch(
+        _ arguments: ExtensionComponentPatchArguments,
+        for sessionID: SessionID
+    ) -> MCPToolResult {
+        guard let patch = arguments.patch, !patch.isEmpty else {
+            return .failure("Missing required argument: patch")
+        }
+        do {
+            let preview = try ExtensionComponentAuthoringService.preview(patch)
+            return present(
+                DisplayContent(
+                    body: .image(preview.image, url: preview.url),
+                    title: "\(preview.componentID) preview",
+                    subtitle: "Extension component · native semantic renderer"
+                ),
+                for: sessionID,
+                describedAs: "the \(preview.componentID) extension preview"
+            )
+        } catch {
+            return .failure(
+                ExtensionComponentAuthoringService.validationMessage(for: error)
+            )
+        }
+    }
+
     private func displayImage(
         _ arguments: DisplayImageArguments,
         for sessionID: SessionID
@@ -3765,6 +4019,14 @@ final class AgentToolCoordinator: MCPToolHandling {
 
         guard let image = NSImage(contentsOf: url), image.isValid else {
             return .failure("\(url.lastPathComponent) is not an image Skalman can display.")
+        }
+
+        if let project = ProjectStore.shared.project(forSessionID: sessionID) {
+            SessionAttachmentStore.shared.record(
+                url: url,
+                sessionID: sessionID,
+                projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true)
+            )
         }
 
         let dimensions = pixelDescription(of: image)

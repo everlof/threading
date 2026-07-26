@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 /// The application's single window: a project sidebar beside the active session's terminal.
 final class MainWindowController: ThemedWindowController {
@@ -11,9 +12,10 @@ final class MainWindowController: ThemedWindowController {
     // MARK: - Properties
 
     /// Not private: the toolbar delegate needs the split view for its tracking separator.
-    private(set) var splitViewController: NSSplitViewController!
+    private(set) var splitViewController: SidebarSplitViewController!
     private var sidebarViewController: ProjectSidebarViewController!
     private var containerViewController: TerminalContainerViewController!
+    private var extensionHookViewController: ExtensionComponentHookViewController!
 
     /// Retained so the sidebar can be collapsed and restored directly.
     private var sidebarItem: NSSplitViewItem!
@@ -38,17 +40,31 @@ final class MainWindowController: ThemedWindowController {
     /// thickness that pass produces is not mistaken for a width the user chose.
     private var isRestoringDisplayPaneWidth = false
 
-    /// Toolbar content naming the current project and session.
-    let sessionTitleItemView = SessionTitleItemView()
+    /// Store-change observations, released with the window.
+    private let appEvents = AppEventObservations()
+
+    /// The active page, drawn as the selected tab of the window's page strip.
+    ///
+    /// The *same* class the display pane's strip uses, inked from the backdrop rather than the
+    /// chrome because the toolbar floats over the terminal's own palette — which is the only thing
+    /// that differs between the two, and now the only thing stated. See `ThemedTabItemView`.
+    let pageTabView = ThemedTabItemView(
+        title: "",
+        symbolName: SessionTitleDefaults.projectSymbolName,
+        placement: .horizontal,
+        showsClose: true,
+        inkSource: .backdrop
+    )
 
     /// Toolbar pill showing the current account's rate-limit usage.
     let accountUsageItemView = AccountUsageItemView()
 
     /// App-owned toolbar controls, retained so pane visibility is reflected as selected state.
-    var sidebarToolbarButton: ToolbarButtonView?
-    var shellDrawerToolbarButton: ToolbarButtonView?
-    var displayPaneToolbarButton: ToolbarButtonView?
-    var sessionContextToolbarButton: ToolbarButtonView?
+    var sidebarToolbarButton: ThemedIconButton?
+    var newSessionButton: ThemedIconButton?
+    var shellDrawerToolbarButton: ThemedIconButton?
+    var displayPaneToolbarButton: ThemedIconButton?
+    var sessionContextToolbarButton: ThemedIconButton?
 
     /// The toolbar context button's menu, rebuilt each open so the theme checkmarks are live.
     let sessionContextMenu = NSMenu()
@@ -58,6 +74,7 @@ final class MainWindowController: ThemedWindowController {
 
     /// Exposed to the toolbar delegate, which needs the split view for its tracking separator.
     var splitView: NSSplitView { splitViewController.splitView }
+
 
     private var findBar: FindBarView?
     private var findBarTopConstraint: NSLayoutConstraint?
@@ -72,6 +89,15 @@ final class MainWindowController: ThemedWindowController {
     /// The session currently shown, if any.
     var currentSessionID: SessionID? {
         containerViewController.currentSessionID
+    }
+
+    /// The project implied by the visible session or composer. Settings and empty states carry
+    /// no project context, so project-scoped extension commands disable there.
+    var currentProjectID: ProjectID? {
+        if let currentSessionID {
+            return ProjectStore.shared.project(forSessionID: currentSessionID)?.id
+        }
+        return containerViewController.currentComposerProjectID
     }
 
     // MARK: - Initialization
@@ -153,10 +179,30 @@ final class MainWindowController: ThemedWindowController {
         sidebarViewController = ProjectSidebarViewController()
         sidebarViewController.delegate = self
 
-        sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarViewController)
+        // A **plain** item, not `sidebarWithViewController:`, and that is the whole of the
+        // sidebar's new silhouette.
+        //
+        // On macOS 26 the sidebar behaviour draws the pane as a floating inset panel: rounded,
+        // held off the window's edges by a margin, with the content pane visible around it.
+        // That is the platform's own look and there is no property to decline it —
+        // `allowsFullHeightLayout` and `titlebarSeparatorStyle` both leave the inset in place.
+        // It is also the wrong shape for this window, whose sidebar is a *structural column*
+        // beside a terminal rather than a panel over a document: the margin left the tabs and
+        // toolbar controls beside it reading as loose parts, and the terminal's own colour ran
+        // underneath the sidebar it is supposed to sit next to.
+        //
+        // So the pane is ours: flush to the window's edges, full height under the transparent
+        // titlebar, its own opaque ground (`ProjectSidebarViewController.applySidebarSurface`),
+        // and the split view's hairline as the only seam. What the behaviour gave that has to
+        // be replaced by hand is exactly two things — the material, and the collapse animation
+        // (`SidebarSplitViewController.toggleSidebar`) — and the app already owned the second.
+        sidebarItem = NSSplitViewItem(viewController: sidebarViewController)
         sidebarItem.minimumThickness = SidebarDefaults.minWidth
         sidebarItem.maximumThickness = SidebarDefaults.maxWidth
         sidebarItem.canCollapse = true
+        // The sidebar is the fixed column: a window resize is absorbed by the terminal, which is
+        // what the sidebar behaviour arranged for itself and a plain item does not.
+        sidebarItem.holdingPriority = SidebarDefaults.holdingPriority
         splitViewController.addSplitViewItem(sidebarItem)
 
         containerViewController = TerminalContainerViewController()
@@ -168,7 +214,10 @@ final class MainWindowController: ThemedWindowController {
             onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() }
         )
         containerViewController.composerViewController.delegate = sessionCoordinator
-        sessionTitleItemView.onClose = { [weak self] in self?.closeActivePageTab() }
+        pageTabView.onClose = { [weak self] in self?.closeActivePageTab() }
+        pageTabView.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
+        // The toolbar shows exactly one page, and it is always the current one.
+        pageTabView.isSelected = true
 
         let contentItem = NSSplitViewItem(viewController: containerViewController)
         contentItem.canCollapse = false
@@ -178,7 +227,20 @@ final class MainWindowController: ThemedWindowController {
         setupDisplayPane()
         setupAgentToolCoordinator()
 
-        window?.contentViewController = splitViewController
+        extensionHookViewController = ExtensionComponentHookViewController(
+            target: .init(
+                component: .applicationMainWindow,
+                contractVersion: 1
+            ),
+            child: splitViewController,
+            customSurfaceResolver: { [weak self] surface, extensionIdentifier in
+                self?.renderCustomSurface(
+                    surface,
+                    extensionIdentifier: extensionIdentifier
+                )
+            }
+        )
+        window?.contentViewController = extensionHookViewController
 
         // Installed after the split view exists: the tracking separator item needs it.
         window?.toolbar = makeToolbar()
@@ -188,7 +250,57 @@ final class MainWindowController: ThemedWindowController {
         // dwarfs the deliberately quiet session tab and its compact app-owned actions.
         window?.toolbarStyle = .unifiedCompact
 
-        unifySidebarWithBackdrop()
+        // The pane's own header, built here because the window controller owns what these
+        // controls do, and installed there because the pane owns where they sit.
+        containerViewController.installHeader(makePaneHeaderView())
+        splitViewController.sidebarTransitionDidComplete = { [weak self] isCollapsed in
+            self?.updateHeaderInset(sidebarIsCollapsed: isCollapsed)
+        }
+    }
+
+    private func renderCustomSurface(
+        _ surface: ExtensionCustomSurface,
+        extensionIdentifier: String
+    ) -> NSView? {
+        switch surface {
+        case .metal(let specification):
+            guard let resourceURL = ExtensionManager.shared.customSurfaceResourceURL(
+                relativePath: specification.shaderResource,
+                extensionIdentifier: extensionIdentifier
+            ), let source = try? String(contentsOf: resourceURL, encoding: .utf8) else {
+                return nil
+            }
+            do {
+                return try ExtensionMetalSurfaceView(
+                    specification: specification,
+                    source: source,
+                    signalProvider: { [weak self] signal in
+                        self?.extensionHostSignal(signal)
+                    }
+                )
+            } catch {
+                SkalmanLogger.extensions.error(
+                    "Could not render Metal surface from \(extensionIdentifier, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+                return nil
+            }
+        }
+    }
+
+    private func extensionHostSignal(_ signal: ExtensionHostSignal) -> Double? {
+        switch signal {
+        case .activeAccountUsageRemaining:
+            guard let account = accountUsageItemView.account,
+                  let used = AccountUsageService.shared
+                    .usage(for: account)?
+                    .peakWindow()?
+                    .fraction else {
+                return nil
+            }
+            return 1 - min(max(used, 0), 1)
+        default:
+            return nil
+        }
     }
 
     private func setupAgentToolCoordinator() {
@@ -198,22 +310,6 @@ final class MainWindowController: ThemedWindowController {
             setPaneVisible: { [weak self] visible in self?.setDisplayPaneVisible(visible) },
             windowProvider: { [weak self] in self?.window }
         )
-    }
-
-    /// Makes the sidebar's material sample the window's own backdrop rather than the desktop,
-    /// so the terminal colour set as the window background (see
-    /// `TerminalContainerViewController.applyPaneBackground`) tints the sidebar too. The sidebar
-    /// then reads as a translucent panel floating over the terminal's colour — no hard seam
-    /// where a solid sidebar met a coloured terminal.
-    private func unifySidebarWithBackdrop() {
-        // The split item wraps the sidebar in a system `NSVisualEffectView`; find it and switch
-        // its blending. Deferred a turn so the wrapper exists after the split view lays out.
-        DispatchQueue.main.async { [weak self] in
-            guard let effectView = self?.sidebarViewController.view.enclosingVisualEffectView else {
-                return
-            }
-            effectView.blendingMode = .withinWindow
-        }
     }
 
     /// Adds the panel agents display content in, collapsed until something arrives.
@@ -242,6 +338,9 @@ final class MainWindowController: ThemedWindowController {
         displayItem = NSSplitViewItem(viewController: displayPaneController)
         displayItem.canCollapse = true
         displayItem.minimumThickness = DisplayPaneDefaults.minWidth
+        // The divider's position is the user's answer, and it outranks what the pane's own
+        // content would prefer — see `DisplayPaneDefaults.holdingPriority`.
+        displayItem.holdingPriority = DisplayPaneDefaults.holdingPriority
         displayItem.isCollapsed = true
         splitViewController.addSplitViewItem(displayItem)
 
@@ -253,9 +352,30 @@ final class MainWindowController: ThemedWindowController {
             name: NSSplitView.didResizeSubviewsNotification,
             object: splitView
         )
+
+        // The toolbar names whatever is on screen, and a session can be renamed from
+        // somewhere that never touches the terminal — the row's `⋯` menu, or another
+        // window. Only the *agent's* own title reached here before, through
+        // `sessionTitleChanged`, so a rename left the tab holding the old name until the
+        // pane next changed.
+        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
+            self?.updateSessionTitleItem()
+        }
+    }
+
+    /// Supplies the extension runtime broker with the same shell root as the native Info pane.
+    ///
+    /// The broker receives only a root chosen by Skalman for a known session. It never receives
+    /// the terminal container or a way to query arbitrary processes.
+    func extensionShellRootPid(for sessionID: SessionID) -> pid_t? {
+        containerViewController?.shellRootPid(for: sessionID)
     }
 
     @objc private func splitViewDidResize(_ notification: Notification) {
+        // Fires while a divider is dragged and when a pane collapses, which are the two ways the
+        // content pane can arrive at the window's leading edge.
+        updateHeaderInset()
+
         guard let displayItem, !displayItem.isCollapsed, !isRestoringDisplayPaneWidth else {
             return
         }
@@ -264,6 +384,53 @@ final class MainWindowController: ThemedWindowController {
         guard width > 0 else { return }
 
         DisplayPaneWidth.stored = width
+    }
+
+    // MARK: - Header Inset
+
+    /// Keeps the pane header's first control clear of the window's own controls.
+    ///
+    /// The header shares its strip with the traffic lights and the sidebar toggle, which is fine
+    /// while the sidebar is there: the pane begins past them. **Collapsed, the pane begins at the
+    /// window's leading edge and the tab lands on top of the lights** — the one thing a
+    /// pane-owned header has to know about the window, and the reason this project's earlier
+    /// hand-rolled header was abandoned.
+    ///
+    /// Measured, not assumed: the lights and the toggle are AppKit's to size, and the answer is
+    /// simply where the toggle ends. One value per collapse, not a feedback loop — the strip's
+    /// contents do not move while the sidebar is out.
+    private func updateHeaderInset(sidebarIsCollapsed: Bool? = nil) {
+        guard let sidebarItem, let containerViewController else { return }
+
+        guard sidebarIsCollapsed ?? sidebarItem.isCollapsed else {
+            containerViewController.headerLeadingInset = PaneHeaderDefaults.inset
+            return
+        }
+
+        let pane = containerViewController.view
+        let paneMinX = pane.convert(pane.bounds, to: nil).minX
+        let measuredControlsMaxX = sidebarToolbarButton.map {
+            $0.convert($0.bounds, to: nil).maxX
+        }
+        // A toolbar item can already exist while its view still has a zero frame (notably while
+        // attaching a hosted test window). That is not a measurement. Keep the launch fallback
+        // until AppKit has actually placed the control, then replace it with the real edge.
+        let controlsMaxX = measuredControlsMaxX.flatMap {
+            $0 > PaneHeaderDefaults.inset ? $0 : nil
+        } ?? PaneHeaderDefaults.assumedWindowControlsWidth
+        let measuredClearance = controlsMaxX - paneMinX + Design.Spacing.medium
+        // A collapsed split item can retain its pre-animation model frame even after the
+        // presentation has reached the window edge. In that state subtracting `paneMinX` makes
+        // the controls appear safely outside the pane although they are visually over it. Use
+        // the same launch fallback until the pane's model frame catches up.
+        let clearance = paneMinX > PaneHeaderDefaults.inset
+            ? PaneHeaderDefaults.assumedWindowControlsWidth + Design.Spacing.medium
+            : measuredClearance
+
+        containerViewController.headerLeadingInset = max(
+            PaneHeaderDefaults.inset,
+            clearance
+        )
     }
 
     // MARK: - Display Pane
@@ -366,22 +533,73 @@ final class MainWindowController: ThemedWindowController {
         sidebarViewController.select(sessionID: sessionID)
     }
 
+    /// Selects through the same sidebar path as a local click, so loading state, persistence,
+    /// display-pane routing, and surface launch cannot drift for a remote resume. Selection is
+    /// intentionally background-only; remote activity must not make the app key.
+    func resumeRemoteSession(_ sessionID: SessionID) {
+        // AppKit does not emit a selection-change callback when the requested row is already
+        // selected. That is exactly the shape of a visible dormant placeholder, so resume it
+        // directly instead of waiting on a delegate callback that will never arrive.
+        if containerViewController.currentSessionID == sessionID {
+            containerViewController.resumeCurrentSession()
+            return
+        }
+        sidebarViewController.select(sessionID: sessionID)
+    }
+
+    @discardableResult
+    func startRemoteSession(
+        in projectID: ProjectID,
+        kind: AgentKind,
+        accountHandle: AccountHandle,
+        model: String?,
+        reasoningEffort: String?,
+        usesNativeUI: Bool,
+        prompt: String
+    ) -> AgentSession? {
+        sessionCoordinator.startRemoteSession(
+            in: projectID,
+            kind: kind,
+            accountHandle: accountHandle,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            usesNativeUI: usesNativeUI,
+            prompt: prompt
+        )
+    }
+
+    func refreshAfterRemoteSessionMutation(sessionID: SessionID, archived: Bool) {
+        if archived, sessionID == currentSessionID {
+            containerViewController.show(sessionID: nil)
+        }
+        sidebarViewController.reload()
+    }
+
+    func refreshAfterRemoteSurfaceMutation(sessionID: SessionID) {
+        containerViewController.reopenIfShowing(sessionID: sessionID)
+        sidebarViewController.reload()
+        updateSessionTitleItem()
+    }
+
     /// Shows or hides the sidebar. Shared by the View menu and the themed toolbar action.
     func toggleSidebar() {
+        let targetIsCollapsed = !sidebarItem.isCollapsed
         splitViewController.toggleSidebar(nil)
+        // Move clear of the window controls at the start of a collapse. AppKit may withhold both
+        // the final resize notification and the animation completion while a hosted window is
+        // off screen; subsequent layout callbacks refine this fallback with measured geometry.
+        updateHeaderInset(sidebarIsCollapsed: targetIsCollapsed)
         updateToolbarControlStates()
     }
 
     /// Keeps the toolbar naming whatever is on screen.
+    ///
+    /// Each branch hands the tab an **identity** as well as a title, which is what lets a rename
+    /// morph while a change of page lands directly — see `ThemedTabItemView.update`.
     func updateSessionTitleItem() {
-        if let index = containerViewController.currentSettingsPageIndex,
-           SettingsPages.all.indices.contains(index) {
-            let page = SettingsPages.all[index]
-            sessionTitleItemView.configure(
-                title: page.title,
-                symbolName: page.symbol,
-                showsClose: true
-            )
+        if let pageID = containerViewController.currentSettingsPageID,
+           let page = SettingsPages.page(id: pageID) {
+            showPageTab(title: page.title, symbolName: page.symbol, identity: pageID)
             updateAccountUsageItem(session: nil)
             updateToolbarControlStates()
             return
@@ -390,23 +608,65 @@ final class MainWindowController: ThemedWindowController {
         let sessionID = containerViewController.currentSessionID
         let session = sessionID.flatMap { ProjectStore.shared.session(withID: $0) }
 
-        if let sessionID {
-            sessionTitleItemView.configure(
-                project: ProjectStore.shared.project(forSessionID: sessionID),
-                session: session
+        if let sessionID, let session {
+            let project = ProjectStore.shared.project(forSessionID: sessionID)
+            showPageTab(
+                title: session.displayTitle,
+                symbolName: SessionTitleDefaults.projectSymbolName,
+                identity: session.id,
+                // The agent's own mark rather than a symbol, which is what the sidebar row beside
+                // it shows for the same session.
+                icon: session.kind.icon,
+                toolTip: project.map { "\($0.name) — \(session.displayTitle)" }
             )
         } else if let projectID = containerViewController.currentComposerProjectID {
             let project = ProjectStore.shared.project(withID: projectID)
-            sessionTitleItemView.configure(
+            showPageTab(
                 title: project?.name ?? "New Session",
                 symbolName: SessionTitleDefaults.projectSymbolName,
-                showsClose: true
+                identity: projectID,
+                toolTip: project?.name
             )
         } else {
-            sessionTitleItemView.configure(project: nil, session: nil)
+            pageTabView.isHidden = true
         }
         updateAccountUsageItem(session: session)
         updateToolbarControlStates()
+    }
+
+    private func showPageTab(
+        title: String,
+        symbolName: String,
+        identity: AnyHashable,
+        icon: NSImage? = nil,
+        toolTip: String? = nil
+    ) {
+        pageTabView.isHidden = false
+        pageTabView.update(
+            title: title,
+            symbolName: symbolName,
+            showsClose: true,
+            identity: identity
+        )
+        if let icon {
+            pageTabView.setIcon(icon)
+        }
+        pageTabView.toolTip = toolTip ?? title
+    }
+
+    /// Clicking the active page tab shows *where* it is, by selecting and scrolling to its row in
+    /// the sidebar.
+    ///
+    /// The tab is always the selected one — the toolbar shows exactly one page — so "select it"
+    /// has nothing left to do in the pane. What it can still answer is the question a page tab
+    /// raises when the sidebar has scrolled somewhere else or the row is nested under a collapsed
+    /// group: *which of these is the thing I am looking at*.
+    func revealActivePageInSidebar() {
+        if let sessionID = containerViewController.currentSessionID {
+            sidebarViewController.reveal(sessionID: sessionID)
+        } else if let projectID = containerViewController.currentComposerProjectID {
+            sidebarViewController.reveal(projectID: projectID)
+        }
     }
 
     /// Closes the active page without killing the persisted session or its running agent.
@@ -446,19 +706,37 @@ final class MainWindowController: ThemedWindowController {
         accountUsageItemView.configure(account: account)
     }
 
-    /// Opens Settings, or does nothing if already open. Used by the menu and ⌘,.
+    /// Opens Settings, or does nothing if already open. What a *door* to a page needs — see
+    /// `showSettingsPage`, which then names the page to land on.
     func showSettings() {
         window?.makeKeyAndOrderFront(nil)
         guard !containerViewController.isShowingSettings else { return }
         toggleSettings()
     }
 
+    /// What ⌘, does: opens Settings, and closes it again if it is already the page.
+    ///
+    /// The platform's Preferences chord only ever *opens*, because on macOS preferences are a
+    /// separate window and ⌘W closes them. Here Settings is a **page in this window**, sharing
+    /// the pane with the session it replaced — so the chord that put it there is the obvious
+    /// thing to press to get the session back, and there is no second window for ⌘W to mean.
+    func toggleSettingsFromCommand() {
+        window?.makeKeyAndOrderFront(nil)
+        toggleSettings()
+    }
+
     /// Opens Settings directly on a named page — the door "Edit Themes…" walks through.
     func showSettingsPage(title: String) {
-        guard let index = SettingsPages.index(ofTitle: title) else { return }
+        guard let pageID = SettingsPages.id(ofTitle: title) else { return }
+        showSettingsPage(id: pageID)
+    }
+
+    func showSettingsPage(id pageID: String) {
+        guard SettingsPages.page(id: pageID) != nil else { return }
         showSettings()
-        sidebarViewController.selectSettingsPage(index)
-        containerViewController.showSettingsPage(index: index)
+        sidebarViewController.selectSettingsPage(id: pageID)
+        containerViewController.showSettingsPage(id: pageID)
+        updateSessionTitleItem()
     }
 
     /// Opens the display panel on the current session's tabs, or closes it.
@@ -514,6 +792,12 @@ final class MainWindowController: ThemedWindowController {
     func updateToolbarControlStates() {
         let hasSession = containerViewController.currentSessionID != nil
         sidebarToolbarButton?.isSelected = !sidebarItem.isCollapsed
+        // **New Session is hidden while Settings is the page.** It creates a session, which a
+        // preferences page is not a context for — and beside a closable "Profiles" tab a `+`
+        // reads as "add another one of these", which is the one thing it does not do. The
+        // design system's own rule: a control offering nothing here hides rather than sitting
+        // there dead.
+        newSessionButton?.isHidden = containerViewController.isShowingSettings
         shellDrawerToolbarButton?.isEnabled = hasSession
         shellDrawerToolbarButton?.isSelected = containerViewController.isShellDrawerOpen
         displayPaneToolbarButton?.isSelected = !displayItem.isCollapsed
@@ -575,6 +859,19 @@ final class MainWindowController: ThemedWindowController {
         setDisplayPaneVisible(true)
     }
 
+    func showAttachments() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard let sessionID = containerViewController.currentSessionID else {
+            NSSound.beep()
+            return
+        }
+
+        displayPaneController.activateAttachments(for: sessionID)
+        displayPaneController.showSession(sessionID)
+        setDisplayPaneVisible(true)
+    }
+
     /// Opens Settings in the content pane, or closes it and returns to what was on screen. The
     /// sidebar itself swaps to the section list rather than a second sidebar appearing.
     func toggleSettings() {
@@ -591,7 +888,7 @@ final class MainWindowController: ThemedWindowController {
         } else {
             preSettingsSessionID = containerViewController.currentSessionID
             sidebarViewController.setSettingsMode(true)
-            containerViewController.showSettingsPage(index: 0)
+            containerViewController.showSettingsPage(id: SettingsPages.generalID)
             syncDisplayPane(to: nil)
         }
 
@@ -811,8 +1108,11 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         toggleSettings()
     }
 
-    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage index: Int) {
-        containerViewController.showSettingsPage(index: index)
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        didSelectSettingsPage pageID: String
+    ) {
+        containerViewController.showSettingsPage(id: pageID)
         updateSessionTitleItem()
     }
 }
@@ -838,11 +1138,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         sidebarViewController.refreshRow(sessionID: sessionID)
 
         if sessionID == currentSessionID {
-            let session = ProjectStore.shared.session(withID: sessionID)
-            sessionTitleItemView.configure(
-                project: ProjectStore.shared.project(forSessionID: sessionID),
-                session: session
-            )
+            updateSessionTitleItem()
         }
     }
 
@@ -926,6 +1222,7 @@ enum MainWindowDefaults {
     static let frameAutosaveName = "SkalmanMainWindow"
     static let toolbarIdentifier = NSToolbar.Identifier("SkalmanMainToolbar")
     static let minContentWidth: CGFloat = 320
+
 }
 
 // MARK: - Display Pane Width
@@ -956,19 +1253,4 @@ enum DisplayPaneWidth {
 
 enum FindBarDefaults {
     static let height: CGFloat = 32
-}
-
-// MARK: - Visual Effect Lookup
-
-private extension NSView {
-    /// The nearest visual-effect view at or above this one — e.g. the system material a
-    /// sidebar split item wraps its content controller's view inside.
-    var enclosingVisualEffectView: NSVisualEffectView? {
-        var view: NSView? = self
-        while let current = view {
-            if let effect = current as? NSVisualEffectView { return effect }
-            view = current.superview
-        }
-        return nil
-    }
 }

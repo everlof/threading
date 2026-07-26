@@ -253,9 +253,9 @@ enum AgentLauncher {
     /// Deliberately not `--strict-mcp-config`: that would suppress the user's own MCP servers
     /// for every session Skalman launches, which is a much larger change than adding one.
     ///
-    /// Skalman's own tools are pre-approved because they call back into the app the user is
-    /// already looking at. Without this, showing panel content or driving the browser raises a
-    /// permission prompt every time, which costs more attention than the action it is guarding.
+    /// Skalman's MCP server is pre-approved as one app capability. Tools that need finer trust
+    /// boundaries enforce them in the app: in particular, browser access is origin-gated and form
+    /// submissions are confirmed because WKWebView may hold credentials the shell does not.
     private static func appendMCPFlags(for session: AgentSession, to command: inout ShellCommand) {
         // Which tools are exposed is the user's choice on the Tools settings page. With every
         // group switched off there is nothing to register — and an empty `enabled_tools` list is
@@ -558,7 +558,8 @@ enum AgentLauncher {
         return (command, .awaitingIdentifier)
     }
 
-    /// Maps Skalman's provider-neutral Fast choice onto Codex's per-run configuration.
+    /// Maps Skalman's per-conversation reasoning and Fast choices onto Codex's per-run
+    /// configuration.
     ///
     /// Native Codex is one `exec` process per turn, so changing this setting while idle needs
     /// no control message and no new conversation: the next launch is already an
@@ -568,6 +569,34 @@ enum AgentLauncher {
         for session: AgentSession,
         to command: inout ShellCommand
     ) {
+        if let effort = session.reasoningEffort, !effort.isEmpty {
+            let account = AgentAccountDiscovery.account(
+                for: session.kind,
+                handle: session.accountHandle
+            )
+            let model = session.model ?? AgentModels.defaultModel(
+                for: session.kind,
+                account: account
+            )
+            let option = AgentModels.option(
+                identifier: model,
+                for: session.kind,
+                account: account
+            )
+
+            // Preserve an override when the cache is unavailable or predates reasoning
+            // metadata. When the current catalog does know the model, it is authoritative:
+            // never launch Luna with a stale Ultra choice saved while the session used Sol.
+            if option?.reasoningLevels.isEmpty != false
+                || option?.supports(reasoningEffort: effort) == true {
+                appendCodexConfigOverride(
+                    AgentDefaults.codexReasoningEffortKey,
+                    string: effort,
+                    to: &command
+                )
+            }
+        }
+
         guard let fastMode = session.fastMode else { return }
 
         if fastMode {

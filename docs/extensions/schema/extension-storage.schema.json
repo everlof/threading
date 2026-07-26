@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skalman.invalid/schema/extension-storage.schema.json",
+  "title": "Skalman extension brokered storage values",
+  "description": "The wire values exchanged on /v1/storage when the host writes an extension's private storage on its behalf. This is what the supported runner uses; the experimental sandbox-exec launcher grants directories instead and these values never appear.",
+  "$defs": {
+    "jsonValue": {
+      "type": ["null", "boolean", "number", "string", "array", "object"],
+      "description": "Any JSON value. The SDK models this as ExtensionJSONValue."
+    },
+    "keyValueKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "One key-value key. UTF-8 encoding is capped at 512 bytes and control characters are rejected by the host."
+    },
+    "keyValueSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "values"],
+      "description": "The whole store, returned by GET /v1/storage/kv. It is fetched in one call because the store is capped at 1 MiB.",
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "values": {
+          "type": "object",
+          "maxProperties": 2048,
+          "propertyNames": { "$ref": "#/$defs/keyValueKey" },
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      }
+    },
+    "keyValueWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "value"],
+      "description": "The body of PUT /v1/storage/kv/{key}.",
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "value": {
+          "$ref": "#/$defs/jsonValue"
+        }
+      }
+    },
+    "cacheName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "One cache entry name. It is a single path component: no separators, not '.' or '..', and no control characters. Both the SDK and the host enforce this, because the host takes the name from a request body."
+    },
+    "cacheListing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "names"],
+      "description": "The body of GET /v1/storage/cache.",
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "names": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/cacheName" }
+        }
+      }
+    },
+    "cacheEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion"],
+      "description": "The body of GET /v1/storage/cache/{name}. A null value is a cache miss, which is an ordinary answer rather than an error: Skalman may reclaim any entry at any moment.",
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "value": {
+          "type": ["string", "null"],
+          "contentEncoding": "base64",
+          "maxLength": 5592408,
+          "description": "Opaque bytes, at most 4 MiB after base64 decoding."
+        }
+      }
+    },
+    "cacheWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "value"],
+      "description": "The body of PUT /v1/storage/cache/{name}.",
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "value": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 5592408,
+          "description": "Opaque bytes, at most 4 MiB after base64 decoding. The extension's cache is additionally capped at 100 MiB in total, checked on every write."
+        }
+      }
+    }
+  }
+}

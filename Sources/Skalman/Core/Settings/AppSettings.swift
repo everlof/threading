@@ -71,13 +71,15 @@ final class AppSettings {
     /// The defaults key keeps its old name — the terminal was once the only transport, and
     /// renaming the key would silently reset the user's choice.
     nonisolated static var usesAgentTitleInSidebar: Bool {
-        UserDefaults.standard.bool(forKey: Keys.usesTerminalTitleInSidebar)
+        _ = registerStandardDefaults
+        return UserDefaults.standard.bool(forKey: Keys.usesTerminalTitleInSidebar)
     }
 
     /// Likewise for the sidebar's branch grouping, which `SidebarTreeBuilder` consults while
     /// building nodes from plain model values.
     nonisolated static var groupsSessionsByBranch: Bool {
-        UserDefaults.standard.bool(forKey: Keys.groupsSessionsByBranch)
+        _ = registerStandardDefaults
+        return UserDefaults.standard.bool(forKey: Keys.groupsSessionsByBranch)
     }
 
     /// Whether the sidebar gathers a project's sessions under the branch they ran on,
@@ -137,6 +139,61 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Attachment Detection
+
+    /// Agent kinds whose prose and terminal output should not be scanned for visual files.
+    ///
+    /// Stored as the disabled set so detection is an opt-out: both current agents, and any
+    /// future agent kind, start enabled without requiring a defaults migration.
+    private var disabledAttachmentDetectionAgentKinds: Set<AgentKind> {
+        get {
+            Set(
+                (defaults.stringArray(forKey: Keys.disabledAttachmentDetectionAgentKinds) ?? [])
+                    .compactMap(AgentKind.init(rawValue:))
+            )
+        }
+        set {
+            defaults.set(
+                newValue.map(\.rawValue).sorted(),
+                forKey: Keys.disabledAttachmentDetectionAgentKinds
+            )
+            notifyChanged()
+        }
+    }
+
+    /// Whether automatic path detection is enabled for this agent's terminal and Native output.
+    func detectsAttachmentReferences(for kind: AgentKind) -> Bool {
+        !disabledAttachmentDetectionAgentKinds.contains(kind)
+    }
+
+    func setAttachmentReferenceDetection(for kind: AgentKind, enabled: Bool) {
+        var disabled = disabledAttachmentDetectionAgentKinds
+        if enabled {
+            disabled.remove(kind)
+        } else {
+            disabled.insert(kind)
+        }
+        disabledAttachmentDetectionAgentKinds = disabled
+    }
+
+    // MARK: - Extensions
+
+    /// Legacy developer default retained only so existing preferences decode unchanged.
+    ///
+    /// `ExtensionManager` deliberately ignores it: App Sandbox permits legacy login-Keychain
+    /// ACL authorization UI, while the generated Seatbelt product policy denies the securityd
+    /// boundary itself. The helper remains a focused containment test harness, not a product
+    /// launch option.
+    ///
+    /// See `docs/extensions/SANDBOX_RUNNER.md`.
+    var usesContainedExtensionLauncher: Bool {
+        get { defaults.bool(forKey: Keys.usesContainedExtensionLauncher) }
+        set {
+            defaults.set(newValue, forKey: Keys.usesContainedExtensionLauncher)
+            notifyChanged()
+        }
+    }
+
     // MARK: - Agent Hooks
 
     /// Whether Skalman installs its lifecycle hooks into each Codex account's `hooks.json`.
@@ -176,6 +233,19 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Remote Access
+
+    /// Whether the remote-access server runs (and, once implemented, its tunnel). Off by
+    /// default: even the loopback-only first milestone exposes interactive terminal access to
+    /// any process holding its private link, so it exists only when the user turns it on.
+    var remoteAccessEnabled: Bool {
+        get { defaults.bool(forKey: Keys.remoteAccessEnabled) }
+        set {
+            defaults.set(newValue, forKey: Keys.remoteAccessEnabled)
+            notifyChanged()
+        }
+    }
+
     // MARK: - MCP Tool Groups
 
     /// The tool groups the user has switched *off* on the Tools page. Stored as the disabled set,
@@ -203,7 +273,24 @@ final class AppSettings {
 
     /// Opt-in settings default to off; the rest are seeded so first launch behaves sensibly.
     private func registerDefaults() {
-        defaults.register(defaults: [
+        defaults.register(defaults: Self.seeds)
+    }
+
+    /// The seeded values, and the one place they are registered on the standard defaults.
+    ///
+    /// This used to happen only in `init`, while the `nonisolated static` readers below go
+    /// straight to `UserDefaults.standard` — so a read that happened before anything touched
+    /// `AppSettings.shared` saw an *unregistered* key and `bool(forKey:)` answered `false`,
+    /// which for every seeded setting here is the opposite of its documented default. The
+    /// sidebar's branch grouping is the one that showed it: documented as on, and off in any
+    /// process that built a tree before instantiating the singleton. Registration is idempotent
+    /// and cheap, so the readers do it themselves rather than depending on an order.
+    private static let registerStandardDefaults: Void = {
+        UserDefaults.standard.register(defaults: seeds)
+    }()
+
+    private static var seeds: [String: Any] {
+        [
             Keys.defaultAgentKind: AgentDefaults.defaultKind.rawValue,
             Keys.restoresLastSession: true,
             Keys.confirmsBeforeClosingRunningSession: true,
@@ -213,7 +300,7 @@ final class AppSettings {
             Keys.discoversAccountAvatars: true,
             Keys.workingOrbStyle: MotionPreferencesDefaults.workingOrbStyle.rawValue,
             Keys.chatNameMorphStyle: MotionPreferencesDefaults.chatNameMorphStyle.rawValue
-        ])
+        ]
     }
 
     private func notifyChanged() {
@@ -230,9 +317,12 @@ final class AppSettings {
         static let groupsSessionsByBranch = "groupsSessionsByBranch"
         static let discoversProjectIcons = "discoversProjectIcons"
         static let discoversAccountAvatars = "discoversAccountAvatars"
+        static let disabledAttachmentDetectionAgentKinds = "disabledAttachmentDetectionAgentKinds"
         static let disabledToolGroupIDs = "disabledToolGroupIDs"
+        static let usesContainedExtensionLauncher = "usesContainedExtensionLauncher"
         static let installsCodexHooks = "installsCodexHooks"
         static let bypassesCodexHookTrust = "bypassesCodexHookTrust"
+        static let remoteAccessEnabled = "remoteAccessEnabled"
         static let workingOrbStyle = "workingOrbStyle"
         static let chatNameMorphStyle = "chatNameMorphStyle"
     }

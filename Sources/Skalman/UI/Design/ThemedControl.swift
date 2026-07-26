@@ -131,7 +131,9 @@ enum ThemedSurface {
         // Half a point in, so a one-point border falls inside the control rather than straddling
         // its edge and drawing at half intensity.
         let rect = border == nil ? bounds : bounds.insetBy(dx: width / 2, dy: width / 2)
-        let corner = radius ?? Design.Radius.control
+        // Fitted to the shape being drawn, so one token cannot produce a rounded square in one
+        // control and a disc in the small one beside it — see `Design.Radius.control(fitting:)`.
+        let corner = radius ?? Design.Radius.control(fitting: rect.size)
         let path = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
 
         fill.setFill()

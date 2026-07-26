@@ -57,7 +57,7 @@ final class AccountsPreferencesViewController: NSViewController {
             SettingsUI.heading("Accounts"),
             SettingsUI.section("Agent Accounts", card),
             SettingsUI.note(AccountsPreferencesStrings.explanation)
-        ])
+        ], hostPage: .accounts)
 
         page.translatesAutoresizingMaskIntoConstraints = false
         pageContainer.addSubview(page)
@@ -193,7 +193,7 @@ final class AccountsPreferencesViewController: NSViewController {
             self?.notifyAccountsChanged()
         }
 
-        let popover = NSPopover()
+        let popover = HostPopoverFactory.make(.settingsAccountIconPicker)
         // Semi-transient, not transient: the system Emoji & Symbols picker opens as its own
         // panel, and a transient popover would close the moment it appears — taking the field
         // that panel inserts into with it. Semi-transient survives that and still dismisses on

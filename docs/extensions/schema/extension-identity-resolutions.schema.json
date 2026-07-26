@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skalman.invalid/schema/extension-identity-resolutions.schema.json",
+  "title": "Skalman primitive identity resolver publication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "providerIcons", "accountIcons"],
+  "properties": {
+    "protocolVersion": { "const": 1 },
+    "providerIcons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["providerID", "image"],
+        "properties": {
+          "providerID": { "type": "string", "minLength": 1 },
+          "image": { "$ref": "extension-host.schema.json#/$defs/imageReference" }
+        }
+      }
+    },
+    "accountIcons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["accountID", "image"],
+        "properties": {
+          "accountID": { "type": "string", "minLength": 1 },
+          "image": { "$ref": "extension-host.schema.json#/$defs/imageReference" }
+        }
+      }
+    }
+  }
+}

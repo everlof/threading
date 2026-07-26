@@ -7,6 +7,11 @@ import Foundation
 /// every node.
 public indirect enum ExtensionNode: Equatable, Sendable {
     case text(String, role: ExtensionTextRole)
+    case image(
+        ExtensionImageReference,
+        role: ExtensionImageRole,
+        accessibilityLabel: String?
+    )
     case button(
         id: String,
         title: String,
@@ -14,8 +19,15 @@ public indirect enum ExtensionNode: Equatable, Sendable {
         isEnabled: Bool
     )
     case status(String, role: ExtensionStatusRole)
+    /// Invokes the next visual hook, eventually reaching the component's native content.
+    case proceed
+    /// Places extension content above existing or extension-rendered content.
+    case overlay(base: ExtensionNode, overlay: ExtensionNode)
+    /// A custom visual surface whose native renderer and lifecycle remain host-owned.
+    case customSurface(ExtensionCustomSurface, accessibilityLabel: String?)
     case divider
     case spacer(ExtensionSpacing)
+    case flexibleSpacer
     case stack(
         axis: ExtensionAxis,
         spacing: ExtensionSpacing,
@@ -23,20 +35,28 @@ public indirect enum ExtensionNode: Equatable, Sendable {
     )
 }
 
-public enum ExtensionTextRole: String, Codable, Equatable, Sendable {
+public enum ExtensionTextRole: String, Codable, CaseIterable, Equatable, Sendable {
     case heading
     case body
     case detail
     case code
+    case compactBody
+    case compactDetail
 }
 
-public enum ExtensionButtonRole: String, Codable, Equatable, Sendable {
+public enum ExtensionImageRole: String, Codable, CaseIterable, Equatable, Sendable {
+    case identity
+    case icon
+    case decoration
+}
+
+public enum ExtensionButtonRole: String, Codable, CaseIterable, Equatable, Sendable {
     case standard
     case primary
     case destructive
 }
 
-public enum ExtensionStatusRole: String, Codable, Equatable, Sendable {
+public enum ExtensionStatusRole: String, Codable, CaseIterable, Equatable, Sendable {
     case neutral
     case positive
     case warning
@@ -64,17 +84,27 @@ extension ExtensionNode: Codable {
         case id
         case title
         case isEnabled
+        case reference
+        case accessibilityLabel
         case spacing
         case axis
         case children
+        case base
+        case overlay
+        case surface
     }
 
     private enum Kind: String, Codable {
         case text
+        case image
         case button
         case status
+        case proceed
+        case overlay
+        case customSurface
         case divider
         case spacer
+        case flexibleSpacer
         case stack
     }
 
@@ -88,6 +118,15 @@ extension ExtensionNode: Codable {
                 try container.decode(String.self, forKey: .text),
                 role: try container.decode(ExtensionTextRole.self, forKey: .role)
             )
+        case .image:
+            self = .image(
+                try container.decode(ExtensionImageReference.self, forKey: .reference),
+                role: try container.decode(ExtensionImageRole.self, forKey: .role),
+                accessibilityLabel: try container.decodeIfPresent(
+                    String.self,
+                    forKey: .accessibilityLabel
+                )
+            )
         case .button:
             self = .button(
                 id: try container.decode(String.self, forKey: .id),
@@ -100,12 +139,29 @@ extension ExtensionNode: Codable {
                 try container.decode(String.self, forKey: .text),
                 role: try container.decode(ExtensionStatusRole.self, forKey: .role)
             )
+        case .proceed:
+            self = .proceed
+        case .overlay:
+            self = .overlay(
+                base: try container.decode(Self.self, forKey: .base),
+                overlay: try container.decode(Self.self, forKey: .overlay)
+            )
+        case .customSurface:
+            self = .customSurface(
+                try container.decode(ExtensionCustomSurface.self, forKey: .surface),
+                accessibilityLabel: try container.decodeIfPresent(
+                    String.self,
+                    forKey: .accessibilityLabel
+                )
+            )
         case .divider:
             self = .divider
         case .spacer:
             self = .spacer(
                 try container.decode(ExtensionSpacing.self, forKey: .spacing)
             )
+        case .flexibleSpacer:
+            self = .flexibleSpacer
         case .stack:
             self = .stack(
                 axis: try container.decode(ExtensionAxis.self, forKey: .axis),
@@ -123,6 +179,11 @@ extension ExtensionNode: Codable {
             try container.encode(Kind.text, forKey: .type)
             try container.encode(text, forKey: .text)
             try container.encode(role, forKey: .role)
+        case .image(let reference, let role, let accessibilityLabel):
+            try container.encode(Kind.image, forKey: .type)
+            try container.encode(reference, forKey: .reference)
+            try container.encode(role, forKey: .role)
+            try container.encodeIfPresent(accessibilityLabel, forKey: .accessibilityLabel)
         case .button(let id, let title, let role, let isEnabled):
             try container.encode(Kind.button, forKey: .type)
             try container.encode(id, forKey: .id)
@@ -133,11 +194,23 @@ extension ExtensionNode: Codable {
             try container.encode(Kind.status, forKey: .type)
             try container.encode(text, forKey: .text)
             try container.encode(role, forKey: .role)
+        case .proceed:
+            try container.encode(Kind.proceed, forKey: .type)
+        case .overlay(let base, let overlay):
+            try container.encode(Kind.overlay, forKey: .type)
+            try container.encode(base, forKey: .base)
+            try container.encode(overlay, forKey: .overlay)
+        case .customSurface(let surface, let accessibilityLabel):
+            try container.encode(Kind.customSurface, forKey: .type)
+            try container.encode(surface, forKey: .surface)
+            try container.encodeIfPresent(accessibilityLabel, forKey: .accessibilityLabel)
         case .divider:
             try container.encode(Kind.divider, forKey: .type)
         case .spacer(let spacing):
             try container.encode(Kind.spacer, forKey: .type)
             try container.encode(spacing, forKey: .spacing)
+        case .flexibleSpacer:
+            try container.encode(Kind.flexibleSpacer, forKey: .type)
         case .stack(let axis, let spacing, let children):
             try container.encode(Kind.stack, forKey: .type)
             try container.encode(axis, forKey: .axis)

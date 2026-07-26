@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 import ThinkingOrbs
 
 /// A live catalogue of the application's design-system components.
@@ -36,11 +37,19 @@ final class ComponentGalleryWindowController: ThemedWindowController {
             window.center()
         }
         window.setFrameAutosaveName(Defaults.frameName)
+        window.delegate = self
     }
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
         window?.makeKeyAndOrderFront(sender)
+    }
+}
+
+extension ComponentGalleryWindowController: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        (contentViewController as? ComponentGalleryViewController)?
+            .stopExtensionProcess()
     }
 }
 
@@ -68,6 +77,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ChipView",
         "FileActivityMapView",
         "MorphingTitleLabel",
+        "PaneFooterView",
         "PromptView",
         "SeparatorView",
         "ShortcutRecorderView",
@@ -81,6 +91,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedProgressBar",
         "ThemedScrollView",
         "ThemedSpinner",
+        "ThemedSplitView",
         "ThemedTableHeaderView",
         "ThemedTableView",
         "ThemedTabItemView",
@@ -89,8 +100,10 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedTextView",
         "ThemedToggle",
         "ThemedSurface",
+        "ThemedSurfaceView",
         "ThemeRedraw",
-        "ToolbarButtonView",
+        "ThemedIconButton",
+        "ToolbarButtonGroupView",
         "WorkingOrbView",
         "WindowBackdrop"
     ]
@@ -109,6 +122,13 @@ final class ComponentGalleryViewController: NSViewController {
     private let themeImageView = NSImageView()
     private let galleryScrollView = ThemedScrollView()
     private let tableModel = ComponentGalleryTableModel()
+    private let extensionLoadButton = ThemedButton()
+    private let extensionProcessStatus = NSTextField(
+        wrappingLabelWithString: "Choose an extension directory to start its interactive process."
+    )
+    private let extensionProcessPreview = NSStackView()
+    private var extensionProcessSession: ExtensionProcessSession?
+    private var extensionLoadGeneration = 0
 
     private var progress = 0.42
     private var clickCount = 0
@@ -125,6 +145,21 @@ final class ComponentGalleryViewController: NSViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        extensionProcessSession?.terminate()
+    }
+
+    func stopExtensionProcess() {
+        extensionLoadGeneration += 1
+        extensionProcessSession?.terminate()
+        extensionProcessSession = nil
+        guard isViewLoaded else { return }
+        extensionProcessStatus.textColor = Design.Text.secondary
+        extensionProcessStatus.stringValue =
+            "Choose an extension directory to start its interactive process."
+        replaceExtensionProcessPreview(with: nil)
     }
 
     override func loadView() {
@@ -244,6 +279,7 @@ final class ComponentGalleryViewController: NSViewController {
             makeFeedbackSection(),
             makeContainersSection(),
             makeColourSection(),
+            makeExtensionSection(),
             makeInfrastructureSection()
         ])
         sections.orientation = .vertical
@@ -364,7 +400,8 @@ final class ComponentGalleryViewController: NSViewController {
             title: "Terminal",
             symbolName: "terminal",
             placement: .horizontal,
-            showsClose: true
+            showsClose: true,
+            inkSource: .chrome
         )
         activeTab.isSelected = true
         activeTab.onSelect = { [weak self] in self?.showReceipt("Selected the Terminal tab.") }
@@ -374,19 +411,21 @@ final class ComponentGalleryViewController: NSViewController {
             title: "Browser",
             symbolName: "globe",
             placement: .horizontal,
-            showsClose: true
+            showsClose: true,
+            inkSource: .chrome
         )
         inactiveTab.onSelect = { [weak self] in self?.showReceipt("Selected the Browser tab.") }
 
         let sidebarTab = ThemedTabItemView(
             title: "Themes",
             symbolName: "paintpalette",
-            placement: .sidebar
+            placement: .sidebar,
+            inkSource: .chrome
         )
         sidebarTab.isSelected = true
         sidebarTab.widthAnchor.constraint(equalToConstant: 180).isActive = true
 
-        let newSessionButton = ToolbarButtonView(
+        let newSessionButton = ThemedIconButton(
             symbolName: "plus",
             accessibility: "New session"
         )
@@ -394,7 +433,7 @@ final class ComponentGalleryViewController: NSViewController {
             self?.showReceipt("Opened the new-session page.")
         }
 
-        let selectedToolbarButton = ToolbarButtonView(
+        let selectedToolbarButton = ThemedIconButton(
             symbolName: "sidebar.trailing",
             accessibility: "Selected toolbar action"
         )
@@ -403,16 +442,33 @@ final class ComponentGalleryViewController: NSViewController {
             self?.showReceipt("Pressed the selected toolbar action.")
         }
 
-        let activeSession = SessionTitleItemView()
-        activeSession.configure(
+        // The toolbar's page tab: the *same* class as the two above it, differing only in the
+        // ground it inks from. Shown beside them on purpose — this pair used to be two
+        // implementations, and the gallery is where that would show.
+        let activeSession = ThemedTabItemView(
             title: "Active session",
             symbolName: "chevron.left.forwardslash.chevron.right",
-            showsClose: true
+            placement: .horizontal,
+            showsClose: true,
+            inkSource: .backdrop
         )
+        activeSession.isSelected = true
+        activeSession.onSelect = { [weak self] in
+            self?.showReceipt("Revealed the active page in the sidebar.")
+        }
         activeSession.onClose = { [weak self] in
             self?.showReceipt("Closed the active page without stopping its session.")
         }
         activeSession.widthAnchor.constraint(equalToConstant: 190).isActive = true
+
+        let groupedActions = ToolbarButtonGroupView(buttons: [
+            galleryToolbarButton(symbol: "ellipsis", label: "Session options"),
+            galleryToolbarButton(
+                symbol: "rectangle.bottomthird.inset.filled",
+                label: "Shell drawer"
+            ),
+            galleryToolbarButton(symbol: "sidebar.trailing", label: "Display panel")
+        ])
 
         return section(
             "Buttons & choices",
@@ -431,12 +487,24 @@ final class ComponentGalleryViewController: NSViewController {
                     row([activeTab, inactiveTab, sidebarTab])
                 ),
                 story(
-                    "ToolbarButtonView",
+                    "ThemedIconButton",
                     "Active page tab with its own close control, then New Session and selected pane actions.",
                     row([activeSession, newSessionButton, selectedToolbarButton])
+                ),
+                story(
+                    "ToolbarButtonGroupView",
+                    "Related toolbar actions spaced as a set, the way the window's own trailing controls are.",
+                    groupedActions
                 )
             ]
         )
+    }
+
+    /// A toolbar button whose only job is to report that it was pressed.
+    private func galleryToolbarButton(symbol: String, label: String) -> ThemedIconButton {
+        let button = ThemedIconButton(symbolName: symbol, accessibility: label)
+        button.onPress = { [weak self] in self?.showReceipt("Pressed \(label).") }
+        return button
     }
 
     private func makeTextSection() -> NSView {
@@ -676,9 +744,111 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThemedOutlineView",
                     "Expand, collapse, select, and scroll a hierarchy.",
                     outlineScroll
+                ),
+                story(
+                    "ThemedSplitView",
+                    "Drag the divider: the seam is inked against the window's backdrop, not the chrome's ground.",
+                    makeSplitViewSample()
+                ),
+                story(
+                    "ThemedSurfaceView",
+                    "A pane's ground. Switch the gallery between Light and Dark: this keeps its "
+                        + "role, where a plain view would keep the colour it was first handed.",
+                    makeSurfaceViewSample()
+                ),
+                story(
+                    "PaneFooterView",
+                    "The bottom band of a pane: hairline, band height, and controls whose ink "
+                        + "sits on the stated margin — corner-adapted when the band meets a "
+                        + "rounded window corner.",
+                    makePaneFooterSample()
                 )
             ]
         )
+    }
+
+    /// The sidebar's own ground, at gallery scale — and beside it the plain view it replaced, so
+    /// the appearance toggle above shows the difference rather than describing it.
+    /// The sidebar footer's shape at the sidebar's width: a titled plain button at the leading
+    /// margin, an icon-only twin at the trailing one, both landing their ink on the same inset.
+    private func makePaneFooterSample() -> NSView {
+        let add = ThemedButton()
+        add.title = "Add Project"
+        add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
+            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        add.isBordered = false
+        add.font = Design.Typography.controlRegular()
+        add.target = self
+        add.action = #selector(buttonPressed(_:))
+
+        let gear = ThemedButton()
+        gear.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
+            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        gear.isBordered = false
+        gear.toolTip = "Settings"
+        gear.target = self
+        gear.action = #selector(buttonPressed(_:))
+
+        let footer = PaneFooterView(leading: [add], trailing: [gear])
+
+        let pane = ThemedSurfaceView()
+        pane.applySurface(fill: Design.Surface.background, radius: .control)
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(footer)
+
+        NSLayoutConstraint.activate([
+            pane.widthAnchor.constraint(equalToConstant: SidebarDefaults.defaultWidth),
+            pane.heightAnchor.constraint(equalToConstant: Design.Size.footerHeight * 2),
+            footer.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: pane.bottomAnchor)
+        ])
+
+        return pane
+    }
+
+    private func makeSurfaceViewSample() -> NSView {
+        let themed = ThemedSurfaceView()
+        themed.applySurface(fill: Design.Surface.background, radius: .panel)
+
+        let row = NSStackView(views: [themed, makeSurfaceLabel()])
+        row.orientation = .horizontal
+        row.spacing = Design.Spacing.medium
+
+        NSLayoutConstraint.activate([
+            themed.widthAnchor.constraint(equalToConstant: 120),
+            themed.heightAnchor.constraint(equalToConstant: 72)
+        ])
+
+        return row
+    }
+
+    private func makeSurfaceLabel() -> NSView {
+        let label = NSTextField(labelWithString: "Surface.background")
+        label.font = Design.Typography.code()
+        label.textColor = Design.Text.secondary
+        return label
+    }
+
+    /// Two panes and the seam between them, which is the whole of what this component draws.
+    private func makeSplitViewSample() -> NSView {
+        let split = ThemedSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.translatesAutoresizingMaskIntoConstraints = false
+
+        for fill in [Design.Surface.panel, Design.Surface.elevated] {
+            let pane = NSView()
+            pane.applySurface(fill: fill, radius: .fixed(0))
+            split.addArrangedSubview(pane)
+        }
+
+        NSLayoutConstraint.activate([
+            split.widthAnchor.constraint(equalToConstant: 260),
+            split.heightAnchor.constraint(equalToConstant: 72)
+        ])
+
+        return split
     }
 
     private func makeColourSection() -> NSView {
@@ -784,6 +954,72 @@ final class ComponentGalleryViewController: NSViewController {
         )
     }
 
+    private func makeExtensionSection() -> NSView {
+        let panel = ExtensionExperimentFixture.registration.panels[0]
+        let rendered: NSView
+
+        do {
+            rendered = try ExtensionNodeRenderer.render(panel.root) { [weak self] action in
+                self?.showReceipt("Extension action “\(action)” was invoked.")
+            }
+            rendered.setAccessibilityIdentifier("gallery.extension.panel")
+        } catch {
+            let failure = NSTextField(wrappingLabelWithString: error.localizedDescription)
+            failure.font = Design.Typography.body()
+            failure.textColor = Design.Status.negative
+            rendered = failure
+        }
+
+        extensionLoadButton.title = "Load Extension Directory…"
+        extensionLoadButton.target = self
+        extensionLoadButton.action = #selector(chooseExtensionDirectory)
+        extensionLoadButton.setAccessibilityIdentifier("gallery.extension.load")
+
+        extensionProcessStatus.font = Design.Typography.detail()
+        extensionProcessStatus.textColor = Design.Text.secondary
+        extensionProcessStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        extensionProcessPreview.orientation = .vertical
+        extensionProcessPreview.alignment = .leading
+        extensionProcessPreview.spacing = Design.Spacing.small
+        extensionProcessPreview.setAccessibilityIdentifier("gallery.extension.process-preview")
+
+        let processExperiment = NSStackView(
+            views: [extensionLoadButton, extensionProcessStatus, extensionProcessPreview]
+        )
+        processExperiment.orientation = .vertical
+        processExperiment.alignment = .leading
+        processExperiment.spacing = Design.Spacing.small
+        extensionProcessStatus.widthAnchor.constraint(
+            lessThanOrEqualTo: processExperiment.widthAnchor
+        ).isActive = true
+        extensionProcessPreview.widthAnchor.constraint(
+            lessThanOrEqualTo: processExperiment.widthAnchor
+        ).isActive = true
+
+        var rows = [
+            story(
+                "ExtensionNode renderer",
+                "Text, status, separation, layout, actions, disabled state, and semantic roles.",
+                rendered
+            ),
+            story(
+                "Live out-of-process extension",
+                "Inspect a manifest, supervise its process, validate every JSONL value, route actions, and render returned panel state.",
+                processExperiment
+            )
+        ]
+        rows.append(contentsOf: ComponentCustomizationGalleryFixture.stories().map {
+            story($0.title, $0.detail, $0.view)
+        })
+
+        return section(
+            "Extension rendering",
+            note: "Semantic values cross the extension boundary; the same themed controls render them.",
+            rows: rows
+        )
+    }
+
     // MARK: Actions
 
     @objc private func themeChanged() {
@@ -822,6 +1058,167 @@ final class ComponentGalleryViewController: NSViewController {
         let button = sender as? ThemedButton
         let name = button?.accessibilityTitle() ?? "Button"
         showReceipt("\(name) pressed · \(clickCount) total.")
+    }
+
+    @objc private func chooseExtensionDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Load Skalman Extension"
+        panel.message = "Choose a directory containing skalman-extension.json."
+        panel.prompt = "Load Extension"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+
+        extensionLoadGeneration += 1
+        let loadGeneration = extensionLoadGeneration
+        extensionProcessSession?.terminate()
+        extensionProcessSession = nil
+        extensionLoadButton.isEnabled = false
+        extensionProcessStatus.textColor = Design.Text.secondary
+        extensionProcessStatus.stringValue = "Inspecting and starting \(directory.lastPathComponent)…"
+        replaceExtensionProcessPreview(with: nil)
+
+        DispatchQueue.global(qos: .userInitiated).async { [directory] in
+            let result: Result<
+                (ExtensionManifest, ExtensionProcessSession.Started),
+                Error
+            >
+            do {
+                let bundle = try ExtensionBundleInspector.inspect(at: directory)
+                let started = try ExtensionProcessSession.start(bundle: bundle)
+                result = .success((bundle.manifest, started))
+            } catch {
+                result = .failure(error)
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.presentStartedExtension(result, generation: loadGeneration)
+            }
+        }
+    }
+
+    private func presentStartedExtension(
+        _ result: Result<
+            (ExtensionManifest, ExtensionProcessSession.Started),
+            Error
+        >,
+        generation: Int
+    ) {
+        guard generation == extensionLoadGeneration else {
+            if case .success((_, let started)) = result {
+                started.session.terminate()
+            }
+            return
+        }
+
+        extensionLoadButton.isEnabled = true
+
+        switch result {
+        case .failure(let error):
+            extensionProcessStatus.stringValue = error.localizedDescription
+            extensionProcessStatus.textColor = Design.Status.negative
+            showReceipt("Extension failed to start.")
+
+        case .success(let (manifest, started)):
+            extensionProcessSession = started.session
+            extensionProcessStatus.textColor = Design.Status.positive
+            extensionProcessStatus.stringValue =
+                "\(manifest.name) is running · \(started.registration.commands.count) command(s), \(started.registration.panels.count) panel(s)."
+
+            guard let panel = started.registration.panels.first else {
+                let empty = NSTextField(labelWithString: "The extension registered no panels.")
+                empty.font = Design.Typography.detail()
+                empty.textColor = Design.Text.tertiary
+                replaceExtensionProcessPreview(with: empty)
+                showReceipt("Loaded extension “\(manifest.name)”.")
+                return
+            }
+
+            if renderExtensionPanel(
+                panel,
+                manifest: manifest,
+                session: started.session
+            ) {
+                showReceipt("Loaded extension “\(manifest.name)” and rendered “\(panel.title)”.")
+            }
+        }
+    }
+
+    @discardableResult
+    private func renderExtensionPanel(
+        _ panel: ExtensionPanel,
+        manifest: ExtensionManifest,
+        session: ExtensionProcessSession
+    ) -> Bool {
+        do {
+            let rendered = try ExtensionNodeRenderer.render(panel.root) { [weak self, weak session] action in
+                guard let self, let session,
+                      self.extensionProcessSession === session else { return }
+                self.extensionProcessStatus.textColor = Design.Text.secondary
+                self.extensionProcessStatus.stringValue = "Running “\(action)”…"
+                session.invoke(panelID: panel.id, actionID: action) { [weak self, weak session] result in
+                    guard let self, let session,
+                          self.extensionProcessSession === session else { return }
+                    self.presentExtensionAction(
+                        result,
+                        manifest: manifest,
+                        session: session
+                    )
+                }
+            }
+            rendered.setAccessibilityIdentifier("gallery.extension.live-panel")
+            replaceExtensionProcessPreview(with: rendered)
+            return true
+        } catch {
+            extensionProcessStatus.textColor = Design.Status.negative
+            extensionProcessStatus.stringValue = error.localizedDescription
+            replaceExtensionProcessPreview(with: nil)
+            showReceipt("Extension panel rendering failed.")
+            return false
+        }
+    }
+
+    private func presentExtensionAction(
+        _ result: Result<ExtensionActionResponse, Error>,
+        manifest: ExtensionManifest,
+        session: ExtensionProcessSession
+    ) {
+        switch result {
+        case .failure(let error):
+            extensionProcessStatus.textColor = Design.Status.negative
+            extensionProcessStatus.stringValue = error.localizedDescription
+            showReceipt("Extension action failed.")
+
+        case .success(let response):
+            if let error = response.error {
+                extensionProcessStatus.textColor = Design.Status.negative
+                extensionProcessStatus.stringValue = error
+                showReceipt("Extension declined the action.")
+                return
+            }
+
+            if let panel = response.panel {
+                guard renderExtensionPanel(panel, manifest: manifest, session: session) else {
+                    return
+                }
+            }
+
+            let message = response.message ?? "Extension action completed."
+            extensionProcessStatus.textColor = Design.Status.positive
+            extensionProcessStatus.stringValue = message
+            showReceipt(message)
+        }
+    }
+
+    private func replaceExtensionProcessPreview(with view: NSView?) {
+        for arranged in extensionProcessPreview.arrangedSubviews {
+            extensionProcessPreview.removeArrangedSubview(arranged)
+            arranged.removeFromSuperview()
+        }
+        if let view {
+            extensionProcessPreview.addArrangedSubview(view)
+        }
     }
 
     @objc private func sampleToggleChanged(_ sender: ThemedToggle) {

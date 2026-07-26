@@ -63,7 +63,7 @@ final class ArchivedPreferencesViewController: NSViewController {
             sections.append(SettingsUI.section(nil, SettingsCard(rows: rowViews)))
         }
 
-        let page = SettingsUI.page(sections)
+        let page = SettingsUI.page(sections, hostPage: .archived)
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([

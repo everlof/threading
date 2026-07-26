@@ -72,7 +72,12 @@ enum SessionImporter {
     /// ordinary subdirectory does, a worktree nested inside the folder does not — the latter
     /// is a separate checkout with its own git directory, on its own branch. The equal-path
     /// case is settled without touching disk, which is almost every rollout.
-    private static func belongs(cwd: String, folder: String, worktree: String?) -> Bool {
+    ///
+    /// Internal rather than private so `SessionImportBelongingTests` can put it against a real
+    /// `git worktree` layout. The rule is the one thing standing between a project and another
+    /// checkout's conversations, and it had been proven by hand rather than by anything that
+    /// runs.
+    static func belongs(cwd: String, folder: String, worktree: String?) -> Bool {
         let path = normalized(cwd)
         if path == folder { return true }
         guard path.hasPrefix(folder + "/") else { return false }

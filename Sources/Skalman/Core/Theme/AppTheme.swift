@@ -4,11 +4,9 @@ import AppKit
 
 /// A theme's durable identity, distinct from the name shown to the user.
 ///
-/// Terminal themes are keyed by their display name, which was fine for four built-ins that
-/// never move. A *shipped library* cannot work that way: renaming a stock theme in some future
-/// release would silently reset every assignment naming it, because the re-point in
-/// `ProjectStore.renameTheme` only runs when the user renames one. A slug costs nothing now and
-/// is the thing that cannot be retrofitted later.
+/// App and terminal themes both use stable IDs. A *shipped library* cannot rely on display
+/// names: renaming a stock theme in some future release must not silently reset assignments.
+/// The slug is persistence identity; `name` is presentation and may change independently.
 struct AppThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible {
     let rawValue: String
 
@@ -44,38 +42,93 @@ struct AppTheme: Codable, Equatable {
     let id: AppThemeID
     let name: String
 
-    /// Light or dark. Drives the window's `NSAppearance` too, or a dark theme gets the
-    /// system's light scrollers and menus drawn over it.
+    /// Adaptive, light, or dark. Fixed themes pin the window's `NSAppearance`; an adaptive
+    /// theme leaves it unpinned and resolves its matching variant as macOS changes appearance.
     let mode: Mode
 
     /// One line, shown under the name where a theme is chosen.
     let summary: String?
 
-    /// The roles this theme states. Everything absent is derived — see `resolved`.
-    let roles: [AppThemeRole: NSColor]
+    /// One or both authored appearances. Existing fixed themes carry one; adaptive themes carry
+    /// both. System carries neither because its roles are AppKit's own dynamic colours.
+    let variants: [VariantKind: Variant]
 
-    /// The terminal palette that belongs with this chrome.
-    ///
-    /// Stated per theme rather than derived from the roles, and that is the point: a palette is
-    /// sixteen ANSI colours that have to stay legible against the ground *and* apart from each
-    /// other, which eleven roles cannot answer — derivation would give eight near-hues. Writing
-    /// it out is what makes the pairing a decision taken while the theme is designed, so anyone
-    /// reading the theme can see the two halves were meant to go together.
-    ///
-    /// Reached through the terminal theme list's "Follow App Theme" entry, at whichever scope
-    /// picks it. A session that names a palette of its own still gets that one.
-    let terminalPalette: TerminalTheme
+    /// Compatibility projections for the rest of the app. Feature views ask for the material,
+    /// palette, or roles that match the appearance currently drawing; they do not need to know
+    /// whether the theme stored one variant or two.
+    var roles: [AppThemeRole: NSColor] { activeVariant?.roles ?? [:] }
+    var terminalPalette: TerminalTheme {
+        activeVariant?.terminalPalette ?? TerminalTheme.basic.renamed(name)
+    }
+    var material: Material { activeVariant?.material ?? .system }
 
-    /// How surfaces are *shaped*, as opposed to coloured.
-    ///
-    /// Added because two themes that differ only in hue read as one app in two tints — which
-    /// is what the first pass was. A style's identity is carried as much by its silhouette as
-    /// its palette: Swiss Minimalist is hard edges and hairline rules, Cyberpunk is a tight
-    /// radius with a neon halo, and Neumorphism is *nothing but* material. Colour alone cannot
-    /// tell those apart.
-    let material: Material
+    enum VariantKind: String, Codable, CaseIterable, Hashable {
+        case light, dark
 
-    /// Radii, border weight and an optional glow.
+        var appearance: NSAppearance? {
+            NSAppearance(named: self == .dark ? .darkAqua : .aqua)
+        }
+
+        init(mode: Mode) {
+            self = mode == .dark ? .dark : .light
+        }
+
+        static func current(in appearance: NSAppearance = NSAppearance.currentDrawing()) -> Self {
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
+        }
+    }
+
+    /// Everything whose authored values may genuinely differ between light and dark.
+    ///
+    /// Material is variant-owned too: a pale paper style may need a hard ink shadow while its
+    /// night counterpart needs a restrained glow. The paired terminal palette must vary because
+    /// its foreground, background, selection, and all sixteen ANSI colours are one contrast set.
+    struct Variant: Codable, Equatable {
+        let roles: [AppThemeRole: NSColor]
+        let terminalPalette: TerminalTheme
+        let material: Material
+
+        private enum CodingKeys: String, CodingKey {
+            case roles, terminalPalette
+            case material
+        }
+
+        init(
+            roles: [AppThemeRole: NSColor],
+            terminalPalette: TerminalTheme,
+            material: Material
+        ) {
+            self.roles = roles
+            self.terminalPalette = terminalPalette
+            self.material = material
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let hexes = try container.decodeIfPresent([String: String].self, forKey: .roles) ?? [:]
+            var parsed: [AppThemeRole: NSColor] = [:]
+            for (key, hex) in hexes {
+                guard let role = AppThemeRole(rawValue: key),
+                      let color = NSColor(hex: hex) else { continue }
+                parsed[role] = color
+            }
+            roles = parsed
+            material = try container.decodeIfPresent(Material.self, forKey: .material) ?? .system
+            terminalPalette = try container.decode(TerminalTheme.self, forKey: .terminalPalette)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(
+                Dictionary(uniqueKeysWithValues: roles.map { ($0.key.rawValue, $0.value.hexString) }),
+                forKey: .roles
+            )
+            try container.encode(material, forKey: .material)
+            try container.encode(terminalPalette, forKey: .terminalPalette)
+        }
+    }
+
+    /// Radii, border weight and an optional panel shadow.
     struct Material: Codable, Equatable {
         /// Containers holding content — cards, the prompt box.
         var panelRadius: CGFloat = 12
@@ -83,8 +136,9 @@ struct AppTheme: Codable, Equatable {
         var controlRadius: CGFloat = 8
         var borderWidth: CGFloat = 1
 
-        /// A halo behind panels, in one of the theme's own colours. Nil for most styles: a
-        /// glow is a strong statement and reads as a mistake anywhere it is not deliberate.
+        /// A shadow behind opted-in panels, in one of the theme's own colours. A zero offset
+        /// reads as a glow; a non-zero, zero-radius shadow gives Bauhaus and Neo Brutalism
+        /// their hard printed lift without teaching feature views about either style.
         var glow: Glow?
 
         static let system = Material()
@@ -94,14 +148,51 @@ struct AppTheme: Codable, Equatable {
         let role: AppThemeRole
         let radius: CGFloat
         let opacity: Double
+        let offsetX: CGFloat
+        let offsetY: CGFloat
+
+        init(
+            role: AppThemeRole,
+            radius: CGFloat,
+            opacity: Double,
+            offsetX: CGFloat = 0,
+            offsetY: CGFloat = 0
+        ) {
+            self.role = role
+            self.radius = radius
+            self.opacity = opacity
+            self.offsetX = offsetX
+            self.offsetY = offsetY
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case role, radius, opacity, offsetX, offsetY
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            role = try container.decode(AppThemeRole.self, forKey: .role)
+            radius = try container.decode(CGFloat.self, forKey: .radius)
+            opacity = try container.decode(Double.self, forKey: .opacity)
+            offsetX = try container.decodeIfPresent(CGFloat.self, forKey: .offsetX) ?? 0
+            offsetY = try container.decodeIfPresent(CGFloat.self, forKey: .offsetY) ?? 0
+        }
     }
 
     enum Mode: String, Codable {
-        case light, dark
+        case system, light, dark
 
         var appearance: NSAppearance? {
-            NSAppearance(named: self == .dark ? .darkAqua : .aqua)
+            switch self {
+            case .system: return nil
+            case .light: return NSAppearance(named: .aqua)
+            case .dark: return NSAppearance(named: .darkAqua)
+            }
         }
+
+        /// The agent-facing term is “adaptive”; `system` survives in persisted documents for
+        /// compatibility with the original System-only implementation.
+        var appearanceName: String { self == .system ? "adaptive" : rawValue }
     }
 
     // MARK: - The System Theme
@@ -111,7 +202,7 @@ struct AppTheme: Codable, Equatable {
     static let system = AppTheme(
         id: .system,
         name: "System",
-        mode: .light,
+        mode: .system,
         summary: "Follows macOS — light, dark, and your accent colour.",
         roles: [:],
         // The palette the app has always defaulted to, so "Follow App Theme" under the System
@@ -121,6 +212,32 @@ struct AppTheme: Codable, Equatable {
     )
 
     var isSystem: Bool { id == .system }
+    var isAdaptive: Bool { mode == .system }
+    var availableVariants: [VariantKind] {
+        VariantKind.allCases.filter { variants[$0] != nil }
+    }
+
+    func variant(_ kind: VariantKind) -> Variant? {
+        variants[kind]
+    }
+
+    func variantKind(for appearance: NSAppearance = NSAppearance.currentDrawing()) -> VariantKind {
+        switch mode {
+        case .light: return .light
+        case .dark: return .dark
+        case .system: return .current(in: appearance)
+        }
+    }
+
+    func variant(for appearance: NSAppearance = NSAppearance.currentDrawing()) -> Variant? {
+        let preferred = variantKind(for: appearance)
+        return variants[preferred]
+            ?? variants[preferred == .light ? .dark : .light]
+    }
+
+    private var activeVariant: Variant? {
+        variant()
+    }
 
     // MARK: - Resolution
 
@@ -131,16 +248,27 @@ struct AppTheme: Codable, Equatable {
     /// it is not optional politeness: a style that stated a fixed dark ground and let the
     /// *labels* fall back to the system's would flip half the window when macOS switched
     /// appearance. A themed role never falls back to a dynamic system colour.
-    func resolved(_ role: AppThemeRole) -> NSColor {
-        if let stated = roles[role] { return stated }
-        guard !isSystem, let derived = derive(role) else { return role.systemColor }
+    func resolved(
+        _ role: AppThemeRole,
+        appearance: NSAppearance = NSAppearance.currentDrawing()
+    ) -> NSColor {
+        guard let variant = variant(for: appearance) else { return role.systemColor }
+        if let stated = variant.roles[role] { return stated }
+        guard let derived = derive(role, from: variant, kind: variantKind(for: appearance)) else {
+            return role.systemColor
+        }
         return derived
     }
 
-    private func derive(_ role: AppThemeRole) -> NSColor? {
+    private func derive(
+        _ role: AppThemeRole,
+        from variant: Variant,
+        kind: VariantKind
+    ) -> NSColor? {
+        let roles = variant.roles
         switch role {
         case .elevated:
-            return roles[.panel]?.lightened(by: mode == .dark ? 0.06 : -0.04)
+            return roles[.panel]?.lightened(by: kind == .dark ? 0.06 : -0.04)
         case .controlResting:
             return roles[.label].map { $0.withAlphaComponent(0.08) }
         case .controlHover:
@@ -166,7 +294,7 @@ struct AppTheme: Codable, Equatable {
         case .surface:
             return roles[.ground]
         case .panel:
-            return roles[.surface]?.lightened(by: mode == .dark ? 0.05 : -0.03)
+            return roles[.surface]?.lightened(by: kind == .dark ? 0.05 : -0.03)
         default:
             return nil
         }
@@ -175,7 +303,9 @@ struct AppTheme: Codable, Equatable {
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, mode, summary, roles, material, terminalPalette
+        case id, name, mode, summary, variants
+        // Legacy single-variant document fields.
+        case roles, material, terminalPalette
     }
 
     init(
@@ -191,9 +321,32 @@ struct AppTheme: Codable, Equatable {
         self.name = name
         self.mode = mode
         self.summary = summary
-        self.roles = roles
-        self.terminalPalette = terminalPalette
-        self.material = material
+        if id == .system && mode == .system && roles.isEmpty {
+            variants = [:]
+        } else {
+            let kind = VariantKind(mode: mode)
+            variants = [
+                kind: Variant(
+                    roles: roles,
+                    terminalPalette: terminalPalette,
+                    material: material
+                )
+            ]
+        }
+    }
+
+    init(
+        id: AppThemeID,
+        name: String,
+        mode: Mode,
+        summary: String?,
+        variants: [VariantKind: Variant]
+    ) {
+        self.id = id
+        self.name = name
+        self.mode = mode
+        self.summary = summary
+        self.variants = variants
     }
 
     /// Roles are written as a hex map keyed by the role's own name, so a theme document is
@@ -205,20 +358,40 @@ struct AppTheme: Codable, Equatable {
         mode = try container.decode(Mode.self, forKey: .mode)
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
 
+        if let encoded = try container.decodeIfPresent(
+            [String: Variant].self,
+            forKey: .variants
+        ) {
+            variants = Dictionary(uniqueKeysWithValues: encoded.compactMap { raw, variant in
+                VariantKind(rawValue: raw).map { ($0, variant) }
+            })
+            return
+        }
+
+        // Legacy documents stored one palette at the top level. Decode them into the equivalent
+        // single variant, so existing custom themes need no eager migration or version flag.
         let hexes = try container.decodeIfPresent([String: String].self, forKey: .roles) ?? [:]
         var parsed: [AppThemeRole: NSColor] = [:]
         for (key, hex) in hexes {
-            // An unknown role name is skipped rather than thrown: a document written by a later
-            // release should lose the role it names, not fail to load at all.
             guard let role = AppThemeRole(rawValue: key), let color = NSColor(hex: hex) else { continue }
             parsed[role] = color
         }
-        roles = parsed
-        material = try container.decodeIfPresent(Material.self, forKey: .material) ?? .system
+        let legacyMaterial = try container.decodeIfPresent(Material.self, forKey: .material) ?? .system
         // A theme document written before palettes existed keeps the app's own default, which is
         // what a terminal following it drew with anyway.
-        terminalPalette = try container.decodeIfPresent(TerminalTheme.self, forKey: .terminalPalette)
+        let legacyTerminal = try container.decodeIfPresent(TerminalTheme.self, forKey: .terminalPalette)
             ?? TerminalTheme.basic.renamed(name)
+        if id == .system && mode == .system && parsed.isEmpty {
+            variants = [:]
+        } else {
+            variants = [
+                VariantKind(mode: mode): Variant(
+                    roles: parsed,
+                    terminalPalette: legacyTerminal,
+                    material: legacyMaterial
+                )
+            ]
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -228,11 +401,10 @@ struct AppTheme: Codable, Equatable {
         try container.encode(mode, forKey: .mode)
         try container.encodeIfPresent(summary, forKey: .summary)
 
-        var hexes: [String: String] = [:]
-        for (role, color) in roles { hexes[role.rawValue] = color.hexString }
-        try container.encode(hexes, forKey: .roles)
-        try container.encode(material, forKey: .material)
-        try container.encode(terminalPalette, forKey: .terminalPalette)
+        try container.encode(
+            Dictionary(uniqueKeysWithValues: variants.map { ($0.key.rawValue, $0.value) }),
+            forKey: .variants
+        )
     }
 }
 

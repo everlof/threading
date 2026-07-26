@@ -22,6 +22,12 @@ struct HTTPResponse {
     let reason: String
     let contentType: String?
     let body: Data
+    /// Extra response headers, empty for MCP. The remote-access server sets a handful of
+    /// hardening headers (`X-Frame-Options`, `X-Content-Type-Options`, a CSP) here, since it
+    /// is the one server reachable through a public tunnel.
+    var extraHeaders: [String: String] = [:]
+    /// Used by the remote-access server for bounded large bodies. MCP responses stay persistent.
+    var closesConnection = false
 
     static func json(_ body: Data) -> HTTPResponse {
         HTTPResponse(status: 200, reason: "OK", contentType: "application/json", body: body)
@@ -39,8 +45,11 @@ struct HTTPResponse {
         if let contentType {
             head += "Content-Type: \(contentType)\r\n"
         }
+        for (name, value) in extraHeaders.sorted(by: { $0.key < $1.key }) {
+            head += "\(name): \(value)\r\n"
+        }
         head += "Content-Length: \(body.count)\r\n"
-        head += "Connection: keep-alive\r\n\r\n"
+        head += "Connection: \(closesConnection ? "close" : "keep-alive")\r\n\r\n"
 
         return Data(head.utf8) + body
     }
@@ -139,7 +148,28 @@ final class MCPConnection {
 
     /// Answers one complete request if the buffer holds one, leaving any remainder for later.
     private func processBuffer() {
-        guard !isHandling, let (request, consumed) = Self.parseRequest(from: buffer) else { return }
+        guard !isHandling else { return }
+
+        let request: HTTPRequest
+        let consumed: Int
+
+        switch Self.parseRequest(from: buffer) {
+        case .incomplete:
+            return
+
+        case .malformed(let status, let reason):
+            // Closed rather than skipped. A framing error is the one error with no recovery:
+            // the next request's first byte is exactly the thing that could not be located.
+            SkalmanLogger.mcp.error(
+                "Refused a malformed request: \(status, privacy: .public) \(reason, privacy: .public)"
+            )
+            send(.status(status, reason), thenClose: true)
+            return
+
+        case .request(let parsed, let bytes):
+            request = parsed
+            consumed = bytes
+        }
 
         // Rebased rather than mutated in place: a Data slice carries its parent's indices,
         // and the parser reads positions relative to `startIndex`.
@@ -177,21 +207,43 @@ final class MCPConnection {
 
     private static let headerTerminator = Data("\r\n\r\n".utf8)
 
-    /// Parses one request, returning it with the number of bytes it consumed.
+    /// What one pass over the buffer found.
     ///
-    /// Returns nil while the request is still incomplete, which is the normal case for the
-    /// first few reads of a large body.
-    static func parseRequest(from buffer: Data) -> (HTTPRequest, Int)? {
-        guard let headerRange = buffer.range(of: headerTerminator) else { return nil }
+    /// The third case is the one that earns the type. The parser used to answer `nil` for *both*
+    /// "not all here yet" and "this can never be a request", so bytes it could not read were
+    /// waited on forever, and framing it could not trust was accepted with a default: a
+    /// `Content-Length` that was missing or unreadable became a body of **zero**, which leaves
+    /// the real body sitting at the head of the buffer to be read as the *next request's* start
+    /// line. Malformed framing has to end the connection, because once the boundary is unknown
+    /// there is no position from which to resume.
+    enum ParseOutcome {
+        /// Not all of the request has arrived — the normal case for the first reads of a body.
+        case incomplete
+        case request(HTTPRequest, consumed: Int)
+        /// Answered with this status, then closed.
+        case malformed(status: Int, reason: String)
+    }
+
+    /// Methods that carry a body here. A request of one of these with no declared length is a
+    /// client this server does not understand, and guessing "empty" is the framing hazard above.
+    private static let bodyBearingMethods: Set<String> = ["POST", "PUT", "PATCH"]
+
+    /// Parses one request, returning it with the number of bytes it consumed.
+    static func parseRequest(from buffer: Data) -> ParseOutcome {
+        guard let headerRange = buffer.range(of: headerTerminator) else { return .incomplete }
 
         let headData = buffer[buffer.startIndex..<headerRange.lowerBound]
-        guard let head = String(data: headData, encoding: .utf8) else { return nil }
+        guard let head = String(data: headData, encoding: .utf8) else {
+            return .malformed(status: 400, reason: "Bad Request")
+        }
 
         var lines = head.components(separatedBy: "\r\n")
-        guard !lines.isEmpty else { return nil }
+        guard !lines.isEmpty else { return .malformed(status: 400, reason: "Bad Request") }
 
         let requestLine = lines.removeFirst().split(separator: " ")
-        guard requestLine.count >= 2 else { return nil }
+        guard requestLine.count >= 2 else {
+            return .malformed(status: 400, reason: "Bad Request")
+        }
 
         var headers: [String: String] = [:]
         for line in lines {
@@ -201,23 +253,55 @@ final class MCPConnection {
                 .lowercased()
             let value = line[line.index(after: separator)...]
                 .trimmingCharacters(in: .whitespaces)
+            // A proxy and an origin choosing different Content-Length values is request
+            // smuggling. Even equal duplicates have no value for these single-message local
+            // transports, so refuse the ambiguity before either server sees the request.
+            if name == "content-length", headers[name] != nil {
+                return .malformed(status: 400, reason: "Bad Request")
+            }
             headers[name] = value
         }
 
-        let contentLength = headers["content-length"].flatMap(Int.init) ?? 0
+        // Chunked framing is not implemented, and a chunked body read as though it were not
+        // chunked puts its own size line where the next request's method belongs.
+        if headers["transfer-encoding"] != nil {
+            return .malformed(status: 501, reason: "Not Implemented")
+        }
+
+        let method = String(requestLine[0]).uppercased()
+        let contentLength: Int
+
+        if let declared = headers["content-length"] {
+            guard let length = Int(declared), length >= 0 else {
+                // A negative length also *crashed* the slice below, since a range whose end
+                // precedes its start is a programmer error rather than a runtime one.
+                return .malformed(status: 400, reason: "Bad Request")
+            }
+            guard length <= MCPDefaults.maximumRequestBytes else {
+                return .malformed(status: 413, reason: "Payload Too Large")
+            }
+            contentLength = length
+        } else if bodyBearingMethods.contains(method) {
+            return .malformed(status: 411, reason: "Length Required")
+        } else {
+            // A request with neither a length nor a body-bearing method has no body, which is
+            // what HTTP/1.1 says and what a client's `GET` of the refused SSE stream sends.
+            contentLength = 0
+        }
+
         let bodyStart = headerRange.upperBound
         let bodyEnd = bodyStart + contentLength
 
         // The body has not all arrived yet.
-        guard buffer.count >= bodyEnd - buffer.startIndex else { return nil }
+        guard buffer.count >= bodyEnd - buffer.startIndex else { return .incomplete }
 
         let request = HTTPRequest(
-            method: String(requestLine[0]).uppercased(),
+            method: method,
             path: String(requestLine[1]),
             headers: headers,
             body: Data(buffer[bodyStart..<bodyEnd])
         )
 
-        return (request, bodyEnd - buffer.startIndex)
+        return .request(request, consumed: bodyEnd - buffer.startIndex)
     }
 }

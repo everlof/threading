@@ -14,8 +14,56 @@
             "type": { "const": "text" },
             "text": { "type": "string" },
             "role": {
-              "enum": ["heading", "body", "detail", "code"]
+              "enum": [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ]
             }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "proceed" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "base", "overlay"],
+          "properties": {
+            "type": { "const": "overlay" },
+            "base": { "$ref": "#/$defs/node" },
+            "overlay": { "$ref": "#/$defs/node" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "surface"],
+          "properties": {
+            "type": { "const": "customSurface" },
+            "surface": { "$ref": "#/$defs/customSurface" },
+            "accessibilityLabel": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "reference", "role"],
+          "properties": {
+            "type": { "const": "image" },
+            "reference": { "$ref": "#/$defs/imageReference" },
+            "role": {
+              "enum": ["identity", "icon", "decoration"]
+            },
+            "accessibilityLabel": { "type": "string" }
           }
         },
         {
@@ -69,6 +117,14 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "flexibleSpacer" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["type", "axis", "spacing", "children"],
           "properties": {
             "type": { "const": "stack" },
@@ -90,6 +146,132 @@
     },
     "spacing": {
       "enum": ["none", "tight", "small", "medium", "large"]
+    },
+    "customSurface": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "shaderResource",
+            "fragmentFunction",
+            "preferredFramesPerSecond",
+            "inputs"
+          ],
+          "properties": {
+            "type": { "const": "metal" },
+            "shaderResource": {
+              "type": "string",
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/).+\\.metal$"
+            },
+            "fragmentFunction": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "preferredFramesPerSecond": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            },
+            "inputs": {
+              "type": "array",
+              "maxItems": 8,
+              "items": { "$ref": "#/$defs/surfaceInput" }
+            }
+          }
+        }
+      ]
+    },
+    "surfaceInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]*$"
+        },
+        "value": { "$ref": "#/$defs/surfaceScalar" }
+      }
+    },
+    "surfaceScalar": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "constant" },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "signal", "mapping"],
+          "properties": {
+            "type": { "const": "signal" },
+            "signal": {
+              "enum": ["active-account.usage-remaining"]
+            },
+            "mapping": { "$ref": "#/$defs/scalarMapping" }
+          }
+        }
+      ]
+    },
+    "scalarMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputMinimum",
+        "inputMaximum",
+        "outputMinimum",
+        "outputMaximum",
+        "curve",
+        "fallback"
+      ],
+      "properties": {
+        "inputMinimum": { "type": "number" },
+        "inputMaximum": { "type": "number" },
+        "outputMinimum": { "type": "number" },
+        "outputMaximum": { "type": "number" },
+        "curve": {
+          "enum": ["linear", "easeIn", "easeOut", "easeInOut"]
+        },
+        "fallback": { "type": "number" }
+      }
+    },
+    "imageReference": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "identifier"],
+          "properties": {
+            "type": { "const": "hostAsset" },
+            "identifier": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "extensionResource" },
+            "path": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "name"],
+          "properties": {
+            "type": { "const": "systemSymbol" },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
     }
   }
 }

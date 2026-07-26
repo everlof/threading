@@ -166,6 +166,77 @@ final class ThinkingOrbTintTests: XCTestCase {
         XCTAssertEqual(settings.chatNameMorphStyle, .scramble)
     }
 
+    func testAttachmentDetectionDefaultsOnAndCanBeDisabledPerAgent() throws {
+        let suiteName = "AttachmentDetectionSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.detectsAttachmentReferences(for: .claude))
+        XCTAssertTrue(settings.detectsAttachmentReferences(for: .codex))
+
+        settings.setAttachmentReferenceDetection(for: .claude, enabled: false)
+        XCTAssertFalse(settings.detectsAttachmentReferences(for: .claude))
+        XCTAssertTrue(settings.detectsAttachmentReferences(for: .codex))
+
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertFalse(reloaded.detectsAttachmentReferences(for: .claude))
+        XCTAssertTrue(reloaded.detectsAttachmentReferences(for: .codex))
+
+        reloaded.setAttachmentReferenceDetection(for: .codex, enabled: false)
+        reloaded.setAttachmentReferenceDetection(for: .claude, enabled: true)
+        XCTAssertTrue(reloaded.detectsAttachmentReferences(for: .claude))
+        XCTAssertFalse(reloaded.detectsAttachmentReferences(for: .codex))
+    }
+
+    func testTerminalAttachmentObserverStopsAndRestartsWithItsAgentSetting() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let first = root.appendingPathComponent("first.png")
+        let second = root.appendingPathComponent("second.pdf")
+        try Data("png".utf8).write(to: first)
+        try Data("%PDF".utf8).write(to: second)
+
+        let sessionID = SessionID()
+        var isEnabled = false
+        var renderedText = first.path
+        let observer = TerminalAttachmentObserver(
+            sessionID: sessionID,
+            projectRoot: { root },
+            currentDirectory: { root },
+            text: { renderedText },
+            isEnabled: { isEnabled }
+        )
+
+        observer.scanNow()
+        XCTAssertEqual(SessionAttachmentStore.shared.attachments(for: sessionID), [])
+
+        isEnabled = true
+        observer.scanNow()
+        XCTAssertEqual(
+            SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
+            ["first.png"]
+        )
+
+        isEnabled = false
+        renderedText = second.path
+        observer.scanNow()
+        XCTAssertEqual(
+            SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
+            ["first.png"]
+        )
+
+        isEnabled = true
+        observer.scanNow()
+        XCTAssertEqual(
+            SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
+            ["second.pdf", "first.png"]
+        )
+    }
+
     func testMorphingTitleAcceptsEverySelectableStyle() {
         let label = MorphingTitleLabel()
         label.setStringValue("Before", animated: false)

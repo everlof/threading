@@ -9,6 +9,7 @@ struct ThemedMenuItem {
     let title: String
     var subtitle: String?
     var image: NSImage?
+    var preview: ThemedMenuPreview?
     var representedValue: Any?
     var isSelected: Bool
     var isEnabled: Bool
@@ -18,6 +19,7 @@ struct ThemedMenuItem {
         title: String,
         subtitle: String? = nil,
         image: NSImage? = nil,
+        preview: ThemedMenuPreview? = nil,
         representedValue: Any? = nil,
         isSelected: Bool = false,
         isEnabled: Bool = true,
@@ -26,11 +28,46 @@ struct ThemedMenuItem {
         self.title = title
         self.subtitle = subtitle
         self.image = image
+        self.preview = preview
         self.representedValue = representedValue
         self.isSelected = isSelected
         self.isEnabled = isEnabled
         self.onChoose = onChoose
     }
+}
+
+/// A live view standing in for a choice, so a menu of animations can be watched rather than
+/// read one selection at a time.
+///
+/// An image would not do: what these rows are choosing between *is* movement, and a still of an
+/// animation says only that there is one. The view is the caller's, made once and handed over,
+/// which is also what keeps a preview honest — the working indicator's row draws the same
+/// `WorkingOrbView` the conversation status draws, and a name transition's row the same
+/// `MorphingTitleLabel` the sidebar morphs, rather than a second rendering of either.
+struct ThemedMenuPreview {
+
+    enum Placement {
+        /// A fixed slot before the title, which still draws beside it.
+        case leading
+        /// The title's own place. The row draws no title of its own, because the preview *is*
+        /// the name — which is the only way a text transition can be shown at all.
+        case title
+    }
+
+    let placement: Placement
+    let view: NSView
+
+    /// The row's highlight arrived or left, by pointer or by arrow key.
+    ///
+    /// The row reports it; the preview decides what it means. An orb runs whether or not it is
+    /// pointed at — a dropdown of animations is a comparison, and a comparison needs them all
+    /// moving — while eleven names morphing at once is unreadable, so a name transition plays
+    /// only where the highlight is.
+    ///
+    /// `false` is also delivered when the row leaves the window, so a menu dismissed
+    /// mid-demonstration ends it rather than leaving something stepping against a view nobody
+    /// can see.
+    var highlightChanged: ((Bool) -> Void)?
 }
 
 enum ThemedMenuEntry {
@@ -591,7 +628,10 @@ private final class ThemedMenuOverlayView: ThemedControl {
 
 // MARK: - Surface and Scrolling
 
-private enum ThemedMenuMetrics {
+/// The dropdown's column geometry. Internal rather than file-private so the columns can be
+/// pinned by a test: a preview hosted in a row and a title drawn in one have to start at the
+/// same place, and that is an arithmetic claim rather than something a render shows.
+enum ThemedMenuMetrics {
     /// Between the panel's edge and its rows, so a highlighted row's capsule floats inside
     /// the panel instead of grazing its border.
     static let outerInset: CGFloat = Design.Spacing.small
@@ -606,6 +646,8 @@ private enum ThemedMenuMetrics {
     /// How far a filtered-out row's ink drops. Dimmed rather than hidden, so the menu keeps
     /// its shape while the user types and nothing moves under the pointer.
     static let filteredOutDimming: CGFloat = 0.4
+    /// A row that cannot be chosen at all.
+    static let disabledDimming: CGFloat = 0.45
     /// The wash a *disabled* row shows under the pointer — feedback that the hover was
     /// seen, well short of the fill that says "choosable".
     static let disabledHoverWash: CGFloat = 0.4
@@ -617,6 +659,11 @@ private enum ThemedMenuMetrics {
     static let leadingSlot: CGFloat = checkSize + Design.Spacing.small
     static let imageSize: CGFloat = 14
     static let imageSlot: CGFloat = 18
+    /// A live preview's column. The orb is the widest thing that goes in it and states its own
+    /// 20pt footprint, so the slot is that plus the gap to whatever follows — the same shape as
+    /// the image column one size up, rather than a second guess at it.
+    static let previewSize: CGFloat = 20
+    static let previewSlot: CGFloat = previewSize + Design.Spacing.tight
 
     /// The image column is reserved only when some item actually carries an image. Reserving
     /// it always left an 18pt hole between checkmark and title in every icon-less menu.
@@ -625,6 +672,29 @@ private enum ThemedMenuMetrics {
             guard case .item(let item) = entry else { return false }
             return item.image != nil
         }
+    }
+
+    /// Reserved on the same terms as the image column, and only for a preview that sits *beside*
+    /// a title — one placed in the title's own slot occupies a column that already exists.
+    static func hasPreviewColumn(_ entries: [ThemedMenuEntry]) -> Bool {
+        entries.contains { entry in
+            guard case .item(let item) = entry else { return false }
+            return item.preview?.placement == .leading
+        }
+    }
+
+    /// Where a row's content begins, per column, so a *drawn* title and a *hosted* preview land
+    /// in the same place. A preview replaces the text rather than joining it, and a column of
+    /// names that shifted sideways when one of them animated would read as a layout bug in the
+    /// menu rather than as the transition it is demonstrating.
+    static var imageInset: CGFloat { contentInset + leadingSlot }
+
+    static func previewInset(hasImageColumn: Bool) -> CGFloat {
+        imageInset + (hasImageColumn ? imageSlot : 0)
+    }
+
+    static func titleInset(hasImageColumn: Bool, hasPreviewColumn: Bool) -> CGFloat {
+        previewInset(hasImageColumn: hasImageColumn) + (hasPreviewColumn ? previewSlot : 0)
     }
 
     static func height(for entries: [ThemedMenuEntry]) -> CGFloat {
@@ -651,7 +721,9 @@ private enum ThemedMenuMetrics {
         }.max() ?? 0
 
         let imageColumn = hasImageColumn(entries) ? imageSlot : 0
-        let content = outerInset * 2 + contentInset * 2 + leadingSlot + imageColumn + text
+        let previewColumn = hasPreviewColumn(entries) ? previewSlot : 0
+        let content = outerInset * 2 + contentInset * 2
+            + leadingSlot + imageColumn + previewColumn + text
         return min(max(minimum, content), ThemedMenuLayout.maximumWidth)
     }
 }
@@ -688,6 +760,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         var views: [NSView] = []
         var selectable: [Int] = []
         let hasImageColumn = ThemedMenuMetrics.hasImageColumn(entries)
+        let hasPreviewColumn = ThemedMenuMetrics.hasPreviewColumn(entries)
 
         for (index, entry) in entries.enumerated() {
             switch entry {
@@ -698,7 +771,8 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
                     entryIndex: index,
                     item: item,
                     isSelected: item.isSelected || index == selectedEntryIndex,
-                    hasImageColumn: hasImageColumn
+                    hasImageColumn: hasImageColumn,
+                    hasPreviewColumn: hasPreviewColumn
                 )
                 madeRows[index] = row
                 views.append(row)
@@ -873,29 +947,134 @@ private final class ThemedMenuRowView: ThemedControl {
 
     var onChoose: ((Int, ThemedMenuItem) -> Void)?
     var onHighlight: ((Int) -> Void)?
-    var isKeyboardHighlighted = false { didSet { needsDisplay = true } }
+    var isKeyboardHighlighted = false {
+        didSet {
+            guard isKeyboardHighlighted != oldValue else { return }
+            needsDisplay = true
+            reportHighlight(isKeyboardHighlighted)
+        }
+    }
     /// The row does not match what is being typed. It dims rather than hides, so the menu
     /// keeps its shape while the filter narrows.
-    var isFilteredOut = false { didSet { needsDisplay = true } }
+    var isFilteredOut = false {
+        didSet {
+            needsDisplay = true
+            applyPreviewInk()
+        }
+    }
 
     private let selected: Bool
     private let hasImageColumn: Bool
+    private let hasPreviewColumn: Bool
     private var pressed = false { didSet { needsDisplay = true } }
     /// The pointer is on a row that cannot be chosen. It answers with a wash far fainter
     /// than the hover fill — feedback that the hover was seen, not an invitation.
     private var isDisabledHover = false { didSet { needsDisplay = true } }
     private var trackingArea: NSTrackingArea?
 
-    init(entryIndex: Int, item: ThemedMenuItem, isSelected: Bool, hasImageColumn: Bool) {
+    /// A preview in the title's slot is the row's name, so the row draws no text of its own.
+    private var drawsTitle: Bool { item.preview?.placement != .title }
+
+    init(
+        entryIndex: Int,
+        item: ThemedMenuItem,
+        isSelected: Bool,
+        hasImageColumn: Bool,
+        hasPreviewColumn: Bool
+    ) {
         self.entryIndex = entryIndex
         self.item = item
         selected = isSelected
         self.hasImageColumn = hasImageColumn
+        self.hasPreviewColumn = hasPreviewColumn
         preferredHeight = item.subtitle?.isEmpty == false
             ? ThemedMenuMetrics.subtitleRowHeight
             : ThemedMenuMetrics.rowHeight
         super.init(frame: .zero)
         toolTip = item.subtitle
+        installPreview()
+    }
+
+    // MARK: - Preview
+
+    /// Places the caller's live view in the column its placement names.
+    ///
+    /// Constraints rather than a frame set in `layout()`: the view arrives from the design
+    /// system with an Auto Layout interior of its own — the orb pinned inside its tint wrapper,
+    /// the morphing label inside its clip — and a row that reached in to set frames would be
+    /// laying out somebody else's subtree. The row is frame-placed by the document view, which
+    /// is what lets constraints from its own edges resolve.
+    private func installPreview() {
+        guard let preview = item.preview else { return }
+
+        preview.view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(preview.view)
+
+        switch preview.placement {
+        case .leading:
+            NSLayoutConstraint.activate([
+                preview.view.leadingAnchor.constraint(
+                    equalTo: leadingAnchor,
+                    constant: ThemedMenuMetrics.previewInset(hasImageColumn: hasImageColumn)
+                ),
+                preview.view.centerYAnchor.constraint(equalTo: centerYAnchor),
+                preview.view.widthAnchor.constraint(
+                    equalToConstant: ThemedMenuMetrics.previewSize
+                ),
+                preview.view.heightAnchor.constraint(
+                    equalToConstant: ThemedMenuMetrics.previewSize
+                )
+            ])
+        case .title:
+            // Pinned to both edges of the title column rather than sized to its text: a label
+            // whose width followed the name it is morphing *into* would resize under its own
+            // animation, and the transition would read as the row twitching.
+            NSLayoutConstraint.activate([
+                preview.view.leadingAnchor.constraint(
+                    equalTo: leadingAnchor,
+                    constant: ThemedMenuMetrics.titleInset(
+                        hasImageColumn: hasImageColumn,
+                        hasPreviewColumn: hasPreviewColumn
+                    )
+                ),
+                preview.view.trailingAnchor.constraint(
+                    equalTo: trailingAnchor,
+                    constant: -ThemedMenuMetrics.contentInset
+                ),
+                preview.view.centerYAnchor.constraint(equalTo: centerYAnchor)
+            ])
+        }
+
+        applyPreviewInk()
+    }
+
+    /// The dimming a drawn row applies to its text, applied to a hosted view instead — a
+    /// disabled or filtered-out row cannot be dimmed by the alpha in `draw(_:)` if its name is
+    /// a subview.
+    private func applyPreviewInk() {
+        guard let preview = item.preview else { return }
+        preview.view.alphaValue = contentAlpha
+    }
+
+    /// A closing menu takes its previews with it. Nothing else reports the end of a highlight
+    /// when the overlay is torn down — the surface deliberately stops moving the highlight once
+    /// it is closing — so this is what stops a demonstration the user has walked away from.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil, isKeyboardHighlighted {
+            isKeyboardHighlighted = false
+        }
+    }
+
+    /// Reports to the preview, unless this row no longer speaks for it.
+    ///
+    /// A preview is a view the caller owns and the row borrows, and a dropdown reopened while the
+    /// previous panel is still fading hands the same view to a *new* row. The old row's teardown
+    /// would then cancel a demonstration the new row had already started, leaving the menu
+    /// looking as though the feature had stopped working.
+    private func reportHighlight(_ isHighlighted: Bool) {
+        guard let preview = item.preview, preview.view.superview === self else { return }
+        preview.highlightChanged?(isHighlighted)
     }
 
     @available(*, unavailable)
@@ -960,6 +1139,24 @@ private final class ThemedMenuRowView: ThemedControl {
     override func isAccessibilityEnabled() -> Bool { item.isEnabled }
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
 
+    /// A menu item is a leaf whatever it is drawn from. A hosted preview is how this row shows
+    /// its own title and status, not a second thing inside it to navigate to, and `item.title`
+    /// already says in words what the preview says in movement.
+    override func accessibilityChildren() -> [Any]? { [] }
+
+    // MARK: - Drawing
+
+    /// How strongly the row states its content: full, dimmed for a row that cannot be chosen,
+    /// dimmed again for one the filter has excluded. Read by `draw(_:)` for the text it inks
+    /// and by `applyPreviewInk` for the text it hosts, so the two cannot disagree.
+    private var contentAlpha: CGFloat {
+        var alpha = item.isEnabled ? 1 : ThemedMenuMetrics.disabledDimming
+        if isFilteredOut {
+            alpha *= ThemedMenuMetrics.filteredOutDimming
+        }
+        return alpha
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         if isKeyboardHighlighted || pressed {
             ThemedSurface.draw(
@@ -987,18 +1184,14 @@ private final class ThemedMenuRowView: ThemedControl {
             )
         }
 
-        var alpha: CGFloat = item.isEnabled ? 1 : 0.45
-        if isFilteredOut {
-            alpha *= ThemedMenuMetrics.filteredOutDimming
-        }
+        let alpha = contentAlpha
         let label = Design.Text.label.withAlphaComponent(alpha)
         let secondary = Design.Text.secondary.withAlphaComponent(alpha)
-        var x = ThemedMenuMetrics.contentInset
 
         if selected {
             drawCheckMark(
                 in: NSRect(
-                    x: x,
+                    x: ThemedMenuMetrics.contentInset,
                     y: bounds.midY - ThemedMenuMetrics.checkSize / 2,
                     width: ThemedMenuMetrics.checkSize,
                     height: ThemedMenuMetrics.checkSize
@@ -1006,21 +1199,23 @@ private final class ThemedMenuRowView: ThemedControl {
                 color: label
             )
         }
-        x += ThemedMenuMetrics.leadingSlot
 
-        if hasImageColumn {
-            if let image = item.image {
-                let imageRect = NSRect(
-                    x: x,
-                    y: bounds.midY - ThemedMenuMetrics.imageSize / 2,
-                    width: ThemedMenuMetrics.imageSize,
-                    height: ThemedMenuMetrics.imageSize
-                )
-                draw(image, in: imageRect, tint: label)
-            }
-            x += ThemedMenuMetrics.imageSlot
+        if hasImageColumn, let image = item.image {
+            let imageRect = NSRect(
+                x: ThemedMenuMetrics.imageInset,
+                y: bounds.midY - ThemedMenuMetrics.imageSize / 2,
+                width: ThemedMenuMetrics.imageSize,
+                height: ThemedMenuMetrics.imageSize
+            )
+            draw(image, in: imageRect, tint: label)
         }
 
+        guard drawsTitle else { return }
+
+        let x = ThemedMenuMetrics.titleInset(
+            hasImageColumn: hasImageColumn,
+            hasPreviewColumn: hasPreviewColumn
+        )
         let titleFont = Design.Typography.control()
         let titleHeight = ceil(titleFont.boundingRectForFont.height)
         let hasSubtitle = item.subtitle?.isEmpty == false

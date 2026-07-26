@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 /// Toolbar pill showing how much of the current account's rate limit is spent.
 ///
@@ -14,6 +15,8 @@ import AppKit
 final class AccountUsageItemView: BackdropOverlay {
 
     // MARK: - Properties
+
+    typealias UsagePopoverContentProvider = @MainActor (AgentAccount) -> NSViewController?
 
     private let ringView = UsageRingView()
     private let summaryLabel = NSTextField(labelWithString: "")
@@ -33,11 +36,33 @@ final class AccountUsageItemView: BackdropOverlay {
     /// Pending close of the hover popover, cancelled when the pointer returns to the pill or moves
     /// into the popover before it fires.
     private var closeWorkItem: DispatchWorkItem?
+    private let customizationLookup: ComponentCustomizationHost.Lookup
+    private let usagePopoverContentProvider: UsagePopoverContentProvider
+
+    /// Invoked for semantic actions inside extension-rendered popover content.
+    var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
 
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
+        customizationLookup = {
+            ComponentCustomizationProviderSlot.shared.customization(for: $0)
+        }
+        usagePopoverContentProvider = Self.nativeUsagePopoverContent(for:)
         super.init(frame: frameRect)
+        setupViews()
+        startObserving()
+    }
+
+    /// Injection point for focused presentation-shell tests.
+    init(
+        customizationLookup: @escaping ComponentCustomizationHost.Lookup,
+        usagePopoverContentProvider: @escaping UsagePopoverContentProvider =
+            AccountUsageItemView.nativeUsagePopoverContent(for:)
+    ) {
+        self.customizationLookup = customizationLookup
+        self.usagePopoverContentProvider = usagePopoverContentProvider
+        super.init(frame: .zero)
         setupViews()
         startObserving()
     }
@@ -69,7 +94,9 @@ final class AccountUsageItemView: BackdropOverlay {
     private func setupViews() {
         wantsLayer = true
         layer?.cornerCurve = .continuous
-        layer?.cornerRadius = Design.Radius.pill(height: AccountUsageItemDefaults.height)
+        // The toolbar's silhouette, shared with the page tab and the action buttons beside it.
+        // A pill here left one rounded rect, one pill and three circles in a single strip.
+        layer?.cornerRadius = Design.Radius.control
         updateBackground()
 
         ringView.translatesAutoresizingMaskIntoConstraints = false
@@ -119,6 +146,11 @@ final class AccountUsageItemView: BackdropOverlay {
 
     /// Points the pill at an account, or hides it when the current session has none.
     func configure(account: AgentAccount?) {
+        if self.account?.id != account?.id {
+            cancelScheduledClose()
+            popover?.close()
+            popover = nil
+        }
         self.account = account
 
         if let account {
@@ -254,17 +286,73 @@ final class AccountUsageItemView: BackdropOverlay {
         // Hovering is the moment the user cares; the service's floor keeps it polite.
         AccountUsageService.shared.refresh(account, force: true)
 
-        let controller = AccountUsagePopoverViewController(account: account)
-        controller.onHoverChange = { [weak self] hovering in
-            if hovering { self?.cancelScheduledClose() } else { self?.scheduleClose() }
-        }
+        guard let controller = makeAccountUsagePopover(for: account) else { return }
 
-        let popover = NSPopover()
+        let popover = HostPopoverFactory.make(.toolbarAccountUsage)
         popover.contentViewController = controller
         popover.behavior = .transient
         popover.animates = false
         popover.show(relativeTo: bounds, of: self, preferredEdge: .minY)
         self.popover = popover
+    }
+
+    /// Builds the account presentation independently from the toolbar hover trigger. The outer
+    /// tracking view remains host-owned, so replacing all visual content cannot break the
+    /// pointer bridge which keeps the popover open.
+    func makeAccountUsagePopover(for account: AgentAccount) -> NSViewController? {
+        let target = ExtensionComponentTarget.accountUsagePopover(
+            accountID: account.id.rawValue
+        )
+        let native = usagePopoverContentProvider(account)
+        let initialResolution = customizationLookup(target)
+        guard native != nil || !initialResolution.isEmpty else { return nil }
+
+        let hoverContainer = HoverTrackingView()
+        hoverContainer.onHoverChange = { [weak self] hovering in
+            if hovering {
+                self?.cancelScheduledClose()
+            } else {
+                self?.scheduleClose()
+            }
+        }
+
+        let hasNativeContent = native != nil
+        let child = native ?? EmptyComponentContentViewController()
+        let controller = ExtensionComponentHookViewController(
+            target: target,
+            child: child,
+            contentInsets: NSEdgeInsets(
+                top: Design.Spacing.inset,
+                left: Design.Spacing.inset,
+                bottom: Design.Spacing.inset,
+                right: Design.Spacing.inset
+            ),
+            fixedWidth: UsagePopoverDefaults.width,
+            containerView: hoverContainer,
+            lookup: customizationLookup,
+            onAction: { [weak self] action in
+                guard let self else { return }
+                if let onCustomizationAction {
+                    onCustomizationAction(action)
+                } else {
+                    ComponentCustomizationProviderSlot.shared.perform(action)
+                }
+            },
+            onResolution: { [weak self] resolution in
+                if !hasNativeContent, resolution.isEmpty {
+                    self?.popover?.close()
+                    self?.popover = nil
+                }
+            }
+        )
+        controller.view.setAccessibilityIdentifier("toolbar.account-usage-popover")
+        return controller
+    }
+
+    private static func nativeUsagePopoverContent(
+        for account: AgentAccount
+    ) -> NSViewController? {
+        AccountUsagePopoverViewController(account: account, isEmbedded: true)
     }
 
     private func scheduleClose() {
@@ -286,7 +374,7 @@ final class AccountUsageItemView: BackdropOverlay {
     }
 
     private func updateBackground() {
-        layer?.cornerRadius = Design.Radius.pill(height: AccountUsageItemDefaults.height)
+        layer?.cornerRadius = Design.Radius.control
         applyLayerBackground(isHovered ? ink.surfaceHover : ink.surface)
     }
 }

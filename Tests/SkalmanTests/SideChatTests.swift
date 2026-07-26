@@ -179,6 +179,27 @@ final class SideChatTests: XCTestCase {
         XCTAssertTrue(source.contains("'exec' 'resume' 'thread-standard'"), source)
     }
 
+    func testCodexNativeReasoningEffortMapsOntoTheNextExecRun() throws {
+        let project = try makeProject()
+        var session = AgentSession(
+            kind: .codex,
+            title: "Codex",
+            model: "gpt-5.6-sol",
+            reasoningEffort: "ultra"
+        )
+        session.resumeState = .resumable(TranscriptID("thread-ultra"))
+
+        let source = try XCTUnwrap(
+            AgentLauncher.streamPlan(for: session, in: project).arguments.last
+        )
+
+        XCTAssertTrue(
+            source.contains("'--config' 'model_reasoning_effort=\"ultra\"'"),
+            source
+        )
+        XCTAssertTrue(source.contains("'exec' 'resume' 'thread-ultra'"), source)
+    }
+
     func testLaunchPlanQuotesHostilePathTitleModelAndPrompt() throws {
         let hostile = "'; rm -rf ~'"
         var project = try makeProject()

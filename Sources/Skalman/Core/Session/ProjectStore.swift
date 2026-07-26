@@ -121,6 +121,7 @@ final class ProjectStore {
         kind: AgentKind,
         accountHandle: AccountHandle = .standard,
         model: String? = nil,
+        reasoningEffort: String? = nil,
         usesNativeUI: Bool = false,
         title: String? = nil
     ) -> AgentSession? {
@@ -134,6 +135,7 @@ final class ProjectStore {
             title: title ?? "",
             accountHandle: accountHandle,
             model: model,
+            reasoningEffort: reasoningEffort,
             usesNativeUI: usesNativeUI
         )
         session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
@@ -217,6 +219,11 @@ final class ProjectStore {
         notifyChanged()
     }
 
+    func setPinned(_ pinned: Bool, for sessionID: SessionID) {
+        update(sessionID: sessionID) { $0.isPinned = pinned }
+        notifyChanged()
+    }
+
     /// Switches which surface renders a session: Skalman's own conversation view, or the
     /// agent's terminal. The conversation itself is untouched — both surfaces resume it by
     /// the same id. Stopping whatever is running belongs to the caller, since this store
@@ -228,41 +235,15 @@ final class ProjectStore {
 
     /// Records which theme a session's terminal draws with. Nil clears the assignment, so the
     /// session inherits its project's theme — and the app default beyond that — again.
-    func setThemeName(_ name: String?, forSessionID sessionID: SessionID) {
-        update(sessionID: sessionID) { $0.themeName = name }
+    func setThemeID(_ themeID: TerminalThemeID?, forSessionID sessionID: SessionID) {
+        update(sessionID: sessionID) { $0.themeID = themeID }
         notifyChanged()
     }
 
-    /// The same for a project, which every session inside it follows unless it names its own.
-    func setThemeName(_ name: String?, forProjectID projectID: ProjectID) {
+    /// The same for a project, which every session inside it follows unless it chooses its own.
+    func setThemeID(_ themeID: TerminalThemeID?, forProjectID projectID: ProjectID) {
         guard let index = index(ofProject: projectID) else { return }
-        projects[index].themeName = name
-        save()
-        notifyChanged()
-    }
-
-    /// Re-points every assignment naming a theme that was renamed.
-    ///
-    /// Themes are identified by name, so without this a rename would look exactly like a
-    /// delete to `ThemeResolution` and silently reset every session and project using it.
-    /// Called by `ThemeAssignments.rename`, which is the only rename path.
-    func renameTheme(from oldName: String, to newName: String) {
-        var changed = false
-
-        for projectIndex in projects.indices {
-            if projects[projectIndex].themeName == oldName {
-                projects[projectIndex].themeName = newName
-                changed = true
-            }
-
-            for sessionIndex in projects[projectIndex].sessions.indices
-            where projects[projectIndex].sessions[sessionIndex].themeName == oldName {
-                projects[projectIndex].sessions[sessionIndex].themeName = newName
-                changed = true
-            }
-        }
-
-        guard changed else { return }
+        projects[index].themeID = themeID
         save()
         notifyChanged()
     }
@@ -332,6 +313,7 @@ final class ProjectStore {
 
         projects[location.projectIndex].sessions[location.sessionIndex].agentTitle = cleaned
         scheduleSave()
+        notifyChanged()
     }
 
     /// Names a session after its first prompt, once.
@@ -498,9 +480,36 @@ final class ProjectStore {
             projects = state.projects
             selectedSessionID = state.selectedSessionID
             isRestoringState = false
+            if migrateLegacyThemeAssignments() {
+                save()
+            }
         case .failed(let quarantinedAt):
             didLoadStateSuccessfully = false
             stateWritesAllowed = quarantinedAt != nil
         }
+    }
+
+    /// Converts the tagged names decoded from old `projects.json` files into current IDs.
+    private func migrateLegacyThemeAssignments() -> Bool {
+        var changed = false
+
+        for projectIndex in projects.indices {
+            if let stored = projects[projectIndex].themeID,
+               let canonical = ThemeManager.shared.canonicalID(for: stored),
+               canonical != stored {
+                projects[projectIndex].themeID = canonical
+                changed = true
+            }
+
+            for sessionIndex in projects[projectIndex].sessions.indices {
+                guard let stored = projects[projectIndex].sessions[sessionIndex].themeID,
+                      let canonical = ThemeManager.shared.canonicalID(for: stored),
+                      canonical != stored else { continue }
+                projects[projectIndex].sessions[sessionIndex].themeID = canonical
+                changed = true
+            }
+        }
+
+        return changed
     }
 }

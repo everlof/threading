@@ -7,77 +7,149 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7A0000010000000000000001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000011 /* main.swift */; };
+		7A0000010000000000000002 /* SkalmanWasmRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000010000000000000091 /* SkalmanWasmRuntime */; };
+		7A0000010000000000000003 /* SkalmanWasmExtensionRunner in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000014 /* SkalmanWasmExtensionRunner */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		09EEC39439CEDA7EAFBC697C /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
+		10A7C6FBD9C60BFA180B1238 /* AppThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04F521EABA85E9D423CC483 /* AppThemeTests.swift */; };
+		122556F8FAB3711CCBA7AAD0 /* ChipViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B977AD037DD062B2428AA28 /* ChipViewTests.swift */; };
+		1FD6060EC0DC83DA4BA1C3C1 /* SessionInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7EA7666508259327901672F /* SessionInfoTests.swift */; };
+		263FA9B47E541D2716EAB6AD /* SidebarTitleMorphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30DCBAC6C0C2898E8093C83 /* SidebarTitleMorphTests.swift */; };
+		287B00D68004042D190D2F68 /* GitStagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3779521669E4E149E1C77B10 /* GitStagingTests.swift */; };
+		2A84B6880DED3F071BEF4857 /* ConversationTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */; };
+		3225059D746FD431CFD65034 /* ThemeToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0D73705B6A31DE5CE62C91 /* ThemeToolTests.swift */; };
 		33E3632E648F76FBA596F672 /* TranscriptReplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */; };
-		D12026070000000000000006 /* StreamSessionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000005 /* StreamSessionLifecycleTests.swift */; };
-		D12026070000000000000004 /* PermissionRequestViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000003 /* PermissionRequestViewTests.swift */; };
-		D12026070000000000000002 /* MCPSessionRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000001 /* MCPSessionRegistryTests.swift */; };
+		3B329452E55225EB2B8BB7DA /* GitReviewRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */; };
+		3B6276B7453B5ECEC77CCD48 /* HookLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 044987FD479F2BCE41800DB0 /* HookLifecycleTests.swift */; };
+		4117E79BB16586DD2BD3E82E /* ExtensionBundleLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2608D19A258FF89E3F45E903 /* ExtensionBundleLoaderTests.swift */; };
+		445F0F42B17C51EC9BB38077 /* ElementInspectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */; };
+		49022923B31CFED2F032E6EC /* SideChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */; };
+		4CC29E6CBEE5E72D3B78DCBD /* GitCommitGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */; };
+		52FE6DECCC10EF3C290A449A /* GitCheckoutWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97CBF23D6F1E81467057C62E /* GitCheckoutWatcherTests.swift */; };
+		56AEA0E2733EBEE96BA2A24F /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
+		5724F2C9CE5E00E9DE98F67E /* SettingsRowLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB1A5B994E77DE60A5FEF1BB /* SettingsRowLayoutTests.swift */; };
+		5952B9612FE334718FFF91F1 /* ConversationMinimapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6351D65718BB714AF03F855E /* ConversationMinimapTests.swift */; };
+		5B143C2EEAF87161EAA77D67 /* AppThemeRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */; };
+		5D2B524A0BB67BC9416D3577 /* FileActivityMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */; };
+		61B9374AE8515F0AE5311E1F /* ThemedIndicatorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */; };
+		6746DE83B248339F7A44A795 /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
+		7108C0A471D9CADAA9684DD6 /* FileActivityMapRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */; };
+		723062734D38CA186B79347F /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
+		74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */; };
+		797CDED78DE5960321A92159 /* ToolbarChromeRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9233B0FB8A36E313E15E9561 /* ToolbarChromeRenderTests.swift */; };
+		7B2722AEF9ED592DD011C293 /* TranscriptUsageIndexTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63B1299073D75E9C4A00C29E /* TranscriptUsageIndexTests.swift */; };
+		82C90C7DE0F6E3D6EB660A66 /* ToolIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */; };
+		8302133C16D906CBE04BEBB2 /* CodeStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */; };
+		83FA7B157AC55CF7B3F151C5 /* ArtifactScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */; };
+		848FBC7336F4E1B9FE429A8A /* ModelNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9984539B5DEA19828534D5B4 /* ModelNameTests.swift */; };
+		89DB8D32FAE049571D22D568 /* SkalmanExtensionHelperNetwork in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* SkalmanExtensionHelperNetwork */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		8BB3533F6E6FCA8D5834C271 /* ThemeSettingsRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2DA509DA20B667CFCB88485 /* ThemeSettingsRenderTests.swift */; };
+		8CDE135AB43AE5B76A4E2CBD /* ConversationRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */; };
+		9334D90DD1C27E2C2025C73A /* ThemeResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9443791670E8CC9E6A0AB86E /* ThemeResolutionTests.swift */; };
+		953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
+		9739FF9F9567786D1930B40E /* ExtensionRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CD4B4E5A5547D27046CFA8 /* ExtensionRendererTests.swift */; };
+		A09CD2FDD17E4E72005ECE03 /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
 		A10000010000000000000002 /* StateManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000000001 /* StateManagerTests.swift */; };
 		A10000020000000000000002 /* DraftStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000001 /* DraftStoreTests.swift */; };
 		A10000030000000000000002 /* EventLogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000030000000000000001 /* EventLogTests.swift */; };
+		A10000040000000000000002 /* PromptAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000040000000000000001 /* PromptAttachmentTests.swift */; };
+		A10000050000000000000002 /* AccountUsageSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000050000000000000001 /* AccountUsageSummaryTests.swift */; };
 		A10000060000000000000002 /* GitDiffParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000060000000000000001 /* GitDiffParserTests.swift */; };
 		A10000070000000000000002 /* GitStatusParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000070000000000000001 /* GitStatusParserTests.swift */; };
 		A10000080000000000000002 /* GitReviewCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000080000000000000001 /* GitReviewCommandsTests.swift */; };
 		A10000090000000000000002 /* GitReviewViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000090000000000000001 /* GitReviewViewTests.swift */; };
-		A10000040000000000000002 /* PromptAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000040000000000000001 /* PromptAttachmentTests.swift */; };
-		A10000050000000000000002 /* AccountUsageSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000050000000000000001 /* AccountUsageSummaryTests.swift */; };
+		A1D70C8F3554C9C81F2DCF48 /* AccountNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F73C717F854436EAC372592 /* AccountNameTests.swift */; };
+		A25FE88323D6293DF6D2471F /* ThemeMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8AE2406CB7A2AD5CF7F25D6 /* ThemeMenuTests.swift */; };
+		A2A96560939503EE66F0F61A /* CodexHookInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52404767F8E6E3FD5655E1D /* CodexHookInstallerTests.swift */; };
+		A34F41FB3D85E4A72F65D704 /* UsageRingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */; };
+		A39A300DF9F7CA8D21A7B7C3 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
+		A8C27A38676335C4660B8182 /* SessionNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FDC3913B435DDBA1E7C13AE /* SessionNamingTests.swift */; };
+		A98028EC99612E6E18C2CB28 /* ShellCommandPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */; };
 		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
+		B5CE1BC1391776027471C273 /* WorkingWordsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */; };
+		B81F7A1E07A694FFB193A1BD /* SkalmanExtensionHelper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = C20CE9CA503B8DC639CAB992 /* SkalmanExtensionHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */; };
 		C997F5C0451F5A25A2EF67AD /* ProjectIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */; };
+		CA89150A08702C023D3D9A45 /* ProjectDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE242D7B54894292C2D86C32 /* ProjectDatabaseTests.swift */; };
 		CB865BD84ED28745D2A4C294 /* UsageForecastTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 696D173B6C5410C69CC97BE3 /* UsageForecastTests.swift */; };
-		7B2722AEF9ED592DD011C293 /* TranscriptUsageIndexTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63B1299073D75E9C4A00C29E /* TranscriptUsageIndexTests.swift */; };
-		F1B216BA36D0993C9078732F /* DiskSpaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A7D8163AC93C023CE61034D /* DiskSpaceTests.swift */; };
-		83FA7B157AC55CF7B3F151C5 /* ArtifactScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */; };
-		49022923B31CFED2F032E6EC /* SideChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */; };
+		D12026070000000000000002 /* MCPSessionRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000001 /* MCPSessionRegistryTests.swift */; };
+		D12026070000000000000004 /* PermissionRequestViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000003 /* PermissionRequestViewTests.swift */; };
+		D12026070000000000000006 /* StreamSessionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000005 /* StreamSessionLifecycleTests.swift */; };
+		D1FF00010000000000000011 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000001 /* NativeDiffCore */; };
+		D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000002 /* NativeDiffAppKit */; };
+		D1FF00010000000000000013 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000003 /* NativeDiffCore */; };
+		D1FF00010000000000000014 /* NativeDiffUIKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000004 /* NativeDiffUIKit */; };
+		D881E6573F863795C4647846 /* CodeStatsRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7369922B60411865EA964277 /* CodeStatsRenderTests.swift */; };
+		D88B0FE7D311EE71390A842F /* ThemedControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */; };
+		E0F2A94B880869D0B3ABF95A /* SyntaxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A033866F2A5F56AB0B49A8BF /* SyntaxTests.swift */; };
+		E15000010000000000000002 /* HotPathCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15000010000000000000001 /* HotPathCacheTests.swift */; };
+		E9C6A0C4EF733BE035B496B8 /* ExtensionPackageStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3219558546061B6BB8C459A1 /* ExtensionPackageStoreTests.swift */; };
+		EB090093A30F0A9150C08255 /* ExtensionProcessSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13591CD9ED76F6A56C469456 /* ExtensionProcessSessionTests.swift */; };
+		EB721DBFB8A82B66BF697A0B /* ThemeSwatchViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F950F46B250C9C32360A9E3 /* ThemeSwatchViewTests.swift */; };
 		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
 		F1000001000000000000037 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
 		F1000001000000000000038 /* LabelMorph in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000005 /* LabelMorph */; };
-		D1FF00010000000000000011 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000001 /* NativeDiffCore */; };
-		D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000002 /* NativeDiffAppKit */; };
-		2A84B6880DED3F071BEF4857 /* ConversationTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */; };
-		8CDE135AB43AE5B76A4E2CBD /* ConversationRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */; };
-		E15000010000000000000002 /* HotPathCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15000010000000000000001 /* HotPathCacheTests.swift */; };
-		5952B9612FE334718FFF91F1 /* ConversationMinimapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6351D65718BB714AF03F855E /* ConversationMinimapTests.swift */; };
-		52FE6DECCC10EF3C290A449A /* GitCheckoutWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97CBF23D6F1E81467057C62E /* GitCheckoutWatcherTests.swift */; };
-		E0F2A94B880869D0B3ABF95A /* SyntaxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A033866F2A5F56AB0B49A8BF /* SyntaxTests.swift */; };
-		3B329452E55225EB2B8BB7DA /* GitReviewRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */; };
-		4CC29E6CBEE5E72D3B78DCBD /* GitCommitGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */; };
-		287B00D68004042D190D2F68 /* GitStagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3779521669E4E149E1C77B10 /* GitStagingTests.swift */; };
-		FD8F1D30E29CF4F0EB06D000 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */; };
-		CA89150A08702C023D3D9A45 /* ProjectDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE242D7B54894292C2D86C32 /* ProjectDatabaseTests.swift */; };
-		9334D90DD1C27E2C2025C73A /* ThemeResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9443791670E8CC9E6A0AB86E /* ThemeResolutionTests.swift */; };
-		8BB3533F6E6FCA8D5834C271 /* ThemeSettingsRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2DA509DA20B667CFCB88485 /* ThemeSettingsRenderTests.swift */; };
-		3225059D746FD431CFD65034 /* ThemeToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0D73705B6A31DE5CE62C91 /* ThemeToolTests.swift */; };
-		A25FE88323D6293DF6D2471F /* ThemeMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8AE2406CB7A2AD5CF7F25D6 /* ThemeMenuTests.swift */; };
-		3B6276B7453B5ECEC77CCD48 /* HookLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 044987FD479F2BCE41800DB0 /* HookLifecycleTests.swift */; };
-		A2A96560939503EE66F0F61A /* CodexHookInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52404767F8E6E3FD5655E1D /* CodexHookInstallerTests.swift */; };
-		10A7C6FBD9C60BFA180B1238 /* AppThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04F521EABA85E9D423CC483 /* AppThemeTests.swift */; };
-		5B143C2EEAF87161EAA77D67 /* AppThemeRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */; };
-		A34F41FB3D85E4A72F65D704 /* UsageRingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */; };
-		848FBC7336F4E1B9FE429A8A /* ModelNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9984539B5DEA19828534D5B4 /* ModelNameTests.swift */; };
-		82C90C7DE0F6E3D6EB660A66 /* ToolIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */; };
-		A98028EC99612E6E18C2CB28 /* ShellCommandPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */; };
-		A1D70C8F3554C9C81F2DCF48 /* AccountNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F73C717F854436EAC372592 /* AccountNameTests.swift */; };
-		B9CAC998E239EC0303F7F2F4 /* ShellCommandPolicyCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */; };
-		D88B0FE7D311EE71390A842F /* ThemedControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */; };
-		445F0F42B17C51EC9BB38077 /* ElementInspectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */; };
-		A8C27A38676335C4660B8182 /* SessionNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FDC3913B435DDBA1E7C13AE /* SessionNamingTests.swift */; };
-		122556F8FAB3711CCBA7AAD0 /* ChipViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B977AD037DD062B2428AA28 /* ChipViewTests.swift */; };
-		61B9374AE8515F0AE5311E1F /* ThemedIndicatorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */; };
-		EB721DBFB8A82B66BF697A0B /* ThemeSwatchViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F950F46B250C9C32360A9E3 /* ThemeSwatchViewTests.swift */; };
-		5724F2C9CE5E00E9DE98F67E /* SettingsRowLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB1A5B994E77DE60A5FEF1BB /* SettingsRowLayoutTests.swift */; };
-		B5CE1BC1391776027471C273 /* WorkingWordsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */; };
-		FCB14DF3E12E78DFBB1A2C55 /* ThinkingOrbTintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */; };
+		F1000001000000000000039 /* SkalmanExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* SkalmanExtensionKit */; };
+		F1000001000000000000041 /* SkalmanRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000009 /* SkalmanRemoteKit */; };
+		F1000001000000000000040 /* SkalmanExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* SkalmanExtensionKit */; };
+		A20000010000000000000012 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000010 /* SwiftTerm */; };
+		A20000010000000000000013 /* SkalmanRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* SkalmanRemoteKit */; };
+		A20000010000000000000016 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015 /* AppIcon.icon */; };
+		F1B216BA36D0993C9078732F /* DiskSpaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A7D8163AC93C023CE61034D /* DiskSpaceTests.swift */; };
 		F8EEA2C01E6CF61FAAF1F024 /* TerminalThemeBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */; };
-		1FD6060EC0DC83DA4BA1C3C1 /* SessionInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7EA7666508259327901672F /* SessionInfoTests.swift */; };
-		5D2B524A0BB67BC9416D3577 /* FileActivityMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */; };
-		7108C0A471D9CADAA9684DD6 /* FileActivityMapRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */; };
-		74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */; };
-		8302133C16D906CBE04BEBB2 /* CodeStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */; };
-		D881E6573F863795C4647846 /* CodeStatsRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7369922B60411865EA964277 /* CodeStatsRenderTests.swift */; };
+		FCB14DF3E12E78DFBB1A2C55 /* ThinkingOrbTintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */; };
+		FD8F1D30E29CF4F0EB06D000 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */; };
+		2C2D5B4F7EAEEA50C6E88CBD /* StorageCleanupGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030A0FC51EEB6F3C240DB595 /* StorageCleanupGateTests.swift */; };
+		0F412B03E89EA9370D3E9F2B /* DefaultsQuarantineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86A896F923B68D73D32EB905 /* DefaultsQuarantineTests.swift */; };
+		94D581C8E64084B2F1E2F1B0 /* AgentLaunchQuotingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA497A258673C03193FDDA52 /* AgentLaunchQuotingTests.swift */; };
+		FD196D0C5BD6E31327B8CEA5 /* SessionImportBelongingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004F8F3293A493419A2D5F51 /* SessionImportBelongingTests.swift */; };
+		8EFF326B85E34DA87614A18D /* PermissionBrokerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 519D10D9A02B5694F4864485 /* PermissionBrokerTests.swift */; };
+		1B621F2E05B343BA81EF920A /* SidebarTreeBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D1992AEC49A3202893C16D /* SidebarTreeBuilderTests.swift */; };
+		27169FB589558A36272AF437 /* EditDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DCC32A2A85515404D399A14 /* EditDiffTests.swift */; };
+		959717B18084138F4C7E3795 /* MarkdownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B2624DBEB2C8061E12BBD3C /* MarkdownTests.swift */; };
+		724D78F3BE9BDD8BD6FFFF0B /* InspectorHierarchyRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57797096959B7C17B6DFA3F3 /* InspectorHierarchyRenderTests.swift */; };
+		85BCE7253AB20F15AE82C1D0 /* PaneFooterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121666065416BF45580A0A15 /* PaneFooterTests.swift */; };
+		EA149FAE2033764F9EB6D06D /* PaneFooterRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A8E8C70E23A0D4A467674E8 /* PaneFooterRenderTests.swift */; };
+		E0570A2EAD0B950AAFDA96A3 /* MotionPreviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2490F584606BFC5B629763DF /* MotionPreviewTests.swift */; };
+		061B375A3969B3044800B937 /* RemoteWebSocketTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A29B432CC7EC48523C8723D /* RemoteWebSocketTests.swift */; };
+		A2F688C9FD58C0A8F3493B96 /* RemoteRingBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC2A6883167C234F1FF9B44 /* RemoteRingBufferTests.swift */; };
+		F41E2CDE4F9059144D334C9E /* RemoteServerIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F9EDD3BDFAAB4A7EC40C29 /* RemoteServerIntegrationTests.swift */; };
 		C759CA85DB7CF715E0E836F0 /* BrowserAgentBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */; };
+		D2E00001000000000000000C /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
+		D2E00001000000000000000D /* NotificationDeliveryE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */; };
+		5C84FCDA4C6BBD2BCBD87252 /* PromptInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		7A0000010000000000000021 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7A0000010000000000000051;
+			remoteInfo = SkalmanWasmExtensionRunner;
+		};
+		04945DA7B3517A8184BC0A01 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1459DEBF5B7709D7DCD407A2;
+			remoteInfo = SkalmanExtensionHelperNetwork;
+		};
+		28376D7AA2BB73D3CD291113 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DB14898531F8EFBEA7892331;
+			remoteInfo = SkalmanExtensionHelper;
+		};
 		95814D89024CC2AED2A443AC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F6000001000000000000001;
+			remoteInfo = Skalman;
+		};
+		D2E000010000000000000007 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F8000001000000000000001 /* Project object */;
 			proxyType = 1;
@@ -86,71 +158,129 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				B81F7A1E07A694FFB193A1BD /* SkalmanExtensionHelper in Embed Extension Helpers */,
+				89DB8D32FAE049571D22D568 /* SkalmanExtensionHelperNetwork in Embed Extension Helpers */,
+				7A0000010000000000000003 /* SkalmanWasmExtensionRunner in Embed Extension Helpers */,
+			);
+			name = "Embed Extension Helpers";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		7A0000010000000000000011 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SkalmanWasmRuntime/Sources/SkalmanWasmExtensionRunner/main.swift; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000012 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = WasmRunner/Info.plist; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000013 /* skalman-wasm-extension-runner.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = WasmRunner/skalman-wasm-extension-runner.entitlements; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000014 /* SkalmanWasmExtensionRunner */ = {isa = PBXFileReference; includeInIndex = 0; path = SkalmanWasmExtensionRunner; sourceTree = BUILT_PRODUCTS_DIR; };
+		044987FD479F2BCE41800DB0 /* HookLifecycleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HookLifecycleTests.swift; sourceTree = "<group>"; };
+		06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyTests.swift; sourceTree = "<group>"; };
+		08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodeStatsTests.swift; sourceTree = "<group>"; };
+		09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionRunnerRequest.swift; sourceTree = "<group>"; };
+		0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtifactScannerTests.swift; sourceTree = "<group>"; };
+		115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ElementInspectionTests.swift; sourceTree = "<group>"; };
+		13591CD9ED76F6A56C469456 /* ExtensionProcessSessionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionProcessSessionTests.swift; sourceTree = "<group>"; };
+		161EB5CC2018AEE0E4E9F95F /* SkalmanExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; path = SkalmanExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
+		19157F0EEE4BA2AFB5105E44 /* Info-network.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "Info-network.plist"; sourceTree = "<group>"; };
+		20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitCommitGraphTests.swift; sourceTree = "<group>"; };
+		2608D19A258FF89E3F45E903 /* ExtensionBundleLoaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionBundleLoaderTests.swift; sourceTree = "<group>"; };
+		2B977AD037DD062B2428AA28 /* ChipViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChipViewTests.swift; sourceTree = "<group>"; };
+		2F950F46B250C9C32360A9E3 /* ThemeSwatchViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeSwatchViewTests.swift; sourceTree = "<group>"; };
+		3219558546061B6BB8C459A1 /* ExtensionPackageStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionPackageStoreTests.swift; sourceTree = "<group>"; };
+		343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationRenderTests.swift; sourceTree = "<group>"; };
+		3779521669E4E149E1C77B10 /* GitStagingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitStagingTests.swift; sourceTree = "<group>"; };
+		37CD4B4E5A5547D27046CFA8 /* ExtensionRendererTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionRendererTests.swift; sourceTree = "<group>"; };
+		3F3EFEC8D4B4F821C9695ABA /* SkalmanExtensionHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = SkalmanExtensionHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolIdentityTests.swift; sourceTree = "<group>"; };
+		48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedIndicatorsTests.swift; sourceTree = "<group>"; };
+		4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThinkingOrbTintTests.swift; sourceTree = "<group>"; };
+		543E83291094AE2E9DCA09FB /* SkalmanExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; path = SkalmanExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
+		595C17B45A239472429DDEC8 /* skalman-extension-helper.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "skalman-extension-helper.entitlements"; sourceTree = "<group>"; };
+		5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SideChatTests.swift; sourceTree = "<group>"; };
+		5F73C717F854436EAC372592 /* AccountNameTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountNameTests.swift; sourceTree = "<group>"; };
+		6351D65718BB714AF03F855E /* ConversationMinimapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationMinimapTests.swift; sourceTree = "<group>"; };
+		63B1299073D75E9C4A00C29E /* TranscriptUsageIndexTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptUsageIndexTests.swift; sourceTree = "<group>"; };
+		661FF20242AD94BEA7B16F91 /* SkalmanExtensionHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = SkalmanExtensionHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		696D173B6C5410C69CC97BE3 /* UsageForecastTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageForecastTests.swift; sourceTree = "<group>"; };
+		724489E037A877AC092F16DE /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		72E4FC8EDC79F143EA49545C /* SkalmanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SkalmanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		D12026070000000000000005 /* StreamSessionLifecycleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamSessionLifecycleTests.swift; sourceTree = "<group>"; };
-		D12026070000000000000003 /* PermissionRequestViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PermissionRequestViewTests.swift; sourceTree = "<group>"; };
-		D12026070000000000000001 /* MCPSessionRegistryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MCPSessionRegistryTests.swift; sourceTree = "<group>"; };
+		D2E000010000000000000002 /* SkalmanNotificationE2ETests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SkalmanNotificationE2ETests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeliveryE2ETests.swift; sourceTree = "<group>"; };
+		7369922B60411865EA964277 /* CodeStatsRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodeStatsRenderTests.swift; sourceTree = "<group>"; };
+		7A7D8163AC93C023CE61034D /* DiskSpaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiskSpaceTests.swift; sourceTree = "<group>"; };
+		7FDC3913B435DDBA1E7C13AE /* SessionNamingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionNamingTests.swift; sourceTree = "<group>"; };
+		8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyCorpusTests.swift; sourceTree = "<group>"; };
+		9233B0FB8A36E313E15E9561 /* ToolbarChromeRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolbarChromeRenderTests.swift; sourceTree = "<group>"; };
+		9443791670E8CC9E6A0AB86E /* ThemeResolutionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeResolutionTests.swift; sourceTree = "<group>"; };
+		97CBF23D6F1E81467057C62E /* GitCheckoutWatcherTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitCheckoutWatcherTests.swift; sourceTree = "<group>"; };
+		9984539B5DEA19828534D5B4 /* ModelNameTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelNameTests.swift; sourceTree = "<group>"; };
+		9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutTests.swift; sourceTree = "<group>"; };
+		9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageRingTests.swift; sourceTree = "<group>"; };
+		A033866F2A5F56AB0B49A8BF /* SyntaxTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SyntaxTests.swift; sourceTree = "<group>"; };
 		A10000010000000000000001 /* StateManagerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StateManagerTests.swift; sourceTree = "<group>"; };
 		A10000020000000000000001 /* DraftStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DraftStoreTests.swift; sourceTree = "<group>"; };
+		A10000030000000000000001 /* EventLogTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EventLogTests.swift; sourceTree = "<group>"; };
+		A10000040000000000000001 /* PromptAttachmentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptAttachmentTests.swift; sourceTree = "<group>"; };
+		A10000050000000000000001 /* AccountUsageSummaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountUsageSummaryTests.swift; sourceTree = "<group>"; };
 		A10000060000000000000001 /* GitDiffParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitDiffParserTests.swift; sourceTree = "<group>"; };
 		A10000070000000000000001 /* GitStatusParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitStatusParserTests.swift; sourceTree = "<group>"; };
 		A10000080000000000000001 /* GitReviewCommandsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitReviewCommandsTests.swift; sourceTree = "<group>"; };
 		A10000090000000000000001 /* GitReviewViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitReviewViewTests.swift; sourceTree = "<group>"; };
-		A10000030000000000000001 /* EventLogTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EventLogTests.swift; sourceTree = "<group>"; };
-		A10000040000000000000001 /* PromptAttachmentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptAttachmentTests.swift; sourceTree = "<group>"; };
-		A10000050000000000000001 /* AccountUsageSummaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountUsageSummaryTests.swift; sourceTree = "<group>"; };
-		A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectIconTests.swift; sourceTree = "<group>"; };
-		696D173B6C5410C69CC97BE3 /* UsageForecastTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageForecastTests.swift; sourceTree = "<group>"; };
-		63B1299073D75E9C4A00C29E /* TranscriptUsageIndexTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptUsageIndexTests.swift; sourceTree = "<group>"; };
-		7A7D8163AC93C023CE61034D /* DiskSpaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiskSpaceTests.swift; sourceTree = "<group>"; };
-		0D2D808FFCF4CFE11AE9BDD3 /* ArtifactScannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtifactScannerTests.swift; sourceTree = "<group>"; };
-		5B1CD8678C3E4CB8CC16E5D9 /* SideChatTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SideChatTests.swift; sourceTree = "<group>"; };
-		B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptReplayTests.swift; sourceTree = "<group>"; };
-		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
-		F2000001000000000000038 /* Skalman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Skalman.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A6563DF6216A83E7016B0C5B /* SkalmanExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; path = SkalmanExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
 		A755DEF013AAE066F8E4BF52 /* ConversationTimelineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationTimelineTests.swift; sourceTree = "<group>"; };
-		343BD88FEDB478E81C5F893B /* ConversationRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationRenderTests.swift; sourceTree = "<group>"; };
-		E15000010000000000000001 /* HotPathCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HotPathCacheTests.swift; sourceTree = "<group>"; };
-		6351D65718BB714AF03F855E /* ConversationMinimapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationMinimapTests.swift; sourceTree = "<group>"; };
-		97CBF23D6F1E81467057C62E /* GitCheckoutWatcherTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitCheckoutWatcherTests.swift; sourceTree = "<group>"; };
-		A033866F2A5F56AB0B49A8BF /* SyntaxTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SyntaxTests.swift; sourceTree = "<group>"; };
-		D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitReviewRenderTests.swift; sourceTree = "<group>"; };
-		20C6E6534CE1099592E40773 /* GitCommitGraphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitCommitGraphTests.swift; sourceTree = "<group>"; };
-		3779521669E4E149E1C77B10 /* GitStagingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitStagingTests.swift; sourceTree = "<group>"; };
-		B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
-		CE242D7B54894292C2D86C32 /* ProjectDatabaseTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectDatabaseTests.swift; sourceTree = "<group>"; };
-		9443791670E8CC9E6A0AB86E /* ThemeResolutionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeResolutionTests.swift; sourceTree = "<group>"; };
-		B2DA509DA20B667CFCB88485 /* ThemeSettingsRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeSettingsRenderTests.swift; sourceTree = "<group>"; };
+		A91BE2B549ED4A475793E903 /* ProjectIconTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectIconTests.swift; sourceTree = "<group>"; };
 		AC0D73705B6A31DE5CE62C91 /* ThemeToolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeToolTests.swift; sourceTree = "<group>"; };
-		F8AE2406CB7A2AD5CF7F25D6 /* ThemeMenuTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeMenuTests.swift; sourceTree = "<group>"; };
-		044987FD479F2BCE41800DB0 /* HookLifecycleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HookLifecycleTests.swift; sourceTree = "<group>"; };
-		D52404767F8E6E3FD5655E1D /* CodexHookInstallerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodexHookInstallerTests.swift; sourceTree = "<group>"; };
-		F04F521EABA85E9D423CC483 /* AppThemeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppThemeTests.swift; sourceTree = "<group>"; };
-		E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppThemeRenderTests.swift; sourceTree = "<group>"; };
-		9E0239E00CC9C28E9E2DD62D /* UsageRingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageRingTests.swift; sourceTree = "<group>"; };
-		9984539B5DEA19828534D5B4 /* ModelNameTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelNameTests.swift; sourceTree = "<group>"; };
-		4682A8C55E2A05C81D681BBB /* ToolIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolIdentityTests.swift; sourceTree = "<group>"; };
-		06B09361E0B24C21D950F857 /* ShellCommandPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyTests.swift; sourceTree = "<group>"; };
-		5F73C717F854436EAC372592 /* AccountNameTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountNameTests.swift; sourceTree = "<group>"; };
-		8B2C0D1E6318B9E36AF4F025 /* ShellCommandPolicyCorpusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellCommandPolicyCorpusTests.swift; sourceTree = "<group>"; };
-		D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedControlTests.swift; sourceTree = "<group>"; };
-		115379ADB3EB4F01101BD993 /* ElementInspectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ElementInspectionTests.swift; sourceTree = "<group>"; };
-		7FDC3913B435DDBA1E7C13AE /* SessionNamingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionNamingTests.swift; sourceTree = "<group>"; };
-		2B977AD037DD062B2428AA28 /* ChipViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChipViewTests.swift; sourceTree = "<group>"; };
-		48C4C1E9F1AB39B3FAF02668 /* ThemedIndicatorsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedIndicatorsTests.swift; sourceTree = "<group>"; };
-		2F950F46B250C9C32360A9E3 /* ThemeSwatchViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeSwatchViewTests.swift; sourceTree = "<group>"; };
-		DB1A5B994E77DE60A5FEF1BB /* SettingsRowLayoutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsRowLayoutTests.swift; sourceTree = "<group>"; };
-		E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkingWordsTests.swift; sourceTree = "<group>"; };
-		4A0807A3E7130969D6FCD0CD /* ThinkingOrbTintTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThinkingOrbTintTests.swift; sourceTree = "<group>"; };
-		EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalThemeBoundaryTests.swift; sourceTree = "<group>"; };
+		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B2DA509DA20B667CFCB88485 /* ThemeSettingsRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeSettingsRenderTests.swift; sourceTree = "<group>"; };
+		B51CB1CC616C631719AD0221 /* AppDelegateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
+		B81A3E96D9BFC8F08FC1DA31 /* TranscriptReplayTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TranscriptReplayTests.swift; sourceTree = "<group>"; };
+		C20CE9CA503B8DC639CAB992 /* SkalmanExtensionHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = SkalmanExtensionHelper; sourceTree = BUILT_PRODUCTS_DIR; };
 		C7EA7666508259327901672F /* SessionInfoTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionInfoTests.swift; sourceTree = "<group>"; };
+		CE242D7B54894292C2D86C32 /* ProjectDatabaseTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectDatabaseTests.swift; sourceTree = "<group>"; };
+		D12026070000000000000001 /* MCPSessionRegistryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MCPSessionRegistryTests.swift; sourceTree = "<group>"; };
+		D12026070000000000000003 /* PermissionRequestViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PermissionRequestViewTests.swift; sourceTree = "<group>"; };
+		D12026070000000000000005 /* StreamSessionLifecycleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamSessionLifecycleTests.swift; sourceTree = "<group>"; };
+		D52404767F8E6E3FD5655E1D /* CodexHookInstallerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodexHookInstallerTests.swift; sourceTree = "<group>"; };
+		D61B65FA55EF48038ED5DB6D /* ThemedControlTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedControlTests.swift; sourceTree = "<group>"; };
+		D92623144A6E83CA51860B8E /* GitReviewRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitReviewRenderTests.swift; sourceTree = "<group>"; };
+		DB1A5B994E77DE60A5FEF1BB /* SettingsRowLayoutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsRowLayoutTests.swift; sourceTree = "<group>"; };
+		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+		E13493FA1CE502FE6B834660 /* WorkingWordsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkingWordsTests.swift; sourceTree = "<group>"; };
+		E15000010000000000000001 /* HotPathCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HotPathCacheTests.swift; sourceTree = "<group>"; };
+		E6D09DC5A688B0031DEC7A47 /* AppThemeRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppThemeRenderTests.swift; sourceTree = "<group>"; };
 		EB13FC5035E3268BB78A317A /* FileActivityMapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FileActivityMapTests.swift; sourceTree = "<group>"; };
+		EFEBDCED973C9121C32FF5DF /* TerminalThemeBoundaryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalThemeBoundaryTests.swift; sourceTree = "<group>"; };
+		F04F521EABA85E9D423CC483 /* AppThemeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppThemeTests.swift; sourceTree = "<group>"; };
+		F2000001000000000000038 /* Skalman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Skalman.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000010000000000000002 /* SkalmanMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SkalmanMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000010000000000000015 /* AppIcon.icon */ = {isa = PBXFileReference; path = Sources/Skalman/AppIcon.icon; sourceTree = "<group>"; };
+		F30DCBAC6C0C2898E8093C83 /* SidebarTitleMorphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarTitleMorphTests.swift; sourceTree = "<group>"; };
+		F446C4C52994905237C3BE9B /* skalman-extension-helper-network.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "skalman-extension-helper-network.entitlements"; sourceTree = "<group>"; };
+		F8AE2406CB7A2AD5CF7F25D6 /* ThemeMenuTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeMenuTests.swift; sourceTree = "<group>"; };
 		FE692D3A27F9A1DFAF3AF79E /* FileActivityMapRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FileActivityMapRenderTests.swift; sourceTree = "<group>"; };
-		9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutTests.swift; sourceTree = "<group>"; };
-		08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodeStatsTests.swift; sourceTree = "<group>"; };
-		7369922B60411865EA964277 /* CodeStatsRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodeStatsRenderTests.swift; sourceTree = "<group>"; };
+		030A0FC51EEB6F3C240DB595 /* StorageCleanupGateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StorageCleanupGateTests.swift; sourceTree = "<group>"; };
+		86A896F923B68D73D32EB905 /* DefaultsQuarantineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DefaultsQuarantineTests.swift; sourceTree = "<group>"; };
+		AA497A258673C03193FDDA52 /* AgentLaunchQuotingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentLaunchQuotingTests.swift; sourceTree = "<group>"; };
+		004F8F3293A493419A2D5F51 /* SessionImportBelongingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionImportBelongingTests.swift; sourceTree = "<group>"; };
+		519D10D9A02B5694F4864485 /* PermissionBrokerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PermissionBrokerTests.swift; sourceTree = "<group>"; };
+		90D1992AEC49A3202893C16D /* SidebarTreeBuilderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarTreeBuilderTests.swift; sourceTree = "<group>"; };
+		9DCC32A2A85515404D399A14 /* EditDiffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EditDiffTests.swift; sourceTree = "<group>"; };
+		2B2624DBEB2C8061E12BBD3C /* MarkdownTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MarkdownTests.swift; sourceTree = "<group>"; };
+		57797096959B7C17B6DFA3F3 /* InspectorHierarchyRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InspectorHierarchyRenderTests.swift; sourceTree = "<group>"; };
+		121666065416BF45580A0A15 /* PaneFooterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaneFooterTests.swift; sourceTree = "<group>"; };
+		7A8E8C70E23A0D4A467674E8 /* PaneFooterRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaneFooterRenderTests.swift; sourceTree = "<group>"; };
+		2490F584606BFC5B629763DF /* MotionPreviewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MotionPreviewTests.swift; sourceTree = "<group>"; };
+		6A29B432CC7EC48523C8723D /* RemoteWebSocketTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteWebSocketTests.swift; sourceTree = "<group>"; };
+		FBC2A6883167C234F1FF9B44 /* RemoteRingBufferTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteRingBufferTests.swift; sourceTree = "<group>"; };
+		52F9EDD3BDFAAB4A7EC40C29 /* RemoteServerIntegrationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteServerIntegrationTests.swift; sourceTree = "<group>"; };
 		0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserAgentBridgeTests.swift; sourceTree = "<group>"; };
+		12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptInputTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -158,6 +288,26 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Skalman/Resources/Info.plist,
+				SkalmanMobile/PairingView.swift,
+				SkalmanMobile/MobileIssueReporting.swift,
+				SkalmanMobile/RemoteAppModel.swift,
+				SkalmanMobile/RemoteAttachmentsView.swift,
+				SkalmanMobile/RemoteClient.swift,
+				SkalmanMobile/RemoteConversationStore.swift,
+				SkalmanMobile/RemoteConversationTimelineViewController.swift,
+				SkalmanMobile/RemoteDiagnostics.swift,
+				SkalmanMobile/RemoteHostStore.swift,
+				SkalmanMobile/RemoteGitReviewView.swift,
+				SkalmanMobile/RemoteNotifications.swift,
+				SkalmanMobile/RemoteSessionConnection.swift,
+				SkalmanMobile/RemoteTheme.swift,
+				SkalmanMobile/RootView.swift,
+				SkalmanMobile/SessionDashboard.swift,
+				SkalmanMobile/SessionDetailView.swift,
+				SkalmanMobile/SkalmanMobileApp.swift,
+				SkalmanMobile/SkalmanMobile.entitlements,
+				SkalmanMobile/TerminalViewRepresentable.swift,
+				SkalmanMobile/ThemedDialog.swift,
 			);
 			target = F6000001000000000000001 /* Skalman */;
 		};
@@ -174,18 +324,37 @@
 			explicitFolders = (
 				Skalman/Resources/BrowserAutomation,
 				Skalman/Resources/Icons,
+				Skalman/Resources/RemoteClient,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		A20000010000000000000014 /* SkalmanMobile */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = Sources/SkalmanMobile;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		7A0000010000000000000031 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A0000010000000000000002 /* SkalmanWasmRuntime in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		56FF87A7554976846335914F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */,
+				F1000001000000000000040 /* SkalmanExtensionKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -196,14 +365,45 @@
 				F1000001000000000000036 /* SwiftTerm in Frameworks */,
 				F1000001000000000000037 /* ThinkingOrbs in Frameworks */,
 				F1000001000000000000038 /* LabelMorph in Frameworks */,
+				F1000001000000000000039 /* SkalmanExtensionKit in Frameworks */,
+				F1000001000000000000041 /* SkalmanRemoteKit in Frameworks */,
 				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2E000010000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D2E00001000000000000000C /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A20000010000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A20000010000000000000012 /* SwiftTerm in Frameworks */,
+				A20000010000000000000013 /* SkalmanRemoteKit in Frameworks */,
+				D1FF00010000000000000013 /* NativeDiffCore in Frameworks */,
+				D1FF00010000000000000014 /* NativeDiffUIKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		7A0000010000000000000041 /* Wasm Runner */ = {
+			isa = PBXGroup;
+			children = (
+				7A0000010000000000000011 /* main.swift */,
+				7A0000010000000000000012 /* Info.plist */,
+				7A0000010000000000000013 /* skalman-wasm-extension-runner.entitlements */,
+			);
+			name = "Wasm Runner";
+			sourceTree = "<group>";
+		};
 		25B0E33ED576F9158763F7B2 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -275,7 +475,29 @@
 				9D99C01A2C6B41ED0AFA301B /* KeyboardShortcutTests.swift */,
 				08D834DF63EE8E73C6840C03 /* CodeStatsTests.swift */,
 				7369922B60411865EA964277 /* CodeStatsRenderTests.swift */,
+				37CD4B4E5A5547D27046CFA8 /* ExtensionRendererTests.swift */,
+				2608D19A258FF89E3F45E903 /* ExtensionBundleLoaderTests.swift */,
+				13591CD9ED76F6A56C469456 /* ExtensionProcessSessionTests.swift */,
+				3219558546061B6BB8C459A1 /* ExtensionPackageStoreTests.swift */,
+				F30DCBAC6C0C2898E8093C83 /* SidebarTitleMorphTests.swift */,
+				9233B0FB8A36E313E15E9561 /* ToolbarChromeRenderTests.swift */,
+				030A0FC51EEB6F3C240DB595 /* StorageCleanupGateTests.swift */,
+				86A896F923B68D73D32EB905 /* DefaultsQuarantineTests.swift */,
+				AA497A258673C03193FDDA52 /* AgentLaunchQuotingTests.swift */,
+				004F8F3293A493419A2D5F51 /* SessionImportBelongingTests.swift */,
+				519D10D9A02B5694F4864485 /* PermissionBrokerTests.swift */,
+				90D1992AEC49A3202893C16D /* SidebarTreeBuilderTests.swift */,
+				9DCC32A2A85515404D399A14 /* EditDiffTests.swift */,
+				2B2624DBEB2C8061E12BBD3C /* MarkdownTests.swift */,
+				57797096959B7C17B6DFA3F3 /* InspectorHierarchyRenderTests.swift */,
+				121666065416BF45580A0A15 /* PaneFooterTests.swift */,
+				7A8E8C70E23A0D4A467674E8 /* PaneFooterRenderTests.swift */,
+				2490F584606BFC5B629763DF /* MotionPreviewTests.swift */,
+				6A29B432CC7EC48523C8723D /* RemoteWebSocketTests.swift */,
+				FBC2A6883167C234F1FF9B44 /* RemoteRingBufferTests.swift */,
+				52F9EDD3BDFAAB4A7EC40C29 /* RemoteServerIntegrationTests.swift */,
 				0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */,
+				12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -289,13 +511,32 @@
 			name = "OS X";
 			sourceTree = "<group>";
 		};
+		DEBA3EC0E0E1A6C00C62BAE7 /* Helper */ = {
+			isa = PBXGroup;
+			children = (
+				09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */,
+				724489E037A877AC092F16DE /* main.swift */,
+				B0339D9A9A84C09D74842AEC /* Info.plist */,
+				595C17B45A239472429DDEC8 /* skalman-extension-helper.entitlements */,
+				19157F0EEE4BA2AFB5105E44 /* Info-network.plist */,
+				F446C4C52994905237C3BE9B /* skalman-extension-helper-network.entitlements */,
+			);
+			name = Helper;
+			path = Helper;
+			sourceTree = "<group>";
+		};
 		F5000001000000000000001 = {
 			isa = PBXGroup;
 			children = (
 				63D8F4952EE47C9A007F49BD /* Sources */,
+				A20000010000000000000014 /* SkalmanMobile */,
+				A20000010000000000000015 /* AppIcon.icon */,
 				F5000001000000000000020 /* Products */,
 				25B0E33ED576F9158763F7B2 /* Frameworks */,
 				B1792448FB880E01F5D9086C /* Tests */,
+				D2E00001000000000000000E /* Notification E2E Tests */,
+				DEBA3EC0E0E1A6C00C62BAE7 /* Helper */,
+				7A0000010000000000000041 /* Wasm Runner */,
 			);
 			sourceTree = "<group>";
 		};
@@ -303,14 +544,66 @@
 			isa = PBXGroup;
 			children = (
 				F2000001000000000000038 /* Skalman.app */,
+				A20000010000000000000002 /* SkalmanMobile.app */,
 				72E4FC8EDC79F143EA49545C /* SkalmanTests.xctest */,
+				D2E000010000000000000002 /* SkalmanNotificationE2ETests.xctest */,
+				3F3EFEC8D4B4F821C9695ABA /* SkalmanExtensionHelper */,
+				A6563DF6216A83E7016B0C5B /* SkalmanExtensionHelperNetwork */,
+				661FF20242AD94BEA7B16F91 /* SkalmanExtensionHelper */,
+				161EB5CC2018AEE0E4E9F95F /* SkalmanExtensionHelperNetwork */,
+				C20CE9CA503B8DC639CAB992 /* SkalmanExtensionHelper */,
+				543E83291094AE2E9DCA09FB /* SkalmanExtensionHelperNetwork */,
+				7A0000010000000000000014 /* SkalmanWasmExtensionRunner */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D2E00001000000000000000E /* Notification E2E Tests */ = {
+			isa = PBXGroup;
+			children = (
+				D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */,
+			);
+			name = "Notification E2E Tests";
+			path = Tests/SkalmanNotificationE2ETests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		7A0000010000000000000051 /* SkalmanWasmExtensionRunner */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A0000010000000000000083 /* Build configuration list for PBXNativeTarget "SkalmanWasmExtensionRunner" */;
+			buildPhases = (
+				7A0000010000000000000032 /* Sources */,
+				7A0000010000000000000031 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SkalmanWasmExtensionRunner;
+			packageProductDependencies = (
+				7A0000010000000000000091 /* SkalmanWasmRuntime */,
+			);
+			productName = SkalmanWasmExtensionRunner;
+			productReference = 7A0000010000000000000014 /* SkalmanWasmExtensionRunner */;
+			productType = "com.apple.product-type.tool";
+		};
+		1459DEBF5B7709D7DCD407A2 /* SkalmanExtensionHelperNetwork */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 513BC3CC78594F6C9DFC61E0 /* Build configuration list for PBXNativeTarget "SkalmanExtensionHelperNetwork" */;
+			buildPhases = (
+				CFDC27CF41471FFEBB7A7C93 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SkalmanExtensionHelperNetwork;
+			productName = SkalmanExtensionHelperNetwork;
+			productReference = 543E83291094AE2E9DCA09FB /* SkalmanExtensionHelperNetwork */;
+			productType = "com.apple.product-type.tool";
+		};
 		20A00C033DC1347FA758CD10 /* SkalmanTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 61DA317B0D969A1DC194B4C8 /* Build configuration list for PBXNativeTarget "SkalmanTests" */;
@@ -325,9 +618,47 @@
 				44883DEA7DCAA5EAADC3CD6A /* PBXTargetDependency */,
 			);
 			name = SkalmanTests;
+			packageProductDependencies = (
+				F4000001000000000000007 /* SkalmanExtensionKit */,
+			);
 			productName = SkalmanTests;
 			productReference = 72E4FC8EDC79F143EA49545C /* SkalmanTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D2E000010000000000000001 /* SkalmanNotificationE2ETests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D2E00001000000000000000B /* Build configuration list for PBXNativeTarget "SkalmanNotificationE2ETests" */;
+			buildPhases = (
+				D2E000010000000000000004 /* Sources */,
+				D2E000010000000000000005 /* Frameworks */,
+				D2E000010000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D2E000010000000000000008 /* PBXTargetDependency */,
+			);
+			name = SkalmanNotificationE2ETests;
+			packageProductDependencies = (
+			);
+			productName = SkalmanNotificationE2ETests;
+			productReference = D2E000010000000000000002 /* SkalmanNotificationE2ETests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		DB14898531F8EFBEA7892331 /* SkalmanExtensionHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 091BD013A1E26748129E077F /* Build configuration list for PBXNativeTarget "SkalmanExtensionHelper" */;
+			buildPhases = (
+				0EEAE3A785B7D334D6F7DBB7 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SkalmanExtensionHelper;
+			productName = SkalmanExtensionHelper;
+			productReference = C20CE9CA503B8DC639CAB992 /* SkalmanExtensionHelper */;
+			productType = "com.apple.product-type.tool";
 		};
 		F6000001000000000000001 /* Skalman */ = {
 			isa = PBXNativeTarget;
@@ -337,10 +668,15 @@
 				F6000001000000000000002 /* Sources */,
 				F3000001000000000000001 /* Frameworks */,
 				F6000001000000000000003 /* Resources */,
+				E77100010000000000000001 /* Embed Extension SDK */,
+				877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */,
+				0B537AA731F40F54768A22BD /* PBXTargetDependency */,
+				7A0000010000000000000022 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				63D8F4952EE47C9A007F49BD /* Sources */,
@@ -350,11 +686,39 @@
 				F4000001000000000000001 /* SwiftTerm */,
 				F4000001000000000000003 /* ThinkingOrbs */,
 				F4000001000000000000005 /* LabelMorph */,
+				F4000001000000000000007 /* SkalmanExtensionKit */,
+				F4000001000000000000009 /* SkalmanRemoteKit */,
 				D1FF00010000000000000001 /* NativeDiffCore */,
 				D1FF00010000000000000002 /* NativeDiffAppKit */,
 			);
 			productName = Skalman;
 			productReference = F2000001000000000000038 /* Skalman.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A20000010000000000000001 /* SkalmanMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A20000010000000000000006 /* Build configuration list for PBXNativeTarget "SkalmanMobile" */;
+			buildPhases = (
+				A20000010000000000000005 /* Sources */,
+				A20000010000000000000003 /* Frameworks */,
+				A20000010000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A20000010000000000000014 /* SkalmanMobile */,
+			);
+			name = SkalmanMobile;
+			packageProductDependencies = (
+				A20000010000000000000010 /* SwiftTerm */,
+				A20000010000000000000011 /* SkalmanRemoteKit */,
+				D1FF00010000000000000003 /* NativeDiffCore */,
+				D1FF00010000000000000004 /* NativeDiffUIKit */,
+			);
+			productName = SkalmanMobile;
+			productReference = A20000010000000000000002 /* SkalmanMobile.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -367,6 +731,12 @@
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
+					A20000010000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					D2E000010000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
 					F6000001000000000000001 = {
 						CreatedOnToolsVersion = 15.0;
 					};
@@ -385,20 +755,35 @@
 				F4000001000000000000002 /* XCLocalSwiftPackageReference "SwiftTerm" */,
 				F4000001000000000000004 /* XCLocalSwiftPackageReference "ThinkingOrbs" */,
 				F4000001000000000000006 /* XCLocalSwiftPackageReference "LabelMorph" */,
+				F4000001000000000000008 /* XCLocalSwiftPackageReference "SkalmanExtensionKit" */,
+				F4000001000000000000010 /* XCLocalSwiftPackageReference "SkalmanRemoteKit" */,
 				D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */,
+				7A0000010000000000000090 /* XCLocalSwiftPackageReference "SkalmanWasmRuntime" */,
 			);
 			productRefGroup = F5000001000000000000020 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (
-				F6000001000000000000001 /* Skalman */,
-				20A00C033DC1347FA758CD10 /* SkalmanTests */,
+				targets = (
+					F6000001000000000000001 /* Skalman */,
+					A20000010000000000000001 /* SkalmanMobile */,
+					20A00C033DC1347FA758CD10 /* SkalmanTests */,
+					D2E000010000000000000001 /* SkalmanNotificationE2ETests */,
+				DB14898531F8EFBEA7892331 /* SkalmanExtensionHelper */,
+				1459DEBF5B7709D7DCD407A2 /* SkalmanExtensionHelperNetwork */,
+				7A0000010000000000000051 /* SkalmanWasmExtensionRunner */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		C995024E6F941ADF45C13130 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2E000010000000000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -412,9 +797,39 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A20000010000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A20000010000000000000016 /* AppIcon.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		E77100010000000000000001 /* Embed Extension SDK */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/SkalmanExtensionKit",
+				"$(SRCROOT)/scripts/embed_extension_sdk.sh",
+			);
+			name = "Embed Extension SDK";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ExtensionSDK/SkalmanExtensionKit/SDK_VERSION",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/scripts/embed_extension_sdk.sh\"";
+		};
 		C0D3A1100000000000000001 /* Enforce Theme Boundary */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -445,6 +860,23 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		7A0000010000000000000032 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A0000010000000000000001 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0EEAE3A785B7D334D6F7DBB7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A39A300DF9F7CA8D21A7B7C3 /* main.swift in Sources */,
+				6746DE83B248339F7A44A795 /* ExtensionRunnerRequest.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2B94BD9027B7FD53BB982AFA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -509,11 +941,58 @@
 				74B47ABECDD7881769897003 /* KeyboardShortcutTests.swift in Sources */,
 				8302133C16D906CBE04BEBB2 /* CodeStatsTests.swift in Sources */,
 				D881E6573F863795C4647846 /* CodeStatsRenderTests.swift in Sources */,
+				9739FF9F9567786D1930B40E /* ExtensionRendererTests.swift in Sources */,
+				4117E79BB16586DD2BD3E82E /* ExtensionBundleLoaderTests.swift in Sources */,
+				EB090093A30F0A9150C08255 /* ExtensionProcessSessionTests.swift in Sources */,
+				E9C6A0C4EF733BE035B496B8 /* ExtensionPackageStoreTests.swift in Sources */,
+				263FA9B47E541D2716EAB6AD /* SidebarTitleMorphTests.swift in Sources */,
+				797CDED78DE5960321A92159 /* ToolbarChromeRenderTests.swift in Sources */,
+				2C2D5B4F7EAEEA50C6E88CBD /* StorageCleanupGateTests.swift in Sources */,
+				0F412B03E89EA9370D3E9F2B /* DefaultsQuarantineTests.swift in Sources */,
+				94D581C8E64084B2F1E2F1B0 /* AgentLaunchQuotingTests.swift in Sources */,
+				FD196D0C5BD6E31327B8CEA5 /* SessionImportBelongingTests.swift in Sources */,
+				8EFF326B85E34DA87614A18D /* PermissionBrokerTests.swift in Sources */,
+				1B621F2E05B343BA81EF920A /* SidebarTreeBuilderTests.swift in Sources */,
+				27169FB589558A36272AF437 /* EditDiffTests.swift in Sources */,
+				959717B18084138F4C7E3795 /* MarkdownTests.swift in Sources */,
+				724D78F3BE9BDD8BD6FFFF0B /* InspectorHierarchyRenderTests.swift in Sources */,
+				85BCE7253AB20F15AE82C1D0 /* PaneFooterTests.swift in Sources */,
+				EA149FAE2033764F9EB6D06D /* PaneFooterRenderTests.swift in Sources */,
+				E0570A2EAD0B950AAFDA96A3 /* MotionPreviewTests.swift in Sources */,
+				061B375A3969B3044800B937 /* RemoteWebSocketTests.swift in Sources */,
+				A2F688C9FD58C0A8F3493B96 /* RemoteRingBufferTests.swift in Sources */,
+				F41E2CDE4F9059144D334C9E /* RemoteServerIntegrationTests.swift in Sources */,
 				C759CA85DB7CF715E0E836F0 /* BrowserAgentBridgeTests.swift in Sources */,
+				5C84FCDA4C6BBD2BCBD87252 /* PromptInputTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2E000010000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D2E00001000000000000000D /* NotificationDeliveryE2ETests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFDC27CF41471FFEBB7A7C93 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				09EEC39439CEDA7EAFBC697C /* main.swift in Sources */,
+				A09CD2FDD17E4E72005ECE03 /* ExtensionRunnerRequest.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		F6000001000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A20000010000000000000005 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -523,15 +1002,198 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		7A0000010000000000000022 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = SkalmanWasmExtensionRunner;
+			target = 7A0000010000000000000051 /* SkalmanWasmExtensionRunner */;
+			targetProxy = 7A0000010000000000000021 /* PBXContainerItemProxy */;
+		};
+		0B537AA731F40F54768A22BD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = SkalmanExtensionHelperNetwork;
+			target = 1459DEBF5B7709D7DCD407A2 /* SkalmanExtensionHelperNetwork */;
+			targetProxy = 04945DA7B3517A8184BC0A01 /* PBXContainerItemProxy */;
+		};
 		44883DEA7DCAA5EAADC3CD6A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = Skalman;
 			target = F6000001000000000000001 /* Skalman */;
 			targetProxy = 95814D89024CC2AED2A443AC /* PBXContainerItemProxy */;
 		};
+		D2E000010000000000000008 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Skalman;
+			target = F6000001000000000000001 /* Skalman */;
+			targetProxy = D2E000010000000000000007 /* PBXContainerItemProxy */;
+		};
+		A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = SkalmanExtensionHelper;
+			target = DB14898531F8EFBEA7892331 /* SkalmanExtensionHelper */;
+			targetProxy = 28376D7AA2BB73D3CD291113 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		7A0000010000000000000081 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = WasmRunner/skalman-wasm-extension-runner.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/WasmRunner/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = se.mjukis.Skalman.wasm-extension-runner;
+				PRODUCT_NAME = "skalman-wasm-extension-runner";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7A0000010000000000000082 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = WasmRunner/skalman-wasm-extension-runner.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/WasmRunner/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = se.mjukis.Skalman.wasm-extension-runner;
+				PRODUCT_NAME = "skalman-wasm-extension-runner";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		0F5B132AD8A070E729F93431 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Helper/skalman-extension-helper-network.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Helper/Info-network.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "se.mjukis.Skalman.extension-helper-network";
+				PRODUCT_NAME = "skalman-extension-helper-network";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		39E37C55A3E2219555956D29 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Helper/skalman-extension-helper.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Helper/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "se.mjukis.Skalman.extension-helper";
+				PRODUCT_NAME = "skalman-extension-helper";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		3DB3C9B15199B2029009DFDF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Helper/skalman-extension-helper.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Helper/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "se.mjukis.Skalman.extension-helper";
+				PRODUCT_NAME = "skalman-extension-helper";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		42E68C88D65AA8EAE7E7206F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Helper/skalman-extension-helper-network.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Helper/Info-network.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "se.mjukis.Skalman.extension-helper-network";
+				PRODUCT_NAME = "skalman-extension-helper-network";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		4D581B8242E06AB691820CF1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Helper/skalman-extension-helper-network.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Helper/Info-network.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "se.mjukis.Skalman.extension-helper-network";
+				PRODUCT_NAME = "skalman-extension-helper-network";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
 		749F6BEEACCEE7D0BB1D2F91 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -554,6 +1216,27 @@
 			};
 			name = Release;
 		};
+		7A66E846FFEEFD7F918F9A8D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Helper/skalman-extension-helper-network.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Helper/Info-network.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "se.mjukis.Skalman.extension-helper-network";
+				PRODUCT_NAME = "skalman-extension-helper-network";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
 		C663059E0D7D5F7C061F7848 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -575,6 +1258,94 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Skalman.app/Contents/MacOS/Skalman";
 			};
 			name = Debug;
+		};
+		D2E000010000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.mjukis.SkalmanNotificationE2ETests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = targeted;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Skalman.app/Contents/MacOS/Skalman";
+			};
+			name = Debug;
+		};
+		D2E00001000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.mjukis.SkalmanNotificationE2ETests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = targeted;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Skalman.app/Contents/MacOS/Skalman";
+			};
+			name = Release;
+		};
+		D3203469E1C36D64E4761E9D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Helper/skalman-extension-helper.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Helper/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "se.mjukis.Skalman.extension-helper";
+				PRODUCT_NAME = "skalman-extension-helper";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D7A6EB9391AC48FF393D7B6F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Helper/skalman-extension-helper.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Helper/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "se.mjukis.Skalman.extension-helper";
+				PRODUCT_NAME = "skalman-extension-helper";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
 		};
 		F7000001000000000000004 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -711,6 +1482,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/Skalman/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Skalman;
@@ -745,6 +1517,7 @@
 				DEVELOPMENT_TEAM = SMQ3E8Y57T;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/Skalman/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Skalman;
@@ -765,14 +1538,118 @@
 			};
 			name = Release;
 		};
+		A20000010000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				APS_ENVIRONMENT = development;
+				CODE_SIGN_ENTITLEMENTS = Sources/SkalmanMobile/SkalmanMobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Skalman;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Skalman pairing code shown on your Mac.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.mjukis.Skalman.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = targeted;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A20000010000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				APS_ENVIRONMENT = production;
+				CODE_SIGN_ENTITLEMENTS = Sources/SkalmanMobile/SkalmanMobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Skalman;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Skalman pairing code shown on your Mac.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.mjukis.Skalman.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = targeted;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		7A0000010000000000000083 /* Build configuration list for PBXNativeTarget "SkalmanWasmExtensionRunner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A0000010000000000000082 /* Release */,
+				7A0000010000000000000081 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		091BD013A1E26748129E077F /* Build configuration list for PBXNativeTarget "SkalmanExtensionHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7A6EB9391AC48FF393D7B6F /* Release */,
+				D3203469E1C36D64E4761E9D /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		513BC3CC78594F6C9DFC61E0 /* Build configuration list for PBXNativeTarget "SkalmanExtensionHelperNetwork" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				42E68C88D65AA8EAE7E7206F /* Release */,
+				4D581B8242E06AB691820CF1 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		61DA317B0D969A1DC194B4C8 /* Build configuration list for PBXNativeTarget "SkalmanTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				749F6BEEACCEE7D0BB1D2F91 /* Release */,
 				C663059E0D7D5F7C061F7848 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D2E00001000000000000000B /* Build configuration list for PBXNativeTarget "SkalmanNotificationE2ETests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D2E00001000000000000000A /* Release */,
+				D2E000010000000000000009 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -795,6 +1672,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A20000010000000000000006 /* Build configuration list for PBXNativeTarget "SkalmanMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A20000010000000000000007 /* Debug */,
+				A20000010000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -809,6 +1695,18 @@
 		F4000001000000000000006 /* XCLocalSwiftPackageReference "LabelMorph" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LabelMorph;
+		};
+		F4000001000000000000008 /* XCLocalSwiftPackageReference "SkalmanExtensionKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SkalmanExtensionKit;
+		};
+		F4000001000000000000010 /* XCLocalSwiftPackageReference "SkalmanRemoteKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SkalmanRemoteKit;
+		};
+		7A0000010000000000000090 /* XCLocalSwiftPackageReference "SkalmanWasmRuntime" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SkalmanWasmRuntime;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -836,6 +1734,22 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = LabelMorph;
 		};
+		F4000001000000000000007 /* SkalmanExtensionKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SkalmanExtensionKit;
+		};
+		F4000001000000000000009 /* SkalmanRemoteKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SkalmanRemoteKit;
+		};
+		A20000010000000000000010 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SwiftTerm;
+		};
+		A20000010000000000000011 /* SkalmanRemoteKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SkalmanRemoteKit;
+		};
 		D1FF00010000000000000001 /* NativeDiffCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NativeDiffCore;
@@ -843,6 +1757,18 @@
 		D1FF00010000000000000002 /* NativeDiffAppKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NativeDiffAppKit;
+		};
+		D1FF00010000000000000003 /* NativeDiffCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NativeDiffCore;
+		};
+		D1FF00010000000000000004 /* NativeDiffUIKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NativeDiffUIKit;
+		};
+		7A0000010000000000000091 /* SkalmanWasmRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SkalmanWasmRuntime;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

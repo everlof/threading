@@ -840,7 +840,8 @@ final class ThemedControlTests: XCTestCase {
         let tab = ThemedTabItemView(
             title: "Browser",
             symbolName: "globe",
-            placement: .horizontal
+            placement: .horizontal,
+            inkSource: .chrome
         )
         var selections = 0
         tab.onSelect = { selections += 1 }
@@ -861,7 +862,8 @@ final class ThemedControlTests: XCTestCase {
         let tab = ThemedTabItemView(
             title: "Accounts",
             symbolName: "person.2",
-            placement: .sidebar
+            placement: .sidebar,
+            inkSource: .chrome
         )
         tab.frame = NSRect(x: 28, y: 92, width: 240, height: Design.Size.sidebarTabHeight)
         root.addSubview(tab)
@@ -872,7 +874,7 @@ final class ThemedControlTests: XCTestCase {
     }
 
     func testToolbarButtonIsKeyboardReachableAndReportsSelectedState() throws {
-        let button = ToolbarButtonView(
+        let button = ThemedIconButton(
             symbolName: "sidebar.trailing",
             accessibility: "Display panel"
         )
@@ -890,31 +892,98 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(button.accessibilityValue() as? Bool, true)
     }
 
-    func testMainToolbarUsesAppOwnedBackdropButtonsAndTracksPaneState() throws {
+    /// The window is a row of panes, and nothing else here would have noticed if it stopped
+    /// being one.
+    ///
+    /// `NSSplitViewController` configures the split view it builds for itself; handing it one of
+    /// ours inherits `NSSplitView`'s defaults instead, and `isVertical` defaults to *false* —
+    /// which laid the sidebar out as a band across the top of the window with the terminal under
+    /// it. Every other test passed, because a stacked layout is a perfectly valid layout.
+    func testTheWindowLaysItsPanesOutSideBySide() throws {
+        let controller = MainWindowController()
+        let splitView = controller.splitViewController.splitView
+
+        XCTAssertTrue(
+            splitView.isVertical,
+            "the window's panes stacked instead of sitting side by side"
+        )
+        XCTAssertEqual(
+            splitView.dividerStyle,
+            .thin,
+            "the divider between panes went back to the thick style"
+        )
+
+        // Side by side means the split view puts its second pane to the *right* of its first,
+        // not under it. Asked of the arranged subviews, which are what the split view actually
+        // positions, and after a layout — an unlaid window leaves every pane at the origin,
+        // where the check would pass or fail on nothing.
+        controller.window?.setContentSize(NSSize(width: 1200, height: 700))
+        splitView.layoutSubtreeIfNeeded()
+
+        let panes = splitView.arrangedSubviews
+        XCTAssertGreaterThanOrEqual(panes.count, 2, "the window lost a pane")
+        XCTAssertLessThanOrEqual(
+            panes[0].frame.maxX,
+            panes[1].frame.minX + splitView.dividerThickness,
+            "the sidebar is no longer beside the session pane"
+        )
+        XCTAssertEqual(
+            panes[0].frame.minY,
+            panes[1].frame.minY,
+            "the panes are at different heights, so they are stacked rather than side by side"
+        )
+    }
+
+    /// The toolbar holds the one control that is the *window's*.
+    ///
+    /// A toolbar lays its items out against the window, so anything in it describing a pane
+    /// drifts away from that pane the moment a divider moves — which is exactly what happened
+    /// when `NSTrackingSeparatorToolbarItem` stopped tracking a non-sidebar split item. The
+    /// sidebar toggle stays because it acts on the split rather than on either side of it.
+    func testWindowToolbarHoldsOnlyTheSidebarToggle() throws {
         let controller = MainWindowController()
         let items = try XCTUnwrap(controller.window?.toolbar?.items)
-        let orderedIdentifiers = items.map(\.itemIdentifier)
-        let identifiers: Set<NSToolbarItem.Identifier> = [
-            .skalmanToggleSidebar,
-            .newSessionPage,
-            .sessionContext,
-            .toggleShellDrawer,
-            .toggleDisplayPane
-        ]
 
-        for item in items where identifiers.contains(item.itemIdentifier) {
-            XCTAssertTrue(
-                item.view is ToolbarButtonView,
-                "\(item.itemIdentifier.rawValue) still uses system toolbar chrome"
-            )
-        }
-
-        let activePageIndex = try XCTUnwrap(orderedIdentifiers.firstIndex(of: .sessionTitle))
-        let newSessionIndex = try XCTUnwrap(orderedIdentifiers.firstIndex(of: .newSessionPage))
         XCTAssertEqual(
-            newSessionIndex,
-            activePageIndex + 1,
+            items.map(\.itemIdentifier),
+            [.skalmanToggleSidebar],
+            "a toolbar item describing a pane cannot stay aligned with it — move it to the header"
+        )
+        XCTAssertTrue(
+            items[0].view is ThemedIconButton,
+            "the sidebar toggle still uses system toolbar chrome"
+        )
+    }
+
+    func testPaneHeaderCarriesThePageItsActionsAndTracksPaneState() throws {
+        let controller = MainWindowController()
+        let root = try XCTUnwrap(controller.window?.contentView)
+        controller.window?.setContentSize(NSSize(width: 1200, height: 700))
+        root.layoutSubtreeIfNeeded()
+
+        let all = descendants(in: root)
+        let tab = try XCTUnwrap(
+            all.compactMap { $0 as? ThemedTabItemView }.first,
+            "the page tab is not in the window's content — it is still a toolbar item"
+        )
+        let header = try XCTUnwrap(tab.superview as? NSStackView)
+
+        // Reading across: which page, then a way to open another. Adjacency is the claim; the
+        // gap between them is the stack's.
+        let arranged = header.arrangedSubviews
+        let tabIndex = try XCTUnwrap(arranged.firstIndex(of: tab))
+        XCTAssertTrue(
+            arranged[tabIndex + 1] is ThemedIconButton,
             "New Session must remain directly after the active page tab"
+        )
+
+        // The session's three actions travel as one group, so the row cannot space them as
+        // three unrelated controls.
+        let group = try XCTUnwrap(all.compactMap { $0 as? ToolbarButtonGroupView }.first)
+        XCTAssertEqual(
+            descendants(in: group).compactMap { $0 as? ThemedIconButton }.count,
+            3,
+            "the session actions group lost one of its buttons"
         )
 
         XCTAssertEqual(controller.displayPaneToolbarButton?.isSelected, false)
@@ -924,26 +993,198 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(controller.displayPaneToolbarButton?.isSelected, false)
     }
 
-    func testActivePageTabOwnsItsCloseAffordance() throws {
-        let tab = SessionTitleItemView()
-        var closes = 0
-        tab.onClose = { closes += 1 }
-        tab.configure(
-            title: "Themes",
-            symbolName: "paintpalette",
-            showsClose: true
+    /// A full-size-content window reports a zero-height safe area for one layout pass while its
+    /// toolbar is attaching. If both this equality and the header's 40pt floor are required,
+    /// AppKit logs an unsatisfiable-constraints failure on every launch before settling on the
+    /// exact same geometry. The equality must yield only during that transient pass.
+    func testPaneHeaderSafeAreaConstraintYieldsDuringWindowAttachment() throws {
+        let controller = MainWindowController()
+        let root = try XCTUnwrap(controller.window?.contentView)
+        let tab = try XCTUnwrap(
+            descendants(in: root).compactMap { $0 as? ThemedTabItemView }.first
+        )
+        let headerHost = try XCTUnwrap(tab.superview?.superview)
+        let pane = try XCTUnwrap(headerHost.superview)
+
+        let safeAreaConstraint = try XCTUnwrap(
+            pane.constraints.first { constraint in
+                constraint.firstItem as AnyObject === headerHost
+                    && constraint.firstAttribute == .bottom
+                    && constraint.secondItem as AnyObject === pane.safeAreaLayoutGuide
+                    && constraint.secondAttribute == .top
+            },
+            "the pane header is no longer tied to the toolbar safe area"
         )
 
+        XCTAssertEqual(safeAreaConstraint.priority.rawValue, 999)
+    }
+
+    /// The header is the pane's, which is the whole reason it moved out of the toolbar: it is
+    /// laid out against the pane's leading edge, so a divider drag carries it along instead of
+    /// sliding the sidebar out from under it.
+    func testPaneHeaderStaysInsideTheContentPaneWhenTheSidebarWidens() throws {
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1200, height: 700))
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let split = controller.splitView
+        let tab = try XCTUnwrap(
+            descendants(in: try XCTUnwrap(window.contentView))
+                .compactMap { $0 as? ThemedTabItemView }.first
+        )
+
+        func tabLeadsThePane() -> Bool {
+            let panes = split.arrangedSubviews
+            guard panes.count >= 2 else { return false }
+            let contentPane = panes[1]
+            let tabInWindow = tab.convert(tab.bounds, to: nil)
+            let paneInWindow = contentPane.convert(contentPane.bounds, to: nil)
+            return tabInWindow.minX >= paneInWindow.minX
+                && tabInWindow.maxX <= paneInWindow.maxX
+        }
+
+        XCTAssertTrue(tabLeadsThePane(), "the header starts outside its own pane")
+
+        split.setPosition(360, ofDividerAt: 0)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            tabLeadsThePane(),
+            "the header did not follow the divider — this is the bug the move exists to remove"
+        )
+    }
+
+    /// A `+` beside a closable "General ✕" reads as "add another one of these", which is the one
+    /// thing it does not do — it creates a *session*, and a preferences page is no context for
+    /// one. The design system's own rule: a control offering nothing here hides.
+    @MainActor
+    func testNewSessionHidesWhileSettingsIsThePage() throws {
+        let controller = MainWindowController()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.newSessionButton?.isHidden, false)
+
+        controller.toggleSettings()
+        XCTAssertEqual(
+            controller.newSessionButton?.isHidden,
+            true,
+            "New Session is still offered on a settings page"
+        )
+
+        controller.toggleSettings()
+        XCTAssertEqual(controller.newSessionButton?.isHidden, false)
+    }
+
+    /// ⌘, is the platform's *open* chord because preferences are normally their own window, with
+    /// ⌘W to close. Here Settings is a page in this window, so the chord that put it there is
+    /// what takes it away again — there is no second window for ⌘W to mean.
+    @MainActor
+    func testTheSettingsCommandClosesWhatItOpened() throws {
+        let controller = MainWindowController()
+        let container = try XCTUnwrap(
+            controller.splitViewController.splitViewItems[1].viewController
+                as? TerminalContainerViewController
+        )
+
+        XCTAssertFalse(container.isShowingSettings)
+
+        controller.toggleSettingsFromCommand()
+        XCTAssertTrue(container.isShowingSettings, "⌘, did not open Settings")
+
+        controller.toggleSettingsFromCommand()
+        XCTAssertFalse(container.isShowingSettings, "⌘, opened Settings but would not close it")
+    }
+
+    /// The accent means "this wants you" — it is the sidebar's attention dot. Spending it on the
+    /// fact that a page happens to be open says that about nothing, which is the rule the design
+    /// system already states for a tab's icon. The cog raises its ink instead.
+    @MainActor
+    func testSettingsCogMarksItselfWithoutSpendingTheAccent() throws {
+        let sidebar = ProjectSidebarViewController()
+        sidebar.view.frame = NSRect(x: 0, y: 0, width: 240, height: 600)
+        sidebar.view.layoutSubtreeIfNeeded()
+
+        let cog = try XCTUnwrap(
+            descendants(in: sidebar.view)
+                .compactMap { $0 as? ThemedButton }
+                .first { $0.title.isEmpty && $0.image != nil },
+            "the sidebar footer has no icon-only button to be the cogwheel"
+        )
+
+        sidebar.setSettingsMode(true)
+        XCTAssertNotEqual(
+            cog.contentTintColor,
+            Design.Surface.accent,
+            "the cogwheel is spending the accent to say a page is open"
+        )
+        XCTAssertEqual(cog.contentTintColor, Design.Text.label)
+
+        sidebar.setSettingsMode(false)
+        XCTAssertEqual(cog.contentTintColor, Design.Text.secondary)
+    }
+
+    /// The one thing a pane-owned header has to know about the window.
+    ///
+    /// The header shares its strip with the traffic lights and the sidebar toggle, which is fine
+    /// while the sidebar is there — the pane begins past them. Collapsed, the pane begins at the
+    /// window's leading edge and the tab lands on top of the lights, which is precisely why this
+    /// project abandoned its first hand-rolled header.
+    @MainActor
+    func testHeaderStepsAsideForTheWindowControlsWhenTheSidebarCollapses() throws {
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1200, height: 700))
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let container = try XCTUnwrap(
+            controller.splitViewController.splitViewItems[1].viewController
+                as? TerminalContainerViewController
+        )
+
+        XCTAssertEqual(
+            container.headerLeadingInset,
+            PaneHeaderDefaults.inset,
+            "with the sidebar out, the pane already starts past the window's controls"
+        )
+
+        controller.toggleSidebar()
+        // The collapse is animated, and the inset is settled against the state it lands in.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: Design.Motion.standard * 2))
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(
+            container.headerLeadingInset,
+            PaneHeaderDefaults.assumedWindowControlsWidth / 2,
+            "the header stayed under the traffic lights with the sidebar collapsed"
+        )
+    }
+
+    func testActivePageTabOwnsItsCloseAffordance() throws {
+        let tab = ThemedTabItemView(
+            title: "Themes",
+            symbolName: "paintpalette",
+            placement: .horizontal,
+            showsClose: true,
+            inkSource: .backdrop
+        )
+        var closes = 0
+        tab.onClose = { closes += 1 }
+
         let close = try XCTUnwrap(
-            descendants(in: tab).compactMap { $0 as? ToolbarButtonView }.first
+            descendants(in: tab).compactMap { $0 as? ThemedIconButton }.first
         )
         XCTAssertFalse(tab.isHidden)
         XCTAssertFalse(close.isHidden)
-        XCTAssertEqual(close.accessibilityTitle(), "Close active page")
+        XCTAssertEqual(close.accessibilityTitle(), "Close Themes")
         XCTAssertTrue(close.accessibilityPerformPress())
         XCTAssertEqual(closes, 1)
 
-        tab.configure(title: "Project", symbolName: "folder", showsClose: false)
+        // The × inks from the tab it sits in, so a page tab over the terminal backdrop cannot
+        // end up with a close button coloured for the chrome.
+        XCTAssertEqual(close.inkSource, .backdrop)
+
+        tab.update(title: "Project", symbolName: "folder", showsClose: false)
         XCTAssertTrue(close.isHidden, "a non-closable destination kept the × visible")
     }
 
@@ -1362,9 +1603,23 @@ final class ThemedControlTests: XCTestCase {
 
         let scroll = ThemedScrollView()
         scroll.hasVerticalScroller = true
+        let scrollEdgeEffect = NSVisualEffectView()
+        scroll.addSubview(scrollEdgeEffect)
+        let privateChromeWrapper = NSView()
+        let nestedScrollEdgeEffect = NSVisualEffectView()
+        privateChromeWrapper.addSubview(nestedScrollEdgeEffect)
+        scroll.addSubview(privateChromeWrapper)
         root.addSubview(scroll)
 
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: root), [])
+
+        let documentEffect = NSVisualEffectView()
+        scroll.documentView = NSView()
+        scroll.documentView?.addSubview(documentEffect)
+        XCTAssertEqual(
+            ThemeBoundaryAudit.violations(in: root).map(\.className),
+            ["NSVisualEffectView"]
+        )
     }
 
     func testPromptUsesOnlyThemedRuntimeBoundaries() {
@@ -1445,6 +1700,7 @@ final class ThemedControlTests: XCTestCase {
                 "ChipView",
                 "FileActivityMapView",
                 "MorphingTitleLabel",
+                "PaneFooterView",
                 "PromptView",
                 "SeparatorView",
                 "ShortcutRecorderView",
@@ -1458,6 +1714,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedProgressBar",
                 "ThemedScrollView",
                 "ThemedSpinner",
+                "ThemedSplitView",
                 "ThemedTableHeaderView",
                 "ThemedTableView",
                 "ThemedTabItemView",
@@ -1466,8 +1723,10 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedTextView",
                 "ThemedToggle",
                 "ThemedSurface",
+                "ThemedSurfaceView",
                 "ThemeRedraw",
-                "ToolbarButtonView",
+                "ThemedIconButton",
+                "ToolbarButtonGroupView",
                 "WorkingOrbView",
                 "WindowBackdrop"
             ]

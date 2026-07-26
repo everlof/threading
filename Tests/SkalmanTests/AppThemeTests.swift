@@ -31,6 +31,143 @@ final class AppThemeTests: XCTestCase {
         }
     }
 
+    func testSystemThemeIsExplicitlyAdaptiveAcrossLightAndDarkAppearances() throws {
+        XCTAssertEqual(AppTheme.system.mode, .system)
+        XCTAssertNil(AppTheme.Mode.system.appearance)
+        XCTAssertTrue(AppTheme.system.variants.isEmpty)
+
+        let light = try XCTUnwrap(NSAppearance(named: .aqua))
+        let dark = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        var lightGround = ""
+        var darkGround = ""
+        var lightLabel = ""
+        var darkLabel = ""
+
+        light.performAsCurrentDrawingAppearance {
+            lightGround = (AppTheme.system.resolved(.ground).usingColorSpace(.sRGB) ?? .black).hexString
+            lightLabel = (AppTheme.system.resolved(.label).usingColorSpace(.sRGB) ?? .black).hexString
+        }
+        dark.performAsCurrentDrawingAppearance {
+            darkGround = (AppTheme.system.resolved(.ground).usingColorSpace(.sRGB) ?? .black).hexString
+            darkLabel = (AppTheme.system.resolved(.label).usingColorSpace(.sRGB) ?? .black).hexString
+        }
+
+        XCTAssertNotEqual(lightGround, darkGround)
+        XCTAssertNotEqual(lightLabel, darkLabel)
+        XCTAssertNotNil(AppTheme.Mode.light.appearance)
+        XCTAssertNotNil(AppTheme.Mode.dark.appearance)
+    }
+
+    func testAuthoredAdaptiveThemeResolvesItsCompleteMatchingVariant() throws {
+        let theme = try adaptiveFixture()
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+
+        XCTAssertEqual(
+            theme.resolved(.ground, appearance: lightAppearance).hexString,
+            AppThemeStyles.swissMinimalist.resolved(.ground).hexString
+        )
+        XCTAssertEqual(
+            theme.resolved(.ground, appearance: darkAppearance).hexString,
+            AppThemeStyles.cyberpunk.resolved(.ground).hexString
+        )
+        XCTAssertEqual(
+            theme.variant(for: lightAppearance)?.material,
+            AppThemeStyles.swissMinimalist.material
+        )
+        XCTAssertEqual(
+            theme.variant(for: darkAppearance)?.material,
+            AppThemeStyles.cyberpunk.material
+        )
+        XCTAssertEqual(
+            theme.variant(for: lightAppearance)?.terminalPalette.id,
+            AppThemeStyles.swissMinimalist.terminalPalette.id
+        )
+        XCTAssertEqual(
+            theme.variant(for: darkAppearance)?.terminalPalette.id,
+            AppThemeStyles.cyberpunk.terminalPalette.id
+        )
+    }
+
+    func testCompatibilityProjectionsFollowTheCurrentDrawingAppearance() throws {
+        let theme = try adaptiveFixture()
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        var lightRadius: CGFloat = -1
+        var darkRadius: CGFloat = -1
+        var lightTerminal = ""
+        var darkTerminal = ""
+
+        lightAppearance.performAsCurrentDrawingAppearance {
+            lightRadius = theme.material.panelRadius
+            lightTerminal = theme.terminalPalette.background.hexString
+        }
+        darkAppearance.performAsCurrentDrawingAppearance {
+            darkRadius = theme.material.panelRadius
+            darkTerminal = theme.terminalPalette.background.hexString
+        }
+
+        XCTAssertEqual(lightRadius, AppThemeStyles.swissMinimalist.material.panelRadius)
+        XCTAssertEqual(darkRadius, AppThemeStyles.cyberpunk.material.panelRadius)
+        XCTAssertEqual(
+            lightTerminal,
+            AppThemeStyles.swissMinimalist.terminalPalette.background.hexString
+        )
+        XCTAssertEqual(
+            darkTerminal,
+            AppThemeStyles.cyberpunk.terminalPalette.background.hexString
+        )
+    }
+
+    func testSecondVariantIsOptionalUntilThemeBecomesAdaptive() throws {
+        XCTAssertNoThrow(try AppThemeEditing.validate(AppThemeStyles.cyberpunk))
+
+        let dark = try XCTUnwrap(AppThemeStyles.cyberpunk.variant(.dark))
+        let invalid = AppTheme(
+            id: AppThemeID("missing-light"),
+            name: "Missing Light",
+            mode: .system,
+            summary: nil,
+            variants: [.dark: dark]
+        )
+        XCTAssertThrowsError(try AppThemeEditing.validate(invalid)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("both light and dark"))
+        }
+    }
+
+    func testDuplicatingAnAdaptiveThemePreservesBothVariants() throws {
+        let source = try adaptiveFixture()
+        let copy = try AppThemeEditing.duplicate(
+            source,
+            id: AppThemeID("adaptive-copy"),
+            name: "Adaptive Copy"
+        )
+
+        XCTAssertEqual(copy.mode, .system)
+        XCTAssertEqual(Set(copy.availableVariants), [.light, .dark])
+        XCTAssertEqual(copy.variant(.light)?.roles, source.variant(.light)?.roles)
+        XCTAssertEqual(copy.variant(.dark)?.roles, source.variant(.dark)?.roles)
+        XCTAssertEqual(copy.variant(.light)?.terminalPalette.name, "Adaptive Copy")
+        XCTAssertEqual(copy.variant(.dark)?.terminalPalette.name, "Adaptive Copy")
+    }
+
+    func testDuplicatingSystemMaterialisesEditableLightAndDarkVariants() throws {
+        let copy = try AppThemeEditing.duplicate(
+            .system,
+            id: AppThemeID("system-copy"),
+            name: "System Copy"
+        )
+
+        XCTAssertEqual(copy.mode, .system)
+        XCTAssertEqual(Set(copy.availableVariants), [.light, .dark])
+        for kind in AppTheme.VariantKind.allCases {
+            let variant = try XCTUnwrap(copy.variant(kind))
+            for role in AppThemeRole.authored {
+                XCTAssertNotNil(variant.roles[role], "\(kind.rawValue).\(role.wireName)")
+            }
+        }
+    }
+
     /// The tokens as their call sites see them, pinned against the literal expressions they
     /// replaced. If one of these changes, the app's default appearance changed.
     func testDesignTokensAreUnchangedUnderTheSystemTheme() {
@@ -104,19 +241,37 @@ final class AppThemeTests: XCTestCase {
     /// clipping host budgets `Design.Size.glowGutter` around glowing panels. The gutter is a
     /// stated constant rather than a derivation, because layout must not move when a theme
     /// does; this is what makes shipping a wider glow a loud decision instead of a silent
-    /// clip. The blur's visible extent is about twice its radius.
+    /// clip. The blur's visible extent is about twice its radius, after travelling its offset.
     func testGlowGutterCoversEveryStockGlow() {
         for theme in AppThemeLibrary.stock {
             guard let glow = theme.material.glow else { continue }
             XCTAssertGreaterThanOrEqual(
-                Design.Size.glowGutter, glow.radius * 2,
-                "\(theme.name)'s halo spills past the gutter clipping hosts hold clear for it"
+                Design.Size.glowGutter,
+                abs(glow.offsetX) + glow.radius * 2,
+                "\(theme.name)'s horizontal shadow spills past its gutter"
+            )
+            XCTAssertGreaterThanOrEqual(
+                Design.Size.glowGutter,
+                abs(glow.offsetY) + glow.radius * 2,
+                "\(theme.name)'s vertical shadow spills past its gutter"
             )
         }
 
         // The settings column's top and bottom padding double as the first and last card's
         // gutter (`SettingsUI.page`), so the page padding must cover the spill too.
         XCTAssertGreaterThanOrEqual(Design.Spacing.large, Design.Size.glowGutter)
+    }
+
+    func testDirectedPanelShadowsFitTheMaterialContract() {
+        let hard = AppThemeStyles.neoBrutalism.material.glow
+        XCTAssertEqual(hard?.radius, 0)
+        XCTAssertNotEqual(hard?.offsetX ?? 0, 0)
+        XCTAssertNotEqual(hard?.offsetY ?? 0, 0)
+
+        let halo = AppThemeStyles.vaporwave.material.glow
+        XCTAssertGreaterThan(halo?.radius ?? 0, 0)
+        XCTAssertEqual(halo?.offsetX, 0)
+        XCTAssertEqual(halo?.offsetY, 0)
     }
 
     /// The accent has to be *stated* for the surfaces that carry a style's identity — the
@@ -148,6 +303,57 @@ final class AppThemeTests: XCTestCase {
 
         XCTAssertEqual(underCyberpunk, AppThemeStyles.cyberpunk.resolved(.accent).resolvedHex)
         XCTAssertNotEqual(underSystem, underCyberpunk, "the same colour object did not re-resolve")
+    }
+
+    // MARK: - Surfaces That Follow the Appearance
+
+    /// The other half of the frozen-`CGColor` problem, and the one nothing swept: a **system
+    /// light/dark switch**. A theme change runs `AppThemeRefresh`; an appearance change ran
+    /// nothing, so dynamic text turned dark while the surface under it stayed dark too.
+    ///
+    /// It stayed invisible while the largest surface in the window was a system material AppKit
+    /// repainted itself. The sidebar paints its own ground now, so the gap is real, and
+    /// `ThemedSurfaceView` is the view that closes it.
+    @MainActor
+    func testAThemedSurfaceViewReResolvesWhenTheAppearanceChanges() throws {
+        AppThemePalette.set(.system)
+
+        let surface = ThemedSurfaceView()
+        surface.frame = NSRect(x: 0, y: 0, width: 10, height: 10)
+        surface.appearance = NSAppearance(named: .darkAqua)
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
+            surface.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+        }
+
+        let dark = try XCTUnwrap(surface.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) })
+
+        // The switch AppKit reports through `viewDidChangeEffectiveAppearance`.
+        surface.appearance = NSAppearance(named: .aqua)
+
+        let light = try XCTUnwrap(surface.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) })
+        XCTAssertGreaterThan(
+            (light.usingColorSpace(.sRGB)?.brightnessComponent ?? 0),
+            (dark.usingColorSpace(.sRGB)?.brightnessComponent ?? 1),
+            "the ground kept its dark fill after the appearance turned light"
+        )
+    }
+
+    /// A plain view is what the sidebar used before, and it is the failure this exists to
+    /// prevent: the layer keeps whatever it was handed.
+    @MainActor
+    func testAPlainViewKeepsItsFillAcrossAnAppearanceChange() throws {
+        AppThemePalette.set(.system)
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        view.appearance = NSAppearance(named: .darkAqua)
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
+            view.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+        }
+        let before = try XCTUnwrap(view.layer?.backgroundColor)
+
+        view.appearance = NSAppearance(named: .aqua)
+
+        XCTAssertEqual(view.layer?.backgroundColor, before)
     }
 
     // MARK: - Repainting What Is Already On Screen
@@ -274,7 +480,11 @@ final class AppThemeTests: XCTestCase {
 
         for role in [AppThemeRole.secondaryLabel, .tertiaryLabel, .quaternaryLabel] {
             let derived = theme.resolved(role)
-            XCTAssertEqual(derived.resolvedHex, label.resolvedHex, "\(role.rawValue) changed hue")
+            XCTAssertEqual(
+                derived.withAlphaComponent(1).resolvedHex,
+                label.withAlphaComponent(1).resolvedHex,
+                "\(role.rawValue) changed hue"
+            )
             XCTAssertLessThan(derived.alphaComponent, label.alphaComponent)
         }
     }
@@ -310,6 +520,21 @@ final class AppThemeTests: XCTestCase {
         let ids = AppThemeLibrary.stock.map(\.id.rawValue)
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
+        XCTAssertEqual(ids.count, 11, "the curated stock catalogue unexpectedly changed size")
+    }
+
+    func testEveryStockStylePassesTheSameValidationAsAgentCreatedThemes() throws {
+        for theme in AppThemeStyles.all {
+            XCTAssertNoThrow(
+                try AppThemeEditing.validate(theme),
+                "\(theme.name) fails the public theme contract"
+            )
+        }
+    }
+
+    func testEveryStockStyleHasAUniquePairedTerminalPalette() {
+        let ids = AppThemeStyles.all.map(\.terminalPalette.id)
+        XCTAssertEqual(Set(ids).count, ids.count)
     }
 
     func testThemesRoundTripThroughTheirDocument() throws {
@@ -319,10 +544,139 @@ final class AppThemeTests: XCTestCase {
 
             XCTAssertEqual(decoded.id, theme.id)
             XCTAssertEqual(decoded.mode, theme.mode)
-            for (role, color) in theme.roles {
-                XCTAssertEqual(decoded.roles[role]?.hexString, color.hexString, role.rawValue)
+            XCTAssertEqual(Set(decoded.variants.keys), Set(theme.variants.keys))
+            for kind in theme.availableVariants {
+                XCTAssertEqual(decoded.variant(kind)?.material, theme.variant(kind)?.material)
+                for (role, color) in theme.variant(kind)?.roles ?? [:] {
+                    XCTAssertEqual(
+                        decoded.variant(kind)?.roles[role]?.hexString,
+                        color.hexString,
+                        "\(kind.rawValue).\(role.rawValue)"
+                    )
+                }
             }
         }
+    }
+
+    func testAdaptiveThemeRoundTripsBothVariants() throws {
+        let theme = try adaptiveFixture()
+        let encoded = try JSONEncoder().encode(theme)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        XCTAssertNotNil(object["variants"])
+        XCTAssertNil(object["roles"], "new documents must not write the legacy single-variant shape")
+
+        let decoded = try JSONDecoder().decode(AppTheme.self, from: encoded)
+        XCTAssertEqual(decoded.mode, .system)
+        XCTAssertEqual(Set(decoded.variants.keys), Set(theme.variants.keys))
+        for kind in theme.availableVariants {
+            let original = try XCTUnwrap(theme.variant(kind))
+            let restored = try XCTUnwrap(decoded.variant(kind))
+            XCTAssertEqual(restored.material, original.material)
+            for role in AppThemeRole.allCases {
+                XCTAssertEqual(
+                    restored.roles[role]?.hexString,
+                    original.roles[role]?.hexString,
+                    "\(kind.rawValue).\(role.wireName)"
+                )
+            }
+            for color in ThemeColorKey.allCases {
+                XCTAssertEqual(
+                    restored.terminalPalette[color].hexString,
+                    original.terminalPalette[color].hexString,
+                    "\(kind.rawValue).terminal.\(color.wireName)"
+                )
+            }
+        }
+    }
+
+    func testThemeDocumentsPreserveTranslucentRoles() throws {
+        let color = try XCTUnwrap(NSColor(hex: "#12345680"))
+        let theme = AppTheme(
+            id: AppThemeID("alpha"),
+            name: "Alpha",
+            mode: .dark,
+            summary: nil,
+            roles: [.accentMuted: color],
+            terminalPalette: .basic,
+            material: .system
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppTheme.self,
+            from: JSONEncoder().encode(theme)
+        )
+        let restored = try XCTUnwrap(decoded.roles[.accentMuted])
+        XCTAssertEqual(restored.hexString, "#12345680")
+        XCTAssertEqual(restored.alphaComponent, color.alphaComponent, accuracy: 1 / 255)
+    }
+
+    func testCustomThemeStorePersistsCompleteDocuments() throws {
+        let suite = "AppThemeStoreTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AppThemeStore(defaults: defaults, key: "themes")
+
+        store.insert(AppThemeStyles.cyberpunk)
+
+        let restored = try XCTUnwrap(store.themes.first)
+        XCTAssertEqual(restored.id, AppThemeStyles.cyberpunk.id)
+        XCTAssertEqual(
+            restored.roles[.accentMuted]?.hexString,
+            AppThemeStyles.cyberpunk.roles[.accentMuted]?.hexString
+        )
+        XCTAssertEqual(restored.material, AppThemeStyles.cyberpunk.material)
+        XCTAssertEqual(restored.terminalPalette, AppThemeStyles.cyberpunk.terminalPalette)
+    }
+
+    func testCustomThemeMaterialisesSystemRolesBeforeItIsStored() throws {
+        let theme = try AppThemeEditing.make(
+            id: AppThemeID("fixed-system-copy"),
+            name: "Fixed System Copy",
+            base: .system,
+            mode: .dark,
+            roles: [
+                .ground: NSColor(hex: "#080808")!,
+                .surface: NSColor(hex: "#101010")!,
+                .panel: NSColor(hex: "#181818")!,
+                .label: NSColor(hex: "#F4F4F4")!,
+                .accent: NSColor(hex: "#66CCFF")!
+            ]
+        )
+
+        for role in AppThemeRole.authored {
+            XCTAssertNotNil(theme.roles[role], "\(role.wireName) stayed dynamic")
+        }
+    }
+
+    func testCustomThemeValidationRejectsUnreadableChrome() {
+        XCTAssertThrowsError(
+            try AppThemeEditing.make(
+                id: AppThemeID("unreadable"),
+                name: "Unreadable",
+                base: AppThemeStyles.cyberpunk,
+                roles: [
+                    .ground: NSColor(hex: "#111111")!,
+                    .surface: NSColor(hex: "#111111")!,
+                    .panel: NSColor(hex: "#111111")!,
+                    .label: NSColor(hex: "#111111")!
+                ]
+            )
+        )
+    }
+
+    func testCustomThemeValidationMeasuresTranslucentTextAsDrawn() {
+        XCTAssertThrowsError(
+            try AppThemeEditing.make(
+                id: AppThemeID("faint"),
+                name: "Faint",
+                base: AppThemeStyles.cyberpunk,
+                roles: [
+                    .label: NSColor(hex: "#FFFFFF20")!
+                ]
+            )
+        )
     }
 
     /// A role added in a later release must not stop an older document loading.
@@ -335,6 +689,30 @@ final class AppThemeTests: XCTestCase {
 
         XCTAssertEqual(decoded.roles[.ground]?.hexString, "#101010")
         XCTAssertEqual(decoded.roles.count, 2)
+    }
+
+    func testLegacySingleVariantDocumentMigratesDuringDecode() throws {
+        let json = """
+        {
+          "id":"legacy-dark",
+          "name":"Legacy Dark",
+          "mode":"dark",
+          "roles":{"ground":"#101010","label":"#EEEEEE"},
+          "material":{"panelRadius":4,"controlRadius":3,"borderWidth":1}
+        }
+        """
+        let decoded = try JSONDecoder().decode(AppTheme.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.availableVariants, [.dark])
+        XCTAssertNil(decoded.variant(.light))
+        XCTAssertEqual(decoded.variant(.dark)?.roles[.ground]?.hexString, "#101010")
+        XCTAssertEqual(decoded.variant(.dark)?.material.panelRadius, 4)
+    }
+
+    func testAppThemeRolesAcceptAgentFacingSnakeCase() {
+        XCTAssertEqual(AppThemeRole.named("status_positive"), .statusPositive)
+        XCTAssertEqual(AppThemeRole.named("controlResting"), .controlResting)
+        XCTAssertNil(AppThemeRole.named("wallpaper"))
     }
 
     // MARK: - Typography
@@ -367,6 +745,18 @@ final class AppThemeTests: XCTestCase {
         let one = ("1" as NSString).size(withAttributes: [.font: numeric]).width
         let eight = ("8" as NSString).size(withAttributes: [.font: numeric]).width
         XCTAssertEqual(one, eight, accuracy: 0.001)
+    }
+
+    private func adaptiveFixture() throws -> AppTheme {
+        let light = try XCTUnwrap(AppThemeStyles.swissMinimalist.variant(.light))
+        let dark = try XCTUnwrap(AppThemeStyles.cyberpunk.variant(.dark))
+        return try AppThemeEditing.assemble(
+            id: AppThemeID("adaptive-fixture"),
+            name: "Adaptive Fixture",
+            mode: .system,
+            summary: nil,
+            variants: [.light: light, .dark: dark]
+        )
     }
 }
 

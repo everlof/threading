@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 // MARK: - Settings UI Kit
 
@@ -10,8 +11,15 @@ enum SettingsUI {
 
     /// A whole page: caption+card sections stacked in a flipped scroll view, top-aligned, so a
     /// short page sits at the top and a long one scrolls.
-    static func page(_ sections: [NSView]) -> NSView {
-        let stack = NSStackView(views: sections)
+    @MainActor
+    static func page(
+        _ sections: [NSView],
+        hostPage: ExtensionHostSettingsPage? = nil
+    ) -> NSView {
+        let allSections = sections + (hostPage.map {
+            ExtensionSettingsRenderer.hostSections(for: $0)
+        } ?? [])
+        let stack = NSStackView(views: allSections)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.large
@@ -45,7 +53,7 @@ enum SettingsUI {
         // Every section fills the column, so cards and their rows share one width — otherwise a
         // card with no stretchy row (a lone field, a full-width preview) hugs its content and
         // sits narrower than the rest.
-        for section in sections {
+        for section in allSections {
             section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
 

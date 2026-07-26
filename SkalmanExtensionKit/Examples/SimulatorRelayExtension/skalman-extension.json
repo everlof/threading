@@ -1,0 +1,39 @@
+{
+  "formatVersion": 1,
+  "identifier": "se.mjukis.simulator-relay",
+  "name": "Simulator Relay",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/simulator-relay.wasm",
+  "capabilities": [
+    "panels"
+  ],
+  "companions": [
+    {
+      "id": "simulator",
+      "platform": "macOS",
+      "bundlePath": "Companions/SimulatorRelayCompanion.app",
+      "activation": "onDemand",
+      "capabilities": [
+        "process.spawn",
+        "screen.capture",
+        "input.control",
+        "ui.remote-surfaces"
+      ],
+      "surfaces": [
+        {
+          "id": "simulator-window",
+          "title": "Simulator",
+          "accessibilityLabel": "Live Simulator window",
+          "maximumWidth": 1920,
+          "maximumHeight": 1200,
+          "acceptsPointer": true,
+          "acceptsKeyboard": true
+        }
+      ]
+    }
+  ],
+  "mcpTools": [],
+  "services": [],
+  "serviceDependencies": []
+}

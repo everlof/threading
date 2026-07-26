@@ -56,6 +56,21 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     func permitsSystemChrome(_ view: NSView) -> Bool {
         if view is NSScroller { return true }
 
+        // macOS 26 inserts visual-effect views into overlay-scrolling chrome. Depending on
+        // the scroll view's state, the effect is either direct or nested under private
+        // NSScrollPocket/NSHardPocketView wrappers. Permit that AppKit-owned side of the tree
+        // while refusing effects in contentView/documentView, where application content lives.
+        if view is NSVisualEffectView {
+            var ancestor = view.superview
+            while let current = ancestor, current !== self {
+                if current === contentView || current === documentView {
+                    return false
+                }
+                ancestor = current.superview
+            }
+            return ancestor === self
+        }
+
         // The only raw clip AppKit may add is the direct, transparent header clip described
         // above. This does not grant permission to a raw clip in the document subtree.
         guard let clip = view as? NSClipView else { return false }

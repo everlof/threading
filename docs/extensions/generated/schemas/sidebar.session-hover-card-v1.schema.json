@@ -1,0 +1,153 @@
+{
+  "$id" : "https://skalman.invalid/schema/components/sidebar.session-hover-card-v1.schema.json",
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties" : false,
+  "properties" : {
+    "hook" : {
+      "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+      "x-skalman-node-constraints" : {
+        "allowedButtonRoles" : [
+          "standard",
+          "primary",
+          "destructive"
+        ],
+        "allowedCustomSurfaceKinds" : [
+
+        ],
+        "allowedImageRoles" : [
+          "identity",
+          "icon",
+          "decoration"
+        ],
+        "allowedStackAxes" : [
+          "horizontal",
+          "vertical"
+        ],
+        "allowedStatusRoles" : [
+          "neutral",
+          "positive",
+          "warning",
+          "negative"
+        ],
+        "allowedTextRoles" : [
+          "heading",
+          "body",
+          "detail",
+          "code",
+          "compactBody",
+          "compactDetail"
+        ],
+        "allowsDivider" : true,
+        "allowsFixedSpacer" : true,
+        "allowsFlexibleSpacer" : true,
+        "allowsOverlay" : true,
+        "allowsProceed" : true,
+        "maximumDepth" : 6,
+        "maximumNodes" : 48,
+        "maximumTextLength" : 1000,
+        "requiresProceed" : true
+      }
+    },
+    "id" : {
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "properties" : {
+      "items" : {
+        "properties" : {
+          "property" : {
+            "enum" : [
+
+            ]
+          },
+          "value" : {
+            "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+          }
+        },
+        "required" : [
+          "property",
+          "value"
+        ],
+        "type" : "object"
+      },
+      "type" : "array"
+    },
+    "replacement" : {
+      "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+      "x-skalman-node-constraints" : {
+        "allowedButtonRoles" : [
+          "standard",
+          "primary",
+          "destructive"
+        ],
+        "allowedCustomSurfaceKinds" : [
+
+        ],
+        "allowedImageRoles" : [
+          "identity",
+          "icon",
+          "decoration"
+        ],
+        "allowedStackAxes" : [
+          "horizontal",
+          "vertical"
+        ],
+        "allowedStatusRoles" : [
+          "neutral",
+          "positive",
+          "warning",
+          "negative"
+        ],
+        "allowedTextRoles" : [
+          "heading",
+          "body",
+          "detail",
+          "code",
+          "compactBody",
+          "compactDetail"
+        ],
+        "allowsDivider" : true,
+        "allowsFixedSpacer" : true,
+        "allowsFlexibleSpacer" : true,
+        "allowsOverlay" : true,
+        "allowsProceed" : false,
+        "maximumDepth" : 6,
+        "maximumNodes" : 48,
+        "maximumTextLength" : 1000,
+        "requiresProceed" : false
+      }
+    },
+    "slots" : {
+      "items" : false,
+      "type" : "array"
+    },
+    "target" : {
+      "additionalProperties" : false,
+      "properties" : {
+        "component" : {
+          "const" : "sidebar.session-hover-card"
+        },
+        "contractVersion" : {
+          "const" : 1
+        },
+        "entityID" : {
+          "minLength" : 1,
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "component",
+        "contractVersion"
+      ],
+      "type" : "object"
+    }
+  },
+  "required" : [
+    "id",
+    "target",
+    "properties",
+    "slots"
+  ],
+  "title" : "Skalman sidebar.session-hover-card v1 component patch",
+  "type" : "object"
+}

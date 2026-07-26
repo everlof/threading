@@ -2,8 +2,8 @@ import AppKit
 
 /// Reads and writes which theme a session, a project, or the app as a whole draws with.
 ///
-/// The assignments live on the records they theme — `AgentSession.themeName` and
-/// `Project.themeName` in `projects.json`, the default on the profile in `UserDefaults` — so
+/// The assignments live on the records they theme — `AgentSession.themeID` and
+/// `Project.themeID` in `projects.json`, the default on the profile in `UserDefaults` — so
 /// each is saved, restored and deleted with the thing it applies to, rather than in a side
 /// table that would outlive it and re-theme whatever later reused the identifier.
 ///
@@ -13,6 +13,33 @@ import AppKit
 enum ThemeAssignments {
 
     // MARK: - Resolution
+
+    /// The terminal-theme list's dynamic entry. Its palette is only a preview of what following
+    /// the app means right now; the reserved ID is the durable choice, so changing app themes
+    /// later re-resolves instead of leaving terminals on a snapshot.
+    static var followsAppTheme: TerminalTheme {
+        AppThemeLibrary.current.terminalPalette.identified(
+            .followsAppTheme,
+            named: TerminalThemeNames.followsAppTheme
+        )
+    }
+
+    /// Everything a user or agent may select, including the dynamic app-linked entry that is
+    /// deliberately not stored in `ThemeManager` as an editable palette.
+    static var selectableThemes: [TerminalTheme] {
+        [followsAppTheme] + ThemeManager.shared.allThemes
+    }
+
+    static func selectableTheme(withID id: TerminalThemeID) -> TerminalTheme? {
+        id == .followsAppTheme ? followsAppTheme : ThemeManager.shared.theme(withID: id)
+    }
+
+    /// Compatibility for persisted names and older MCP clients. New assignments use IDs.
+    static func selectableTheme(named name: String) -> TerminalTheme? {
+        name.caseInsensitiveCompare(TerminalThemeNames.followsAppTheme) == .orderedSame
+            ? followsAppTheme
+            : ThemeManager.shared.theme(named: name)
+    }
 
     /// The theme the app falls back to: the one the profile carries.
     ///
@@ -25,30 +52,31 @@ enum ThemeAssignments {
     /// The theme a session's terminal draws with.
     static func theme(for sessionID: SessionID?) -> TerminalTheme {
         guard let sessionID, let assignment = resolution(for: sessionID) else {
-            return palette(named: defaultTheme.name)
+            return palette(withID: defaultTheme.id)
         }
-        return palette(named: assignment.themeName)
+        return palette(withID: assignment.themeID)
     }
 
-    /// A name to a palette, with the app-theme entry answered first.
-    ///
-    /// "Follow App Theme" is a *name* rather than a fourth piece of state, which is what lets it
-    /// ride the scope chain unchanged: a session can follow the chrome while its project names
-    /// Solarized, and the whole of `ThemeResolution` is untouched. The cost is one reserved
-    /// name, which `ThemeManager` refuses to let a user take.
-    static func palette(named name: String) -> TerminalTheme {
-        if name == TerminalThemeNames.followsAppTheme {
+    /// An ID to a palette, with the dynamic app-theme entry answered first.
+    static func palette(withID id: TerminalThemeID) -> TerminalTheme {
+        if id == .followsAppTheme {
             return AppThemeLibrary.current.terminalPalette
         }
-        guard let named = ThemeManager.shared.theme(named: name) else {
+        guard let identified = ThemeManager.shared.theme(withID: id) else {
             // The stored default is an embedded copy, so it answers even when the theme it was
             // copied from is gone — but if *it* is the app-theme entry, that resolves first.
             let fallback = defaultTheme
-            return fallback.name == TerminalThemeNames.followsAppTheme
+            return fallback.id == .followsAppTheme
                 ? AppThemeLibrary.current.terminalPalette
                 : fallback
         }
-        return named
+        return identified
+    }
+
+    /// Compatibility for pre-ID callers and migration tests.
+    static func palette(named name: String) -> TerminalTheme {
+        guard let theme = selectableTheme(named: name) else { return defaultTheme }
+        return palette(withID: theme.id)
     }
 
     /// The whole profile a session's terminal runs with: the user's own profile — font, cursor,
@@ -66,24 +94,29 @@ enum ThemeAssignments {
     static func resolution(for sessionID: SessionID) -> ThemeResolution.Assignment? {
         let store = ProjectStore.shared
         return ThemeResolution.resolve(
-            session: store.session(withID: sessionID)?.themeName,
-            project: store.project(forSessionID: sessionID)?.themeName,
-            global: defaultTheme.name,
-            available: availableNames
+            session: canonicalID(store.session(withID: sessionID)?.themeID),
+            project: canonicalID(store.project(forSessionID: sessionID)?.themeID),
+            global: canonicalID(defaultTheme.id),
+            available: availableIDs
         )
     }
 
     /// What a session would draw with if its own assignment were cleared — the label the
     /// menu's "Inherit" item wears, so inheriting says what it inherits.
     static func inheritedName(forSession sessionID: SessionID) -> String {
+        inheritedTheme(forSession: sessionID).name
+    }
+
+    /// The palette a session would draw with if its own assignment were cleared.
+    static func inheritedTheme(forSession sessionID: SessionID) -> TerminalTheme {
         let store = ProjectStore.shared
         let resolved = ThemeResolution.resolve(
             session: nil,
-            project: store.project(forSessionID: sessionID)?.themeName,
-            global: defaultTheme.name,
-            available: availableNames
+            project: canonicalID(store.project(forSessionID: sessionID)?.themeID),
+            global: canonicalID(defaultTheme.id),
+            available: availableIDs
         )
-        return resolved?.themeName ?? defaultTheme.name
+        return resolved.map { palette(withID: $0.themeID) } ?? defaultTheme
     }
 
     /// The same, one scope out: what a project falls back to.
@@ -93,23 +126,23 @@ enum ThemeAssignments {
 
     // MARK: - Assignments
 
-    static func themeName(forSession sessionID: SessionID) -> String? {
-        ProjectStore.shared.session(withID: sessionID)?.themeName
+    static func themeID(forSession sessionID: SessionID) -> TerminalThemeID? {
+        canonicalID(ProjectStore.shared.session(withID: sessionID)?.themeID)
     }
 
-    static func themeName(forProject projectID: ProjectID) -> String? {
-        ProjectStore.shared.project(withID: projectID)?.themeName
+    static func themeID(forProject projectID: ProjectID) -> TerminalThemeID? {
+        canonicalID(ProjectStore.shared.project(withID: projectID)?.themeID)
     }
 
     /// Assigns a theme to one session, or clears it with nil so it inherits again.
-    static func setTheme(named name: String?, forSession sessionID: SessionID) {
-        ProjectStore.shared.setThemeName(name, forSessionID: sessionID)
+    static func setTheme(id: TerminalThemeID?, forSession sessionID: SessionID) {
+        ProjectStore.shared.setThemeID(id, forSessionID: sessionID)
         notifyChanged()
     }
 
     /// Assigns a theme to every session in a project that has not chosen its own.
-    static func setTheme(named name: String?, forProject projectID: ProjectID) {
-        ProjectStore.shared.setThemeName(name, forProjectID: projectID)
+    static func setTheme(id: TerminalThemeID?, forProject projectID: ProjectID) {
+        ProjectStore.shared.setThemeID(id, forProjectID: projectID)
         notifyChanged()
     }
 
@@ -121,27 +154,19 @@ enum ThemeAssignments {
 
     // MARK: - Theme Lifecycle
 
-    /// Includes the app-theme entry, or `ThemeResolution` would treat a scope that chose it as
-    /// a dangling name and quietly inherit past it.
-    static var availableNames: Set<String> {
-        Set(ThemeManager.shared.allThemes.map(\.name)).union([TerminalThemeNames.followsAppTheme])
+    /// Includes the app-theme entry, or resolution would treat it as dangling and inherit.
+    static var availableIDs: Set<TerminalThemeID> {
+        Set(selectableThemes.map(\.id))
     }
 
-    /// Renames a theme and re-points every assignment naming it.
-    ///
-    /// Resolution treats an unknown name as "inherit", which is the right answer for a theme
-    /// that was *deleted* and the wrong one for a theme that was merely renamed: without this,
-    /// renaming would silently reset every session and project using it. This is the only
-    /// rename path — `ThemeManager.renameTheme` alone leaves the references behind.
+    /// Renames only the label. Session and project assignments keep pointing at the same ID.
     @discardableResult
     static func rename(_ theme: TerminalTheme, to newName: String) -> Bool {
-        let oldName = theme.name
         guard ThemeManager.shared.renameTheme(theme, to: newName) else { return false }
 
-        ProjectStore.shared.renameTheme(from: oldName, to: newName)
-
         // The default is an embedded copy, so it carries the old name until it is re-saved.
-        if defaultTheme.name == oldName, let renamed = ThemeManager.shared.theme(named: newName) {
+        if defaultTheme.id == theme.id,
+           let renamed = ThemeManager.shared.theme(withID: theme.id) {
             ProfileStorage.shared.setTheme(renamed)
         }
 
@@ -151,13 +176,25 @@ enum ThemeAssignments {
 
     /// Stores a *new* theme, refusing to replace one that already exists.
     ///
-    /// `ThemeManager.addTheme` replaces silently by name, which is what an editor wants when
-    /// saving an edit and exactly what a creator must not do: a clobbered custom theme is
-    /// unrecoverable, and the caller most likely to hit this is an agent inventing a name.
+    /// `ThemeManager.addTheme` replaces silently by ID, which is what an editor wants when
+    /// saving an edit and exactly what a creator must not do. Creation checks both the durable
+    /// identity and the human label so an agent cannot accidentally overwrite or ambiguously
+    /// shadow an existing theme.
     static func create(_ theme: TerminalTheme) -> Bool {
-        guard ThemeManager.shared.theme(named: theme.name) == nil else { return false }
+        guard !ThemeManager.shared.isReserved(theme.name),
+              theme.id != .followsAppTheme,
+              ThemeManager.shared.theme(withID: theme.id) == nil,
+              ThemeManager.shared.theme(named: theme.name) == nil else { return false }
         ThemeManager.shared.addTheme(theme)
         return true
+    }
+
+    static func displayName(for id: TerminalThemeID) -> String {
+        selectableTheme(withID: id)?.name ?? id.rawValue
+    }
+
+    private static func canonicalID(_ stored: TerminalThemeID?) -> TerminalThemeID? {
+        stored.flatMap { ThemeManager.shared.canonicalID(for: $0) }
     }
 
     // MARK: - Notification

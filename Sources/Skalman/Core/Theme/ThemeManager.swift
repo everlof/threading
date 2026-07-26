@@ -21,17 +21,11 @@ final class ThemeManager {
     /// Built-in themes that cannot be deleted
     let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean]
 
-    /// Custom user themes (persisted)
+    /// Custom user themes (persisted). Kept in memory so a legacy document that receives an ID
+    /// while decoding cannot receive a different identity on the next lookup.
     private(set) var customThemes: [TerminalTheme] {
-        get {
-            guard let data = defaults.data(forKey: Keys.customThemes),
-                  let themes = try? JSONDecoder().decode([TerminalTheme].self, from: data) else {
-                return []
-            }
-            return themes
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) {
+        didSet {
+            if let data = try? JSONEncoder().encode(customThemes) {
                 defaults.set(data, forKey: Keys.customThemes)
             }
             NotificationCenter.default.post(ThemesDidChange())
@@ -45,27 +39,42 @@ final class ThemeManager {
 
     // MARK: - Initialization
 
-    private init() {}
+    private init() {
+        if let data = defaults.data(forKey: Keys.customThemes),
+           let themes = try? JSONDecoder().decode([TerminalTheme].self, from: data) {
+            let migratedThemes = Self.normaliseLegacyThemes(themes)
+            customThemes = migratedThemes
+            // Re-encode once so themes written before IDs existed finish their migration and
+            // old case-only name collisions become unambiguous without dropping a palette.
+            if let migrated = try? JSONEncoder().encode(migratedThemes), migrated != data {
+                defaults.set(migrated, forKey: Keys.customThemes)
+            }
+        } else {
+            customThemes = []
+        }
+    }
 
     // MARK: - Theme Management
 
     /// Check if a theme is built-in (cannot be deleted)
     func isBuiltIn(_ theme: TerminalTheme) -> Bool {
-        builtInThemes.contains { $0.name == theme.name }
+        builtInThemes.contains { $0.id == theme.id }
     }
 
-    /// The one name a custom theme may not take: the list's app-theme entry is a *name*, and a
-    /// user theme wearing it would shadow the entry at every scope that chose it.
+    /// The dynamic app-linked entry cannot be replaced by a stored palette.
     func isReserved(_ name: String) -> Bool {
-        name == TerminalThemeNames.followsAppTheme
+        name.caseInsensitiveCompare(TerminalThemeNames.followsAppTheme) == .orderedSame
     }
 
     /// Add a new custom theme
     func addTheme(_ theme: TerminalTheme) {
-        guard !isReserved(theme.name) else { return }
+        guard !isReserved(theme.name), theme.id != .followsAppTheme else { return }
         var themes = customThemes
-        // Replace if exists, otherwise append
-        if let index = themes.firstIndex(where: { $0.name == theme.name }) {
+        guard !allThemes.contains(where: {
+            $0.id != theme.id && namesEqual($0.name, theme.name)
+        }) else { return }
+        // Identity decides replacement; names are only labels and stay unique for clarity.
+        if let index = themes.firstIndex(where: { $0.id == theme.id }) {
             themes[index] = theme
         } else {
             themes.append(theme)
@@ -77,7 +86,9 @@ final class ThemeManager {
     func deleteTheme(_ theme: TerminalTheme) -> Bool {
         guard !isBuiltIn(theme) else { return false }
         var themes = customThemes
-        themes.removeAll { $0.name == theme.name }
+        let oldCount = themes.count
+        themes.removeAll { $0.id == theme.id }
+        guard themes.count != oldCount else { return false }
         customThemes = themes
         return true
     }
@@ -85,10 +96,12 @@ final class ThemeManager {
     /// Rename a custom theme
     func renameTheme(_ theme: TerminalTheme, to newName: String) -> Bool {
         guard !isBuiltIn(theme), !isReserved(newName) else { return false }
-        guard !allThemes.contains(where: { $0.name == newName }) else { return false }
+        guard !allThemes.contains(where: {
+            $0.id != theme.id && namesEqual($0.name, newName)
+        }) else { return false }
 
         var themes = customThemes
-        if let index = themes.firstIndex(where: { $0.name == theme.name }) {
+        if let index = themes.firstIndex(where: { $0.id == theme.id }) {
             themes[index].name = newName
             customThemes = themes
             return true
@@ -98,7 +111,23 @@ final class ThemeManager {
 
     /// Get a theme by name
     func theme(named name: String) -> TerminalTheme? {
-        allThemes.first { $0.name == name }
+        allThemes.first { namesEqual($0.name, name) }
+    }
+
+    /// Get a theme by its durable identity.
+    func theme(withID id: TerminalThemeID) -> TerminalTheme? {
+        allThemes.first { $0.id == id }
+    }
+
+    /// Resolves a stored ID, including the tagged names decoded from pre-ID project state.
+    func canonicalID(for storedID: TerminalThemeID) -> TerminalThemeID? {
+        if storedID == .followsAppTheme { return storedID }
+        if theme(withID: storedID) != nil { return storedID }
+        guard let oldName = storedID.legacyName else { return nil }
+        if oldName.caseInsensitiveCompare(TerminalThemeNames.followsAppTheme) == .orderedSame {
+            return .followsAppTheme
+        }
+        return theme(named: oldName)?.id
     }
 
     /// Duplicate a theme with a new name
@@ -107,12 +136,12 @@ final class ThemeManager {
         var counter = 1
         var newName = "\(theme.name) Copy"
 
-        while allThemes.contains(where: { $0.name == newName }) {
+        while allThemes.contains(where: { namesEqual($0.name, newName) }) {
             counter += 1
             newName = "\(theme.name) Copy \(counter)"
         }
 
-        newTheme.name = newName
+        newTheme = theme.duplicated(named: newName)
         addTheme(newTheme)
         return newTheme
     }
@@ -133,7 +162,7 @@ final class ThemeManager {
         // Ensure unique name
         var finalName = themeName
         var counter = 1
-        while allThemes.contains(where: { $0.name == finalName }) {
+        while allThemes.contains(where: { namesEqual($0.name, finalName) }) {
             counter += 1
             finalName = "\(themeName) \(counter)"
         }
@@ -176,6 +205,38 @@ final class ThemeManager {
     }
 
     // MARK: - Private Helpers
+
+    private func namesEqual(_ first: String, _ second: String) -> Bool {
+        first.caseInsensitiveCompare(second) == .orderedSame
+    }
+
+    static func normaliseLegacyThemes(_ themes: [TerminalTheme]) -> [TerminalTheme] {
+        var usedNames = Set(
+            (TerminalTheme.builtInThemes.map(\.name) + [TerminalThemeNames.followsAppTheme])
+                .map { $0.lowercased() }
+        )
+        var usedIDs = Set(TerminalTheme.builtInThemes.map(\.id))
+        usedIDs.insert(.followsAppTheme)
+
+        return themes.map { original in
+            var theme = original
+            if usedIDs.contains(theme.id) {
+                theme.id = .makeCustom()
+            }
+            usedIDs.insert(theme.id)
+
+            let base = theme.name
+            var candidate = base
+            var suffix = 2
+            while usedNames.contains(candidate.lowercased()) {
+                candidate = "\(base) \(suffix)"
+                suffix += 1
+            }
+            theme.name = candidate
+            usedNames.insert(candidate.lowercased())
+            return theme
+        }
+    }
 
     private func extractColor(from plist: [String: Any], key: String) throws -> NSColor? {
         guard let colorData = plist[key] as? Data else {

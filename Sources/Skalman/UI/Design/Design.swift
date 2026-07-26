@@ -56,6 +56,21 @@ enum Design {
             return Accessibility.increasesContrast ? max(themed, 2) : themed
         }
 
+        /// The control radius, kept a *rounded rect* at small sizes.
+        ///
+        /// A corner radius is only a corner while it is a fraction of the side. `control` is 8
+        /// under the System theme, which on a 16pt square — a tab's × — is half the side, so it
+        /// drew as a disc while the 20pt `+` beside it drew as a rounded square. Same token, two
+        /// silhouettes, and no call site said anything about a circle. Anything comfortably
+        /// larger than the radius is unaffected, so this changes small controls only.
+        static func control(fitting size: CGSize) -> CGFloat {
+            min(control, min(size.width, size.height) * cornerFitFraction)
+        }
+
+        /// How much of the shorter side a corner may take before the shape stops reading as a
+        /// rounded rect. A third is the point at which a 16pt square still has flat edges.
+        static let cornerFitFraction: CGFloat = 1.0 / 3.0
+
         /// Fully rounded, for pill-shaped controls of a known height.
         /// Fully rounded — unless a style says otherwise.
         ///
@@ -77,7 +92,24 @@ enum Design {
         static let tabHeight: CGFloat = 28
         static let sidebarTabHeight: CGFloat = 30
         static let tabIconSlot: CGFloat = 16
-        static let tabCloseTarget: CGFloat = 16
+
+        /// The × on a tab, and anything else that raises a surface around a small mark.
+        ///
+        /// Sized so the hover surface has room *around* the glyph: at 16 the drawn mark filled
+        /// its box to within a point and the highlight read as a smudge on the character rather
+        /// than as a target under the pointer. It also matches `DisplayPaneDefaults.buttonSize`,
+        /// which is the `+` at the other end of the same tab row.
+        static let tabCloseTarget: CGFloat = 20
+
+        /// An icon button nested inside another control — a tab's ×, a sidebar row's ⋯.
+        ///
+        /// The same target as `tabCloseTarget`, named for the role rather than for one of the
+        /// places that has it: a row's `⋯` and a tab's `×` are the same control at the same size,
+        /// and were 16 and 20 only because each was sized where it was used. The glyph is stated
+        /// beside it so the padding between them — `(target - glyph) / 2` — is a decision taken
+        /// once here rather than arithmetic at a call site. See `ThemedIconButton.Target`.
+        static let inlineButtonTarget: CGFloat = tabCloseTarget
+        static let inlineButtonGlyph: CGFloat = 12
 
         /// Compact controls floating in the transparent window toolbar.
         static let toolbarButtonWidth: CGFloat = 30
@@ -90,6 +122,15 @@ enum Design {
         static let inputMaxHeight: CGFloat = 180
         /// Widest a column of content grows before it becomes hard to scan.
         static let readableWidth: CGFloat = 620
+
+        /// The bottom band of a pane, holding its footer controls — see `PaneFooterView`.
+        ///
+        /// Deeper than the controls it holds, and deliberately: the band used to sit inside
+        /// AppKit's own inset sidebar panel, which supplied a margin of its own below it.
+        /// Flush to the window, that margin is the band's to provide — 32 put the row a few
+        /// points off the window's rounded bottom corner, which reads as content about to
+        /// fall out of the pane.
+        static let footerHeight: CGFloat = 48
 
         /// The room a panel's halo needs inside any clipping ancestor.
         ///
@@ -306,17 +347,20 @@ enum Design {
 
     // MARK: - Ink
 
-    /// The four label tiers, resolved against a ground the theme does not own.
+    /// Every colour a drawn component needs, resolved against **one** of the window's two grounds.
     ///
-    /// Handed to a `BackdropOverlay` rather than read from `Design.Text`, which answers for the
-    /// chrome's ground and is wrong over the window's backdrop by exactly the amount the two
-    /// palettes differ.
+    /// Originally this answered only for the backdrop — a ground the theme does not own — where
+    /// reading `Design.Text` is wrong by the amount the two palettes differ. It now also answers
+    /// for the chrome (`Ink.chrome`), and that is what lets a component appear on either ground
+    /// without being written twice. A tab in the display pane and the same tab in the toolbar
+    /// differ in *where their colours come from* and in nothing else, so that is the only thing
+    /// they state; see `InkSource`.
     struct Ink {
 
-        /// The tone every value here is cut from: white over a dark ground, black over a light
-        /// one. Held so each tier and surface is *the base at an opacity* rather than a dimming
-        /// of the tier above it — `withAlphaComponent` replaces alpha rather than scaling it, and
-        /// chaining it reads as a scale that it is not.
+        /// The tone every derived value here is cut from: white over a dark ground, black over a
+        /// light one. Held so each tier and surface is *the base at an opacity* rather than a
+        /// dimming of the tier above it — `withAlphaComponent` replaces alpha rather than scaling
+        /// it, and chaining it reads as a scale that it is not.
         let base: NSColor
 
         let label: NSColor
@@ -325,19 +369,76 @@ enum Design {
         let quaternary: NSColor
 
         /// A control surface that reads on the same ground — the pill behind the usage summary,
-        /// the card floating at the pane's corner.
+        /// the card floating at the pane's corner, a tab.
         ///
-        /// Derived rather than taken from `Design.Surface`, for the same reason as the ink: the
-        /// chrome's resting fill is *its* label colour held at 8%, which over a backdrop of the
-        /// opposite tone is either invisible or a bright smear.
-        var surface: NSColor {
-            base.withAlphaComponent(Accessibility.increasesContrast ? 0.22 : 0.14)
+        /// **Derived over a ground the theme does not own, stated over one it does.** Cut from
+        /// `base` there is right for the backdrop and only there: the chrome's own resting fill is
+        /// its label colour at a far lower opacity, which over a backdrop of the opposite tone is
+        /// either invisible or a bright smear. But on the chrome itself the theme already states
+        /// these three roles, and a component deriving its own would sit at a weight no other
+        /// control in the window uses.
+        let surface: NSColor
+        let surfaceHover: NSColor
+        let border: NSColor
+
+        /// Surfaces cut from `base`, for a ground the theme does not own.
+        init(
+            base: NSColor,
+            label: NSColor,
+            secondary: NSColor,
+            tertiary: NSColor,
+            quaternary: NSColor
+        ) {
+            let increased = Accessibility.increasesContrast
+            self.init(
+                base: base,
+                label: label,
+                secondary: secondary,
+                tertiary: tertiary,
+                quaternary: quaternary,
+                surface: base.withAlphaComponent(increased ? 0.22 : 0.14),
+                surfaceHover: base.withAlphaComponent(increased ? 0.34 : 0.24),
+                border: base.withAlphaComponent(increased ? 0.52 : 0.30)
+            )
         }
-        var surfaceHover: NSColor {
-            base.withAlphaComponent(Accessibility.increasesContrast ? 0.34 : 0.24)
+
+        /// Surfaces stated outright, for a ground that already has roles of its own.
+        init(
+            base: NSColor,
+            label: NSColor,
+            secondary: NSColor,
+            tertiary: NSColor,
+            quaternary: NSColor,
+            surface: NSColor,
+            surfaceHover: NSColor,
+            border: NSColor
+        ) {
+            self.base = base
+            self.label = label
+            self.secondary = secondary
+            self.tertiary = tertiary
+            self.quaternary = quaternary
+            self.surface = surface
+            self.surfaceHover = surfaceHover
+            self.border = border
         }
-        var border: NSColor {
-            base.withAlphaComponent(Accessibility.increasesContrast ? 0.52 : 0.30)
+
+        /// The chrome's own ground, as an `Ink`.
+        ///
+        /// Computed on every access rather than stored, for the reason `ThemedControl` draws in
+        /// `draw(_:)` at all: a role resolves to a different colour after a theme switch, and a
+        /// value captured once would keep the old one.
+        static var chrome: Ink {
+            Ink(
+                base: Design.Text.label,
+                label: Design.Text.label,
+                secondary: Design.Text.secondary,
+                tertiary: Design.Text.tertiary,
+                quaternary: Design.Text.quaternary,
+                surface: Design.Surface.controlResting,
+                surfaceHover: Design.Surface.controlHover,
+                border: Design.Surface.border
+            )
         }
     }
 
@@ -360,9 +461,35 @@ enum Design {
     /// adapt to light and dark on their own, and are ordered so neighbouring entries are never
     /// near-hues. A theme may want its own ramp one day; this is where it would go.
     enum Categorical {
-        static let ramp: [NSColor] = [
-            .systemBlue, .systemOrange, .systemPurple, .systemTeal, .systemPink, .systemIndigo
+
+        /// A hue and the word for it.
+        ///
+        /// The name is not decoration: a colour that only exists as pixels cannot appear in a
+        /// legend, a tooltip or a report pasted into a chat, and "the third one" is not a
+        /// thing anyone can point at. The name lives *beside* the colour so the two cannot
+        /// drift — a ramp reordered without its words is a legend that lies.
+        struct Hue: Equatable {
+            let name: String
+            let color: NSColor
+        }
+
+        static let hues: [Hue] = [
+            Hue(name: "Blue", color: .systemBlue),
+            Hue(name: "Orange", color: .systemOrange),
+            Hue(name: "Purple", color: .systemPurple),
+            Hue(name: "Teal", color: .systemTeal),
+            Hue(name: "Pink", color: .systemPink),
+            Hue(name: "Indigo", color: .systemIndigo)
         ]
+
+        static let ramp: [NSColor] = hues.map(\.color)
+
+        /// The hue for an index that may run past the ramp, cycling. Every caller that
+        /// colours an unbounded sequence — graph lanes, hierarchy depths — needs this, and
+        /// each wrote its own `% count` before.
+        static func hue(at index: Int) -> Hue {
+            hues[((index % hues.count) + hues.count) % hues.count]
+        }
     }
 
     // MARK: - Diff
@@ -466,6 +593,16 @@ enum Design {
         /// One beat of a menu's confirmation blink — the chosen row flickering once before
         /// the panel fades, the acknowledgement every platform menu gives.
         static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
+
+        /// The pause a repeating demonstration holds a finished state before starting the next
+        /// — long enough to read the name that just arrived, short enough that a hovered row
+        /// does not look finished.
+        ///
+        /// A caller guards on `reducesMotion` before scheduling rather than reading a zero hold
+        /// as a cadence: a demonstration whose animation has already been collapsed is not a
+        /// faster demonstration, it is a flicker, and the honest reduced form is to hold the
+        /// name still.
+        static var demonstrationHold: TimeInterval { reducesMotion ? 0 : 0.9 }
     }
 
     // MARK: - Accessibility
@@ -622,6 +759,6 @@ extension NSView {
         layer?.shadowColor = AppThemePalette.current.resolved(spec.role).cgColor
         layer?.shadowRadius = spec.radius
         layer?.shadowOpacity = Float(spec.opacity)
-        layer?.shadowOffset = .zero
+        layer?.shadowOffset = CGSize(width: spec.offsetX, height: spec.offsetY)
     }
 }

@@ -88,7 +88,14 @@ final class ModelNameTests: XCTestCase {
                   "service_tiers": [
                     {"id": "priority-v2", "name": "Fast", "description": "Quick"}
                   ],
-                  "default_service_tier": "priority-v2"
+                  "default_service_tier": "priority-v2",
+                  "default_reasoning_level": "low",
+                  "supported_reasoning_levels": [
+                    {"effort": "low", "description": "Quick work"},
+                    {"effort": "xhigh", "description": "Deep work"},
+                    {"effort": "max", "description": "Hardest work"},
+                    {"effort": "ultra", "description": "Delegated work"}
+                  ]
                 },
                 {
                   "slug": "gpt-hidden",
@@ -111,6 +118,19 @@ final class ModelNameTests: XCTestCase {
         XCTAssertEqual(options.first?.displayName, "GPT Visible")
         XCTAssertEqual(options.first?.fastServiceTier, "priority-v2")
         XCTAssertTrue(options.first?.supportsFastMode == true)
+        XCTAssertEqual(options.first?.defaultReasoningLevel, "low")
+        XCTAssertEqual(
+            options.first?.reasoningLevels.map(\.effort),
+            ["low", "xhigh", "max", "ultra"]
+        )
+        XCTAssertEqual(
+            options.first?.reasoningLevels.map(\.displayName),
+            ["Light", "Extra High", "Max", "Ultra"]
+        )
+        XCTAssertEqual(
+            options.first?.reasoningLevels.last?.description,
+            "Delegated work"
+        )
         XCTAssertEqual(
             AgentModels.defaultFastMode(
                 for: .codex,
@@ -118,6 +138,54 @@ final class ModelNameTests: XCTestCase {
                 account: account
             ),
             true
+        )
+    }
+
+    func testUnsupportedAccountEffortFallsBackToTheSelectedModelsDefault() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data(#"model_reasoning_effort = "ultra""#.utf8).write(
+            to: directory.appendingPathComponent(AgentDefaults.codexConfigFile)
+        )
+        try Data("""
+            {"models":[{
+              "slug":"gpt-no-ultra",
+              "display_name":"GPT No Ultra",
+              "visibility":"list",
+              "default_reasoning_level":"medium",
+              "supported_reasoning_levels":[
+                {"effort":"low","description":"Quick"},
+                {"effort":"medium","description":"Balanced"},
+                {"effort":"max","description":"Deep"}
+              ]
+            }]}
+            """.utf8).write(
+                to: directory.appendingPathComponent(AgentDefaults.codexModelsCacheFile)
+            )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .standard,
+            configPath: directory.path
+        )
+        var session = AgentSession(kind: .codex, title: "Effort")
+
+        XCTAssertEqual(
+            AgentModels.effectiveEffort(
+                for: session,
+                model: "gpt-no-ultra",
+                account: account
+            ),
+            "medium"
+        )
+
+        session.reasoningEffort = "max"
+        XCTAssertEqual(
+            AgentModels.effectiveEffort(
+                for: session,
+                model: "gpt-no-ultra",
+                account: account
+            ),
+            "max"
         )
     }
 

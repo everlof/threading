@@ -68,8 +68,11 @@ final class SessionInfoRowView: NSView {
         valueLabel.lineBreakMode = .byTruncatingTail
 
         // The value is the row's answer, so it keeps its width; the two descriptions give way.
-        valueLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        valueLabel.setContentHuggingPriority(.required, for: .horizontal)
+        // High rather than required: required would make the widest row a hard floor under the
+        // whole panel, and a panel that cannot be dragged narrower than one process name is worse
+        // than a truncated megabyte count.
+        valueLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        valueLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         secondaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         primaryLabel.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
 

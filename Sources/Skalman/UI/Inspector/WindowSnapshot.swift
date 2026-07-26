@@ -8,6 +8,7 @@ import AppKit
 /// shot. The cost is honesty about out-of-process content — a `WKWebView`'s page may render
 /// blank. The overlay is a child window, so it is never in this tree; the marker is drawn
 /// onto the bitmap instead.
+@MainActor
 enum WindowSnapshot {
 
     /// Captures from the window's frame view rather than `contentView`, so the toolbar is in
@@ -28,11 +29,96 @@ enum WindowSnapshot {
         // sizes the `NSImage` the sheet previews.
         rep.size = bounds.size
 
+        repaintMaterialPanes(in: rep, window: window, frameView: frameView)
+
         if let indicator {
             annotate(rep, with: indicator, within: bounds)
         }
 
         return rep
+    }
+
+    /// Supplies the ground a system-material pane draws on, which the capture cannot see.
+    ///
+    /// A `.sidebar` or `.inspector` split item's material is **not in the view tree** — measured
+    /// on this macOS, a window built that way contains zero `NSVisualEffectView`s, and the region
+    /// is painted for the window from outside the process. `cacheDisplay` therefore writes opaque
+    /// *white* across the whole column, and the pane's own rows — light text, drawn correctly,
+    /// on top — disappear into it. Every inspector report was shipping a screenshot with a blank
+    /// band where the sidebar should be.
+    ///
+    /// So the ground is painted here from `WindowBackdrop`, which is the app's own record of what
+    /// the window is painted with, and the pane is drawn over it again. Three things this got
+    /// wrong first, each measured:
+    ///
+    /// - **The column, not the pane.** Under `.fullSizeContentView` such a pane runs the window's
+    ///   full height with the traffic lights floating over it, so the strip *above* the pane is
+    ///   missing its ground too and stayed white when only the pane was repainted.
+    /// - **The traffic lights are not the pane's.** They live in the window's titlebar
+    ///   container, so the fill covers them; redrawing that container restores them, and the clip
+    ///   is what stops a window-wide view from touching the panes beside it.
+    /// - **A bare `NSBitmapImageRep` draws as a copy**, which puts the pane's own transparency
+    ///   straight back over the ground just painted for it. It goes through an `NSImage` and
+    ///   `.sourceOver` instead.
+    ///
+    /// **The main window no longer has such a pane**: its sidebar is a plain split item painting
+    /// its own opaque ground, so it captures correctly with no help — see
+    /// `MainWindowController.setupSplitViewController`. This is kept because it is a property of
+    /// `cacheDisplay` and system materials rather than of one window, and any pane that adopts a
+    /// system material later would silently lose its ground in every report without it.
+    private static func repaintMaterialPanes(
+        in rep: NSBitmapImageRep,
+        window: NSWindow,
+        frameView: NSView
+    ) {
+        let sidebars = (window.contentViewController as? NSSplitViewController)?
+            .splitViewItems
+            .filter { $0.behavior == .sidebar && !$0.isCollapsed }
+            .map(\.viewController.view) ?? []
+
+        guard !sidebars.isEmpty, let context = NSGraphicsContext(bitmapImageRep: rep) else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+
+        let titlebar = window.standardWindowButton(.closeButton)?.superview
+
+        for sidebar in sidebars {
+            let pane = sidebar.convert(sidebar.bounds, to: frameView)
+            guard pane.width > 0, pane.height > 0 else { continue }
+
+            let column = NSRect(
+                x: pane.minX,
+                y: pane.minY,
+                width: pane.width,
+                height: frameView.bounds.maxY - pane.minY
+            )
+
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: column).setClip()
+
+            WindowBackdrop.color.setFill()
+            column.fill()
+
+            draw(sidebar, at: pane)
+            if let titlebar {
+                draw(titlebar, at: titlebar.convert(titlebar.bounds, to: frameView))
+            }
+
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private static func draw(_ view: NSView, at rect: NSRect) {
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+
+        let image = NSImage(size: view.bounds.size)
+        image.addRepresentation(rep)
+        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
     }
 
     private static func annotate(

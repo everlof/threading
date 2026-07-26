@@ -439,15 +439,143 @@ struct SetProjectIconArguments: Decodable {
 struct ListThemesArguments: Decodable {}
 
 struct SetThemeArguments: Decodable {
+    let themeID: String?
+    /// Accepted for clients launched against the pre-ID schema.
     let theme: String?
     let scope: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case themeID = "theme_id"
+        case theme, scope
+    }
 }
 
 struct CreateThemeArguments: Decodable {
     let name: String?
+    let baseID: String?
+    /// Accepted for clients launched against the pre-ID schema.
     let base: String?
     let colors: [String: String]?
     let apply: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case baseID = "base_id"
+        case base, colors, apply
+    }
+}
+
+struct AppThemeReferenceArguments: Decodable {
+    let themeID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case themeID = "theme_id"
+    }
+}
+
+struct SetAppThemeArguments: Decodable {
+    let themeID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case themeID = "theme_id"
+    }
+}
+
+struct AppThemeGlowArguments: Decodable {
+    let role: String?
+    let radius: Double?
+    let opacity: Double?
+    let offsetX: Double?
+    let offsetY: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case role, radius, opacity
+        case offsetX = "offset_x"
+        case offsetY = "offset_y"
+    }
+}
+
+struct AppThemeMaterialArguments: Decodable {
+    let panelRadius: Double?
+    let controlRadius: Double?
+    let borderWidth: Double?
+    let glow: AppThemeGlowArguments?
+    let removeGlow: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case panelRadius = "panel_radius"
+        case controlRadius = "control_radius"
+        case borderWidth = "border_width"
+        case glow
+        case removeGlow = "remove_glow"
+    }
+}
+
+struct AppThemeVariantArguments: Decodable {
+    let roles: [String: String]?
+    let material: AppThemeMaterialArguments?
+    let terminalColors: [String: String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case roles, material
+        case terminalColors = "terminal_colors"
+    }
+}
+
+struct CreateAppThemeArguments: Decodable {
+    let name: String?
+    let baseID: String?
+    let appearance: String?
+    /// Accepted for clients launched against the single-variant schema.
+    let mode: String?
+    let summary: String?
+    let variants: [String: AppThemeVariantArguments]?
+    /// Legacy single-variant patch fields.
+    let roles: [String: String]?
+    let material: AppThemeMaterialArguments?
+    let terminalColors: [String: String]?
+    let apply: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case baseID = "base_id"
+        case appearance, mode, summary, variants, roles, material
+        case terminalColors = "terminal_colors"
+        case apply
+    }
+}
+
+struct DuplicateAppThemeArguments: Decodable {
+    let themeID: String?
+    let name: String?
+    let apply: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case themeID = "theme_id"
+        case name, apply
+    }
+}
+
+struct UpdateAppThemeArguments: Decodable {
+    let themeID: String?
+    let name: String?
+    let appearance: String?
+    /// Accepted for clients launched against the single-variant schema.
+    let mode: String?
+    let summary: String?
+    let variants: [String: AppThemeVariantArguments]?
+    /// Legacy single-variant patch fields.
+    let roles: [String: String]?
+    let material: AppThemeMaterialArguments?
+    let terminalColors: [String: String]?
+    let apply: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case themeID = "theme_id"
+        case name, appearance, mode, summary, variants, roles, material
+        case terminalColors = "terminal_colors"
+        case apply
+    }
 }
 
 /// What an agent proposes removing, and why the user should agree.
@@ -458,6 +586,18 @@ struct CreateThemeArguments: Decodable {
 struct StorageCleanupArguments: Decodable {
     let paths: String?
     let reason: String?
+}
+
+struct NotifyUserArguments: Decodable {
+    let title: String?
+    let message: String?
+    let recipient: String?
+
+    init(title: String?, message: String?, recipient: String? = nil) {
+        self.title = title
+        self.message = message
+        self.recipient = recipient
+    }
 }
 
 enum PanelTabReference: Decodable, Equatable {
@@ -479,6 +619,25 @@ struct PanelActivateTabArguments: Decodable {
 }
 
 struct EmptyToolArguments: Decodable {}
+
+struct ExtensionComponentReferenceArguments: Decodable {
+    let component: String?
+    let version: Int?
+}
+
+struct ExtensionComponentPatchArguments: Decodable {
+    let patch: String?
+}
+
+struct ExtensionScaffoldProjectArguments: Decodable {
+    let name: String?
+    let identifier: String?
+    let directory: String?
+}
+
+struct ExtensionProposeInstallArguments: Decodable {
+    let directory: String?
+}
 
 /// A `tools/call` request whose argument payload has been decoded for the named tool.
 enum MCPToolCall {
@@ -519,10 +678,23 @@ enum MCPToolCall {
     case setProjectIcon(SetProjectIconArguments)
     case listReclaimableStorage(EmptyToolArguments)
     case proposeStorageCleanup(StorageCleanupArguments)
+    case notifyUser(NotifyUserArguments)
     case listThemes(ListThemesArguments)
     case setTheme(SetThemeArguments)
     case createTheme(CreateThemeArguments)
-    case unknown(String)
+    case listAppThemes(EmptyToolArguments)
+    case getAppTheme(AppThemeReferenceArguments)
+    case setAppTheme(SetAppThemeArguments)
+    case createAppTheme(CreateAppThemeArguments)
+    case duplicateAppTheme(DuplicateAppThemeArguments)
+    case updateAppTheme(UpdateAppThemeArguments)
+    case extensionListComponents(EmptyToolArguments)
+    case extensionScaffoldProject(ExtensionScaffoldProjectArguments)
+    case extensionProposeInstall(ExtensionProposeInstallArguments)
+    case extensionDescribeComponent(ExtensionComponentReferenceArguments)
+    case extensionValidateComponentPatch(ExtensionComponentPatchArguments)
+    case extensionPreviewComponentPatch(ExtensionComponentPatchArguments)
+    case unknown(name: String, arguments: MCPJSONValue)
 
     var name: String {
         switch self {
@@ -563,10 +735,25 @@ enum MCPToolCall {
         case .setProjectIcon: return MCPTools.setProjectIcon
         case .listReclaimableStorage: return MCPTools.listReclaimableStorage
         case .proposeStorageCleanup: return MCPTools.proposeStorageCleanup
+        case .notifyUser: return MCPTools.notifyUser
         case .listThemes: return MCPTools.listThemes
         case .setTheme: return MCPTools.setTheme
         case .createTheme: return MCPTools.createTheme
-        case .unknown(let name): return name
+        case .listAppThemes: return MCPTools.listAppThemes
+        case .getAppTheme: return MCPTools.getAppTheme
+        case .setAppTheme: return MCPTools.setAppTheme
+        case .createAppTheme: return MCPTools.createAppTheme
+        case .duplicateAppTheme: return MCPTools.duplicateAppTheme
+        case .updateAppTheme: return MCPTools.updateAppTheme
+        case .extensionListComponents: return MCPTools.extensionListComponents
+        case .extensionScaffoldProject: return MCPTools.extensionScaffoldProject
+        case .extensionProposeInstall: return MCPTools.extensionProposeInstall
+        case .extensionDescribeComponent: return MCPTools.extensionDescribeComponent
+        case .extensionValidateComponentPatch:
+            return MCPTools.extensionValidateComponentPatch
+        case .extensionPreviewComponentPatch:
+            return MCPTools.extensionPreviewComponentPatch
+        case .unknown(let name, _): return name
         }
     }
 }
@@ -832,6 +1019,11 @@ struct MCPToolCallParameters: Decodable {
                 try container.decodeIfPresent(StorageCleanupArguments.self, forKey: .arguments)
                     ?? StorageCleanupArguments(paths: nil, reason: nil)
             )
+        case MCPTools.notifyUser:
+            call = .notifyUser(
+                try container.decodeIfPresent(NotifyUserArguments.self, forKey: .arguments)
+                    ?? NotifyUserArguments(title: nil, message: nil)
+            )
         case MCPTools.listThemes:
             call = .listThemes(
                 try container.decodeIfPresent(ListThemesArguments.self, forKey: .arguments)
@@ -840,15 +1032,123 @@ struct MCPToolCallParameters: Decodable {
         case MCPTools.setTheme:
             call = .setTheme(
                 try container.decodeIfPresent(SetThemeArguments.self, forKey: .arguments)
-                    ?? SetThemeArguments(theme: nil, scope: nil)
+                    ?? SetThemeArguments(themeID: nil, theme: nil, scope: nil)
             )
         case MCPTools.createTheme:
             call = .createTheme(
                 try container.decodeIfPresent(CreateThemeArguments.self, forKey: .arguments)
-                    ?? CreateThemeArguments(name: nil, base: nil, colors: nil, apply: nil)
+                    ?? CreateThemeArguments(
+                        name: nil,
+                        baseID: nil,
+                        base: nil,
+                        colors: nil,
+                        apply: nil
+                    )
+            )
+        case MCPTools.listAppThemes:
+            call = .listAppThemes(
+                try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+                    ?? EmptyToolArguments()
+            )
+        case MCPTools.getAppTheme:
+            call = .getAppTheme(
+                try container.decodeIfPresent(AppThemeReferenceArguments.self, forKey: .arguments)
+                    ?? AppThemeReferenceArguments(themeID: nil)
+            )
+        case MCPTools.setAppTheme:
+            call = .setAppTheme(
+                try container.decodeIfPresent(SetAppThemeArguments.self, forKey: .arguments)
+                    ?? SetAppThemeArguments(themeID: nil)
+            )
+        case MCPTools.createAppTheme:
+            call = .createAppTheme(
+                try container.decodeIfPresent(CreateAppThemeArguments.self, forKey: .arguments)
+                    ?? CreateAppThemeArguments(
+                        name: nil,
+                        baseID: nil,
+                        appearance: nil,
+                        mode: nil,
+                        summary: nil,
+                        variants: nil,
+                        roles: nil,
+                        material: nil,
+                        terminalColors: nil,
+                        apply: nil
+                    )
+            )
+        case MCPTools.duplicateAppTheme:
+            call = .duplicateAppTheme(
+                try container.decodeIfPresent(DuplicateAppThemeArguments.self, forKey: .arguments)
+                    ?? DuplicateAppThemeArguments(themeID: nil, name: nil, apply: nil)
+            )
+        case MCPTools.updateAppTheme:
+            call = .updateAppTheme(
+                try container.decodeIfPresent(UpdateAppThemeArguments.self, forKey: .arguments)
+                    ?? UpdateAppThemeArguments(
+                        themeID: nil,
+                        name: nil,
+                        appearance: nil,
+                        mode: nil,
+                        summary: nil,
+                        variants: nil,
+                        roles: nil,
+                        material: nil,
+                        terminalColors: nil,
+                        apply: nil
+                    )
+            )
+        case MCPTools.extensionListComponents:
+            call = .extensionListComponents(
+                try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+                    ?? EmptyToolArguments()
+            )
+        case MCPTools.extensionScaffoldProject:
+            call = .extensionScaffoldProject(
+                try container.decodeIfPresent(
+                    ExtensionScaffoldProjectArguments.self,
+                    forKey: .arguments
+                ) ?? ExtensionScaffoldProjectArguments(
+                    name: nil,
+                    identifier: nil,
+                    directory: nil
+                )
+            )
+        case MCPTools.extensionProposeInstall:
+            call = .extensionProposeInstall(
+                try container.decodeIfPresent(
+                    ExtensionProposeInstallArguments.self,
+                    forKey: .arguments
+                ) ?? ExtensionProposeInstallArguments(directory: nil)
+            )
+        case MCPTools.extensionDescribeComponent:
+            call = .extensionDescribeComponent(
+                try container.decodeIfPresent(
+                    ExtensionComponentReferenceArguments.self,
+                    forKey: .arguments
+                ) ?? ExtensionComponentReferenceArguments(component: nil, version: nil)
+            )
+        case MCPTools.extensionValidateComponentPatch:
+            call = .extensionValidateComponentPatch(
+                try container.decodeIfPresent(
+                    ExtensionComponentPatchArguments.self,
+                    forKey: .arguments
+                ) ?? ExtensionComponentPatchArguments(patch: nil)
+            )
+        case MCPTools.extensionPreviewComponentPatch:
+            call = .extensionPreviewComponentPatch(
+                try container.decodeIfPresent(
+                    ExtensionComponentPatchArguments.self,
+                    forKey: .arguments
+                ) ?? ExtensionComponentPatchArguments(patch: nil)
             )
         default:
-            call = .unknown(name)
+            call = .unknown(
+                name: name,
+                arguments: try container.decodeIfPresent(
+                    MCPJSONValue.self,
+                    forKey: .arguments
+                ) ?? .emptyObject
+            )
         }
     }
 }
@@ -956,7 +1256,54 @@ extension MCPToolHandling {
 struct MCPToolDefinition: Encodable {
     let name: String
     let description: String
-    let inputSchema: MCPInputSchema
+    let inputSchema: MCPToolInputSchema
+
+    init(name: String, description: String, inputSchema: MCPInputSchema) {
+        self.name = name
+        self.description = description
+        self.inputSchema = .builtIn(inputSchema)
+    }
+
+    init(name: String, description: String, externalSchema: MCPJSONValue) {
+        self.name = name
+        self.description = description
+        self.inputSchema = .externalJSON(externalSchema)
+    }
+}
+
+enum MCPToolInputSchema: Encodable {
+    case builtIn(MCPInputSchema)
+    case externalJSON(MCPJSONValue)
+
+    var type: String {
+        switch self {
+        case .builtIn(let schema): return schema.type
+        case .externalJSON: return "object"
+        }
+    }
+
+    var properties: [String: MCPPropertySchema] {
+        switch self {
+        case .builtIn(let schema): return schema.properties
+        case .externalJSON: return [:]
+        }
+    }
+
+    var required: [String] {
+        switch self {
+        case .builtIn(let schema): return schema.required
+        case .externalJSON: return []
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .builtIn(let schema):
+            try schema.encode(to: encoder)
+        case .externalJSON(let schema):
+            try schema.encode(to: encoder)
+        }
+    }
 }
 
 struct MCPInputSchema: Encodable {
@@ -1099,10 +1446,43 @@ enum MCPTools {
     static let proposeStorageCleanup = "propose_storage_cleanup"
     static let storageTools = [listReclaimableStorage, proposeStorageCleanup]
 
+    static let notifyUser = "notify_user"
+    static let notificationTools = [notifyUser]
+
     static let listThemes = "list_themes"
     static let setTheme = "set_theme"
     static let createTheme = "create_theme"
     static let themeTools = [listThemes, setTheme, createTheme]
+
+    static let listAppThemes = "list_app_themes"
+    static let getAppTheme = "get_app_theme"
+    static let setAppTheme = "set_app_theme"
+    static let createAppTheme = "create_app_theme"
+    static let duplicateAppTheme = "duplicate_app_theme"
+    static let updateAppTheme = "update_app_theme"
+    static let appThemeTools = [
+        listAppThemes,
+        getAppTheme,
+        setAppTheme,
+        createAppTheme,
+        duplicateAppTheme,
+        updateAppTheme
+    ]
+
+    static let extensionListComponents = "extension_list_components"
+    static let extensionScaffoldProject = "extension_scaffold_project"
+    static let extensionProposeInstall = "extension_propose_install"
+    static let extensionDescribeComponent = "extension_describe_component"
+    static let extensionValidateComponentPatch = "extension_validate_component_patch"
+    static let extensionPreviewComponentPatch = "extension_preview_component_patch"
+    static let extensionAuthoringTools = [
+        extensionListComponents,
+        extensionScaffoldProject,
+        extensionProposeInstall,
+        extensionDescribeComponent,
+        extensionValidateComponentPatch,
+        extensionPreviewComponentPatch
+    ]
 
     private static var browserSemanticLocatorSchema: MCPPropertySchema {
         MCPPropertySchema(
@@ -1143,13 +1523,11 @@ enum MCPTools {
         )
     }
 
-
-    /// Every tool the server serves, all pre-approved together: each only calls back into the app
-    /// the user is already looking at, and an agent with a shell already outreaches a browser
-    /// click. `MCPToolCatalog` groups these and decides — from the user's Tools settings — which
-    /// are actually advertised and pre-approved on a launch.
+    /// Every tool the server serves. Clients pre-approve this MCP server as one app capability;
+    /// browser tools then enforce origin and consequential-action approval inside Skalman, where
+    /// the app can account for cookies and the page the user is actually looking at.
     static let allTools = displayTools + browserTools + panelTools + projectTools
-        + storageTools + themeTools
+        + storageTools + notificationTools + themeTools + appThemeTools + extensionAuthoringTools
 
     /// The full `tools/list` payload. `MCPToolCatalog.enabledDefinitions` filters this to the
     /// groups the user has switched on before it is served.
@@ -1180,6 +1558,38 @@ enum MCPTools {
                     )
                 ],
                 required: ["path"]
+            )
+        ),
+        MCPToolDefinition(
+            name: notifyUser,
+            description: """
+                Send a notification about this session. By default it reaches the participant \
+                who wrote the current turn, so “notify me” follows the speaker rather than \
+                always meaning the Mac owner. It can explicitly target the owner, everyone in \
+                this chat, or one member by exact display name. It cannot target another chat. \
+                Use it only when a participant explicitly asks for the notification, and call \
+                it once when the requested milestone has actually been reached. It does not \
+                replace the normal final response in the conversation.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "title": MCPPropertySchema(
+                        type: .string,
+                        description: "Optional short notification title. Defaults to the session title."
+                    ),
+                    "message": MCPPropertySchema(
+                        type: .string,
+                        description: "A concise result or summary suitable for a lock screen."
+                    ),
+                    "recipient": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            Optional recipient: requester (default), owner, everyone, or a chat \
+                            member's exact display name.
+                            """
+                    )
+                ],
+                required: ["message"]
             )
         ),
         MCPToolDefinition(
@@ -2550,10 +2960,12 @@ enum MCPTools {
         MCPToolDefinition(
             name: listThemes,
             description: """
-                List the terminal colour themes available in Skalman — each one's name, whether \
-                it is built in, and its background and text colours — and report which theme \
-                this session is currently drawing with and which scope decided that. Use it \
-                before set_theme, and as the `base` for create_theme.
+                List the terminal colour themes available in Skalman — each one's stable ID, name, \
+                whether it is built in, custom, or dynamically follows the app chrome, and its \
+                background and text colours — and report which theme this session is currently \
+                drawing with and which scope decided that. Use it before set_theme, and as the \
+                `base_id` for \
+                create_theme.
                 """,
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
@@ -2569,15 +2981,16 @@ enum MCPTools {
                 means and is the only scope that touches nothing else; use `project` or \
                 `global` when the user asks for something broader.
 
-                Omit `theme` to clear that scope's choice, so it inherits again. Do not restyle \
-                the terminal unasked — this changes what the user is looking at.
+                Pass a `theme_id` from list_themes. Omit `theme_id` to clear that scope's \
+                choice, so it inherits again. Do not restyle the terminal unasked — this \
+                changes what the user is looking at.
                 """,
             inputSchema: MCPInputSchema(
                 properties: [
-                    "theme": MCPPropertySchema(
+                    "theme_id": MCPPropertySchema(
                         type: .string,
                         description: """
-                            The theme's name, exactly as list_themes reported it. Omit to clear \
+                            The stable ID exactly as list_themes reported it. Omit to clear \
                             the assignment at this scope and inherit again.
                             """
                     ),
@@ -2601,7 +3014,7 @@ enum MCPTools {
                 theme that exists — "something warmer", "match the Rust logo", "solarized but \
                 darker".
 
-                `colors` is merged onto `base`, so changing one colour means sending one \
+                `colors` is merged onto `base_id`, so changing one colour means sending one \
                 colour, not twenty. Every value is a hex string such as "#1E1E2E".
 
                 An existing theme is never overwritten: pick another name if this one is taken. \
@@ -2615,10 +3028,10 @@ enum MCPTools {
                         type: .string,
                         description: "A name for the new theme. Must not already be taken."
                     ),
-                    "base": MCPPropertySchema(
+                    "base_id": MCPPropertySchema(
                         type: .string,
                         description: """
-                            The theme to start from, by name. Defaults to whatever this session \
+                            The theme to start from, by stable ID. Defaults to whatever this session \
                             is drawing with now, so unspecified colours keep their current value.
                             """
                     ),
@@ -2626,7 +3039,7 @@ enum MCPTools {
                         type: .object,
                         description: """
                             The colours to change, as hex strings. Any subset; anything omitted \
-                            is taken from `base`.
+                            is taken from `base_id`.
                             """,
                         properties: paletteSchema
                     ),
@@ -2639,6 +3052,307 @@ enum MCPTools {
                     )
                 ],
                 required: ["name", "colors"]
+            )
+        ),
+        MCPToolDefinition(
+            name: listAppThemes,
+            description: """
+                List Skalman's app-chrome themes, their stable IDs, whether each is built in or \
+                custom, and which one is active. These style the window, sidebar, panels, text \
+                and control material; they are distinct from terminal themes. Call this before \
+                choosing or modifying an app theme.
+                """,
+            inputSchema: MCPInputSchema(properties: [:], required: [])
+        ),
+        MCPToolDefinition(
+            name: getAppTheme,
+            description: """
+                Read one complete app-chrome theme document in the same snake-case vocabulary \
+                accepted by create_app_theme and update_app_theme. Each available light/dark \
+                variant includes its authored and resolved roles, material, and complete paired \
+                terminal palette.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "theme_id": MCPPropertySchema(
+                        type: .string,
+                        description: "Stable ID from list_app_themes."
+                    )
+                ],
+                required: ["theme_id"]
+            )
+        ),
+        MCPToolDefinition(
+            name: setAppTheme,
+            description: """
+                Apply an app-chrome theme immediately and app-wide. There is one window chrome, \
+                so unlike terminal themes this has no session or project scope. Do not change it \
+                unasked: it changes what the user is looking at. Use the stable ID from \
+                list_app_themes, not the display name.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "theme_id": MCPPropertySchema(
+                        type: .string,
+                        description: "Stable ID from list_app_themes."
+                    )
+                ],
+                required: ["theme_id"]
+            )
+        ),
+        MCPToolDefinition(
+            name: createAppTheme,
+            description: """
+                Create a custom app-chrome theme from partial light and/or dark variant patches. \
+                One variant makes a fixed light or dark theme; both variants with appearance \
+                "adaptive" follow macOS automatically. A second variant is optional and can be \
+                added later with update_app_theme. Each variant inherits omitted roles, material, \
+                and terminal colours from the matching base variant (or the base's available \
+                variant when no match exists). The base defaults to the active app theme. The new \
+                theme is applied by default.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "name": MCPPropertySchema(
+                        type: .string,
+                        description: "Unique display name for the custom theme."
+                    ),
+                    "base_id": MCPPropertySchema(
+                        type: .string,
+                        description: "Base theme ID. Defaults to the active app theme."
+                    ),
+                    "appearance": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            "light", "dark", or "adaptive". Adaptive requires both variants and \
+                            follows the user's macOS appearance. Defaults to the base appearance, \
+                            or to the sole supplied variant when exactly one is provided.
+                            """
+                    ),
+                    "summary": MCPPropertySchema(
+                        type: .string,
+                        description: "Optional one-line description shown in Settings."
+                    ),
+                    "variants": MCPPropertySchema(
+                        type: .object,
+                        description: """
+                            Optional light and/or dark patches. Supplying both does not force \
+                            adaptive behaviour; `appearance` decides whether the theme follows \
+                            macOS or pins one variant.
+                            """,
+                        properties: [
+                            "light": MCPPropertySchema(
+                                type: .object,
+                                description: "The light appearance patch.",
+                                properties: appVariantSchema
+                            ),
+                            "dark": MCPPropertySchema(
+                                type: .object,
+                                description: "The dark appearance patch.",
+                                properties: appVariantSchema
+                            )
+                        ]
+                    ),
+                    "apply": MCPPropertySchema(
+                        type: .boolean,
+                        description: "Apply immediately. Defaults to true."
+                    )
+                ],
+                required: ["name"]
+            )
+        ),
+        MCPToolDefinition(
+            name: duplicateAppTheme,
+            description: """
+                Duplicate any app-chrome theme into an editable custom theme. Returns the copy's \
+                stable ID. Every available light/dark variant is copied; an adaptive theme stays \
+                adaptive. The copy is not applied by default.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "theme_id": MCPPropertySchema(
+                        type: .string,
+                        description: "Source ID from list_app_themes."
+                    ),
+                    "name": MCPPropertySchema(
+                        type: .string,
+                        description: "Optional unique name. Defaults to “Source Copy”."
+                    ),
+                    "apply": MCPPropertySchema(
+                        type: .boolean,
+                        description: "Apply the unmodified copy immediately. Defaults to false."
+                    )
+                ],
+                required: ["theme_id"]
+            )
+        ),
+        MCPToolDefinition(
+            name: updateAppTheme,
+            description: """
+                Patch an existing custom app-chrome theme in place while keeping its stable ID. \
+                Built-in themes are immutable. Only supplied variants and fields change; this can \
+                add a missing light or dark variant without replacing the existing one. Set \
+                appearance to "adaptive" once both exist to follow macOS. An active theme repaints \
+                live; an inactive theme stays inactive unless `apply` is true.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "theme_id": MCPPropertySchema(
+                        type: .string,
+                        description: "The custom theme's stable ID."
+                    ),
+                    "name": MCPPropertySchema(
+                        type: .string,
+                        description: "Optional new unique display name."
+                    ),
+                    "appearance": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            Optional "light", "dark", or "adaptive". Adaptive requires both a \
+                            light and dark variant.
+                            """
+                    ),
+                    "summary": MCPPropertySchema(
+                        type: .string,
+                        description: "Optional replacement summary; an empty string clears it."
+                    ),
+                    "variants": MCPPropertySchema(
+                        type: .object,
+                        description: "Only the light and/or dark variant fields to change.",
+                        properties: [
+                            "light": MCPPropertySchema(
+                                type: .object,
+                                description: "Patch or add the light appearance.",
+                                properties: appVariantSchema
+                            ),
+                            "dark": MCPPropertySchema(
+                                type: .object,
+                                description: "Patch or add the dark appearance.",
+                                properties: appVariantSchema
+                            )
+                        ]
+                    ),
+                    "apply": MCPPropertySchema(
+                        type: .boolean,
+                        description: """
+                            Apply after updating. If omitted, an active target stays active and \
+                            an inactive target stays inactive.
+                            """
+                    )
+                ],
+                required: ["theme_id"]
+            )
+        ),
+        MCPToolDefinition(
+            name: extensionListComponents,
+            description: """
+                List every versioned Skalman UI component an extension may customize. Returns \
+                stable component IDs, versions, context kinds and summaries. Use this before \
+                generating a component patch; never guess a view class or hierarchy.
+                """,
+            inputSchema: MCPInputSchema(properties: [:], required: [])
+        ),
+        MCPToolDefinition(
+            name: extensionScaffoldProject,
+            description: """
+                Create a new, separate Swift WebAssembly extension project at an absolute path. \
+                It vendors the exact SDK snapshot shipped by this Skalman build and creates a \
+                visible starter panel. It refuses overwrite and does not build, install, enable, \
+                or grant capabilities. Use this when the user asks to make Skalman do something \
+                through an extension rather than by editing Skalman's own source.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "name": MCPPropertySchema(
+                        type: .string,
+                        description: "Human-readable extension name."
+                    ),
+                    "identifier": MCPPropertySchema(
+                        type: .string,
+                        description: "Lowercase reverse-DNS extension identifier."
+                    ),
+                    "directory": MCPPropertySchema(
+                        type: .string,
+                        description: "Absolute path for the new project. It must not exist."
+                    )
+                ],
+                required: ["name", "identifier", "directory"]
+            )
+        ),
+        MCPToolDefinition(
+            name: extensionProposeInstall,
+            description: """
+                Inspect a built .skalmanextension package or unpacked package directory, show \
+                its runtime and complete capability request to the user, and install it only \
+                after explicit approval. A successful installation is always left disabled; \
+                this tool cannot enable an extension or grant capabilities silently.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "directory": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            Absolute path to the assembled .skalmanextension package or unpacked \
+                            package directory. This is not the source-project directory.
+                            """
+                    )
+                ],
+                required: ["directory"]
+            )
+        ),
+        MCPToolDefinition(
+            name: extensionDescribeComponent,
+            description: """
+                Describe one public extension component in full: properties, slots, replacement \
+                limits, host-owned behavior, contextual image assets, an example patch and a \
+                generated contract-specific JSON Schema.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "component": MCPPropertySchema(
+                        type: .string,
+                        description: "Stable ID from extension_list_components."
+                    ),
+                    "version": MCPPropertySchema(
+                        type: .number,
+                        description: "Optional contract version. Omit for the current version."
+                    )
+                ],
+                required: ["component"]
+            )
+        ),
+        MCPToolDefinition(
+            name: extensionValidateComponentPatch,
+            description: """
+                Decode and validate one component-patch JSON object with exactly the same SDK \
+                validator Skalman uses before accepting a running extension's publication. \
+                Returns precise JSON paths for every rejected constraint.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "patch": MCPPropertySchema(
+                        type: .string,
+                        description: "The complete ExtensionComponentPatch JSON object as a string."
+                    )
+                ],
+                required: ["patch"]
+            )
+        ),
+        MCPToolDefinition(
+            name: extensionPreviewComponentPatch,
+            description: """
+                Validate and render a component patch through Skalman's native semantic-node \
+                renderer, then show the result in this session's display panel. The preview uses \
+                safe representative host assets and does not install or publish the patch.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "patch": MCPPropertySchema(
+                        type: .string,
+                        description: "The complete ExtensionComponentPatch JSON object as a string."
+                    )
+                ],
+                required: ["patch"]
             )
         )
     ]
@@ -2667,5 +3381,94 @@ enum MCPTools {
         }
 
         return properties
+    }
+
+    private static var appRoleSchema: [String: MCPPropertySchema] {
+        Dictionary(uniqueKeysWithValues: AppThemeRole.allCases.map { role in
+            (
+                role.wireName,
+                MCPPropertySchema(
+                    type: .string,
+                    description: "Semantic \(role.wireName) colour as #RRGGBB or #RRGGBBAA."
+                )
+            )
+        })
+    }
+
+    private static var appVariantSchema: [String: MCPPropertySchema] {
+        [
+            "roles": MCPPropertySchema(
+                type: .object,
+                description: """
+                    Semantic chrome colours to replace in this appearance. Values are #RRGGBB \
+                    or #RRGGBBAA; omitted roles stay inherited from the base variant.
+                    """,
+                properties: appRoleSchema
+            ),
+            "material": MCPPropertySchema(
+                type: .object,
+                description: "Shape and panel-shadow values for this appearance.",
+                properties: appMaterialSchema
+            ),
+            "terminal_colors": MCPPropertySchema(
+                type: .object,
+                description: """
+                    Paired terminal palette used by “Follow App Theme” in this appearance. \
+                    Omitted colours inherit from the base variant.
+                    """,
+                properties: paletteSchema
+            )
+        ]
+    }
+
+    private static var appMaterialSchema: [String: MCPPropertySchema] {
+        [
+            "panel_radius": MCPPropertySchema(
+                type: .number,
+                description: "Panel corner radius, 0–24 points."
+            ),
+            "control_radius": MCPPropertySchema(
+                type: .number,
+                description: "Nested-control corner radius, 0–24 points."
+            ),
+            "border_width": MCPPropertySchema(
+                type: .number,
+                description: "Border width, 0.5–4 points."
+            ),
+            "glow": MCPPropertySchema(
+                type: .object,
+                description: """
+                    Optional panel shadow. Zero offsets make a centred glow; non-zero offsets \
+                    make a directional soft or hard shadow. Twice the radius plus the absolute \
+                    offset on either axis must fit the 20-point shadow gutter.
+                    """,
+                properties: [
+                    "role": MCPPropertySchema(
+                        type: .string,
+                        description: "Theme role whose colour supplies the glow."
+                    ),
+                    "radius": MCPPropertySchema(
+                        type: .number,
+                        description: "Shadow blur radius, 0–10 points; 0 makes a hard shadow."
+                    ),
+                    "opacity": MCPPropertySchema(
+                        type: .number,
+                        description: "Glow opacity, 0–1."
+                    ),
+                    "offset_x": MCPPropertySchema(
+                        type: .number,
+                        description: "Horizontal shadow offset, -10–10 points; 0 makes a centred glow."
+                    ),
+                    "offset_y": MCPPropertySchema(
+                        type: .number,
+                        description: "Vertical shadow offset, -10–10 points; 0 makes a centred glow."
+                    )
+                ]
+            ),
+            "remove_glow": MCPPropertySchema(
+                type: .boolean,
+                description: "True removes the base theme's glow."
+            )
+        ]
     }
 }

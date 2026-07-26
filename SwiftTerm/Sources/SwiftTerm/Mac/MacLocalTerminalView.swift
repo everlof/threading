@@ -90,11 +90,25 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
      * The `processDelegate` is used to deliver messages and information relevant t
      */
     public weak var processDelegate: LocalProcessTerminalViewDelegate?
+
+    /**
+     * Gives a subclass a chance to keep the child process on an explicitly managed grid.
+     *
+     * The terminal renderer has already observed the AppKit frame change when this is called.
+     * Returning false suppresses only the PTY resize and delegate notification; the subclass
+     * can immediately re-apply its managed grid. The default preserves SwiftTerm behaviour.
+     */
+    open func shouldApplyProcessSizeChange(newCols: Int, newRows: Int) -> Bool {
+        true
+    }
     
     /**
      * This method is invoked to notify the client of the new columsn and rows that have been set by the UI
      */
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        guard shouldApplyProcessSizeChange(newCols: newCols, newRows: newRows) else {
+            return
+        }
         guard process.running else {
             return
         }

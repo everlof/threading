@@ -290,6 +290,8 @@ instead, and every session has one.
 - Each session keeps its own shell, and its own answer to whether the drawer is open. The
   process stays alive while you work elsewhere, so your directory and history are still there
   when you come back, and it is closed with the session.
+- It is hidden while Settings or the new-session composer is on screen — neither is a session,
+  so neither has a shell — and comes back with the session when you return to it.
 
 Shell sessions from earlier versions are removed when your state is upgraded. They held
 nothing — no conversation, no transcript, and no saved scrollback — and every session gains a
@@ -330,7 +332,9 @@ its transcript for natively rendered ones (including a `/rename` typed into the 
 the agent has named it, a session is named after its first prompt.
 
 Renaming a session in Skalman pins your own name instead, and it stops following the agent.
-Clear the name to go back to following it. Turn the follow behaviour off entirely under
+The rename sheet's **Use Agent's Name** button hands it back — it appears only when you have
+given the session a name of your own, since that is the only time there is anything to undo.
+Turn the follow behaviour off entirely under
 **Settings > General > Name sessions after the agent's own title** — sessions then keep their
 first-prompt names.
 
@@ -453,8 +457,8 @@ Resuming a `claudedb` conversation under the default account would not find it.
 The default account launches with `env -u CLAUDE_CONFIG_DIR` rather than a bare command, so an
 override exported by your shell cannot silently route it to the wrong account.
 
-### Usage in the toolbar
-The toolbar shows how much of the current account's rate limit is spent —
+### Usage in the session header
+The header above the session shows how much of the current account's rate limit is spent —
 each window labelled with its value, like `5h 43% · 7d 73%`, beside a small ring gauging
 whichever window is closest to its limit. It follows the selected session's account, and
 hides for shells and anything else without a metered login. The pill stays monochrome while
@@ -628,6 +632,48 @@ It is early. Compared to the terminal you lose slash commands, plan mode, interr
 mid-flight, and some of the agent's richer rendering. Use it where you want the conversation to
 read like a conversation; use the terminal when you need the complete agent interface.
 
+## Remote Access (beta)
+
+Turn on **Settings > General > Remote Access > Allow remote access** to mirror Skalman from a
+browser or the Skalman iPhone app. **Open Locally** tests the browser client on the Mac,
+and **Pair iPhone…** shows an owner-device QR code for the native app. Pairing is for your own
+trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded
+Native permission requests. To involve somebody else, use a session's **… > Share Chat…** and
+choose a view-only, collaborator, or collaborator-with-approval invitation for that chat alone.
+The invitation works once and expires after 24 hours only if unused. Acceptance creates a
+device-bound membership that lasts until **Stop Sharing**, Remote Access is disabled, or the Mac
+app exits. Permission approval is an explicit right for that member and chat; it never grants
+another chat, Mac settings, or the ability to create shares.
+
+A dormant session can be resumed remotely; a running agent UI mirrors its terminal scrollback
+and accepts keyboard input, while Native sessions show the conversation, composer, and
+permission cards. Long Native conversations initially open at their newest messages. Pull near
+the top or choose **Load earlier messages** to fetch older pages without losing your reading
+position. A permission whose edit diff is too large for a bounded remote snapshot must be
+reviewed on the Mac, so a remote device can never approve from a partial preview.
+
+On iPhone, open a chat's **… > Attachments** to see images and PDFs that session has
+mentioned. The list is available only to a paired owner device, not to one-chat guest links.
+The Mac sends a file only when you choose its preview, and only if the referenced file still
+exists inside that session's checkout.
+
+The iPhone explains notifications in the dashboard before asking iOS for permission. They cover
+accepted shared chats, Native permission cards, and updates you explicitly ask an agent to send
+when it finishes. Opening one goes directly to its chat; permission details and Allow/Deny stay
+behind the authenticated chat rather than appearing on the lock screen. Terminal UI prompts are
+not parsed. With APNs provider credentials the notification reaches a suspended phone; otherwise
+the settings page marks the connection **Live only**. For `notify_user`, “me” follows whoever
+wrote the current turn; an explicit request can instead target the owner, everyone in this chat,
+or a named member. Open Native chats also show live **Name is typing…** presence without locking
+anyone out of the composer.
+
+Every link is a password, but an owner pairing code is much more powerful than a one-chat guest
+link. Each Skalman launch creates a fresh owner link. Turning Remote Access off, or quitting the
+app, closes the local listener and secure relay and revokes the links immediately. Remote
+traffic uses a temporary Cloudflare HTTPS relay; without `cloudflared`, **Open Locally** still
+works but access from another device does not. See [Remote access](docs/REMOTE_ACCESS.md) for
+pairing, notifications, the complete security model, and beta limitations.
+
 ## Display Panel
 
 A terminal can only draw text. The display panel is the way around that: a third pane on
@@ -636,16 +682,24 @@ the right that Claude or Codex can put content into while you keep working in th
 Ask for something visual — "show me that screenshot", "chart the bundle sizes", "render that
 as a table" — and the panel opens beside the terminal. Close it with the **✕** in its header;
 it reopens the next time the agent displays something. It can also be opened by hand — the
-panel toggle at the toolbar's right edge, or **View ▸ Display Panel** — so its tabs (the
+panel toggle at the session header's right edge, or **View ▸ Display Panel** — so its tabs (the
 browser, Git Review, Session Info) are reachable without an agent putting content there first.
 
-### Toolbar controls
+### The session header
 
-Three buttons sit at the toolbar's right edge:
+Every session sits under a header of its own, at the top of the pane: the page tab and a **+**
+for a new session on the left, then what that session's account has left to spend, then what
+can be done to it. It belongs to the pane rather than to the window, so it moves when the
+sidebar is dragged or collapsed instead of drifting over the project list.
+
+The window's toolbar keeps only the **sidebar toggle**, beside the traffic lights — the one
+control that acts on the window rather than on a pane.
+
+Three buttons sit at the header's right edge:
 
 - **Context** (⋯) — a menu of what applies to the session on screen. So far: the **Theme**
   picker (the same one as the session row's `⋯` menu), with an *Edit Themes…* door to
-  Settings.
+  Settings, plus **Attachments** for files the agent has mentioned.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
 
@@ -656,6 +710,49 @@ Two kinds of content:
 - **HTML** — wide tables, charts, Mermaid diagrams, side-by-side diffs, rendered reports.
   It is a real browser engine, so scripts run and libraries load from a CDN; an agent can
   pull in Chart.js or Mermaid rather than hand-rolling SVG.
+
+### Attachments
+
+When Claude or Codex prints a path to an existing PNG, JPEG, GIF, WebP, HEIC, TIFF, BMP, or
+PDF, Skalman adds it to that session's **Attachments** tab. The same detection runs over native
+Chat replies, and an image deliberately shown through the display tool is added too. Code files
+are ignored because Git Review already covers them.
+
+Open **Attachments** from the session header's **⋯** menu or the panel's **+** menu. The list
+sits above an inline image/PDF preview; **Open**, **Finder**, and **Copy Path** act on the
+selected file. A new reference to the same path moves it to the top and refreshes the preview,
+so the project file remains the source of truth rather than being copied into Skalman.
+
+Only real files inside the session's checkout are accepted. Missing paths, unsupported file
+types, directories, and symlinks escaping the checkout are ignored. Terminal discovery happens
+after an output burst settles, so it does not need native rendering or an explicit MCP tool call.
+
+Automatic detection is an opt-out feature and is enabled separately for both agents by default.
+Use **Settings > General > Attachments** to turn **Detect attachments from Claude Code** or
+**Detect attachments from Codex** off independently if a future CLI version changes how it
+renders file paths. Turning detection off stops scanning that agent's terminal and Native replies;
+files deliberately shown through the display tool still appear.
+
+### The shared browser
+
+**View ▸ Browser** (Cmd+Shift+B) opens a real browser tab belonging to the current session.
+It has an address bar, history controls, persistent cookies, and the Web Inspector. The agent
+driving that session sees and acts on this same tab—it can open pages, go back or forward,
+reload, read a semantic page outline, click, hover, drag between page elements, type, and select
+form options, set checkboxes and switches to an exact state, use single, double, right, and middle
+clicks, send keyboard shortcuts with native focus and control behavior, wait for text, URL, or
+element-state updates, inspect bounded console and network diagnostics, and return screenshots.
+
+Local development pages are available immediately. Before an agent can read or act on another
+website, Skalman asks whether to allow it once, always allow that origin, or deny it. Persistent
+grants are listed under **Settings ▸ Tools ▸ Website Access**, where they can be revoked. Redirects
+are checked again before the destination page is returned to the agent.
+
+Passwords, file selection, download destinations, and form submissions stay with you. Skalman
+reveals the browser or opens a native sheet for those boundaries instead of passing their secrets
+or decisions through the conversation. Console, network, CSS-query, and page-snapshot results are
+explicitly marked as untrusted page data; request bodies, response bodies, headers, and cookies
+are never captured for the agent.
 
 Clicking a link in an HTML document opens it in your real browser rather than navigating the
 panel, which has no back button or address bar to get you home again.
@@ -799,11 +896,53 @@ Two modes, both under the View menu:
 **Esc** backs out of either. Invoking one command while the other is active switches mode in
 place; invoking the same one again cancels. A capture ends the mode.
 
+### Hierarchy and spacing layers
+
+While **Inspect Element** is active, two modifiers add layers to what is drawn. They are
+independent, so either or both can be held, and the hint in the corner of the overlay says so.
+
+- **⌃ (Control) — hierarchy.** Every ancestor of the element is outlined too, each in its own
+  colour, with a numbered chip at its top-left corner and a key in the opposite bottom corner
+  mapping each colour to its class and size. Only the element itself is filled; the ancestors
+  are outlines, so an eleven-deep chain stays a hierarchy rather than a wash. The element
+  needs no chip — its badge is drawn in its own colour instead, which is what ties it to the
+  first row of the key.
+- **⌥ (Option) — spacing.** The gaps around the picked element are measured: a dashed line
+  with the number of points on it, in the parent's colour. Flush edges are left unmarked — a
+  `0` on all four sides of a fitted view says nothing — and a child that *overflows* its
+  parent is reported as a **negative** number, which is the one measurement here that is a
+  bug on its own rather than a value to judge.
+- **⌥ alone** draws the element and the one level outside it, which is the common question
+  ("why is this inset like that") without the whole chain.
+
+**The drawing measures one thing; the key measures all of them.** A 14pt sidebar icon sits
+eleven levels deep in a real window, so measuring every pair on the canvas puts twenty-eight
+numbers around one icon and loses the four that were asked for. Only the picked element's own
+gaps are drawn. Every other pair is listed in the key as text (`4 in 5 · leading 4 ·
+trailing 32 · top 5 · bottom 5`), where a line costs nothing and covers nothing — which is
+also what makes the measurements legible no matter how small the element is.
+
+Numbers that will not fit in the gap they measure step outside it, and a hairline **leader**
+runs back to the gap they came from, so a displaced number still says what it belongs to.
+
+A run of views sharing one rectangle — a wrapper that exactly fills its parent — counts as
+**one level with several names**, shown as `NSStackView = NSView`. Two outlines on the same
+pixels would claim there are two things to look at when there is one. In practice this is
+what keeps a real chain readable: the terminal's eleven views collapse to four rectangles.
+
+Whatever is held at the moment you click is what the screenshot shows *and* what the report
+text describes, so the legend, the colours and the measurements all arrive in the pasted
+markdown. The on-screen key folds if the window is too short to hold every row; the report
+always lists them all.
+
 Every capture opens a report sheet holding a screenshot of the whole window with the capture
 marked, and the report text:
 
 - Element reports name the view's class, its frame, the view chain above it, and the view
-  controllers responsible — the names a conversation about this codebase already uses.
+  controllers responsible — the names a conversation about this codebase already uses. If a
+  layer was held, they also carry the colour legend (`Orange · 1 · RowView · 372×64 at
+  (24, 180)`) and the measured spacing per parent, so the colours in the screenshot can be
+  named by anyone — or any agent — reading only the text.
 - Point and region reports give the geometry twice: in window coordinates (bottom-left
   origin, what AppKit code speaks) and from the top-left (how anyone reading the screenshot
   counts).
@@ -871,7 +1010,14 @@ Configure in **Preferences > Profiles**:
 
 ## Settings
 
-Open with **Cmd+,**.
+**Cmd+,** opens Settings, and pressing it again closes it — unlike most Mac apps, where
+preferences are their own window and Cmd+W closes them. Here Settings is a *page in this
+window*, replacing the session in the pane and the project list in the sidebar, so the chord
+that put it there is what takes it away. The **✕** on its tab, and the cogwheel at the bottom
+of the sidebar, do the same thing.
+
+While Settings is the page, the header offers no **+**: that button creates a session, and a
+preferences page is no context for one.
 
 ### General
 - **New sessions use** — the agent the composer opens on; any other can be picked there
@@ -881,6 +1027,7 @@ Open with **Cmd+,**.
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
 - **Ask before closing a running session**
+- **Allow remote access** — see [Remote Access](#remote-access-beta)
 - **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
 - **Skip Codex hook review** — see [Codex hooks](#codex-hooks)
 - **Shell path** — used by the shell drawer (⌃`); agents always launch via your login shell
@@ -888,9 +1035,18 @@ Open with **Cmd+,**.
 ### Motion
 
 - **Working indicator** defaults to **Random**, choosing a new orb for each turn without
-  immediately repeating the last one. Choose a named orb to use that animation every time.
-- **Chat name transition** defaults to **Shape Morph**. Every available transition can be
-  previewed on the page and used when the active chat is renamed.
+  immediately repeating the last one. Choose a named orb to use that animation every time. The
+  list shows every orb running side by side, so they can be compared without being selected one
+  at a time; Random's row re-rolls each time you point at it.
+- **Chat name transition** defaults to **Shape Morph**. Point at a transition in the list and
+  its row demonstrates it, morphing between the transition's name and the app's own and back for
+  as long as you stay on it — one row at a time, and only after a short pause, so a pointer
+  crossing the list leaves every name readable. Every transition can also be
+  previewed on the page. It plays wherever a name you are already looking at changes: the
+  sidebar row, the session header's page tab, and project and checkout rows — whether the change
+  came from renaming the session yourself, from the agent naming the conversation, or from
+  a checkout switching branch. A row being filled in for the first time, or scrolled back
+  into view, simply shows its name.
 
 Animation timing is tuned by Skalman rather than exposed as another preference, and transitions
 honour macOS Reduce Motion.
@@ -924,7 +1080,7 @@ next launch.
 Per-account icons and names. See [Accounts](#accounts).
 
 ### Will it last?
-The usage panel above the composer, and the toolbar's pill popover, say how much of each
+The usage panel above the composer, and the header's pill popover, say how much of each
 window is spent. When Skalman has watched a window long enough to see a *rate*, it also says
 where that rate leads:
 
@@ -943,7 +1099,7 @@ recovers the past week from disk the first time it looks. Claude records none, s
 projection appears after Skalman has watched the window for a while.
 
 ### Usage
-Where your tokens went, read from the agents' own transcripts — the question the toolbar's
+Where your tokens went, read from the agents' own transcripts — the question the header's
 usage pill provokes and cannot answer. It says the week is 85% spent; this says what spent it.
 
 It opens with the windows you are actually metered on — the join neither source can make
@@ -1092,11 +1248,13 @@ recorded about it dying — is what a crash needs explaining.
 | Shell drawer | Ctrl+` |
 | Inspect Element | Cmd+Option+I |
 | Inspect Geometry (freeflow) | Cmd+Option+Shift+I |
+| …hold while inspecting: outline every parent | Ctrl |
+| …hold while inspecting: measure the spacing | Option |
 | Bigger Font | Cmd++ |
 | Smaller Font | Cmd+- |
 | Full Screen | Cmd+Ctrl+F |
 | Minimize | Cmd+M |
-| Preferences | Cmd+, |
+| Settings (opens, and closes again) | Cmd+, |
 
 ### Changing shortcuts
 

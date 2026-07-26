@@ -291,20 +291,33 @@ enum MCPDefaults {
 enum DisplayPaneDefaults {
     static let minWidth: CGFloat = 200
     static let defaultWidth: CGFloat = 380
-    static let headerHeight: CGFloat = 28
+
+    /// How hard the panel holds the width the divider was dragged to.
+    ///
+    /// `NSSplitViewController` positions its items with a constraint at the item's holding
+    /// priority, and an ordinary view's content hugging is `defaultLow` — the *same* 250. A tie
+    /// is what the panel had: drag it wider and on mouse-up the solver was free to prefer the
+    /// labels' natural width, so the pane sprang back to whatever its content happened to want.
+    /// One step above that settles it, and leaves the panel below the priority at which its own
+    /// content resists being squeezed — the pane still stops at `minWidth`, it just no longer
+    /// undoes the drag. The terminal keeps the default and so absorbs a window resize.
+    static let holdingPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.defaultLow.rawValue + 10
+    )
     static let padding: CGFloat = 8
     static let buttonSize: CGFloat = 20
     static let titleFontSize: CGFloat = 11
     static let captionFontSize: CGFloat = 10
 
-    /// The tab strip appears only once surfaces coexist — a lone image keeps the cleaner
-    /// header-titled look, and the strip earns its row only when there is a choice to make.
-    static let tabBarMinimumTabs = 2
+    /// The pane's one header row: its tabs, and the `+` beside them. There was a titled header
+    /// above the strip and a rule saying the strip appeared only once two surfaces coexisted;
+    /// together they spent two rows of a narrow pane saying the name of the tab twice, once in a
+    /// heading and once in the tab under it.
     static let tabBarHeight: CGFloat = 36
     static let tabChipMaxWidth: CGFloat = 180
 
-    /// Content tabs an agent stacks up are capped so a session that keeps displaying charts
-    /// does not grow an unbounded strip; the oldest content tab is dropped, never the browser.
+    /// Agent-created content and browser tabs are capped independently so neither repeated
+    /// rendering nor tab-opening can grow an unbounded strip or retain unbounded web processes.
     static let maximumContentTabs = 8
     static let maximumBrowserTabs = 8
 }
@@ -368,9 +381,17 @@ enum SidebarDefaults {
     /// Breathing room between the toolbar's safe area and the first row.
     static let contentTopInset: CGFloat = 4
 
-    /// Reserved strip at the bottom of the sidebar for the add-project control.
-    static let footerHeight: CGFloat = 32
-    static let footerInset: CGFloat = 10
+    /// How hard the sidebar holds its width against a window resize.
+    ///
+    /// The sidebar behaviour arranged this for itself; a plain split item does not, and without
+    /// it both panes grew when the window did — a sidebar that widens with the window is a
+    /// sidebar the user has to keep putting back. One step above the default settles it in
+    /// favour of the terminal, which is the pane that should absorb the change. The same
+    /// reasoning and the same step as `DisplayPaneDefaults.holdingPriority`, at the other end
+    /// of the window.
+    static let holdingPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.defaultLow.rawValue + 10
+    )
 
     static let renameFieldWidth: CGFloat = 260
     static let renameFieldHeight: CGFloat = 24
@@ -411,16 +432,28 @@ enum SidebarRowDefaults {
     static let settingsSymbol = "gearshape"
     /// Applied to secondary text when inverted on an emphasized selection.
     static let secondaryTextAlpha: CGFloat = 0.7
-    static let horizontalSpacing: CGFloat = 7
+
+    // The three below were 7, 5 and 8 — none of them on `Design.Spacing`'s scale, which is
+    // deliberately small (4/6/10/12) precisely so a row cannot drift a point away from every
+    // other row in the app. They were each measured against this one list rather than chosen,
+    // which is how the `⋯` came to sit at a different inset from the `×` beside it in the
+    // toolbar. On the scale now, at the nearest step in each case.
+    static let horizontalSpacing: CGFloat = Design.Spacing.small
     /// The outline view places the cell almost flush against the disclosure chevron, so the
     /// gap between them is owned here.
-    static let leadingInset: CGFloat = 5
-    static let trailingInset: CGFloat = 8
+    static let leadingInset: CGFloat = Design.Spacing.tight
+    static let trailingInset: CGFloat = Design.Spacing.small
     static let iconSize: CGFloat = 13
     /// Wider than `iconSize` so a 12pt emoji, whose glyph outgrows its font size, is not
     /// clipped at the slot's edges.
     static let iconSlotWidth: CGFloat = 16
-    static let trailingSlotSize: CGFloat = 16
+
+    /// The row's trailing control — its status dot, and the `⋯` that replaces it on hover.
+    ///
+    /// The same target as every other nested icon button, rather than the 16 it used to be: a
+    /// row's `⋯` and a tab's `×` are one control, and sizing this one where it was used is what
+    /// made them differ. See `ThemedIconButton.Target.inline`.
+    static let trailingSlotSize: CGFloat = Design.Size.inlineButtonTarget
     /// Gap between the `+` and `⋯` when a project row shows both on hover.
     static let hoverButtonSpacing: CGFloat = 2
 
@@ -485,6 +518,11 @@ struct TerminalSessionDidEnd: AppEvent {
 
 struct ProjectsDidChange: AppEvent {
     static let name = Notification.Name("projectsDidChange")
+}
+
+struct SessionActivityDidChange: AppEvent {
+    static let name = Notification.Name("sessionActivityDidChange")
+    let sessionID: SessionID
 }
 
 struct AppSettingsDidChange: AppEvent {

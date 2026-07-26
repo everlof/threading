@@ -64,6 +64,290 @@ struct BrowserPageIdentity: Equatable {
     let url: String
 }
 
+// MARK: - Browser Chrome
+
+/// The compact, responsive strip shared by every live browser tab.
+///
+/// Browser-only diagnostics do not get one glyph each: the strip protects the address field as
+/// its primary content, then collects active test conditions behind one counted control and the
+/// less common reload/pop-up actions behind overflow. This matters at the display pane's 260pt
+/// minimum, where a row of individually surfaced tools otherwise becomes narrower than its URL.
+final class BrowserChromeBar: NSView {
+
+    private enum Layout {
+        static let minimumAddressWidth: CGFloat = 72
+        static let compactForwardThreshold: CGFloat = 320
+        static let labelledConditionThreshold: CGFloat = 360
+        static let expandedPrivateThreshold: CGFloat = 520
+    }
+
+    let backButton = BrowserChromeBar.button("chevron.backward", "Back")
+    let forwardButton = BrowserChromeBar.button("chevron.forward", "Forward")
+    let reloadButton = BrowserChromeBar.button("arrow.clockwise", "Reload")
+    let addressField = ThemedTextField()
+    let testConditionsButton = BrowserChromeBar.button(
+        "slider.horizontal.3",
+        "Test Conditions"
+    )
+    let closePopupButton = BrowserChromeBar.button("xmark", "Close Pop-up")
+    let overflowButton = BrowserChromeBar.button("ellipsis", "Browser Options")
+
+    private let privateIndicator = BrowserPrivateIndicator()
+    private let stack: NSStackView
+    private let contextKind: BrowserContextKind
+    private var activeTestConditionCount = 0
+    private var canGoForward = false
+    private var popupDepth = 0
+    private var isLoading = false
+    private(set) var areTestConditionsFolded = false
+    private(set) var isReloadFolded = false
+
+    init(contextKind: BrowserContextKind) {
+        self.contextKind = contextKind
+        stack = NSStackView(views: [
+            backButton,
+            forwardButton,
+            reloadButton,
+            privateIndicator,
+            addressField,
+            testConditionsButton,
+            closePopupButton,
+            overflowButton
+        ])
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setup()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setup() {
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = Design.Spacing.small
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.small,
+            left: Design.Spacing.medium,
+            bottom: Design.Spacing.small,
+            right: Design.Spacing.medium
+        )
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        addressField.placeholderString = BrowserDefaults.addressPlaceholder
+        addressField.font = Design.Typography.body()
+        addressField.focusRingType = .none
+        addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        addressField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let minimumAddress = addressField.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: Layout.minimumAddressWidth
+        )
+        minimumAddress.priority = .defaultHigh
+
+        for control in [
+            backButton,
+            forwardButton,
+            reloadButton,
+            testConditionsButton,
+            closePopupButton,
+            overflowButton
+        ] {
+            control.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        privateIndicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        privateIndicator.isHidden = contextKind != .private
+        testConditionsButton.isHidden = true
+        closePopupButton.isHidden = true
+        closePopupButton.toolTip = "Close pop-up and return to its opener"
+
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            minimumAddress
+        ])
+    }
+
+    override func layout() {
+        super.layout()
+        updateResponsiveLayout()
+    }
+
+    func setNavigationState(canGoBack: Bool, canGoForward: Bool, popupDepth: Int) {
+        backButton.isEnabled = canGoBack
+        forwardButton.isEnabled = canGoForward
+        self.canGoForward = canGoForward
+        self.popupDepth = popupDepth
+        closePopupButton.isHidden = popupDepth == 0
+        updateResponsiveLayout()
+    }
+
+    func setLoading(_ isLoading: Bool) {
+        self.isLoading = isLoading
+        let symbol = isLoading ? "xmark" : "arrow.clockwise"
+        let label = isLoading ? "Stop Loading" : "Reload"
+        reloadButton.image = Self.image(symbol, accessibility: label)
+        reloadButton.toolTip = label
+        reloadButton.setAccessibilityLabel(label)
+        updateResponsiveLayout()
+    }
+
+    func setActiveTestConditionCount(_ count: Int) {
+        activeTestConditionCount = count
+        testConditionsButton.toolTip = count == 1
+            ? "1 Active Test Condition"
+            : "\(count) Active Test Conditions"
+        updateResponsiveLayout()
+    }
+
+    func updateResponsiveLayout() {
+        let width = bounds.width
+
+        // A disabled Forward is the first thing to yield at the narrowest supported pane width.
+        // It reappears as soon as it can do work, so responsive chrome never removes navigation.
+        forwardButton.isHidden = width < Layout.compactForwardThreshold && !canGoForward
+
+        // Under the medium breakpoint the conditions move into Browser Options. The options
+        // button adopts their glyph and count, so the override stays visible without spending
+        // two targets on diagnostics before the URL.
+        let shouldFoldTestConditions = width < Layout.labelledConditionThreshold
+            && activeTestConditionCount > 0
+        let conditionFoldingChanged = shouldFoldTestConditions != areTestConditionsFolded
+        areTestConditionsFolded = shouldFoldTestConditions
+        testConditionsButton.isHidden = activeTestConditionCount == 0
+            || areTestConditionsFolded
+
+        let conditionTitle = activeTestConditionCount > 0
+            && width >= Layout.labelledConditionThreshold
+            ? "\(activeTestConditionCount)"
+            : ""
+        if testConditionsButton.title != conditionTitle {
+            testConditionsButton.title = conditionTitle
+        }
+
+        let overflowTitle = areTestConditionsFolded ? "\(activeTestConditionCount)" : ""
+        if overflowButton.title != overflowTitle {
+            overflowButton.title = overflowTitle
+        }
+        if conditionFoldingChanged {
+            let overflowSymbol = areTestConditionsFolded ? "slider.horizontal.3" : "ellipsis"
+            overflowButton.image = Self.image(overflowSymbol, accessibility: "Browser Options")
+        }
+        overflowButton.toolTip = areTestConditionsFolded
+            ? "\(activeTestConditionCount) Active Test Conditions · Browser Options"
+            : "Browser Options"
+
+        // A committed pop-up already has Back, an explicit Close, and Browser Options. Ordinary
+        // Reload is also in that menu; at the narrowest width it yields unless it is currently
+        // the Stop control, which must remain one click away while a load is in flight.
+        isReloadFolded = width < Layout.compactForwardThreshold
+            && popupDepth > 0
+            && !isLoading
+        reloadButton.isHidden = isReloadFolded
+
+        privateIndicator.isExpanded = contextKind == .private
+            && width >= Layout.expandedPrivateThreshold
+    }
+
+    static func button(_ symbol: String, _ label: String) -> ThemedButton {
+        let button = ThemedButton(image: image(symbol, accessibility: label), target: nil, action: nil)
+        button.toolTip = label
+        return button
+    }
+
+    static func image(_ symbol: String, accessibility: String) -> NSImage? {
+        NSImage(systemSymbolName: symbol, accessibilityDescription: accessibility)?
+            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+    }
+}
+
+/// A status badge, not a button: private state remains visible beside the address even after a
+/// loaded page replaces the tab's generic "Private Browser" title.
+private final class BrowserPrivateIndicator: NSView, ThemedComponent {
+
+    private let imageView: NSImageView
+    private let label = NSTextField(labelWithString: "Private")
+    private let contentStack: NSStackView
+    private var themeRedraw: ThemeRedraw?
+
+    var isExpanded = false {
+        didSet {
+            guard isExpanded != oldValue else { return }
+            label.isHidden = !isExpanded
+            invalidateIntrinsicContentSize()
+            needsLayout = true
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        imageView = NSImageView(
+            image: BrowserChromeBar.image(
+                "hand.raised.fill",
+                accessibility: "Private Browsing"
+            ) ?? NSImage()
+        )
+        contentStack = NSStackView(views: [imageView, label])
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        themeRedraw = ThemeRedraw(self)
+
+        imageView.contentTintColor = Design.Text.secondary
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        label.font = Design.Typography.caption()
+        label.textColor = Design.Text.secondary
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.isHidden = true
+
+        contentStack.orientation = .horizontal
+        contentStack.alignment = .centerY
+        contentStack.spacing = Design.Spacing.tight
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(contentStack)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Design.Size.chipHeight),
+            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.tight),
+            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.tight),
+            contentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: Design.Symbol.control + 2),
+            imageView.heightAnchor.constraint(equalToConstant: Design.Symbol.control + 2)
+        ])
+
+        toolTip = "Private browser · isolated, non-persistent website data"
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel("Private Browser")
+        setAccessibilityHelp("Uses isolated, non-persistent website data")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let compactWidth = Design.Spacing.tight * 2 + Design.Symbol.control + 2
+        let expandedWidth = compactWidth
+            + Design.Spacing.tight
+            + ceil("Private".size(withAttributes: [.font: Design.Typography.caption()]).width)
+        return NSSize(
+            width: isExpanded ? expandedWidth : compactWidth,
+            height: Design.Size.chipHeight
+        )
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        ThemedSurface.draw(
+            bounds,
+            fill: Design.Surface.controlResting,
+            border: Design.Surface.border
+        )
+    }
+}
+
 // MARK: - Browser View Controller
 
 /// A real, navigable browser surface — distinct from `DisplayPaneController`, which stays the
@@ -77,32 +361,15 @@ final class BrowserViewController: NSViewController {
 
     // MARK: - Chrome
 
-    private let backButton = BrowserViewController.navButton("chevron.backward", "Back")
-    private let forwardButton = BrowserViewController.navButton("chevron.forward", "Forward")
-    private let reloadButton = BrowserViewController.navButton("arrow.clockwise", "Reload")
-    private let reloadFromOriginButton = BrowserViewController.navButton(
-        "arrow.clockwise.circle",
-        "Reload from Origin"
-    )
-    private let closePopupButton = BrowserViewController.navButton("xmark", "Close Pop-up")
-    private let resetViewportButton = BrowserViewController.navButton(
-        "aspectratio",
-        "Reset Responsive Viewport"
-    )
-    private let resetColorSchemeButton = BrowserViewController.navButton(
-        "circle.lefthalf.filled",
-        "Reset Color Scheme"
-    )
-    private let resetUserAgentButton = BrowserViewController.navButton(
-        "network",
-        "Reset User Agent"
-    )
-    private let resetMediaTypeButton = BrowserViewController.navButton(
-        "printer",
-        "Reset CSS Media Type"
-    )
-    private let addressField = ThemedTextField()
+    private lazy var chromeBar = BrowserChromeBar(contextKind: contextKind)
+    private var backButton: ThemedButton { chromeBar.backButton }
+    private var forwardButton: ThemedButton { chromeBar.forwardButton }
+    private var reloadButton: ThemedButton { chromeBar.reloadButton }
+    private var closePopupButton: ThemedButton { chromeBar.closePopupButton }
+    private var addressField: ThemedTextField { chromeBar.addressField }
     private let progressBar = ThemedProgressBar()
+    private var testConditionsMenuSession: AnyObject?
+    private var overflowMenuSession: AnyObject?
 
     // MARK: - Web View
 
@@ -194,6 +461,7 @@ final class BrowserViewController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        chromeBar.updateResponsiveLayout()
         layoutWebViews()
     }
 
@@ -252,60 +520,19 @@ final class BrowserViewController: NSViewController {
     private func setupChrome() {
         for (button, action) in [(backButton, #selector(goBack)),
                                   (forwardButton, #selector(goForward)),
-                                  (reloadButton, #selector(reload)),
-                                  (reloadFromOriginButton, #selector(reloadFromOrigin))] {
+                                  (reloadButton, #selector(reload))] {
             button.target = self
             button.action = action
         }
-        reloadFromOriginButton.toolTip = """
-            Reload from origin and revalidate cached content with the server when possible
-            """
+        chromeBar.testConditionsButton.target = self
+        chromeBar.testConditionsButton.action = #selector(showTestConditions)
         closePopupButton.target = self
         closePopupButton.action = #selector(closeActivePopup)
-        closePopupButton.isHidden = true
-        closePopupButton.toolTip = "Close pop-up and return to its opener"
-        resetViewportButton.target = self
-        resetViewportButton.action = #selector(resetResponsiveViewport)
-        resetViewportButton.isHidden = true
-        resetColorSchemeButton.target = self
-        resetColorSchemeButton.action = #selector(resetColorScheme)
-        resetColorSchemeButton.isHidden = true
-        resetUserAgentButton.target = self
-        resetUserAgentButton.action = #selector(resetUserAgent)
-        resetUserAgentButton.isHidden = true
-        resetMediaTypeButton.target = self
-        resetMediaTypeButton.action = #selector(resetMediaType)
-        resetMediaTypeButton.isHidden = true
+        chromeBar.overflowButton.target = self
+        chromeBar.overflowButton.action = #selector(showBrowserOverflow)
 
-        addressField.placeholderString = BrowserDefaults.addressPlaceholder
-        addressField.font = Design.Typography.body()
-        addressField.focusRingType = .none
         addressField.target = self
         addressField.action = #selector(addressEntered)
-        addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let bar = NSStackView(
-            views: [
-                backButton,
-                forwardButton,
-                reloadButton,
-                reloadFromOriginButton,
-                closePopupButton,
-                resetViewportButton,
-                resetColorSchemeButton,
-                resetUserAgentButton,
-                resetMediaTypeButton,
-                addressField
-            ]
-        )
-        bar.orientation = .horizontal
-        bar.alignment = .centerY
-        bar.spacing = Design.Spacing.small
-        bar.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.small, left: Design.Spacing.medium,
-            bottom: Design.Spacing.small, right: Design.Spacing.medium
-        )
-        bar.translatesAutoresizingMaskIntoConstraints = false
 
         progressBar.isHidden = true
         progressBar.translatesAutoresizingMaskIntoConstraints = false
@@ -322,22 +549,22 @@ final class BrowserViewController: NSViewController {
         webViewHost = BrowserViewportCanvasView()
         viewportScrollView.documentView = webViewHost
 
-        view.addSubview(bar)
+        view.addSubview(chromeBar)
         view.addSubview(progressBar)
         view.addSubview(separator)
         view.addSubview(viewportScrollView)
         installWebView(webView)
 
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            chromeBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            chromeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            chromeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
             progressBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             progressBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            progressBar.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: -2),
+            progressBar.topAnchor.constraint(equalTo: chromeBar.bottomAnchor, constant: -2),
 
-            separator.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            separator.topAnchor.constraint(equalTo: chromeBar.bottomAnchor),
             separator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
@@ -347,6 +574,7 @@ final class BrowserViewController: NSViewController {
             viewportScrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
+        updateTestConditionChrome()
         updateNavButtons()
     }
 
@@ -683,18 +911,14 @@ final class BrowserViewController: NSViewController {
     func setResponsiveViewport(width: Int, height: Int) {
         _ = view
         agentViewportSize = CGSize(width: CGFloat(width), height: CGFloat(height))
-        resetViewportButton.isHidden = false
-        resetViewportButton.toolTip = """
-            Responsive viewport: \(width)×\(height) CSS px. Click to fit the shared panel.
-            """
+        updateTestConditionChrome()
         layoutWebViews(resetScrollPosition: true)
     }
 
     func resetResponsiveViewportToPanel() {
         _ = view
         agentViewportSize = nil
-        resetViewportButton.isHidden = true
-        resetViewportButton.toolTip = "Reset Responsive Viewport"
+        updateTestConditionChrome()
         layoutWebViews(resetScrollPosition: true)
     }
 
@@ -705,10 +929,7 @@ final class BrowserViewController: NSViewController {
         _ = view
         agentColorScheme = colorScheme
         webViewStack.forEach { $0.appearance = colorScheme.appearance }
-        resetColorSchemeButton.isHidden = colorScheme == .auto
-        resetColorSchemeButton.toolTip = colorScheme == .auto
-            ? "Reset Color Scheme"
-            : "Emulating \(colorScheme.rawValue) page appearance. Click to follow the system."
+        updateTestConditionChrome()
     }
 
     /// Overrides the HTTP and JavaScript user agent for this browser tab only. WebKit applies the
@@ -718,17 +939,7 @@ final class BrowserViewController: NSViewController {
         _ = view
         agentUserAgent = userAgent
         webViewStack.forEach { $0.customUserAgent = userAgent.value }
-        resetUserAgentButton.isHidden = userAgent == .automatic
-        switch userAgent {
-        case .automatic:
-            resetUserAgentButton.toolTip = "Reset User Agent"
-        case .custom(let value):
-            let preview = String(value.prefix(BrowserDefaults.userAgentTooltipLength))
-            let suffix = value.count > preview.count ? "…" : ""
-            resetUserAgentButton.toolTip = """
-                Custom User Agent: \(preview)\(suffix). Click to use WebKit's default.
-                """
-        }
+        updateTestConditionChrome()
     }
 
     /// Overrides the CSS media type for this browser tab. `print` lets the shared live browser
@@ -738,10 +949,7 @@ final class BrowserViewController: NSViewController {
         _ = view
         agentMediaType = mediaType
         webViewStack.forEach { $0.mediaType = mediaType.value }
-        resetMediaTypeButton.isHidden = mediaType == .auto
-        resetMediaTypeButton.toolTip = mediaType == .auto
-            ? "Reset CSS Media Type"
-            : "Emulating CSS \(mediaType.rawValue) media. Click to use WebKit's default."
+        updateTestConditionChrome()
     }
 
     func agentSetBrowserEmulation(
@@ -1688,11 +1896,149 @@ final class BrowserViewController: NSViewController {
         setEmulatedMediaType(.auto)
     }
 
+    @objc private func showTestConditions() {
+        let entries = testConditionMenuEntries()
+        testConditionsMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 260),
+            from: chromeBar.testConditionsButton,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.testConditionsMenuSession = nil }
+        )
+    }
+
+    @objc private func showBrowserOverflow() {
+        var entries: [ThemedMenuEntry] = []
+        if chromeBar.isReloadFolded {
+            entries.append(.item(ThemedMenuItem(
+                title: "Reload",
+                image: BrowserChromeBar.image("arrow.clockwise", accessibility: "Reload"),
+                onChoose: { [weak self] in self?.reload() }
+            )))
+        }
+        entries.append(
+            .item(ThemedMenuItem(
+                title: "Reload from Origin",
+                subtitle: "Revalidate cached content with the server when possible",
+                image: BrowserChromeBar.image(
+                    "arrow.clockwise.circle",
+                    accessibility: "Reload from Origin"
+                ),
+                onChoose: { [weak self] in self?.reloadFromOrigin() }
+            ))
+        )
+        if chromeBar.areTestConditionsFolded {
+            entries.append(.separator)
+            entries.append(contentsOf: testConditionMenuEntries())
+        }
+
+        overflowMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 290),
+            from: chromeBar.overflowButton,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.overflowMenuSession = nil }
+        )
+    }
+
     @objc private func addressEntered() {
         navigate(to: addressField.stringValue)
     }
 
     // MARK: - Chrome Sync
+
+    private func testConditionMenuEntries() -> [ThemedMenuEntry] {
+        var entries: [ThemedMenuEntry] = []
+
+        if let viewport = agentViewportSize {
+            let width = Int(viewport.width)
+            let height = Int(viewport.height)
+            entries.append(.item(ThemedMenuItem(
+                title: "Responsive Viewport · \(width)×\(height)",
+                subtitle: "Reset to fit the browser panel",
+                image: BrowserChromeBar.image(
+                    "aspectratio",
+                    accessibility: "Responsive Viewport"
+                ),
+                isSelected: true,
+                onChoose: { [weak self] in self?.resetResponsiveViewport() }
+            )))
+        }
+
+        if agentColorScheme != .auto {
+            entries.append(.item(ThemedMenuItem(
+                title: "Color Scheme · \(agentColorScheme.rawValue.capitalized)",
+                subtitle: "Reset to follow the system",
+                image: BrowserChromeBar.image(
+                    "circle.lefthalf.filled",
+                    accessibility: "Color Scheme"
+                ),
+                isSelected: true,
+                onChoose: { [weak self] in self?.resetColorScheme() }
+            )))
+        }
+
+        if case .custom(let value) = agentUserAgent {
+            let preview = String(value.prefix(BrowserDefaults.userAgentTooltipLength))
+            let suffix = value.count > preview.count ? "…" : ""
+            entries.append(.item(ThemedMenuItem(
+                title: "Custom User Agent",
+                subtitle: "\(preview)\(suffix)",
+                image: BrowserChromeBar.image("network", accessibility: "User Agent"),
+                isSelected: true,
+                onChoose: { [weak self] in self?.resetUserAgent() }
+            )))
+        }
+
+        if agentMediaType != .auto {
+            entries.append(.item(ThemedMenuItem(
+                title: "CSS Media · \(agentMediaType.rawValue.capitalized)",
+                subtitle: "Reset to WebKit's default",
+                image: BrowserChromeBar.image("printer", accessibility: "CSS Media"),
+                isSelected: true,
+                onChoose: { [weak self] in self?.resetMediaType() }
+            )))
+        }
+
+        if entries.count > 1 {
+            entries += [
+                .separator,
+                .item(ThemedMenuItem(
+                    title: "Reset All Test Conditions",
+                    image: BrowserChromeBar.image(
+                        "arrow.counterclockwise",
+                        accessibility: "Reset All Test Conditions"
+                    ),
+                    onChoose: { [weak self] in self?.resetAllTestConditions() }
+                ))
+            ]
+        }
+        return entries
+    }
+
+    private func updateTestConditionChrome() {
+        let count = [
+            agentViewportSize != nil,
+            agentColorScheme != .auto,
+            agentUserAgent != .automatic,
+            agentMediaType != .auto
+        ].filter { $0 }.count
+        chromeBar.setActiveTestConditionCount(count)
+    }
+
+    private func resetAllTestConditions() {
+        agentViewportSize = nil
+        agentColorScheme = .auto
+        agentUserAgent = .automatic
+        agentMediaType = .auto
+        webViewStack.forEach {
+            $0.appearance = nil
+            $0.customUserAgent = nil
+            $0.mediaType = nil
+        }
+        updateTestConditionChrome()
+        layoutWebViews(resetScrollPosition: true)
+    }
 
     private func syncAddress(url: URL? = nil) {
         let shown = url ?? webView.url
@@ -1704,34 +2050,19 @@ final class BrowserViewController: NSViewController {
     }
 
     private func updateNavButtons() {
-        backButton.isEnabled = webView.canGoBack || webViewStack.count > 1
-        forwardButton.isEnabled = webView.canGoForward
-        closePopupButton.isHidden = webViewStack.count == 1
+        chromeBar.setNavigationState(
+            canGoBack: webView.canGoBack || webViewStack.count > 1,
+            canGoForward: webView.canGoForward,
+            popupDepth: max(0, webViewStack.count - 1)
+        )
     }
 
     private func updateProgress(_ value: Double) {
         progressBar.progress = value
         progressBar.isHidden = value >= 1 || value <= 0
         let isLoading = webView.isLoading
-        let symbol = isLoading ? "xmark" : "arrow.clockwise"
-        let label = isLoading ? "Stop Loading" : "Reload"
-        reloadButton.image = BrowserViewController.navImage(symbol, label)
+        chromeBar.setLoading(isLoading)
         reloadButton.action = isLoading ? #selector(stopLoading) : #selector(reload)
-        reloadButton.toolTip = label
-        reloadButton.setAccessibilityLabel(label)
-    }
-
-    // MARK: - Helpers
-
-    private static func navButton(_ symbol: String, _ label: String) -> ThemedButton {
-        let button = ThemedButton(image: navImage(symbol, label), target: nil, action: nil)
-        button.toolTip = label
-        return button
-    }
-
-    private static func navImage(_ symbol: String, _ label: String) -> NSImage? {
-        NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
-            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
     }
 
     private func closePopup(_ popup: WKWebView) {

@@ -34,11 +34,18 @@ final class AccountPreferencesStore {
     private let defaults: UserDefaults
     private var preferences: [String: AccountPreference]
 
+    /// False only when a stored value could not be decoded *and* could not be kept aside. A
+    /// write then has nowhere to put what it would destroy, so it does not happen.
+    private var writesAllowed = true
+
     // MARK: - Initialization
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.preferences = Self.load(from: defaults)
+
+        let loaded = Self.load(from: defaults)
+        self.preferences = loaded.preferences
+        self.writesAllowed = loaded.writesAllowed
     }
 
     // MARK: - Public Methods
@@ -90,17 +97,52 @@ final class AccountPreferencesStore {
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(preferences) else { return }
-        defaults.set(data, forKey: Keys.accountPreferences)
-        NotificationCenter.default.post(AccountPreferencesDidChange())
+        guard writesAllowed else {
+            SkalmanLogger.session.error(
+                "Refusing to save account preferences: the unreadable previous value is still there"
+            )
+            return
+        }
+
+        do {
+            defaults.set(try JSONEncoder().encode(preferences), forKey: Keys.accountPreferences)
+            NotificationCenter.default.post(AccountPreferencesDidChange())
+        } catch {
+            // An encode that fails leaves the stored value alone, which is the right outcome —
+            // but silently returning made an edit that never landed look exactly like one that
+            // did, so the emoji reverted on the next launch with nothing to explain it.
+            SkalmanLogger.session.error(
+                "Could not save account preferences: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
-    private static func load(from defaults: UserDefaults) -> [String: AccountPreference] {
-        guard let data = defaults.data(forKey: Keys.accountPreferences),
-              let decoded = try? JSONDecoder().decode([String: AccountPreference].self, from: data)
-        else { return [:] }
+    /// Missing and unreadable are different answers.
+    ///
+    /// Both used to return an empty dictionary, and the next customisation then wrote *that*
+    /// over the stored blob — so a user whose preferences failed to decode lost every account
+    /// emoji and name they had set, permanently, the first time they changed one. The unreadable
+    /// case is now kept aside and only then overwritten; see `DefaultsQuarantine`.
+    private static func load(
+        from defaults: UserDefaults
+    ) -> (preferences: [String: AccountPreference], writesAllowed: Bool) {
+        guard let data = defaults.data(forKey: Keys.accountPreferences) else {
+            return ([:], true)
+        }
 
-        return decoded
+        guard let decoded = try? JSONDecoder().decode(
+            [String: AccountPreference].self,
+            from: data
+        ) else {
+            let quarantined = DefaultsQuarantine.quarantine(
+                data,
+                forKey: Keys.accountPreferences,
+                in: defaults
+            )
+            return ([:], quarantined)
+        }
+
+        return (decoded, true)
     }
 
     // MARK: - Keys

@@ -26,6 +26,11 @@ enum GitReviewCommands {
         ["status", "--porcelain=v2", "-z", "--untracked-files=all"]
     }
 
+    /// Tracked plus non-ignored untracked files, NUL-delimited so every legal path survives.
+    static func repositoryFiles() -> [String] {
+        ["ls-files", "-co", "--exclude-standard", "-z"]
+    }
+
     /// The diff flags for one read, with the whitespace-ignore flag folded in only when asked.
     private static func diffFlags(ignoringWhitespace: Bool) -> [String] {
         ignoringWhitespace ? diffFlags + [ignoreWhitespaceFlag] : diffFlags
@@ -125,6 +130,10 @@ enum GitReviewDefaults {
     static let lineCharacterCap = DiffPresentationPolicy.default.lineCharacterLimit
     /// Diffs past this size fail as too large rather than stall the app.
     static let maximumDiffBytes = 8 * 1024 * 1024
+
+    /// The mobile repository browser is an overview, not an unbounded archive transport.
+    static let remoteRepositoryFileLimit = 5_000
+    static let remoteRepositoryFileByteCap = 512 * 1024
 
     static let lineNumberWidth: CGFloat = 36
 

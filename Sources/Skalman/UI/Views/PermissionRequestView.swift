@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanRemoteKit
 
 /// An approval request shown inline in the conversation it belongs to.
 ///
@@ -12,7 +13,9 @@ final class PermissionRequestView: NSView {
     // MARK: - Properties
 
     private let request: PermissionRequest
+    private let remoteID = UUID().uuidString
     private var onDecision: ((PermissionDecision) -> Void)?
+    private lazy var safeRemoteRequest = makeRemoteRequest()
 
     private var buttonRow: NSStackView!
     private var resolvedLabel: NSTextField!
@@ -143,6 +146,51 @@ final class PermissionRequestView: NSView {
     /// Resolves the request without a click, used when the session ends while it is pending.
     func resolve(_ decision: PermissionDecision) {
         settle(decision, note: "Denied — session ended.")
+    }
+
+    /// The safe, provider-neutral part of the card a paired remote client may render.
+    var remoteRequest: RemotePermissionRequestDTO {
+        safeRemoteRequest
+    }
+
+    private func makeRemoteRequest() -> RemotePermissionRequestDTO {
+        let diff = (EditDiff.lines(forTool: request.toolName, input: request.input) ?? [])
+            .enumerated()
+            .map { index, line in
+                let kind: String
+                switch line.kind {
+                case .context: kind = "context"
+                case .added: kind = "addition"
+                case .removed: kind = "removal"
+                }
+                return RemotePermissionDiffLineDTO(
+                    id: String(index),
+                    kind: kind,
+                    text: line.text
+                )
+            }
+        return RemoteConversationWirePolicy.safePermission(RemotePermissionRequestDTO(
+            id: remoteID,
+            toolName: request.toolName,
+            summary: request.summary,
+            filePath: request.filePath,
+            diff: diff
+        ))
+    }
+
+    /// Resolves the same card from an authenticated interactive client. It deliberately offers
+    /// only one-shot allow or deny; session-wide policy remains a local Mac decision.
+    func resolveRemote(id: String, decision: String) -> Bool {
+        guard id == remoteID, !isResolved, remoteRequest.canDecide else { return false }
+        switch decision {
+        case "allow":
+            settle(.allow(reason: "Approved from a paired Skalman device."), note: "Allowed remotely.")
+        case "deny":
+            settle(.deny(reason: "The user declined from a paired Skalman device."), note: "Denied remotely.")
+        default:
+            return false
+        }
+        return true
     }
 
     // MARK: - Actions

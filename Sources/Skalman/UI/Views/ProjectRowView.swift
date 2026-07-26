@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 // MARK: - Project Row View
 
@@ -12,16 +13,32 @@ final class ProjectRowView: NSTableCellView {
 
     // MARK: - Properties
 
+    typealias ProjectHoverContentProvider = @MainActor (Project) -> NSViewController?
+
     /// The project's icon — discovered, chosen, or the folder fallback. Shown only for
     /// project rows; headings and grouped checkouts keep their text-only shape.
     private let iconView = NSImageView()
-    private let nameLabel = NSTextField(labelWithString: "")
+    private let nameLabel = MorphingTitleLabel()
     private let countLabel = NSTextField(labelWithString: "")
 
-    /// The name's two leading anchors: beside the icon for project rows, at the row's own
-    /// inset for the roles that show none. Exactly one is active at a time.
-    private var nameLeadingWithIcon: NSLayoutConstraint?
-    private var nameLeadingPlain: NSLayoutConstraint?
+    private let nativeContent = NSView()
+    private let afterTitleSlot = NSStackView()
+    private let trailingSlot = NSView()
+    private var contentContainer: ComponentContentContainer!
+    private var rowContentStack: NSStackView!
+    private var customizationHost: ComponentCustomizationHost!
+    private let customizationLookup: ComponentCustomizationHost.Lookup
+    private let projectHoverContentProvider: ProjectHoverContentProvider
+
+    /// Invoked for semantic actions inside extension-rendered replacement content.
+    var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
+
+    private var nativeName = ""
+    private var nativeToolTip: String?
+    private var nativeIcon: NSImage?
+    private var nativeIconTint: NSColor?
+    private var nativeIconAlpha: CGFloat = 1
+    private var nativeIconIsHidden = true
 
     /// The icon record on display, retained so an appearance flip can re-compose it —
     /// whether it needs a backplate depends on what it is drawn against.
@@ -37,7 +54,14 @@ final class ProjectRowView: NSTableCellView {
     /// A `+` sat beside it once, opening a menu that created a session with defaults for
     /// agent, account, model and checkout. Selecting the row opens the composer, where those
     /// are chosen — so the shortcut was a way to skip the only screen that asks.
-    private let hoverButton = ThemedButton()
+    /// The same nested icon button as a session row's `⋯` and a tab's `×`; only its glyph
+    /// changes with the row's role. Inks from the chrome — the sidebar's own ground.
+    private let hoverButton = ThemedIconButton(
+        symbolName: SidebarRowDefaults.actionSymbol,
+        accessibility: "Project actions",
+        target: .inline,
+        inkSource: .chrome
+    )
     private let hoverControls = NSStackView()
 
     private var trackingArea: NSTrackingArea?
@@ -45,11 +69,7 @@ final class ProjectRowView: NSTableCellView {
 
     /// Whether this row's role offers hover controls; repository headings keep a quiet edge.
     private var showsHoverButton = false
-
-    /// Keeps the name clear of the controls' slot, active only when they are shown so a
-    /// repository heading's name keeps its full width. Pinned to the stack, so it tracks
-    /// whether one control shows or two.
-    private var hoverNameTrailingConstraint: NSLayoutConstraint?
+    private var hasCount = false
 
     /// Invoked when the `⋯`/gear is pressed, carrying the anchor to hang a menu from.
     var onHoverAction: ((NSView) -> Void)?
@@ -64,6 +84,11 @@ final class ProjectRowView: NSTableCellView {
     /// Retained so colours can be reapplied when the selection state changes.
     private var isHeading = false
 
+    /// Whether the name landing on the next content pass renames what this row is already
+    /// showing. Only a project row can say yes: a heading's name *is* its identity, so a
+    /// different name there is a different heading rather than a rename of this one.
+    private var animatesNextName = false
+
     /// `textField` is deliberately left unset (see `SessionRowView`); colours are owned by
     /// `applyTextColors` and reapplied when selection changes.
     override var backgroundStyle: NSView.BackgroundStyle {
@@ -73,7 +98,23 @@ final class ProjectRowView: NSTableCellView {
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
+        customizationLookup = {
+            ComponentCustomizationProviderSlot.shared.customization(for: $0)
+        }
+        projectHoverContentProvider = Self.nativeProjectHoverContent(for:)
         super.init(frame: frameRect)
+        setupViews()
+    }
+
+    /// Injection point used by the Component Gallery and focused shell tests.
+    init(
+        customizationLookup: @escaping ComponentCustomizationHost.Lookup,
+        projectHoverContentProvider: @escaping ProjectHoverContentProvider =
+            ProjectRowView.nativeProjectHoverContent(for:)
+    ) {
+        self.customizationLookup = customizationLookup
+        self.projectHoverContentProvider = projectHoverContentProvider
+        super.init(frame: .zero)
         setupViews()
     }
 
@@ -97,9 +138,15 @@ final class ProjectRowView: NSTableCellView {
     func configure(with project: Project, style: Style = .standalone, collapsedSessionCount: Int = 0) {
         isHeading = false
 
+        // Read before the record is replaced: the same project named differently is a
+        // rename — or, for a grouped checkout named by its branch, a branch that moved
+        // under it. Either is a change to the name already on screen, and worth showing as
+        // one. A cell recycled from another project is not, and lands its name directly.
+        let wasShowingThisProject = popoverProject?.id == project.id
+
         // Rows reconfigure while the pointer sits on them, so an open popover survives a
         // same-project refresh; only reuse for a different project dismisses it.
-        if popoverProject?.id != project.id {
+        if !wasShowingThisProject {
             dismissPopover()
         }
         popoverProject = project
@@ -112,18 +159,27 @@ final class ProjectRowView: NSTableCellView {
 
         switch style {
         case .standalone:
-            nameLabel.stringValue = project.name
+            nativeName = project.name
             // The icon shows on standalone rows only: under a repository heading the same
             // repo's mark would repeat once per checkout and say nothing new.
             showIcon(for: project)
         case .checkout:
-            nameLabel.stringValue = GitInfo.currentBranch(for: project.folderPath) ?? project.name
+            nativeName = GitInfo.currentBranch(for: project.folderPath) ?? project.name
             hideIcon()
         }
 
         setCount(collapsedSessionCount)
-        toolTip = project.folderPath
+        nativeToolTip = project.folderPath
+        animatesNextName = wasShowingThisProject && nameLabel.stringValue != nativeName
         applyTextColors()
+        captureNativePresentation()
+        customizationHost.updateTarget(
+            .init(
+                component: HostComponentContracts.sidebarProjectRow.id,
+                contractVersion: HostComponentContracts.sidebarProjectRow.version,
+                entityID: project.id.uuidString.lowercased()
+            )
+        )
     }
 
     /// Shows a group heading — a repository above its checkouts, or the archive — with an
@@ -135,10 +191,13 @@ final class ProjectRowView: NSTableCellView {
         hideIcon()
         setHoverControls(moreSymbol: nil)
         nameLabel.font = Design.Typography.caption()
-        nameLabel.stringValue = name
+        nativeName = name
         setCount(count)
-        toolTip = nil
+        nativeToolTip = nil
+        animatesNextName = false
         applyTextColors()
+        captureNativePresentation()
+        customizationHost.deactivate()
     }
 
     /// Shows a branch heading above the sessions that ran on it. Same quiet treatment as a
@@ -154,10 +213,13 @@ final class ProjectRowView: NSTableCellView {
             moreAccessibility: "Grouping options"
         )
         nameLabel.font = Design.Typography.caption()
-        nameLabel.stringValue = branch
+        nativeName = branch
         setCount(collapsedSessionCount)
-        toolTip = branch
+        nativeToolTip = branch
+        animatesNextName = false
         applyTextColors()
+        captureNativePresentation()
+        customizationHost.deactivate()
     }
 
     /// Configures the trailing hover control for the row's role: a `nil` `moreSymbol` hides
@@ -169,14 +231,11 @@ final class ProjectRowView: NSTableCellView {
     private func setHoverControls(moreSymbol: String?, moreAccessibility: String = "") {
         hoverButton.isHidden = moreSymbol == nil
         if let moreSymbol {
-            hoverButton.image = NSImage(
-                systemSymbolName: moreSymbol,
-                accessibilityDescription: moreAccessibility
-            )
+            hoverButton.setSymbol(moreSymbol, accessibility: moreAccessibility)
         }
 
         showsHoverButton = moreSymbol != nil
-        hoverNameTrailingConstraint?.isActive = showsHoverButton
+        updateTrailingSlotVisibility()
 
         if showsHoverButton {
             setHoverButtonVisible(isHovered, animated: false)
@@ -195,54 +254,111 @@ final class ProjectRowView: NSTableCellView {
             weight: .regular
         )
         iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.setAccessibilityIdentifier("sidebar.project.identity")
 
-        nameLabel.lineBreakMode = .byTruncatingTail
-        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.setContentHuggingPriority(
+            SidebarRowDefaults.stretchableHugging,
+            for: .horizontal
+        )
+        nameLabel.setAccessibilityIdentifier("sidebar.project.title")
+
+        // Stated once as a rule: the row's role and selection both move under it, and a
+        // theme switch replaces the colours it resolves to. See `applyTextColors`.
+        nameLabel.setTextColor { [weak self] in
+            guard let self else { return Design.Text.label }
+            if backgroundStyle == .emphasized { return Design.Text.selected }
+            return isHeading ? Design.Text.secondary : Design.Text.label
+        }
 
         countLabel.font = Design.Typography.numericDetail()
         countLabel.alignment = .right
         countLabel.setContentHuggingPriority(.required, for: .horizontal)
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         countLabel.translatesAutoresizingMaskIntoConstraints = false
+        countLabel.setAccessibilityIdentifier("sidebar.project.count")
 
-        addSubview(iconView)
-        addSubview(nameLabel)
-        addSubview(countLabel)
+        setupTrailingSlot()
+        setupCustomizableContent()
         setAccessibilityRole(.staticText)
 
-        nameLeadingWithIcon = nameLabel.leadingAnchor.constraint(
-            equalTo: iconView.trailingAnchor,
-            constant: SidebarRowDefaults.horizontalSpacing
-        )
-        nameLeadingPlain = nameLabel.leadingAnchor.constraint(
-            equalTo: leadingAnchor,
-            constant: SidebarRowDefaults.leadingInset
-        )
-        nameLeadingPlain?.isActive = true
-
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(
+            rowContentStack.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: SidebarRowDefaults.leadingInset
             ),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
-            iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
-
-            nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            nameLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: countLabel.leadingAnchor,
-                constant: -SidebarRowDefaults.horizontalSpacing
-            ),
-
-            countLabel.trailingAnchor.constraint(
+            rowContentStack.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -SidebarRowDefaults.trailingInset
             ),
-            countLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+            rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
+            iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth)
+        ])
+    }
+
+    /// Builds the visual subtree extensions may replace. Count and hover actions remain in the
+    /// trailing sibling so no replacement can hide or move host-owned project state.
+    private func setupCustomizableContent() {
+        let nativeStack = NSStackView(views: [iconView, nameLabel])
+        nativeStack.orientation = .horizontal
+        nativeStack.alignment = .centerY
+        nativeStack.spacing = SidebarRowDefaults.horizontalSpacing
+        nativeStack.translatesAutoresizingMaskIntoConstraints = false
+
+        nativeContent.translatesAutoresizingMaskIntoConstraints = false
+        nativeContent.addSubview(nativeStack)
+        NSLayoutConstraint.activate([
+            nativeStack.topAnchor.constraint(equalTo: nativeContent.topAnchor),
+            nativeStack.bottomAnchor.constraint(equalTo: nativeContent.bottomAnchor),
+            nativeStack.leadingAnchor.constraint(equalTo: nativeContent.leadingAnchor),
+            nativeStack.trailingAnchor.constraint(equalTo: nativeContent.trailingAnchor)
         ])
 
-        setupHoverControls()
+        nativeContent.setAccessibilityIdentifier("sidebar.project.default-content")
+        contentContainer = ComponentContentContainer(defaultContent: nativeContent)
+        contentContainer.setAccessibilityIdentifier("sidebar.project.content")
+        contentContainer.setContentHuggingPriority(
+            SidebarRowDefaults.stretchableHugging,
+            for: .horizontal
+        )
+        contentContainer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        afterTitleSlot.orientation = .horizontal
+        afterTitleSlot.alignment = .centerY
+        afterTitleSlot.spacing = Design.Spacing.tight
+        afterTitleSlot.isHidden = true
+        afterTitleSlot.setAccessibilityIdentifier("sidebar.project.slot.after-title")
+
+        rowContentStack = NSStackView(views: [contentContainer, afterTitleSlot, trailingSlot])
+        rowContentStack.orientation = .horizontal
+        rowContentStack.alignment = .centerY
+        rowContentStack.spacing = SidebarRowDefaults.horizontalSpacing
+        rowContentStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rowContentStack)
+
+        customizationHost = ComponentCustomizationHost(
+            target: .init(
+                component: HostComponentContracts.sidebarProjectRow.id,
+                contractVersion: HostComponentContracts.sidebarProjectRow.version
+            ),
+            contentContainer: contentContainer,
+            slots: ["after-title": afterTitleSlot],
+            lookup: customizationLookup,
+            imageResolver: { [weak self] reference, _ in
+                self?.resolveCustomizationImage(reference)
+            },
+            onAction: { [weak self] action in
+                guard let self else { return }
+                if let onCustomizationAction {
+                    onCustomizationAction(action)
+                } else {
+                    ComponentCustomizationProviderSlot.shared.perform(action)
+                }
+            },
+            onProperties: { [weak self] properties in
+                self?.applyCustomizationProperties(properties)
+            }
+        )
     }
 
     /// Shows the project's stored icon, or the folder symbol while it has none.
@@ -252,8 +368,6 @@ final class ProjectRowView: NSTableCellView {
     /// when the appearance flips.
     private func showIcon(for project: Project) {
         iconView.isHidden = false
-        nameLeadingPlain?.isActive = false
-        nameLeadingWithIcon?.isActive = true
 
         shownProjectIcon = project.icon
         shownProjectName = project.name
@@ -264,8 +378,6 @@ final class ProjectRowView: NSTableCellView {
         iconView.isHidden = true
         shownProjectIcon = nil
         shownProjectName = ""
-        nameLeadingWithIcon?.isActive = false
-        nameLeadingPlain?.isActive = true
     }
 
     private func applyIconImage() {
@@ -275,6 +387,7 @@ final class ProjectRowView: NSTableCellView {
         // No real mark yet: a deterministic tile from the name, so every project is
         // distinguishable at a glance without anything having been found or stored.
         iconView.image = stored ?? GeneratedProjectIcon.image(for: shownProjectName)
+        nativeIcon = iconView.image
     }
 
     private var isDarkAppearance: Bool {
@@ -286,22 +399,69 @@ final class ProjectRowView: NSTableCellView {
         super.viewDidChangeEffectiveAppearance()
         guard shownProjectIcon != nil else { return }
         applyIconImage()
+        customizationHost?.refresh()
     }
 
-    /// Installs the trailing hover controls, dormant until a role enables them. Both buttons
-    /// live in a stack so hiding one collapses it and the name reservation tracks the rest.
-    private func setupHoverControls() {
-        hoverButton.target = self
-        hoverButton.action = #selector(hoverButtonClicked)
+    /// Records what the row would show with no extension in play. The name is deliberately
+    /// not applied here: every configure path ends in a content pass, and setting it twice
+    /// would morph the row through the native name on its way to a customized one.
+    private func captureNativePresentation() {
+        toolTip = nativeToolTip
+        nativeIcon = iconView.image
+        nativeIconTint = iconView.contentTintColor
+        nativeIconAlpha = iconView.alphaValue
+        nativeIconIsHidden = iconView.isHidden
+    }
 
-        for button in [hoverButton] {
-            button.isBordered = false
-            button.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
-                button.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize)
-            ])
+    private func applyCustomizationProperties(
+        _ properties: [
+            ExtensionComponentPropertyID: ExtensionComponentPropertyValue
+        ]
+    ) {
+        toolTip = nativeToolTip
+        iconView.image = nativeIcon
+        iconView.contentTintColor = nativeIconTint
+        iconView.alphaValue = nativeIconAlpha
+        iconView.isHidden = nativeIconIsHidden
+
+        var name = nativeName
+        if case .text(let title) = properties[.title] {
+            name = title
         }
+        nameLabel.setStringValue(name, animated: animatesNextName)
+        animatesNextName = false
+
+        if case .text(let value) = properties[.toolTip] {
+            toolTip = value
+        }
+        if case .image(let reference) = properties[.identityImage],
+           let image = resolveCustomizationImage(reference) {
+            iconView.image = image
+            iconView.isHidden = false
+        }
+    }
+
+    private func resolveCustomizationImage(
+        _ reference: ExtensionImageReference
+    ) -> NSImage? {
+        switch reference {
+        case .systemSymbol(let name):
+            return NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        case .hostAsset(let identifier):
+            guard identifier == "project.image" else { return nil }
+            return nativeIcon
+        case .extensionResource:
+            // Package-relative resources are resolved by the process-backed provider later.
+            return nil
+        }
+    }
+
+    /// Installs the host-owned trailing shell. Count and hover controls are overlaid and
+    /// crossfaded, so pointer movement never changes the row's layout.
+    private func setupTrailingSlot() {
+        // No size stated here: the button knows its own target and padding.
+        hoverButton.onPress = { [weak self] in self?.hoverButtonClicked() }
+        hoverButton.translatesAutoresizingMaskIntoConstraints = false
 
         hoverControls.orientation = .horizontal
         hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
@@ -310,23 +470,27 @@ final class ProjectRowView: NSTableCellView {
         hoverControls.translatesAutoresizingMaskIntoConstraints = false
         hoverControls.addArrangedSubview(hoverButton)
 
-        addSubview(hoverControls)
+        trailingSlot.translatesAutoresizingMaskIntoConstraints = false
+        trailingSlot.setAccessibilityIdentifier("sidebar.project.trailing")
+        hoverControls.setAccessibilityIdentifier("sidebar.project.actions")
+        trailingSlot.addSubview(countLabel)
+        trailingSlot.addSubview(hoverControls)
 
         NSLayoutConstraint.activate([
-            hoverControls.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -SidebarRowDefaults.trailingInset
+            trailingSlot.widthAnchor.constraint(
+                equalToConstant: SidebarRowDefaults.trailingSlotSize
             ),
-            hoverControls.centerYAnchor.constraint(equalTo: centerYAnchor)
+            trailingSlot.heightAnchor.constraint(
+                equalToConstant: SidebarRowDefaults.trailingSlotSize
+            ),
+            countLabel.leadingAnchor.constraint(equalTo: trailingSlot.leadingAnchor),
+            countLabel.trailingAnchor.constraint(equalTo: trailingSlot.trailingAnchor),
+            countLabel.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
+            hoverControls.trailingAnchor.constraint(
+                equalTo: trailingSlot.trailingAnchor
+            ),
+            hoverControls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
         ])
-
-        // Activated only when a role shows controls: it reserves their slot so a long name
-        // never sits underneath them. Pinned to the stack's leading edge, so it tightens or
-        // loosens as one control shows or two.
-        hoverNameTrailingConstraint = nameLabel.trailingAnchor.constraint(
-            lessThanOrEqualTo: hoverControls.leadingAnchor,
-            constant: -SidebarRowDefaults.horizontalSpacing
-        )
     }
 
     // MARK: - Hover
@@ -375,23 +539,14 @@ final class ProjectRowView: NSTableCellView {
     override func prepareForReuse() {
         super.prepareForReuse()
         dismissPopover()
+        customizationHost.deactivate()
     }
 
     private func presentPopover() {
         guard let project = popoverProject, window != nil, popover == nil else { return }
+        guard let controller = makeProjectHoverCard(for: project) else { return }
 
-        // A reading shows itself; a machine known to have no scc shows how to get one. A
-        // project merely not counted yet shows nothing — "not looked" is not "not installed".
-        let controller: ProjectStatsPopoverViewController
-        if let info = ProjectStatsPopoverViewController.Info(project: project) {
-            controller = ProjectStatsPopoverViewController(info: info)
-        } else if CodeStatsService.shared.toolIsMissing {
-            controller = ProjectStatsPopoverViewController(missingToolFor: project.name)
-        } else {
-            return
-        }
-
-        let content = NSPopover()
+        let content = HostPopoverFactory.make(.sidebarProjectHoverCard)
         // Closed by hand on exit and reuse, matching the session popover's reasoning.
         content.behavior = .applicationDefined
         content.animates = false
@@ -399,6 +554,68 @@ final class ProjectRowView: NSTableCellView {
         content.show(relativeTo: bounds, of: self, preferredEdge: .maxX)
 
         popover = content
+    }
+
+    /// Builds the presentation independently from the pointer shell so tests and future
+    /// project-card triggers exercise the exact same customizable component.
+    ///
+    /// The card exists when either Skalman's native SCC feature or an extension has content.
+    /// This is what lets an extension introduce a useful hover on a machine where SCC has not
+    /// produced a reading, without taking over hover timing, placement, or dismissal.
+    func makeProjectHoverCard(for project: Project) -> NSViewController? {
+        let target = ExtensionComponentTarget.projectHoverCard(
+            projectID: project.id.uuidString.lowercased()
+        )
+        let native = projectHoverContentProvider(project)
+        let initialResolution = customizationLookup(target)
+        guard native != nil || !initialResolution.isEmpty else { return nil }
+
+        let hasNativeContent = native != nil
+        let child = native ?? EmptyComponentContentViewController()
+        let controller = ExtensionComponentHookViewController(
+            target: target,
+            child: child,
+            contentInsets: NSEdgeInsets(
+                top: Design.Spacing.inset,
+                left: Design.Spacing.inset,
+                bottom: Design.Spacing.inset,
+                right: Design.Spacing.inset
+            ),
+            fixedWidth: ProjectPopoverDefaults.width,
+            lookup: customizationLookup,
+            onAction: { [weak self] action in
+                guard let self else { return }
+                if let onCustomizationAction {
+                    onCustomizationAction(action)
+                } else {
+                    ComponentCustomizationProviderSlot.shared.perform(action)
+                }
+            },
+            onResolution: { [weak self] resolution in
+                // If extension content was the only reason this presentation existed, removing
+                // it closes the card instead of leaving an empty popover under the pointer.
+                if !hasNativeContent, resolution.isEmpty {
+                    self?.dismissPopover()
+                }
+            }
+        )
+        controller.view.setAccessibilityIdentifier("sidebar.project-hover-card")
+        return controller
+    }
+
+    private static func nativeProjectHoverContent(for project: Project) -> NSViewController? {
+        // A reading shows itself; a machine known to have no scc shows how to get one. A
+        // project merely not counted *yet* still contributes no native content.
+        if let info = ProjectStatsPopoverViewController.Info(project: project) {
+            return ProjectStatsPopoverViewController(info: info, isEmbedded: true)
+        }
+        if CodeStatsService.shared.toolIsMissing {
+            return ProjectStatsPopoverViewController(
+                missingToolFor: project.name,
+                isEmbedded: true
+            )
+        }
+        return nil
     }
 
     private func dismissPopover() {
@@ -426,29 +643,37 @@ final class ProjectRowView: NSTableCellView {
         }
     }
 
-    @objc private func hoverButtonClicked() {
+    private func hoverButtonClicked() {
         onHoverAction?(hoverButton)
     }
 
     private func setCount(_ count: Int) {
+        hasCount = count > 0
         countLabel.stringValue = count > 0 ? String(count) : ""
         countLabel.isHidden = count <= 0
+        updateTrailingSlotVisibility()
+    }
+
+    private func updateTrailingSlotVisibility() {
+        trailingSlot.isHidden = !showsHoverButton && !hasCount
     }
 
     /// Applies the row's colours for its current role and selection state. The icon tint
     /// only reaches the folder-symbol fallback; a real icon keeps its own colours.
     private func applyTextColors() {
+        nameLabel.refreshTextColor()
+
         if backgroundStyle == .emphasized {
-            nameLabel.textColor = Design.Text.selected
             countLabel.textColor = Design.Text.selected.withAlphaComponent(
                 SidebarRowDefaults.secondaryTextAlpha
             )
             iconView.contentTintColor = Design.Text.selected
+            nativeIconTint = iconView.contentTintColor
             return
         }
 
-        nameLabel.textColor = isHeading ? Design.Text.secondary : Design.Text.label
         countLabel.textColor = Design.Text.secondary
         iconView.contentTintColor = Design.Text.secondary
+        nativeIconTint = iconView.contentTintColor
     }
 }

@@ -34,6 +34,11 @@ final class EventLog {
         /// in a subprocess whose output is discarded — so when one stops working there is
         /// nothing on screen, and nothing in the agent's own output, to say so.
         case hooks
+
+        /// Remote access. Its own category because it is the one surface reachable from off the
+        /// machine, so a security question ("who connected, when, with what capability, and did
+        /// they type into it") must have a durable answer that outlives the live log.
+        case remote
     }
 
     // MARK: - Singleton

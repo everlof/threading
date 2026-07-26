@@ -323,6 +323,15 @@ private final class PromptTextView: ThemedTextView {
         return resigned
     }
 
+    /// A view taken out of its window loses the first responder without ever being *asked* to
+    /// resign it, so the two callbacks above do not cover every way the caret leaves. Left
+    /// alone the composer keeps drawing its accent ring around a box nothing is typing into,
+    /// which is the one state a focus ring may never describe.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onFocusChange?(window?.firstResponder === self)
+    }
+
     // MARK: - Key Handling
 
     /// Return submits; Shift-Return and Option-Return insert a newline. This is the shape

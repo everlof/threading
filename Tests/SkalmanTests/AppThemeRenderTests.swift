@@ -51,8 +51,28 @@ final class AppThemeRenderTests: XCTestCase {
         for theme in AppThemeLibrary.stock {
             AppThemePalette.set(theme)
 
+            if theme.isAdaptive {
+                for (suffix, appearanceName) in [
+                    ("light", NSAppearance.Name.aqua),
+                    ("dark", .darkAqua)
+                ] {
+                    let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+                    let data = try XCTUnwrap(
+                        image(for: theme, appearance: appearance),
+                        "Failed to render \(theme.name) \(suffix)"
+                    )
+                    let url = directory.appendingPathComponent(
+                        "chrome-\(theme.id.rawValue)-\(suffix).png"
+                    )
+                    try data.write(to: url)
+                    written.append(url.lastPathComponent)
+                }
+                continue
+            }
+
+            let appearance = try XCTUnwrap(theme.mode.appearance)
             let data = try XCTUnwrap(
-                image(for: theme),
+                image(for: theme, appearance: appearance),
                 "Failed to render \(theme.name)"
             )
             let url = directory.appendingPathComponent("chrome-\(theme.id.rawValue).png")
@@ -61,7 +81,10 @@ final class AppThemeRenderTests: XCTestCase {
         }
 
         print("Rendered \(written.count) themed conversations to \(directory.path)")
-        XCTAssertEqual(written.count, AppThemeLibrary.stock.count)
+        let expected = AppThemeLibrary.stock.reduce(0) {
+            $0 + ($1.isAdaptive ? 2 : 1)
+        }
+        XCTAssertEqual(written.count, expected)
     }
 
     /// The dropdown at both of its densities — a plain choice list (check column only, with a
@@ -163,18 +186,14 @@ final class AppThemeRenderTests: XCTestCase {
         return Array(timeline.rows.prefix(Render.rowLimit))
     }
 
-    private func image(for theme: AppTheme) -> Data? {
+    private func image(for theme: AppTheme, appearance: NSAppearance) -> Data? {
         // A themed app pins its appearance, or the system draws its own scrollers and selection
-        // over it — so the render uses the theme's own mode rather than the process's.
-        let appearance = theme.isSystem
-            ? NSAppearance(named: .darkAqua)
-            : theme.mode.appearance
-
+        // over it. System is deliberately rendered once in each macOS appearance.
         var data: Data?
-        appearance?.performAsCurrentDrawingAppearance {
+        appearance.performAsCurrentDrawingAppearance {
             let host = laidOut(rows())
             host.appearance = appearance
-            data = png(of: host, ground: theme.resolved(.ground))
+            data = png(of: host, ground: theme.resolved(.ground, appearance: appearance))
         }
         return data
     }

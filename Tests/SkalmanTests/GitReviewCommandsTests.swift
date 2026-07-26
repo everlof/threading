@@ -37,6 +37,13 @@ final class GitReviewCommandsTests: XCTestCase {
         )
     }
 
+    func testRepositoryFilesAreLiteralAndNULTerminated() {
+        XCTAssertEqual(
+            GitReviewCommands.repositoryFiles(),
+            ["ls-files", "-co", "--exclude-standard", "-z"]
+        )
+    }
+
     func testLogPagesWithControlCharacterFormat() {
         let arguments = GitReviewCommands.log(skip: 200)
         XCTAssertTrue(arguments.contains("--skip=200"))

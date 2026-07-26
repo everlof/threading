@@ -145,6 +145,45 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         sidebar.select(sessionID: session.id)
     }
 
+    /// Starts a session requested by the paired owner device through the same one-shot prompt
+    /// route as the Mac composer. Selecting it is intentional: a terminal must be installed in
+    /// a laid-out view before its PTY can start, and the native surface follows the same
+    /// one-live-process path. The window is not activated, so the phone never steals Mac focus.
+    @discardableResult
+    func startRemoteSession(
+        in projectID: ProjectID,
+        kind: AgentKind,
+        accountHandle: AccountHandle,
+        model: String?,
+        reasoningEffort: String?,
+        usesNativeUI: Bool,
+        prompt: String
+    ) -> AgentSession? {
+        let opening = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !opening.isEmpty,
+              let session = ProjectStore.shared.addSession(
+                to: projectID,
+                kind: kind,
+                accountHandle: accountHandle,
+                model: model,
+                reasoningEffort: reasoningEffort,
+                usesNativeUI: usesNativeUI,
+                title: SessionNaming.promptTitle(from: opening)
+              ) else { return nil }
+
+        EventLog.shared.record(.remote, "Session started remotely", [
+            "session": session.id.uuidString,
+            "project": projectID.uuidString,
+            "agent": kind.rawValue,
+            "prompt": opening,
+        ])
+
+        pendingPrompt = opening
+        sidebar.reload()
+        sidebar.select(sessionID: session.id)
+        return session
+    }
+
     func sessionComposer(
         _ composer: SessionComposerViewController,
         importSession session: ImportableSession,
@@ -201,15 +240,15 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
               AgentRuntime.shared.isRunning(sessionID: sessionID),
               let session = ProjectStore.shared.session(withID: sessionID) else { return true }
 
-        let surface = toNative ? "Conversation" : "Terminal"
+        let surface = toNative ? "Native UI" : session.kind.originalUITitle
         let alert = NSAlert()
-        alert.messageText = "Show \"\(session.displayTitle)\" as \(surface.lowercased())?"
+        alert.messageText = "Show “\(session.displayTitle)” in \(surface)?"
         alert.informativeText = """
             The agent stops and starts again on the new surface, resuming this conversation \
             where it left off. Anything it is working on right now is interrupted.
             """
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Show as \(surface)")
+        alert.addButton(withTitle: "Switch UI")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
     }

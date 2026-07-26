@@ -24,8 +24,8 @@ enum AppThemePalette {
     /// The exception, also measured, is `CALayer.backgroundColor`: a `CGColor` is resolved once
     /// at assignment and frozen. Those sites are re-applied by `AppThemeRefresh`.
     static func color(_ role: AppThemeRole) -> NSColor {
-        NSColor(name: NSColor.Name("skalman.\(role.rawValue)")) { _ in
-            current.resolved(role)
+        NSColor(name: NSColor.Name("skalman.\(role.rawValue)")) { appearance in
+            current.resolved(role, appearance: appearance)
         }
     }
 }
@@ -46,12 +46,90 @@ enum AppThemeLibrary {
     ///
     /// Written in Swift rather than loaded from a bundled JSON on purpose: the roles a theme
     /// states are few enough that a literal is shorter than the document, and it is checked by
-    /// the compiler and readable in a diff. The `Codable` path exists for the themes an agent
-    /// or a user creates, which live in Application Support.
+    /// the compiler and readable in a diff. The `Codable` path serves the persistent themes an
+    /// agent or a user creates through `AppThemeStore`.
     static var stock: [AppTheme] { [.system] + AppThemeStyles.all }
 
+    static var custom: [AppTheme] { AppThemeStore.shared.themes }
+
+    static var all: [AppTheme] { stock + custom }
+
     static func theme(withID id: AppThemeID) -> AppTheme? {
-        stock.first { $0.id == id }
+        all.first { $0.id == id }
+    }
+
+    static func isStock(_ theme: AppTheme) -> Bool {
+        stock.contains { $0.id == theme.id }
+    }
+
+    static func isCustom(_ theme: AppTheme) -> Bool {
+        custom.contains { $0.id == theme.id }
+    }
+
+    static func uniqueCopyName(of theme: AppTheme) -> String {
+        let names = Set(all.map { $0.name.lowercased() })
+        var candidate = "\(theme.name) Copy"
+        var index = 2
+        while names.contains(candidate.lowercased()) {
+            candidate = "\(theme.name) Copy \(index)"
+            index += 1
+        }
+        return candidate
+    }
+
+    static func makeCustomID() -> AppThemeID {
+        AppThemeID("custom-\(UUID().uuidString.lowercased())")
+    }
+
+    static func create(_ theme: AppTheme) throws {
+        guard theme.id != .system, self.theme(withID: theme.id) == nil else {
+            throw AppThemeEditingError.invalid(
+                "An app theme with id \"\(theme.id.rawValue)\" already exists."
+            )
+        }
+        guard !all.contains(where: {
+            $0.name.caseInsensitiveCompare(theme.name) == .orderedSame
+        }) else {
+            throw AppThemeEditingError.invalid(
+                "An app theme named \"\(theme.name)\" already exists."
+            )
+        }
+        try AppThemeEditing.validate(theme)
+        AppThemeStore.shared.insert(theme)
+        NotificationCenter.default.post(AppThemeLibraryDidChange())
+    }
+
+    static func update(_ theme: AppTheme) throws {
+        guard isCustom(theme) else {
+            throw AppThemeEditingError.invalid(
+                "Built-in app themes cannot be edited. Duplicate this theme first."
+            )
+        }
+        guard !all.contains(where: {
+            $0.id != theme.id && $0.name.caseInsensitiveCompare(theme.name) == .orderedSame
+        }) else {
+            throw AppThemeEditingError.invalid(
+                "Another app theme is already named \"\(theme.name)\"."
+            )
+        }
+        try AppThemeEditing.validate(theme)
+        guard AppThemeStore.shared.replace(theme) else {
+            throw AppThemeEditingError.invalid("The custom app theme no longer exists.")
+        }
+        NotificationCenter.default.post(AppThemeLibraryDidChange())
+        if current.id == theme.id {
+            apply(theme)
+        }
+    }
+
+    @discardableResult
+    static func delete(_ theme: AppTheme) -> Bool {
+        guard isCustom(theme), AppThemeStore.shared.remove(id: theme.id) else { return false }
+        if current.id == theme.id {
+            apply(.system)
+        }
+        NotificationCenter.default.post(AppThemeLibraryDidChange())
+        return true
     }
 
     // MARK: Current
@@ -75,7 +153,7 @@ enum AppThemeLibrary {
     /// build launches a *light* style as a white app wearing dark scrollers, dark menus and a
     /// dark switch. Every system-drawn control follows this and nothing else.
     private static func applyAppearance(for theme: AppTheme) {
-        NSApp.appearance = theme.isSystem ? nil : theme.mode.appearance
+        NSApp.appearance = theme.mode.appearance
     }
 
     /// Switches the app's theme and repaints everything already on screen.
@@ -101,4 +179,8 @@ enum AppThemeLibrary {
 struct AppThemeDidChange: AppEvent {
     static let name = Notification.Name("appThemeDidChange")
     let themeID: AppThemeID
+}
+
+struct AppThemeLibraryDidChange: AppEvent {
+    static let name = Notification.Name("appThemeLibraryDidChange")
 }

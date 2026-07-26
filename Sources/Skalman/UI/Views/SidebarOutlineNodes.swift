@@ -90,7 +90,16 @@ enum SidebarTreeBuilder {
         for (project, identity) in zip(projects, identities) {
             let node = ProjectNode(projectID: project.id)
             // Archived sessions are gathered separately, below the projects.
-            let activeSessions = project.sessions.filter { !$0.isArchived }
+            let activeSessions = project.sessions
+                .filter { !$0.isArchived }
+                .enumerated()
+                .sorted {
+                    if $0.element.isPinned != $1.element.isPinned {
+                        return $0.element.isPinned
+                    }
+                    return $0.offset < $1.offset
+                }
+                .map(\.element)
             node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
 
             // Side chats hang off the session they were forked from, so only what remains

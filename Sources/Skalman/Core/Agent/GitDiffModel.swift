@@ -120,6 +120,16 @@ struct GitStatus {
     let untracked: [String]
 }
 
+// MARK: - Repository Files
+
+/// One bounded source file read for a remote repository browser.
+struct GitRepositoryFile {
+    let path: String
+    let content: String?
+    let isBinary: Bool
+    let isTruncated: Bool
+}
+
 // MARK: - Turn Baseline
 
 /// A snapshot of the checkout at the moment a session started working, against which

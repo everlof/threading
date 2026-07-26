@@ -10,7 +10,7 @@ struct KeyboardShortcutsDidChange: AppEvent {
 
 // MARK: - Shortcut Override Store
 
-/// The user's own bindings, over the defaults in `AppCommands`.
+/// The user's own bindings over defaults from the shared built-in/extension command registry.
 ///
 /// A separate store rather than properties on `AppSettings`, following `AccountPreferencesStore`:
 /// this is a dictionary keyed by something the app invents, and giving each command its own
@@ -33,12 +33,22 @@ final class ShortcutOverrideStore {
     }
 
     private var payload = Payload()
+
+    /// False only when a stored value could not be decoded *and* could not be kept aside. A
+    /// write then has nowhere to put what it would destroy, so it does not happen.
+    private var writesAllowed = true
+
     private let defaults: UserDefaults
+    private let registry: CommandRegistry
 
     /// The defaults are injectable so tests can exercise the resolution and conflict rules
     /// without writing bindings into the user's own preferences.
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        registry: CommandRegistry = .shared
+    ) {
         self.defaults = defaults
+        self.registry = registry
         load()
     }
 
@@ -48,11 +58,23 @@ final class ShortcutOverrideStore {
     func shortcut(for command: AppCommand) -> KeyboardShortcut? {
         guard command.isEditable else { return command.defaultShortcut }
         if payload.cleared.contains(command.id) { return nil }
-        return payload.bound[command.id] ?? command.defaultShortcut
+        if let override = payload.bound[command.id] { return override }
+        guard let candidate = command.defaultShortcut else { return nil }
+
+        // An extension default is a suggestion, not permission to steal a chord. Suppress it
+        // when any active command already resolves to that key. The user can still bind it after
+        // moving or clearing the owner in Keyboard settings.
+        if command.origin.extensionIdentifier != nil,
+           registry.all.contains(where: { other in
+               other.id != command.id && unsuppressedShortcut(for: other) == candidate
+           }) {
+            return nil
+        }
+        return candidate
     }
 
     func shortcut(forID id: String) -> KeyboardShortcut? {
-        AppCommands.command(id: id).flatMap(shortcut(for:))
+        registry.command(id: id).flatMap(shortcut(for:))
     }
 
     func isOverridden(_ command: AppCommand) -> Bool {
@@ -75,7 +97,9 @@ final class ShortcutOverrideStore {
         payload.cleared.removeAll { $0 == command.id }
 
         if let shortcut {
-            if shortcut != command.defaultShortcut { payload.bound[command.id] = shortcut }
+            if shortcut != command.defaultShortcut || defaultConflict(for: command) != nil {
+                payload.bound[command.id] = shortcut
+            }
         } else if command.defaultShortcut != nil {
             payload.cleared.append(command.id)
         }
@@ -101,14 +125,40 @@ final class ShortcutOverrideStore {
     /// Fixed commands are included: taking ⌘Q for something of ours would leave the user unable
     /// to quit, and that is exactly the collision worth refusing rather than the one to ignore.
     func conflict(for shortcut: KeyboardShortcut, excluding command: AppCommand) -> AppCommand? {
-        AppCommands.all.first { candidate in
+        registry.all.first { candidate in
             candidate.id != command.id && self.shortcut(for: candidate) == shortcut
         }
+    }
+
+    /// Why an extension's declared default is currently unbound, if it is.
+    func defaultConflict(for command: AppCommand) -> AppCommand? {
+        guard command.origin.extensionIdentifier != nil,
+              payload.bound[command.id] == nil,
+              !payload.cleared.contains(command.id),
+              let candidate = command.defaultShortcut else {
+            return nil
+        }
+        return registry.all.first { other in
+            other.id != command.id && unsuppressedShortcut(for: other) == candidate
+        }
+    }
+
+    private func unsuppressedShortcut(for command: AppCommand) -> KeyboardShortcut? {
+        guard command.isEditable else { return command.defaultShortcut }
+        if payload.cleared.contains(command.id) { return nil }
+        return payload.bound[command.id] ?? command.defaultShortcut
     }
 
     // MARK: - Persistence
 
     private func save() {
+        guard writesAllowed else {
+            SkalmanLogger.session.error(
+                "Refusing to save shortcut overrides: the unreadable previous value is still there"
+            )
+            return
+        }
+
         do {
             defaults.set(try JSONEncoder().encode(payload), forKey: Keys.overrides)
             NotificationCenter.default.post(KeyboardShortcutsDidChange())
@@ -117,9 +167,24 @@ final class ShortcutOverrideStore {
         }
     }
 
+    /// Missing and unreadable are different answers.
+    ///
+    /// Both used to fall through to the default payload, and the next rebinding then wrote that
+    /// default straight over the stored blob — so a user whose overrides failed to decode lost
+    /// every one of them, permanently, the first time they touched a shortcut. The unreadable
+    /// case is now kept aside and only then overwritten; see `DefaultsQuarantine`.
     private func load() {
-        guard let data = defaults.data(forKey: Keys.overrides),
-              let decoded = try? JSONDecoder().decode(Payload.self, from: data) else { return }
+        guard let data = defaults.data(forKey: Keys.overrides) else { return }
+
+        guard let decoded = try? JSONDecoder().decode(Payload.self, from: data) else {
+            writesAllowed = DefaultsQuarantine.quarantine(
+                data,
+                forKey: Keys.overrides,
+                in: defaults
+            )
+            return
+        }
+
         payload = decoded
     }
 

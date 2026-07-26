@@ -1,0 +1,102 @@
+{
+  "$id" : "https://skalman.invalid/schema/components/conversation.assistant-message-v1.schema.json",
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties" : false,
+  "properties" : {
+    "hook" : {
+      "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+      "x-skalman-node-constraints" : {
+        "allowedButtonRoles" : [
+          "standard"
+        ],
+        "allowedCustomSurfaceKinds" : [
+
+        ],
+        "allowedImageRoles" : [
+          "icon",
+          "decoration"
+        ],
+        "allowedStackAxes" : [
+          "horizontal",
+          "vertical"
+        ],
+        "allowedStatusRoles" : [
+          "neutral",
+          "positive",
+          "warning",
+          "negative"
+        ],
+        "allowedTextRoles" : [
+          "compactBody",
+          "compactDetail"
+        ],
+        "allowsDivider" : true,
+        "allowsFixedSpacer" : true,
+        "allowsFlexibleSpacer" : false,
+        "allowsOverlay" : false,
+        "allowsProceed" : true,
+        "maximumDepth" : 2,
+        "maximumNodes" : 10,
+        "maximumTextLength" : 160,
+        "requiredRootAxis" : "vertical",
+        "requiresProceed" : true
+      }
+    },
+    "id" : {
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "properties" : {
+      "items" : {
+        "properties" : {
+          "property" : {
+            "enum" : [
+
+            ]
+          },
+          "value" : {
+            "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+          }
+        },
+        "required" : [
+          "property",
+          "value"
+        ],
+        "type" : "object"
+      },
+      "type" : "array"
+    },
+    "slots" : {
+      "items" : false,
+      "type" : "array"
+    },
+    "target" : {
+      "additionalProperties" : false,
+      "properties" : {
+        "component" : {
+          "const" : "conversation.assistant-message"
+        },
+        "contractVersion" : {
+          "const" : 1
+        },
+        "entityID" : {
+          "minLength" : 1,
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "component",
+        "contractVersion"
+      ],
+      "type" : "object"
+    }
+  },
+  "required" : [
+    "id",
+    "target",
+    "properties",
+    "slots"
+  ],
+  "title" : "Skalman conversation.assistant-message v1 component patch",
+  "type" : "object"
+}

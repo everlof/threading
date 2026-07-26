@@ -6,6 +6,42 @@ import AppKit
 @MainActor
 protocol BackdropOverlayContent where Self: NSView {}
 
+/// Which of the window's two grounds a drawn component sits on.
+///
+/// The grounds are described in `BackdropOverlay`: the chrome's, which the app theme owns, and
+/// the window backdrop, which a terminal pane paints with its *own* palette.
+///
+/// This exists so a component that can appear on both says which — once, as a value — instead of
+/// existing twice. That was the actual cost of the old arrangement: the display pane's tab and the
+/// toolbar's page tab were two classes because "the colour comes from somewhere else" had been
+/// modelled as a *base class* rather than as data. Sharing their metrics through a constants enum
+/// was tried and did not hold, because what drifted was never the metrics — it was the hover
+/// state, the close button, the pressed fill and the accessibility role, none of which a shared
+/// constant reaches.
+@MainActor
+enum InkSource {
+
+    /// The chrome's ground, whose roles the app theme states.
+    case chrome
+
+    /// The window backdrop, whose colour the theme does not own.
+    case backdrop
+
+    var ink: Design.Ink {
+        switch self {
+        case .chrome: Design.Ink.chrome
+        case .backdrop: WindowBackdrop.ink
+        }
+    }
+}
+
+/// A view that draws from an `InkSource`, so the ground it is on can be asserted rather than
+/// assumed. `BackdropOverlayContent` says a view *can* be inked; this says which ink it took.
+@MainActor
+protocol InkSourced {
+    var inkSource: InkSource { get }
+}
+
 /// A view drawn directly on the window's **backdrop** rather than on the chrome's ground.
 ///
 /// # Why this type exists
@@ -45,9 +81,12 @@ protocol BackdropOverlayContent where Self: NSView {}
 /// Surfaces are the same story: a fill from `Design.Surface.*` is calibrated for the chrome's
 /// ground, so a pill that needs one derives it from `ink` instead (see `Design.Ink.surface`).
 @MainActor
-class BackdropOverlay: NSView, BackdropOverlayContent {
+class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced {
 
     private let appEvents = AppEventObservations()
+
+    /// Always the backdrop: a passive overlay exists only to sit on it.
+    let inkSource: InkSource = .backdrop
 
     /// The ink that reads on the backdrop right now. Held here so a subclass rebuilding its own
     /// content between backdrop changes — a label whose text changed — re-reads the same source
@@ -113,14 +152,36 @@ class BackdropOverlay: NSView, BackdropOverlayContent {
 ///
 /// It keeps `ThemedControl`'s keyboard, enabled-state, and accessibility contract while replacing
 /// chrome-palette colours with ink measured against the active terminal backdrop.
-class BackdropThemedControl: ThemedControl, BackdropOverlayContent {
+class BackdropThemedControl: ThemedControl, BackdropOverlayContent, InkSourced {
 
     private let appEvents = AppEventObservations()
 
-    final var ink: Design.Ink { WindowBackdrop.ink }
+    /// Which ground this control draws on, fixed for its lifetime.
+    ///
+    /// `.backdrop` is the default because that is what this base exists for and what every
+    /// toolbar control needs. A component that also appears inside the chrome — the tab, the icon
+    /// button — passes `.chrome` there rather than being a second class that draws the same thing
+    /// from different roles.
+    let inkSource: InkSource
+
+    final var ink: Design.Ink { inkSource.ink }
+
+    init(frame frameRect: NSRect, inkSource: InkSource) {
+        self.inkSource = inkSource
+        super.init(frame: frameRect)
+        observeInk()
+    }
 
     override init(frame frameRect: NSRect) {
+        self.inkSource = .backdrop
         super.init(frame: frameRect)
+        observeInk()
+    }
+
+    /// Both grounds move, and for overlapping but different reasons: the backdrop when the
+    /// selected session's palette changes, the chrome when the app theme does. Observing both
+    /// regardless costs a redraw that was already free and removes a way to get this wrong.
+    private func observeInk() {
         appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in self?.inkDidChange() }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.inkDidChange() }
         appEvents.observe(AccessibilityDisplayOptionsDidChange.self) {

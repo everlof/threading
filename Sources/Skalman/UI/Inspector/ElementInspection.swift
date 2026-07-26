@@ -20,6 +20,9 @@ enum InspectorDefaults {
     static let minimumVisibleAlpha: CGFloat = 0.01
 
     static let strokeWidth: CGFloat = 2
+    /// Ancestors are drawn lighter than the pick, so the target still reads as the target
+    /// when nine outlines are on screen.
+    static let ancestorStrokeWidth: CGFloat = 1.5
     static let fillAlpha: CGFloat = 0.12
     /// The freeflow guides span the whole window, so they rest well below the outline.
     static let guideAlpha: CGFloat = 0.35
@@ -29,6 +32,50 @@ enum InspectorDefaults {
     static let dragThreshold: CGFloat = 4
     static let escapeKeyCode: UInt16 = 53
     static let screenshotPrefix = "skalman-inspect-"
+
+    // MARK: - Hierarchy
+
+    /// Two rectangles no further apart than this are one rectangle to the eye, so the views
+    /// holding them are one level. Views land on half points routinely.
+    static let coincidentTolerance: CGFloat = 0.5
+
+    /// A gap smaller than this is a flush edge, and drawing `0` around a fitted view is four
+    /// numbers saying nothing.
+    static let minimumMeasuredGap: CGFloat = 0.5
+
+    /// The depth number inside each outlined rectangle's top-leading corner.
+    static let chipSize: CGFloat = 14
+    static let chipInset: CGFloat = 2
+
+    static let measureWidth: CGFloat = 1
+    static let measureDash: [CGFloat] = [3, 2]
+    /// The perpendicular end mark, so a two-point gap still reads as a span.
+    static let measureTick: CGFloat = 8
+
+    /// The room kept between two of the overlay's small labels, and between a label and the
+    /// edge it steps past.
+    static let labelClearance: CGFloat = 3
+
+    /// A leader is a line saying which measure a displaced number belongs to, not a measure
+    /// itself, so it rests well below the one it points at.
+    static let leaderAlpha: CGFloat = 0.5
+
+    static let legendRowHeight: CGFloat = 15
+    static let legendSwatch: CGFloat = 9
+
+    /// Past this a class name is truncated rather than widening the key — one
+    /// `ComponentContentContainerView = _NSCoreHostingView` would otherwise set the panel's
+    /// width for every row under it.
+    ///
+    /// Both halves earn their keep. The **fraction** is what makes the cap answer the window
+    /// rather than a guess: a real chain is eleven levels of composed AppKit class names, and a
+    /// fixed 300 truncated most of them on a 1400pt window with half of it empty. The
+    /// **ceiling** is what stops a wide window handing the key most of itself.
+    static let legendTitleFraction: CGFloat = 0.42
+    static let legendTitleWidth: CGFloat = 460
+
+    /// Above this brightness a hue takes black ink rather than white.
+    static let inkFlipBrightness: CGFloat = 0.6
 }
 
 // MARK: - Element Hit Test
@@ -121,12 +168,18 @@ struct ElementReport {
     /// names AppKit plumbing, the controllers name types this project defines.
     let controllers: [String]
 
+    /// The rectangles the overlay drew, target first — the same coalescing and the same hues.
+    let levels: [InspectorLevel]
+
+    /// What was held when the pick was made, and therefore what the screenshot shows.
+    let layers: InspectorLayers
+
     /// Set once the window snapshot lands on disk.
     var screenshotPath: String?
 
     // MARK: - Building
 
-    static func build(for view: NSView) -> ElementReport {
+    static func build(for view: NSView, layers: InspectorLayers = []) -> ElementReport {
         var chain: [Node] = []
         var currentView: NSView? = view
         while let current = currentView {
@@ -149,6 +202,8 @@ struct ElementReport {
             target: chain[0],
             viewChain: chain,
             controllers: controllers,
+            levels: InspectorHierarchy.levels(for: view),
+            layers: layers,
             screenshotPath: nil
         )
     }
@@ -190,11 +245,52 @@ struct ElementReport {
             lines.append("- Controllers: " + controllers.joined(separator: " → "))
         }
 
+        lines.append(contentsOf: hierarchyLines)
+        lines.append(contentsOf: spacingLines)
+
         if let screenshotPath {
             lines.append("- Window screenshot, target outlined: \(screenshotPath)")
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// The colour key, in words.
+    ///
+    /// The screenshot carries the hierarchy as *colours*, which nobody reading the text can
+    /// see and no agent can name. So each outline is spelled out here against the class it
+    /// belongs to — which is what turns "the orange one is too wide" into a file to open.
+    private var hierarchyLines: [String] {
+        guard layers.contains(.hierarchy) || layers.contains(.spacing) else { return [] }
+
+        let shown = InspectorHierarchy.shown(levels, for: layers)
+        guard shown.count > 1 else { return [] }
+
+        return ["- Hierarchy, target outward (outline colour · depth · class · frame):"]
+            + shown.map { level in
+                var row = "  - \(level.hue.name) · \(level.depth) · \(level.title)"
+                row += " · \(InspectorGeometry.describe(level.rect))"
+                if let identifier = level.identifier {
+                    row += " · id \(identifier)"
+                }
+                return row + " · \(level.address)"
+            }
+    }
+
+    /// What the measures on the screenshot say, per pair. The parent is named first because
+    /// the layout that chose the gap almost always lives there.
+    private var spacingLines: [String] {
+        guard layers.contains(.spacing) else { return [] }
+
+        let pairs = InspectorSpacing.gaps(across: InspectorHierarchy.shown(levels, for: layers))
+        guard !pairs.isEmpty else { return [] }
+
+        let shown = InspectorHierarchy.shown(levels, for: layers)
+        return ["- Spacing, inside each parent (points):"]
+            + pairs.enumerated().map { index, pair in
+                "  - \(shown[index].title) inside \(pair.parent.title): "
+                    + InspectorSpacing.describe(pair.gaps)
+            }
     }
 }
 

@@ -51,7 +51,7 @@ final class TerminalContainerViewController: NSViewController {
     private var drawerHeightValue: CGFloat = ShellDrawerDefaults.defaultHeight
 
     private var settingsPage: NSViewController?
-    private var settingsPageCache: [Int: NSViewController] = [:]
+    private var settingsPageCache: [String: NSViewController] = [:]
 
     /// Whether settings is the surface currently on screen, so the window can title the pane.
     var isShowingSettings: Bool { settingsPage != nil }
@@ -59,9 +59,19 @@ final class TerminalContainerViewController: NSViewController {
     /// The non-session sidebar destination currently shown. These make the toolbar tab derive
     /// from the same selection as the content pane instead of falling back to a generic title.
     private(set) var currentComposerProjectID: ProjectID?
-    private(set) var currentSettingsPageIndex: Int?
+    private(set) var currentSettingsPageID: String?
 
     weak var delegate: TerminalContainerViewControllerDelegate?
+
+    /// The pane's header strip. See `setupHeader`.
+    private let headerHost = NSView()
+    private var headerLeadingConstraint: NSLayoutConstraint?
+
+    /// Where the pane's content begins — below the header rather than below the toolbar.
+    private let contentGuide = NSLayoutGuide()
+
+    /// What every surface in this pane pins its top to.
+    var contentTopAnchor: NSLayoutYAxisAnchor { contentGuide.topAnchor }
 
     // MARK: - Lifecycle
 
@@ -72,6 +82,7 @@ final class TerminalContainerViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupHeader()
         setupDrawer()
         setupPlaceholder()
         setupComposer()
@@ -90,6 +101,9 @@ final class TerminalContainerViewController: NSViewController {
         // surfaces, but the pane fill is set directly by `applyPaneBackground` and follows
         // nothing on its own.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.themeDidChange() }
+        appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
+            self?.settingsCatalogueDidChange()
+        }
     }
 
     /// Repaints the pane behind whatever surface is on screen after a theme change.
@@ -110,6 +124,94 @@ final class TerminalContainerViewController: NSViewController {
         }
     }
 
+    // MARK: - Header
+
+    /// The pane's own header strip: the page tab, the `+`, and the session's actions.
+    ///
+    /// **These used to be toolbar items**, and moving them here is what stops them drifting away
+    /// from the pane they act on. `NSToolbar` positions its items relative to the *window*, so
+    /// the tab naming this session sat at a fixed x while the sidebar's divider moved under it —
+    /// `NSTrackingSeparatorToolbarItem` had papered over that, and it stopped working the moment
+    /// the sidebar became a plain split item. A header owned by the pane cannot drift, because it
+    /// *is* the pane: no divider is crossed and there is nothing to track.
+    ///
+    /// The strip sits under the toolbar rather than in the titlebar. A view in the titlebar strip
+    /// is behind AppKit's own titlebar container, which is what this project's earlier hand-rolled
+    /// header ran into, and the window keeps a real toolbar for the one control that belongs to
+    /// the *window* rather than to either pane — the sidebar toggle.
+    private func setupHeader() {
+        headerHost.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(headerHost)
+        view.addLayoutGuide(contentGuide)
+
+        let headerBottom = headerHost.bottomAnchor.constraint(
+            equalTo: view.safeAreaLayoutGuide.topAnchor
+        )
+        // AppKit briefly reports a zero-height safe area while the full-size-content window is
+        // being attached. Let the 40pt floor win for that one layout pass; once the toolbar has
+        // established its inset, both constraints agree. Keeping this equality just below
+        // required avoids a launch-time unsatisfiable-constraints warning without changing the
+        // settled geometry.
+        headerBottom.priority = .init(999)
+
+        NSLayoutConstraint.activate([
+            // **The strip the toolbar reserves is the header's**, top to safe-area bottom, and
+            // that is the whole of "one row across the window". Pinned below the safe area
+            // instead, the header was a second row under a toolbar holding one button, so the
+            // content pane opened with an empty band across the top of it.
+            headerHost.topAnchor.constraint(equalTo: view.topAnchor),
+            headerBottom,
+            headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            // A floor, not the height: the strip is the toolbar's to size, and this only keeps
+            // the row sane where there is no window to inset it — a fixture, or a test.
+            headerHost.heightAnchor.constraint(
+                greaterThanOrEqualToConstant: PaneHeaderDefaults.height
+            ),
+
+            // Everything else in the pane hangs off this rather than off the safe area directly,
+            // so the header is the only place that knows where the pane's content begins.
+            contentGuide.topAnchor.constraint(equalTo: headerHost.bottomAnchor),
+            contentGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            contentGuide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            contentGuide.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    /// Puts the window controller's header content into the strip. The controller owns those
+    /// views because it owns what they do; the pane owns where they sit.
+    func installHeader(_ content: NSView) {
+        content.translatesAutoresizingMaskIntoConstraints = false
+        headerHost.addSubview(content)
+
+        let leading = content.leadingAnchor.constraint(
+            equalTo: headerHost.leadingAnchor,
+            constant: PaneHeaderDefaults.inset
+        )
+        headerLeadingConstraint = leading
+
+        NSLayoutConstraint.activate([
+            leading,
+            content.trailingAnchor.constraint(
+                equalTo: headerHost.trailingAnchor,
+                constant: -PaneHeaderDefaults.inset
+            ),
+            content.centerYAnchor.constraint(equalTo: headerHost.centerYAnchor)
+        ])
+    }
+
+    /// How far in the header's first control starts.
+    ///
+    /// Normally the pane's own inset — but the strip the header sits in is also where the
+    /// **window's** controls live, and with the sidebar collapsed the pane reaches the window's
+    /// leading edge and the tab lands on top of the traffic lights. This is the "shift itself
+    /// sideways to dodge the traffic lights" that a hand-rolled header has to do; the window
+    /// controller computes it by measuring, since the lights are AppKit's to size.
+    var headerLeadingInset: CGFloat {
+        get { headerLeadingConstraint?.constant ?? PaneHeaderDefaults.inset }
+        set { headerLeadingConstraint?.constant = newValue }
+    }
+
     /// The composer sits alongside the placeholder, hidden until a project is selected.
     private func setupComposer() {
         addChild(composerViewController)
@@ -120,7 +222,7 @@ final class TerminalContainerViewController: NSViewController {
         view.addSubview(composer)
 
         NSLayoutConstraint.activate([
-            composer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            composer.topAnchor.constraint(equalTo: contentTopAnchor),
             composer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composer.trailingAnchor.constraint(equalTo: view.trailingAnchor)
@@ -131,8 +233,12 @@ final class TerminalContainerViewController: NSViewController {
     func showComposer(projectID: ProjectID) {
         detachCurrentChild()
         currentComposerProjectID = projectID
-        currentSettingsPageIndex = nil
+        currentSettingsPageID = nil
         currentSessionID = nil
+
+        // A shell belongs to a conversation; neither the composer nor a settings page is one, and
+        // a drawer left standing under them draws a terminal through the form on top of it.
+        applyDrawer(for: nil)
 
         placeholderView.isHidden = true
         composerViewController.view.isHidden = false
@@ -145,11 +251,11 @@ final class TerminalContainerViewController: NSViewController {
     ///
     /// The page is pinned straight to the pane — centred, capped at a readable width, floored by
     /// margins — rather than through an intermediate container, which did not size its child.
-    func showSettingsPage(index: Int) {
-        guard index >= 0, index < SettingsPages.all.count else { return }
+    func showSettingsPage(id: String) {
+        guard let definition = SettingsPages.page(id: id) else { return }
 
         currentComposerProjectID = nil
-        currentSettingsPageIndex = index
+        currentSettingsPageID = id
 
         if settingsPage == nil {
             detachCurrentChild()
@@ -157,14 +263,16 @@ final class TerminalContainerViewController: NSViewController {
             placeholderView.isHidden = true
             composerViewController.view.isHidden = true
             applyPaneBackground(Design.Surface.ground)
+            // The session's shell goes with the session — see `showComposer`.
+            applyDrawer(for: nil)
         } else if let current = settingsPage {
             current.view.removeFromSuperview()
             current.removeFromParent()
         }
 
-        let page = settingsPageCache[index] ?? {
-            let made = SettingsPages.all[index].make()
-            settingsPageCache[index] = made
+        let page = settingsPageCache[id] ?? {
+            let made = definition.make()
+            settingsPageCache[id] = made
             return made
         }()
 
@@ -179,7 +287,7 @@ final class TerminalContainerViewController: NSViewController {
         preferred.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            content.topAnchor.constraint(equalTo: contentTopAnchor),
             content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             content.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             preferred,
@@ -189,6 +297,15 @@ final class TerminalContainerViewController: NSViewController {
         ])
 
         settingsPage = page
+    }
+
+    private func settingsCatalogueDidChange() {
+        settingsPageCache.removeAll()
+        guard settingsPage != nil else { return }
+        let requested = currentSettingsPageID ?? SettingsPages.generalID
+        showSettingsPage(
+            id: SettingsPages.page(id: requested) == nil ? SettingsPages.generalID : requested
+        )
     }
 
     // MARK: - Setup
@@ -318,7 +435,7 @@ final class TerminalContainerViewController: NSViewController {
         view.addSubview(placeholderView)
 
         NSLayoutConstraint.activate([
-            placeholderView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            placeholderView.topAnchor.constraint(equalTo: contentTopAnchor),
             placeholderView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             placeholderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             placeholderView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
@@ -336,7 +453,7 @@ final class TerminalContainerViewController: NSViewController {
 
         detachCurrentChild()
         currentComposerProjectID = nil
-        currentSettingsPageIndex = nil
+        currentSettingsPageID = nil
         applyDrawer(for: sessionID)
 
         guard let sessionID,
@@ -412,7 +529,7 @@ final class TerminalContainerViewController: NSViewController {
 
         // Pinned to the safe area, which the toolbar insets for us.
         NSLayoutConstraint.activate([
-            controller.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            controller.view.topAnchor.constraint(equalTo: contentTopAnchor),
             controller.view.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
             controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
@@ -461,7 +578,10 @@ final class TerminalContainerViewController: NSViewController {
         view.addSubview(conversation.view, positioned: .below, relativeTo: gitStatusOverlay)
 
         NSLayoutConstraint.activate([
-            conversation.view.topAnchor.constraint(equalTo: view.topAnchor),
+            // The conversation draws its own top inset, so it pinned to the pane's own top and
+            // ran under the toolbar deliberately. The header is a real strip and cannot be run
+            // under, so this is the one place that changes from `view.topAnchor`.
+            conversation.view.topAnchor.constraint(equalTo: contentTopAnchor),
             conversation.view.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
             conversation.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             conversation.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
@@ -500,7 +620,8 @@ final class TerminalContainerViewController: NSViewController {
         // Also paint the window itself, so the terminal's colour is the backdrop the whole
         // right side sits on: it fills the strip beneath the transparent toolbar and runs into
         // the window's rounded corners, instead of a neutral chrome meeting the terminal in a
-        // hard edge. The sidebar's own material floats on top of this, unaffected.
+        // hard edge. The sidebar covers its own column with an opaque ground, so this reaches
+        // only the panes that want it — and the split view's divider is the seam between them.
         view.window?.backgroundColor = color
 
         // And tell whatever is drawn on it. The toolbar sits over this colour rather than over
@@ -530,7 +651,7 @@ final class TerminalContainerViewController: NSViewController {
 
     private func showEmptyState() {
         currentComposerProjectID = nil
-        currentSettingsPageIndex = nil
+        currentSettingsPageID = nil
         composerViewController.view.isHidden = true
         placeholderView.isHidden = false
         applyPaneBackground(Design.Surface.ground)
@@ -593,7 +714,7 @@ private extension TerminalContainerViewController {
 
         NSLayoutConstraint.activate([
             gitStatusOverlay.topAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.topAnchor,
+                equalTo: contentTopAnchor,
                 constant: Design.Spacing.inset
             ),
             gitStatusOverlay.trailingAnchor.constraint(
@@ -675,6 +796,9 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
     }
 
     func agentSessionDidChangeState(_ controller: AgentSessionViewController) {
+        NotificationCenter.default.post(
+            SessionActivityDidChange(sessionID: controller.sessionID)
+        )
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
     }
 }
@@ -723,35 +847,27 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
     func conversationDidChangeActivity(_ controller: ConversationViewController) {
         // Same channel a terminal session's activity uses, so the sidebar refreshes its row
         // and its attention dot the one way it already knows.
+        NotificationCenter.default.post(
+            SessionActivityDidChange(sessionID: controller.sessionID)
+        )
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
     }
 }
 
+// MARK: - Pane Header Defaults
 
-// MARK: - Drawer Divider
+/// The strip at the top of the content pane, holding what used to be toolbar items.
+enum PaneHeaderDefaults {
+    /// Deep enough for the tab and the icon buttons beside it, with air above and below —
+    /// `Design.Size.tabHeight` plus a `Design.Spacing.small` margin each way.
+    static let height: CGFloat = Design.Size.tabHeight + Design.Spacing.small * 2
 
-/// The grab strip above the shell drawer.
-///
-/// A hand-rolled divider rather than an `NSSplitView`, because the pane is not a split: the
-/// conversation fills it and the drawer is a strip taken off the bottom. A split view would
-/// bring its own collapse behaviour, its own delegate and its own idea of priorities, all of
-/// which would have to be argued out of the way.
-final class ShellDrawerDivider: NSView {
+    /// From the pane's own edges. The leading one is what makes the tab start where the sidebar
+    /// ends, which is the whole reason the header lives in the pane.
+    static let inset: CGFloat = Design.Spacing.medium
 
-    /// Positive as the pointer moves down, which is the direction that *shrinks* the drawer.
-    var onDrag: ((CGFloat) -> Void)?
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        Design.Surface.border.setFill()
-        NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
-    }
-
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .resizeUpDown)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        onDrag?(event.deltaY)
-    }
+    /// Stands in for the window controls' width until they have been laid out and can be
+    /// measured. Only ever used on the first pass of a launch that starts collapsed — the
+    /// measurement replaces it as soon as there is something to measure.
+    static let assumedWindowControlsWidth: CGFloat = 112
 }

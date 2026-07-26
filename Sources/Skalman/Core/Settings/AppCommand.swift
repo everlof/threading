@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 // MARK: - App Command
 
@@ -16,7 +17,28 @@ struct AppCommand {
         case session = "Session"
         case view = "View"
         case inspect = "Inspect"
+        case extensions = "Extensions"
         case system = "System"
+    }
+
+    enum Origin: Equatable {
+        case builtIn
+        case extensionCommand(identifier: String, name: String, localID: String)
+
+        var extensionIdentifier: String? {
+            guard case .extensionCommand(let identifier, _, _) = self else { return nil }
+            return identifier
+        }
+
+        var extensionName: String? {
+            guard case .extensionCommand(_, let name, _) = self else { return nil }
+            return name
+        }
+
+        var localCommandID: String? {
+            guard case .extensionCommand(_, _, let localID) = self else { return nil }
+            return localID
+        }
     }
 
     /// Stable across releases and across renames: this is what an override is stored under, so
@@ -25,6 +47,7 @@ struct AppCommand {
 
     let group: Group
     let title: String
+    let detail: String?
     let defaultShortcut: KeyboardShortcut?
 
     /// Whether the user may rebind it.
@@ -33,6 +56,35 @@ struct AppCommand {
     /// wants and breaking either is worse than any flexibility it buys — they appear so the page
     /// answers "what is this key doing", which is most of why a shortcuts list is opened.
     let isEditable: Bool
+
+    let origin: Origin
+    let scope: ExtensionCommandScope
+    let risk: ExtensionCommandRisk
+    let menuPlacements: [ExtensionMenuPlacement]
+
+    init(
+        id: String,
+        group: Group,
+        title: String,
+        detail: String? = nil,
+        defaultShortcut: KeyboardShortcut?,
+        isEditable: Bool,
+        origin: Origin = .builtIn,
+        scope: ExtensionCommandScope = .application,
+        risk: ExtensionCommandRisk = .ordinary,
+        menuPlacements: [ExtensionMenuPlacement] = []
+    ) {
+        self.id = id
+        self.group = group
+        self.title = title
+        self.detail = detail
+        self.defaultShortcut = defaultShortcut
+        self.isEditable = isEditable
+        self.origin = origin
+        self.scope = scope
+        self.risk = risk
+        self.menuPlacements = menuPlacements
+    }
 }
 
 // MARK: - The Table

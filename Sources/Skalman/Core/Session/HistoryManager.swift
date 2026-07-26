@@ -38,7 +38,7 @@ enum HistoryManager {
             do {
                 try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             } catch {
-                print("Failed to create history directory: \(error)")
+                SkalmanLogger.session.error("Failed to create the history directory: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -71,7 +71,7 @@ enum HistoryManager {
                 }
             }
         } catch {
-            print("Failed to cleanup orphaned history files: \(error)")
+            SkalmanLogger.session.error("Failed to clean up orphaned history files: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -84,7 +84,7 @@ enum HistoryManager {
             do {
                 try fileManager.removeItem(at: filePath)
             } catch {
-                print("Failed to remove history file: \(error)")
+                SkalmanLogger.session.error("Failed to remove a history file: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

@@ -152,7 +152,7 @@ final class StoragePreferencesViewController: NSViewController {
 
         sections.append(SettingsUI.note(StorageStrings.safety))
 
-        let page = SettingsUI.page(sections)
+        let page = SettingsUI.page(sections, hostPage: .storage)
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([

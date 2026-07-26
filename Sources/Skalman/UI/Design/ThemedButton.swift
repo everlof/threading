@@ -19,7 +19,7 @@ import AppKit
 /// `isProminent` fills the bordered shape with the theme's accent, for the one action a sheet is
 /// asking about. There is deliberately no third colour: a destructive button says so in its
 /// *title*, and a red control on a theme whose accent is already red says nothing at all.
-final class ThemedButton: ThemedControl {
+final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     // MARK: - Geometry
 
@@ -84,6 +84,18 @@ final class ThemedButton: ThemedControl {
 
     /// The accent-filled shape, for the action a sheet or a card is asking about.
     var isProminent: Bool = false {
+        didSet { needsDisplay = true }
+    }
+
+    /// What a *plain* button raises under the pointer, when the resting control surface is not
+    /// enough to be seen.
+    ///
+    /// A plain button rests on nothing and lifts to `Design.Surface.controlResting`, which reads
+    /// clearly against a pane. On top of a surface that is already filled — a tab's ×, sitting on
+    /// the tab's own fill — the same colour is the same colour twice and says nothing, so the one
+    /// control in the row that closes something looked inert. A call site that puts a plain button
+    /// on a fill states the weight that reads there.
+    var hoverFill: NSColor? {
         didSet { needsDisplay = true }
     }
 
@@ -246,12 +258,18 @@ final class ThemedButton: ThemedControl {
             // A plain button carries no surface at rest and lifts under the pointer — the design
             // system's "quiet until relevant". It is also the only thing saying the mark can be
             // clicked, which matters most exactly where the mark is all there is.
-            focusPath = ThemedSurface.draw(bounds, fill: Design.Surface.controlResting)
+            focusPath = ThemedSurface.draw(
+                bounds,
+                fill: isPressed
+                    ? (hoverFill ?? Design.Surface.controlHover)
+                    : (hoverFill ?? Design.Surface.controlResting)
+            )
         } else {
+            let corner = Design.Radius.control(fitting: bounds.size)
             focusPath = NSBezierPath(
                 roundedRect: bounds,
-                xRadius: Design.Radius.control,
-                yRadius: Design.Radius.control
+                xRadius: corner,
+                yRadius: corner
             )
         }
 
@@ -270,13 +288,7 @@ final class ThemedButton: ThemedControl {
         var x = content.midX - (titleWidth + imageWidth + gap) / 2
 
         if let image {
-            let rect = NSRect(
-                x: x,
-                y: content.midY - Layout.imageSize / 2,
-                width: Layout.imageSize,
-                height: Layout.imageSize
-            )
-            draw(image, in: rect)
+            draw(image, in: imageRect(for: image, centredOn: content.midY, from: x))
             x += Layout.imageSize + gap
         }
 
@@ -294,6 +306,33 @@ final class ThemedButton: ThemedControl {
             height: height
         )
         (title as NSString).draw(in: content, withAttributes: titleAttributes)
+    }
+
+    /// Where a glyph is drawn: fitted into the image box, never stretched to fill it.
+    ///
+    /// `NSImage.draw(in:)` scales to the rect it is handed, on each axis independently, and an SF
+    /// Symbol is square only by coincidence. `ellipsis` is three dots on one line — about four
+    /// times wider than it is tall — so a square box pulled each dot into a vertical bar, which is
+    /// what the session row's and the review header's overflow buttons were drawing. Fitting
+    /// costs nothing for the square symbols and is the only thing that is right for the rest.
+    private func imageRect(for image: NSImage, centredOn midY: CGFloat, from x: CGFloat) -> NSRect {
+        let box = Layout.imageSize
+        let size = image.size
+        guard size.width > 0, size.height > 0 else {
+            return NSRect(x: x, y: midY - box / 2, width: box, height: box)
+        }
+
+        let scale = min(box / size.width, box / size.height)
+        let width = size.width * scale
+        let height = size.height * scale
+        // Centred in the slot it was allotted, so a wide-and-short glyph sits where a square one
+        // would rather than hugging the slot's leading edge.
+        return NSRect(
+            x: x + (box - width) / 2,
+            y: midY - height / 2,
+            width: width,
+            height: height
+        )
     }
 
     /// A template image carries no colour of its own, so it is drawn and then filled through what
@@ -336,6 +375,13 @@ final class ThemedButton: ThemedControl {
                 : Design.Surface.accent
         }
         return dimmed(isPressed || isHovered ? Design.Surface.controlHover : Design.Surface.controlResting)
+    }
+
+    /// The frame's horizontal padding around the title and glyph — the bordered shape's title
+    /// inset, or the plain shape's breathing room for its hover surface. What `PaneFooterView`
+    /// subtracts to put the *ink* on a stated margin.
+    var opticalHorizontalInset: CGFloat {
+        isBordered ? Layout.titleInset : Layout.plainInset
     }
 
     private var foreground: NSColor {

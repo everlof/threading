@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 import XCTest
 @testable import Skalman
 
@@ -182,5 +183,236 @@ final class AppCommandTests: XCTestCase {
     func testFixedCommandsAreNotEditable() {
         XCTAssertTrue(AppCommands.fixed.allSatisfy { !$0.isEditable })
         XCTAssertTrue(AppCommands.editable.allSatisfy(\.isEditable))
+    }
+}
+
+// MARK: - Dynamic Registry
+
+final class CommandRegistryTests: XCTestCase {
+    func testExtensionCommandsJoinTheSameNamespaceAsBuiltIns() throws {
+        let builtIn = AppCommand(
+            id: "app.refresh",
+            group: .view,
+            title: "Refresh",
+            defaultShortcut: .init(key: "r", modifiers: .command),
+            isEditable: true
+        )
+        let registry = CommandRegistry(builtInCommands: [builtIn])
+        registry.replaceExtensionCommands(
+            extensionIdentifier: "com.example.ci",
+            extensionName: "CI",
+            commands: [
+                .init(
+                    id: "open-build",
+                    title: "Open Build",
+                    scope: .project,
+                    risk: .destructive,
+                    defaultShortcut: .init(
+                        key: "b",
+                        modifiers: [.option, .command]
+                    )
+                )
+            ]
+        )
+
+        let command = try XCTUnwrap(
+            registry.command(id: "extension.com.example.ci.open-build")
+        )
+        XCTAssertEqual(command.group, .extensions)
+        XCTAssertEqual(command.scope, .project)
+        XCTAssertEqual(command.risk, .destructive)
+        XCTAssertEqual(command.origin.extensionName, "CI")
+        XCTAssertEqual(command.defaultShortcut?.displayString, "⌥⌘B")
+    }
+
+    @MainActor
+    func testDestructiveExtensionCommandUsesHostWordingAndRequiresApproval() throws {
+        let destructive = AppCommand(
+            id: "extension.com.example.ci.reset",
+            group: .extensions,
+            title: "Reset status",
+            detail: "Extension-authored detail must not become confirmation copy.",
+            defaultShortcut: nil,
+            isEditable: true,
+            origin: .extensionCommand(
+                identifier: "com.example.ci",
+                name: "CI Status",
+                localID: "reset"
+            ),
+            risk: .destructive
+        )
+
+        var presentations: [ExtensionCommandConfirmationPresentation] = []
+        var invocations = 0
+        var decision: (@MainActor (Bool) -> Void)?
+        ExtensionCommandExecutionGate.execute(
+            destructive,
+            present: { presentation, completion in
+                presentations.append(presentation)
+                decision = completion
+            },
+            invoke: { invocations += 1 }
+        )
+
+        XCTAssertEqual(
+            presentations,
+            [
+                .init(command: destructive)
+            ]
+        )
+        XCTAssertEqual(presentations.first?.title, "Run “Reset status”?")
+        XCTAssertEqual(
+            presentations.first?.message,
+            "“CI Status” marked this command as destructive. "
+                + "It may make changes that cannot be undone."
+        )
+        XCTAssertFalse(
+            presentations.first?.message.contains("Extension-authored detail") ?? true
+        )
+        XCTAssertEqual(presentations.first?.acceptTitle, "Run Destructive Command")
+        XCTAssertEqual(presentations.first?.cancelTitle, "Cancel")
+        XCTAssertEqual(invocations, 0)
+
+        decision?(false)
+        XCTAssertEqual(invocations, 0)
+
+        ExtensionCommandExecutionGate.execute(
+            destructive,
+            present: { _, completion in completion(true) },
+            invoke: { invocations += 1 }
+        )
+        XCTAssertEqual(invocations, 1)
+
+        let ordinary = AppCommand(
+            id: "extension.com.example.ci.refresh",
+            group: .extensions,
+            title: "Refresh",
+            defaultShortcut: nil,
+            isEditable: true,
+            origin: .extensionCommand(
+                identifier: "com.example.ci",
+                name: "CI Status",
+                localID: "refresh"
+            )
+        )
+        var ordinaryPresented = false
+        ExtensionCommandExecutionGate.execute(
+            ordinary,
+            present: { _, _ in ordinaryPresented = true },
+            invoke: { invocations += 1 }
+        )
+        XCTAssertFalse(ordinaryPresented)
+        XCTAssertEqual(invocations, 2)
+    }
+
+    func testCollidingExtensionDefaultIsUnboundUntilTheOwnerMoves() throws {
+        let suiteName = "SkalmanCommandRegistryTests-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        let builtIn = AppCommand(
+            id: "app.refresh",
+            group: .view,
+            title: "Refresh",
+            defaultShortcut: .init(key: "r", modifiers: .command),
+            isEditable: true
+        )
+        let registry = CommandRegistry(builtInCommands: [builtIn])
+        registry.replaceExtensionCommands(
+            extensionIdentifier: "com.example.ci",
+            extensionName: "CI",
+            commands: [
+                .init(
+                    id: "refresh",
+                    title: "Refresh CI",
+                    defaultShortcut: .init(
+                        key: "r",
+                        modifiers: [.command]
+                    )
+                )
+            ]
+        )
+        let store = ShortcutOverrideStore(
+            defaults: UserDefaults(suiteName: suiteName)!,
+            registry: registry
+        )
+        let extensionCommand = try XCTUnwrap(
+            registry.command(id: "extension.com.example.ci.refresh")
+        )
+
+        XCTAssertNil(store.shortcut(for: extensionCommand))
+        XCTAssertEqual(store.defaultConflict(for: extensionCommand)?.id, builtIn.id)
+
+        store.setShortcut(nil, for: builtIn)
+        XCTAssertEqual(
+            store.shortcut(for: extensionCommand),
+            extensionCommand.defaultShortcut
+        )
+    }
+
+    func testExtensionMenuLayoutUsesStablePlacementsAndCanonicalShortcutOwner() throws {
+        let registry = CommandRegistry(builtInCommands: [])
+        registry.replaceExtensionCommands(
+            extensionIdentifier: "com.example.zebra",
+            extensionName: "Zebra",
+            commands: [
+                .init(
+                    id: "shared",
+                    title: "Shared",
+                    menuPlacements: [.project, .view]
+                ),
+                .init(
+                    id: "shortcut-only",
+                    title: "Shortcut only",
+                    menuPlacements: []
+                )
+            ]
+        )
+        registry.replaceExtensionCommands(
+            extensionIdentifier: "com.example.alpha",
+            extensionName: "Alpha",
+            commands: [
+                .init(
+                    id: "refresh",
+                    title: "Refresh",
+                    menuPlacements: [.project]
+                )
+            ]
+        )
+
+        let projectGroups = ExtensionCommandMenuLayout.groups(
+            commands: registry.extensionCommands,
+            placement: .project
+        )
+        XCTAssertEqual(projectGroups.map(\.extensionName), ["Alpha", "Zebra"])
+        XCTAssertEqual(projectGroups[1].commands.map(\.title), ["Shared"])
+
+        let shared = try XCTUnwrap(
+            registry.command(id: "extension.com.example.zebra.shared")
+        )
+        XCTAssertEqual(
+            ExtensionCommandMenuLayout.canonicalPlacement(for: shared),
+            .project
+        )
+        XCTAssertEqual(
+            ExtensionCommandMenuLayout.groups(
+                commands: registry.extensionCommands,
+                placement: .view
+            ).flatMap(\.commands).map(\.id),
+            [shared.id]
+        )
+
+        let shortcutOnly = try XCTUnwrap(
+            registry.command(id: "extension.com.example.zebra.shortcut-only")
+        )
+        XCTAssertNil(
+            ExtensionCommandMenuLayout.canonicalPlacement(for: shortcutOnly)
+        )
+        XCTAssertTrue(
+            ExtensionMenuPlacement.allCases.allSatisfy { placement in
+                ExtensionCommandMenuLayout.groups(
+                    commands: registry.extensionCommands,
+                    placement: placement
+                ).flatMap(\.commands).allSatisfy { $0.id != shortcutOnly.id }
+            }
+        )
     }
 }

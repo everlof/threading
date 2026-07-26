@@ -1,0 +1,328 @@
+import AppKit
+
+enum AppThemeEditingError: LocalizedError {
+    case invalid(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalid(let message): return message
+        }
+    }
+}
+
+/// Builds a durable custom theme from a stock or custom base.
+///
+/// A base may omit derived roles, and System deliberately stores no roles at all. Custom
+/// documents instead materialise the authored vocabulary at creation time. That keeps them
+/// independent of a later stock-theme change and prevents a fixed dark ground from falling
+/// through to a dynamic light system label.
+enum AppThemeEditing {
+
+    static func make(
+        id: AppThemeID,
+        name: String,
+        base: AppTheme,
+        mode: AppTheme.Mode? = nil,
+        summary: String? = nil,
+        roles overrides: [AppThemeRole: NSColor] = [:],
+        material: AppTheme.Material? = nil,
+        terminalPalette: TerminalTheme? = nil
+    ) throws -> AppTheme {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            throw AppThemeEditingError.invalid("Provide a name for the app theme.")
+        }
+
+        let requestedMode = mode ?? base.mode
+        // A custom document has one fixed palette. When its base is the adaptive System theme,
+        // snapshot the appearance the user is actually looking at rather than claiming those
+        // fixed colours can follow both modes.
+        let targetMode: AppTheme.Mode
+        if requestedMode == .system {
+            targetMode = NSAppearance.currentDrawing()
+                .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
+        } else {
+            targetMode = requestedMode
+        }
+        let kind = AppTheme.VariantKind(mode: targetMode)
+        let variant = makeVariant(
+            named: cleanName,
+            from: base,
+            kind: kind,
+            roles: overrides,
+            material: material,
+            terminalPalette: terminalPalette
+        )
+        return try assemble(
+            id: id,
+            name: cleanName,
+            mode: targetMode == .system ? (kind == .dark ? .dark : .light) : targetMode,
+            summary: summary,
+            variants: [kind: variant]
+        )
+    }
+
+    /// Materialises one editable appearance from a base and merges only the supplied changes.
+    ///
+    /// If the base has no matching variant, its available appearance is used as the design
+    /// starting point. System is resolved under the requested appearance. Validation later
+    /// catches a new opposite variant whose inherited colours were not changed enough to read.
+    static func makeVariant(
+        named name: String,
+        from base: AppTheme,
+        kind: AppTheme.VariantKind,
+        roles overrides: [AppThemeRole: NSColor] = [:],
+        material: AppTheme.Material? = nil,
+        terminalPalette: TerminalTheme? = nil
+    ) -> AppTheme.Variant {
+        let appearance = kind.appearance ?? NSAppearance.currentDrawing()
+        let source = base.variant(kind)
+            ?? base.variant(kind == .light ? .dark : .light)
+        var roles = source?.roles ?? [:]
+        appearance.performAsCurrentDrawingAppearance {
+            for role in AppThemeRole.authored where roles[role] == nil {
+                let resolved = base.resolved(role, appearance: appearance)
+                roles[role] = resolved.usingColorSpace(.sRGB) ?? resolved
+            }
+        }
+        for (role, color) in overrides {
+            roles[role] = color
+        }
+        return AppTheme.Variant(
+            roles: roles,
+            terminalPalette: (terminalPalette
+                ?? source?.terminalPalette
+                ?? base.terminalPalette).renamed(name),
+            material: material ?? source?.material ?? base.material
+        )
+    }
+
+    static func assemble(
+        id: AppThemeID,
+        name: String,
+        mode: AppTheme.Mode,
+        summary: String?,
+        variants: [AppTheme.VariantKind: AppTheme.Variant]
+    ) throws -> AppTheme {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            throw AppThemeEditingError.invalid("Provide a name for the app theme.")
+        }
+        let renamed = variants.mapValues { variant in
+            AppTheme.Variant(
+                roles: variant.roles,
+                terminalPalette: variant.terminalPalette.renamed(cleanName),
+                material: variant.material
+            )
+        }
+        let theme = AppTheme(
+            id: id,
+            name: cleanName,
+            mode: mode,
+            summary: summary,
+            variants: renamed
+        )
+        try validate(theme)
+        return theme
+    }
+
+    /// Duplicating is a value copy of the entire style, including an optional opposite
+    /// appearance. It never snapshots an adaptive theme down to whichever variant is visible.
+    static func duplicate(
+        _ source: AppTheme,
+        id: AppThemeID,
+        name: String
+    ) throws -> AppTheme {
+        let variants: [AppTheme.VariantKind: AppTheme.Variant]
+        if source.isSystem {
+            variants = Dictionary(uniqueKeysWithValues: AppTheme.VariantKind.allCases.map {
+                (
+                    $0,
+                    makeVariant(named: name, from: source, kind: $0)
+                )
+            })
+        } else {
+            variants = source.variants
+        }
+        return try assemble(
+            id: id,
+            name: name,
+            mode: source.mode,
+            summary: source.summary,
+            variants: variants
+        )
+    }
+
+    static func validate(_ theme: AppTheme) throws {
+        if theme.isSystem {
+            guard theme.mode == .system, theme.variants.isEmpty else {
+                throw AppThemeEditingError.invalid(
+                    "The System theme is supplied by AppKit and cannot contain authored variants."
+                )
+            }
+            return
+        }
+
+        guard !theme.variants.isEmpty else {
+            throw AppThemeEditingError.invalid(
+                "An app theme must provide at least one light or dark variant."
+            )
+        }
+        switch theme.mode {
+        case .light where theme.variant(.light) == nil:
+            throw AppThemeEditingError.invalid(
+                "A theme with light appearance must provide a light variant."
+            )
+        case .dark where theme.variant(.dark) == nil:
+            throw AppThemeEditingError.invalid(
+                "A theme with dark appearance must provide a dark variant."
+            )
+        case .system where theme.variant(.light) == nil || theme.variant(.dark) == nil:
+            throw AppThemeEditingError.invalid(
+                "An adaptive theme must provide both light and dark variants."
+            )
+        default:
+            break
+        }
+
+        for kind in theme.availableVariants {
+            guard let variant = theme.variant(kind) else { continue }
+            try validate(variant, kind: kind, theme: theme)
+        }
+    }
+
+    private static func validate(
+        _ variant: AppTheme.Variant,
+        kind: AppTheme.VariantKind,
+        theme: AppTheme
+    ) throws {
+        let resolved = AppTheme(
+            id: theme.id,
+            name: theme.name,
+            mode: kind == .dark ? .dark : .light,
+            summary: theme.summary,
+            variants: [kind: variant]
+        )
+
+        for role in AppThemeRole.authored where variant.roles[role] == nil {
+            throw AppThemeEditingError.invalid(
+                "The \(kind.rawValue) variant has no \(role.wireName) colour after merging its base."
+            )
+        }
+
+        let appearance = kind.appearance ?? NSAppearance.currentDrawing()
+        let ground = resolved.resolved(.ground, appearance: appearance)
+        guard ground.alphaComponent >= 0.999 else {
+            throw AppThemeEditingError.invalid(
+                "\(kind.rawValue).ground must be opaque because the window has no theme surface behind it."
+            )
+        }
+        let surface = composite(resolved.resolved(.surface, appearance: appearance), over: ground)
+        let panel = composite(resolved.resolved(.panel, appearance: appearance), over: surface)
+
+        for (role, effectiveSurface) in [
+            (AppThemeRole.ground, ground),
+            (.surface, surface),
+            (.panel, panel)
+        ] {
+            let effectiveLabel = composite(
+                resolved.resolved(.label, appearance: appearance),
+                over: effectiveSurface
+            )
+            let ratio = ThemeContrast.ratio(effectiveLabel, effectiveSurface)
+            guard ratio >= ThemeContrast.minimumRatio else {
+                throw AppThemeEditingError.invalid(
+                    "\(kind.rawValue) \(resolved.resolved(.label, appearance: appearance).hexString) "
+                        + "text on \(role.wireName) "
+                        + "\(resolved.resolved(role, appearance: appearance).hexString) "
+                        + "has \(formatted(ratio)):1 contrast; "
+                        + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
+                )
+            }
+        }
+
+        let effectiveAccent = composite(
+            resolved.resolved(.accent, appearance: appearance),
+            over: ground
+        )
+        let accentRatio = ThemeContrast.ratio(
+            effectiveAccent,
+            ground
+        )
+        guard accentRatio >= 2 else {
+            throw AppThemeEditingError.invalid(
+                "The accent is only \(formatted(accentRatio)):1 against the window ground; "
+                    + "at least 2:1 is required."
+            )
+        }
+
+        guard ThemeContrast.isLegible(
+            foreground: variant.terminalPalette.foreground,
+            background: variant.terminalPalette.background
+        ) else {
+            throw AppThemeEditingError.invalid(
+                "The \(kind.rawValue) variant's paired terminal text is not legible against its background."
+            )
+        }
+
+        let material = variant.material
+        guard (0...24).contains(material.panelRadius) else {
+            throw AppThemeEditingError.invalid("panel_radius must be between 0 and 24.")
+        }
+        guard (0...24).contains(material.controlRadius) else {
+            throw AppThemeEditingError.invalid("control_radius must be between 0 and 24.")
+        }
+        guard (0.5...4).contains(material.borderWidth) else {
+            throw AppThemeEditingError.invalid("border_width must be between 0.5 and 4.")
+        }
+
+        if let glow = material.glow {
+            // Layout reserves a constant gutter, so a tool-authored shadow may not silently
+            // spill beyond it and become clipped by every scroll view. A directed shadow uses
+            // part of that budget merely reaching its offset, before its blur begins.
+            guard (0...Design.Size.glowGutter / 2).contains(glow.radius) else {
+                throw AppThemeEditingError.invalid(
+                    "glow.radius must be between 0 and \(Int(Design.Size.glowGutter / 2))."
+                )
+            }
+            guard (0...1).contains(glow.opacity) else {
+                throw AppThemeEditingError.invalid("glow.opacity must be between 0 and 1.")
+            }
+            guard (-10...10).contains(glow.offsetX), (-10...10).contains(glow.offsetY) else {
+                throw AppThemeEditingError.invalid(
+                    "glow offsets must be between -10 and 10 points."
+                )
+            }
+            let horizontalExtent = abs(glow.offsetX) + glow.radius * 2
+            let verticalExtent = abs(glow.offsetY) + glow.radius * 2
+            guard horizontalExtent <= Design.Size.glowGutter,
+                  verticalExtent <= Design.Size.glowGutter else {
+                throw AppThemeEditingError.invalid(
+                    "glow radius plus offset exceeds the \(Int(Design.Size.glowGutter))-point "
+                        + "panel-shadow gutter."
+                )
+            }
+        }
+    }
+
+    private static func formatted(_ value: CGFloat) -> String {
+        String(format: "%.1f", Double(value))
+    }
+
+    /// Resolves translucency the way the themed views do before measuring contrast. Measuring
+    /// the RGB components of a 10%-opaque white label directly would call it white-on-black
+    /// with 21:1 contrast even though the user actually sees a near-black grey.
+    private static func composite(_ foreground: NSColor, over background: NSColor) -> NSColor {
+        guard let foreground = foreground.usingColorSpace(.sRGB),
+              let background = background.usingColorSpace(.sRGB) else {
+            return foreground
+        }
+        let alpha = foreground.alphaComponent
+        return NSColor(
+            srgbRed: foreground.redComponent * alpha + background.redComponent * (1 - alpha),
+            green: foreground.greenComponent * alpha + background.greenComponent * (1 - alpha),
+            blue: foreground.blueComponent * alpha + background.blueComponent * (1 - alpha),
+            alpha: 1
+        )
+    }
+}

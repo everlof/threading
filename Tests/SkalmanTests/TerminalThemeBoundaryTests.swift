@@ -12,6 +12,24 @@ final class TerminalThemeBoundaryTests: XCTestCase {
         EmojiFixedTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
     }
 
+    func testRemoteGridRestoresLatestNaturalMacGrid() {
+        let view = terminal()
+        let original = view.getTerminal().getDims()
+
+        view.setRemoteGrid(cols: 42, rows: 20)
+        XCTAssertEqual(view.getTerminal().getDims().cols, 42)
+        XCTAssertEqual(view.getTerminal().getDims().rows, 20)
+
+        view.frame.size = NSSize(width: 700, height: 500)
+        XCTAssertEqual(view.getTerminal().getDims().cols, 42)
+        XCTAssertEqual(view.getTerminal().getDims().rows, 20)
+
+        view.clearRemoteGrid()
+        let restored = view.getTerminal().getDims()
+        XCTAssertGreaterThan(restored.cols, original.cols)
+        XCTAssertGreaterThan(restored.rows, original.rows)
+    }
+
     // MARK: - The permission contract
 
     func testTerminalPermitsAScrollerButNotAnArbitraryControl() {

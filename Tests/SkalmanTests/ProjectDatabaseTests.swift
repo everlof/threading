@@ -170,10 +170,15 @@ final class ProjectDatabaseTests: XCTestCase {
         session.hasLaunched = true
         session.lastExitCode = 3
         session.usesNativeUI = true
+        session.isPinned = true
         session.isArchived = true
+        session.themeID = .ocean
 
-        try database.save(ProjectsState(projects: [makeProject("alpha", sessions: [session])]))
-        let restored = try XCTUnwrap(try database.load().projects.first?.sessions.first)
+        var project = makeProject("alpha", sessions: [session])
+        project.themeID = .homebrew
+        try database.save(ProjectsState(projects: [project]))
+        let restoredProject = try XCTUnwrap(try database.load().projects.first)
+        let restored = try XCTUnwrap(restoredProject.sessions.first)
 
         XCTAssertEqual(restored.customTitle, "Renamed")
         XCTAssertEqual(restored.agentTitle, "working")
@@ -183,7 +188,10 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.lastExitCode, 3)
         XCTAssertTrue(restored.hasLaunched)
         XCTAssertTrue(restored.usesNativeUI)
+        XCTAssertTrue(restored.isPinned)
         XCTAssertTrue(restored.isArchived)
+        XCTAssertEqual(restored.themeID, .ocean)
+        XCTAssertEqual(restoredProject.themeID, .homebrew)
     }
 
     // MARK: - The Real Document

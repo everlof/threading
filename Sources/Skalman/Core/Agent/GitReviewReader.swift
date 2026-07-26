@@ -76,6 +76,63 @@ enum GitReviewReader {
         }
     }
 
+    /// The checkout's tracked and non-ignored untracked files, sorted for a compact browser.
+    static func repositoryFiles(
+        in root: URL,
+        completion: @escaping @MainActor (Result<[String], Failure>) -> Void
+    ) {
+        perform(completion) {
+            try repositoryFilePaths(in: root)
+        }
+    }
+
+    /// Reads one repository-relative file after proving it belongs to git's visible file list
+    /// and remains inside the checkout after resolving symlinks. The byte cap applies before
+    /// decoding, so a remote request cannot turn a large generated file into a large allocation.
+    static func repositoryFile(
+        path: String,
+        in root: URL,
+        completion: @escaping @MainActor (Result<GitRepositoryFile, Failure>) -> Void
+    ) {
+        perform(completion) {
+            guard try repositoryFilePaths(in: root).contains(path) else {
+                throw Failure.gitFailed("File not found.")
+            }
+
+            let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+            let candidate = resolvedRoot
+                .appendingPathComponent(path)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            let rootPrefix = resolvedRoot.path.hasSuffix("/")
+                ? resolvedRoot.path
+                : resolvedRoot.path + "/"
+            guard candidate.path.hasPrefix(rootPrefix),
+                  let values = try? candidate.resourceValues(forKeys: [
+                    .isRegularFileKey,
+                    .fileSizeKey,
+                  ]),
+                  values.isRegularFile == true else {
+                throw Failure.gitFailed("File not found.")
+            }
+
+            let cap = GitReviewDefaults.remoteRepositoryFileByteCap
+            let handle = try FileHandle(forReadingFrom: candidate)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: cap + 1) ?? Data()
+            let truncated = data.count > cap
+            let bounded = truncated ? Data(data.prefix(cap)) : data
+            let binary = bounded.prefix(GitReviewDefaults.binarySniffBytes).contains(0)
+
+            return GitRepositoryFile(
+                path: path,
+                content: binary ? nil : GitDiffParser.decode(bounded),
+                isBinary: binary,
+                isTruncated: truncated
+            )
+        }
+    }
+
     /// The uncommitted totals for the floating status card: numstat against HEAD plus
     /// untracked line counts, without producing a single hunk. Completion arrives on main.
     static func uncommittedSummary(
@@ -239,6 +296,15 @@ enum GitReviewReader {
 
     private static func decodeTrimmed(_ data: Data) -> String {
         GitDiffParser.decode(data).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func repositoryFilePaths(in root: URL) throws -> [String] {
+        GitDiffParser.decode(try run(GitReviewCommands.repositoryFiles(), in: root))
+            .split(separator: "\u{00}", omittingEmptySubsequences: true)
+            .map(String.init)
+            .sorted {
+                $0.localizedStandardCompare($1) == .orderedAscending
+            }
     }
 
     // MARK: - Untracked Synthesis

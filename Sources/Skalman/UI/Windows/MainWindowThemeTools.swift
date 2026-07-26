@@ -12,12 +12,18 @@ extension AgentToolCoordinator {
     // MARK: List
 
     func listThemes(for sessionID: SessionID) -> MCPToolResult {
-        let themes = ThemeManager.shared.allThemes
+        let themes = ThemeAssignments.selectableThemes
         guard !themes.isEmpty else { return .failure("No themes are installed.") }
 
         let listing = themes.map { theme -> String in
-            let origin = ThemeManager.shared.isBuiltIn(theme) ? "built-in" : "custom"
-            return "  \(theme.name) (\(origin)) — background \(theme.background.hexString),"
+            let origin: String
+            if theme.id == .followsAppTheme {
+                origin = "dynamic, follows app chrome"
+            } else {
+                origin = ThemeManager.shared.isBuiltIn(theme) ? "built-in" : "custom"
+            }
+            return "  \(theme.id.rawValue) — \(theme.name) (\(origin)) — background"
+                + " \(theme.background.hexString),"
                 + " text \(theme.foreground.hexString)"
         }
 
@@ -34,15 +40,26 @@ extension AgentToolCoordinator {
             return .failure(Self.scopeError(arguments.scope ?? ""))
         }
 
-        guard let name = arguments.theme?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !name.isEmpty else {
+        let rawID = arguments.themeID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyName = arguments.theme?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let theme: TerminalTheme?
+        if let rawID, !rawID.isEmpty {
+            theme = ThemeAssignments.selectableTheme(withID: TerminalThemeID(rawID))
+        } else if let legacyName, !legacyName.isEmpty {
+            theme = ThemeAssignments.selectableTheme(named: legacyName)
+        } else {
             return clearTheme(scope: scope, for: sessionID)
         }
 
-        guard let theme = ThemeManager.shared.theme(named: name) else {
+        guard let theme else {
+            let reference = rawID.flatMap { $0.isEmpty ? nil : $0 }
+                ?? legacyName.flatMap { $0.isEmpty ? nil : $0 }
+                ?? ""
             return .failure(
-                "No theme named \"\(name)\". Available: "
-                    + ThemeManager.shared.allThemes.map(\.name).joined(separator: ", ") + "."
+                "No terminal theme matching \"\(reference)\". Available IDs: "
+                    + ThemeAssignments.selectableThemes.map(\.id.rawValue).joined(separator: ", ")
+                    + "."
             )
         }
 
@@ -60,21 +77,23 @@ extension AgentToolCoordinator {
     ) -> MCPToolResult {
         switch scope {
         case .session:
-            ThemeAssignments.setTheme(named: theme.name, forSession: sessionID)
+            ThemeAssignments.setTheme(id: theme.id, forSession: sessionID)
         case .project:
             guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
                 return .failure("This session belongs to no project.")
             }
-            ThemeAssignments.setTheme(named: theme.name, forProject: project.id)
+            ThemeAssignments.setTheme(id: theme.id, forProject: project.id)
         case .global:
             ThemeAssignments.setDefaultTheme(theme)
         }
 
-        var message = "Set \(theme.name) as the \(scopeDescription(scope, for: sessionID)) theme."
+        var message = "Set \(theme.name) (\(theme.id.rawValue)) as the"
+            + " \(scopeDescription(scope, for: sessionID)) theme."
 
         if let effective = ThemeAssignments.resolution(for: sessionID),
-           effective.themeName != theme.name {
-            message += " This session still draws with \(effective.themeName), which is set on"
+           effective.themeID != theme.id {
+            message += " This session still draws with"
+                + " \(ThemeAssignments.displayName(for: effective.themeID)), which is set on"
                 + " its \(effective.scope.rawValue) — clear that to let it through."
         } else {
             message = join(message, surfaceNote(for: sessionID))
@@ -86,12 +105,12 @@ extension AgentToolCoordinator {
     private func clearTheme(scope: ThemeScope, for sessionID: SessionID) -> MCPToolResult {
         switch scope {
         case .session:
-            ThemeAssignments.setTheme(named: nil, forSession: sessionID)
+            ThemeAssignments.setTheme(id: nil, forSession: sessionID)
         case .project:
             guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
                 return .failure("This session belongs to no project.")
             }
-            ThemeAssignments.setTheme(named: nil, forProject: project.id)
+            ThemeAssignments.setTheme(id: nil, forProject: project.id)
         case .global:
             return .failure(
                 "The default theme cannot be cleared — there is nothing above it to inherit"
@@ -121,7 +140,8 @@ extension AgentToolCoordinator {
             return .failure("Provide a name for the theme.")
         }
 
-        guard ThemeManager.shared.theme(named: name) == nil else {
+        guard ThemeManager.shared.theme(named: name) == nil,
+              !ThemeManager.shared.isReserved(name) else {
             return .failure(
                 "A theme named \"\(name)\" already exists, and an existing theme is never"
                     + " overwritten. Choose another name."
@@ -134,17 +154,24 @@ extension AgentToolCoordinator {
 
         // The base is what unspecified colours keep, so it defaults to what the user is
         // already looking at — which is what makes "warmer background" a one-colour call.
-        var theme: TerminalTheme
-        if let baseName = arguments.base, !baseName.isEmpty {
-            guard let base = ThemeManager.shared.theme(named: baseName) else {
-                return .failure("No theme named \"\(baseName)\" to use as a base.")
+        let rawBaseID = arguments.baseID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyBaseName = arguments.base?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base: TerminalTheme
+        if let rawBaseID, !rawBaseID.isEmpty {
+            guard let found = ThemeAssignments.selectableTheme(withID: TerminalThemeID(rawBaseID)) else {
+                return .failure("No terminal theme with id \"\(rawBaseID)\" to use as a base.")
             }
-            theme = base
+            base = found
+        } else if let legacyBaseName, !legacyBaseName.isEmpty {
+            guard let found = ThemeAssignments.selectableTheme(named: legacyBaseName) else {
+                return .failure("No theme named \"\(legacyBaseName)\" to use as a base.")
+            }
+            base = found
         } else {
-            theme = ThemeAssignments.theme(for: sessionID)
+            base = ThemeAssignments.theme(for: sessionID)
         }
 
-        theme.name = name
+        var theme = base.duplicated(named: name)
 
         for (rawKey, value) in colors {
             guard let key = ThemeColorKey.named(rawKey) else {
@@ -180,10 +207,17 @@ extension AgentToolCoordinator {
         }
 
         guard let scope = target else {
-            return .success("Created \(name). It is not in use — apply it with set_theme.")
+            return .success(
+                "Created \(name) (\(theme.id.rawValue)). It is not in use — apply it with set_theme."
+            )
         }
 
-        return .success(join("Created \(name).", apply(theme, scope: scope, for: sessionID).text))
+        return .success(
+            join(
+                "Created \(name) (\(theme.id.rawValue)).",
+                apply(theme, scope: scope, for: sessionID).text
+            )
+        )
     }
 
     // MARK: - Scopes
@@ -240,7 +274,8 @@ extension AgentToolCoordinator {
         }
 
         return join(
-            "This session draws with \(resolved.themeName) (\(source)).",
+            "This session draws with \(ThemeAssignments.displayName(for: resolved.themeID))"
+                + " (\(resolved.themeID.rawValue), \(source)).",
             surfaceNote(for: sessionID)
         )
     }

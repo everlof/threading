@@ -29,41 +29,41 @@ enum ThemeScope: String, Codable, CaseIterable {
 /// singletons, which is how they would have gone untested.
 enum ThemeResolution {
 
-    /// A resolved theme: its name, and the scope that supplied it.
+    /// A resolved theme: its durable ID, and the scope that supplied it.
     struct Assignment: Equatable {
         let scope: ThemeScope
-        let themeName: String
+        let themeID: TerminalThemeID
     }
 
-    /// Resolves narrowest-first, skipping names that answer to no theme.
+    /// Resolves narrowest-first, skipping IDs that answer to no theme.
     ///
-    /// - **Absent means inherit, not copy.** A session with no name of its own follows its
+    /// - **Absent means inherit, not copy.** A session with no ID of its own follows its
     ///   project, and a project with none follows the global default — so changing the default
     ///   still moves everything that never opted out. Recording the current theme at creation
     ///   would have frozen every session against the one setting most likely to change.
-    /// - **A dangling name is not an error.** Themes are identified by name, so a delete leaves
-    ///   references behind. A name nothing answers to degrades to inheriting from the next
+    /// - **A dangling ID is not an error.** Deleting a theme leaves references behind. An ID
+    ///   nothing answers to degrades to inheriting from the next
     ///   scope out, which is indistinguishable from never having chosen — the alternative is a
     ///   terminal that draws nothing, or one that pins a colour scheme the user cannot see in
-    ///   any list. (A *rename* re-points its references instead; see `ThemeAssignments.rename`.)
+    ///   any list. A rename cannot create this state because the assignment keeps the same ID.
     ///
     /// Returns nil when no scope names a theme that exists, which the caller answers with the
     /// profile's own embedded theme.
     static func resolve(
-        session: String?,
-        project: String?,
-        global: String?,
-        available: Set<String>
+        session: TerminalThemeID?,
+        project: TerminalThemeID?,
+        global: TerminalThemeID?,
+        available: Set<TerminalThemeID>
     ) -> Assignment? {
-        let chain: [(ThemeScope, String?)] = [
+        let chain: [(ThemeScope, TerminalThemeID?)] = [
             (.session, session),
             (.project, project),
             (.global, global)
         ]
 
-        for (scope, name) in chain {
-            guard let name, available.contains(name) else { continue }
-            return Assignment(scope: scope, themeName: name)
+        for (scope, id) in chain {
+            guard let id, available.contains(id) else { continue }
+            return Assignment(scope: scope, themeID: id)
         }
 
         return nil

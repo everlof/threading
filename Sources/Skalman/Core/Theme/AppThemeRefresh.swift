@@ -161,6 +161,7 @@ enum AppThemeRefresh {
 
     private static let accessibilityObserver = AccessibilityDisplayOptionsObserver()
     private static var observesAccessibilityDisplayOptions = false
+    private static var appearanceObservation: NSKeyValueObservation?
 
     /// AppKit refreshes stock controls when these preferences move; app-owned chrome needs the
     /// same signal. Installed once at launch, after the palette is restored and before windows
@@ -174,6 +175,37 @@ enum AppThemeRefresh {
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil
         )
+    }
+
+    /// Repaints when the user switches macOS between light and dark.
+    ///
+    /// Every colour this app resolves is either a dynamic `NSColor` — which follows the
+    /// appearance on its own — or a `CGColor` frozen onto a layer, which does not. So a live
+    /// switch used to leave the two halves of the window disagreeing: labels turned dark while
+    /// the surfaces under them stayed dark too, and a conversation became black on black. It
+    /// was invisible for a long time because the largest surface, the sidebar, was a *system
+    /// material* that AppKit repainted itself, and the terminal beside it is a palette that has
+    /// no light and dark to switch between.
+    ///
+    /// The sweep for this is the one a theme change already uses; only the trigger was missing.
+    /// Installed once at launch, alongside the accessibility observer, for the same reason:
+    /// AppKit refreshes its own controls on these signals and app-owned chrome needs telling.
+    static func startObservingSystemAppearance() {
+        guard appearanceObservation == nil else { return }
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { _, _ in
+            // KVO lands before AppKit has finished handing the new appearance down the view
+            // tree, and a repaint that runs first re-resolves every colour in the *old* one.
+            DispatchQueue.main.async {
+                repaintEverything()
+                // An adaptive theme changes more than dynamic NSColor: its material and paired
+                // terminal palette are variant-owned values. Reuse the ordinary theme event so
+                // every non-colour consumer resolves the newly active variant as well.
+                guard AppThemeLibrary.current.isAdaptive else { return }
+                NotificationCenter.default.post(
+                    AppThemeDidChange(themeID: AppThemeLibrary.current.id)
+                )
+            }
+        }
     }
 
     static func accessibilityDisplayOptionsChanged() {

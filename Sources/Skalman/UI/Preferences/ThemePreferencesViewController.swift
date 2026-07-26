@@ -40,15 +40,10 @@ final class ThemePreferencesViewController: NSViewController {
         selectedTheme.map { ThemeManager.shared.isBuiltIn($0) } ?? false
     }
 
-    /// The list's first row: the app theme's own palette, wearing the reserved name.
-    private static var followsAppThemeEntry: TerminalTheme {
-        AppThemeLibrary.current.terminalPalette.renamed(TerminalThemeNames.followsAppTheme)
-    }
-
     /// Neither editable nor deletable, for the same reason: there is no palette here to change.
     /// The way to change what it draws is to change the app theme above it.
     private var isFollowsAppThemeSelected: Bool {
-        selectedTheme?.name == TerminalThemeNames.followsAppTheme
+        selectedTheme?.id == .followsAppTheme
     }
 
     // MARK: - UI Elements
@@ -115,6 +110,8 @@ final class ThemePreferencesViewController: NSViewController {
 
     private weak var appThemePopUp: ThemedPopUp?
     private weak var appThemeSubtitle: NSTextField?
+    private weak var duplicateAppThemeButton: ThemedButton?
+    private weak var deleteAppThemeButton: ThemedButton?
 
     /// Explains why the palette below it is read-only, and offers the way out. Hidden for a
     /// custom theme, where the palette simply works.
@@ -160,7 +157,10 @@ final class ThemePreferencesViewController: NSViewController {
         appEvents.observe(ThemesDidChange.self) { [weak self] _ in self?.themesDidChange() }
         // The app-theme entry *is* the app theme's palette, so a switch changes what this list
         // shows as well as what the window is painted in.
-        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.themesDidChange() }
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.appThemeDidChange() }
+        appEvents.observe(AppThemeLibraryDidChange.self) { [weak self] _ in
+            self?.appThemeLibraryDidChange()
+        }
         appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.themesDidChange() }
     }
 
@@ -173,7 +173,7 @@ final class ThemePreferencesViewController: NSViewController {
             SettingsUI.section("Terminal", themeListSection()),
             SettingsUI.section("Preview", previewView),
             SettingsUI.section("Colors", colorsSection())
-        ])
+        ], hostPage: .themes)
 
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -194,13 +194,25 @@ final class ThemePreferencesViewController: NSViewController {
     /// style.
     private func appThemeSection() -> NSView {
         let popUp = SettingsUI.popUp(target: self, action: #selector(appThemeChanged))
-        for theme in AppThemeLibrary.stock {
-            popUp.addItem(
-                ThemedMenuItem(title: theme.name, representedValue: theme.id.rawValue)
-            )
-        }
-        popUp.selectItem(at: AppThemeLibrary.stock.firstIndex { $0.id == AppThemeLibrary.current.id } ?? 0)
         appThemePopUp = popUp
+
+        let duplicate = iconButton(
+            "plus.square.on.square",
+            tooltip: "Duplicate App Theme",
+            action: #selector(duplicateAppTheme)
+        )
+        let delete = iconButton(
+            "trash",
+            tooltip: "Delete Custom App Theme",
+            action: #selector(deleteAppTheme)
+        )
+        duplicateAppThemeButton = duplicate
+        deleteAppThemeButton = delete
+
+        let actions = NSStackView(views: [duplicate, delete])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = Design.Spacing.small
 
         let card = SettingsCard(rows: [
             SettingsUI.row(
@@ -208,8 +220,14 @@ final class ThemePreferencesViewController: NSViewController {
                 subtitle: AppThemeLibrary.current.summary,
                 control: popUp,
                 subtitleField: &appThemeSubtitle
+            ),
+            SettingsUI.row(
+                title: "Custom themes",
+                subtitle: "Duplicate a built-in to make an editable copy.",
+                control: actions
             )
         ])
+        reloadAppThemeControls()
         return card
     }
 
@@ -221,6 +239,69 @@ final class ThemePreferencesViewController: NSViewController {
         // The subtitle describes the *chosen* theme, so it moves with the choice — otherwise
         // it keeps describing the theme that was selected when the card was built.
         appThemeSubtitle?.stringValue = theme.summary ?? ""
+    }
+
+    private func reloadAppThemeControls() {
+        guard let popUp = appThemePopUp else { return }
+        popUp.removeAllItems()
+        for theme in AppThemeLibrary.all {
+            let title = AppThemeLibrary.isCustom(theme) ? "\(theme.name) — Custom" : theme.name
+            popUp.addItem(
+                ThemedMenuItem(title: title, representedValue: theme.id.rawValue)
+            )
+        }
+        let index = AppThemeLibrary.all.firstIndex {
+            $0.id == AppThemeLibrary.current.id
+        } ?? 0
+        popUp.selectItem(at: index)
+        appThemeSubtitle?.stringValue = AppThemeLibrary.current.summary ?? ""
+        duplicateAppThemeButton?.isEnabled = true
+        deleteAppThemeButton?.isEnabled = AppThemeLibrary.isCustom(AppThemeLibrary.current)
+    }
+
+    private func appThemeDidChange() {
+        reloadAppThemeControls()
+        // “Follow App Theme” is a live terminal-palette entry.
+        loadThemes()
+    }
+
+    private func appThemeLibraryDidChange() {
+        reloadAppThemeControls()
+    }
+
+    @objc private func duplicateAppTheme() {
+        let source = AppThemeLibrary.current
+        do {
+            let copy = try AppThemeEditing.duplicate(
+                source,
+                id: AppThemeLibrary.makeCustomID(),
+                name: AppThemeLibrary.uniqueCopyName(of: source)
+            )
+            try AppThemeLibrary.create(copy)
+            AppThemeLibrary.apply(copy)
+        } catch {
+            presentAlert("Cannot Duplicate App Theme", error.localizedDescription)
+        }
+    }
+
+    @objc private func deleteAppTheme() {
+        let theme = AppThemeLibrary.current
+        guard AppThemeLibrary.isCustom(theme) else {
+            presentAlert(
+                "Cannot Delete App Theme",
+                "Built-in app themes are fixed. Duplicate one to make an editable custom theme."
+            )
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Delete “\(theme.name)”?"
+        alert.informativeText = "The app will return to the System theme."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        _ = AppThemeLibrary.delete(theme)
     }
 
     /// The theme list on its flat surface, the list-editing controls beneath it, and a note
@@ -296,13 +377,13 @@ final class ThemePreferencesViewController: NSViewController {
         // The app-theme entry leads the list. It is not a palette anyone edits — it is the answer
         // "whatever the app theme says", shown with the palette that answer currently gives, so
         // choosing it is the same gesture as choosing any other row.
-        themes = [Self.followsAppThemeEntry] + ThemeManager.shared.allThemes
+        themes = ThemeAssignments.selectableThemes
         themeTableView.reloadData()
 
         // Keep whatever was selected across a reload — editing a colour reloads the list, and
         // jumping back to the default theme mid-edit would be maddening.
-        let target = selectedTheme?.name ?? ThemeAssignments.defaultTheme.name
-        let index = themes.firstIndex { $0.name == target } ?? 0
+        let target = selectedTheme?.id ?? ThemeAssignments.defaultTheme.id
+        let index = themes.firstIndex { $0.id == target } ?? 0
 
         if !themes.isEmpty {
             selectedTheme = themes[index]
@@ -332,7 +413,7 @@ final class ThemePreferencesViewController: NSViewController {
         builtInNote.stringValue = isFollowsAppThemeSelected ? Strings.followsAppNote : Strings.builtInNote
         builtInBanner.isHidden = !isFixed
         removeButton.isEnabled = !isFixed
-        useThemeButton.isEnabled = theme.name != ThemeAssignments.defaultTheme.name
+        useThemeButton.isEnabled = theme.id != ThemeAssignments.defaultTheme.id
     }
 
     // MARK: - Actions
@@ -345,8 +426,7 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     @objc private func addTheme() {
-        var newTheme = TerminalTheme.basic
-        newTheme.name = uniqueName(basedOn: "New Theme")
+        let newTheme = TerminalTheme.basic.duplicated(named: uniqueName(basedOn: "New Theme"))
 
         guard ThemeAssignments.create(newTheme) else { return }
 
@@ -450,14 +530,12 @@ final class ThemePreferencesViewController: NSViewController {
         let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newName.isEmpty, newName != theme.name else { return }
 
-        // Through `ThemeAssignments`, which re-points every session and project naming the old
-        // one — `ThemeManager` alone would leave them all inheriting again.
         guard ThemeAssignments.rename(theme, to: newName) else {
             presentAlert("Cannot Rename", "A theme with that name already exists.")
             return
         }
 
-        selectedTheme = ThemeManager.shared.theme(named: newName)
+        selectedTheme = ThemeManager.shared.theme(withID: theme.id)
         loadThemes()
     }
 
@@ -493,22 +571,22 @@ final class ThemePreferencesViewController: NSViewController {
         theme[key] = color
         ThemeManager.shared.addTheme(theme)
         selectedTheme = theme
-        themes = ThemeManager.shared.allThemes
+        themes = ThemeAssignments.selectableThemes
 
         previewView.show(theme)
-        reloadRow(named: theme.name)
+        reloadRow(withID: theme.id)
 
-        // The default carries an embedded copy of the theme rather than its name, so an edit
+        // The default carries an embedded copy of the theme rather than only its ID, so an edit
         // reaches the terminals only by re-saving it.
-        if ThemeAssignments.defaultTheme.name == theme.name {
+        if ThemeAssignments.defaultTheme.id == theme.id {
             ThemeAssignments.setDefaultTheme(theme)
         } else {
             NotificationCenter.default.post(ThemeAssignmentsDidChange())
         }
     }
 
-    private func reloadRow(named name: String) {
-        guard let row = themes.firstIndex(where: { $0.name == name }) else { return }
+    private func reloadRow(withID id: TerminalThemeID) {
+        guard let row = themes.firstIndex(where: { $0.id == id }) else { return }
         themeTableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
     }
 
@@ -539,7 +617,7 @@ extension ThemePreferencesViewController: NSTableViewDelegate {
 
         cell.configure(
             with: theme,
-            isDefault: theme.name == ThemeAssignments.defaultTheme.name
+            isDefault: theme.id == ThemeAssignments.defaultTheme.id
         )
         return cell
     }

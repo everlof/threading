@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "identifier": "se.mjukis.skalman-rain",
+  "name": "Usage Rain",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/usage-rain.wasm",
+  "capabilities": [
+    "ui.components",
+    "ui.rendering.metal"
+  ]
+}

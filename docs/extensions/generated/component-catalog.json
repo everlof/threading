@@ -1,0 +1,3453 @@
+{
+  "components" : [
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "application",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard",
+              "primary",
+              "destructive"
+            ],
+            "allowedCustomSurfaceKinds" : [
+              "metal"
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "heading",
+              "body",
+              "detail",
+              "code",
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : true,
+            "allowsProceed" : true,
+            "maximumDepth" : 6,
+            "maximumNodes" : 16,
+            "maximumTextLength" : 200,
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "window-chrome",
+            "input-routing",
+            "accessibility-container"
+          ],
+          "id" : "application.main-window",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "base" : {
+              "type" : "proceed"
+            },
+            "overlay" : {
+              "surface" : {
+                "fragmentFunction" : "skalmanExtensionFragment",
+                "inputs" : [
+
+                ],
+                "preferredFramesPerSecond" : 60,
+                "shaderResource" : "Resources/window-surface.metal",
+                "type" : "metal"
+              },
+              "type" : "customSurface"
+            },
+            "type" : "overlay"
+          },
+          "id" : "window-surface",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "application.main-window",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Composable visual hooks around the complete main-window content."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/application.main-window-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard",
+                "primary",
+                "destructive"
+              ],
+              "allowedCustomSurfaceKinds" : [
+                "metal"
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : true,
+              "allowsProceed" : true,
+              "maximumDepth" : 6,
+              "maximumNodes" : 16,
+              "maximumTextLength" : 200,
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "application.main-window"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman application.main-window v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "project-presentation",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : false,
+            "allowsOverlay" : false,
+            "allowsProceed" : true,
+            "maximumDepth" : 2,
+            "maximumNodes" : 8,
+            "maximumTextLength" : 80,
+            "requiredRootAxis" : "horizontal",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "text-input",
+            "submission",
+            "keyboard-routing",
+            "draft-persistence",
+            "accessibility-container"
+          ],
+          "id" : "composer.session-start",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "horizontal",
+            "children" : [
+              {
+                "id" : "insert-template",
+                "isEnabled" : true,
+                "role" : "standard",
+                "title" : "Template",
+                "type" : "button"
+              },
+              {
+                "type" : "proceed"
+              }
+            ],
+            "spacing" : "small",
+            "type" : "stack"
+          },
+          "id" : "project-template",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "composer.session-start",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Compact accessories before or after the protected new-session prompt."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/composer.session-start-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : false,
+              "allowsOverlay" : false,
+              "allowsProceed" : true,
+              "maximumDepth" : 2,
+              "maximumNodes" : 8,
+              "maximumTextLength" : 80,
+              "requiredRootAxis" : "horizontal",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "composer.session-start"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman composer.session-start v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "session-presentation",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : false,
+            "allowsOverlay" : false,
+            "allowsProceed" : true,
+            "maximumDepth" : 2,
+            "maximumNodes" : 8,
+            "maximumTextLength" : 80,
+            "requiredRootAxis" : "horizontal",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "text-input",
+            "submission",
+            "keyboard-routing",
+            "stream-availability",
+            "permission-state",
+            "accessibility-container"
+          ],
+          "id" : "composer.conversation-reply",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "horizontal",
+            "children" : [
+              {
+                "type" : "proceed"
+              },
+              {
+                "id" : "attach-context",
+                "isEnabled" : true,
+                "role" : "standard",
+                "title" : "Context",
+                "type" : "button"
+              }
+            ],
+            "spacing" : "small",
+            "type" : "stack"
+          },
+          "id" : "conversation-context",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "composer.conversation-reply",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Compact accessories before or after the protected conversation reply prompt."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/composer.conversation-reply-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : false,
+              "allowsOverlay" : false,
+              "allowsProceed" : true,
+              "maximumDepth" : 2,
+              "maximumNodes" : 8,
+              "maximumTextLength" : 80,
+              "requiredRootAxis" : "horizontal",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "composer.conversation-reply"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman composer.conversation-reply v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "conversation-row",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : false,
+            "allowsOverlay" : false,
+            "allowsProceed" : true,
+            "maximumDepth" : 2,
+            "maximumNodes" : 10,
+            "maximumTextLength" : 160,
+            "requiredRootAxis" : "vertical",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "transcript-order",
+            "message-content",
+            "turn-boundary",
+            "accessibility-container"
+          ],
+          "id" : "conversation.user-message",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "vertical",
+            "children" : [
+              {
+                "type" : "proceed"
+              },
+              {
+                "role" : "neutral",
+                "text" : "Tracked by extension",
+                "type" : "status"
+              }
+            ],
+            "spacing" : "small",
+            "type" : "stack"
+          },
+          "id" : "user-message-note",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "conversation.user-message",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Display or action annotations around an intact user-message row."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/conversation.user-message-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : false,
+              "allowsOverlay" : false,
+              "allowsProceed" : true,
+              "maximumDepth" : 2,
+              "maximumNodes" : 10,
+              "maximumTextLength" : 160,
+              "requiredRootAxis" : "vertical",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "conversation.user-message"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman conversation.user-message v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "conversation-row",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : false,
+            "allowsOverlay" : false,
+            "allowsProceed" : true,
+            "maximumDepth" : 2,
+            "maximumNodes" : 10,
+            "maximumTextLength" : 160,
+            "requiredRootAxis" : "vertical",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "transcript-order",
+            "message-content",
+            "streaming-lifecycle",
+            "accessibility-container"
+          ],
+          "id" : "conversation.assistant-message",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "vertical",
+            "children" : [
+              {
+                "type" : "proceed"
+              },
+              {
+                "id" : "save-answer",
+                "isEnabled" : true,
+                "role" : "standard",
+                "title" : "Save answer",
+                "type" : "button"
+              }
+            ],
+            "spacing" : "small",
+            "type" : "stack"
+          },
+          "id" : "assistant-message-action",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "conversation.assistant-message",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Display or action annotations around an intact assistant-message row."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/conversation.assistant-message-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : false,
+              "allowsOverlay" : false,
+              "allowsProceed" : true,
+              "maximumDepth" : 2,
+              "maximumNodes" : 10,
+              "maximumTextLength" : 160,
+              "requiredRootAxis" : "vertical",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "conversation.assistant-message"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman conversation.assistant-message v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "conversation-row",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : false,
+            "allowsOverlay" : false,
+            "allowsProceed" : true,
+            "maximumDepth" : 2,
+            "maximumNodes" : 10,
+            "maximumTextLength" : 160,
+            "requiredRootAxis" : "vertical",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "transcript-order",
+            "tool-result-attachment",
+            "tool-expansion",
+            "accessibility-container"
+          ],
+          "id" : "conversation.tool-call",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "vertical",
+            "children" : [
+              {
+                "role" : "neutral",
+                "text" : "Development environment",
+                "type" : "status"
+              },
+              {
+                "type" : "proceed"
+              }
+            ],
+            "spacing" : "small",
+            "type" : "stack"
+          },
+          "id" : "tool-call-environment",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "conversation.tool-call",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Display or action annotations around an intact collapsible tool-call row."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/conversation.tool-call-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : false,
+              "allowsOverlay" : false,
+              "allowsProceed" : true,
+              "maximumDepth" : 2,
+              "maximumNodes" : 10,
+              "maximumTextLength" : 160,
+              "requiredRootAxis" : "vertical",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "conversation.tool-call"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman conversation.tool-call v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "conversation-row",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : false,
+            "allowsOverlay" : false,
+            "allowsProceed" : true,
+            "maximumDepth" : 2,
+            "maximumNodes" : 8,
+            "maximumTextLength" : 160,
+            "requiredRootAxis" : "vertical",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "transcript-order",
+            "permission-state",
+            "permission-decision",
+            "permission-queue",
+            "remote-mirroring",
+            "accessibility-container"
+          ],
+          "id" : "conversation.permission-card",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "vertical",
+            "children" : [
+              {
+                "role" : "warning",
+                "text" : "Workspace policy applies",
+                "type" : "status"
+              },
+              {
+                "type" : "proceed"
+              }
+            ],
+            "spacing" : "small",
+            "type" : "stack"
+          },
+          "id" : "permission-policy-note",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "conversation.permission-card",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Display-only annotations around an intact host-owned permission card."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/conversation.permission-card-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : false,
+              "allowsOverlay" : false,
+              "allowsProceed" : true,
+              "maximumDepth" : 2,
+              "maximumNodes" : 8,
+              "maximumTextLength" : 160,
+              "requiredRootAxis" : "vertical",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "conversation.permission-card"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman conversation.permission-card v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "session-presentation",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : false,
+            "allowsOverlay" : false,
+            "allowsProceed" : true,
+            "maximumDepth" : 1,
+            "maximumNodes" : 6,
+            "maximumTextLength" : 40,
+            "requiredRootAxis" : "horizontal",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "tab-selection",
+            "tab-closure",
+            "tab-order",
+            "tab-identity",
+            "tab-active-state",
+            "tab-overflow",
+            "tab-persistence",
+            "new-tab-menu",
+            "pane-visibility",
+            "accessibility-container"
+          ],
+          "id" : "display.pane-header",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "horizontal",
+            "children" : [
+              {
+                "role" : "neutral",
+                "text" : "Development",
+                "type" : "status"
+              },
+              {
+                "id" : "refresh-display-status",
+                "isEnabled" : true,
+                "role" : "standard",
+                "title" : "Refresh",
+                "type" : "button"
+              },
+              {
+                "type" : "proceed"
+              }
+            ],
+            "spacing" : "small",
+            "type" : "stack"
+          },
+          "id" : "display-environment",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "display.pane-header",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Compact commands or status in the host-owned display-pane header."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/display.pane-header-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : false,
+              "allowsOverlay" : false,
+              "allowsProceed" : true,
+              "maximumDepth" : 1,
+              "maximumNodes" : 6,
+              "maximumTextLength" : 40,
+              "requiredRootAxis" : "horizontal",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "display.pane-header"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman display.pane-header v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "session-presentation",
+          "hostOwnedBehavior" : [
+            "tab-selection",
+            "tab-closure",
+            "tab-order",
+            "tab-identity",
+            "tab-active-state",
+            "tab-overflow",
+            "tab-persistence",
+            "accessibility-container"
+          ],
+          "id" : "display.tab-header",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+            {
+              "contentConstraints" : {
+                "allowedButtonRoles" : [
+
+                ],
+                "allowedCustomSurfaceKinds" : [
+
+                ],
+                "allowedImageRoles" : [
+
+                ],
+                "allowedStackAxes" : [
+
+                ],
+                "allowedStatusRoles" : [
+                  "neutral",
+                  "positive",
+                  "warning",
+                  "negative"
+                ],
+                "allowedTextRoles" : [
+
+                ],
+                "allowsDivider" : false,
+                "allowsFixedSpacer" : false,
+                "allowsFlexibleSpacer" : false,
+                "allowsOverlay" : false,
+                "allowsProceed" : false,
+                "maximumDepth" : 0,
+                "maximumNodes" : 1,
+                "maximumTextLength" : 24,
+                "requiresProceed" : false
+              },
+              "id" : "after-title",
+              "maximumInlineItems" : 1
+            }
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "id" : "display-tab-status",
+          "properties" : [
+
+          ],
+          "slots" : [
+            {
+              "children" : [
+                {
+                  "role" : "positive",
+                  "text" : "Live",
+                  "type" : "status"
+                }
+              ],
+              "slot" : "after-title"
+            }
+          ],
+          "target" : {
+            "component" : "display.tab-header",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "One compact status annotation after each intact native display-tab title."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/display.tab-header-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : {
+              "oneOf" : [
+                {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "children" : {
+                      "items" : {
+                        "$ref" : "https://skalman.invalid/schema/extension-node.schema.json"
+                      },
+                      "maxItems" : 1,
+                      "minItems" : 1,
+                      "type" : "array",
+                      "x-skalman-node-constraints" : {
+                        "allowedButtonRoles" : [
+
+                        ],
+                        "allowedCustomSurfaceKinds" : [
+
+                        ],
+                        "allowedImageRoles" : [
+
+                        ],
+                        "allowedStackAxes" : [
+
+                        ],
+                        "allowedStatusRoles" : [
+                          "neutral",
+                          "positive",
+                          "warning",
+                          "negative"
+                        ],
+                        "allowedTextRoles" : [
+
+                        ],
+                        "allowsDivider" : false,
+                        "allowsFixedSpacer" : false,
+                        "allowsFlexibleSpacer" : false,
+                        "allowsOverlay" : false,
+                        "allowsProceed" : false,
+                        "maximumDepth" : 0,
+                        "maximumNodes" : 1,
+                        "maximumTextLength" : 24,
+                        "requiresProceed" : false
+                      }
+                    },
+                    "slot" : {
+                      "const" : "after-title"
+                    }
+                  },
+                  "required" : [
+                    "slot",
+                    "children"
+                  ],
+                  "type" : "object"
+                }
+              ]
+            },
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "display.tab-header"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman display.tab-header v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "session-presentation",
+          "hostOwnedBehavior" : [
+            "activity-state",
+            "accessibility-container"
+          ],
+          "id" : "sidebar.session-identity",
+          "properties" : [
+
+          ],
+          "replacement" : "contentOnly",
+          "replacementConstraints" : {
+            "allowedButtonRoles" : [
+
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal"
+            ],
+            "allowedStatusRoles" : [
+
+            ],
+            "allowedTextRoles" : [
+
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : false,
+            "allowsOverlay" : false,
+            "allowsProceed" : false,
+            "maximumDepth" : 1,
+            "maximumNodes" : 5,
+            "maximumTextLength" : 1,
+            "requiredRootAxis" : "horizontal",
+            "requiresProceed" : false
+          },
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "id" : "two-part-session-identity",
+          "properties" : [
+
+          ],
+          "replacement" : {
+            "axis" : "horizontal",
+            "children" : [
+              {
+                "accessibilityLabel" : "Provider",
+                "reference" : {
+                  "identifier" : "session.provider-image",
+                  "type" : "hostAsset"
+                },
+                "role" : "identity",
+                "type" : "image"
+              }
+            ],
+            "spacing" : "tight",
+            "type" : "stack"
+          },
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "sidebar.session-identity",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+          {
+            "description" : "The provider image after primitive resolver and side-chat precedence.",
+            "id" : "session.provider-image",
+            "isOptional" : false
+          },
+          {
+            "description" : "The account image after explicit user-choice precedence.",
+            "id" : "session.account-image",
+            "isOptional" : true
+          }
+        ],
+        "summary" : "Provider/account identity at the leading edge of a session row."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/sidebar.session-identity-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "replacement" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal"
+              ],
+              "allowedStatusRoles" : [
+
+              ],
+              "allowedTextRoles" : [
+
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : false,
+              "allowsOverlay" : false,
+              "allowsProceed" : false,
+              "maximumDepth" : 1,
+              "maximumNodes" : 5,
+              "maximumTextLength" : 1,
+              "requiredRootAxis" : "horizontal",
+              "requiresProceed" : false
+            }
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "sidebar.session-identity"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman sidebar.session-identity v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "session-presentation",
+          "hostOwnedBehavior" : [
+            "selection",
+            "drag-and-drop",
+            "row-actions",
+            "activity-state",
+            "accessibility-container"
+          ],
+          "id" : "sidebar.session-row",
+          "properties" : [
+            "title",
+            "identity-image",
+            "tool-tip"
+          ],
+          "replacement" : "contentOnly",
+          "replacementConstraints" : {
+            "allowedButtonRoles" : [
+              "standard"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : false,
+            "allowsProceed" : false,
+            "maximumDepth" : 1,
+            "maximumNodes" : 8,
+            "maximumTextLength" : 80,
+            "requiredRootAxis" : "horizontal",
+            "requiresProceed" : false
+          },
+          "slots" : [
+            {
+              "contentConstraints" : {
+                "allowedButtonRoles" : [
+
+                ],
+                "allowedCustomSurfaceKinds" : [
+
+                ],
+                "allowedImageRoles" : [
+
+                ],
+                "allowedStackAxes" : [
+
+                ],
+                "allowedStatusRoles" : [
+                  "neutral",
+                  "positive",
+                  "warning",
+                  "negative"
+                ],
+                "allowedTextRoles" : [
+
+                ],
+                "allowsDivider" : false,
+                "allowsFixedSpacer" : false,
+                "allowsFlexibleSpacer" : false,
+                "allowsOverlay" : false,
+                "allowsProceed" : false,
+                "maximumDepth" : 0,
+                "maximumNodes" : 1,
+                "maximumTextLength" : 24,
+                "requiresProceed" : false
+              },
+              "id" : "after-title",
+              "maximumInlineItems" : 2
+            }
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "id" : "ci-session-row",
+          "properties" : [
+
+          ],
+          "replacement" : {
+            "axis" : "horizontal",
+            "children" : [
+              {
+                "accessibilityLabel" : "Provider",
+                "reference" : {
+                  "identifier" : "session.provider-image",
+                  "type" : "hostAsset"
+                },
+                "role" : "identity",
+                "type" : "image"
+              },
+              {
+                "role" : "compactBody",
+                "text" : "Deploy production",
+                "type" : "text"
+              },
+              {
+                "type" : "flexibleSpacer"
+              },
+              {
+                "role" : "positive",
+                "text" : "CI passed",
+                "type" : "status"
+              }
+            ],
+            "spacing" : "small",
+            "type" : "stack"
+          },
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "sidebar.session-row",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+          {
+            "description" : "The session's already-resolved provider or side-chat image.",
+            "id" : "session.provider-image",
+            "isOptional" : false
+          },
+          {
+            "description" : "The session's already-resolved optional account image.",
+            "id" : "session.account-image",
+            "isOptional" : true
+          }
+        ],
+        "summary" : "The replaceable visual content and after-title slot of a session row."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/sidebar.session-row-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+                    "title",
+                    "identity-image",
+                    "tool-tip"
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "replacement" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : false,
+              "allowsProceed" : false,
+              "maximumDepth" : 1,
+              "maximumNodes" : 8,
+              "maximumTextLength" : 80,
+              "requiredRootAxis" : "horizontal",
+              "requiresProceed" : false
+            }
+          },
+          "slots" : {
+            "items" : {
+              "oneOf" : [
+                {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "children" : {
+                      "items" : {
+                        "$ref" : "https://skalman.invalid/schema/extension-node.schema.json"
+                      },
+                      "maxItems" : 2,
+                      "minItems" : 1,
+                      "type" : "array",
+                      "x-skalman-node-constraints" : {
+                        "allowedButtonRoles" : [
+
+                        ],
+                        "allowedCustomSurfaceKinds" : [
+
+                        ],
+                        "allowedImageRoles" : [
+
+                        ],
+                        "allowedStackAxes" : [
+
+                        ],
+                        "allowedStatusRoles" : [
+                          "neutral",
+                          "positive",
+                          "warning",
+                          "negative"
+                        ],
+                        "allowedTextRoles" : [
+
+                        ],
+                        "allowsDivider" : false,
+                        "allowsFixedSpacer" : false,
+                        "allowsFlexibleSpacer" : false,
+                        "allowsOverlay" : false,
+                        "allowsProceed" : false,
+                        "maximumDepth" : 0,
+                        "maximumNodes" : 1,
+                        "maximumTextLength" : 24,
+                        "requiresProceed" : false
+                      }
+                    },
+                    "slot" : {
+                      "const" : "after-title"
+                    }
+                  },
+                  "required" : [
+                    "slot",
+                    "children"
+                  ],
+                  "type" : "object"
+                }
+              ]
+            },
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "sidebar.session-row"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman sidebar.session-row v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "session-presentation",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard",
+              "primary",
+              "destructive"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "heading",
+              "body",
+              "detail",
+              "code",
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : true,
+            "allowsProceed" : true,
+            "maximumDepth" : 6,
+            "maximumNodes" : 48,
+            "maximumTextLength" : 1000,
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "hover-trigger",
+            "presentation-lifecycle",
+            "popover-chrome",
+            "accessibility-container"
+          ],
+          "id" : "sidebar.session-hover-card",
+          "properties" : [
+
+          ],
+          "replacement" : "contentOnly",
+          "replacementConstraints" : {
+            "allowedButtonRoles" : [
+              "standard",
+              "primary",
+              "destructive"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "heading",
+              "body",
+              "detail",
+              "code",
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : true,
+            "allowsProceed" : false,
+            "maximumDepth" : 6,
+            "maximumNodes" : 48,
+            "maximumTextLength" : 1000,
+            "requiresProceed" : false
+          },
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "vertical",
+            "children" : [
+              {
+                "type" : "proceed"
+              },
+              {
+                "type" : "divider"
+              },
+              {
+                "role" : "positive",
+                "text" : "Preview ready",
+                "type" : "status"
+              }
+            ],
+            "spacing" : "medium",
+            "type" : "stack"
+          },
+          "id" : "session-runtime-details",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "sidebar.session-hover-card",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Composable content inside the hover card presented from a session row."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/sidebar.session-hover-card-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard",
+                "primary",
+                "destructive"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : true,
+              "allowsProceed" : true,
+              "maximumDepth" : 6,
+              "maximumNodes" : 48,
+              "maximumTextLength" : 1000,
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "replacement" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard",
+                "primary",
+                "destructive"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : true,
+              "allowsProceed" : false,
+              "maximumDepth" : 6,
+              "maximumNodes" : 48,
+              "maximumTextLength" : 1000,
+              "requiresProceed" : false
+            }
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "sidebar.session-hover-card"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman sidebar.session-hover-card v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "account-presentation",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard",
+              "primary",
+              "destructive"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "heading",
+              "body",
+              "detail",
+              "code",
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : true,
+            "allowsProceed" : true,
+            "maximumDepth" : 6,
+            "maximumNodes" : 48,
+            "maximumTextLength" : 1000,
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "hover-trigger",
+            "presentation-lifecycle",
+            "popover-chrome",
+            "data-refresh",
+            "account-selection",
+            "hover-survival",
+            "accessibility-container"
+          ],
+          "id" : "toolbar.account-usage-popover",
+          "properties" : [
+
+          ],
+          "replacement" : "contentOnly",
+          "replacementConstraints" : {
+            "allowedButtonRoles" : [
+              "standard",
+              "primary",
+              "destructive"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "heading",
+              "body",
+              "detail",
+              "code",
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : true,
+            "allowsProceed" : false,
+            "maximumDepth" : 6,
+            "maximumNodes" : 48,
+            "maximumTextLength" : 1000,
+            "requiresProceed" : false
+          },
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "vertical",
+            "children" : [
+              {
+                "type" : "proceed"
+              },
+              {
+                "type" : "divider"
+              },
+              {
+                "role" : "neutral",
+                "text" : "Team budget available",
+                "type" : "status"
+              }
+            ],
+            "spacing" : "medium",
+            "type" : "stack"
+          },
+          "id" : "account-budget-note",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "toolbar.account-usage-popover",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Composable detail content in the toolbar's active-account usage popover."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/toolbar.account-usage-popover-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard",
+                "primary",
+                "destructive"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : true,
+              "allowsProceed" : true,
+              "maximumDepth" : 6,
+              "maximumNodes" : 48,
+              "maximumTextLength" : 1000,
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "replacement" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard",
+                "primary",
+                "destructive"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : true,
+              "allowsProceed" : false,
+              "maximumDepth" : 6,
+              "maximumNodes" : 48,
+              "maximumTextLength" : 1000,
+              "requiresProceed" : false
+            }
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "toolbar.account-usage-popover"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman toolbar.account-usage-popover v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "project-presentation",
+          "hostOwnedBehavior" : [
+            "selection",
+            "drag-and-drop",
+            "row-actions",
+            "aggregate-count",
+            "accessibility-container"
+          ],
+          "id" : "sidebar.project-row",
+          "properties" : [
+            "title",
+            "identity-image",
+            "tool-tip"
+          ],
+          "replacement" : "contentOnly",
+          "replacementConstraints" : {
+            "allowedButtonRoles" : [
+              "standard"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : false,
+            "allowsProceed" : false,
+            "maximumDepth" : 1,
+            "maximumNodes" : 8,
+            "maximumTextLength" : 80,
+            "requiredRootAxis" : "horizontal",
+            "requiresProceed" : false
+          },
+          "slots" : [
+            {
+              "contentConstraints" : {
+                "allowedButtonRoles" : [
+
+                ],
+                "allowedCustomSurfaceKinds" : [
+
+                ],
+                "allowedImageRoles" : [
+
+                ],
+                "allowedStackAxes" : [
+
+                ],
+                "allowedStatusRoles" : [
+                  "neutral",
+                  "positive",
+                  "warning",
+                  "negative"
+                ],
+                "allowedTextRoles" : [
+
+                ],
+                "allowsDivider" : false,
+                "allowsFixedSpacer" : false,
+                "allowsFlexibleSpacer" : false,
+                "allowsOverlay" : false,
+                "allowsProceed" : false,
+                "maximumDepth" : 0,
+                "maximumNodes" : 1,
+                "maximumTextLength" : 24,
+                "requiresProceed" : false
+              },
+              "id" : "after-title",
+              "maximumInlineItems" : 2
+            }
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "id" : "ci-project-status",
+          "properties" : [
+
+          ],
+          "slots" : [
+            {
+              "children" : [
+                {
+                  "role" : "positive",
+                  "text" : "CI passed",
+                  "type" : "status"
+                }
+              ],
+              "slot" : "after-title"
+            }
+          ],
+          "target" : {
+            "component" : "sidebar.project-row",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+          {
+            "description" : "The project's resolved icon or generated fallback tile.",
+            "id" : "project.image",
+            "isOptional" : false
+          }
+        ],
+        "summary" : "The replaceable visual content and after-title slot of a project row."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/sidebar.project-row-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+                    "title",
+                    "identity-image",
+                    "tool-tip"
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "replacement" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : false,
+              "allowsProceed" : false,
+              "maximumDepth" : 1,
+              "maximumNodes" : 8,
+              "maximumTextLength" : 80,
+              "requiredRootAxis" : "horizontal",
+              "requiresProceed" : false
+            }
+          },
+          "slots" : {
+            "items" : {
+              "oneOf" : [
+                {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "children" : {
+                      "items" : {
+                        "$ref" : "https://skalman.invalid/schema/extension-node.schema.json"
+                      },
+                      "maxItems" : 2,
+                      "minItems" : 1,
+                      "type" : "array",
+                      "x-skalman-node-constraints" : {
+                        "allowedButtonRoles" : [
+
+                        ],
+                        "allowedCustomSurfaceKinds" : [
+
+                        ],
+                        "allowedImageRoles" : [
+
+                        ],
+                        "allowedStackAxes" : [
+
+                        ],
+                        "allowedStatusRoles" : [
+                          "neutral",
+                          "positive",
+                          "warning",
+                          "negative"
+                        ],
+                        "allowedTextRoles" : [
+
+                        ],
+                        "allowsDivider" : false,
+                        "allowsFixedSpacer" : false,
+                        "allowsFlexibleSpacer" : false,
+                        "allowsOverlay" : false,
+                        "allowsProceed" : false,
+                        "maximumDepth" : 0,
+                        "maximumNodes" : 1,
+                        "maximumTextLength" : 24,
+                        "requiresProceed" : false
+                      }
+                    },
+                    "slot" : {
+                      "const" : "after-title"
+                    }
+                  },
+                  "required" : [
+                    "slot",
+                    "children"
+                  ],
+                  "type" : "object"
+                }
+              ]
+            },
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "sidebar.project-row"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman sidebar.project-row v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "project-presentation",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+              "standard",
+              "primary",
+              "destructive"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "heading",
+              "body",
+              "detail",
+              "code",
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : true,
+            "allowsProceed" : true,
+            "maximumDepth" : 6,
+            "maximumNodes" : 48,
+            "maximumTextLength" : 1000,
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "hover-trigger",
+            "presentation-lifecycle",
+            "popover-chrome",
+            "accessibility-container"
+          ],
+          "id" : "sidebar.project-hover-card",
+          "properties" : [
+
+          ],
+          "replacement" : "contentOnly",
+          "replacementConstraints" : {
+            "allowedButtonRoles" : [
+              "standard",
+              "primary",
+              "destructive"
+            ],
+            "allowedCustomSurfaceKinds" : [
+
+            ],
+            "allowedImageRoles" : [
+              "identity",
+              "icon",
+              "decoration"
+            ],
+            "allowedStackAxes" : [
+              "horizontal",
+              "vertical"
+            ],
+            "allowedStatusRoles" : [
+              "neutral",
+              "positive",
+              "warning",
+              "negative"
+            ],
+            "allowedTextRoles" : [
+              "heading",
+              "body",
+              "detail",
+              "code",
+              "compactBody",
+              "compactDetail"
+            ],
+            "allowsDivider" : true,
+            "allowsFixedSpacer" : true,
+            "allowsFlexibleSpacer" : true,
+            "allowsOverlay" : true,
+            "allowsProceed" : false,
+            "maximumDepth" : 6,
+            "maximumNodes" : 48,
+            "maximumTextLength" : 1000,
+            "requiresProceed" : false
+          },
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "axis" : "vertical",
+            "children" : [
+              {
+                "type" : "proceed"
+              },
+              {
+                "type" : "divider"
+              },
+              {
+                "role" : "positive",
+                "text" : "CI passed",
+                "type" : "status"
+              }
+            ],
+            "spacing" : "medium",
+            "type" : "stack"
+          },
+          "id" : "project-ci-details",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "sidebar.project-hover-card",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Composable content inside the hover card presented from a project row."
+      },
+      "patchSchema" : {
+        "$id" : "https://skalman.invalid/schema/components/sidebar.project-hover-card-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard",
+                "primary",
+                "destructive"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : true,
+              "allowsProceed" : true,
+              "maximumDepth" : 6,
+              "maximumNodes" : 48,
+              "maximumTextLength" : 1000,
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "replacement" : {
+            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+            "x-skalman-node-constraints" : {
+              "allowedButtonRoles" : [
+                "standard",
+                "primary",
+                "destructive"
+              ],
+              "allowedCustomSurfaceKinds" : [
+
+              ],
+              "allowedImageRoles" : [
+                "identity",
+                "icon",
+                "decoration"
+              ],
+              "allowedStackAxes" : [
+                "horizontal",
+                "vertical"
+              ],
+              "allowedStatusRoles" : [
+                "neutral",
+                "positive",
+                "warning",
+                "negative"
+              ],
+              "allowedTextRoles" : [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ],
+              "allowsDivider" : true,
+              "allowsFixedSpacer" : true,
+              "allowsFlexibleSpacer" : true,
+              "allowsOverlay" : true,
+              "allowsProceed" : false,
+              "maximumDepth" : 6,
+              "maximumNodes" : 48,
+              "maximumTextLength" : 1000,
+              "requiresProceed" : false
+            }
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "sidebar.project-hover-card"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Skalman sidebar.project-hover-card v1 component patch",
+        "type" : "object"
+      }
+    }
+  ],
+  "formatVersion" : 1
+}

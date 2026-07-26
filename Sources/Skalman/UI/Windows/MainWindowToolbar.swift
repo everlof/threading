@@ -3,31 +3,9 @@ import AppKit
 // MARK: - Toolbar Item Identifiers
 
 extension NSToolbarItem.Identifier {
-    /// App-owned sidebar toggle; kept beside the system tracking separator.
+    /// App-owned sidebar toggle; the first thing in the toolbar, sitting over the sidebar.
     static let skalmanToggleSidebar = NSToolbarItem.Identifier("SkalmanToggleSidebar")
 
-    /// Names the project and session currently shown.
-    static let sessionTitle = NSToolbarItem.Identifier("SkalmanSessionTitle")
-
-    /// Opens the session composer, placed directly after the active page tab.
-    static let newSessionPage = NSToolbarItem.Identifier("SkalmanNewSessionPage")
-
-    /// Shows the current account's rate-limit usage, at the trailing edge of the centre pane.
-    static let accountUsage = NSToolbarItem.Identifier("SkalmanAccountUsage")
-
-    /// A second divider-aligned gap, bound to the display pane's divider, so the pane toggles
-    /// sit over the pane they control — and the usage pill stays over the centre pane rather
-    /// than drifting out over the panel when it opens.
-    static let displayTrackingSeparator = NSToolbarItem.Identifier("SkalmanDisplayTrackingSeparator")
-
-    /// The context menu for the session on screen — theme so far, more to come.
-    static let sessionContext = NSToolbarItem.Identifier("SkalmanSessionContext")
-
-    /// Toggles the shell drawer under the session.
-    static let toggleShellDrawer = NSToolbarItem.Identifier("SkalmanToggleShellDrawer")
-
-    /// Toggles the display panel, so it can be opened without an agent putting content in it.
-    static let toggleDisplayPane = NSToolbarItem.Identifier("SkalmanToggleDisplayPane")
 }
 
 // MARK: - NSToolbarDelegate
@@ -51,12 +29,16 @@ extension MainWindowController: NSToolbarDelegate {
 
     // MARK: Delegate
 
+    /// One item, and that is the point.
+    ///
+    /// Everything else that lived here — the page tab, the `+`, the usage pill, the session's
+    /// actions — belongs to the *content pane* and now sits in the pane's own header (see
+    /// `TerminalContainerViewController.setupHeader`). A toolbar positions its items relative to
+    /// the window, so anything in it that describes a pane drifts away from that pane the moment
+    /// a divider moves. The sidebar toggle is the exception because it is genuinely the window's:
+    /// it acts on the split, not on either side of it, and it belongs beside the traffic lights.
     public func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
-            .skalmanToggleSidebar, .sidebarTrackingSeparator,
-            .sessionTitle, .newSessionPage, .flexibleSpace, .accountUsage,
-            .displayTrackingSeparator, .sessionContext, .toggleShellDrawer, .toggleDisplayPane
-        ]
+        [.skalmanToggleSidebar]
     }
 
     public func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -70,7 +52,7 @@ extension MainWindowController: NSToolbarDelegate {
     ) -> NSToolbarItem? {
         switch itemIdentifier {
         case .skalmanToggleSidebar:
-            let button = ToolbarButtonView(
+            let button = ThemedIconButton(
                 symbolName: "sidebar.leading",
                 accessibility: "Show or hide sidebar"
             )
@@ -79,64 +61,51 @@ extension MainWindowController: NSToolbarDelegate {
             sidebarToolbarButton = button
             return makeOverlayItem(identifier: itemIdentifier, view: button)
 
-        case .sidebarTrackingSeparator:
-            return NSTrackingSeparatorToolbarItem(
-                identifier: itemIdentifier,
-                splitView: splitViewController.splitView,
-                dividerIndex: 0
-            )
-
-        case .displayTrackingSeparator:
-            // The display item is added at launch and only ever collapses, so divider 1
-            // always exists; a collapsed pane hides the separator and merges the sections.
-            return NSTrackingSeparatorToolbarItem(
-                identifier: itemIdentifier,
-                splitView: splitViewController.splitView,
-                dividerIndex: 1
-            )
-
-        case .sessionTitle:
-            return makeSessionTitleItem(identifier: itemIdentifier)
-
-        case .newSessionPage:
-            let button = ToolbarButtonView(
-                symbolName: "plus",
-                accessibility: "New session"
-            )
-            button.toolTip = "New Session (⌘N)"
-            button.onPress = { [weak self] in self?.newSession() }
-            return makeOverlayItem(identifier: itemIdentifier, view: button)
-
-        case .accountUsage:
-            return makeAccountUsageItem(identifier: itemIdentifier)
-
-        case .sessionContext:
-            return makeSessionContextItem(identifier: itemIdentifier)
-
-        case .toggleShellDrawer:
-            return makePaneToggleItem(
-                identifier: itemIdentifier,
-                symbolName: "rectangle.bottomthird.inset.filled",
-                label: "Shell",
-                toolTip: "Show or Hide the Shell Drawer (⌃`)"
-            ) { [weak self] in
-                self?.toggleShellDrawer()
-            }
-
-        case .toggleDisplayPane:
-            return makePaneToggleItem(
-                identifier: itemIdentifier,
-                symbolName: "sidebar.trailing",
-                label: "Panel",
-                toolTip: "Show or Hide the Display Panel"
-            ) { [weak self] in
-                self?.toggleDisplayPane()
-            }
-
         default:
-            // Flexible space is supplied by the system.
             return nil
         }
+    }
+
+    // MARK: - Pane Header
+
+    /// Everything that names or acts on the session on screen, in one row for the content pane's
+    /// own header.
+    ///
+    /// The window controller builds it because the window controller owns what these do — the
+    /// composer, the panes, the session's menu. The pane owns only where the row sits, which is
+    /// what makes it move with the pane. Reading across: which page, a way to open another, then
+    /// what that page's account has left to spend, then what can be done to it.
+    func makePaneHeaderView() -> NSView {
+        let newSessionButton = ThemedIconButton(symbolName: "plus", accessibility: "New session")
+        newSessionButton.toolTip = "New Session (⌘N)"
+        newSessionButton.onPress = { [weak self] in self?.newSession() }
+        self.newSessionButton = newSessionButton
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let header = NSStackView(views: [
+            pageTabView,
+            newSessionButton,
+            spacer,
+            accountUsageItemView,
+            makeSessionActionsGroup()
+        ])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = Design.Spacing.small
+
+        NSLayoutConstraint.activate([
+            pageTabView.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: SessionTitleDefaults.minWidth
+            ),
+            pageTabView.widthAnchor.constraint(
+                lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth
+            )
+        ])
+
+        return header
     }
 
     // MARK: Item Construction
@@ -155,6 +124,17 @@ extension MainWindowController: NSToolbarDelegate {
         identifier: NSToolbarItem.Identifier,
         view: NSView & BackdropOverlayContent
     ) -> NSToolbarItem {
+        // The protocol says a view *can* be inked; it cannot say which ink it took, because a
+        // component that serves both grounds — the page tab, the icon button — conforms either
+        // way. So the ground itself is asserted here, where the wrong one would be invisible
+        // until someone looked at a light theme over a dark terminal.
+        if let inked = view as? InkSourced, inked.inkSource != .backdrop {
+            assertionFailure(
+                "\(type(of: view)) is in the toolbar but inks from \(inked.inkSource); "
+                    + "the toolbar floats over the terminal's palette, not the chrome's"
+            )
+        }
+
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.view = view
         // These draw their own surface, or none. The system bezel would double it, and on a
@@ -164,51 +144,52 @@ extension MainWindowController: NSToolbarDelegate {
         return item
     }
 
-    private func makeSessionTitleItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let item = makeOverlayItem(identifier: identifier, view: sessionTitleItemView)
-        item.visibilityPriority = .high
-
-        NSLayoutConstraint.activate([
-            sessionTitleItemView.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: SessionTitleDefaults.minWidth
-            ),
-            sessionTitleItemView.widthAnchor.constraint(
-                lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth
-            )
+    /// The session's three actions, as one group.
+    ///
+    /// They belong together: each one acts on the session named at the other end of the header,
+    /// and two of them toggle a pane of the window. Kept as separate toolbar items they were
+    /// spaced as though unrelated — which is what `ToolbarButtonGroupView` exists to fix.
+    private func makeSessionActionsGroup() -> ToolbarButtonGroupView {
+        ToolbarButtonGroupView(buttons: [
+            makeSessionContextButton(),
+            makePaneToggleButton(
+                symbolName: "rectangle.bottomthird.inset.filled",
+                label: "Shell",
+                toolTip: "Show or Hide the Shell Drawer (⌃`)",
+                store: { [weak self] in self?.shellDrawerToolbarButton = $0 }
+            ) { [weak self] in
+                self?.toggleShellDrawer()
+            },
+            makePaneToggleButton(
+                symbolName: "sidebar.trailing",
+                label: "Panel",
+                toolTip: "Show or Hide the Display Panel",
+                store: { [weak self] in self?.displayPaneToolbarButton = $0 }
+            ) { [weak self] in
+                self?.toggleDisplayPane()
+            }
         ])
-
-        return item
     }
 
-    private func makeAccountUsageItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        makeOverlayItem(identifier: identifier, view: accountUsageItemView)
-    }
-
-    private func makePaneToggleItem(
-        identifier: NSToolbarItem.Identifier,
+    private func makePaneToggleButton(
         symbolName: String,
         label: String,
         toolTip: String,
+        store: (ThemedIconButton) -> Void,
         onPress: @escaping () -> Void
-    ) -> NSToolbarItem {
-        let button = ToolbarButtonView(symbolName: symbolName, accessibility: label)
+    ) -> ThemedIconButton {
+        let button = ThemedIconButton(symbolName: symbolName, accessibility: label)
         button.toolTip = toolTip
         button.onPress = onPress
-
-        if identifier == .toggleShellDrawer {
-            shellDrawerToolbarButton = button
-        } else if identifier == .toggleDisplayPane {
-            displayPaneToolbarButton = button
-        }
-
-        return makeOverlayItem(identifier: identifier, view: button)
+        store(button)
+        return button
     }
 
     /// The context button: a menu of what applies to the session on screen. Rebuilt on every
     /// open (`menuNeedsUpdate`), because its checkmarks — which theme is chosen — go stale
     /// the moment they are drawn.
-    private func makeSessionContextItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let button = ToolbarButtonView(symbolName: "ellipsis", accessibility: "Session options")
+    private func makeSessionContextButton() -> ThemedIconButton {
+        let button = ThemedIconButton(symbolName: "ellipsis", accessibility: "Session options")
         button.toolTip = "Session Options"
         button.onPress = { [weak self, weak button] in
             guard let self, let button else { return }
@@ -222,12 +203,12 @@ extension MainWindowController: NSToolbarDelegate {
             self?.showSettingsPage(title: SettingsPages.themesTitle)
         }
 
-        return makeOverlayItem(identifier: identifier, view: button)
+        return button
     }
 
     // MARK: Actions
 
-    private func showSessionContextMenu(from button: ToolbarButtonView) {
+    private func showSessionContextMenu(from button: ThemedIconButton) {
         menuNeedsUpdate(sessionContextMenu)
         sessionContextMenu.popUp(
             positioning: nil,
@@ -249,6 +230,18 @@ extension MainWindowController: NSMenuDelegate {
         // themes page, so the button never opens onto nothing.
         if let sessionID = currentSessionID {
             menu.addItem(themeMenuBuilder.sessionThemeItem(for: sessionID))
+            menu.addItem(.separator())
+            let attachments = NSMenuItem(
+                title: "Attachments",
+                action: #selector(attachmentsClicked),
+                keyEquivalent: ""
+            )
+            attachments.image = NSImage(
+                systemSymbolName: "paperclip",
+                accessibilityDescription: "Attachments"
+            )
+            attachments.target = self
+            menu.addItem(attachments)
         } else {
             let item = NSMenuItem(
                 title: "Themes…",
@@ -263,4 +256,22 @@ extension MainWindowController: NSMenuDelegate {
     @objc private func themeSettingsClicked() {
         showSettingsPage(title: SettingsPages.themesTitle)
     }
+
+    @objc private func attachmentsClicked() {
+        showAttachments()
+    }
+}
+
+// MARK: - Page Tab Defaults
+
+/// How wide the toolbar's page tab is allowed to grow, and what stands in for a page with no
+/// mark of its own.
+///
+/// All that is left of what was once a parallel tab implementation: everything describing what a
+/// tab *is* now lives in `ThemedTabItemView`, and these two widths are a property of this
+/// particular slot in the toolbar rather than of tabs.
+enum SessionTitleDefaults {
+    static let minWidth: CGFloat = 120
+    static let maxWidth: CGFloat = 360
+    static let projectSymbolName = "folder"
 }

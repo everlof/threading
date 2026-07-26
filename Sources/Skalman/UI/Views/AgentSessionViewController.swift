@@ -36,6 +36,8 @@ final class AgentSessionViewController: NSViewController {
     /// Set when the terminal is not yet large enough to start the process, so the launch
     /// can be retried from the size-change callback.
     private var pendingLaunchPlan: AgentLaunchPlan?
+    private let remoteViewportBanner = RemoteViewportBannerView()
+    private var attachmentObserver: TerminalAttachmentObserver?
 
     // MARK: - Initialization
 
@@ -47,6 +49,30 @@ final class AgentSessionViewController: NSViewController {
         )
         super.init(nibName: nil, bundle: nil)
         session.delegate = self
+
+        let terminalSession = session
+        attachmentObserver = TerminalAttachmentObserver(
+            sessionID: agentSession.id,
+            projectRoot: {
+                ProjectStore.shared.project(forSessionID: agentSession.id).map {
+                    URL(fileURLWithPath: $0.folderPath, isDirectory: true)
+                }
+            },
+            currentDirectory: { [weak terminalSession] in
+                terminalSession?.effectiveWorkingDirectory()
+            },
+            text: { [weak terminalSession] in
+                guard let terminal = terminalSession?.terminalView.getTerminal() else { return "" }
+                let rendered = terminal.getBufferAsData()
+                return String(
+                    decoding: rendered.suffix(SessionAttachmentDefaults.maximumTerminalScanBytes),
+                    as: UTF8.self
+                )
+            },
+            isEnabled: {
+                AppSettings.shared.detectsAttachmentReferences(for: agentSession.kind)
+            }
+        )
 
         activityTracker.markDormant()
         activityTracker.onChange = { [weak self] _ in
@@ -71,6 +97,7 @@ final class AgentSessionViewController: NSViewController {
         // the view's edge, which reads as cramped beside the sidebar divider.
         session.terminalView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(session.terminalView)
+        view.addSubview(remoteViewportBanner)
 
         NSLayoutConstraint.activate([
             session.terminalView.topAnchor.constraint(
@@ -88,6 +115,14 @@ final class AgentSessionViewController: NSViewController {
             session.terminalView.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor,
                 constant: -TerminalPadding.trailing
+            ),
+            remoteViewportBanner.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor,
+                constant: -Design.Spacing.large
+            ),
+            remoteViewportBanner.bottomAnchor.constraint(
+                equalTo: view.bottomAnchor,
+                constant: -Design.Spacing.large
             )
         ])
 
@@ -153,6 +188,7 @@ final class AgentSessionViewController: NSViewController {
     /// Terminates the agent, leaving the terminal view in place showing its final output.
     func terminate() {
         guard isRunning else { return }
+        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
         session.terminate()
         isRunning = false
         activityTracker.markDormant()
@@ -175,6 +211,9 @@ final class AgentSessionViewController: NSViewController {
         pendingLaunchPlan = nil
         isRunning = true
         activityTracker.markRunning()
+        if AppSettings.shared.remoteAccessEnabled {
+            RemoteSessionMirrorRegistry.shared.beginCapturing(session, sessionID: sessionID)
+        }
 
         // The command line, before it runs. A launch that takes the app down with it leaves
         // this as the only account of what was being started.
@@ -249,10 +288,13 @@ final class AgentSessionViewController: NSViewController {
 extension AgentSessionViewController: TerminalSessionDelegate {
 
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String) {
+        RemoteSessionMirrorRegistry.shared.sessionTitleChanged(sessionID, title: title)
         delegate?.agentSession(self, titleChangedTo: title)
     }
 
     func terminalSession(_ session: TerminalSession, sizeChangedTo cols: Int, rows: Int) {
+        RemoteSessionMirrorRegistry.shared.sessionResized(sessionID, cols: cols, rows: rows)
+
         // The agent will repaint in response; that is not it working.
         activityTracker.noteTerminalResized()
 
@@ -262,8 +304,20 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         }
     }
 
+    func terminalSession(
+        _ session: TerminalSession,
+        remoteViewportChangedTo grid: (cols: Int, rows: Int)?
+    ) {
+        if let grid {
+            remoteViewportBanner.show(cols: grid.cols, rows: grid.rows)
+        } else {
+            remoteViewportBanner.hide()
+        }
+    }
+
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {
         activityTracker.recordOutput(byteCount: byteCount)
+        attachmentObserver?.noteOutput()
     }
 
     func terminalSessionDidRingBell(_ session: TerminalSession) {
@@ -276,8 +330,10 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {
+        attachmentObserver?.scanNow()
         isRunning = false
         activityTracker.markDormant()
+        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
 
         EventLog.shared.record(.session, "Agent exited", [
             "session": sessionID.uuidString,
@@ -299,4 +355,81 @@ protocol AgentSessionViewControllerDelegate: AnyObject {
     func agentSession(_ controller: AgentSessionViewController, titleChangedTo title: String)
     func agentSession(_ controller: AgentSessionViewController, didExitWithCode exitCode: Int32?)
     func agentSessionDidChangeState(_ controller: AgentSessionViewController)
+}
+
+// MARK: - Remote Viewport Banner
+
+/// Explains the otherwise surprising desktop shrink while the iPhone owns the PTY geometry.
+/// It floats over the terminal's own palette, so its ink is derived from the active backdrop.
+private final class RemoteViewportBannerView: BackdropOverlay {
+    private let icon = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "Fit to iPhone")
+    private let detailLabel = NSTextField(
+        labelWithString: "Mac size returns when the remote view closes"
+    )
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        isHidden = true
+        wantsLayer = true
+        layer?.cornerCurve = .continuous
+
+        icon.image = NSImage(
+            systemSymbolName: "iphone",
+            accessibilityDescription: "Controlled from iPhone"
+        )
+        icon.symbolConfiguration = Design.Symbol.configuration(
+            Design.Symbol.control,
+            weight: .medium
+        )
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.font = Design.Typography.control()
+        detailLabel.font = Design.Typography.detail()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let labels = NSStackView(views: [titleLabel, detailLabel])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = Design.Spacing.hairline
+        labels.translatesAutoresizingMaskIntoConstraints = false
+
+        let content = NSStackView(views: [icon, labels])
+        content.orientation = .horizontal
+        content.alignment = .centerY
+        content.spacing = Design.Spacing.medium
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(lessThanOrEqualToConstant: 320),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.small),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.small),
+            icon.widthAnchor.constraint(equalToConstant: 16)
+        ])
+    }
+
+    override func applyInk(_ ink: Design.Ink) {
+        layer?.cornerRadius = Design.Radius.control
+        applyLayerBackground(ink.surface)
+        layer?.borderWidth = Design.Radius.border
+        applyLayerBorder(ink.border)
+        icon.contentTintColor = ink.label
+        titleLabel.textColor = ink.label
+        detailLabel.textColor = ink.secondary
+    }
+
+    func show(cols: Int, rows: Int) {
+        titleLabel.stringValue = "Fit to iPhone · \(cols)×\(rows)"
+        toolTip = "The iPhone controls the terminal size while its remote view is open."
+        isHidden = false
+    }
+
+    func hide() {
+        isHidden = true
+    }
 }

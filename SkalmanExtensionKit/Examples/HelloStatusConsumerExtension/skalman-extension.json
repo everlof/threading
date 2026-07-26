@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "identifier": "se.mjukis.hello-status-consumer",
+  "name": "Hello Status Consumer",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/hello-status-consumer.wasm",
+  "capabilities": [
+    "commands",
+    "services.consume"
+  ],
+  "mcpTools": [],
+  "settings": {
+    "pages": [],
+    "sections": []
+  },
+  "services": [],
+  "serviceDependencies": [
+    {
+      "providerIdentifier": "se.mjukis.hello-status",
+      "serviceID": "status",
+      "version": 1,
+      "required": true
+    }
+  ]
+}

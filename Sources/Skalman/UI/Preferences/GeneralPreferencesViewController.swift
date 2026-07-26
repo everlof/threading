@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage.CIFilterBuiltins
 
 /// General preferences: which agent new sessions use, startup behaviour, and the shell.
 final class GeneralPreferencesViewController: NSViewController {
@@ -10,10 +11,16 @@ final class GeneralPreferencesViewController: NSViewController {
     private let branchGroupingToggle = ThemedToggle()
     private let projectIconToggle = ThemedToggle()
     private let accountAvatarToggle = ThemedToggle()
+    private let claudeAttachmentToggle = ThemedToggle()
+    private let codexAttachmentToggle = ThemedToggle()
     private let restoreSessionToggle = ThemedToggle()
     private let confirmCloseToggle = ThemedToggle()
     private let codexHookToggle = ThemedToggle()
     private let codexHookTrustToggle = ThemedToggle()
+    private let remoteAccessToggle = ThemedToggle()
+    private let remoteOpenButton = ThemedButton()
+    private let remotePairButton = ThemedButton()
+    private var remoteStatusField: NSTextField?
     private let shellField = ThemedTextField()
 
     // MARK: - Lifecycle
@@ -48,6 +55,16 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(accountAvatarToggle,
                   isOn: AppSettings.shared.discoversAccountAvatars,
                   action: #selector(accountAvatarChanged))
+        configure(
+            claudeAttachmentToggle,
+            isOn: AppSettings.shared.detectsAttachmentReferences(for: .claude),
+            action: #selector(claudeAttachmentDetectionChanged)
+        )
+        configure(
+            codexAttachmentToggle,
+            isOn: AppSettings.shared.detectsAttachmentReferences(for: .codex),
+            action: #selector(codexAttachmentDetectionChanged)
+        )
         configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
         configure(confirmCloseToggle, isOn: AppSettings.shared.confirmsBeforeClosingRunningSession, action: #selector(confirmCloseChanged))
         configure(codexHookToggle,
@@ -57,6 +74,25 @@ final class GeneralPreferencesViewController: NSViewController {
                   isOn: AppSettings.shared.bypassesCodexHookTrust,
                   action: #selector(codexHookTrustChanged))
         codexHookTrustToggle.isEnabled = AppSettings.shared.installsCodexHooks
+        configure(
+            remoteAccessToggle,
+            isOn: AppSettings.shared.remoteAccessEnabled,
+            action: #selector(remoteAccessChanged)
+        )
+
+        remoteOpenButton.title = "Open Locally"
+        remoteOpenButton.target = self
+        remoteOpenButton.action = #selector(openRemoteAccess)
+        remotePairButton.title = "Pair iPhone…"
+        remotePairButton.target = self
+        remotePairButton.action = #selector(pairRemoteAccess)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(remoteAccessStatusDidChange),
+            name: RemoteAccessCoordinator.statusDidChange,
+            object: nil
+        )
 
         shellField.font = Design.Typography.body()
         shellField.placeholderString = TerminalDefaults.defaultShell
@@ -116,12 +152,14 @@ final class GeneralPreferencesViewController: NSViewController {
         let page = SettingsUI.page([
             SettingsUI.heading("General"),
             SettingsUI.section("Sessions", sessions),
+            SettingsUI.section("Attachments", attachmentDetectionCard()),
             SettingsUI.section("Startup", startup),
             SettingsUI.section("Closing", closing),
+            SettingsUI.section("Remote Access", remoteAccessCard()),
             SettingsUI.section("Codex Hooks", codexHooksCard()),
             SettingsUI.section("Shell", shell),
             SettingsUI.note("Shell path is used by shell sessions. Agent sessions launch through your login shell regardless.")
-        ])
+        ], hostPage: .general)
 
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -130,6 +168,51 @@ final class GeneralPreferencesViewController: NSViewController {
             page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+
+        refreshRemoteAccessStatus()
+    }
+
+    private func attachmentDetectionCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Detect attachments from Claude Code",
+                subtitle: "Scans Claude's terminal output and Native replies for image and PDF paths. "
+                    + "Turn this off if a Claude update changes how paths are rendered.",
+                control: claudeAttachmentToggle
+            ),
+            SettingsUI.row(
+                title: "Detect attachments from Codex",
+                subtitle: "Scans Codex's terminal output and Native replies for image and PDF paths. "
+                    + "Turn this off if a Codex update changes how paths are rendered.",
+                control: codexAttachmentToggle
+            )
+        ])
+    }
+
+    private func remoteAccessCard() -> SettingsCard {
+        let actions = NSStackView(views: [remoteOpenButton, remotePairButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = Design.Spacing.small
+
+        let statusRow = SettingsUI.row(
+            title: "Private connection link (Beta)",
+            subtitle: "Off",
+            control: actions,
+            subtitleField: &remoteStatusField
+        )
+
+        return SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Allow remote access",
+                subtitle: "Publishes only Skalman's authenticated remote surface through a "
+                    + "temporary Cloudflare HTTPS relay; MCP and extension services stay local. "
+                    + "Pairing is for your own trusted devices. Share an individual chat from "
+                    + "its ⋯ menu when someone else should see it.",
+                control: remoteAccessToggle
+            ),
+            statusRow
         ])
     }
 
@@ -208,6 +291,20 @@ final class GeneralPreferencesViewController: NSViewController {
         NotificationCenter.default.post(ProjectsDidChange())
     }
 
+    @objc private func claudeAttachmentDetectionChanged() {
+        AppSettings.shared.setAttachmentReferenceDetection(
+            for: .claude,
+            enabled: claudeAttachmentToggle.state == .on
+        )
+    }
+
+    @objc private func codexAttachmentDetectionChanged() {
+        AppSettings.shared.setAttachmentReferenceDetection(
+            for: .codex,
+            enabled: codexAttachmentToggle.state == .on
+        )
+    }
+
     @objc private func branchGroupingChanged() {
         AppSettings.shared.groupsSessionsByBranch = branchGroupingToggle.state == .on
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
@@ -232,6 +329,115 @@ final class GeneralPreferencesViewController: NSViewController {
 
     @objc private func codexHookTrustChanged() {
         AppSettings.shared.bypassesCodexHookTrust = codexHookTrustToggle.state == .on
+    }
+
+    @objc private func remoteAccessChanged() {
+        RemoteAccessCoordinator.shared.setEnabled(remoteAccessToggle.state == .on)
+        refreshRemoteAccessStatus()
+    }
+
+    @objc private func remoteAccessStatusDidChange(_ notification: Notification) {
+        refreshRemoteAccessStatus()
+    }
+
+    private func refreshRemoteAccessStatus() {
+        let coordinator = RemoteAccessCoordinator.shared
+        remoteAccessToggle.state = AppSettings.shared.remoteAccessEnabled ? .on : .off
+
+        switch coordinator.status {
+        case .disabled:
+            remoteStatusField?.stringValue = "Off. Turning this on creates a fresh private link."
+        case .starting:
+            remoteStatusField?.stringValue = "Starting the private listener…"
+        case .listening(let port):
+            switch coordinator.relayStatus {
+            case .inactive, .starting:
+                remoteStatusField?.stringValue = "Local mirror ready on 127.0.0.1:\(port); "
+                    + "connecting the secure relay…"
+            case .connected(let url):
+                remoteStatusField?.stringValue = "Ready for iPhone and web at \(url.host ?? "the secure relay"). "
+                    + "Turning access off immediately invalidates the link."
+            case .unavailable(let reason):
+                remoteStatusField?.stringValue = "Local browser access is ready. \(reason)"
+            }
+        case .failed:
+            remoteStatusField?.stringValue = "Could not start the private listener. "
+                + "Turn access off and on to retry."
+        }
+
+        remoteOpenButton.isEnabled = coordinator.localURL != nil
+        remotePairButton.isEnabled = coordinator.remoteURL != nil
+    }
+
+    @objc private func openRemoteAccess() {
+        guard let url = RemoteAccessCoordinator.shared.localURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func pairRemoteAccess() {
+        guard let url = RemoteAccessCoordinator.shared.remoteURL,
+              let image = qrCode(for: url.absoluteString) else {
+            return
+        }
+
+        let imageView = NSImageView(image: image)
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+
+        let note = NSTextField(wrappingLabelWithString:
+            "Open Skalman on iPhone, choose Add Connection, and scan this code. "
+            + "This is an owner-device code: it can access your chats and approve permission requests. "
+            + "Only scan it on a device you control."
+        )
+        note.font = Design.Typography.body()
+        note.textColor = Design.Text.secondary
+        note.alignment = .center
+
+        let stack = NSStackView(views: [imageView, note])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = Design.Spacing.medium
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.small,
+            left: Design.Spacing.medium,
+            bottom: Design.Spacing.small,
+            right: Design.Spacing.medium
+        )
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            imageView.widthAnchor.constraint(equalToConstant: 240),
+            imageView.heightAnchor.constraint(equalToConstant: 240),
+            note.widthAnchor.constraint(equalToConstant: 320)
+        ])
+
+        let alert = NSAlert()
+        alert.messageText = "Pair Skalman on iPhone"
+        alert.informativeText = "The relay and pairing code are new for this Skalman launch."
+        alert.accessoryView = stack
+        alert.addButton(withTitle: "Done")
+        alert.addButton(withTitle: "Copy Pairing Link")
+        if alert.runModal() == .alertSecondButtonReturn {
+            copyRemoteURL(url)
+        }
+    }
+
+    private func copyRemoteURL(_ url: URL) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+
+    }
+
+    private func qrCode(for text: String) -> NSImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(text.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        let representation = NSCIImageRep(ciImage: scaled)
+        let image = NSImage(size: representation.size)
+        image.addRepresentation(representation)
+        return image
     }
 
     @objc private func shellPathChanged() {

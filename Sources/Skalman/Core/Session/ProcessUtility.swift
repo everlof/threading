@@ -27,33 +27,52 @@ struct ProcessSummary {
 /// Utility for querying process information.
 enum ProcessUtility {
 
-    /// Finds all processes system-wide and returns those that are children of our app.
-    static func findAllChildProcesses() -> [pid_t] {
-        let ourPid = getpid()
+    /// Every live pid, with the buffer sized from the kernel's own count.
+    ///
+    /// `proc_listallpids` fills whatever buffer it is handed and returns how many it wrote, and a
+    /// **full** buffer is indistinguishable from a machine that happens to have exactly that many
+    /// processes. Three walks here each passed a fixed 4096, so on a busy machine the list was
+    /// silently cut off — and the info panel above it reported "Processes 12" with no way to know
+    /// it had been handed a truncated table. A short answer now means *that is all of them*:
+    /// the count is asked for first, and a reply that fills the buffer is grown and asked again.
+    ///
+    /// The one case that cannot be resolved by growing is reported rather than trimmed away,
+    /// because a process list quietly missing entries is the failure this exists to end.
+    static func liveProcessIdentifiers() -> [pid_t] {
+        var capacity = max(Int(proc_listallpids(nil, 0)), ProcessScan.minimumProcesses)
 
-        var allPids = [pid_t](repeating: 0, count: 4096)
-        let bufferSize = Int32(allPids.count * MemoryLayout<pid_t>.size)
-        let count = proc_listallpids(&allPids, bufferSize)
+        for attempt in 1...ProcessScan.attempts {
+            capacity += ProcessScan.headroom
 
-        guard count > 0 else { return [] }
+            var pids = [pid_t](repeating: 0, count: capacity)
+            let written = proc_listallpids(
+                &pids,
+                Int32(capacity * MemoryLayout<pid_t>.size)
+            )
+            guard written > 0 else { return [] }
 
-        let numPids = Int(count)
-        var children: [pid_t] = []
+            let count = Int(written)
+            if count < capacity {
+                return pids.prefix(count).filter { $0 > 0 }
+            }
 
-        for i in 0..<numPids {
-            let pid = allPids[i]
-            guard pid > 0 else { continue }
-
-            var taskInfo = proc_bsdinfo()
-            let size = MemoryLayout<proc_bsdinfo>.size
-            let result = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &taskInfo, Int32(size))
-
-            if result == size && taskInfo.pbi_ppid == ourPid {
-                children.append(pid)
+            if attempt == ProcessScan.attempts {
+                SkalmanLogger.session.error(
+                    """
+                    Process table filled a \(capacity, privacy: .public)-pid buffer after \
+                    \(attempt, privacy: .public) attempts; the list may be short.
+                    """
+                )
+                return pids.filter { $0 > 0 }
             }
         }
 
-        return children
+        return []
+    }
+
+    /// Finds all processes system-wide and returns those that are children of our app.
+    static func findAllChildProcesses() -> [pid_t] {
+        getProcessChildren(forPid: getpid())
     }
 
     /// Gets the working directory for a given process ID.
@@ -109,29 +128,12 @@ enum ProcessUtility {
 
     /// Gets all direct children of a given process.
     static func getProcessChildren(forPid parentPid: pid_t) -> [pid_t] {
-        var allPids = [pid_t](repeating: 0, count: 4096)
-        let bufferSize = Int32(allPids.count * MemoryLayout<pid_t>.size)
-        let count = proc_listallpids(&allPids, bufferSize)
-
-        guard count > 0 else { return [] }
-
-        let numPids = Int(count)
-        var children: [pid_t] = []
-
-        for i in 0..<numPids {
-            let pid = allPids[i]
-            guard pid > 0 else { continue }
-
+        liveProcessIdentifiers().filter { pid in
             var taskInfo = proc_bsdinfo()
             let size = MemoryLayout<proc_bsdinfo>.size
             let result = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &taskInfo, Int32(size))
-
-            if result == size && taskInfo.pbi_ppid == parentPid {
-                children.append(pid)
-            }
+            return result == size && taskInfo.pbi_ppid == parentPid
         }
-
-        return children
     }
 
     /// Every live process keyed by pid, with its parent and command, in a single pass.
@@ -142,19 +144,13 @@ enum ProcessUtility {
     /// already contains. Working directories are deliberately not read here: that is a second
     /// syscall per process, and the panel needs the directory of the session, not of each child.
     static func processTable() -> [pid_t: ProcessSummary] {
-        var allPids = [pid_t](repeating: 0, count: ProcessScan.maximumProcesses)
-        let bufferSize = Int32(allPids.count * MemoryLayout<pid_t>.size)
-        let count = proc_listallpids(&allPids, bufferSize)
-
-        guard count > 0 else { return [:] }
+        let pids = liveProcessIdentifiers()
+        guard !pids.isEmpty else { return [:] }
 
         var table: [pid_t: ProcessSummary] = [:]
-        table.reserveCapacity(Int(count))
+        table.reserveCapacity(pids.count)
 
-        for index in 0..<Int(count) {
-            let pid = allPids[index]
-            guard pid > 0 else { continue }
-
+        for pid in pids {
             var taskInfo = proc_bsdinfo()
             let size = MemoryLayout<proc_bsdinfo>.size
             guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &taskInfo, Int32(size)) == size else { continue }
@@ -331,8 +327,16 @@ enum ProcessUtility {
     // MARK: - Constants
 
     private enum ProcessScan {
-        /// The pid buffer handed to `proc_listallpids`, matching what the older walks here use.
-        static let maximumProcesses = 4096
+        /// The floor for the pid buffer, for the case where the kernel's own count comes back
+        /// unusable. Every ordinary machine is well under it.
+        static let minimumProcesses = 4096
+
+        /// Room over the count the kernel just reported. Processes keep being spawned while the
+        /// table is being read, so the answer is stale by the time it is used.
+        static let headroom = 256
+
+        /// How many times to grow and ask again before reporting a short answer as short.
+        static let attempts = 3
     }
 
     private enum SocketScan {

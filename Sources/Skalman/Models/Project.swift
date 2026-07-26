@@ -31,6 +31,9 @@ enum AgentKind: String, Codable, CaseIterable {
         }
     }
 
+    /// The agent's own interactive TUI, hosted inside Skalman's terminal surface.
+    var originalUITitle: String { "\(displayName) UI" }
+
     /// The executable invoked on the user's PATH.
     var executableName: String {
         switch self {
@@ -188,6 +191,13 @@ struct AgentSession: Codable, Identifiable {
     /// Nil uses whatever the CLI defaults to.
     var model: String?
 
+    /// A per-conversation Codex reasoning-effort override.
+    ///
+    /// Nil inherits the routed account when that value is supported by the selected model,
+    /// otherwise the model catalog's own default. The value stays a string because the catalog
+    /// is authoritative and may add levels without a Skalman release.
+    var reasoningEffort: String?
+
     /// A per-conversation Fast-mode override.
     ///
     /// Nil inherits the routed account's setting, true requests Fast, and false explicitly
@@ -248,16 +258,22 @@ struct AgentSession: Codable, Identifiable {
     /// untouched, so an archived session resumes exactly as it would have.
     var isArchived: Bool
 
-    /// The terminal theme this session draws with, by name. Nil inherits — from the project,
+    /// Pinned conversations sort ahead of the ordinary project order on every surface.
+    /// This is shared session state rather than a phone-only preference: pinning from either
+    /// side should mean the same thing everywhere the conversation is listed.
+    var isPinned: Bool
+
+    /// The terminal theme this session draws with, by stable ID. Nil inherits — from the project,
     /// and from the app default beyond that — so a session that never chose still follows a
     /// later change to either. See `ThemeResolution.resolve`.
-    var themeName: String?
+    var themeID: TerminalThemeID?
 
     init(
         kind: AgentKind,
         title: String,
         accountHandle: AccountHandle = .standard,
         model: String? = nil,
+        reasoningEffort: String? = nil,
         usesNativeUI: Bool = false,
         forkedFrom: SessionID? = nil,
         id: SessionID = SessionID()
@@ -274,19 +290,21 @@ struct AgentSession: Codable, Identifiable {
         self.lastExitCode = nil
         self.accountHandle = accountHandle
         self.model = model
+        self.reasoningEffort = reasoningEffort
         self.fastMode = nil
         self.branch = nil
         self.isArchived = false
+        self.isPinned = false
         self.usesNativeUI = usesNativeUI
         self.forkedFrom = forkedFrom
-        self.themeName = nil
+        self.themeID = nil
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, title, customTitle, createdAt, lastActiveAt
         case agentTitle = "terminalTitle"
-        case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, branch
-        case fastMode, archived, nativeUI, forkParent, themeName
+        case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
+        case fastMode, archived, pinned, nativeUI, forkParent, themeID, themeName
     }
 
     init(from decoder: Decoder) throws {
@@ -312,12 +330,18 @@ struct AgentSession: Codable, Identifiable {
             storedName: try container.decodeIfPresent(String.self, forKey: .accountHandle)
         )
         model = try container.decodeIfPresent(String.self, forKey: .model)
+        reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
         fastMode = try container.decodeIfPresent(Bool.self, forKey: .fastMode)
         branch = try container.decodeIfPresent(String.self, forKey: .branch)
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        isPinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
         usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
         forkedFrom = try container.decodeIfPresent(SessionID.self, forKey: .forkParent)
-        themeName = try container.decodeIfPresent(String.self, forKey: .themeName)
+        themeID = try container.decodeIfPresent(TerminalThemeID.self, forKey: .themeID)
+        if themeID == nil,
+           let legacyName = try container.decodeIfPresent(String.self, forKey: .themeName) {
+            themeID = .migratedFromName(legacyName)
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -334,12 +358,14 @@ struct AgentSession: Codable, Identifiable {
         try container.encodeIfPresent(lastExitCode, forKey: .lastExitCode)
         try container.encodeIfPresent(accountHandle.persistedSessionName, forKey: .accountHandle)
         try container.encodeIfPresent(model, forKey: .model)
+        try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
         try container.encodeIfPresent(fastMode, forKey: .fastMode)
         try container.encodeIfPresent(branch, forKey: .branch)
         try container.encode(isArchived, forKey: .archived)
+        try container.encode(isPinned, forKey: .pinned)
         try container.encode(usesNativeUI, forKey: .nativeUI)
         try container.encodeIfPresent(forkedFrom, forKey: .forkParent)
-        try container.encodeIfPresent(themeName, forKey: .themeName)
+        try container.encodeIfPresent(themeID, forKey: .themeID)
     }
 
     /// Whether a previous conversation exists that can be resumed.
@@ -423,9 +449,9 @@ struct Project: Codable, Identifiable {
     /// existed still decodes.
     var icon: ProjectIcon?
 
-    /// The terminal theme this project's sessions draw with, by name. Nil inherits the app
-    /// default; a session naming its own theme overrides this.
-    var themeName: String?
+    /// The terminal theme this project's sessions draw with, by stable ID. Nil inherits the app
+    /// default; a session choosing its own theme overrides this.
+    var themeID: TerminalThemeID?
 
     init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
         self.id = id
@@ -435,11 +461,11 @@ struct Project: Codable, Identifiable {
         self.isExpanded = true
         self.createdAt = Date()
         self.icon = nil
-        self.themeName = nil
+        self.themeID = nil
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, folderPath, sessions, isExpanded, createdAt, icon, themeName
+        case id, name, folderPath, sessions, isExpanded, createdAt, icon, themeID, themeName
     }
 
     init(from decoder: Decoder) throws {
@@ -455,7 +481,11 @@ struct Project: Codable, Identifiable {
         isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         icon = try container.decodeIfPresent(ProjectIcon.self, forKey: .icon)
-        themeName = try container.decodeIfPresent(String.self, forKey: .themeName)
+        themeID = try container.decodeIfPresent(TerminalThemeID.self, forKey: .themeID)
+        if themeID == nil,
+           let legacyName = try container.decodeIfPresent(String.self, forKey: .themeName) {
+            themeID = .migratedFromName(legacyName)
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -467,7 +497,7 @@ struct Project: Codable, Identifiable {
         try container.encode(isExpanded, forKey: .isExpanded)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(icon, forKey: .icon)
-        try container.encodeIfPresent(themeName, forKey: .themeName)
+        try container.encodeIfPresent(themeID, forKey: .themeID)
     }
 
     var folderURL: URL {

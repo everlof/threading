@@ -18,11 +18,40 @@ enum CodeStatsRunner {
     /// the fallback that knows whatever `PATH` the user actually builds — a GUI app inherits
     /// neither Homebrew's prefix nor a Go bin directory (see `AgentLauncher.loginShellPath`).
     static func locate(shell: String, fileManager: FileManager = .default) -> String? {
+        locate(
+            shell: shell,
+            fileManager: fileManager,
+            shellOutput: runLocateCommand
+        )
+    }
+
+    /// The locating policy with its process boundary supplied by the caller.
+    ///
+    /// Keeping output parsing outside `Process` makes the important rule — ignore login-shell
+    /// greetings and use the last non-empty line — deterministic to test. The production entry
+    /// point above still performs the real shell probe.
+    static func locate(
+        shell: String,
+        fileManager: FileManager,
+        shellOutput: (String) -> String?
+    ) -> String? {
         for candidate in CodeStatsDefaults.executableCandidates
         where fileManager.isExecutableFile(atPath: candidate) {
             return candidate
         }
 
+        guard let output = shellOutput(shell),
+              let path = output
+                  .split(separator: "\n")
+                  .map({ $0.trimmingCharacters(in: .whitespaces) })
+                  .last(where: { !$0.isEmpty }),
+              fileManager.isExecutableFile(atPath: path)
+        else { return nil }
+
+        return path
+    }
+
+    private static func runLocateCommand(shell: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
         process.arguments = ["-l", "-c", CodeStatsDefaults.locateCommand]
@@ -42,17 +71,8 @@ enum CodeStatsRunner {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
-        // The last non-empty line, not the whole output: a login shell is free to print a
-        // greeting or a version-manager warning before the answer.
-        guard process.terminationStatus == 0,
-              let path = String(data: data, encoding: .utf8)?
-                  .split(separator: "\n")
-                  .map({ $0.trimmingCharacters(in: .whitespaces) })
-                  .last(where: { !$0.isEmpty }),
-              fileManager.isExecutableFile(atPath: path)
-        else { return nil }
-
-        return path
+        guard process.terminationStatus == 0 else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     // MARK: - Measuring

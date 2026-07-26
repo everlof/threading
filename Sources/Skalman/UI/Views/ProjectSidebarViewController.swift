@@ -16,6 +16,9 @@ final class ProjectSidebarViewController: NSViewController {
     /// Footer controls, retained so settings mode can hide Add Project and mark the cogwheel.
     private var addButton: ThemedButton!
     private var settingsButton: ThemedButton!
+    /// The band the footer controls live in; the list and the settings sidebar both end at
+    /// its top rather than restating its height.
+    private var footer: PaneFooterView!
 
     /// The settings section list, shown in place of the projects when settings is open — so
     /// the window never grows a second sidebar.
@@ -24,14 +27,17 @@ final class ProjectSidebarViewController: NSViewController {
     /// Builds the Theme submenu for the row menus; retained because the items target it.
     let themeMenuBuilder = ThemeMenuBuilder()
 
-    /// Covers the sidebar's system material while a style is in force. Absent under System,
-    /// where the material is what should be seen — see `applySidebarSurface`.
+    /// The sidebar's ground, under every theme — see `applySidebarSurface`.
     private var themeBackdrop: NSView?
     private(set) var isSettingsMode = false
 
     /// Top level of the tree: a `RepoGroupNode` for repositories with several checkouts,
     /// a bare `ProjectNode` for everything else.
     private var rootNodes: [NSObject] = []
+
+    /// The shape `rootNodes` was last built from, so a change that leaves it alone can
+    /// refresh the rows rather than rebuild them. See `reload`.
+    private var renderedStructure = ""
 
     /// Every project node, regardless of whether it sits inside a group.
     private var allProjectNodes: [ProjectNode] {
@@ -80,9 +86,11 @@ final class ProjectSidebarViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // The footer first: the list ends at the band's top, so the band has to exist to be
+        // constrained against.
+        setupFooter()
         setupOutlineView()
         setupEmptyState()
-        setupFooter()
         observeStoreChanges()
         applySidebarSurface()
         reload()
@@ -106,7 +114,19 @@ private extension ProjectSidebarViewController {
 
     private func setupOutlineView() {
         outlineView = ThemedOutlineView()
-        outlineView.style = .sourceList
+        // `.inset`, not `.sourceList`, and the difference is a *material*.
+        //
+        // The two styles draw the same rows and the same inset selection capsule; what
+        // `.sourceList` adds is a vibrant background of its own, drawn by the table. That was
+        // invisible while the split item wrapped the whole pane in the same material — two
+        // identical translucencies stacked — and became the sidebar's whole appearance the
+        // moment the pane stopped supplying one: the list sampled the *desktop* through the
+        // window, so the column carried a blue-grey wash off whatever wallpaper was behind it
+        // and the theme's own ground showed only in the strips the table did not cover.
+        //
+        // Proven by filling the ground with a flat red: everything the list covered stayed
+        // grey-blue, everything it did not turned red.
+        outlineView.style = .inset
         outlineView.headerView = nil
         outlineView.rowSizeStyle = .default
         outlineView.floatsGroupRows = false
@@ -125,13 +145,21 @@ private extension ProjectSidebarViewController {
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        // The list already starts below the toolbar, because it is pinned to the safe area two
+        // lines down. Left automatic, AppKit insets it a second time for the same titlebar —
+        // and on macOS 26 it also installs a scroll-edge-effect material *inside* the scroll
+        // view to fade content passing under chrome that this content never reaches. A system
+        // material inside app-owned content is precisely what the theme boundary forbids, and
+        // the audit caught it the moment the sidebar stopped being wrapped in a material of
+        // its own. One pane, one answer about its own insets.
+        scrollView.automaticallyAdjustsContentInsets = false
 
         view.addSubview(scrollView)
 
-        // The sidebar's material fills the window's full height; the list starts below the
-        // traffic lights via the safe area, with no app-name header or section label above
-        // it — the projects are the sidebar's whole content, so a heading would only repeat
-        // what is already visible.
+        // The sidebar fills the window's full height; the list starts below the traffic lights
+        // via the safe area, with no app-name header or section label above it — the projects
+        // are the sidebar's whole content, so a heading would only repeat what is already
+        // visible.
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor,
@@ -139,10 +167,7 @@ private extension ProjectSidebarViewController {
             ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor,
-                constant: -SidebarDefaults.footerHeight
-            )
+            scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
         ])
     }
 
@@ -182,11 +207,10 @@ private extension ProjectSidebarViewController {
         ])
     }
 
-    /// Footer holding the add-project control and the settings cogwheel, pinned below the list
-    /// behind a hairline. Add sits at the leading edge; settings mirrors it at the trailing one.
+    /// Footer holding the add-project control and the settings cogwheel. Add sits at the
+    /// leading edge; settings mirrors it at the trailing one. The band itself — the hairline,
+    /// the height, the corner-aware insets — is `PaneFooterView`'s to state.
     private func setupFooter() {
-        let separator = SeparatorView()
-
         addButton = ThemedButton()
         addButton.title = "Add Project"
         addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
@@ -195,7 +219,6 @@ private extension ProjectSidebarViewController {
         addButton.font = Design.Typography.controlRegular()
         addButton.target = self
         addButton.action = #selector(addProjectClicked)
-        addButton.translatesAutoresizingMaskIntoConstraints = false
 
         // A quiet icon-only twin of Add Project, so settings is reachable without leaving the
         // window. It carries no title, so the row reads as "add on the left, settings opposite".
@@ -206,34 +229,14 @@ private extension ProjectSidebarViewController {
         settingsButton.toolTip = "Settings"
         settingsButton.target = self
         settingsButton.action = #selector(settingsClicked)
-        settingsButton.translatesAutoresizingMaskIntoConstraints = false
 
-        view.addSubview(separator)
-        view.addSubview(addButton)
-        view.addSubview(settingsButton)
+        footer = PaneFooterView(leading: [addButton], trailing: [settingsButton])
+        view.addSubview(footer)
 
         NSLayoutConstraint.activate([
-            separator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            separator.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor,
-                constant: -SidebarDefaults.footerHeight
-            ),
-
-            addButton.leadingAnchor.constraint(
-                equalTo: view.leadingAnchor,
-                constant: SidebarDefaults.footerInset
-            ),
-            addButton.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor,
-                constant: -SidebarDefaults.footerInset
-            ),
-
-            settingsButton.trailingAnchor.constraint(
-                equalTo: view.trailingAnchor,
-                constant: -SidebarDefaults.footerInset
-            ),
-            settingsButton.centerYAnchor.constraint(equalTo: addButton.centerYAnchor)
+            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
     }
 
@@ -248,42 +251,42 @@ private extension ProjectSidebarViewController {
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applySidebarSurface()
         }
+        appEvents.observe(ExtensionIdentityResolversDidChange.self) { [weak self] _ in
+            self?.reload()
+        }
+        appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
+            self?.extensionSettingsDidChange()
+        }
     }
 
-    /// Paints the sidebar's own ground — or deliberately does not.
+    /// Paints the sidebar's own ground, under every theme including System.
     ///
-    /// The split item wraps the sidebar in a system `NSVisualEffectView`, which is why a theme
-    /// otherwise reached everything on screen except the largest surface on it. Under **System**
-    /// that material is the right answer: it samples the window's backdrop, so the terminal's
-    /// colour tints the sidebar and there is no seam where the two meet.
+    /// This used to be conditional, and the condition was the system material: the split item
+    /// wrapped the sidebar in an `NSVisualEffectView`, which under System was the right answer
+    /// — it sampled the window's backdrop, so the terminal's colour tinted the sidebar and
+    /// there was no seam where the two met — while under a style it was what stopped the theme
+    /// meaning anything, so an opaque backdrop covered it.
     ///
-    /// Under a **style** the material is what stops the theme meaning anything, so an opaque
-    /// backdrop covers it. That trade is the point of picking a style: translucency sampling a
-    /// colour the theme did not choose reads as a bug rather than as depth.
+    /// **There is no material any more.** The pane is a plain split item (see
+    /// `MainWindowController.setupSplitViewController`), so the sidebar is an opaque column
+    /// under every theme and the seam is the split view's hairline rather than an absence of
+    /// one. System keeps its own answer the way every other role does: `Surface.background`
+    /// resolves to `windowBackgroundColor` there, which is the colour AppKit's own source
+    /// lists sit on.
     ///
-    /// **The backdrop is a subview, and under System it is removed rather than made clear.**
-    /// Filling the controller's own view was the obvious approach and was measured to be wrong:
-    /// `applySurface` makes a view layer-backed, and a layer-backed child inside the material
-    /// stops `.withinWindow` blending from sampling through it — the System sidebar went from
-    /// the terminal's near-black to the material's default grey. Adding and removing a subview
-    /// leaves the view hierarchy exactly as it was when no style is in force.
-    ///
-    /// Its own observer rather than part of `AppThemeRefresh`'s sweep, because the *decision*
-    /// changes with the theme, not just the colour — and a recorded surface carries a colour.
+    /// The backdrop stays a *subview* rather than a fill on the controller's own view, because
+    /// `applySurface` makes a view layer-backed and the outline view, its scroll view and the
+    /// footer are all layered over it — one view whose only job is the ground is what keeps
+    /// the ordering obvious.
     private func applySidebarSurface() {
-        guard !AppThemeLibrary.current.isSystem else {
-            themeBackdrop?.removeFromSuperview()
-            themeBackdrop = nil
-            return
-        }
-
         let backdrop = themeBackdrop ?? makeThemeBackdrop()
         backdrop.applySurface(fill: Design.Surface.background, radius: .fixed(0))
     }
 
     private func makeThemeBackdrop() -> NSView {
-        let backdrop = NSView()
-        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        // `ThemedSurfaceView`, not a bare `NSView`: a layer's fill is a frozen `CGColor`, and the
+        // one thing no app-wide sweep answers is a system light/dark switch.
+        let backdrop = ThemedSurfaceView()
         view.addSubview(backdrop, positioned: .below, relativeTo: nil)
 
         NSLayoutConstraint.activate([
@@ -304,10 +307,28 @@ private extension ProjectSidebarViewController {
 extension ProjectSidebarViewController {
 
     /// Rebuilds the outline from the store, preserving expansion and selection.
+    ///
+    /// A change that leaves the tree's *shape* alone refreshes the rows in place instead.
+    /// `ProjectsDidChange` fires for content edits as well as structural ones — a rename is
+    /// the common case — and rebuilding for those is not merely wasteful: it hands every
+    /// row back to the reuse pool, and a recycled cell has no memory of the name it is
+    /// replacing, which is exactly what the title's morph animates from.
     func reload() {
+        let rebuilt = SidebarTreeBuilder.rootNodes(from: ProjectStore.shared.projects)
+        let shape = Self.structureSignature(of: rebuilt)
+
+        if shape == renderedStructure, !rootNodes.isEmpty {
+            // The existing nodes are kept deliberately: the outline identifies rows by
+            // object identity, and replacing equivalent nodes would invalidate every row
+            // for nothing. Content is read from the store at configure time anyway.
+            refreshRows()
+            return
+        }
+
         let selectedSessionID = selectedNode()?.sessionID ?? ProjectStore.shared.selectedSessionID
 
-        rootNodes = SidebarTreeBuilder.rootNodes(from: ProjectStore.shared.projects)
+        rootNodes = rebuilt
+        renderedStructure = shape
 
         emptyStateView.isHidden = !rootNodes.isEmpty
 
@@ -348,6 +369,39 @@ extension ProjectSidebarViewController {
         "\(node.projectID):\(node.branch)"
     }
 
+    /// The outline's shape: which rows exist, nested how, in what order.
+    ///
+    /// Deliberately carries identities rather than content — a session's title and a
+    /// project's name are absent, so a rename compares equal and takes the in-place path. A
+    /// heading's *name* is its identity and is included: renaming a branch regroups the
+    /// sessions under it, which is a different tree rather than a differently-labelled one.
+    private static func structureSignature(of nodes: [NSObject]) -> String {
+        var signature = ""
+
+        func walk(_ node: NSObject) {
+            switch node {
+            case let repo as RepoGroupNode:
+                signature += "r:\(repo.name)("
+                repo.projectNodes.forEach(walk)
+            case let project as ProjectNode:
+                signature += "p:\(project.projectID)("
+                project.childNodes.forEach(walk)
+            case let branch as BranchGroupNode:
+                signature += "b:\(branch.projectID)/\(branch.branch)("
+                branch.sessionNodes.forEach(walk)
+            case let session as SessionNode:
+                signature += "s:\(session.sessionID)("
+                session.childNodes.forEach(walk)
+            default:
+                signature += "?("
+            }
+            signature += ")"
+        }
+
+        nodes.forEach(walk)
+        return signature
+    }
+
     /// Removes a session and its terminal. Shared by the row's context menu and its hover
     /// `⋯` actions (in `ProjectSidebarSessionActions.swift`), so it lives in the internal
     /// extension both files can reach.
@@ -362,6 +416,11 @@ extension ProjectSidebarViewController {
     ///
     /// When `allowsEmpty` is set, clearing the field is meaningful — it drops a custom name
     /// so the automatic one applies again — and is passed through rather than ignored.
+    ///
+    /// That used to be *said*: "Leave empty to follow the agent's own name for the
+    /// conversation" was a sentence describing a gesture, in a sheet that had room for the
+    /// gesture itself. It is a button now, and only when there is a custom name to drop —
+    /// a session already following its agent has nothing to be returned to.
     func promptRename(
         title: String,
         current: String,
@@ -371,10 +430,8 @@ extension ProjectSidebarViewController {
     ) {
         promptForText(
             title: title,
-            message: allowsEmpty
-                ? "Leave empty to follow the agent's own name for the conversation."
-                : nil,
             confirmTitle: "Rename",
+            clearTitle: allowsEmpty && !current.isEmpty ? "Use Agent's Name" : nil,
             current: current,
             placeholder: placeholder,
             allowsEmpty: allowsEmpty,
@@ -388,6 +445,7 @@ extension ProjectSidebarViewController {
         title: String,
         message: String? = nil,
         confirmTitle: String,
+        clearTitle: String? = nil,
         current: String = "",
         placeholder: String = "",
         allowsEmpty: Bool = false,
@@ -399,6 +457,11 @@ extension ProjectSidebarViewController {
             alert.informativeText = message
         }
         alert.addButton(withTitle: confirmTitle)
+        // Between confirm and cancel, which is where a third action belongs: it is something the
+        // sheet does, not a way out of it.
+        if let clearTitle {
+            alert.addButton(withTitle: clearTitle)
+        }
         alert.addButton(withTitle: "Cancel")
 
         let textField = ThemedTextField(frame: NSRect(
@@ -411,7 +474,16 @@ extension ProjectSidebarViewController {
         alert.accessoryView = textField
         alert.window.initialFirstResponder = textField
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let response = alert.runModal()
+
+        // The clear button answers with the empty string, which is what the callers already
+        // read as "drop the custom name" — the field's contents are beside the point.
+        if clearTitle != nil, response == .alertSecondButtonReturn {
+            completion("")
+            return
+        }
+
+        guard response == .alertFirstButtonReturn else { return }
 
         let trimmed = textField.stringValue.trimmingCharacters(in: .whitespaces)
         guard allowsEmpty || !trimmed.isEmpty else { return }
@@ -425,11 +497,29 @@ extension ProjectSidebarViewController {
         let row = outlineView.row(forItem: node)
         guard row >= 0 else { return }
 
-        outlineView.reloadData(
-            forRowIndexes: IndexSet(integer: row),
-            columnIndexes: IndexSet(integer: 0)
-        )
+        reconfigureRow(at: row)
         outlineView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+    }
+
+    /// Re-applies a row's content to the view already on screen.
+    ///
+    /// `reloadData(forRowIndexes:)` does the same job by handing the row back to the reuse
+    /// pool and asking for it again, which loses the one thing a title's morph needs: the
+    /// name being replaced, held by the very view that was showing it. A recycled cell
+    /// would morph from whichever row it last served.
+    ///
+    /// A row with no live view needs nothing done — the outline builds it from the store
+    /// when it next asks, which is already current.
+    private func reconfigureRow(at row: Int) {
+        guard let item = outlineView.item(atRow: row),
+              let view = outlineView.view(
+                  atColumn: 0,
+                  row: row,
+                  makeIfNecessary: false
+              ) as? NSTableCellView
+        else { return }
+
+        apply(item, to: view)
     }
 
     /// Refreshes the project row owning a session, re-reading its branch.
@@ -446,17 +536,14 @@ extension ProjectSidebarViewController {
         let row = outlineView.row(forItem: project)
         guard row >= 0 else { return }
 
-        outlineView.reloadData(
-            forRowIndexes: IndexSet(integer: row),
-            columnIndexes: IndexSet(integer: 0)
-        )
+        reconfigureRow(at: row)
     }
 
     /// Refreshes row contents without rebuilding, used when running state changes.
     func refreshRows() {
-        let allRows = IndexSet(integersIn: 0..<outlineView.numberOfRows)
-        let allColumns = IndexSet(integersIn: 0..<outlineView.numberOfColumns)
-        outlineView.reloadData(forRowIndexes: allRows, columnIndexes: allColumns)
+        for row in 0..<outlineView.numberOfRows {
+            reconfigureRow(at: row)
+        }
     }
 
     /// Shows or clears the selected row's activation spinner.
@@ -507,6 +594,41 @@ extension ProjectSidebarViewController {
     ///
     /// The delegate is invoked directly rather than via the selection notification, which
     /// does not fire when the requested row is already selected.
+    /// Shows *where* a session is: selects its row, opening whatever groups hide it, and scrolls
+    /// it into view.
+    ///
+    /// Separate from `select` because it answers a different question. Selecting is how a session
+    /// is *opened*, and it tells the delegate so the pane follows. Revealing is for something
+    /// already on screen — the toolbar's page tab — where the pane must not change and the only
+    /// thing wanted is the row brought into sight.
+    func reveal(sessionID: SessionID) {
+        select(sessionID: sessionID, notifyDelegate: false)
+        scrollSelectionIntoView()
+    }
+
+    /// The same, for a project — the row behind an open composer.
+    func reveal(projectID: ProjectID) {
+        guard let node = allProjectNodes.first(where: { $0.projectID == projectID }) else { return }
+
+        if let group = outlineView.parent(forItem: node) {
+            outlineView.expandItem(group)
+        }
+
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
+
+        suppressSelectionCallback = true
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        suppressSelectionCallback = false
+        scrollSelectionIntoView()
+    }
+
+    private func scrollSelectionIntoView() {
+        let row = outlineView.selectedRow
+        guard row >= 0 else { return }
+        outlineView.scrollRowToVisible(row)
+    }
+
     func select(sessionID: SessionID, notifyDelegate: Bool = true) {
         guard let node = sessionNode(for: sessionID) else { return }
 
@@ -576,21 +698,29 @@ extension ProjectSidebarViewController {
     /// settings replaces the sidebar rather than adding a second one beside it.
     /// Highlights a settings row, for doors that land on a specific page rather than the
     /// first. A no-op outside settings mode, where there is no list to highlight.
-    func selectSettingsPage(_ index: Int) {
-        settingsSidebar?.select(index)
+    func selectSettingsPage(id: String) {
+        settingsSidebar?.select(id: id)
     }
 
+    /// The cogwheel marks settings by **raising its ink**, not by taking the accent.
+    ///
+    /// It was accent-tinted, which spends the one colour that means "this wants you" — the
+    /// sidebar's attention dot is the same colour — on the fact that a page happens to be open.
+    /// The design system already states this for tabs ("a tab's icon takes the label's colour,
+    /// never the accent") and the cog is the same kind of thing: a destination, not a summons.
+    /// Secondary at rest and label-coloured while it is the page on screen reads as selected
+    /// without saying anything is waiting.
     func setSettingsMode(_ on: Bool) {
         isSettingsMode = on
 
         if on {
             let sidebar = settingsSidebar ?? makeSettingsSidebar()
             sidebar.isHidden = false
-            sidebar.select(0)
+            sidebar.select(id: SettingsPages.generalID)
             scrollView.isHidden = true
             emptyStateView.isHidden = true
             addButton.isHidden = true
-            settingsButton.contentTintColor = Design.Surface.accent
+            settingsButton.contentTintColor = Design.Text.label
         } else {
             settingsSidebar?.isHidden = true
             scrollView.isHidden = false
@@ -602,9 +732,9 @@ extension ProjectSidebarViewController {
 
     private func makeSettingsSidebar() -> SettingsSidebar {
         let sidebar = SettingsSidebar(items: SettingsPages.sidebarItems)
-        sidebar.onSelect = { [weak self] index in
+        sidebar.onSelect = { [weak self] pageID in
             guard let self else { return }
-            self.delegate?.projectSidebar(self, didSelectSettingsPage: index)
+            self.delegate?.projectSidebar(self, didSelectSettingsPage: pageID)
         }
         view.addSubview(sidebar)
 
@@ -615,11 +745,23 @@ extension ProjectSidebarViewController {
             ),
             sidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.medium),
             sidebar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.medium),
-            sidebar.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -SidebarDefaults.footerHeight)
+            sidebar.bottomAnchor.constraint(lessThanOrEqualTo: footer.topAnchor)
         ])
 
         settingsSidebar = sidebar
         return sidebar
+    }
+
+    private func extensionSettingsDidChange() {
+        guard let sidebar = settingsSidebar else { return }
+        let previous = sidebar.selectedID
+        let selected = previous.flatMap(SettingsPages.page(id:)) == nil
+            ? SettingsPages.generalID
+            : previous ?? SettingsPages.generalID
+        sidebar.rebuild(items: SettingsPages.sidebarItems, selecting: selected)
+        if isSettingsMode, selected != previous {
+            delegate?.projectSidebar(self, didSelectSettingsPage: selected)
+        }
     }
 
 }
@@ -745,10 +887,7 @@ private extension ProjectSidebarViewController {
     /// scoped to it, since the build output worth finding is usually in a worktree they were
     /// not thinking about.
     @objc private func reclaimDiskSpaceClicked() {
-        guard let index = SettingsPages.all.firstIndex(where: { $0.title == SettingsPages.storageTitle })
-        else { return }
-
-        delegate?.projectSidebar(self, didSelectSettingsPage: index)
+        delegate?.projectSidebar(self, didSelectSettingsPage: SettingsPages.storageID)
     }
 
     @objc private func revealInFinderClicked() {
@@ -946,16 +1085,44 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-        if let groupNode = item as? RepoGroupNode {
-            let cell = dequeueCell(SidebarIdentifiers.repoCell) { ProjectRowView() }
-            cell.configureAsRepository(named: groupNode.name)
-            return cell
+        if item is RepoGroupNode || item is ProjectNode {
+            let identifier = item is RepoGroupNode
+                ? SidebarIdentifiers.repoCell
+                : SidebarIdentifiers.projectCell
+            let cell = dequeueCell(identifier) { ProjectRowView() }
+            return apply(item, to: cell) ? cell : nil
         }
 
-        if let projectNode = item as? ProjectNode {
-            guard let project = ProjectStore.shared.project(withID: projectNode.projectID) else { return nil }
+        if item is BranchGroupNode {
+            let cell = dequeueCell(SidebarIdentifiers.branchCell) { ProjectRowView() }
+            return apply(item, to: cell) ? cell : nil
+        }
 
-            let cell = dequeueCell(SidebarIdentifiers.projectCell) { ProjectRowView() }
+        if item is SessionNode {
+            let cell = dequeueCell(SidebarIdentifiers.sessionCell) { SessionRowView() }
+            return apply(item, to: cell) ? cell : nil
+        }
+
+        return nil
+    }
+
+    /// Fills a row view from its node, reading current state from the stores.
+    ///
+    /// Split out of `viewFor` so a row already on screen can be brought up to date without
+    /// being handed back to the reuse pool first — see `reconfigureRow(at:)`. Returns false
+    /// for a node whose record has gone, which is the outline asking about something the
+    /// store has already dropped.
+    @discardableResult
+    private func apply(_ item: Any, to view: NSTableCellView) -> Bool {
+        if let groupNode = item as? RepoGroupNode, let cell = view as? ProjectRowView {
+            cell.configureAsRepository(named: groupNode.name)
+            return true
+        }
+
+        if let projectNode = item as? ProjectNode, let cell = view as? ProjectRowView {
+            guard let project = ProjectStore.shared.project(withID: projectNode.projectID) else {
+                return false
+            }
 
             // Inside a group the repository name is already above, so the checkout is
             // identified by its branch instead of repeating the folder name.
@@ -975,12 +1142,10 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
             }
-            return cell
+            return true
         }
 
-        if let branchNode = item as? BranchGroupNode {
-            let cell = dequeueCell(SidebarIdentifiers.branchCell) { ProjectRowView() }
-
+        if let branchNode = item as? BranchGroupNode, let cell = view as? ProjectRowView {
             let hiddenSessions = outlineView.isItemExpanded(branchNode)
                 ? 0
                 : branchNode.sessionNodes.count
@@ -992,13 +1157,13 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.onHoverAction = { [weak self] anchor in
                 self?.showBranchGroupingOptions(from: anchor)
             }
-            return cell
+            return true
         }
 
-        if let sessionNode = item as? SessionNode {
-            guard let session = ProjectStore.shared.session(withID: sessionNode.sessionID) else { return nil }
-
-            let cell = dequeueCell(SidebarIdentifiers.sessionCell) { SessionRowView() }
+        if let sessionNode = item as? SessionNode, let cell = view as? SessionRowView {
+            guard let session = ProjectStore.shared.session(withID: sessionNode.sessionID) else {
+                return false
+            }
 
             cell.configure(
                 with: session,
@@ -1008,10 +1173,10 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.onAction = { [weak self] sessionID, anchor in
                 self?.showRowActions(for: sessionID, from: anchor)
             }
-            return cell
+            return true
         }
 
-        return nil
+        return false
     }
 
     /// Clickable rows highlight under the pointer; group headings do not, since they only
@@ -1397,5 +1562,5 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     )
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
-    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage index: Int)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
 }

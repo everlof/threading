@@ -1,4 +1,5 @@
 import XCTest
+import SkalmanExtensionKit
 @testable import Skalman
 
 /// The rules behind the info panel that are decisions rather than readings: how a bind address
@@ -16,6 +17,49 @@ final class SessionInfoTests: XCTestCase {
         isIPv6: Bool = false
     ) -> ListeningPort {
         ListeningPort(port: number, pid: pid, command: command, address: address, isIPv6: isIPv6)
+    }
+
+    // MARK: - Process Table
+
+    /// The process list is sized from the kernel's own count rather than a fixed buffer.
+    ///
+    /// `proc_listallpids` returns how many pids it wrote, and a *full* buffer looks exactly like
+    /// a machine with that many processes — so a fixed 4096 truncated silently on a busy machine
+    /// and the panel reported a short list as though it were the whole one. Asked against the
+    /// real kernel, because the bug was in the sizing and a mocked table would size itself.
+    func testTheProcessListIsWholeRatherThanBufferSized() {
+        let pids = ProcessUtility.liveProcessIdentifiers()
+
+        // This process is in it, which is the cheapest proof the walk ran at all.
+        XCTAssertTrue(pids.contains(getpid()), "the test's own process is missing from the table")
+
+        // Every entry is a real pid: the tail of an over-allocated buffer is zeros, and returning
+        // those as processes is how a padded read becomes a wrong answer.
+        XCTAssertFalse(pids.contains(where: { $0 <= 0 }), "the list carries buffer padding")
+        XCTAssertEqual(Set(pids).count, pids.count, "the list repeats a pid")
+
+        // A macOS session runs well over a hundred processes; a list at exactly a round buffer
+        // size is the truncation signature this replaced.
+        XCTAssertGreaterThan(pids.count, 20, "the table came back implausibly short")
+        XCTAssertNotEqual(pids.count, 4096, "the list is exactly the old fixed buffer size")
+    }
+
+    /// The table and the child walk answer from the same reading, so a session's process count
+    /// cannot depend on which of them was asked.
+    func testTheProcessTableAgreesWithTheChildWalk() {
+        let table = ProcessUtility.processTable()
+        XCTAssertNotNil(table[getpid()], "the table is missing this process")
+
+        let parent = getppid()
+        let childrenOfParent = Set(ProcessUtility.getProcessChildren(forPid: parent))
+        let tableChildren = Set(
+            table.values.filter { $0.parentPid == parent }.map(\.pid)
+        )
+
+        // A process may start or exit between the two reads; the agreement that matters is that
+        // this process is a child of its own parent in both.
+        XCTAssertTrue(childrenOfParent.contains(getpid()))
+        XCTAssertTrue(tableChildren.contains(getpid()))
     }
 
     // MARK: - Interface Classification
@@ -163,6 +207,65 @@ final class SessionInfoTests: XCTestCase {
 
         XCTAssertEqual(groups.count, 1)
         XCTAssertEqual(groups.first?.0, .shell)
+    }
+
+    // MARK: - Extension Runtime Boundary
+
+    @MainActor
+    func testExtensionRuntimeSnapshotIsSessionScopedAndBounded() {
+        let longCommand = String(repeating: "n", count: 200)
+        let processes = (1...300).map { index in
+            SessionProcess(
+                pid: pid_t(index),
+                command: longCommand,
+                memoryBytes: UInt64(index),
+                cpuPercent: Double(index)
+            )
+        }
+        let ports = (1...160).map { index in
+            ListeningPort(
+                port: UInt16(index),
+                pid: pid_t(index),
+                command: longCommand,
+                address: String(repeating: "a", count: 100),
+                isIPv6: false
+            )
+        }
+        let native = SessionInfoSnapshot(
+            processGroups: [
+                .init(origin: .agent, processes: Array(processes.prefix(200))),
+                .init(origin: .shell, processes: Array(processes.dropFirst(200)))
+            ],
+            portGroups: [
+                .init(origin: .agent, ports: Array(ports.prefix(100))),
+                .init(origin: .shell, ports: Array(ports.dropFirst(100)))
+            ]
+        )
+
+        let exposed = LiveExtensionHostSnapshotProvider.extensionRuntimeSnapshot(
+            sessionID: "session-1",
+            snapshot: native
+        )
+
+        XCTAssertEqual(exposed.sessionID, "session-1")
+        XCTAssertEqual(
+            exposed.processGroups.flatMap(\.processes).count,
+            ExtensionSessionRuntimeLimits.maximumProcesses
+        )
+        XCTAssertEqual(
+            exposed.portGroups.flatMap(\.ports).count,
+            ExtensionSessionRuntimeLimits.maximumPorts
+        )
+        XCTAssertEqual(exposed.processGroups.map(\.origin), [.agent, .shell])
+        XCTAssertEqual(exposed.portGroups.map(\.origin), [.agent, .shell])
+        XCTAssertEqual(
+            exposed.processGroups.first?.processes.first?.command.count,
+            ExtensionSessionRuntimeLimits.maximumCommandLength
+        )
+        XCTAssertEqual(
+            exposed.portGroups.first?.ports.first?.address.count,
+            ExtensionSessionRuntimeLimits.maximumAddressLength
+        )
     }
 
     // MARK: - Process Formatting

@@ -58,6 +58,53 @@ enum GitInfo {
         return String(trimmed.dropFirst(GitDefaults.refPrefix.count))
     }
 
+    /// Returns the commit currently checked out in a worktree.
+    ///
+    /// A symbolic `HEAD` usually resolves in the repository's shared refs directory, while a
+    /// detached `HEAD` contains the commit directly. Loose refs win over `packed-refs`, matching
+    /// git's own lookup order.
+    static func headRevision(for path: String) -> String? {
+        guard let location = worktreeLocation(for: path) else { return nil }
+
+        let headURL = URL(fileURLWithPath: location.worktreeIdentity)
+            .appendingPathComponent(GitDefaults.headFile)
+        guard let contents = try? String(contentsOf: headURL, encoding: .utf8) else {
+            return nil
+        }
+
+        let head = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard head.hasPrefix("ref: ") else {
+            return isCommitHash(head) ? head : nil
+        }
+
+        let reference = String(head.dropFirst("ref: ".count))
+        let candidates = [
+            URL(fileURLWithPath: location.worktreeIdentity).appendingPathComponent(reference),
+            URL(fileURLWithPath: location.repositoryIdentity).appendingPathComponent(reference)
+        ]
+        for candidate in candidates {
+            if let value = try? String(contentsOf: candidate, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               isCommitHash(value) {
+                return value
+            }
+        }
+
+        let packedRefs = URL(fileURLWithPath: location.repositoryIdentity)
+            .appendingPathComponent(GitDefaults.packedRefsFile)
+        guard let packed = try? String(contentsOf: packedRefs, encoding: .utf8) else {
+            return nil
+        }
+        for line in packed.split(separator: "\n") {
+            guard !line.hasPrefix("#"), !line.hasPrefix("^") else { continue }
+            let fields = line.split(separator: " ", maxSplits: 1)
+            guard fields.count == 2, fields[1] == reference else { continue }
+            let value = String(fields[0])
+            return isCommitHash(value) ? value : nil
+        }
+        return nil
+    }
+
     /// Suggests a project name for a folder.
     ///
     /// The folder's own name is used when it differs from the repository root, so two
@@ -225,6 +272,10 @@ enum GitInfo {
         URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
+    private static func isCommitHash(_ value: String) -> Bool {
+        (40...64).contains(value.count) && value.allSatisfy(\.isHexDigit)
+    }
+
     /// Resolves the directory holding a checkout's git metadata.
     ///
     /// Usually `<root>/.git`, but submodules and worktrees put a *file* there containing a
@@ -278,6 +329,7 @@ enum GitDefaults {
 
     /// The repository-level config file, holding among other things its remotes.
     static let configFile = "config"
+    static let packedRefsFile = "packed-refs"
     static let originSectionHeader = "[remote \"origin\"]"
     static let remoteURLKey = "url"
 }

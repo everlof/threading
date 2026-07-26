@@ -2,22 +2,31 @@ import AppKit
 
 /// The stock styles the app ships.
 ///
-/// Named after design movements — Bauhaus, Art Deco, Swiss/International Style — which are
-/// public design history rather than anyone's property. The palettes here are our own values,
-/// authored against those aesthetics; nothing is copied from any style guide or site.
+/// Named after public design movements and broad visual genres. The palettes here are our own
+/// values, authored against those aesthetics; nothing is copied from a style guide or site.
 ///
 /// **What a style can and cannot carry here.** A design style is roughly four layers: palette,
-/// material (radius, border weight, shadow), type, and layout with motion. This ships the
-/// first. Skalman's layout *is* the product, so no theme moves the sidebar, and the material
-/// layer is deliberately not attempted yet — which is why the styles that live or die by
-/// shadow (Neumorphism, Claymorphism, Neo Brutalism) are not offered at all rather than
-/// offered as flat grey approximations of themselves.
+/// material, type, and layout with motion. Skalman's layout *is* the product, so no theme moves
+/// the sidebar. Themes do own shape, rules, and a directed panel shadow: enough for hard-print,
+/// soft-clay, neon, and restrained editorial materials without turning a theme into a second
+/// view hierarchy.
 ///
 /// Each states only the roles in `AppThemeRole.authored`; the rest are derived, so a theme is a
 /// dozen decisions rather than twenty-five.
 enum AppThemeStyles {
 
-    static let all: [AppTheme] = [cyberpunk, swissMinimalist]
+    static let all: [AppTheme] = [
+        cyberpunk,
+        swissMinimalist,
+        bauhaus,
+        artDeco,
+        neoBrutalism,
+        claymorphism,
+        vaporwave,
+        newsprint,
+        botanical,
+        industrial
+    ]
 
     /// High-contrast neon on near-black.
     ///
@@ -57,6 +66,7 @@ enum AppThemeStyles {
         // hues become magenta/cyan/green/yellow, `statusNegative` becomes red, and `black` is
         // the panel colour rather than true black so an ANSI-black glyph is still a glyph.
         terminalPalette: TerminalTheme(
+            id: TerminalThemeID("app-cyberpunk-terminal"),
             name: "Cyberpunk",
             foreground: hex("#E6FFF4"),
             background: hex("#07070B"),
@@ -135,6 +145,7 @@ enum AppThemeStyles {
         // neutrals are a monotone ramp dark enough to read on white and still ordered
         // black → brightBlack → white → brightWhite, so nothing that picks one of them vanishes.
         terminalPalette: TerminalTheme(
+            id: TerminalThemeID("app-swiss-minimalist-terminal"),
             name: "Swiss Minimalist",
             foreground: hex("#111111"),
             background: hex("#FFFFFF"),
@@ -162,7 +173,7 @@ enum AppThemeStyles {
 
     /// Force-unwrapped deliberately: these are literals in this file, so a bad one is a build
     /// this test suite fails rather than a colour that silently renders white at runtime.
-    private static func hex(_ value: String) -> NSColor {
+    static func hex(_ value: String) -> NSColor {
         guard let color = NSColor(hex: value) else {
             preconditionFailure("Malformed stock theme colour: \(value)")
         }

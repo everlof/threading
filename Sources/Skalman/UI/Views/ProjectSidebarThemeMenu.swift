@@ -18,7 +18,7 @@ struct ThemeMenuChoice {
     let target: Target
 
     /// Nil clears the assignment, so the record inherits again.
-    let themeName: String?
+    let themeID: TerminalThemeID?
 }
 
 // MARK: - Theme Menu Builder
@@ -39,7 +39,7 @@ final class ThemeMenuBuilder: NSObject {
     func sessionThemeItem(for sessionID: SessionID) -> NSMenuItem {
         makeThemeItem(
             target: .session(sessionID),
-            assigned: ThemeAssignments.themeName(forSession: sessionID),
+            assigned: ThemeAssignments.themeID(forSession: sessionID),
             inherited: ThemeAssignments.inheritedName(forSession: sessionID)
         )
     }
@@ -48,7 +48,7 @@ final class ThemeMenuBuilder: NSObject {
     func projectThemeItem(for projectID: ProjectID) -> NSMenuItem {
         makeThemeItem(
             target: .project(projectID),
-            assigned: ThemeAssignments.themeName(forProject: projectID),
+            assigned: ThemeAssignments.themeID(forProject: projectID),
             inherited: ThemeAssignments.inheritedName(forProject: projectID)
         )
     }
@@ -62,14 +62,14 @@ final class ThemeMenuBuilder: NSObject {
     /// whose result the user cannot see.
     private func makeThemeItem(
         target: ThemeMenuChoice.Target,
-        assigned: String?,
+        assigned: TerminalThemeID?,
         inherited: String
     ) -> NSMenuItem {
         let submenu = NSMenu()
 
         submenu.addItem(themeChoiceItem(
             title: "Inherit (\(inherited))",
-            choice: ThemeMenuChoice(target: target, themeName: nil),
+            choice: ThemeMenuChoice(target: target, themeID: nil),
             isChecked: assigned == nil
         ))
         submenu.addItem(.separator())
@@ -78,8 +78,8 @@ final class ThemeMenuBuilder: NSObject {
         // the answer "whatever the app theme says", which changes when the app theme does.
         let followsApp = themeChoiceItem(
             title: TerminalThemeNames.followsAppTheme,
-            choice: ThemeMenuChoice(target: target, themeName: TerminalThemeNames.followsAppTheme),
-            isChecked: assigned == TerminalThemeNames.followsAppTheme
+            choice: ThemeMenuChoice(target: target, themeID: .followsAppTheme),
+            isChecked: assigned == .followsAppTheme
         )
         followsApp.image = ThemeSwatchImage.menuSwatch(for: AppThemeLibrary.current.terminalPalette)
         submenu.addItem(followsApp)
@@ -88,8 +88,8 @@ final class ThemeMenuBuilder: NSObject {
         for theme in ThemeManager.shared.allThemes {
             let item = themeChoiceItem(
                 title: theme.name,
-                choice: ThemeMenuChoice(target: target, themeName: theme.name),
-                isChecked: theme.name == assigned
+                choice: ThemeMenuChoice(target: target, themeID: theme.id),
+                isChecked: theme.id == assigned
             )
             item.image = ThemeSwatchImage.menuSwatch(for: theme)
             submenu.addItem(item)
@@ -128,9 +128,9 @@ final class ThemeMenuBuilder: NSObject {
 
         switch choice.target {
         case .session(let sessionID):
-            ThemeAssignments.setTheme(named: choice.themeName, forSession: sessionID)
+            ThemeAssignments.setTheme(id: choice.themeID, forSession: sessionID)
         case .project(let projectID):
-            ThemeAssignments.setTheme(named: choice.themeName, forProject: projectID)
+            ThemeAssignments.setTheme(id: choice.themeID, forProject: projectID)
         }
     }
 
@@ -156,9 +156,11 @@ extension ProjectSidebarViewController {
 
     private func sidebarThemeBuilder() -> ThemeMenuBuilder {
         themeMenuBuilder.onEditThemes = { [weak self] in
-            guard let self,
-                  let index = SettingsPages.index(ofTitle: SettingsPages.themesTitle) else { return }
-            self.delegate?.projectSidebar(self, didSelectSettingsPage: index)
+            guard let self else { return }
+            self.delegate?.projectSidebar(
+                self,
+                didSelectSettingsPage: SettingsPages.themesID
+            )
         }
         return themeMenuBuilder
     }

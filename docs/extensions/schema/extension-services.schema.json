@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skalman.invalid/schema/extension-services.schema.json",
+  "title": "Skalman brokered extension services",
+  "$defs": {
+    "contributionIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "extensionIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$"
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "title",
+        "description",
+        "inputSchema",
+        "outputSchema"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/contributionIdentifier" },
+        "version": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "inputSchema": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "object" }
+          }
+        },
+        "outputSchema": { "type": "object" }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerIdentifier",
+        "serviceID",
+        "version",
+        "required"
+      ],
+      "properties": {
+        "providerIdentifier": { "$ref": "#/$defs/extensionIdentifier" },
+        "serviceID": { "$ref": "#/$defs/contributionIdentifier" },
+        "version": { "type": "integer", "minimum": 1 },
+        "required": { "type": "boolean" }
+      }
+    },
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "serviceVersion", "arguments"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "serviceVersion": { "type": "integer", "minimum": 1 },
+        "arguments": { "type": "object" }
+      }
+    },
+    "callResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "providerIdentifier",
+        "serviceID",
+        "serviceVersion",
+        "value"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "providerIdentifier": { "$ref": "#/$defs/extensionIdentifier" },
+        "serviceID": { "$ref": "#/$defs/contributionIdentifier" },
+        "serviceVersion": { "type": "integer", "minimum": 1 },
+        "value": true
+      }
+    }
+  }
+}

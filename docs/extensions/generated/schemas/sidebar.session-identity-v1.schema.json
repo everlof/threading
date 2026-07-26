@@ -1,0 +1,98 @@
+{
+  "$id" : "https://skalman.invalid/schema/components/sidebar.session-identity-v1.schema.json",
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties" : false,
+  "properties" : {
+    "id" : {
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "properties" : {
+      "items" : {
+        "properties" : {
+          "property" : {
+            "enum" : [
+
+            ]
+          },
+          "value" : {
+            "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+          }
+        },
+        "required" : [
+          "property",
+          "value"
+        ],
+        "type" : "object"
+      },
+      "type" : "array"
+    },
+    "replacement" : {
+      "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+      "x-skalman-node-constraints" : {
+        "allowedButtonRoles" : [
+
+        ],
+        "allowedCustomSurfaceKinds" : [
+
+        ],
+        "allowedImageRoles" : [
+          "identity",
+          "icon",
+          "decoration"
+        ],
+        "allowedStackAxes" : [
+          "horizontal"
+        ],
+        "allowedStatusRoles" : [
+
+        ],
+        "allowedTextRoles" : [
+
+        ],
+        "allowsDivider" : false,
+        "allowsFixedSpacer" : true,
+        "allowsFlexibleSpacer" : false,
+        "allowsOverlay" : false,
+        "allowsProceed" : false,
+        "maximumDepth" : 1,
+        "maximumNodes" : 5,
+        "maximumTextLength" : 1,
+        "requiredRootAxis" : "horizontal",
+        "requiresProceed" : false
+      }
+    },
+    "slots" : {
+      "items" : false,
+      "type" : "array"
+    },
+    "target" : {
+      "additionalProperties" : false,
+      "properties" : {
+        "component" : {
+          "const" : "sidebar.session-identity"
+        },
+        "contractVersion" : {
+          "const" : 1
+        },
+        "entityID" : {
+          "minLength" : 1,
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "component",
+        "contractVersion"
+      ],
+      "type" : "object"
+    }
+  },
+  "required" : [
+    "id",
+    "target",
+    "properties",
+    "slots"
+  ],
+  "title" : "Skalman sidebar.session-identity v1 component patch",
+  "type" : "object"
+}

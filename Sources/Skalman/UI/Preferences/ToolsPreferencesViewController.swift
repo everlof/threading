@@ -13,6 +13,7 @@ final class ToolsPreferencesViewController: NSViewController {
 
     /// The tool rows of each group, kept so toggling the group can dim them together.
     private var toolRowsByGroup: [String: [NSView]] = [:]
+    private let appEvents = AppEventObservations()
     private var pageView: NSView?
     private let groupOverride: [MCPToolGroup]?
     private let browserAccessStore: BrowserAccessStore
@@ -34,7 +35,7 @@ final class ToolsPreferencesViewController: NSViewController {
     }
 
     private var displayedGroups: [MCPToolGroup] {
-        groupOverride ?? MCPToolCatalog.groups
+        groupOverride ?? MCPToolCatalog.allGroups
     }
 
     // MARK: - Lifecycle
@@ -42,6 +43,9 @@ final class ToolsPreferencesViewController: NSViewController {
     override func loadView() {
         view = NSView()
         render()
+        appEvents.observe(MCPExternalToolsDidChange.self) { [weak self] _ in
+            self?.render()
+        }
     }
 
     // MARK: - Setup
@@ -65,7 +69,7 @@ final class ToolsPreferencesViewController: NSViewController {
         }
         sections.append(websiteAccessSection())
 
-        let page = SettingsUI.page(sections)
+        let page = SettingsUI.page(sections, hostPage: .tools)
         pageView = page
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -79,9 +83,11 @@ final class ToolsPreferencesViewController: NSViewController {
 
     private func groupSection(_ group: MCPToolGroup, index: Int) -> NSView {
         let enabled = MCPToolCatalog.isEnabled(group)
+        let available = MCPToolCatalog.isAvailable(group)
 
         let toggle = ThemedToggle()
         toggle.state = enabled ? .on : .off
+        toggle.isEnabled = available
         toggle.tag = index
         toggle.target = self
         toggle.action = #selector(groupToggled(_:))
@@ -98,7 +104,7 @@ final class ToolsPreferencesViewController: NSViewController {
         }
 
         toolRowsByGroup[group.id] = toolViews
-        applyEnabled(enabled, to: toolViews)
+        applyEnabled(enabled && available, to: toolViews)
 
         return SettingsUI.section(group.title, SettingsCard(rows: rows))
     }

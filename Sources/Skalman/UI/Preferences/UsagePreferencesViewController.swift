@@ -76,7 +76,7 @@ final class UsagePreferencesViewController: NSViewController {
 
         sections.append(SettingsUI.note(UsageStrings.footnote))
 
-        let page = SettingsUI.page(sections)
+        let page = SettingsUI.page(sections, hostPage: .usage)
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([

@@ -15,8 +15,9 @@ final class ElementInspector {
 
     // MARK: - Properties
 
-    /// Called with the picked view once the mode has been dismissed. Element mode.
-    var onPick: ((NSView) -> Void)?
+    /// Called with the picked view, and the layers held while picking it, once the mode has
+    /// been dismissed. Element mode.
+    var onPick: ((NSView, InspectorLayers) -> Void)?
 
     /// Called with the picked point, in window coordinates. A freeflow click.
     var onPickPoint: ((NSPoint) -> Void)?
@@ -65,6 +66,9 @@ final class ElementInspector {
         overlay.inspectorView.onMouseDragged = { [weak self] point in self?.gestureMoved(to: point) }
         overlay.inspectorView.onMouseUp = { [weak self] point in self?.gestureEnded(at: point) }
         overlay.inspectorView.onCancel = { [weak self] in self?.cancel() }
+        // A modifier changes what is drawn without the pointer moving at all, so the overlay
+        // has to answer the key as well as the mouse.
+        overlay.inspectorView.onModifiersChanged = { [weak self] in self?.refreshIndicator() }
 
         window.addChildWindow(overlay, ordered: .above)
 
@@ -141,6 +145,13 @@ final class ElementInspector {
         return ElementHitTest.topmost(in: root, at: root.convert(point, from: nil))
     }
 
+    /// Asked of the keyboard each time rather than tracked: `flagsChanged` says *when* to look,
+    /// and AppKit's own record of what is down is the one that cannot fall out of step — a
+    /// modifier released while another window was key never reaches this view at all.
+    private func heldLayers() -> InspectorLayers {
+        InspectorLayers.held(NSEvent.modifierFlags)
+    }
+
     private func pointerMoved(to point: NSPoint) {
         guard let overlay else { return }
 
@@ -152,8 +163,8 @@ final class ElementInspector {
                 return
             }
             overlay.inspectorView.indicator = .element(
-                rect: target.convert(target.bounds, to: nil),
-                label: InspectorIndicator.label(for: target)
+                levels: InspectorHierarchy.levels(for: target),
+                layers: heldLayers()
             )
 
         case .freeflow:
@@ -215,9 +226,12 @@ final class ElementInspector {
         switch mode {
         case .element:
             let picked = target(atWindowPoint: point)
+            // Read before the mode goes away: the report has to say what the screenshot shows,
+            // and the screenshot shows whatever was held at the moment of the click.
+            let layers = heldLayers()
             deactivate()
             if let picked {
-                onPick?(picked)
+                onPick?(picked, layers)
             }
 
         case .freeflow:
@@ -267,14 +281,17 @@ final class InspectorOverlayWindow: NSWindow {
 // MARK: - Indicator
 
 /// What the overlay shows and the snapshot keeps, in window coordinates throughout.
+///
+/// An element carries its whole chain rather than one rectangle, because the modifiers decide
+/// how much of it is drawn and they are free to change between one pointer move and the next —
+/// re-walking the view tree on every key press would answer a question already answered.
 enum InspectorIndicator {
-    case element(rect: NSRect, label: String)
+    case element(levels: [InspectorLevel], layers: InspectorLayers)
     case point(NSPoint, label: String)
     case region(NSRect, label: String)
 
-    static func label(for view: NSView) -> String {
-        let rect = view.convert(view.bounds, to: nil)
-        return "\(type(of: view)) — \(Int(rect.width.rounded()))×\(Int(rect.height.rounded()))"
+    static func element(for view: NSView, layers: InspectorLayers) -> InspectorIndicator {
+        .element(levels: InspectorHierarchy.levels(for: view), layers: layers)
     }
 }
 
@@ -288,6 +305,7 @@ final class InspectorOverlayView: NSView {
     var onMouseDragged: ((NSPoint) -> Void)?
     var onMouseUp: ((NSPoint) -> Void)?
     var onCancel: (() -> Void)?
+    var onModifiersChanged: (() -> Void)?
 
     var indicator: InspectorIndicator? {
         didSet { needsDisplay = true }
@@ -345,6 +363,12 @@ final class InspectorOverlayView: NSView {
         }
     }
 
+    /// Reaches this view because the overlay is key, which is the same thing that lets Esc
+    /// land here — one reason, two behaviours.
+    override func flagsChanged(with event: NSEvent) {
+        onModifiersChanged?()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let indicator else { return }
         InspectorIndicatorDrawing.draw(indicator, within: bounds)
@@ -359,9 +383,13 @@ enum InspectorIndicatorDrawing {
 
     static func draw(_ indicator: InspectorIndicator, within bounds: NSRect) {
         switch indicator {
-        case .element(let rect, let label), .region(let rect, let label):
-            // One visual for both: an outlined rectangle is an outlined rectangle, whether
-            // a view was found under it or the pointer drew it.
+        case .element(let levels, let layers):
+            // The unlayered case is the outlined rectangle it always was; the layers are
+            // additions on top of it rather than a second way of drawing a pick.
+            InspectorHierarchyDrawing.draw(levels: levels, layers: layers, within: bounds)
+        case .region(let rect, let label):
+            // One visual for an element and a drawn region: an outlined rectangle is an
+            // outlined rectangle, whether a view was found under it or the pointer drew it.
             drawOutlined(rect, label: label, within: bounds)
         case .point(let point, let label):
             drawPoint(point, label: label, within: bounds)
@@ -422,52 +450,13 @@ enum InspectorIndicatorDrawing {
 
     // MARK: - Shared
 
-    /// Resolved before any alpha is applied: `withAlphaComponent` *replaces* alpha, and a
-    /// theme's accent is free to be translucent already — the ThemedButton lesson.
+    /// Both live in `InspectorDrawing`, which is where the layered overlay reaches them too —
+    /// a badge drawn two ways is two badges.
     private static func resolvedAccent() -> NSColor {
-        Design.Surface.accent.usingColorSpace(.sRGB) ?? Design.Surface.accent
+        InspectorDrawing.resolvedAccent()
     }
 
-    /// The label badge, preferring the space above the rect and falling inside it when the
-    /// rect already touches the top — a highlight on the toolbar would otherwise push its
-    /// own name off the window.
     private static func drawBadge(_ label: String, above rect: NSRect, within bounds: NSRect) {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Design.Typography.caption(),
-            .foregroundColor: Design.Text.label
-        ]
-
-        let textSize = (label as NSString).size(withAttributes: attributes)
-        let badgeSize = NSSize(
-            width: ceil(textSize.width) + Design.Spacing.medium * 2,
-            height: ceil(textSize.height) + Design.Spacing.tight * 2
-        )
-
-        var origin = NSPoint(x: rect.minX, y: rect.maxY + Design.Spacing.tight)
-        if origin.y + badgeSize.height > bounds.maxY {
-            origin.y = rect.maxY - badgeSize.height - Design.Spacing.tight
-        }
-        origin.x = max(bounds.minX, min(origin.x, bounds.maxX - badgeSize.width))
-
-        let badgeRect = NSRect(origin: origin, size: badgeSize)
-        let badge = NSBezierPath(
-            roundedRect: badgeRect,
-            xRadius: Design.Radius.control,
-            yRadius: Design.Radius.control
-        )
-
-        Design.Surface.elevated.setFill()
-        badge.fill()
-        Design.Surface.border.setStroke()
-        badge.lineWidth = Design.Radius.border
-        badge.stroke()
-
-        (label as NSString).draw(
-            at: NSPoint(
-                x: badgeRect.minX + Design.Spacing.medium,
-                y: badgeRect.minY + Design.Spacing.tight
-            ),
-            withAttributes: attributes
-        )
+        InspectorDrawing.badge(label, above: rect, within: bounds)
     }
 }

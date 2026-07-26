@@ -10,17 +10,20 @@ final class SettingsSidebar: NSView {
     // MARK: - Item
 
     struct Item {
+        let id: String
         let title: String
         let symbol: String
     }
 
     // MARK: - Properties
 
-    /// Called with the index the user picked. Not fired by `select(_:)`, so the owner can set
+    /// Called with the stable page ID the user picked. Not fired by `select(id:)`, so the owner can set
     /// the initial page without re-entrancy.
-    var onSelect: ((Int) -> Void)?
+    var onSelect: ((String) -> Void)?
 
+    private var items: [Item] = []
     private var rows: [ThemedTabItemView] = []
+    private(set) var selectedID: String?
 
     // MARK: - Initialization
 
@@ -38,24 +41,35 @@ final class SettingsSidebar: NSView {
     // MARK: - Public Methods
 
     /// Selects a page without notifying, for setting the initial state.
-    func select(_ index: Int) {
+    func select(id: String) {
+        selectedID = items.contains { $0.id == id } ? id : nil
         for (offset, row) in rows.enumerated() {
-            row.isSelected = offset == index
+            row.isSelected = items[offset].id == selectedID
+        }
+    }
+
+    func rebuild(items: [Item], selecting selectedID: String?) {
+        subviews.forEach { $0.removeFromSuperview() }
+        build(items)
+        if let selectedID {
+            select(id: selectedID)
         }
     }
 
     // MARK: - Private Methods
 
     private func build(_ items: [Item]) {
-        rows = items.enumerated().map { index, item in
+        self.items = items
+        rows = items.map { item in
             let row = ThemedTabItemView(
                 title: item.title,
                 symbolName: item.symbol,
-                placement: .sidebar
+                placement: .sidebar,
+                inkSource: .chrome
             )
             row.onSelect = { [weak self] in
-                self?.select(index)
-                self?.onSelect?(index)
+                self?.select(id: item.id)
+                self?.onSelect?(item.id)
             }
             return row
         }

@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 import WebKit
 
 // MARK: - Display Content
@@ -44,6 +45,8 @@ final class DisplayTab {
         case info(SessionInfoViewController)
         case terminal(ShellDrawerViewController)
         case files(FileTreeViewController)
+        case attachments(SessionAttachmentsViewController)
+        case extensionPanel(ExtensionPanelViewController)
     }
 
     let id: UUID
@@ -88,6 +91,16 @@ final class DisplayTab {
         return nil
     }
 
+    var attachments: SessionAttachmentsViewController? {
+        if case .attachments(let attachments) = body { return attachments }
+        return nil
+    }
+
+    var extensionPanel: ExtensionPanelViewController? {
+        if case .extensionPanel(let panel) = body { return panel }
+        return nil
+    }
+
     /// The tab's view controller, when its body is a live surface rather than rendered content.
     var hostedController: NSViewController? {
         switch body {
@@ -97,6 +110,8 @@ final class DisplayTab {
         case .info(let info): return info
         case .terminal(let terminal): return terminal
         case .files(let files): return files
+        case .attachments(let attachments): return attachments
+        case .extensionPanel(let panel): return panel
         }
     }
 
@@ -116,6 +131,10 @@ final class DisplayTab {
             return "terminal"
         case .files:
             return "folder"
+        case .attachments:
+            return "paperclip"
+        case .extensionPanel:
+            return "puzzlepiece.extension"
         }
     }
 
@@ -139,6 +158,10 @@ final class DisplayTab {
             return "Terminal"
         case .files:
             return "Files"
+        case .attachments:
+            return "Attachments"
+        case .extensionPanel(let panel):
+            return panel.panelTitle
         }
     }
 }
@@ -148,7 +171,7 @@ final class DisplayTab {
 /// The panel beside the terminal, showing content an agent asked Skalman to display.
 ///
 /// Content is held per session rather than globally, and each session keeps a *set* of tabs that
-/// coexist: every image, every document, and one live browser share the pane, switched between by
+/// coexist: images, documents, and live browsers share the pane, switched between by
 /// a strip along the top. A background session that displays something does not take over the
 /// panel from the session on screen; its tabs are waiting when it is selected, as its scrollback is.
 @MainActor
@@ -157,21 +180,21 @@ final class DisplayPaneController: NSViewController {
     // MARK: - Properties
 
     private var headerView: NSView!
-    private var titleLabel: NSTextField!
 
-    /// Opens a new tab. It lives in the header rather than in the tab strip because the strip
-    /// collapses to nothing below `tabBarMinimumTabs` — a `+` inside it would be invisible in
-    /// exactly the empty and one-tab states where it is most wanted.
+    /// Opens a new tab. It sits at the trailing edge of the tab row rather than inside the
+    /// scrolling strip, so a pane full of tabs scrolls sideways *under* it instead of carrying
+    /// the one control that adds another off the edge with them.
     private var newTabButton: ThemedButton!
+    private var headerCustomizationView: DisplayPaneHeaderCustomizationView!
     private var newTabMenuSession: AnyObject?
     private var tabBar: DisplayTabBar!
-    private var tabBarHeight: NSLayoutConstraint!
     private var imageView: NSImageView!
     private var webView: WKWebView!
     private var hostedView: NSView!
     private var captionLabel: NSTextField!
     private var contentMenuButton: ThemedButton!
     private var placeholderLabel: NSTextField!
+    private let appEvents = AppEventObservations()
 
     /// The live tab's view controller currently parented into `hostedView` — the browser or a
     /// review — so switching tabs can swap it out without rebuilding its state.
@@ -179,9 +202,17 @@ final class DisplayPaneController: NSViewController {
 
     private var tabsBySession: [SessionID: [DisplayTab]] = [:]
     private var activeTabIDBySession: [SessionID: UUID] = [:]
-    /// The browser most recently selected, independent of a screenshot or document in front.
+    /// The browser the agent and user most recently selected. Kept separately from the visible
+    /// panel tab because displaying a screenshot or document must not silently retarget the next
+    /// browser action to the first browser in the strip.
     private var activeBrowserTabIDBySession: [SessionID: UUID] = [:]
+    private let extensionPanels: ExtensionPanelRouting
+    private let customizationLookup: ComponentCustomizationHost.Lookup
     private let browserFactory: @MainActor (BrowserContextKind) -> BrowserViewController
+
+    /// Test and embedding seam for extension actions. Production routes through the shared
+    /// provider slot when no explicit receiver is installed.
+    var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
 
     /// Not private: the actions in `DisplayPaneMenu` name the session they write files for.
     private(set) var currentSessionID: SessionID?
@@ -206,12 +237,22 @@ final class DisplayPaneController: NSViewController {
     // MARK: - Lifecycle
 
     init(
+        extensionPanels: ExtensionPanelRouting? = nil,
+        customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
+            ComponentCustomizationProviderSlot.shared.customization(for: $0)
+        },
         browserFactory: @escaping @MainActor (BrowserContextKind) -> BrowserViewController = {
             BrowserViewController(contextKind: $0)
         }
     ) {
+        self.extensionPanels = extensionPanels ?? ExtensionManager.shared
+        self.customizationLookup = customizationLookup
         self.browserFactory = browserFactory
         super.init(nibName: nil, bundle: nil)
+
+        appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
+            self?.ensureAttachmentsTab(for: event.sessionID)
+        }
     }
 
     @available(*, unavailable)
@@ -235,15 +276,15 @@ final class DisplayPaneController: NSViewController {
 
     // MARK: - Setup
 
+    /// The pane's one top row: its tabs, and the control that adds another.
+    ///
+    /// There was a titled header above the strip, which spent a row of a narrow pane restating
+    /// the name of the tab directly beneath it — and the toolbar already names the page. The
+    /// tabs *are* the header now, with `+` at the trailing edge where a browser puts it, which
+    /// is also what closes the gap between this pane and the rest of the window's chrome.
     private func setupHeader() {
         headerView = NSView()
         headerView.translatesAutoresizingMaskIntoConstraints = false
-
-        titleLabel = NSTextField(labelWithString: "Display")
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = Design.Typography.caption()
-        titleLabel.textColor = Design.Text.secondary
-        titleLabel.lineBreakMode = .byTruncatingTail
 
         newTabButton = ThemedButton(
             symbol: "plus",
@@ -255,30 +296,81 @@ final class DisplayPaneController: NSViewController {
         newTabButton.isBordered = false
         newTabButton.toolTip = "New tab"
 
-        headerView.addSubview(titleLabel)
+        headerCustomizationView = DisplayPaneHeaderCustomizationView(
+            lookup: customizationLookup,
+            onAction: { [weak self] action in
+                guard let self else { return }
+                if let onCustomizationAction {
+                    onCustomizationAction(action)
+                } else {
+                    ComponentCustomizationProviderSlot.shared.perform(action)
+                }
+            }
+        )
+
+        headerView.addSubview(headerCustomizationView)
         headerView.addSubview(newTabButton)
         view.addSubview(headerView)
     }
 
     @objc private func newTabButtonClicked(_ sender: NSView) {
         guard let sessionID = currentSessionID else { return }
+        let canAddBrowser = tabs(for: sessionID).lazy.filter { $0.browser != nil }.count
+            < DisplayPaneDefaults.maximumBrowserTabs
 
-        let choices: [(String, String, () -> Void)] = [
-            ("Terminal", "terminal", { [weak self] in _ = self?.addTerminalTab(for: sessionID) }),
-            ("Browser", "globe", { [weak self] in _ = self?.addBrowserTab(for: sessionID) }),
-            ("Private Browser", "hand.raised.fill", { [weak self] in
+        let choices: [(String, String, Bool, () -> Void)] = [
+            ("Terminal", "terminal", true, {
+                [weak self] in _ = self?.addTerminalTab(for: sessionID)
+            }),
+            ("Browser", "globe", canAddBrowser, {
+                [weak self] in _ = self?.addBrowserTab(for: sessionID)
+            }),
+            ("Private Browser", "hand.raised.fill", canAddBrowser, {
+                [weak self] in
                 _ = self?.addBrowserTab(for: sessionID, contextKind: .private)
             }),
-            ("Files", "folder", { [weak self] in _ = self?.activateFiles(for: sessionID) }),
-            ("Review", "plus.forwardslash.minus", { [weak self] in _ = self?.activateReview(for: sessionID) }),
-            ("Info", "info.circle", { [weak self] in _ = self?.activateInfo(for: sessionID) })
+            ("Files", "folder", true, {
+                [weak self] in _ = self?.activateFiles(for: sessionID)
+            }),
+            ("Review", "plus.forwardslash.minus", true, {
+                [weak self] in _ = self?.activateReview(for: sessionID)
+            }),
+            ("Info", "info.circle", true, {
+                [weak self] in _ = self?.activateInfo(for: sessionID)
+            }),
+            ("Attachments", "paperclip", true, {
+                [weak self] in _ = self?.activateAttachments(for: sessionID)
+            })
         ]
-        let entries = choices.map { title, symbol, action in
+        var entries = choices.map { title, symbol, isEnabled, action in
             ThemedMenuEntry.item(ThemedMenuItem(
                 title: title,
                 image: NSImage(systemSymbolName: symbol, accessibilityDescription: title),
+                isEnabled: isEnabled,
                 onChoose: action
             ))
+        }
+        let contributedPanels = extensionPanels.extensionPanelInventory
+        if !contributedPanels.isEmpty {
+            entries.append(.separator)
+            entries.append(contentsOf: contributedPanels.map { item in
+                ThemedMenuEntry.item(ThemedMenuItem(
+                    title: item.panel.title,
+                    subtitle: item.extensionName,
+                    image: NSImage(
+                        systemSymbolName: "puzzlepiece.extension",
+                        accessibilityDescription: "Extension panel"
+                    ),
+                    onChoose: { [weak self] in
+                        _ = self?.activateExtensionPanel(
+                            extensionIdentifier: item.extensionIdentifier,
+                            panelID: item.panel.id,
+                            title: item.panel.title,
+                            for: sessionID
+                        )
+                    }
+                ))
+            })
         }
 
         newTabMenuSession = ThemedMenuPresenter.present(
@@ -291,10 +383,13 @@ final class DisplayPaneController: NSViewController {
     }
 
     private func setupTabBar() {
-        tabBar = DisplayTabBar(frame: .zero)
+        tabBar = DisplayTabBar(
+            frame: .zero,
+            customizationLookup: customizationLookup
+        )
         tabBar.onSelect = { [weak self] id in self?.userActivatedTab(id) }
         tabBar.onClose = { [weak self] id in self?.userClosedTab(id) }
-        view.addSubview(tabBar)
+        headerView.addSubview(tabBar)
     }
 
     private func setupContent() {
@@ -364,7 +459,6 @@ final class DisplayPaneController: NSViewController {
 
     private func setupConstraints() {
         let padding = DisplayPaneDefaults.padding
-        tabBarHeight = tabBar.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
             // Pinned to the safe area, which the toolbar insets. Pinning to the view's own top
@@ -372,44 +466,47 @@ final class DisplayPaneController: NSViewController {
             headerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            headerView.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.headerHeight),
+            headerView.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.tabBarHeight),
 
-            titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: padding),
-            titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: newTabButton.leadingAnchor,
+            // The strip takes the row and gives up only what `+` needs, so a pane full of tabs
+            // scrolls sideways rather than pushing the control that adds one off the edge.
+            tabBar.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
+            tabBar.topAnchor.constraint(equalTo: headerView.topAnchor),
+            tabBar.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
+            tabBar.trailingAnchor.constraint(
+                equalTo: headerCustomizationView.leadingAnchor,
                 constant: -4
             ),
 
+            headerCustomizationView.trailingAnchor.constraint(
+                equalTo: newTabButton.leadingAnchor,
+                constant: -4
+            ),
+            headerCustomizationView.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            headerCustomizationView.heightAnchor.constraint(
+                lessThanOrEqualTo: headerView.heightAnchor
+            ),
             newTabButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -padding),
             newTabButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             newTabButton.widthAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
             newTabButton.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
 
-            // The strip sits between the header and the content; its height collapses to zero
-            // when there are too few tabs to be worth a row (see `render`).
-            tabBar.topAnchor.constraint(equalTo: headerView.bottomAnchor),
-            tabBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tabBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tabBarHeight,
-
-            // Content anchors to the strip's bottom, so a hidden strip (height 0) leaves it
-            // directly under the header, and a shown one pushes it down without swapping anchors.
-            imageView.topAnchor.constraint(equalTo: tabBar.bottomAnchor, constant: padding),
+            // Content anchors under the one header row.
+            imageView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: padding),
             imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: padding),
             imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -padding),
             imageView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -padding),
 
             // The web view occupies the same region, minus the padding: an HTML document
             // brings its own margins and inset it twice looks like a mistake.
-            webView.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            webView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             webView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -padding),
 
             // A live surface fills the whole content region, over the caption footer, since it
             // carries its own chrome and needs no caption beneath it.
-            hostedView.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            hostedView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             hostedView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             hostedView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             hostedView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -460,8 +557,8 @@ final class DisplayPaneController: NSViewController {
         }
         tabs.append(tab)
 
-        // Cap the content tabs, never the browser: a session that keeps drawing charts should
-        // not grow an unbounded strip, but its one browser is a working surface, not clutter.
+        // Cap rendered content independently from live browsers: a session that keeps drawing
+        // charts should not grow an unbounded strip, while browser tabs have their own hard cap.
         let contentCount = tabs.filter { $0.content != nil }.count
         if contentCount > DisplayPaneDefaults.maximumContentTabs,
            let oldest = tabs.first(where: { $0.content != nil }) {
@@ -476,6 +573,75 @@ final class DisplayPaneController: NSViewController {
         persist(sessionID)
 
         if sessionID == currentSessionID { render() }
+    }
+
+    // MARK: - Public — Extension Panels
+
+    /// Opens one registered extension panel as a normal per-session display tab.
+    ///
+    /// One tab exists per extension/panel pair in a session. Its controller keeps the stable
+    /// identifiers even while the provider is disabled, so the tab can recover on re-enable and
+    /// can be restored before extension processes finish starting.
+    @discardableResult
+    func activateExtensionPanel(
+        extensionIdentifier: String,
+        panelID: String,
+        title: String,
+        for sessionID: SessionID
+    ) -> ExtensionPanelViewController {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+
+        if let existing = tabs.first(where: {
+            $0.extensionPanel?.extensionIdentifier == extensionIdentifier
+                && $0.extensionPanel?.panelID == panelID
+        }), let panel = existing.extensionPanel {
+            activeTabIDBySession[sessionID] = existing.id
+            persist(sessionID)
+            if sessionID == currentSessionID { render() }
+            return panel
+        }
+
+        let controller = makeExtensionPanel(
+            extensionIdentifier: extensionIdentifier,
+            panelID: panelID,
+            title: title,
+            for: sessionID
+        )
+        let tab = DisplayTab(body: .extensionPanel(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+        persist(sessionID)
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    private func makeExtensionPanel(
+        extensionIdentifier: String,
+        panelID: String,
+        title: String,
+        for sessionID: SessionID
+    ) -> ExtensionPanelViewController {
+        let projectID = ProjectStore.shared.project(forSessionID: sessionID)?.id
+        let controller = ExtensionPanelViewController(
+            extensionIdentifier: extensionIdentifier,
+            panelID: panelID,
+            title: title,
+            context: .init(
+                projectID: projectID?.uuidString.lowercased(),
+                sessionID: sessionID.uuidString.lowercased()
+            ),
+            router: extensionPanels
+        )
+        addChild(controller)
+        controller.onChange = { [weak self, weak controller] in
+            guard let self, controller != nil else { return }
+            self.persist(sessionID)
+            if self.currentSessionID == sessionID { self.render() }
+        }
+        return controller
     }
 
     // MARK: - Public — Browser Tabs
@@ -575,8 +741,8 @@ final class DisplayPaneController: NSViewController {
 
     // MARK: - Public — Review Tab
 
-    /// Returns the session's git review tab, creating and activating one if it has none — the
-    /// same one-per-session shape as the browser.
+    /// Returns the session's git review tab, creating and activating one if it has none. Review
+    /// remains a singleton because one session has one working-tree comparison.
     @discardableResult
     func activateReview(for sessionID: SessionID) -> GitReviewViewController? {
         restoreIfNeeded(sessionID)
@@ -612,8 +778,8 @@ final class DisplayPaneController: NSViewController {
 
     // MARK: - Public — Info Tab
 
-    /// Returns the session's info tab, creating and activating one if it has none — the same
-    /// one-per-session shape as the browser and the review.
+    /// Returns the session's info tab, creating and activating one if it has none. Info remains a
+    /// singleton because it describes the session rather than a navigable resource.
     @discardableResult
     func activateInfo(for sessionID: SessionID) -> SessionInfoViewController? {
         restoreIfNeeded(sessionID)
@@ -680,9 +846,8 @@ final class DisplayPaneController: NSViewController {
 
     /// Adds a terminal tab and brings it to the front.
     ///
-    /// Multi-instance, unlike the browser, review and info tabs: those answer a question about
-    /// the session and there is only one answer, while shells are the thing you want two of —
-    /// one running a server, one to type in.
+    /// Multi-instance like browsers, unlike review and info tabs. Shells are another surface
+    /// where two independent states are useful — one running a server, one to type in.
     @discardableResult
     func addTerminalTab(for sessionID: SessionID) -> ShellDrawerViewController? {
         restoreIfNeeded(sessionID)
@@ -719,9 +884,8 @@ final class DisplayPaneController: NSViewController {
 
     // MARK: - Public — Files Tab
 
-    /// Returns the session's file tree, creating and activating one if it has none — the same
-    /// one-per-session shape as the browser, review and info. One project has one tree; a second
-    /// would show the same directory twice.
+    /// Returns the session's file tree, creating and activating one if it has none. One project
+    /// has one tree; a second would show the same directory twice.
     @discardableResult
     func activateFiles(for sessionID: SessionID) -> FileTreeViewController? {
         restoreIfNeeded(sessionID)
@@ -751,6 +915,56 @@ final class DisplayPaneController: NSViewController {
         guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
 
         let controller = FileTreeViewController(folderPath: project.folderPath)
+        addChild(controller)
+        return controller
+    }
+
+    // MARK: - Public — Attachments Tab
+
+    /// Returns the visual-file list, creating and activating its singleton tab when needed.
+    @discardableResult
+    func activateAttachments(for sessionID: SessionID) -> SessionAttachmentsViewController? {
+        guard let controller = ensureAttachmentsTab(for: sessionID) else { return nil }
+        guard let tab = tabsBySession[sessionID]?.first(where: { $0.attachments === controller })
+        else { return controller }
+
+        activeTabIDBySession[sessionID] = tab.id
+        persist(sessionID)
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// A newly detected file adds a quiet tab without stealing selection from what the user is
+    /// reading. If the pane was empty, the new tab naturally becomes its first active surface.
+    @discardableResult
+    private func ensureAttachmentsTab(
+        for sessionID: SessionID
+    ) -> SessionAttachmentsViewController? {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+
+        if let existing = tabs.first(where: { $0.attachments != nil }) {
+            existing.attachments?.refresh()
+            return existing.attachments
+        }
+
+        guard let controller = makeAttachments(for: sessionID) else { return nil }
+        let tab = DisplayTab(body: .attachments(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        if activeTabIDBySession[sessionID] == nil {
+            activeTabIDBySession[sessionID] = tab.id
+        }
+        persist(sessionID)
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    private func makeAttachments(
+        for sessionID: SessionID
+    ) -> SessionAttachmentsViewController? {
+        guard ProjectStore.shared.project(forSessionID: sessionID) != nil else { return nil }
+        let controller = SessionAttachmentsViewController(sessionID: sessionID)
         addChild(controller)
         return controller
     }
@@ -852,6 +1066,7 @@ final class DisplayPaneController: NSViewController {
         activeBrowserTabIDBySession = activeBrowserTabIDBySession.filter {
             sessionIDs.contains($0.key)
         }
+        SessionAttachmentStore.shared.retainOnly(sessionIDs: sessionIDs)
 
         if let currentSessionID, !sessionIDs.contains(currentSessionID) {
             self.currentSessionID = nil
@@ -907,21 +1122,29 @@ final class DisplayPaneController: NSViewController {
         let tabs = currentSessionID.flatMap { tabsBySession[$0] } ?? []
         let active = activeTab(for: currentSessionID)
 
+        headerCustomizationView.showSession(
+            currentSessionID?.uuidString.lowercased()
+        )
         renderTabBar(tabs: tabs, active: active)
         renderContent(active: active)
 
-        titleLabel.stringValue = active?.title ?? "Display"
         placeholderLabel.isHidden = active != nil
     }
 
+    /// The strip is the pane's header, so it is always drawn — a lone tab names the pane, which
+    /// is the job the title label above it used to do twice.
     private func renderTabBar(tabs: [DisplayTab], active: DisplayTab?) {
-        let show = tabs.count >= DisplayPaneDefaults.tabBarMinimumTabs
-        tabBar.isHidden = !show
-        tabBarHeight.constant = show ? DisplayPaneDefaults.tabBarHeight : 0
-
-        guard show else { return }
+        let target = ExtensionComponentTarget.displayTabHeader(
+            sessionID: currentSessionID?.uuidString.lowercased()
+        )
         tabBar.update(items: tabs.map {
-            DisplayTabBarItem(id: $0.id, title: $0.title, symbolName: $0.symbolName, isActive: $0.id == active?.id)
+            DisplayTabBarItem(
+                id: $0.id,
+                title: $0.title,
+                symbolName: $0.symbolName,
+                isActive: $0.id == active?.id,
+                customizationTarget: target
+            )
         })
     }
 
@@ -994,6 +1217,23 @@ final class DisplayPaneController: NSViewController {
             // Reads the root on first show and re-reads what is open on later ones, so a file an
             // agent just wrote is there without the folder being collapsed and reopened.
             files.refresh()
+
+        case .attachments(let attachments):
+            imageView.image = nil
+            imageView.isHidden = true
+            hideHTML()
+            captionLabel.isHidden = true
+            contentMenuButton.isHidden = true
+            installHosted(attachments)
+            attachments.refresh()
+
+        case .extensionPanel(let panel):
+            imageView.image = nil
+            imageView.isHidden = true
+            hideHTML()
+            captionLabel.isHidden = true
+            contentMenuButton.isHidden = true
+            installHosted(panel)
 
         case nil:
             installHosted(nil)
@@ -1105,6 +1345,21 @@ final class DisplayPaneController: NSViewController {
                 // costs nothing but the controller.
                 guard let controller = makeFiles(for: sessionID) else { continue }
                 tabs.append(DisplayTab(id: id, body: .files(controller)))
+
+            case .attachments:
+                guard let controller = makeAttachments(for: sessionID) else { continue }
+                tabs.append(DisplayTab(id: id, body: .attachments(controller)))
+
+            case .extensionPanel:
+                guard let extensionIdentifier = persisted.extensionIdentifier,
+                      let panelID = persisted.extensionPanelID else { continue }
+                let controller = makeExtensionPanel(
+                    extensionIdentifier: extensionIdentifier,
+                    panelID: panelID,
+                    title: persisted.title ?? "Extension Panel",
+                    for: sessionID
+                )
+                tabs.append(DisplayTab(id: id, body: .extensionPanel(controller)))
             }
         }
 
@@ -1139,7 +1394,8 @@ final class DisplayPaneController: NSViewController {
 
     private func persisted(_ tab: DisplayTab) -> PersistedTab? {
         if let browser = tab.browser {
-            // Private contexts and even their URLs are runtime-only.
+            // Private contexts are runtime-only by definition. Persisting their URL would both
+            // misrepresent the missing ephemeral state and leave a browsing-history trace.
             guard browser.contextKind == .shared else { return nil }
             // An empty browser (never navigated) has nothing worth restoring.
             guard let url = browser.currentURL?.absoluteString ?? browser.restoredURL else { return nil }
@@ -1175,6 +1431,27 @@ final class DisplayPaneController: NSViewController {
             return PersistedTab(
                 id: tab.id.uuidString, kind: .files, title: tab.title,
                 subtitle: "", url: nil, html: nil, cacheFile: nil
+            )
+        }
+
+        if tab.attachments != nil {
+            return PersistedTab(
+                id: tab.id.uuidString, kind: .attachments, title: tab.title,
+                subtitle: "", url: nil, html: nil, cacheFile: nil
+            )
+        }
+
+        if let panel = tab.extensionPanel {
+            return PersistedTab(
+                id: tab.id.uuidString,
+                kind: .extensionPanel,
+                title: panel.panelTitle,
+                subtitle: "",
+                url: nil,
+                html: nil,
+                cacheFile: nil,
+                extensionIdentifier: panel.extensionIdentifier,
+                extensionPanelID: panel.panelID
             )
         }
 

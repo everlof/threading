@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 /// Shown when a project is selected: choose how a session should start, then start it.
 ///
@@ -35,6 +36,12 @@ final class SessionComposerViewController: NSViewController {
     /// Experimental, and offered only for agents with a structured headless transport.
     private var usesNativeUI = false
     private let promptView = PromptView()
+    private var promptContentContainer: ComponentContentContainer!
+    private var promptCustomizationHost: ComponentCustomizationHost!
+    private let customizationLookup: ComponentCustomizationHost.Lookup
+
+    /// Invoked for semantic actions in extension-provided prompt accessories.
+    var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
 
     /// What is left of the account the chips currently name.
     private let usagePanel = AccountUsagePanelView()
@@ -46,6 +53,22 @@ final class SessionComposerViewController: NSViewController {
     private var selectedBranch: String?
 
     weak var delegate: SessionComposerViewControllerDelegate?
+
+    // MARK: - Initialization
+
+    init(
+        customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
+            ComponentCustomizationProviderSlot.shared.customization(for: $0)
+        }
+    ) {
+        self.customizationLookup = customizationLookup
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     // MARK: - Lifecycle
 
@@ -87,14 +110,17 @@ final class SessionComposerViewController: NSViewController {
         }
 
         wirePrompt()
+        setupPromptCustomization()
 
-        let stack = NSStackView(views: [headings, chips, usagePanel, promptView, importButton])
+        let stack = NSStackView(
+            views: [headings, chips, usagePanel, promptContentContainer, importButton]
+        )
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
         stack.setCustomSpacing(Design.Spacing.large, after: headings)
         stack.setCustomSpacing(Design.Spacing.large, after: usagePanel)
-        stack.setCustomSpacing(Design.Spacing.large, after: promptView)
+        stack.setCustomSpacing(Design.Spacing.large, after: promptContentContainer)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(stack)
@@ -116,12 +142,36 @@ final class SessionComposerViewController: NSViewController {
                 lessThanOrEqualTo: view.trailingAnchor,
                 constant: -Design.Spacing.pane
             ),
-            promptView.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            promptContentContainer.widthAnchor.constraint(equalTo: stack.widthAnchor),
             usagePanel.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
 
         wireChips()
         observeUsage()
+    }
+
+    /// Places the protected native prompt behind the generic around-hook host. The contract only
+    /// accepts horizontal hooks containing exactly one `.proceed`, so this container can gain
+    /// leading/trailing accessories but can never lose the text field or submit control.
+    private func setupPromptCustomization() {
+        promptContentContainer = ComponentContentContainer(defaultContent: promptView)
+        promptContentContainer.setAccessibilityIdentifier("composer.session-start.content")
+        promptCustomizationHost = ComponentCustomizationHost(
+            target: .sessionStartComposer(),
+            contentContainer: promptContentContainer,
+            lookup: customizationLookup,
+            imageResolver: ExtensionComponentResourceResolver.image,
+            onAction: { [weak self] action in
+                guard let self else { return }
+                if let onCustomizationAction {
+                    onCustomizationAction(action)
+                } else {
+                    ComponentCustomizationProviderSlot.shared.perform(action)
+                }
+            }
+        )
+        // A family-wide patch must not appear before the composer has a real project context.
+        promptCustomizationHost.deactivate()
     }
 
     /// A reading arriving after the composer is on screen redraws the panel in place, rather
@@ -204,8 +254,11 @@ final class SessionComposerViewController: NSViewController {
         self.projectID = projectID
 
         guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
+            updatePromptCustomization(for: nil)
             return
         }
+
+        updatePromptCustomization(for: projectID)
 
         selectedAgent = AppSettings.shared.defaultAgentKind
         selectedAccountHandle = .standard
@@ -226,6 +279,19 @@ final class SessionComposerViewController: NSViewController {
 
         refreshChips()
         discoverImportable(for: project)
+    }
+
+    /// Keeps component targeting separate from project lookup so the shell can be exercised
+    /// without manufacturing persisted project state. Product navigation calls it through
+    /// `show(projectID:)`.
+    func updatePromptCustomization(for projectID: ProjectID?) {
+        guard let projectID else {
+            promptCustomizationHost?.deactivate()
+            return
+        }
+        promptCustomizationHost?.updateTarget(
+            .sessionStartComposer(projectID: projectID.uuidString.lowercased())
+        )
     }
 
     /// Looks for conversations this project could adopt, revealing the chip if any are found.
@@ -277,7 +343,7 @@ final class SessionComposerViewController: NSViewController {
         if surfaceChip.isHidden { usesNativeUI = false }
         surfaceChip.configure(
             symbolName: ComposerDefaults.surfaceSymbol,
-            title: usesNativeUI ? ComposerDefaults.nativeTitle : ComposerDefaults.terminalTitle
+            title: usesNativeUI ? ComposerDefaults.nativeTitle : selectedAgent.originalUITitle
         )
 
         refreshUsagePanel(account: account)
@@ -475,7 +541,7 @@ final class SessionComposerViewController: NSViewController {
         [false, true].map { isNative in
             .item(
                 ThemedMenuItem(
-                    title: isNative ? ComposerDefaults.nativeTitle : ComposerDefaults.terminalTitle,
+                    title: isNative ? ComposerDefaults.nativeTitle : selectedAgent.originalUITitle,
                     representedValue: isNative,
                     isSelected: isNative == usesNativeUI
                 )
@@ -638,10 +704,8 @@ enum ComposerDefaults {
     /// rather than as one branch name among several.
     static let thisCheckoutSuffix = "this checkout"
 
-    /// Named for what the user sees rather than how it works: "Terminal" and "Chat" describe
-    /// the surface, where "PTY" and "stream-json" would describe the plumbing.
-    static let terminalTitle = "Terminal"
-    static let nativeTitle = "Chat (experimental)"
+    /// A session is the durable object; these names describe only the UI rendering it.
+    static let nativeTitle = "Native (Experimental)"
     static let surfaceSymbol = "bubble.left.and.text.bubble.right"
     static let promptPlaceholder = "Describe a task or ask a question"
 

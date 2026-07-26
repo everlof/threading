@@ -10,6 +10,8 @@ final class KeyboardPreferencesViewController: NSViewController {
     // MARK: - Properties
 
     private let store = ShortcutOverrideStore.shared
+    private let registry = CommandRegistry.shared
+    private let appEvents = AppEventObservations()
 
     /// Rebuilt wholesale on any change, following `ArchivedPreferencesViewController`: a rebind
     /// can move a conflict warning onto a row far from the one that was edited, so redrawing the
@@ -21,6 +23,9 @@ final class KeyboardPreferencesViewController: NSViewController {
     override func loadView() {
         view = NSView()
         rebuild()
+        appEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
+            self?.rebuild()
+        }
     }
 
     // MARK: - Building
@@ -34,7 +39,7 @@ final class KeyboardPreferencesViewController: NSViewController {
             SettingsUI.note(Strings.note)
         ]
 
-        for (group, commands) in AppCommands.grouped() {
+        for (group, commands) in registry.grouped() {
             let rows = commands.map(makeRow)
             sections.append(SettingsUI.section(group.rawValue, SettingsCard(rows: rows)))
         }
@@ -47,7 +52,7 @@ final class KeyboardPreferencesViewController: NSViewController {
             )
         ])))
 
-        let page = SettingsUI.page(sections)
+        let page = SettingsUI.page(sections, hostPage: .keyboard)
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
 
@@ -68,7 +73,7 @@ final class KeyboardPreferencesViewController: NSViewController {
             let label = NSTextField(labelWithString: shortcut?.displayString ?? ShortcutRecorderStrings.unbound)
             label.font = Design.Typography.code()
             label.textColor = Design.Text.tertiary
-            return SettingsUI.row(title: command.title, subtitle: nil, control: label)
+            return SettingsUI.row(title: rowTitle(command), subtitle: nil, control: label)
         }
 
         let recorder = ShortcutRecorderView(shortcut: shortcut)
@@ -78,10 +83,15 @@ final class KeyboardPreferencesViewController: NSViewController {
         recorders[command.id] = recorder
 
         return SettingsUI.row(
-            title: command.title,
+            title: rowTitle(command),
             subtitle: subtitle(for: command, shortcut: shortcut),
             control: recorder
         )
+    }
+
+    private func rowTitle(_ command: AppCommand) -> String {
+        guard let extensionName = command.origin.extensionName else { return command.title }
+        return "\(extensionName) — \(command.title)"
     }
 
     /// The row's second line carries the two things that are not visible in the chord itself:
@@ -89,6 +99,14 @@ final class KeyboardPreferencesViewController: NSViewController {
     private func subtitle(for command: AppCommand, shortcut: KeyboardShortcut?) -> String? {
         if let shortcut, let other = store.conflict(for: shortcut, excluding: command) {
             return String(format: Strings.conflictFormat, other.title)
+        }
+        if let fallback = command.defaultShortcut,
+           let other = store.defaultConflict(for: command) {
+            return String(
+                format: Strings.defaultConflictFormat,
+                fallback.displayString,
+                other.title
+            )
         }
         guard store.isOverridden(command) else { return nil }
 
@@ -136,6 +154,7 @@ private enum Strings {
         + "Escape cancels, Delete removes the shortcut."
 
     static let conflictFormat = "Already used by %@"
+    static let defaultConflictFormat = "Default %@ is used by %@"
     static let changedFormat = "Changed from %@"
     static let changedNoDefault = "Changed"
 

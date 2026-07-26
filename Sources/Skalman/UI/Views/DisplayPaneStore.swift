@@ -24,6 +24,8 @@ struct PersistedTab: Codable {
         case info
         case terminal
         case files
+        case attachments
+        case extensionPanel
     }
 
     var id: String
@@ -39,6 +41,9 @@ struct PersistedTab: Codable {
     /// Review: the selected `GitReviewMode` raw value. Optional so older layouts still decode;
     /// defaulted so the other kinds' call sites need not mention it.
     var mode: String? = nil
+    /// Extension panel: stable contribution owner and local panel identifier.
+    var extensionIdentifier: String? = nil
+    var extensionPanelID: String? = nil
 }
 
 extension PersistedPanel {
@@ -55,6 +60,9 @@ extension PersistedPanel {
             case .info: return "n"
             case .terminal: return "t"
             case .files: return "f"
+            case .attachments: return "a"
+            case .extensionPanel:
+                return "e:\(tab.extensionIdentifier ?? "")/\(tab.extensionPanelID ?? "")"
             }
         }
         return parts.joined(separator: "|") + "#" + (activeTabID ?? "")
@@ -89,6 +97,10 @@ extension PersistedPanel {
             case .files:
                 detail = "a file tree of the project folder (the user is browsing the files "
                     + "you are working in)"
+            case .attachments:
+                detail = "visual files referenced in this session (images and PDFs)"
+            case .extensionPanel:
+                detail = "extension panel \"\(tab.title ?? "Panel")\""
             }
             lines.append("\(index). \(detail)\(active)")
         }

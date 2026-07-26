@@ -11,23 +11,81 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let identifier: String
     public let name: String
     public let version: String
+    public let dataVersion: Int
+    public let runtime: ExtensionRuntime
     public let executable: String
     public let capabilities: Set<ExtensionCapability>
+    public let mcpTools: [ExtensionMCPTool]
+    public let settings: ExtensionSettingsContribution
+    public let services: [ExtensionServiceDefinition]
+    public let serviceDependencies: [ExtensionServiceDependency]
+    public let companions: [ExtensionCompanion]
 
     public init(
         formatVersion: Int = Self.currentFormatVersion,
         identifier: String,
         name: String,
         version: String,
+        dataVersion: Int = 1,
+        runtime: ExtensionRuntime = .native,
         executable: String,
-        capabilities: Set<ExtensionCapability> = []
+        capabilities: Set<ExtensionCapability> = [],
+        mcpTools: [ExtensionMCPTool] = [],
+        settings: ExtensionSettingsContribution = .init(),
+        services: [ExtensionServiceDefinition] = [],
+        serviceDependencies: [ExtensionServiceDependency] = [],
+        companions: [ExtensionCompanion] = []
     ) {
         self.formatVersion = formatVersion
         self.identifier = identifier
         self.name = name
         self.version = version
+        self.dataVersion = dataVersion
+        self.runtime = runtime
         self.executable = executable
         self.capabilities = capabilities
+        self.mcpTools = mcpTools
+        self.settings = settings
+        self.services = services
+        self.serviceDependencies = serviceDependencies
+        self.companions = companions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities, mcpTools, settings
+        case services, serviceDependencies, companions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try container.decode(Int.self, forKey: .formatVersion)
+        identifier = try container.decode(String.self, forKey: .identifier)
+        name = try container.decode(String.self, forKey: .name)
+        version = try container.decode(String.self, forKey: .version)
+        dataVersion = try container.decodeIfPresent(Int.self, forKey: .dataVersion) ?? 1
+        runtime = try container.decodeIfPresent(
+            ExtensionRuntime.self,
+            forKey: .runtime
+        ) ?? .native
+        executable = try container.decode(String.self, forKey: .executable)
+        capabilities = try container.decode(Set<ExtensionCapability>.self, forKey: .capabilities)
+        mcpTools = try container.decodeIfPresent([ExtensionMCPTool].self, forKey: .mcpTools) ?? []
+        settings = try container.decodeIfPresent(
+            ExtensionSettingsContribution.self,
+            forKey: .settings
+        ) ?? .init()
+        services = try container.decodeIfPresent(
+            [ExtensionServiceDefinition].self,
+            forKey: .services
+        ) ?? []
+        serviceDependencies = try container.decodeIfPresent(
+            [ExtensionServiceDependency].self,
+            forKey: .serviceDependencies
+        ) ?? []
+        companions = try container.decodeIfPresent(
+            [ExtensionCompanion].self,
+            forKey: .companions
+        ) ?? []
     }
 
     public func validate() throws {
@@ -58,6 +116,12 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         if version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append(.init(path: "version", message: "must not be empty"))
         }
+        if !(1...1_000_000).contains(dataVersion) {
+            issues.append(.init(
+                path: "dataVersion",
+                message: "must be between 1 and 1000000"
+            ))
+        }
 
         if !ExtensionIdentifierRules.isSafeRelativePath(executable) {
             issues.append(
@@ -67,11 +131,140 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
                 )
             )
         }
+        if runtime == .webAssembly,
+           URL(fileURLWithPath: executable).pathExtension.lowercased() != "wasm" {
+            issues.append(
+                .init(
+                    path: "executable",
+                    message: "must end in '.wasm' for the 'webAssembly' runtime"
+                )
+            )
+        }
+
+        var seenToolIDs: Set<String> = []
+        for (index, tool) in mcpTools.enumerated() {
+            let path = "mcpTools[\(index)]"
+            issues.append(contentsOf: tool.validationIssues(
+                path: path,
+                extensionIdentifier: identifier
+            ))
+            if !seenToolIDs.insert(tool.id).inserted {
+                issues.append(.init(path: "\(path).id", message: "duplicates '\(tool.id)'"))
+            }
+        }
+        if !mcpTools.isEmpty, !capabilities.contains(.mcpTools) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'mcp.tools' when MCP tools are declared"
+            ))
+        }
+
+        issues.append(contentsOf: settings.validationIssues())
+        if !settings.isEmpty, !capabilities.contains(.settings) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'settings' when settings are declared"
+            ))
+        }
+
+        var seenServices: Set<String> = []
+        for (index, service) in services.enumerated() {
+            let path = "services[\(index)]"
+            issues.append(contentsOf: service.validationIssues(path: path))
+            let key = "\(service.id)@\(service.version)"
+            if !seenServices.insert(key).inserted {
+                issues.append(.init(path: path, message: "duplicates '\(key)'"))
+            }
+        }
+        if services.count > 32 {
+            issues.append(.init(path: "services", message: "must contain at most 32 services"))
+        }
+        if !services.isEmpty, !capabilities.contains(.servicesProvide) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'services.provide' when services are declared"
+            ))
+        }
+
+        var seenDependencies: Set<String> = []
+        for (index, dependency) in serviceDependencies.enumerated() {
+            let path = "serviceDependencies[\(index)]"
+            issues.append(contentsOf: dependency.validationIssues(
+                path: path,
+                consumerIdentifier: identifier
+            ))
+            let key = "\(dependency.providerIdentifier)/\(dependency.serviceID)@\(dependency.version)"
+            if !seenDependencies.insert(key).inserted {
+                issues.append(.init(path: path, message: "duplicates this dependency"))
+            }
+        }
+        if serviceDependencies.count > 64 {
+            issues.append(.init(
+                path: "serviceDependencies",
+                message: "must contain at most 64 dependencies"
+            ))
+        }
+        if !serviceDependencies.isEmpty, !capabilities.contains(.servicesConsume) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'services.consume' when dependencies are declared"
+            ))
+        }
+
+        if companions.count > ExtensionCompanion.maximumCount {
+            issues.append(.init(
+                path: "companions",
+                message: "must contain at most \(ExtensionCompanion.maximumCount) companions"
+            ))
+        }
+        if !companions.isEmpty, runtime != .webAssembly {
+            issues.append(.init(
+                path: "companions",
+                message: "advanced companions require a 'webAssembly' core runtime"
+            ))
+        }
+        var seenCompanionIDs: Set<String> = []
+        var seenCompanionPaths: Set<String> = []
+        for (index, companion) in companions.enumerated() {
+            let path = "companions[\(index)]"
+            issues.append(contentsOf: companion.validationIssues(
+                path: path,
+                extensionIdentifier: identifier
+            ))
+            if !seenCompanionIDs.insert(companion.id).inserted {
+                issues.append(.init(
+                    path: "\(path).id",
+                    message: "duplicates '\(companion.id)'"
+                ))
+            }
+            if !seenCompanionPaths.insert(companion.bundlePath).inserted {
+                issues.append(.init(
+                    path: "\(path).bundlePath",
+                    message: "duplicates '\(companion.bundlePath)'"
+                ))
+            }
+        }
+        if companions.contains(where: { !$0.operations.isEmpty }),
+           !capabilities.contains(.companionOperations) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'companions.invoke' when companion operations are declared"
+            ))
+        }
 
         if !issues.isEmpty {
             throw ExtensionValidationError(issues: issues)
         }
     }
+}
+
+/// The execution boundary declared by an extension package.
+///
+/// Native remains the decode default for format-1 development packages. New distributable
+/// extensions use `webAssembly`, which runs behind Skalman's capability-only Wasm host.
+public enum ExtensionRuntime: String, Codable, Equatable, Sendable {
+    case native
+    case webAssembly
 }
 
 /// A named authority requested by an extension.
@@ -88,11 +281,35 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
 
     public static let commands = Self(rawValue: "commands")
     public static let panels = Self(rawValue: "panels")
-    public static let projectRead = Self(rawValue: "project.read")
-    public static let sessionEvents = Self(rawValue: "session.events")
+    public static let mcpTools = Self(rawValue: "mcp.tools")
+    public static let settings = Self(rawValue: "settings")
+    public static let servicesProvide = Self(rawValue: "services.provide")
+    public static let servicesConsume = Self(rawValue: "services.consume")
+    public static let companionOperations = Self(rawValue: "companions.invoke")
+    public static let componentCustomization = Self(rawValue: "ui.components")
+    public static let customMetalSurfaces = Self(rawValue: "ui.rendering.metal")
+    public static let hostProjectsRead = Self(rawValue: "host.projects.read")
+    public static let hostSessionsRead = Self(rawValue: "host.sessions.read")
+    public static let hostSessionRuntimeRead = Self(rawValue: "host.sessions.runtime.read")
+    public static let hostRepositoriesRead = Self(rawValue: "host.repositories.read")
+    public static let hostProvidersRead = Self(rawValue: "host.providers.read")
+    public static let hostAccountsPresentationRead = Self(
+        rawValue: "host.accounts.presentation.read"
+    )
+    public static let hostEvents = Self(rawValue: "host.events")
+    public static let providerIconResolver = Self(rawValue: "appearance.provider-icons")
+    public static let accountIconResolver = Self(rawValue: "appearance.account-icons")
+    public static let sessionIdentityRenderer = Self(rawValue: "appearance.session-identity")
+    public static let keyValueStorage = Self(rawValue: "storage.kv")
+    public static let cacheStorage = Self(rawValue: "storage.cache")
+    public static let secrets = Self(rawValue: "storage.secrets")
+    public static let networkClient = Self(rawValue: "network.client")
 }
 
 enum ExtensionIdentifierRules {
+    static let contributionMessage =
+        "must start with a lowercase letter and contain only lowercase letters, digits, '-', or '.'"
+
     static func isReverseDNSIdentifier(_ value: String) -> Bool {
         let parts = value.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count >= 2 else { return false }

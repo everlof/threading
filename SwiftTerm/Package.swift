@@ -4,10 +4,10 @@ import PackageDescription
 
 #if os(Linux) || os(Windows)
 let platformExcludes = ["Apple", "Mac", "iOS"]
-#elseif os(macOS)
-// Exclude iOS-specific code on macOS
-let platformExcludes = ["iOS"]
 #else
+// Package manifests run for the host OS, not the target being compiled. A macOS host can build
+// both the Skalman Mac app and its iOS app in one graph, so excluding `iOS` here would remove
+// `TerminalView` from an iPhone build. The Darwin sources already use `#if os(...)` guards.
 let platformExcludes: [String] = []
 #endif
 

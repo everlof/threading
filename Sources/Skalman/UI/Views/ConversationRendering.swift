@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 // MARK: - Rendering
 
@@ -17,7 +18,13 @@ extension ConversationViewController {
         switch change {
         case .appended(let index):
             let row = timeline.rows[index]
-            let (view, startsTurn) = ConversationRowView.make(for: row)
+            let (nativeView, startsTurn) = ConversationRowView.make(for: row)
+            let view: NSView
+            if let target = componentTarget(for: row) {
+                view = customizeConversationRow(nativeView, target: target)
+            } else {
+                view = nativeView
+            }
 
             // Not before the first turn: a rule at the very top of the pane separates the
             // conversation from nothing.
@@ -25,11 +32,13 @@ extension ConversationViewController {
                 addRow(ConversationRowView.turnDivider(), newTurn: true)
             }
 
-            // Kept for the rows something later needs to find: a tool call, so its result can
-            // be attached, and a user message, because the turn rail scrolls to it. Everything
-            // else is drawn once and never addressed again.
+            // Navigation follows the outer row so extension annotations are part of its visible
+            // extent. A tool result instead updates the retained native ToolCallView directly.
             switch row {
-            case .toolCall, .userMessage: rowViews[index] = view
+            case .userMessage:
+                rowViews[index] = view
+            case .toolCall:
+                pendingToolViews[index] = nativeView as? ToolCallView
             default: break
             }
 
@@ -40,11 +49,11 @@ extension ConversationViewController {
 
         case .resultAttached(let index):
             guard case .toolCall(let call) = timeline.rows[index],
-                  let toolView = rowViews[index] as? ToolCallView,
+                  let toolView = pendingToolViews[index],
                   let result = call.result else { return }
 
             toolView.setResult(result.text, isError: result.isError)
-            rowViews[index] = nil
+            pendingToolViews[index] = nil
             scrollToBottom()
 
         case .streaming(let text):
@@ -72,6 +81,25 @@ extension ConversationViewController {
             ProjectStore.shared.update(sessionID: agentSession.id) {
                 $0.resumeState = .resumable(agentSessionID)
             }
+        }
+    }
+
+    /// Conversation contracts are scoped to the session, not to message text or row indexes.
+    /// Extensions may annotate a kind of row in a known session without receiving transcript
+    /// content as an accidental data API.
+    private func componentTarget(
+        for row: ConversationTimeline.Row
+    ) -> ExtensionComponentTarget? {
+        let sessionID = agentSession.id.uuidString.lowercased()
+        switch row {
+        case .userMessage:
+            return .conversationUserMessage(sessionID: sessionID)
+        case .assistant:
+            return .conversationAssistantMessage(sessionID: sessionID)
+        case .toolCall:
+            return .conversationToolCall(sessionID: sessionID)
+        case .thinking, .notice:
+            return nil
         }
     }
 
@@ -117,7 +145,7 @@ extension ConversationViewController {
         setStatus(TurnStatusText.working(
             word: word,
             elapsed: elapsed,
-            effort: configuredEffort
+            effort: effectiveEffort
         ))
     }
 
@@ -226,10 +254,23 @@ extension ConversationViewController {
             if self.activePermissionCard === card { self.activePermissionCard = nil }
             self.delegate?.conversationDidChangeActivity(self)
             self.showNextPermissionIfIdle()
+            RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
         }
 
         guard let card else { return }
         activePermissionCard = card
-        addRow(card, newTurn: true)
+        RemoteNotificationService.shared.permissionRequested(
+            sessionID: sessionID,
+            toolName: pending.request.toolName,
+            summary: pending.request.summary
+        )
+        let target = ExtensionComponentTarget.conversationPermissionCard(
+            sessionID: agentSession.id.uuidString.lowercased()
+        )
+        addRow(
+            customizeConversationRow(card, target: target),
+            newTurn: true
+        )
+        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
     }
 }

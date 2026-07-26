@@ -69,6 +69,7 @@ final class StateManagerTests: XCTestCase {
         XCTAssertNil(session.forkedFrom)
         XCTAssertEqual(session.resumeState, .awaitingIdentifier)
         XCTAssertNil(session.model)
+        XCTAssertNil(session.reasoningEffort)
         XCTAssertNil(session.fastMode)
         XCTAssertNil(session.branch)
     }
@@ -114,8 +115,10 @@ final class StateManagerTests: XCTestCase {
         session.resumeState = .resumable(TranscriptID("thread-test"))
         session.hasLaunched = true
         session.lastExitCode = 7
+        session.reasoningEffort = "ultra"
         session.fastMode = true
         session.branch = "feature/test"
+        session.isPinned = true
         session.isArchived = true
 
         var project = Project(
@@ -151,8 +154,10 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(restoredSession.resumeState, .resumable(TranscriptID("thread-test")))
         XCTAssertEqual(restoredSession.accountHandle, .named("codex-work"))
         XCTAssertEqual(restoredSession.model, "gpt-test")
+        XCTAssertEqual(restoredSession.reasoningEffort, "ultra")
         XCTAssertEqual(restoredSession.fastMode, true)
         XCTAssertEqual(restoredSession.branch, "feature/test")
+        XCTAssertTrue(restoredSession.isPinned)
         XCTAssertEqual(restoredSession.lastExitCode, 7)
         XCTAssertEqual(restoredSession.forkedFrom, parentID)
         XCTAssertTrue(restoredSession.hasLaunched)

@@ -65,6 +65,27 @@ mode is silent: an unregistered test file builds nothing and `xcodebuild test` r
     drives it from `Design.Surface.accent`, re-resolved on a live theme switch and an
     appearance change.
 
+- **LabelMorph** (local fork): the single-line label that morphs a name character by
+  character when it changes, used for every session, project and checkout name the app shows.
+  - Location: `./LabelMorph/` (git submodule), a local Swift package like the other two.
+  - Upstream: https://github.com/everlof/LabelMorph — **our fork**, mod it directly.
+  - `MorphingTitleLabel` (in `UI/Design/`) is the theme boundary: the package owns glyph
+    layout and animation, the wrapper owns the semantic ink, Reduce Motion, clipping,
+    accessibility and the user's chosen preset.
+  - **Truncation is ours.** The stock label lays a whole line out from the leading edge and
+    lets it run past the view, which the wrapper's clip then cuts dead mid-glyph. That is
+    fine for a toolbar item sized to its text and wrong for every sidebar row, where names
+    are sentences and the pane is the narrow one. `MorphTruncation.tail` keeps the longest
+    head that fits and ends it with an ellipsis — found with one `CTLineGetStringIndexForPosition`
+    rather than a search, then verified and stepped back by *composed character* so a cut
+    never lands inside a surrogate pair. `intrinsicContentSize` still reports the whole
+    text's width, so Auto Layout hears what the label wants and truncation only describes
+    what it does once given less.
+  - **Assigning the value already in force costs nothing** (`font`, `textColor`,
+    `alignment` all guard on equality). Each rebuilds or repaints every glyph layer, and a
+    sidebar row restates all three on every configure — which happens continuously while an
+    agent works.
+
 ## Architecture
 
 ### Core Components
@@ -100,26 +121,70 @@ The window uses `.fullSizeContentView` with a transparent, hidden title bar, so 
 runs the full height and the traffic lights float over it. The window title stays `Skalman`,
 since it is only surfaced where macOS names the window (Mission Control, the Window menu).
 
-Chrome is a real `NSToolbar` (`.unifiedCompact` style — the large `.unified` style sizes the
-system sidebar toggle for a 15pt window title, dwarfing the quiet 13pt session title beside
-it; see `MainWindowToolbar.swift`) rather than a
-hand-rolled header. That matters: an earlier custom header had to track the sidebar's collapse
-state and shift itself sideways to dodge the traffic lights. The toolbar gets all of that for
-free, because its items are positioned relative to the window rather than to either pane.
+**The toolbar holds one item, and everything else belongs to the pane it describes.**
+`NSToolbar` positions its items relative to the *window*, which is what makes it right for the
+sidebar toggle — that control acts on the split rather than on either side of it, and it stays
+beside the traffic lights in both collapse states — and wrong for everything else that used to
+live there. The page tab, the `+`, the usage pill and the session's actions all name or act on
+the *content pane*, so at a fixed window x they drift away from it the moment a divider moves.
 
-- `.toggleSidebar` and `.sidebarTrackingSeparator` are **system** items. The first drives the
-  split view's first item; the second keeps a divider aligned with the split position.
-- `.sessionTitle` is ours, holding `SessionTitleItemView`. It sets `isBordered = false`, or the
-  system draws a bezel behind it and it reads as a button.
+`NSTrackingSeparatorToolbarItem` hid that for years, and stopped the day the sidebar became a
+plain split item: measured on macOS 26 across all three split-item kinds, it follows the divider
+only when the pane beside it has `.sidebar` behaviour. Dragging the divider wider then slid the
+sidebar out from under the tab and left it floating over the list.
+
+So those controls moved into `TerminalContainerViewController`'s own header strip
+(`setupHeader`, `PaneHeaderDefaults`), which cannot drift because it *is* the pane — no divider
+is crossed and there is nothing to track. Two things this settles that measuring never could:
+the header follows a **collapse** as readily as a drag, and it stops where the pane stops, so
+the display panel's own strip lines up with it rather than sitting under a window-wide row.
+
+The strip sits **under** the toolbar rather than in the titlebar. A view in the titlebar strip
+is behind AppKit's own titlebar container, which is what this project's earlier hand-rolled
+header ran into — it had to track the sidebar's collapse state and shift sideways to dodge the
+traffic lights. Below the safe area there is nothing to dodge.
+
+The style stays `.unifiedCompact`: the large `.unified` style sizes the system sidebar toggle
+for a 15pt window title, dwarfing the quiet controls in the header below it.
 
 Nothing may pin to `view.topAnchor` in either pane, or it lands under the toolbar — a bug this
-project has already had once, where it hid the terminal's first rows. The terminal, placeholder
-and sidebar content all pin to `safeAreaLayoutGuide`, which the toolbar insets for them.
+project has already had once, where it hid the terminal's first rows. The sidebar pins to
+`safeAreaLayoutGuide`; everything in the content pane pins to
+`TerminalContainerViewController.contentTopAnchor`, which is the header's bottom, so the header
+is the only place that knows how tall it is.
 
 `SidebarSplitViewController` overrides `toggleSidebar(_:)` to set `isCollapsed` directly.
 The stock implementation collapses but does not restore here, which left no way back to the
 sidebar. Overriding it fixes the toolbar button and the View menu together, since both route
 through that one method.
+
+**The sidebar is a plain split item, not `NSSplitViewItem(sidebarWithViewController:)`**, and
+that single line is the whole of its silhouette. On macOS 26 the sidebar *behaviour* draws the
+pane as a floating inset panel — rounded, held off the window's edges by a margin, with the
+content pane visible around it — and there is no property to decline it (`allowsFullHeightLayout`
+and `titlebarSeparatorStyle` both leave the inset). That is the platform's look for a panel over
+a document, and the wrong shape for a structural column beside a terminal: the margin left the
+toolbar's tab and controls reading as loose parts, and the terminal's colour ran underneath the
+sidebar it is meant to sit next to. So the pane is ours — flush to the window's edges, full
+height under the transparent titlebar, the split view's hairline as the only seam.
+
+Three things the behaviour supplied and now have to be stated, each found by losing it:
+
+- **The ground.** `ProjectSidebarViewController.applySidebarSurface` fills a `ThemedSurfaceView`
+  with `Surface.background` under *every* theme. It used to be conditional — System kept the
+  system material, a style covered it — and there is no material any more.
+- **The width.** `SidebarDefaults.holdingPriority` is one step above the default, or a window
+  resize widens the sidebar along with the terminal. The behaviour arranged this for itself.
+- **The table's own material.** `outlineView.style` is `.inset`, not `.sourceList`: the two draw
+  the same rows and the same selection capsule, and `.sourceList` adds a vibrant background *of
+  its own*. Stacked inside a matching material it was invisible; over an opaque ground it became
+  the sidebar's whole appearance, sampling the desktop through the window. Proven by filling the
+  ground with flat red — everything the list covered stayed grey-blue.
+
+The sidebar's scroll view also sets `automaticallyAdjustsContentInsets = false`. It is pinned to
+the safe area already, so AppKit was insetting it a second time for the same titlebar — and on
+macOS 26 that also installs a scroll-edge-effect `NSVisualEffectView` *inside* the scroll view,
+which `ThemeBoundaryAudit` correctly refuses. One pane, one answer about its own insets.
 
 Sidebar rows deliberately leave `NSTableCellView.textField` unset. Assigning it lets the table
 restyle the label on selection, which tints an unemphasized source-list row with the accent
@@ -173,8 +238,16 @@ the undocumented question of what Claude Code does with an image returned from a
 and the `⋯` menu offers only the actions that fit — an image and a document share almost
 nothing worth acting on.
 
-Three things were measured rather than assumed, each having first been wrong:
+Four things were measured rather than assumed, each having first been wrong:
 
+- **A split item's `holdingPriority` ties with its content's hugging**, and both are 250. That
+  tie is what let a dragged panel spring back on mouse-up: the divider's new width and the
+  labels' preferred width were equally important, so the solver was free to prefer the labels.
+  The panel is the one pane the user positions deliberately, so it holds ten points above that
+  (`DisplayPaneDefaults.holdingPriority`) and the terminal keeps the default, which is also what
+  makes the terminal absorb a window resize. The `NSImageView` note below is the same bug from
+  the other end, fixed by flooring the content instead — one pane's worth of content cannot be
+  floored one view at a time, which is why the priority moved.
 - **`NSSplitView.setPosition` does nothing** under `NSSplitViewController`, which lays its
   items out with Auto Layout. `setPosition(915, ofDividerAt: 1)` left the pane at its 260pt
   minimum. Width is set with a temporary constraint, released once honoured so the divider
@@ -1051,6 +1124,22 @@ and compares ids, order, titles, accounts and resume identifiers. A fixture prov
 path; that one proves the file the user will actually migrate, which is the only copy they
 cannot get back.
 
+**The same rule reaches the small stores**, and it had to: `ShortcutOverrideStore` and
+`AccountPreferencesStore` keep their state as one encoded blob in `UserDefaults`, and both
+collapsed *missing* and *unreadable* into one `else { return }`. For a document store the next
+write is a save; for a settings store the next write is **any ordinary edit** — so a user whose
+bindings failed to decode lost every one of them, permanently, the first time they rebound a
+key. Both now keep the unreadable bytes under `<key>.unreadable` (`DefaultsQuarantine`) and
+permit writes only if that keeping succeeded, which is `stateWritesAllowed` in miniature.
+
+A related ordering trap lives one layer up. `AppSettings`'s **`nonisolated static` readers go
+straight to `UserDefaults.standard`**, while the seeded defaults were registered only in its
+`init` — so a read that happened before anything touched `AppSettings.shared` saw an
+unregistered key, and `bool(forKey:)` answers `false`, which for every seeded setting is the
+*opposite* of its documented default. The sidebar's branch grouping is what showed it. The seeds
+are registered by the readers themselves now; registration is idempotent, and an invariant that
+depends on instantiation order is not an invariant.
+
 ### Diagnostics and Drafts
 
 Both exist because of one crash (22 July 2026), and each answers a different half of it.
@@ -1219,6 +1308,28 @@ glyph on the way in (`ProjectStore.strippingDecoration`). Claude Code reports ti
 already draws a status dot and an agent icon. A title consisting only of symbols is left
 intact rather than reduced to nothing.
 
+**A name that changes is morphed into its replacement, not swapped** — the sidebar rows, the
+toolbar's page tab, and project and checkout rows all draw through `MorphingTitleLabel`. Two
+rules decide when, and both exist because the animation is only honest about a *change to
+something already on screen*:
+
+- **Only the same record renamed animates.** A row holds the id it last drew and the string
+  it last drew; a morph needs both to say yes. A first fill, a row reconfigured while an
+  agent works, and a cell recycled from another session all land the name directly — the
+  last would otherwise animate a transition between two unrelated conversations, which reads
+  as a glitch. A *heading* never animates at all: its name is its identity, so a different
+  name there is a different heading rather than a rename of this one.
+- **The rename has to reach the view that is showing it**, which is what actually made this
+  work and was two separate gaps. `ProjectsDidChange` fires for content edits as well as
+  structural ones, and the sidebar answered every one with a full `reloadData()` — which
+  hands each row back to the reuse pool, losing the very name the morph animates from. So
+  `reload` compares a **structure signature** (identities and nesting, deliberately *not*
+  names) and refreshes the rows in place when the tree's shape is unchanged, while
+  `refreshRow` reconfigures the live view rather than reloading the row. Separately,
+  `MainWindowController` observed *nothing*: the toolbar title was updated only from the
+  terminal's own `sessionTitleChanged`, so a rename from the row's `⋯` menu never reached
+  it at all and the tab kept the old name until the pane next changed.
+
 `SessionNaming.backfillLegacyNames` runs once per launch and replaces what the old scheme
 left behind: placeholder titles ("Claude Code 2", the account-alias variants) drop to empty
 and are re-derived from the transcripts — the agent's own title where one exists, the first
@@ -1294,18 +1405,17 @@ conversation it was said in. Three things the tools do that a thinner wrapper wo
   safety net and start being a taste.
 
 **A terminal palette can follow the app theme.** `AppTheme.terminalPalette` states the palette
-that belongs with each style — neon-on-near-black for Cyberpunk, black-on-paper with the one red
-for Swiss, and the app's long-standing default for System — and the terminal theme list offers
-`TerminalThemeNames.followsAppTheme` ("Follow App Theme") as its first entry.
+that belongs with each style — from Cyberpunk neon and Bauhaus primaries to Art Deco brass and
+Botanical greens — and the terminal theme list offers `TerminalThemeNames.followsAppTheme`
+("Follow App Theme") as its first entry. System keeps the app's long-standing terminal default.
 
 Three decisions carry it:
 
-- **It is a reserved *name*, not a fourth setting.** Terminal themes are already keyed by name at
-  three scopes, so choosing it is an ordinary assignment and `ThemeResolution` needs no case for
-  it: a session can follow the chrome while its project names Solarized, and the narrowest scope
-  still wins. The name must be in `availableNames` or resolution treats it as dangling and
-  inherits past it, which looks exactly like the choice not sticking. `ThemeManager` refuses to
-  create or rename a theme to it.
+- **It is a reserved stable ID, not a fourth setting.** `TerminalThemeID.followsAppTheme`
+  participates in the same three scoped assignments as every other terminal theme, so a session
+  can follow the chrome while its project names Solarized and the narrowest scope still wins.
+  The display name is only presentation; persisted assignments do not break if a theme is
+  renamed. `ThemeManager` refuses to create a theme with the reserved identity or display name.
 - **The palette is stated per theme, not derived from the roles.** Sixteen ANSI colours have to
   stay legible against the ground *and* apart from each other, which eleven roles cannot answer —
   derivation gives eight near-hues. Writing it out is what makes the pairing a decision taken
@@ -1322,6 +1432,25 @@ protocol, not of the theme.
 
 A live app-theme switch is a terminal-theme switch for any session following it, which is why
 `AgentSessionViewController` observes `AppThemeDidChange` alongside the assignment events.
+
+An app theme has one identity and one or two complete `AppTheme.Variant`s. A variant owns its
+roles, material and paired terminal palette — all three may need to change across appearance,
+not merely the ground colour. A theme with one variant pins Aqua or Dark Aqua. A theme with both
+may still pin either one, or use `AppTheme.Mode.system` to leave `NSApp.appearance` unset and
+follow macOS automatically. The second variant is optional and can be added later; validation
+requires both only when the theme becomes adaptive.
+
+**System** is the identity case: it stores no literal variants and resolves AppKit's dynamic
+colours under each appearance. Duplicating it materialises editable light and dark variants.
+Legacy custom documents with top-level `roles`/`material`/`terminalPalette` decode into one
+equivalent variant, while new documents write a `variants` map.
+
+Built-ins are immutable and use stable IDs. MCP exposes list/get/set/create/duplicate/update.
+`get_app_theme` returns `appearance` plus `variants.light`/`variants.dark` in the same snake-case
+`roles`, `material`, and `terminal_colors` vocabulary create/update accept, with resolved roles
+alongside them for inspection. One variant is a complete fixed theme; both plus
+`appearance: "adaptive"` follow macOS. Tool descriptions state the merge and fallback rules, so
+duplicate-then-update is available explicitly without a prescriptive workflow paragraph.
 
 A natively-rendered session records an assignment but shows almost none of it: the conversation
 is drawn in system colours per the design system, so the theme reaches only the pane's backdrop.
@@ -1355,7 +1484,7 @@ view's edges sat exactly at the cards': the halo faded vertically (the spill lan
 section spacing, inside the clip) and not sideways at all. The contract is
 `Design.Size.glowGutter` — the room a clipping host holds clear around glowing panels,
 constant across themes because layout never moves with the theme; `SettingsUI.page` budgets
-it, `AppThemeTests` pins it to the widest stock glow, and a Cyberpunk render assertion in
+it, `AppThemeTests` pins it to the widest stock glow or directed shadow, and a Cyberpunk render assertion in
 `ThemeSettingsRenderTests` samples pixels on all four sides of a card so a new clipping host
 cannot silently reintroduce the flat edge. Theme-specific issues get general fixes at this
 seam: themes state specs (`AppTheme.Material`), one interpreter draws them
@@ -1713,7 +1842,40 @@ Components so far:
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. |
 | `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
+| `ThemedSplitView` | An `NSSplitView` whose divider is inked against the window backdrop, not the chrome's ground. |
+| `ThemedSurfaceView` | A pane's ground, and the one view that re-resolves its fill on a *system* light/dark switch. |
+| `ToolbarButtonGroupView` | Related toolbar actions as one item, so their spacing is ours rather than `NSToolbar`'s. |
 | `WorkingOrbView` | The dotted "working" orb, tinted with the accent — the theme boundary for the `ThinkingOrbs` view. |
+| `ThemedTabItemView` | **Every** tab: the display pane's strip, the settings sidebar, and the toolbar's active page. |
+| `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. |
+| `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
+
+**Two components say "every" for a reason, and it is the design system's sharpest lesson so
+far.** Each of them was two or three implementations, and each had already been "unified" by
+sharing constants — one radius, one type scale, one height, read from a common enum. It did not
+hold, in either case, and both times the reason was the same: **what drifts is not the metrics.**
+The pane's tab gained hover and press states while the toolbar's stayed inert; one faded its
+close button in, the other showed it always; one was an `NSControl` with a `.radioButton` role
+and keyboard activation, the other a plain `NSView` that could not be clicked at all. A shared
+constant reaches none of that. The `⋯` and the `×` were 16pt and 20pt around 16pt and 12pt
+glyphs — two paddings nobody chose, each measured where it was used.
+
+So the thing that genuinely differed became **data instead of a type**. A tab in the pane and a
+tab in the toolbar differ only in which ground they draw on, which is now an `InkSource` they are
+handed rather than a base class they inherit — see `Design.Ink.chrome` and `BackdropOverlay`. An
+icon button names a **role** (`ThemedIconButton.Target`) rather than taking an `NSSize`, and the
+role states the target, the glyph and therefore the padding between them; there is deliberately
+no size parameter, because that is the seam a fourth slightly-different button arrives through.
+The hover fill is part of the role too: a toolbar button lifts to `surface` because it sits on
+the bare backdrop, an inline one to `surfaceHover` because it sits on a fill that is *already*
+`surface` — a distinction previously set by hand at the one call site that had noticed.
+
+Two guards keep it: `MainWindowToolbar.makeOverlayItem` asserts that anything placed in the
+toolbar inks from `.backdrop` (the protocol can only say a view *can* be inked, not which ink it
+took, now that one component serves both), and `ToolbarChromeRenderTests` pins that the page tab
+and the pane tab are the same type rather than comparing two classes' measurements — a test that
+could only ever catch drift after it happened, and which passed for a long time over two tabs
+that visibly differed.
 
 The rule behind the table now covers **every chrome-drawing AppKit class**, not just the seven
 that eroded first: content containers (`NSScrollView`, `NSTextView`, tables) because their
@@ -1724,6 +1886,47 @@ chrome (`NSMenu`, `NSPopover`, `NSAlert`, the file panels) stay allowed — they
 the theme owns. `config/theme-boundary.json` owns the list; the build and test suite both run
 its SwiftSyntax checker, while `.swiftlint.yml` provides fast editor feedback. A class with no
 wrapper yet gets one in `UI/Design/` first.
+
+**A choice that *is* an animation is shown in the list, not named in it.** A dropdown row can
+carry a live view (`ThemedMenuPreview` on `ThemedMenuItem`), and the Motion settings page is
+what needed it: "Bounce" describes a transition exactly as well as "Searching" describes an orb,
+which is to say not at all, so deciding meant selecting one, watching it, selecting the next, and
+comparing against a memory of the first. An image would not have helped — a still of an animation
+says only that there is one.
+
+The view is the caller's, made once and handed over, which is what keeps a preview honest: the
+row draws the same `WorkingOrbView` the conversation status draws and the same
+`MorphingTitleLabel` the sidebar morphs, rather than a second rendering of either. Two
+placements, because the two settings need different shapes — `.leading` puts a preview in its own
+reserved column beside the title, `.title` puts it *in* the title's slot and the row draws no
+text, which is the only way a text transition can be demonstrated at all.
+
+Four rules, and each is about legibility rather than cost:
+
+- **Who moves is per placement, and the previews decide.** Seven orbs run at once because
+  comparing animations means seeing them together; eleven names morphing at once is unreadable,
+  so a transition plays on the highlighted row only. The row reports its highlight
+  (`highlightChanged`) and says nothing about what that should mean.
+- **A demonstration holds the row's own name first** (`Design.Motion.demonstrationHold`). The
+  highlight is also where it lands when the menu *opens*, and a list whose selected row read
+  "Skalman" the moment it appeared had answered a question nobody asked with the one name the
+  user came to read. It doubles as the dwell that lets a pointer cross the list.
+- **Only the row that owns a demonstration may end it.** The menu keeps its rows in a
+  dictionary, so a highlight moving from one row to the next reports in no defined order, and an
+  unguarded stop cancelled the row that had just started.
+- **A closed menu takes its demonstration with it.** Nothing reports a highlight *leaving* when
+  a dropdown is dismissed — the surface deliberately stops moving the highlight once it is
+  closing — so the row's own departure from the window (`viewWillMove(toWindow: nil)`) delivers
+  the `false`. Without it a timer steps forever against a view nobody can see.
+
+Under Reduce Motion the rows keep their names and stay still: `setStringValue` would not animate,
+so demonstrating there would be two names swapping outright — more visual change than the list it
+replaced, in the setting that asked for less. The orbs need no branch, since `ThinkingOrbView`
+already idles its display link.
+
+The second name is the **app's own**, read from the bundle (`AppInfo.name`) rather than written
+down. A transition acts on a change, so a demonstration needs two names, and that is the one
+string every install has.
 
 `PromptView` is an `NSTextView`, not an `NSTextField`, for two things a single-line field
 cannot do: a task worth describing runs past one line, and what is dropped on a composer is
@@ -1756,6 +1959,31 @@ The vocabulary these encode, which new work should follow:
   work and the accent is the user's own. No hardcoded RGB.
 - **`.continuous` corners.** The default circular curve looks subtly wrong beside system
   controls at these radii; `applySurface(fill:radius:border:)` handles this.
+- **Aligned by ink, inset from the corner.** Containers place controls by their visible
+  content, not their frames — a plain button's frame includes its invisible hover surface,
+  which is what `OpticalInsetProviding` reports and the container subtracts. Margins that
+  meet the window's rounded corners come from the corner-adapted layout guide
+  (`layoutGuide(for: .safeArea(cornerAdaptation:))`), which states clearance only where a
+  curve actually is — measured for the sidebar's band: 16pt at the window corner, zero at
+  the divider. `PaneFooterView` is the reference for both. Equal frame margins are not
+  equal visual margins.
+
+**One silhouette per strip.** `TabAppearance` states a tab's geometry and type scale in one
+place, because the app draws tabs in two views that cannot share a class: the pane's strip reads
+the chrome's roles, while the toolbar's active-page tab sits on the terminal backdrop and inks
+itself from there (`BackdropOverlay`). They differ by that alone and had drifted in everything
+else — a 13pt semibold pill beside a 12pt regular rounded rect — which is how one navigation
+idea came to look like two. The toolbar's controls join them: `ToolbarButtonView` and the usage
+pill draw at `Design.Radius.control` rather than a pill radius, because these buttons are square
+and a pill radius on a square is a *circle*, so the strip held a rounded rect, a pill and three
+circles at once. `ToolbarChromeRenderTests` draws the strips on a near-black and a near-white
+backdrop, since a relationship between neighbouring shapes is visible in a picture and in no
+assertion anyone would write.
+
+A tab's icon takes the **label's** colour, never the accent. The accent means "this wants you"
+here — the sidebar's attention dot is the same colour — and spending it on whichever tab happens
+to be open says that about nothing. The info panel's process dots follow the same rule and draw
+in the positive status role, which is what a running process actually is.
 
 `SessionComposerViewController` is the reference implementation, and **the only way a session
 is created**. Reading down its column is the decision in order: the project, the choices
@@ -1817,7 +2045,7 @@ amount of our drawing reaches: the **`NSMenu` a `ThemedPopUp` opens**, and the *
 panel behind `ThemeSwatchView`**. Callers depend on the wrapper, not on the system part, so
 replacing either with something custom later is a change to one file.
 
-Four bugs are worth keeping, because each is a trap the next drawn control will walk into:
+Five bugs are worth keeping, because each is a trap the next drawn control will walk into:
 
 - **`withAlphaComponent` replaces alpha, it does not scale it.** Dimming a disabled button
   against a resting surface that is *already* translucent — Cyberpunk holds its neon at 10% —
@@ -1831,6 +2059,36 @@ Four bugs are worth keeping, because each is a trap the next drawn control will 
 - **A `CGColor` on a layer is frozen**, which is the whole reason these controls draw. The one
   place a layer is unavoidable is `ThemedSpinner` — it animates off the main thread — so its
   `strokeColor` is re-applied on every redraw instead.
+- **`NSTextView(frame:textContainer: nil)` builds no text system**, and that is not the same
+  thing as building the default one. `init(frame:)` creates the storage, layout manager and
+  container; the *designated* initializer takes them from you, and nil means the view joins no
+  text network at all. Such a view lays out, draws its box, takes first responder and shows its
+  focus ring — and then silently discards every keystroke, refuses every selection and reports a
+  nil `layoutManager` to whatever sizes itself to the text. From 23 July it cost the app **every
+  `PromptView` it has** — the session composer, the conversation's reply box, the commit message —
+  and every `ThemedTextView.scrolling()` besides.
+  `ThemedTextView`'s only initializer is `init(frame:textContainer:)`, so
+  the boundary rewrite had to pass *something*, and `nil` reads as "the usual one". `ThemedTextView`
+  now builds a TextKit 1 network when given none, and holds the storage — ownership runs storage →
+  layout manager → container, and the view retains only the container, so an unheld network is
+  released the moment the initializer returns. Pinned by `PromptInputTests`, which types into the
+  prompt through the responder chain rather than asserting about its appearance: nothing visible
+  distinguishes a dead text view from a live empty one, which is why nothing caught this.
+
+That freeze has **two** invalidating events, and only one of them was ever swept. A theme change
+runs `AppThemeRefresh.repaintEverything`; a **system light/dark switch ran nothing**, so dynamic
+text turned dark while the surfaces under it stayed dark too. It hid for a long time behind two
+accidents: the largest surface in the window was a system material AppKit repainted itself, and
+the terminal beside it is a palette with no light and dark to switch between. Both are gone now
+— the sidebar paints its own ground — so `AppThemeRefresh.startObservingSystemAppearance` fires
+the same sweep from `NSApp.effectiveAppearance`, one turn later, because KVO lands before AppKit
+has handed the new appearance down the tree.
+
+What that sweep cannot fix is a pane whose *ground* is the terminal palette while its content is
+drawn in system colours: a native conversation under a dark terminal theme in light mode is dark
+text on a dark ground. That is the documented cost of the conversation drawing in system colours,
+not a stale layer, and it is the same trade in the other direction that made the old sidebar look
+right by luck.
 
 `ThemedPopUp` carries two rules that are not obvious: an item that already has an action keeps
 it (which is how a pull-down like the themes gear works, and only unclaimed items route through
@@ -1933,6 +2191,15 @@ Sources/Skalman/
 - Unit tests for `TerminalProfile` serialization
 - Integration tests for shell spawning
 - UI tests for keyboard input handling
+
+**A fixture window is built, never shown.** `AppDelegate.applicationShouldTerminateAfterLastWindowClosed`
+is `true`, which is right for the app and a trap for the test host: a window ordered on screen
+and then released queues that decision, and AppKit acts on it the next time *anything* spins the
+run loop. The host then exits cleanly inside a later, unrelated test — no crash report, no failing
+assertion, and `xcodebuild` reporting "unexpected exit" against whichever test happened to pump.
+Found by a menu test that ran the run loop for a second, which made a latent version of this
+land in `SessionImportBelongingTests`. An unshown window still lays out, still draws through
+`cacheDisplay`, and still takes a first responder, which is everything these tests need.
 
 ## Documentation
 

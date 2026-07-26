@@ -1,0 +1,160 @@
+{
+  "$id" : "https://skalman.invalid/schema/components/sidebar.project-row-v1.schema.json",
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties" : false,
+  "properties" : {
+    "id" : {
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "properties" : {
+      "items" : {
+        "properties" : {
+          "property" : {
+            "enum" : [
+              "title",
+              "identity-image",
+              "tool-tip"
+            ]
+          },
+          "value" : {
+            "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+          }
+        },
+        "required" : [
+          "property",
+          "value"
+        ],
+        "type" : "object"
+      },
+      "type" : "array"
+    },
+    "replacement" : {
+      "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
+      "x-skalman-node-constraints" : {
+        "allowedButtonRoles" : [
+          "standard"
+        ],
+        "allowedCustomSurfaceKinds" : [
+
+        ],
+        "allowedImageRoles" : [
+          "identity",
+          "icon",
+          "decoration"
+        ],
+        "allowedStackAxes" : [
+          "horizontal"
+        ],
+        "allowedStatusRoles" : [
+          "neutral",
+          "positive",
+          "warning",
+          "negative"
+        ],
+        "allowedTextRoles" : [
+          "compactBody",
+          "compactDetail"
+        ],
+        "allowsDivider" : false,
+        "allowsFixedSpacer" : true,
+        "allowsFlexibleSpacer" : true,
+        "allowsOverlay" : false,
+        "allowsProceed" : false,
+        "maximumDepth" : 1,
+        "maximumNodes" : 8,
+        "maximumTextLength" : 80,
+        "requiredRootAxis" : "horizontal",
+        "requiresProceed" : false
+      }
+    },
+    "slots" : {
+      "items" : {
+        "oneOf" : [
+          {
+            "additionalProperties" : false,
+            "properties" : {
+              "children" : {
+                "items" : {
+                  "$ref" : "https://skalman.invalid/schema/extension-node.schema.json"
+                },
+                "maxItems" : 2,
+                "minItems" : 1,
+                "type" : "array",
+                "x-skalman-node-constraints" : {
+                  "allowedButtonRoles" : [
+
+                  ],
+                  "allowedCustomSurfaceKinds" : [
+
+                  ],
+                  "allowedImageRoles" : [
+
+                  ],
+                  "allowedStackAxes" : [
+
+                  ],
+                  "allowedStatusRoles" : [
+                    "neutral",
+                    "positive",
+                    "warning",
+                    "negative"
+                  ],
+                  "allowedTextRoles" : [
+
+                  ],
+                  "allowsDivider" : false,
+                  "allowsFixedSpacer" : false,
+                  "allowsFlexibleSpacer" : false,
+                  "allowsOverlay" : false,
+                  "allowsProceed" : false,
+                  "maximumDepth" : 0,
+                  "maximumNodes" : 1,
+                  "maximumTextLength" : 24,
+                  "requiresProceed" : false
+                }
+              },
+              "slot" : {
+                "const" : "after-title"
+              }
+            },
+            "required" : [
+              "slot",
+              "children"
+            ],
+            "type" : "object"
+          }
+        ]
+      },
+      "type" : "array"
+    },
+    "target" : {
+      "additionalProperties" : false,
+      "properties" : {
+        "component" : {
+          "const" : "sidebar.project-row"
+        },
+        "contractVersion" : {
+          "const" : 1
+        },
+        "entityID" : {
+          "minLength" : 1,
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "component",
+        "contractVersion"
+      ],
+      "type" : "object"
+    }
+  },
+  "required" : [
+    "id",
+    "target",
+    "properties",
+    "slots"
+  ],
+  "title" : "Skalman sidebar.project-row v1 component patch",
+  "type" : "object"
+}

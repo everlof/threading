@@ -113,4 +113,25 @@ enum AppThemeRole: String, CaseIterable, Codable {
         .statusPositive, .statusWarning, .statusNegative,
         .syntaxKeyword, .syntaxType, .syntaxString, .syntaxNumber
     ]
+
+    /// Snake case is the agent-facing spelling. The stored document keeps the enum's original
+    /// raw values for compatibility, while tools accept both forms so hand-authored documents
+    /// and model-authored patches meet at the same role.
+    var wireName: String {
+        rawValue.reduce(into: "") { result, character in
+            if character.isUppercase {
+                result.append("_")
+                result.append(character.lowercased())
+            } else {
+                result.append(character)
+            }
+        }
+    }
+
+    static func named(_ name: String) -> AppThemeRole? {
+        allCases.first {
+            $0.rawValue.caseInsensitiveCompare(name) == .orderedSame
+                || $0.wireName.caseInsensitiveCompare(name) == .orderedSame
+        }
+    }
 }

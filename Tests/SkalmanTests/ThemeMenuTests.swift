@@ -20,13 +20,17 @@ final class ThemeMenuTests: XCTestCase {
 
     func testSessionMenuOffersInheritThenEveryTheme() throws {
         let sidebar = ProjectSidebarViewController()
-        let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
+        let sessionID = SessionID()
+        let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: sessionID))
 
         let titles = submenu.items.map(\.title)
         let names = ThemeManager.shared.allThemes.map(\.name)
 
         // Inherit, separator, one item per theme, separator, the door to Settings.
-        XCTAssertEqual(titles.first, "Inherit (\(ThemeAssignments.defaultTheme.name))")
+        XCTAssertEqual(
+            titles.first,
+            "Inherit (\(ThemeAssignments.inheritedName(forSession: sessionID)))"
+        )
         XCTAssertEqual(titles.last, "Edit Themes…")
         for name in names {
             XCTAssertTrue(titles.contains(name), "\(name) is missing from the menu")
@@ -58,7 +62,7 @@ final class ThemeMenuTests: XCTestCase {
         let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
 
         for item in submenu.items where item.representedObject is ThemeMenuChoice {
-            guard (item.representedObject as? ThemeMenuChoice)?.themeName != nil else { continue }
+            guard (item.representedObject as? ThemeMenuChoice)?.themeID != nil else { continue }
             XCTAssertNotNil(item.image, "\(item.title) has no swatch")
         }
     }
@@ -93,14 +97,14 @@ final class ThemeMenuTests: XCTestCase {
         XCTAssertEqual(pid, projectID)
     }
 
-    /// Clearing is the nil `themeName`, which is why the handler needs no sentinel to tell
+    /// Clearing is the nil `themeID`, which is why the handler needs no sentinel to tell
     /// "inherit" apart from a theme called something.
     func testInheritCarriesNoThemeName() throws {
         let sidebar = ProjectSidebarViewController()
         let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
 
         let inherit = try XCTUnwrap(submenu.items.first?.representedObject as? ThemeMenuChoice)
-        XCTAssertNil(inherit.themeName)
+        XCTAssertNil(inherit.themeID)
     }
 
     /// End to end through AppKit's own dispatch: picking an item reaches the assignment layer.
@@ -117,7 +121,7 @@ final class ThemeMenuTests: XCTestCase {
         let submenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
 
         let themeItem = try XCTUnwrap(
-            submenu.items.first { ($0.representedObject as? ThemeMenuChoice)?.themeName != nil },
+            submenu.items.first { ($0.representedObject as? ThemeMenuChoice)?.themeID != nil },
             "no theme item in the menu"
         )
         let action = try XCTUnwrap(themeItem.action)
@@ -141,7 +145,7 @@ final class ThemeMenuTests: XCTestCase {
         let sidebar = ProjectSidebarViewController()
         let item = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: SessionID()))
             .items
-            .first { ($0.representedObject as? ThemeMenuChoice)?.themeName != nil }
+            .first { ($0.representedObject as? ThemeMenuChoice)?.themeID != nil }
         let themeItem = try XCTUnwrap(item, "no theme item in the menu")
 
         // Anything transient would already be gone by the time the menu is shown.

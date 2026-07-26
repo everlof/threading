@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skalman.invalid/schema/extension-process.schema.json",
+  "title": "Skalman persistent extension process message",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/actionRequest"
+    },
+    {
+      "$ref": "#/$defs/actionResponse"
+    },
+    {
+      "$ref": "#/$defs/commandRequest"
+    },
+    {
+      "$ref": "#/$defs/commandResponse"
+    },
+    {
+      "$ref": "#/$defs/mcpToolRequest"
+    },
+    {
+      "$ref": "#/$defs/mcpToolResponse"
+    },
+    {
+      "$ref": "#/$defs/componentActionRequest"
+    },
+    {
+      "$ref": "#/$defs/settingsUpdateRequest"
+    },
+    {
+      "$ref": "#/$defs/settingsUpdateResponse"
+    },
+    {
+      "$ref": "#/$defs/serviceRequest"
+    },
+    {
+      "$ref": "#/$defs/serviceResponse"
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "actionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestID", "panelID", "actionID", "context"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "panelID": { "$ref": "#/$defs/identifier" },
+        "actionID": { "$ref": "#/$defs/identifier" },
+        "context": { "$ref": "#/$defs/commandContext" }
+      }
+    },
+    "componentTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "contractVersion"],
+      "properties": {
+        "component": { "type": "string", "minLength": 1 },
+        "contractVersion": { "type": "integer", "minimum": 1 },
+        "entityID": { "type": "string", "minLength": 1 }
+      }
+    },
+    "componentActionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "target",
+        "actionID"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "target": { "$ref": "#/$defs/componentTarget" },
+        "actionID": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "actionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestID"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "panel": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "title", "root"],
+          "properties": {
+            "id": { "$ref": "#/$defs/identifier" },
+            "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "loadActionID": { "$ref": "#/$defs/identifier" },
+            "root": {
+              "$ref": "extension-node.schema.json"
+            }
+          }
+        },
+        "message": { "type": "string" },
+        "error": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["error"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["panel"] },
+                { "required": ["message"] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "commandContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectID": { "type": "string", "minLength": 1 },
+        "sessionID": { "type": "string", "minLength": 1 }
+      }
+    },
+    "commandRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "commandID",
+        "context"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "commandID": { "$ref": "#/$defs/identifier" },
+        "context": { "$ref": "#/$defs/commandContext" }
+      }
+    },
+    "commandResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestID", "commandID"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "commandID": { "$ref": "#/$defs/identifier" },
+        "message": { "type": "string", "minLength": 1 },
+        "error": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["error"]
+          },
+          "then": {
+            "not": {
+              "required": ["message"]
+            }
+          }
+        }
+      ]
+    },
+    "settingsUpdateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "settingsVersion",
+        "values"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "settingsVersion": { "const": 1 },
+        "values": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/$defs/identifier" }
+        }
+      }
+    },
+    "settingsUpdateResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "settingIDs"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "settingIDs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "error": { "type": "string", "minLength": 1 }
+      }
+    },
+    "serviceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "callerExtensionIdentifier",
+        "serviceID",
+        "serviceVersion",
+        "arguments"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "callerExtensionIdentifier": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$"
+        },
+        "serviceID": { "$ref": "#/$defs/identifier" },
+        "serviceVersion": { "type": "integer", "minimum": 1 },
+        "arguments": { "type": "object" }
+      }
+    },
+    "serviceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "serviceID",
+        "serviceVersion"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "serviceID": { "$ref": "#/$defs/identifier" },
+        "serviceVersion": { "type": "integer", "minimum": 1 },
+        "value": true,
+        "error": { "type": "string", "minLength": 1 }
+      },
+      "oneOf": [
+        {
+          "required": ["value"],
+          "not": { "required": ["error"] }
+        },
+        {
+          "required": ["error"],
+          "not": { "required": ["value"] }
+        }
+      ]
+    },
+    "mcpToolRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "sessionID",
+        "toolID",
+        "arguments"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "sessionID": { "type": "string", "minLength": 1 },
+        "toolID": { "$ref": "#/$defs/identifier" },
+        "arguments": { "type": "object" }
+      }
+    },
+    "mcpToolResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestID", "text", "isError"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "isError": { "type": "boolean" }
+      }
+    }
+  }
+}
