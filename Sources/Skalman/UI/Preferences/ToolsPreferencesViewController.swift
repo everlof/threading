@@ -120,11 +120,11 @@ final class ToolsPreferencesViewController: NSViewController {
         icon.widthAnchor.constraint(equalToConstant: ToolsPreferencesDefaults.iconWidth).isActive = true
 
         let title = NSTextField(labelWithString: tool.title)
-        title.font = Design.Typography.body()
+        title.applyFont(.body)
         title.textColor = Design.Text.label
 
         let detail = NSTextField(labelWithString: tool.detail)
-        detail.font = Design.Typography.subheading()
+        detail.applyFont(.subheading)
         detail.textColor = Design.Text.secondary
         detail.lineBreakMode = .byTruncatingTail
 
@@ -134,7 +134,7 @@ final class ToolsPreferencesViewController: NSViewController {
         labels.spacing = Design.Spacing.hairline
 
         let name = NSTextField(labelWithString: tool.name)
-        name.font = Design.Typography.compactToolName()
+        name.applyFont(.compactToolName)
         name.textColor = Design.Text.tertiary
         name.setContentHuggingPriority(.required, for: .horizontal)
         name.setContentCompressionResistancePriority(.required, for: .horizontal)

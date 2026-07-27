@@ -31,7 +31,7 @@ final class GitReviewCommitRow: NSView {
         applySurface(fill: .clear, radius: .control)
 
         let hashLabel = NSTextField(labelWithString: commit.shortHash)
-        hashLabel.font = Design.Typography.code()
+        hashLabel.applyFont(.code())
         hashLabel.textColor = Design.Text.tertiary
         hashLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -45,7 +45,7 @@ final class GitReviewCommitRow: NSView {
         identity.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let subjectLabel = NSTextField(labelWithString: commit.subject)
-        subjectLabel.font = Design.Typography.control()
+        subjectLabel.applyFont(.control)
         subjectLabel.textColor = Design.Text.label
         subjectLabel.lineBreakMode = .byTruncatingTail
         subjectLabel.usesSingleLineMode = true
@@ -66,7 +66,7 @@ final class GitReviewCommitRow: NSView {
 
         let when = Self.relativeFormatter.localizedString(for: commit.date, relativeTo: Date())
         let byline = NSTextField(labelWithString: "\(commit.author) · \(when)")
-        byline.font = Design.Typography.detail()
+        byline.applyFont(.detail())
         byline.textColor = Design.Text.tertiary
         byline.lineBreakMode = .byTruncatingTail
         byline.usesSingleLineMode = true
@@ -128,7 +128,7 @@ final class GitReviewCommitRow: NSView {
         let name = isTag ? String(ref.dropFirst(GitReviewCommitRowDefaults.tagPrefix.count)) : ref
 
         let label = NSTextField(labelWithString: name)
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = ref == GitReviewCommitRowDefaults.headRef ? Design.Text.label : Design.Text.secondary
         label.translatesAutoresizingMaskIntoConstraints = false
 
@@ -162,6 +162,13 @@ final class GitReviewCommitRow: NSView {
             options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
             owner: self
         ))
+
+        // A row that scrolled out from under the pointer was never told it was left — see
+        // `NSView.hoverIsStale`.
+        if hoverIsStale(isHovered) {
+            isHovered = false
+            applyHover()
+        }
     }
 
     override func mouseEntered(with event: NSEvent) {

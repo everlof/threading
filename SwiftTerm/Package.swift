@@ -51,9 +51,7 @@ let products: [Product] = [
 let targets: [Target] = [
     .target(
         name: "SwiftTerm",
-        dependencies: [
-            .product(name: "Subprocess", package: "swift-subprocess", condition: .when(platforms: [.macOS, .linux]))
-        ],
+        dependencies: [],
         path: "Sources/SwiftTerm",
         exclude: platformExcludes
     ),
@@ -88,8 +86,7 @@ let package = Package(
     ],
     products: products,
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.0.0"),
-        .package(url: "https://github.com/swiftlang/swift-subprocess", branch: "main")
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.0.0")
     ],
     targets: targets,
     swiftLanguageVersions: [.v5]

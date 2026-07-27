@@ -299,7 +299,9 @@ open class Terminal {
     // You can ignore most of the defaults set here, the function
     // reset() will do that again
     var sendFocus: Bool = false
-    var cursorHidden : Bool = false
+    /// Whether DECTCEM has hidden the cursor. Readable from outside so a host serialising the
+    /// screen (for a remote mirror, a snapshot) can reproduce the cursor state it found.
+    public internal(set) var cursorHidden : Bool = false
     
     /// Controls the origin mode (DECOM), when set, the screen is limited to the top and bottom margins
     var originMode: Bool = false

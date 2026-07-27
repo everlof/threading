@@ -34,7 +34,7 @@ final class FindBarView: NSView {
 
     private lazy var resultsLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
-        label.font = Design.Typography.detail()
+        label.applyFont(.detail())
         label.textColor = Design.Text.secondary
         return label
     }()

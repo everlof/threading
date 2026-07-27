@@ -202,7 +202,7 @@ private enum ExtensionComponentPatchPreviewRenderer {
                     labelWithString: "\(surface.kind.rawValue.capitalized) custom surface"
                 )
                 label.alignment = .center
-                label.font = Design.Typography.detail()
+                label.applyFont(.detail())
                 label.textColor = Design.Text.secondary
                 label.applySurface(
                     fill: Design.Surface.controlResting,
@@ -233,7 +233,7 @@ private enum ExtensionComponentPatchPreviewRenderer {
         let heading = NSTextField(
             labelWithString: "\(contract.id.rawValue) · v\(contract.version)"
         )
-        heading.font = Design.Typography.caption()
+        heading.applyFont(.caption)
         heading.textColor = Design.Text.secondary
 
         let shell = NSView()
@@ -250,7 +250,7 @@ private enum ExtensionComponentPatchPreviewRenderer {
         let footer = NSTextField(
             labelWithString: owned.isEmpty ? "No host-owned behavior" : "Host keeps \(owned)"
         )
-        footer.font = Design.Typography.detail()
+        footer.applyFont(.detail())
         footer.textColor = Design.Text.tertiary
         footer.lineBreakMode = .byTruncatingTail
 

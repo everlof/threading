@@ -256,6 +256,48 @@ enum AppThemeEditing {
             )
         }
 
+        // Code is body text too. The conversation's diffs and code blocks draw the syntax
+        // roles over the chrome, so a variant whose keyword colour vanishes there ships
+        // unreadable diffs — found by a live theme whose light variant kept its dark syntax
+        // set, and every keyword drew as white-on-white. Two deliberate softenings: the floor
+        // is the accent's 2:1 rather than the label's 3:1, because Apple's own light teal
+        // sits at 2.2:1 and a System duplicate must stay valid; and only the ground is
+        // measured, because the panel is a wash a few percent off it — a gate that also
+        // measured the wash failed on rounding, not on readability.
+        for role in [AppThemeRole.syntaxKeyword, .syntaxType, .syntaxString, .syntaxNumber] {
+            let colour = composite(
+                resolved.resolved(role, appearance: appearance),
+                over: ground
+            )
+            let ratio = ThemeContrast.ratio(colour, ground)
+            guard ratio >= 2 else {
+                throw AppThemeEditingError.invalid(
+                    "\(kind.rawValue) \(role.wireName) "
+                        + "\(resolved.resolved(role, appearance: appearance).hexString) on the "
+                        + "window ground has \(formatted(ratio)):1 contrast; "
+                        + "at least 2:1 is required."
+                )
+            }
+        }
+
+        // Status hues annotate the chrome — session dots, ± counters, diff signs — and need
+        // the accent's floor to stay tellable from the ground.
+        for role in [AppThemeRole.statusPositive, .statusWarning, .statusNegative] {
+            let colour = composite(
+                resolved.resolved(role, appearance: appearance),
+                over: ground
+            )
+            let ratio = ThemeContrast.ratio(colour, ground)
+            guard ratio >= 2 else {
+                throw AppThemeEditingError.invalid(
+                    "\(kind.rawValue) \(role.wireName) "
+                        + "\(resolved.resolved(role, appearance: appearance).hexString) is only "
+                        + "\(formatted(ratio)):1 against the window ground; "
+                        + "at least 2:1 is required."
+                )
+            }
+        }
+
         guard ThemeContrast.isLegible(
             foreground: variant.terminalPalette.foreground,
             background: variant.terminalPalette.background

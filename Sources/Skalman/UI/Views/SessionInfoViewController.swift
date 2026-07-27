@@ -86,13 +86,13 @@ final class SessionInfoViewController: NSViewController {
 
     private func setupHeader() {
         directoryLabel = NSTextField(labelWithString: "")
-        directoryLabel.font = Design.Typography.compactCode()
+        directoryLabel.applyFont(.compactCode)
         directoryLabel.textColor = Design.Text.label
         // The interesting end of a long path is the last component, so the middle gives way.
         directoryLabel.lineBreakMode = .byTruncatingMiddle
 
         metaLabel = NSTextField(labelWithString: "")
-        metaLabel.font = Design.Typography.caption()
+        metaLabel.applyFont(.caption)
         metaLabel.textColor = Design.Text.tertiary
         metaLabel.lineBreakMode = .byTruncatingTail
 
@@ -323,7 +323,7 @@ final class SessionInfoViewController: NSViewController {
 
     private func add(sectionTitle: String, count: Int) {
         let label = NSTextField(labelWithString: "\(sectionTitle.uppercased())  \(count)")
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = Design.Text.quaternary
         label.translatesAutoresizingMaskIntoConstraints = false
 
@@ -339,7 +339,7 @@ final class SessionInfoViewController: NSViewController {
 
     private func add(originTitle origin: SessionInfoOrigin) {
         let label = NSTextField(labelWithString: origin.rawValue)
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
         addFullWidth(label)
@@ -347,7 +347,7 @@ final class SessionInfoViewController: NSViewController {
 
     private func add(note: String) {
         let label = NSTextField(labelWithString: note)
-        label.font = Design.Typography.body()
+        label.applyFont(.body)
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
         label.lineBreakMode = .byWordWrapping

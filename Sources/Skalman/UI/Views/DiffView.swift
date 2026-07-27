@@ -23,7 +23,7 @@ final class DiffView: DiffAppKitView {
                 gutterWidth: DiffDefaults.gutterWidth,
                 verticalInset: 1
             ),
-            theme: .skalman
+            theme: .skalman()
         )
         beginObservingTheme()
     }
@@ -46,7 +46,7 @@ final class DiffView: DiffAppKitView {
                 gutterWidth: DiffDefaults.gutterWidth,
                 verticalInset: 1
             ),
-            theme: .skalman
+            theme: .skalman()
         )
         beginObservingTheme()
     }
@@ -55,22 +55,63 @@ final class DiffView: DiffAppKitView {
         guard !observesTheme else { return }
         observesTheme = true
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
-            self?.update(theme: .skalman)
+            self?.applyCurrentTheme()
         }
+        // The washes are measured against the ground, and in a conversation that ground is the
+        // *terminal palette's* background — which moves when the selected session does, with the
+        // app theme sitting perfectly still. Without this a diff kept the previous session's
+        // tint until something else repainted it.
+        appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in
+            self?.applyCurrentTheme()
+        }
+    }
+
+    /// Re-themes in the view's **own** effective appearance.
+    ///
+    /// The package freezes each row's wash onto a layer (`.cgColor`), which resolves a dynamic
+    /// colour in whatever drawing appearance is ambient — from a notification handler, that is
+    /// whatever AppKit last had in hand. Under an adaptive theme that painted the dark
+    /// variant's washes into a light window. The text labels resolve at draw and were right
+    /// all along, which is what made the slabs read as the theme being broken.
+    ///
+    /// The same appearance decides what the *ground* resolves to, which is why it is measured
+    /// in here rather than passed in from a caller that has no drawing appearance in force.
+    private func applyCurrentTheme() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            update(theme: .skalman(on: resolvedGround()))
+        }
+    }
+
+    /// Rows built before the view joined a window froze their washes in the ambient
+    /// appearance; both hooks re-resolve them in the appearance the view actually wears.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        applyCurrentTheme()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyCurrentTheme()
     }
 }
 
 private extension DiffAppKitTheme {
-    static var skalman: DiffAppKitTheme {
-        DiffAppKitTheme(
+
+    /// The renderer's theme, with every colour that depends on the ground resolved against the
+    /// one this diff is actually drawn on — see `Design.Diff.on(_:)`.
+    static func skalman(on ground: NSColor = Design.Surface.ground) -> DiffAppKitTheme {
+        let diff = Design.Diff.on(ground)
+
+        return DiffAppKitTheme(
             font: Design.Typography.code(),
             label: Design.Text.label,
             secondaryLabel: Design.Text.secondary,
             tertiaryLabel: Design.Text.tertiary,
-            added: Design.Diff.added,
-            removed: Design.Diff.removed,
-            addedBackground: Design.Diff.added.withAlphaComponent(DiffDefaults.addedAlpha),
-            removedBackground: Design.Diff.removed.withAlphaComponent(DiffDefaults.removedAlpha),
+            added: diff.added,
+            removed: diff.removed,
+            addedBackground: diff.addedWash,
+            removedBackground: diff.removedWash,
             syntaxKeyword: Design.Syntax.keyword,
             syntaxType: Design.Syntax.type,
             syntaxString: Design.Syntax.string,

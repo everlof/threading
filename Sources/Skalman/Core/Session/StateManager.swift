@@ -346,6 +346,28 @@ final class StateManager {
         try? database().retainPanels(sessionIDs: sessionIDs)
     }
 
+    // MARK: - Session Attachments
+
+    /// The attachment references a session has surfaced, stored beside its panel layout for the
+    /// same reason: both are what the display pane rebuilds after a relaunch.
+    func loadAttachmentsPayload(for sessionID: SessionID) -> String? {
+        try? database().attachmentsPayload(for: sessionID)
+    }
+
+    func saveAttachmentsPayload(_ payload: String, for sessionID: SessionID) {
+        do {
+            try database().saveAttachmentsPayload(payload, for: sessionID)
+        } catch {
+            SkalmanLogger.mcp.error(
+                "Could not persist session attachments: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    func retainAttachments(sessionIDs: Set<SessionID>) {
+        try? database().retainAttachments(sessionIDs: sessionIDs)
+    }
+
     /// Reads the `panels/<uuid>.json` files into the database once, then renames the directory.
     ///
     /// Attempted at most once per launch whether or not it finds anything, since the common

@@ -9,10 +9,6 @@
 #if !os(iOS) && !os(Windows)
 import Foundation
 import Dispatch
-#if canImport(Subprocess)
-import Subprocess
-import System
-#endif
 
 /// Delegate that is invoked by the ``LocalProcess`` class in response to various
 /// process-related events.
@@ -58,7 +54,8 @@ public protocol LocalProcessDelegate: AnyObject {
  *
  * The `childfd` property has the Unix file descriptor for the primary side of the created pseudo-terminal.
  *
- * This implementation uses swift-subprocess with openpty/login_tty for pseudo-terminal support.
+ * This implementation uses `forkpty`, so the child owns a controlling terminal and its PID is
+ * available synchronously to callers.
  */
 public class LocalProcess {
     let readSize = 128*1024
@@ -85,13 +82,27 @@ public class LocalProcess {
     var readQueue: DispatchQueue
     
     var io: DispatchIO?
-    
-    #if canImport(Subprocess)
-    // Swift Subprocess related properties
-    private var subprocessTask: Task<Void, Error>?
-    private var masterFd: Int32 = -1
-    private var slaveFd: Int32 = -1
-    #endif
+
+    private let usesMainQueue: Bool
+    private let pendingChunkFlushThreshold = 32
+    private let pendingTimeSliceNanoseconds: UInt64 = 4_000_000
+    private let pendingHighWaterBytes = 4 * 1024 * 1024
+    private let pendingLowWaterBytes = 1 * 1024 * 1024
+    private var pendingChunks: [[UInt8]] = []
+    private var pendingChunkIndex = 0
+    private var pendingBytes = 0
+    private var pendingScheduled = false
+    private var readSuspendedForBackpressure = false
+    private var pendingGeneration: UInt64 = 0
+    private let pendingLock = NSLock()
+
+    /// Identifies the child that owns the current PTY callbacks.
+    ///
+    /// DispatchIO callbacks can arrive after a descriptor has been closed. Tagging every read
+    /// and queued delivery prevents one process's tail output from entering a subsequently
+    /// launched terminal generation.
+    private var processGeneration: UInt64 = 0
+    private var terminationRequested = false
     
     /**
      * Initializes the LocalProcess runner and communication with the host happens via the provided
@@ -106,6 +117,133 @@ public class LocalProcess {
         self.delegate = delegate
         self.dispatchQueue = dispatchQueue ?? DispatchQueue.main
         self.readQueue = DispatchQueue(label: "sender")
+        self.usesMainQueue = self.dispatchQueue === DispatchQueue.main
+    }
+
+    deinit {
+        let pid = shellPid
+
+        io?.close()
+        io = nil
+        cancelChildMonitor()
+
+        guard pid > 0 else { return }
+        kill(pid, SIGTERM)
+
+        // Once the monitor is cancelled, an independent waiter must own reaping the child.
+        // Capturing only the PID lets LocalProcess deallocate immediately without leaving a
+        // zombie or retaining its delegate and terminal view.
+        DispatchQueue.global(qos: .utility).async {
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+        }
+    }
+
+    private func resetPendingOutput(for generation: UInt64) {
+        pendingLock.lock()
+        pendingGeneration = generation
+        pendingChunks.removeAll(keepingCapacity: true)
+        pendingChunkIndex = 0
+        pendingBytes = 0
+        pendingScheduled = false
+        readSuspendedForBackpressure = false
+        pendingLock.unlock()
+    }
+
+    /// Queues output for bounded main-thread delivery.
+    ///
+    /// The terminal view and Skalman's output hooks are main-thread objects, but making the PTY
+    /// reader wait synchronously on that thread makes fast output feel chunky. An unbounded
+    /// asynchronous hop has the opposite failure: memory grows for as long as the producer
+    /// outruns AppKit. Stop reading at the high-water mark and let the kernel's PTY buffer apply
+    /// the same backpressure a physical terminal would.
+    private func enqueueReceivedData(_ bytes: [UInt8], generation: UInt64) -> Bool {
+        pendingLock.lock()
+        guard generation == pendingGeneration else {
+            pendingLock.unlock()
+            return false
+        }
+        pendingChunks.append(bytes)
+        pendingBytes += bytes.count
+        let keepReading = pendingBytes < pendingHighWaterBytes
+        if !keepReading {
+            readSuspendedForBackpressure = true
+        }
+        let shouldSchedule = !pendingScheduled
+        if shouldSchedule {
+            pendingScheduled = true
+        }
+        pendingLock.unlock()
+
+        if shouldSchedule {
+            dispatchQueue.async { [weak self] in
+                self?.drainReceivedData(generation: generation)
+            }
+        }
+        return keepReading
+    }
+
+    private func resumePtyRead(generation: UInt64) {
+        guard running,
+              !terminationRequested,
+              generation == processGeneration,
+              let io else { return }
+        io.read(offset: 0, length: readSize, queue: readQueue) { [weak self] done, data, error in
+            self?.childProcessRead(generation: generation, done: done, data: data, errno: error)
+        }
+    }
+
+    private func drainReceivedData(generation: UInt64) {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+
+        while true {
+            var chunk: [UInt8]?
+            var shouldResumeRead = false
+
+            pendingLock.lock()
+            guard generation == pendingGeneration else {
+                pendingLock.unlock()
+                return
+            }
+            if pendingChunkIndex < pendingChunks.count {
+                chunk = pendingChunks[pendingChunkIndex]
+                pendingChunkIndex += 1
+                if pendingChunkIndex >= pendingChunkFlushThreshold {
+                    pendingChunks.removeFirst(pendingChunkIndex)
+                    pendingChunkIndex = 0
+                }
+
+                if let chunk {
+                    pendingBytes -= chunk.count
+                    if readSuspendedForBackpressure && pendingBytes <= pendingLowWaterBytes {
+                        readSuspendedForBackpressure = false
+                        shouldResumeRead = true
+                    }
+                }
+            } else {
+                pendingChunks.removeAll(keepingCapacity: true)
+                pendingChunkIndex = 0
+                pendingBytes = 0
+                pendingScheduled = false
+                pendingLock.unlock()
+                return
+            }
+            pendingLock.unlock()
+
+            if shouldResumeRead {
+                resumePtyRead(generation: generation)
+            }
+            if let chunk {
+                delegate?.dataReceived(slice: chunk[...])
+            }
+
+            if DispatchTime.now().uptimeNanoseconds - startedAt >= pendingTimeSliceNanoseconds {
+                dispatchQueue.async { [weak self] in
+                    self?.drainReceivedData(generation: generation)
+                }
+                return
+            }
+        }
     }
     
     /**
@@ -114,7 +252,7 @@ public class LocalProcess {
      */
     public func send (data: ArraySlice<UInt8>)
     {
-        guard running else {
+        guard running, !terminationRequested, childfd >= 0 else {
             return
         }
         let copy = sendCount
@@ -142,33 +280,16 @@ public class LocalProcess {
     /* Used to generate the next file name counter */
     var logFileCounter = 0
     
-    #if canImport(Subprocess)
-    // Create pseudo-terminal pair using openpty
-    private func createPseudoTerminal() throws -> (master: Int32, slave: Int32) {
-        var master: Int32 = -1
-        var slave: Int32 = -1
-        
-        let result = openpty(&master, &slave, nil, nil, nil)
-        guard result == 0 else {
-            throw POSIXError(.init(rawValue: errno)!)
-        }
-        
-        return (master: master, slave: slave)
-    }
-    
-    // Set up login tty for the slave side
-    private func setupLoginTty(slaveFd: Int32) throws {
-        let result = login_tty(slaveFd)
-        guard result == 0 else {
-            throw POSIXError(.init(rawValue: errno)!)
-        }
-    }
-    #endif
-    
     /* Total number of bytes read */
     var totalRead = 0
-    func childProcessRead (done: Bool, data: DispatchData?, errno: Int32) {
+    func childProcessRead (generation: UInt64, done: Bool, data: DispatchData?, errno: Int32) {
+        guard generation == processGeneration else { return }
+
         guard let data else {
+            // A transient callback without data must not break the one-read-at-a-time chain.
+            if !done {
+                resumePtyRead(generation: generation)
+            }
             return
         }
         if debugIO {
@@ -178,10 +299,6 @@ public class LocalProcess {
         
         if data.count == 0 {
             childfd = -1
-            if running {
-                running = false
-                // delegate.processTerminated (self, exitCode: nil)
-            }
             return
         }
         var b: [UInt8] = Array.init(repeating: 0, count: data.count)
@@ -199,20 +316,44 @@ public class LocalProcess {
                 }
             }
         })
-        dispatchQueue.sync {
-            delegate?.dataReceived(slice: b[...])
+        // DispatchIO may invoke this handler more than once for one read operation. Only its
+        // final callback is allowed to start the successor; re-arming on every partial callback
+        // creates concurrent read chains that multiply under a fast producer.
+        let keepReading: Bool
+        if usesMainQueue {
+            keepReading = enqueueReceivedData(b, generation: generation)
+        } else {
+            dispatchQueue.sync {
+                guard generation == self.processGeneration else { return }
+                self.delegate?.dataReceived(slice: b[...])
+            }
+            keepReading = true
         }
-        io?.read(offset: 0, length: readSize, queue: readQueue, ioHandler: childProcessRead)
+        if done && keepReading {
+            resumePtyRead(generation: generation)
+        }
     }
 
 #if os(macOS)
     var childMonitor: DispatchSourceProcess?
 #endif
 
-    func processTerminated ()
+    func processTerminated (pid: pid_t, generation: UInt64)
     {
-        var n: Int32 = 0
-        waitpid (shellPid, &n, WNOHANG)
+        var waitStatus: Int32 = 0
+        var waitedPID: pid_t
+        repeat {
+            waitedPID = waitpid(pid, &waitStatus, 0)
+        } while waitedPID == -1 && errno == EINTR
+
+        let exitCode = waitedPID == pid
+            ? Self.exitCode(fromWaitStatus: waitStatus)
+            : nil
+
+        // A stale exit callback must never mutate a newer child. startProcess also refuses
+        // relaunch until reaping finishes, but this check keeps the callback safe if callers
+        // invoke lifecycle methods from different queues.
+        guard generation == processGeneration, pid == shellPid else { return }
 
         // Reaping the child destroys the kernel event this source is registered for. Left
         // active, the knote is reported as EV_VANISHED the next time the workloop re-arms
@@ -222,8 +363,22 @@ public class LocalProcess {
         // cancelling before the exit event arrives would leave a zombie behind instead.
         cancelChildMonitor()
 
-        delegate?.processTerminated(self, exitCode: n)
+        io?.close()
+        io = nil
+        childfd = -1
+        terminationRequested = false
         running = false
+        shellPid = 0
+        delegate?.processTerminated(self, exitCode: exitCode)
+    }
+
+    /// Darwin exposes the wait-status helpers as C macros, which Swift cannot import.
+    ///
+    /// The low seven bits are zero for an ordinary exit and the next byte carries the code.
+    /// A signal termination has no process-returned exit code, so the delegate receives nil.
+    static func exitCode(fromWaitStatus status: Int32) -> Int32? {
+        guard status & 0x7f == 0 else { return nil }
+        return (status >> 8) & 0xff
     }
 
     /// Releases the child's exit source. Idempotent, since the exit event fires at most once.
@@ -235,7 +390,10 @@ public class LocalProcess {
 #endif
     }
 
-    /// Indicates if the child process is currently running
+    /// Indicates whether this instance still owns a child lifecycle.
+    ///
+    /// This remains true between `terminate()` and `waitpid`: that terminating child still owns
+    /// the exit monitor and must be reaped before another launch can reuse this instance.
     public private(set) var running: Bool = false
     
     /**
@@ -247,116 +405,33 @@ public class LocalProcess {
      */
     public func startProcess(executable: String = "/bin/bash", args: [String] = [], environment: [String]? = nil, execName: String? = nil, currentDirectory: String? = nil)
      {
-        if running {
+        if running || shellPid != 0 {
             return
         }
-        
-        #if canImport(Subprocess)
-        startProcessWithSubprocess(executable: executable, args: args, environment: environment, execName: execName, currentDirectory: currentDirectory)
-        #else
-        startProcessWithForkpty(executable: executable, args: args, environment: environment, execName: execName, currentDirectory: currentDirectory)
-        #endif
+
+        processGeneration &+= 1
+        let generation = processGeneration
+        terminationRequested = false
+        resetPendingOutput(for: generation)
+
+        startProcessWithForkpty(
+            executable: executable,
+            args: args,
+            environment: environment,
+            execName: execName,
+            currentDirectory: currentDirectory,
+            generation: generation
+        )
     }
-    
-    #if canImport(Subprocess)
-    private func startProcessWithSubprocess(executable: String, args: [String], environment: [String]?, execName: String?, currentDirectory: String?) {
-        do {
-            var size = delegate?.getWindowSize () ?? winsize()
-            
-            // Create pseudo-terminal pair using openpty
-            let (master, slave) = try createPseudoTerminal()
-            self.masterFd = master
-            self.slaveFd = slave
-            self.childfd = master
-            
-            // Set window size on the master fd
-            _ = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: master, windowSize: &size)
-            
-            // Prepare environment
-            var env: [String: String] = [:]
-            let envArray = environment ?? Terminal.getEnvironmentVariables(termName: "xterm-256color")
-            for envVar in envArray {
-                let components = envVar.split(separator: "=", maxSplits: 1)
-                if components.count == 2 {
-                    env[String(components[0])] = String(components[1])
-                }
-            }
-            
-            // Create FileDescriptor instances for swift-subprocess
-            let slaveFileDescriptor = System.FileDescriptor(rawValue: slave)
-            
-            // Mark as running and set up I/O for reading from master fd first
-            running = true
-            // Capture FD values for cleanup handler to close them safely after DispatchIO is done
-            let masterToClose = master
-            let slaveToClose = slave
-            io = DispatchIO(type: .stream, fileDescriptor: master, queue: dispatchQueue, cleanupHandler: { _ in
-                // Close file descriptors after DispatchIO has finished with them
-                // This prevents EV_VANISHED crash by ensuring proper cleanup order
-                close(masterToClose)
-                close(slaveToClose)
-            })
-            guard let io else {
-                return
-            }
-            io.setLimit(lowWater: 1)
-            io.setLimit(highWater: readSize)
-            io.read(offset: 0, length: readSize, queue: readQueue, ioHandler: childProcessRead)
-            
-            // Start subprocess with swift-subprocess asynchronously
-            Task {
-                do {
-                    // Start subprocess with swift-subprocess, using the slave side of the pty
-                    // The subprocess will automatically handle the pseudo-terminal setup when using FileDescriptor I/O
-                    var options = PlatformOptions()
-                    options.preSpawnProcessConfigurator = { spawnAttr, fileAttr in
-                        var flags: Int16 = 0
-                        posix_spawnattr_getflags(&spawnAttr, &flags)
-                        posix_spawnattr_setflags(&spawnAttr, flags | Int16(POSIX_SPAWN_SETSID))
-                        
-                    }
-                    let result = try await Subprocess.run(
-                        .name(executable),
-                        arguments: Arguments(executablePathOverride: execName ?? executable, remainingValues: Array(args)),
-                        environment: .custom(Dictionary(uniqueKeysWithValues: env.map { (Environment.Key(stringLiteral: $0.key), $0.value) })),
-                        workingDirectory: currentDirectory.map { System.FilePath($0) },
-                        platformOptions: options,
-                        input: .fileDescriptor(slaveFileDescriptor, closeAfterSpawningProcess: true),
-                        output: .fileDescriptor(slaveFileDescriptor, closeAfterSpawningProcess: false),
-                        error: .fileDescriptor(slaveFileDescriptor, closeAfterSpawningProcess: false)
-                    )
-                    
-                    // Process completed
-                    await MainActor.run {
-                        self.running = false
-                        let exitCode: Int32?
-                        switch result.terminationStatus {
-                        case .exited(let code):
-                            exitCode = code
-                        default:
-                            exitCode = nil
-                        }
-                        self.delegate?.processTerminated(self, exitCode: exitCode)
-                    }
-                    
-                } catch {
-                    await MainActor.run {
-                        self.running = false  
-                        self.delegate?.processTerminated(self, exitCode: nil)
-                    }
-                    print("Failed to start process with swift-subprocess: \(error)")
-                }
-            }
-            
-        } catch {
-            running = false
-            delegate?.processTerminated(self, exitCode: nil)
-            print("Failed to create pseudo-terminal: \(error)")
-        }
-    }
-    #endif
-    
-    private func startProcessWithForkpty(executable: String, args: [String], environment: [String]?, execName: String?, currentDirectory: String?) {
+
+    private func startProcessWithForkpty(
+        executable: String,
+        args: [String],
+        environment: [String]?,
+        execName: String?,
+        currentDirectory: String?,
+        generation: UInt64
+    ) {
         var size = delegate?.getWindowSize () ?? winsize()
     
         var shellArgs = args
@@ -374,20 +449,25 @@ public class LocalProcess {
         }
 
         if let (shellPid, childfd) = PseudoTerminalHelpers.fork(andExec: executable, args: shellArgs, env: env, currentDirectory: currentDirectory, desiredWindowSize: &size) {
+            // Publish the exact child identity before activating the exit source. Very short
+            // commands can exit immediately, and their handler must never observe the default
+            // PID (0) or an unstarted state.
+            running = true
+            self.childfd = childfd
+            self.shellPid = shellPid
 #if os(macOS)
             childMonitor = DispatchSource.makeProcessSource(identifier: shellPid, eventMask: .exit, queue: dispatchQueue)
             if let cm = childMonitor {
+                cm.setEventHandler(handler: { [weak self] in
+                    self?.processTerminated(pid: shellPid, generation: generation)
+                })
                 if #available(macOS 10.12, *) {
                     cm.activate()
                 } else {
                     // Fallback on earlier versions
                 }
-                cm.setEventHandler(handler: { [weak self] in self?.processTerminated () })
             }
 #endif
-            running = true
-            self.childfd = childfd
-            self.shellPid = shellPid
             // Capture FD value for cleanup handler to close it safely after DispatchIO is done
             let fdToClose = childfd
             io = DispatchIO(type: .stream, fileDescriptor: childfd, queue: dispatchQueue, cleanupHandler: { _ in
@@ -400,27 +480,22 @@ public class LocalProcess {
             }
             io.setLimit(lowWater: 1)
             io.setLimit(highWater: readSize)
-            io.read(offset: 0, length: readSize, queue: readQueue, ioHandler: childProcessRead)
+            resumePtyRead(generation: generation)
+        } else {
+            running = false
+            shellPid = 0
+            delegate?.processTerminated(self, exitCode: nil)
         }
     }
 
     public func terminate()
     {
-        #if canImport(Subprocess)
-        if let task = subprocessTask {
-            task.cancel()
-            subprocessTask = nil
-        }
-
-        // Set FD markers to -1 (actual FDs are closed by DispatchIO cleanup handler)
-        masterFd = -1
-        slaveFd = -1
-        #endif
+        guard running, !terminationRequested else { return }
+        terminationRequested = true
 
         // Close DispatchIO - this will trigger the cleanup handler which closes file descriptors
         // The cleanup handler ensures FDs are closed AFTER DispatchIO is done with them,
         // preventing "BUG IN CLIENT OF LIBDISPATCH: Unexpected EV_VANISHED" crash
-        // This applies to both Subprocess and forkpty paths
         io?.close()
         io = nil
         childfd = -1
@@ -428,8 +503,6 @@ public class LocalProcess {
         if shellPid != 0 {
             kill(shellPid, SIGTERM)
         }
-
-        running = false
     }
     
     var loggingDir: String? = nil

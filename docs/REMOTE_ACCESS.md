@@ -1,15 +1,15 @@
 # Remote access
 
 Remote access mirrors Skalman sessions to a browser or to the native `SkalmanMobile` iOS app.
-It is an opt-in beta feature: open **Settings → General → Remote Access** on the Mac and turn on
-**Allow remote access**.
+It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac
+and turn on **Remote Access**. The page follows the local listener and secure relay live, then
+shows the iPhone pairing code in place once the connection is ready.
 
 ## Pair an iPhone
 
 1. Keep Skalman running on the Mac.
 2. Wait for the Remote Access status to say the secure relay is ready.
-3. Choose **Pair iPhone**.
-4. In Skalman on the iPhone, choose **Pair a Mac** and scan the QR code.
+3. In Skalman on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
 The iOS app stores the paired host and bearer token in the Keychain. It shows all unarchived
 sessions grouped by project or ordered by recent activity, including dormant sessions. Pinned sessions

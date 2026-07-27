@@ -78,6 +78,7 @@ final class BrowserChromeBar: NSView {
         static let minimumAddressWidth: CGFloat = 72
         static let compactForwardThreshold: CGFloat = 320
         static let labelledConditionThreshold: CGFloat = 360
+        static let labelledPasswordThreshold: CGFloat = 520
         static let expandedPrivateThreshold: CGFloat = 520
     }
 
@@ -91,6 +92,7 @@ final class BrowserChromeBar: NSView {
     )
     let closePopupButton = BrowserChromeBar.button("xmark", "Close Pop-up")
     let overflowButton = BrowserChromeBar.button("ellipsis", "Browser Options")
+    let passwordInputButton = BrowserChromeBar.button("key.fill", "Private Password Input")
 
     private let privateIndicator = BrowserPrivateIndicator()
     private let stack: NSStackView
@@ -99,6 +101,7 @@ final class BrowserChromeBar: NSView {
     private var canGoForward = false
     private var popupDepth = 0
     private var isLoading = false
+    private var isPasswordFieldFocused = false
     private(set) var areTestConditionsFolded = false
     private(set) var isReloadFolded = false
 
@@ -109,6 +112,7 @@ final class BrowserChromeBar: NSView {
             forwardButton,
             reloadButton,
             privateIndicator,
+            passwordInputButton,
             addressField,
             testConditionsButton,
             closePopupButton,
@@ -137,7 +141,7 @@ final class BrowserChromeBar: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         addressField.placeholderString = BrowserDefaults.addressPlaceholder
-        addressField.font = Design.Typography.body()
+        addressField.applyFont(.body)
         addressField.focusRingType = .none
         addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         addressField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -150,6 +154,7 @@ final class BrowserChromeBar: NSView {
             backButton,
             forwardButton,
             reloadButton,
+            passwordInputButton,
             testConditionsButton,
             closePopupButton,
             overflowButton
@@ -158,6 +163,11 @@ final class BrowserChromeBar: NSView {
         }
         privateIndicator.setContentCompressionResistancePriority(.required, for: .horizontal)
         privateIndicator.isHidden = contextKind != .private
+        passwordInputButton.isHidden = true
+        passwordInputButton.toolTip = """
+            Password field under user control · use your password manager or type privately; \
+            Skalman never exposes its value to the agent
+            """
         testConditionsButton.isHidden = true
         closePopupButton.isHidden = true
         closePopupButton.toolTip = "Close pop-up and return to its opener"
@@ -201,6 +211,12 @@ final class BrowserChromeBar: NSView {
         testConditionsButton.toolTip = count == 1
             ? "1 Active Test Condition"
             : "\(count) Active Test Conditions"
+        updateResponsiveLayout()
+    }
+
+    func setPasswordFieldFocused(_ focused: Bool) {
+        isPasswordFieldFocused = focused
+        passwordInputButton.isHidden = !focused
         updateResponsiveLayout()
     }
 
@@ -251,6 +267,14 @@ final class BrowserChromeBar: NSView {
 
         privateIndicator.isExpanded = contextKind == .private
             && width >= Layout.expandedPrivateThreshold
+
+        let passwordTitle = isPasswordFieldFocused
+            && width >= Layout.labelledPasswordThreshold
+            ? "Private Input"
+            : ""
+        if passwordInputButton.title != passwordTitle {
+            passwordInputButton.title = passwordTitle
+        }
     }
 
     static func button(_ symbol: String, _ label: String) -> ThemedButton {
@@ -297,7 +321,7 @@ private final class BrowserPrivateIndicator: NSView, ThemedComponent {
 
         imageView.contentTintColor = Design.Text.secondary
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = Design.Text.secondary
         label.translatesAutoresizingMaskIntoConstraints = false
         label.isHidden = true
@@ -378,6 +402,7 @@ final class BrowserViewController: NSViewController {
     private var webViewHost: NSView!
     private var webViewStack: [WKWebView] = []
     private var documentSequences: [ObjectIdentifier: Int] = [:]
+    private var passwordFocusedFrameTokens: [ObjectIdentifier: Set<String>] = [:]
     private var agentViewportSize: CGSize?
     private var agentColorScheme: BrowserColorScheme = .auto
     private var agentUserAgent: BrowserUserAgentOverride = .automatic
@@ -489,11 +514,24 @@ final class BrowserViewController: NSViewController {
             contentWorld: .defaultClient,
             name: BrowserDefaults.navigationReadinessMessageHandler
         )
+        contentController.add(
+            proxy,
+            contentWorld: .defaultClient,
+            name: BrowserDefaults.passwordFocusMessageHandler
+        )
         contentController.addUserScript(
             WKUserScript(
                 source: BrowserAgentScripts.navigationReadiness,
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: true,
+                in: .defaultClient
+            )
+        )
+        contentController.addUserScript(
+            WKUserScript(
+                source: BrowserAgentScripts.passwordFocusObservation,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false,
                 in: .defaultClient
             )
         )
@@ -530,6 +568,8 @@ final class BrowserViewController: NSViewController {
         closePopupButton.action = #selector(closeActivePopup)
         chromeBar.overflowButton.target = self
         chromeBar.overflowButton.action = #selector(showBrowserOverflow)
+        chromeBar.passwordInputButton.target = self
+        chromeBar.passwordInputButton.action = #selector(resumePrivatePasswordInput)
 
         addressField.target = self
         addressField.action = #selector(addressEntered)
@@ -609,6 +649,7 @@ final class BrowserViewController: NSViewController {
     private func makeWebView(configuration: WKWebViewConfiguration) -> WKWebView {
         let candidate = WKWebView(frame: .zero, configuration: configuration)
         documentSequences[ObjectIdentifier(candidate)] = 0
+        passwordFocusedFrameTokens[ObjectIdentifier(candidate)] = []
         candidate.translatesAutoresizingMaskIntoConstraints = true
         candidate.autoresizingMask = []
         candidate.navigationDelegate = self
@@ -669,6 +710,9 @@ final class BrowserViewController: NSViewController {
 
     private func activateWebView(_ candidate: WKWebView) {
         webView = candidate
+        chromeBar.setPasswordFieldFocused(
+            passwordFocusedFrameTokens[ObjectIdentifier(candidate)]?.isEmpty == false
+        )
         installWebView(candidate)
         observeWebView()
         syncAddress()
@@ -902,6 +946,10 @@ final class BrowserViewController: NSViewController {
     var emulatedColorScheme: BrowserColorScheme { agentColorScheme }
     var emulatedUserAgent: String? { agentUserAgent.value }
     var emulatedMediaType: BrowserMediaType { agentMediaType }
+    var passwordFieldHasFocus: Bool {
+        guard isViewLoaded else { return false }
+        return passwordFocusedFrameTokens[ObjectIdentifier(webView)]?.isEmpty == false
+    }
 
     /// Gives the live page an exact CSS-pixel viewport without resizing Skalman's window.
     ///
@@ -1087,6 +1135,20 @@ final class BrowserViewController: NSViewController {
         try await callAgentScript(
             BrowserAgentScripts.describeTarget,
             arguments: pointArguments(x: x, y: y)
+        )
+    }
+
+    /// Transfers one exact password field to the user without letting its value cross the
+    /// isolated-world bridge. This intentionally does not invoke Authentication Services:
+    /// its public password-provider request returns the plaintext credential to the app.
+    func preparePasswordFieldForUser(
+        ref: String?,
+        selector: String?,
+        locator: BrowserSemanticLocator? = nil
+    ) async throws -> BrowserActionOutcome {
+        try await callAgentActionScript(
+            BrowserAgentScripts.focusPasswordForUser,
+            arguments: targetArguments(ref: ref, selector: selector, locator: locator)
         )
     }
 
@@ -1880,6 +1942,12 @@ final class BrowserViewController: NSViewController {
         closePopup(popup)
     }
 
+    /// Clicking the visible privacy affordance restores keyboard focus to the WebKit surface.
+    /// The DOM field remains the active element; the control never reads or changes its value.
+    @objc private func resumePrivatePasswordInput() {
+        view.window?.makeFirstResponder(webView)
+    }
+
     @objc private func resetResponsiveViewport() {
         resetResponsiveViewportToPanel()
     }
@@ -2072,6 +2140,7 @@ final class BrowserViewController: NSViewController {
         let wasActive = popup === webView
         webViewStack.remove(at: index)
         documentSequences.removeValue(forKey: ObjectIdentifier(popup))
+        passwordFocusedFrameTokens.removeValue(forKey: ObjectIdentifier(popup))
         popup.navigationDelegate = nil
         popup.uiDelegate = nil
         popup.removeFromSuperview()
@@ -2162,7 +2231,9 @@ extension BrowserViewController: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        passwordFocusedFrameTokens[ObjectIdentifier(webView)] = []
         guard webView === self.webView else { return }
+        chromeBar.setPasswordFieldFocused(false)
         recordAgentNavigationTrace("start")
         consoleMessages.removeAll()
         networkEntries.removeAll()
@@ -2707,6 +2778,7 @@ enum BrowserDefaults {
     static let consoleMessageHandler = "skalmanConsole"
     static let networkMessageHandler = "skalmanNetwork"
     static let navigationReadinessMessageHandler = "skalmanNavigationReadiness"
+    static let passwordFocusMessageHandler = "skalmanPasswordFocus"
     static let maximumPendingNavigations = 100
     static let maximumPopupDepth = 4
     static let minimumViewportWidth = 200
@@ -2764,6 +2836,24 @@ extension BrowserViewController: WKScriptMessageHandler {
             guard trackedLoadHasCommitted,
                   trackedDocumentReadinessToken == documentToken else { return }
             finishLoad(true, loadReadiness.completionMessage)
+            return
+        }
+        if message.name == BrowserDefaults.passwordFocusMessageHandler {
+            guard let messageWebView = message.webView,
+                  let frameToken = payload["frame_token"] as? String,
+                  !frameToken.isEmpty,
+                  let focused = payload["focused"] as? Bool else { return }
+            let identifier = ObjectIdentifier(messageWebView)
+            var focusedFrames = passwordFocusedFrameTokens[identifier] ?? []
+            if focused {
+                focusedFrames.insert(frameToken)
+            } else {
+                focusedFrames.remove(frameToken)
+            }
+            passwordFocusedFrameTokens[identifier] = focusedFrames
+            if messageWebView === webView {
+                chromeBar.setPasswordFieldFocused(!focusedFrames.isEmpty)
+            }
             return
         }
         if message.name == BrowserDefaults.networkMessageHandler {

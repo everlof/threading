@@ -15,8 +15,6 @@ final class ChipView: ThemedControl {
     private let titleLabel = NSTextField(labelWithString: "")
     private let chevronView = NSImageView()
 
-    private var trackingArea: NSTrackingArea?
-    private var isHovered = false { didSet { updateHoverState() } }
     private var isPresentingMenu = false { didSet { updateBackground() } }
     private var menuSession: AnyObject?
 
@@ -76,7 +74,7 @@ final class ChipView: ThemedControl {
         iconView.contentTintColor = Design.Text.secondary
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = Design.Typography.control()
+        titleLabel.applyFont(.control)
         titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingTail
 
@@ -142,24 +140,12 @@ final class ChipView: ThemedControl {
 
     // MARK: - Interaction
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
+    /// The chip's hover is a fill *and* a width, so it answers the base's hook rather than
+    /// redrawing: see `updateHoverWidth`.
+    override func hoverDidChange() {
+        super.hoverDidChange()
+        updateHoverState()
     }
-
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }

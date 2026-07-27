@@ -63,7 +63,9 @@ enum RemoteThemeBridge {
                 panelRadius: Double(material.panelRadius),
                 controlRadius: Double(material.controlRadius),
                 borderWidth: Double(material.borderWidth),
-                glow: glow
+                glow: glow,
+                typeface: material.typeface.rawValue,
+                fontFamily: material.fontFamily
             )
         )
     }

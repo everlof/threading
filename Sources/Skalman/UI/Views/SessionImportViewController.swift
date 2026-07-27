@@ -65,10 +65,10 @@ final class SessionImportViewController: NSViewController {
     // MARK: - Setup
 
     private func setupViews() {
-        headingLabel.font = Design.Typography.heading()
+        headingLabel.applyFont(.heading)
         headingLabel.textColor = Design.Text.label
 
-        subheadingLabel.font = Design.Typography.subheading()
+        subheadingLabel.applyFont(.subheading)
         subheadingLabel.textColor = Design.Text.secondary
 
         let headings = NSStackView(views: [headingLabel, subheadingLabel])
@@ -77,7 +77,7 @@ final class SessionImportViewController: NSViewController {
         headings.spacing = Design.Spacing.hairline
 
         searchField.placeholderString = ImportStrings.searchPlaceholder
-        searchField.font = Design.Typography.body()
+        searchField.applyFont(.body)
 
         // Filtering is driven by the delegate rather than the field's action, leaving Return
         // to confirm the selection: the field holds focus, so its action would otherwise
@@ -246,11 +246,11 @@ extension SessionImportViewController: NSTableViewDelegate {
         icon.contentTintColor = Design.Text.secondary
 
         let title = NSTextField(labelWithString: session.title)
-        title.font = Design.Typography.body()
+        title.applyFont(.body)
         title.lineBreakMode = .byTruncatingTail
 
         let detail = NSTextField(labelWithString: detailText(for: session))
-        detail.font = Design.Typography.subheading()
+        detail.applyFont(.subheading)
         detail.textColor = Design.Text.tertiary
         detail.lineBreakMode = .byTruncatingTail
 

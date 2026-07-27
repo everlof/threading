@@ -52,7 +52,7 @@
     "capabilities": {
       "type": "array",
       "uniqueItems": true,
-      "description": "Safe WebAssembly v1 values include commands, panels, mcp.tools, settings, services.provide, services.consume, companions.invoke, ui.components, ui.rendering.metal, appearance.provider-icons, appearance.account-icons, appearance.session-identity, host.projects.read, host.sessions.read, host.sessions.runtime.read, host.repositories.read, host.providers.read, host.accounts.presentation.read, host.events, storage.kv, storage.cache, and storage.secrets. companions.invoke addresses only operations declared by the same extension's companion. ui.rendering.metal permits constrained host-owned custom surfaces only; it does not grant Metal objects to the extension process. host.sessions.runtime.read returns only host-attributed process and listening-port rows for an exact session ID; it does not grant process-table access. network.client is reserved for deprecated native compatibility and is rejected for WebAssembly. Unknown values remain inspectable but are rejected by hosts that do not support them.",
+      "description": "Safe WebAssembly v1 values include commands, panels, mcp.tools, settings, services.provide, services.consume, companions.invoke, ui.components, ui.rendering.metal, appearance.provider-icons, appearance.account-icons, appearance.session-identity, appearance.themes, appearance.fonts, host.projects.read, host.sessions.read, host.sessions.runtime.read, host.repositories.read, host.providers.read, host.accounts.presentation.read, host.events, storage.kv, storage.cache, and storage.secrets. appearance.themes and appearance.fonts are data-plane: the host reads the declared documents and font files itself, and the running extension gains no new broker operation from either. companions.invoke addresses only operations declared by the same extension's companion. ui.rendering.metal permits constrained host-owned custom surfaces only; it does not grant Metal objects to the extension process. host.sessions.runtime.read returns only host-attributed process and listening-port rows for an exact session ID; it does not grant process-table access. network.client is reserved for deprecated native compatibility and is rejected for WebAssembly. Unknown values remain inspectable but are rejected by hosts that do not support them.",
       "items": {
         "type": "string",
         "minLength": 1
@@ -96,6 +96,43 @@
       "description": "Optional separately signed macOS worker apps. Companions extend a WebAssembly core; they do not replace its settings, commands, panels, hooks, tools, storage, or host-data capability boundary.",
       "items": {
         "$ref": "#/$defs/companion"
+      }
+    },
+    "themes": {
+      "type": "array",
+      "maxItems": 16,
+      "default": [],
+      "description": "App-theme documents offered to the host's theme library while the extension is enabled. Requires the appearance.themes capability. Each resource is a package-relative JSON file in the host's app-theme vocabulary (the document Skalman stores for a custom theme); the host reads, validates, and namespaces it (ext.<extension>.<id>) at inspection time, before any extension code runs.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "resource"],
+        "properties": {
+          "id": { "$ref": "#/$defs/contributionIdentifier" },
+          "resource": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Package-relative path without '.' or '..' components."
+          }
+        }
+      }
+    },
+    "fonts": {
+      "type": "array",
+      "maxItems": 16,
+      "default": [],
+      "description": "Font files (.otf, .ttf, .ttc) registered process-scoped for Skalman's own chrome while the extension is enabled. Requires the appearance.fonts capability. Family names come from the files themselves; the host parses each file at inspection time and names every family in the install disclosure. Licensing of a bundled font is the package author's responsibility.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resource"],
+        "properties": {
+          "resource": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Package-relative path ending in .otf, .ttf, or .ttc."
+          }
+        }
       }
     }
   },

@@ -32,7 +32,7 @@ final class ExtensionRemoteSurfaceView:
         setAccessibilityRole(.image)
 
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.font = Design.Typography.detail()
+        statusLabel.applyFont(.detail())
         statusLabel.textColor = Design.Text.secondary
         statusLabel.alignment = .center
         statusLabel.maximumNumberOfLines = 3

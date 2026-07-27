@@ -385,8 +385,8 @@ private final class RemoteViewportBannerView: BackdropOverlay {
         )
         icon.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = Design.Typography.control()
-        detailLabel.font = Design.Typography.detail()
+        titleLabel.applyFont(.control)
+        detailLabel.applyFont(.detail())
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
 

@@ -81,6 +81,7 @@ final class ComponentGalleryViewController: NSViewController {
         "PromptView",
         "SeparatorView",
         "ShortcutRecorderView",
+        "SidebarBackdropView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
         "ThemedButton",
@@ -205,11 +206,11 @@ final class ComponentGalleryViewController: NSViewController {
 
     private func makeHeader() -> NSView {
         let title = NSTextField(labelWithString: "Component Gallery")
-        title.font = Design.Typography.heading()
+        title.applyFont(.heading)
         title.textColor = Design.Text.label
 
         let subtitle = NSTextField(labelWithString: "Theme is app-wide · Light/Dark is scoped to this window")
-        subtitle.font = Design.Typography.subheading()
+        subtitle.applyFont(.subheading)
         subtitle.textColor = Design.Text.secondary
 
         let heading = NSStackView(views: [title, subtitle])
@@ -541,7 +542,7 @@ final class ComponentGalleryViewController: NSViewController {
 
                 Try selecting, editing, and scrolling this text.
                 """
-            text.font = Design.Typography.body()
+            text.applyFont(.body)
             text.textContainerInset = NSSize(width: Design.Spacing.medium, height: Design.Spacing.medium)
         }
 
@@ -617,7 +618,7 @@ final class ComponentGalleryViewController: NSViewController {
             labelledControl(orb.state.rawValue, control: orb)
         })
 
-        morphingTitle.font = Design.Typography.emphasizedBody()
+        morphingTitle.applyFont(.emphasizedBody)
         morphingTitle.setStringValue("Rename this conversation", animated: false)
         morphingTitle.translatesAutoresizingMaskIntoConstraints = false
         morphingTitle.widthAnchor.constraint(equalToConstant: 260).isActive = true
@@ -757,6 +758,13 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSurfaceViewSample()
                 ),
                 story(
+                    "SidebarBackdropView",
+                    "The sidebar's ground: the platform's material under System, the theme's "
+                        + "own opaque surface under a style. Switch the theme above to watch it "
+                        + "trade one for the other.",
+                    makeSidebarBackdropSample()
+                ),
+                story(
                     "PaneFooterView",
                     "The bottom band of a pane: hairline, band height, and controls whose ink "
                         + "sits on the stated margin — corner-adapted when the band meets a "
@@ -777,7 +785,7 @@ final class ComponentGalleryViewController: NSViewController {
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         add.isBordered = false
-        add.font = Design.Typography.controlRegular()
+        add.applyFont(.controlRegular)
         add.target = self
         add.action = #selector(buttonPressed(_:))
 
@@ -807,6 +815,17 @@ final class ComponentGalleryViewController: NSViewController {
         return pane
     }
 
+    private func makeSidebarBackdropSample() -> NSView {
+        let backdrop = SidebarBackdropView()
+
+        NSLayoutConstraint.activate([
+            backdrop.widthAnchor.constraint(equalToConstant: 120),
+            backdrop.heightAnchor.constraint(equalToConstant: 72)
+        ])
+
+        return backdrop
+    }
+
     private func makeSurfaceViewSample() -> NSView {
         let themed = ThemedSurfaceView()
         themed.applySurface(fill: Design.Surface.background, radius: .panel)
@@ -825,7 +844,7 @@ final class ComponentGalleryViewController: NSViewController {
 
     private func makeSurfaceLabel() -> NSView {
         let label = NSTextField(labelWithString: "Surface.background")
-        label.font = Design.Typography.code()
+        label.applyFont(.code())
         label.textColor = Design.Text.secondary
         return label
     }
@@ -922,7 +941,7 @@ final class ComponentGalleryViewController: NSViewController {
         )
 
         let surfaceLabel = NSTextField(labelWithString: "ThemedSurface / applySurface")
-        surfaceLabel.font = Design.Typography.control()
+        surfaceLabel.applyFont(.control)
         surfaceLabel.textColor = Design.Text.label
         surfaceLabel.translatesAutoresizingMaskIntoConstraints = false
         surface.addSubview(surfaceLabel)
@@ -965,7 +984,7 @@ final class ComponentGalleryViewController: NSViewController {
             rendered.setAccessibilityIdentifier("gallery.extension.panel")
         } catch {
             let failure = NSTextField(wrappingLabelWithString: error.localizedDescription)
-            failure.font = Design.Typography.body()
+            failure.applyFont(.body)
             failure.textColor = Design.Status.negative
             rendered = failure
         }
@@ -975,7 +994,7 @@ final class ComponentGalleryViewController: NSViewController {
         extensionLoadButton.action = #selector(chooseExtensionDirectory)
         extensionLoadButton.setAccessibilityIdentifier("gallery.extension.load")
 
-        extensionProcessStatus.font = Design.Typography.detail()
+        extensionProcessStatus.applyFont(.detail())
         extensionProcessStatus.textColor = Design.Text.secondary
         extensionProcessStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -1128,7 +1147,7 @@ final class ComponentGalleryViewController: NSViewController {
 
             guard let panel = started.registration.panels.first else {
                 let empty = NSTextField(labelWithString: "The extension registered no panels.")
-                empty.font = Design.Typography.detail()
+                empty.applyFont(.detail())
                 empty.textColor = Design.Text.tertiary
                 replaceExtensionProcessPreview(with: empty)
                 showReceipt("Loaded extension “\(manifest.name)”.")
@@ -1344,11 +1363,11 @@ final class ComponentGalleryViewController: NSViewController {
 
     private func section(_ title: String, note: String, rows: [NSView]) -> NSView {
         let heading = NSTextField(labelWithString: title)
-        heading.font = Design.Typography.heading()
+        heading.applyFont(.heading)
         heading.textColor = Design.Text.label
 
         let explanation = NSTextField(wrappingLabelWithString: note)
-        explanation.font = Design.Typography.subheading()
+        explanation.applyFont(.subheading)
         explanation.textColor = Design.Text.secondary
 
         let cards = NSStackView(views: rows)
@@ -1369,11 +1388,11 @@ final class ComponentGalleryViewController: NSViewController {
 
     private func story(_ name: String, _ summary: String, _ sample: NSView) -> NSView {
         let nameLabel = NSTextField(labelWithString: name)
-        nameLabel.font = Design.Typography.control()
+        nameLabel.applyFont(.control)
         nameLabel.textColor = Design.Text.label
 
         let summaryLabel = NSTextField(wrappingLabelWithString: summary)
-        summaryLabel.font = Design.Typography.subheading()
+        summaryLabel.applyFont(.subheading)
         summaryLabel.textColor = Design.Text.secondary
 
         let heading = NSStackView(views: [nameLabel, summaryLabel])
@@ -1436,7 +1455,7 @@ final class ComponentGalleryViewController: NSViewController {
 
     private func smallLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
         return label
     }
@@ -1537,7 +1556,7 @@ private final class ComponentGalleryTableModel: NSObject,
 
     private func cell(_ text: String) -> NSView {
         let label = NSTextField(labelWithString: text)
-        label.font = Design.Typography.body()
+        label.applyFont(.body)
         label.textColor = Design.Text.label
         label.translatesAutoresizingMaskIntoConstraints = false
 

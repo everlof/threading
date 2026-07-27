@@ -4,11 +4,6 @@ import SkalmanExtensionKit
 /// The application's single window: a project sidebar beside the active session's terminal.
 final class MainWindowController: ThemedWindowController {
 
-    private enum SessionLoadingReason: Hashable {
-        case gitStatus
-        case gitReview
-    }
-
     // MARK: - Properties
 
     /// Not private: the toolbar delegate needs the split view for its tracking separator.
@@ -78,10 +73,6 @@ final class MainWindowController: ThemedWindowController {
 
     private var findBar: FindBarView?
     private var findBarTopConstraint: NSLayoutConstraint?
-
-    /// Several independent reads start from one selection. The row stops spinning only once all
-    /// of them have landed, so a quick status summary cannot hide a still-rendering branch diff.
-    private var sessionLoadingReasons: [SessionID: Set<SessionLoadingReason>] = [:]
 
     /// The inspect mode, kept here because extensions cannot store it. See `MainWindowInspector`.
     let elementInspector = ElementInspector()
@@ -500,26 +491,20 @@ final class MainWindowController: ThemedWindowController {
         setDisplayPaneVisible(true)
     }
 
+    /// Forwards a pane's loading state to the row it belongs to.
+    ///
+    /// The sidebar keeps the reasons, so this no longer aggregates a second copy of them — one
+    /// place answers "why is that row spinning". **Raising** stays gated on the session being on
+    /// screen, since these loads describe the pane and only the shown session has one; a
+    /// **clear** is always forwarded, because a load that finishes after the user has moved on
+    /// is exactly the one whose row would otherwise keep the spinner for good.
     private func setSessionLoading(
         _ isLoading: Bool,
-        reason: SessionLoadingReason,
+        reason: SessionLoadingState.Reason,
         for sessionID: SessionID
     ) {
-        var reasons = sessionLoadingReasons[sessionID] ?? []
-        if isLoading {
-            reasons.insert(reason)
-            sessionLoadingReasons[sessionID] = reasons
-        } else {
-            reasons.remove(reason)
-            if reasons.isEmpty {
-                sessionLoadingReasons.removeValue(forKey: sessionID)
-            } else {
-                sessionLoadingReasons[sessionID] = reasons
-            }
-        }
-        if sessionID == currentSessionID {
-            sidebarViewController.setSessionLoading(!reasons.isEmpty, for: sessionID)
-        }
+        guard !isLoading || sessionID == currentSessionID else { return }
+        sidebarViewController.setSessionLoading(isLoading, reason: reason, for: sessionID)
     }
 
     // MARK: - Public Methods
@@ -1176,6 +1161,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController) {
         showReview()
+    }
+
+    func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController) {
+        newSession()
     }
 
     func terminalContainer(

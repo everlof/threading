@@ -446,7 +446,10 @@ final class RemoteSessionMirrorRegistry {
     func beginCapturing(_ terminal: TerminalSession, sessionID: SessionID) {
         guard mirrors[sessionID] == nil else { return }
         var ring = RemoteRingBuffer(capacity: RemoteAccessDefaults.ringBufferBytes)
-        ring.append(terminal.terminalView.getTerminal().getBufferAsData())
+        // A synthesised repaint, not `getBufferAsData()`: that is plain text joined by bare line
+        // feeds with blank cells as NUL, which a client renders as a staircase of run-together
+        // words. See `RemoteScreenSeed`.
+        ring.append(RemoteScreenSeed.repaint(of: terminal.terminalView.getTerminal()))
         mirrors[sessionID] = Mirror(ring: ring, surface: "terminal")
         installTap(on: terminal, sessionID: sessionID)
     }

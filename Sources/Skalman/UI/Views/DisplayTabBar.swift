@@ -34,6 +34,16 @@ final class DisplayTabBar: NSView {
     private let scrollView = ThemedScrollView()
     private let customizationLookup: ComponentCustomizationHost.Lookup
 
+    /// Fades the strip's clipped edge instead of cutting a tab off mid-label.
+    ///
+    /// The strip scrolls rather than shrinking its chips, so in a narrow pane a tab ends in a
+    /// hard vertical slice against the `+` beside it — which reads as a defect, not as "there
+    /// is more". A short alpha ramp at whichever edge actually clips is the quiet version of a
+    /// scroll affordance: it appears only while there is content beyond it, and only on that
+    /// side. Alpha-only, so no theme owns it and no appearance can strand it.
+    private let fadeMask = CAGradientLayer()
+    private static let fadeLength: CGFloat = Design.Spacing.large
+
     // MARK: - Init
 
     override init(frame frameRect: NSRect) {
@@ -79,6 +89,21 @@ final class DisplayTabBar: NSView {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
 
+        scrollView.wantsLayer = true
+        fadeMask.startPoint = CGPoint(x: 0, y: 0.5)
+        fadeMask.endPoint = CGPoint(x: 1, y: 0.5)
+        scrollView.layer?.mask = fadeMask
+
+        // The fade follows the scroll position as well as the width: scrolling to the end must
+        // take the trailing ramp with it, or the last tab would fade for nothing.
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(updateFade),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -93,14 +118,10 @@ final class DisplayTabBar: NSView {
             stack.heightAnchor.constraint(equalTo: scrollView.contentView.heightAnchor)
         ])
 
-        // A hairline under the strip, separating it from the content below.
-        let separator = SeparatorView()
-        addSubview(separator)
-        NSLayoutConstraint.activate([
-            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
-            separator.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
+        // No hairline here: the strip does not span the pane — the customization slot and `+`
+        // sit beside it — so a rule pinned to the strip stopped mid-air short of the pane's
+        // edge. The pane's header owns the full-width rule; see
+        // `DisplayPaneController.setupHeader`.
     }
 
     // MARK: - Update
@@ -133,5 +154,41 @@ final class DisplayTabBar: NSView {
             )
             stack.addArrangedSubview(customized)
         }
+
+        needsLayout = true
+    }
+
+    // MARK: - Overflow Fade
+
+    override func layout() {
+        super.layout()
+        updateFade()
+    }
+
+    @objc private func updateFade() {
+        let clip = scrollView.contentView.bounds
+        let content = stack.frame
+        guard clip.width > 0 else { return }
+
+        let clipsLeading = clip.minX > 0.5
+        let clipsTrailing = content.maxX - clip.maxX > 0.5
+        let ramp = min(Self.fadeLength / clip.width, 0.5)
+
+        let opaque = NSColor.black.cgColor
+        let clear = NSColor.clear.cgColor
+
+        // Resizing a layer animates by default, and a mask that glides while the pane is
+        // dragged leaves a visible band of half-faded tabs trailing the divider.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fadeMask.frame = scrollView.bounds
+        fadeMask.colors = [
+            clipsLeading ? clear : opaque,
+            opaque,
+            opaque,
+            clipsTrailing ? clear : opaque
+        ]
+        fadeMask.locations = [0, NSNumber(value: ramp), NSNumber(value: 1 - ramp), 1]
+        CATransaction.commit()
     }
 }

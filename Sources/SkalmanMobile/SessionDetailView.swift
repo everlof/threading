@@ -352,28 +352,42 @@ struct SessionDetailView: View {
     }
 }
 
-private struct ConnectionBanner: View {
+private struct RemoteNavigationTitle: View {
     @ObservedObject var connection: RemoteSessionConnection
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 7, height: 7)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(theme.secondaryLabel)
-            Spacer()
+        VStack(spacing: MobileDesign.Spacing.hairline) {
+            Text(connection.title)
+                .font(.headline)
+                .lineLimit(1)
+
             if case .failed = connection.phase {
-                Button("Reconnect") { connection.connect() }
-                    .font(.caption.weight(.medium))
+                Button(action: connection.connect) {
+                    status
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Reconnect")
+            } else {
+                status
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(theme.surface)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var status: some View {
+        HStack(spacing: MobileDesign.Spacing.tight) {
+            Circle()
+                .fill(color)
+                .frame(
+                    width: MobileDesign.Size.navigationStatusIndicator,
+                    height: MobileDesign.Size.navigationStatusIndicator
+                )
+            Text(label)
+                .lineLimit(1)
         }
+        .font(.caption2)
+        .foregroundStyle(theme.secondaryLabel)
     }
 
     private var color: Color {
@@ -413,13 +427,17 @@ private struct TerminalRemoteView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ConnectionBanner(connection: connection)
             TerminalViewRepresentable(
                 connection: connection,
                 theme: connection.terminalTheme
             )
             .background(terminalBackground)
             TerminalKeyBar(connection: connection)
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                RemoteNavigationTitle(connection: connection)
+            }
         }
         .environment(\.remoteTheme, theme)
         .preferredColorScheme(theme.colorScheme)
@@ -480,10 +498,6 @@ struct ConversationRemoteView: View {
     var body: some View {
         RemoteConversationTimelineView(connection: connection, theme: theme)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                ConnectionBanner(connection: connection)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     presenceBanner
@@ -504,6 +518,11 @@ struct ConversationRemoteView: View {
                 }
                 .padding(.bottom, keyboardOverlap)
                 .background(theme.ground)
+            }
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    RemoteNavigationTitle(connection: connection)
+                }
             }
             .task {
                 if initiallyFocusesComposer, draft.isEmpty {

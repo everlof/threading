@@ -8,10 +8,18 @@ import AppKit
 /// On a near-black terminal the seam between the sidebar and the session simply was not there,
 /// and the panes read as one undivided surface.
 ///
-/// `dividerColor` is the whole of the seam AppKit offers here, so it reads the same ink the
-/// toolbar does. The backdrop moves when the selected session changes as well as when the theme
-/// does — both are observed, because a divider that keeps the previous session's ink is the bug
-/// this exists to fix, one palette later.
+/// `dividerColor` is the whole of the seam AppKit offers here. The rule is: **the theme's own
+/// line wherever it visibly reads on the backdrop; the measured neutral only where it does
+/// not.** Over the chrome's ground the theme's border always reads — a theme is built that way
+/// — and a neutral there drew a pale grey seam across a theme whose every other rule is its own
+/// hue. Over a terminal palette the border is *measured* against the actual backdrop first: the
+/// System theme's terminal deliberately matches the chrome, where the quiet themed hairline is
+/// right and the neutral was the one loud line in the window — while a palette the border
+/// vanishes against (a black terminal under a light chrome's black rules) still gets the
+/// neutral, which is the seam this view originally existed to restore. The backdrop moves when
+/// the selected session changes as well as when the theme does — both are observed, because a
+/// divider that keeps the previous session's ink is the bug this exists to fix, one palette
+/// later.
 final class ThemedSplitView: NSSplitView {
 
     private let appEvents = AppEventObservations()
@@ -40,8 +48,22 @@ final class ThemedSplitView: NSSplitView {
 
     // MARK: - Appearance
 
-    /// A hairline that reads on the backdrop rather than on the chrome's ground.
-    override var dividerColor: NSColor { WindowBackdrop.ink.border }
+    /// The faintest a hairline may sit above its ground and still register as a line. Well
+    /// below text legibility on purpose: a seam is found by the eye sweeping across it, not
+    /// read — the System theme's own dark hairline sits at ~1.35:1.
+    private static let visibleLineRatio: CGFloat = 1.2
+
+    /// The theme's own line wherever it reads on the backdrop; measured ink where it cannot.
+    override var dividerColor: NSColor {
+        let border = Design.Surface.border
+        guard !WindowBackdrop.isChromeGround else { return border }
+
+        let backdrop = WindowBackdrop.color
+        let drawn = backdrop.composited(under: border)
+        return ThemeContrast.ratio(drawn, backdrop) >= Self.visibleLineRatio
+            ? border
+            : WindowBackdrop.ink.border
+    }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()

@@ -85,7 +85,7 @@ final class EmojiPickerViewController: NSViewController {
     private func makeEmojiCell(_ emoji: String) -> ThemedButton {
         let button = ThemedButton(title: emoji, target: self, action: #selector(cellClicked(_:)))
         button.isBordered = false
-        button.font = Design.Typography.emojiPickerCell()
+        button.applyFont(.emojiPickerCell)
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             button.widthAnchor.constraint(equalToConstant: EmojiPickerLayout.cellSize),
@@ -107,7 +107,7 @@ final class EmojiPickerViewController: NSViewController {
         browse.translatesAutoresizingMaskIntoConstraints = false
 
         field.placeholderString = EmojiPickerStrings.placeholder
-        field.font = Design.Typography.body()
+        field.applyFont(.body)
         field.delegate = self
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
 

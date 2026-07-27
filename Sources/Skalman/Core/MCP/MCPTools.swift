@@ -501,6 +501,9 @@ struct AppThemeMaterialArguments: Decodable {
     let borderWidth: Double?
     let glow: AppThemeGlowArguments?
     let removeGlow: Bool?
+    let typeface: String?
+    let fontFamily: String?
+    let removeFontFamily: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case panelRadius = "panel_radius"
@@ -508,6 +511,9 @@ struct AppThemeMaterialArguments: Decodable {
         case borderWidth = "border_width"
         case glow
         case removeGlow = "remove_glow"
+        case typeface
+        case fontFamily = "font_family"
+        case removeFontFamily = "remove_font_family"
     }
 }
 
@@ -3468,6 +3474,30 @@ enum MCPTools {
             "remove_glow": MCPPropertySchema(
                 type: .boolean,
                 description: "True removes the base theme's glow."
+            ),
+            "typeface": MCPPropertySchema(
+                type: .string,
+                description: """
+                    Typeface class for the app's prose: "default" (SF Sans), "serif" (New York), \
+                    "rounded" (SF Rounded) or "monospaced" (SF Mono). These are macOS's own font \
+                    designs, so every weight exists and nothing is downloaded. Code and the \
+                    terminal never follow it, and numeric labels keep SF's aligned digits.
+                    """
+            ),
+            "font_family": MCPPropertySchema(
+                type: .string,
+                description: """
+                    An installed font family — "Baskerville", "Iowan Old Style" — for a theme \
+                    whose identity is a particular face rather than one of the four classes. \
+                    Wins over typeface where it resolves. Must be installed on this machine; \
+                    call list_app_themes or get_app_theme to see what a theme currently uses. \
+                    A theme that names a family the reading machine lacks falls back to \
+                    typeface rather than failing.
+                    """
+            ),
+            "remove_font_family": MCPPropertySchema(
+                type: .boolean,
+                description: "True removes the base theme's font family, falling back to typeface."
             )
         ]
     }

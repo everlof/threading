@@ -36,13 +36,13 @@ final class AccountUsagePanelView: NSView {
         // Flush, with no surface of its own: a card here would inset its bars from the column
         // everything else is aligned to, and `Surface.panel` is nearly invisible against the
         // pane anyway — so it read as a misalignment rather than as a group.
-        titleLabel.font = Design.Typography.caption()
+        titleLabel.applyFont(.caption)
         titleLabel.textColor = Design.Text.secondary
 
-        planLabel.font = Design.Typography.caption()
+        planLabel.applyFont(.caption)
         planLabel.textColor = Design.Text.tertiary
 
-        footerLabel.font = Design.Typography.caption()
+        footerLabel.applyFont(.caption)
         footerLabel.textColor = Design.Text.tertiary
 
         let spacer = NSView()

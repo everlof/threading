@@ -158,3 +158,48 @@ enum TurnStatusText {
         return value
     }
 }
+
+// MARK: - Run Progress
+
+/// A provider-neutral position inside the plan an agent reports while a turn is running.
+///
+/// Codex calls this `update_plan` and Claude's older vocabulary calls it `TodoWrite`; both carry
+/// a complete ordered list on every update. Reducing that list here keeps provider argument
+/// shapes out of the view and makes "Step n / total" one fact rather than display-time inference.
+struct RunProgress: Equatable {
+    let step: Int
+    let total: Int
+
+    var label: String { "Step \(step) / \(total)" }
+
+    init(step: Int, total: Int) {
+        self.step = step
+        self.total = total
+    }
+
+    init?(tool: ToolIdentity, input: [String: Any]) {
+        let items: [[String: Any]]
+        switch tool {
+        case .plan:
+            items = input["plan"] as? [[String: Any]] ?? []
+        case .todoWrite:
+            items = input["todos"] as? [[String: Any]] ?? []
+        default:
+            return nil
+        }
+
+        guard !items.isEmpty else { return nil }
+
+        let activeIndex = items.firstIndex {
+            ($0["status"] as? String) == "in_progress"
+        }
+        let nextIndex = items.firstIndex {
+            ($0["status"] as? String) != "completed"
+        }
+
+        self.init(
+            step: (activeIndex ?? nextIndex ?? (items.count - 1)) + 1,
+            total: items.count
+        )
+    }
+}

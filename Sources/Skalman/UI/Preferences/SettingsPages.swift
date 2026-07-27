@@ -16,6 +16,7 @@ enum SettingsPages {
     }
 
     static let generalID = ExtensionHostSettingsPage.general.rawValue
+    static let remoteAccessID = "remote-access"
     static let accountsID = ExtensionHostSettingsPage.accounts.rawValue
     static let profilesID = ExtensionHostSettingsPage.profiles.rawValue
     static let themesID = ExtensionHostSettingsPage.themes.rawValue
@@ -40,6 +41,12 @@ enum SettingsPages {
             title: "General",
             symbol: "gearshape"
         ) { GeneralPreferencesViewController() },
+        Page(
+            id: remoteAccessID,
+            hostPage: nil,
+            title: "Remote Access",
+            symbol: "iphone"
+        ) { RemoteAccessPreferencesViewController() },
         Page(
             id: accountsID,
             hostPage: .accounts,

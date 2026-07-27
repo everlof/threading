@@ -18,13 +18,13 @@ final class UsageBarRow: NSView {
         translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = Design.Typography.body()
+        titleLabel.applyFont(.body)
         titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let valueLabel = NSTextField(labelWithString: value)
-        valueLabel.font = Design.Typography.numericControl()
+        valueLabel.applyFont(.numericControl)
         valueLabel.textColor = Design.Text.secondary
         valueLabel.alignment = .right
         valueLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -38,7 +38,7 @@ final class UsageBarRow: NSView {
 
         if let detail {
             let detailLabel = NSTextField(labelWithString: detail)
-            detailLabel.font = Design.Typography.subheading()
+            detailLabel.applyFont(.subheading)
             detailLabel.textColor = Design.Text.tertiary
             rows.insert(detailLabel, at: 1)
         }

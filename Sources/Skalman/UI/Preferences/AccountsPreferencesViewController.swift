@@ -105,7 +105,7 @@ final class AccountsPreferencesViewController: NSViewController {
             action: #selector(iconClicked(_:))
         )
         button.isBordered = false
-        button.font = Design.Typography.accountEmoji()
+        button.applyFont(.accountEmoji)
         button.tag = index
         button.alphaValue = account.emoji == nil ? AccountsPreferencesLayout.unsetIconAlpha : 1
         button.toolTip = AccountsPreferencesStrings.iconWellTooltip
@@ -125,7 +125,7 @@ final class AccountsPreferencesViewController: NSViewController {
     /// The editable name over a quiet caption naming the provider and its config directory.
     private func makeLabelStack(for account: AgentAccount, row index: Int) -> NSView {
         let field = ThemedTextField(string: account.displayName)
-        field.font = Design.Typography.body()
+        field.applyFont(.body)
         field.textColor = Design.Text.label
         field.isBordered = false
         field.isBezeled = false
@@ -142,7 +142,7 @@ final class AccountsPreferencesViewController: NSViewController {
 
         let caption = NSTextField(labelWithString:
             "\(account.provider.displayName) · \(abbreviated(account.configPath))")
-        caption.font = Design.Typography.subheading()
+        caption.applyFont(.subheading)
         caption.textColor = Design.Text.secondary
         caption.lineBreakMode = .byTruncatingMiddle
         caption.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -158,7 +158,7 @@ final class AccountsPreferencesViewController: NSViewController {
     /// Shown when no logins are found, so the empty card is not a blank panel.
     private func makeEmptyRow() -> NSView {
         let label = NSTextField(labelWithString: AccountsPreferencesStrings.emptyMessage)
-        label.font = Design.Typography.body()
+        label.applyFont(.body)
         label.textColor = Design.Text.secondary
         return padded(label)
     }

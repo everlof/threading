@@ -28,6 +28,7 @@ final class GitReviewViewController: NSViewController {
 
     var modeChip: ChipView!
     var backButton: ThemedButton!
+    private var headerCluster: NSStackView!
     var counterLabel: NSTextField!
     private var menuButton: ThemedButton!
     var scrollView: NSScrollView!
@@ -36,6 +37,7 @@ final class GitReviewViewController: NSViewController {
     var summaryPill: GitReviewSummaryPill!
     var jumpToEndButton: ThemedButton!
     private var scrollObserver: NSObjectProtocol?
+    private let appEvents = AppEventObservations()
 
     /// What the body is currently showing. Commit mode is two phases deep: the history list,
     /// and one commit opened out of it.
@@ -126,6 +128,16 @@ final class GitReviewViewController: NSViewController {
         setupHeader()
         setupBody()
         setupConstraints()
+
+        // The pane's counters and file headers are *built* attributed strings — `+362 −26` is
+        // one string carrying two colours — so their font and their ink both freeze at build
+        // time, where a plain label's would be re-resolved by the theme sweep. Re-reading is
+        // the honest rebuild: this pane already keeps the reader's scroll offset and whatever
+        // was expanded by hand across a reload, so a theme switch costs a git read and nothing
+        // the user can see move.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.refresh(force: true)
+        }
     }
 
     deinit {
@@ -155,7 +167,7 @@ final class GitReviewViewController: NSViewController {
         }
 
         counterLabel = NSTextField(labelWithString: "")
-        counterLabel.font = Design.Typography.caption()
+        counterLabel.applyFont(.caption)
         counterLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         // One overflow rather than a row of icons: refreshing, collapsing, wrapping and the
@@ -170,7 +182,19 @@ final class GitReviewViewController: NSViewController {
         menuButton.isBordered = false
         menuButton.toolTip = "Diff options"
 
-        [backButton, modeChip, counterLabel, menuButton].forEach {
+        // A stack rather than individual constraints, because the back button is usually
+        // hidden: a hidden view keeps the frame its constraints give it, so the chip sat
+        // indented past a ghost button and read as floating in the pane rather than starting
+        // where the row does. A stack detaches hidden views, so the chip's leading is the
+        // row's inset whenever there is nothing to go back to.
+        headerCluster = NSStackView(views: [backButton, modeChip])
+        headerCluster.orientation = .horizontal
+        headerCluster.alignment = .centerY
+        headerCluster.spacing = Design.Spacing.tight
+        headerCluster.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(headerCluster)
+
+        [counterLabel, menuButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview($0)
         }
@@ -209,7 +233,7 @@ final class GitReviewViewController: NSViewController {
 
         placeholderLabel = NSTextField(labelWithString: "")
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
-        placeholderLabel.font = Design.Typography.body()
+        placeholderLabel.applyFont(.body)
         placeholderLabel.textColor = Design.Text.tertiary
         placeholderLabel.alignment = .center
         placeholderLabel.lineBreakMode = .byWordWrapping
@@ -247,15 +271,13 @@ final class GitReviewViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             // The toolbar insets the safe area; pinning to the view's own top would slide
-            // the header under it.
-            backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.small),
-            backButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
-
-            modeChip.topAnchor.constraint(
+            // the header under it. The row's insets mirror the overflow button's on the other
+            // side, so the chip starts where the row does instead of hanging mid-air.
+            headerCluster.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor,
                 constant: Design.Spacing.small
             ),
-            modeChip.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: Design.Spacing.tight),
+            headerCluster.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
 
             counterLabel.leadingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: Design.Spacing.medium),
             counterLabel.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
@@ -535,7 +557,7 @@ final class GitReviewSummaryPill: NSView {
 
         let labels = [filesLabel, addedLabel, removedLabel]
         labels.forEach {
-            $0.font = Design.Typography.caption()
+            $0.applyFont(.caption)
             $0.setContentHuggingPriority(.required, for: .horizontal)
         }
 

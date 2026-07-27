@@ -69,11 +69,11 @@ final class ThemeColorEditor: NSView {
     private func mainColors() -> NSView {
         let columns = ThemeColorKey.main.map { key -> NSView in
             let name = NSTextField(labelWithString: key.displayName)
-            name.font = Design.Typography.subheading()
+            name.applyFont(.subheading)
             name.textColor = Design.Text.secondary
 
             let hex = NSTextField(labelWithString: "")
-            hex.font = Design.Typography.compactCode()
+            hex.applyFont(.compactCode)
             hex.textColor = Design.Text.tertiary
             hexLabels[key] = hex
 
@@ -106,7 +106,7 @@ final class ThemeColorEditor: NSView {
         let rows = [("Normal", ThemeColorKey.normal), ("Bright", ThemeColorKey.bright)]
             .map { title, keys -> NSView in
                 let label = NSTextField(labelWithString: title)
-                label.font = Design.Typography.subheading()
+                label.applyFont(.subheading)
                 label.textColor = Design.Text.secondary
                 label.translatesAutoresizingMaskIntoConstraints = false
                 label.widthAnchor.constraint(equalToConstant: ThemeEditorLayout.rowLabelWidth)

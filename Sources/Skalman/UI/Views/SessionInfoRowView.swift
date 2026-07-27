@@ -51,17 +51,17 @@ final class SessionInfoRowView: NSView {
         glyphView.contentTintColor = symbolColor
         glyphView.imageScaling = .scaleNone
 
-        primaryLabel.font = Design.Typography.compactCode()
+        primaryLabel.applyFont(.compactCode)
         primaryLabel.textColor = Design.Text.label
         primaryLabel.stringValue = primary
         primaryLabel.lineBreakMode = .byTruncatingTail
 
-        secondaryLabel.font = Design.Typography.compactCode()
+        secondaryLabel.applyFont(.compactCode)
         secondaryLabel.textColor = Design.Text.tertiary
         secondaryLabel.stringValue = secondary
         secondaryLabel.lineBreakMode = .byTruncatingTail
 
-        valueLabel.font = Design.Typography.compactCode()
+        valueLabel.applyFont(.compactCode)
         valueLabel.textColor = Design.Text.tertiary
         valueLabel.stringValue = value
         valueLabel.alignment = .right
@@ -128,6 +128,13 @@ final class SessionInfoRowView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
+
+        // The row moved rather than the pointer, so no exit was ever delivered — see
+        // `NSView.hoverIsStale`.
+        if hoverIsStale(isHovered) {
+            isHovered = false
+            updateSurface()
+        }
 
         guard action != nil else { return }
         addTrackingArea(NSTrackingArea(

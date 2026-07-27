@@ -52,7 +52,7 @@ enum ConversationRowView {
         bubble.applySurface(fill: Design.Chat.bubbleFill, radius: .panel)
 
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = Design.Typography.body()
+        label.applyFont(.body, in: .conversation)
         label.textColor = Design.Text.label
         label.isSelectable = true
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -100,14 +100,14 @@ enum ConversationRowView {
 
     /// Reasoning, quieter than the reply it precedes — an aside, not the answer.
     static func thinking(_ text: String) -> NSView {
-        label(text, font: Design.Typography.body(), color: Design.Text.tertiary)
+        label(text, role: .body, color: Design.Text.tertiary)
     }
 
     /// Neither said nor tool output: a truncation banner, a failed turn, an orphan result.
     static func notice(_ text: String, kind: ConversationTimeline.NoticeKind) -> NSView {
         label(
             text,
-            font: Design.Typography.subheading(),
+            role: .subheading,
             color: kind == .error ? Design.Status.negative : Design.Text.tertiary
         )
     }
@@ -116,14 +116,18 @@ enum ConversationRowView {
     /// finishes: rendering markdown per token would reflow the whole block on every keystroke,
     /// and the finished message is authoritative anyway.
     static func streaming(_ text: String) -> NSTextField {
-        label(text, font: Design.Typography.body(), color: Design.Text.label)
+        label(text, role: .body, color: Design.Text.label)
     }
 
     // MARK: - Private Methods
 
-    private static func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
+    /// Takes a role rather than a font: these rows are the transcript, so they resolve in the
+    /// `.conversation` surface — a streaming reply that arrived in the chrome font would change
+    /// face the moment it finished and became rendered markdown — and recording the role is what
+    /// lets a live theme or font-override switch reach them.
+    private static func label(_ text: String, role: Design.FontRole, color: NSColor) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = font
+        label.applyFont(role, in: .conversation)
         label.textColor = color
         label.isSelectable = true
         label.translatesAutoresizingMaskIntoConstraints = false

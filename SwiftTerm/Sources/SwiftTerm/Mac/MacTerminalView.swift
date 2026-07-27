@@ -107,6 +107,29 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     // Cache for the colors in the 0..255 range
     var colors: [NSColor?] = Array(repeating: nil, count: 256)
     var trueColors: [Attribute.Color:NSColor] = [:]
+
+    /// Backgrounds cached *after* `trueColorBackgroundTransform` has run.
+    ///
+    /// Separate from `trueColors` because that cache is keyed by the colour alone, while the
+    /// transform applies to one role only — sharing it would hand a rewritten background back
+    /// to a foreground asking for the same 24-bit value.
+    var trueColorBackgrounds: [Attribute.Color:NSColor] = [:]
+
+    /// Rewrites a 24-bit **background** colour on its way to the screen.
+    ///
+    /// A program emitting `48;2;R;G;B` has picked an absolute colour for a generic terminal and
+    /// cannot know what palette it landed in, so a themed host has no say in the one place a
+    /// large flat area of colour appears. This is that say. Foregrounds are deliberately not
+    /// offered: a program's syntax highlighting is its own, and rewriting text colour against a
+    /// background the program also chose is how legibility gets broken from the outside.
+    ///
+    /// Indexed colours (`ansi256`) are already the palette's and never reach this.
+    public var trueColorBackgroundTransform: ((NSColor) -> NSColor)? {
+        didSet {
+            trueColorBackgrounds = [:]
+            colorsChanged()
+        }
+    }
     var transparent = TTColor.transparent ()
     var isBigSur = true
     

@@ -70,6 +70,57 @@ class ThemedControl: NSControl, ThemedComponent {
         return resigned
     }
 
+    // MARK: - Hover
+
+    /// Whether the pointer is on this control.
+    ///
+    /// **Owned here because six controls had each written the same three members** — a
+    /// `trackingArea`, an `isHovered`, an `updateTrackingAreas` — and so carried the same bug six
+    /// times over: a tracking area reports what the *pointer* did, so a control that moves out
+    /// from under a stationary pointer is never told it was left and stays lit. See
+    /// `NSView.isPointerInside` for how that reaches the screen. One implementation is also what
+    /// stops the seventh control from being the one that forgot.
+    private(set) var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hoverDidChange()
+        }
+    }
+
+    /// Answered when the pointer arrives or leaves. The default redraw is what a control drawing
+    /// its own hover fill needs; a control that hovers by moving a layer or a constraint overrides
+    /// this instead of watching the flag itself.
+    func hoverDidChange() {
+        needsDisplay = true
+    }
+
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+
+        // Tracking is rebuilt exactly when this view's geometry changed, which is the moment a
+        // hover can have gone stale without the pointer moving at all.
+        if hoverIsStale(isHovered) {
+            isHovered = false
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
     override func keyDown(with event: NSEvent) {
         guard isEnabled else {
             super.keyDown(with: event)

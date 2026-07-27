@@ -103,6 +103,8 @@ enum AppCommands {
         static let find = "edit.find"
 
         static let toggleSidebar = "view.sidebar"
+        static let groupByBranch = "view.groupByBranch"
+        static let loneBranchHeadings = "view.loneBranchHeadings"
         static let newTerminalTab = "view.terminal"
         static let browser = "view.browser"
         static let files = "view.files"
@@ -135,6 +137,13 @@ enum AppCommands {
 
         AppCommand(id: ID.toggleSidebar, group: .view, title: "Toggle Sidebar",
                    defaultShortcut: KeyboardShortcut(key: "s", modifiers: [.command, .control]), isEditable: true),
+        // B for branch, on the sidebar-toggle's own ⌃⌘ layer — ⇧⌘B is the browser's. The
+        // lone-branch refinement takes the ⌥⌘ layer of the same key, so the pair reads as
+        // one idea at two depths.
+        AppCommand(id: ID.groupByBranch, group: .view, title: "Group Sessions by Branch",
+                   defaultShortcut: KeyboardShortcut(key: "b", modifiers: [.command, .control]), isEditable: true),
+        AppCommand(id: ID.loneBranchHeadings, group: .view, title: "Headings for Lone Branches",
+                   defaultShortcut: KeyboardShortcut(key: "b", modifiers: [.command, .option]), isEditable: true),
         // ⌘T for the terminal, which is what T means everywhere else. The browser keeps ⇧⌘B
         // rather than taking ⌘T from it.
         AppCommand(id: ID.newTerminalTab, group: .view, title: "Terminal",

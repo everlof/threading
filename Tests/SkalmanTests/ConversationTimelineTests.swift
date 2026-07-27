@@ -173,6 +173,27 @@ final class ConversationTimelineTests: XCTestCase {
         }
     }
 
+    func testPlanCallReportsRunProgressBesideItsToolRow() {
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        let changes = timeline.apply(.assistantMessage(blocks: [
+            .toolUse(
+                id: "plan-1",
+                tool: .plan,
+                input: [
+                    "plan": [
+                        ["step": "Inspect", "status": "completed"],
+                        ["step": "Implement", "status": "in_progress"],
+                        ["step": "Verify", "status": "pending"],
+                        ["step": "Document", "status": "pending"],
+                    ]
+                ]
+            )
+        ]))
+
+        XCTAssertEqual(changes.count, 2)
+        XCTAssertEqual(changes.last, .runProgress(RunProgress(step: 2, total: 4)))
+    }
+
     func testNoToolSubjectIsRawJSON() throws {
         // The subject exists so a reader is not asked to parse an argument schema before
         // understanding a row. `Read` and Codex's `update_plan` both fell through to the

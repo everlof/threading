@@ -12,9 +12,73 @@ import XCTest
 @MainActor
 final class AppThemeTests: XCTestCase {
 
+    /// These tests run hosted in the app, so `UserDefaults.standard` is the shipping app's own
+    /// domain — clearing the font-override keys outright would delete the developer's actual
+    /// chosen fonts every time the suite runs. The real values are set aside before each test
+    /// (which also keeps a machine where the feature is in use from failing the layer-order
+    /// assertions) and put back after it.
+    private var preservedFontOverrides: [String: String?] = [:]
+
+    override func setUp() {
+        super.setUp()
+        preservedFontOverrides = [
+            "chromeFontFamily": UserDefaults.standard.string(forKey: "chromeFontFamily"),
+            "conversationFontFamily": UserDefaults.standard.string(forKey: "conversationFontFamily")
+        ]
+        clearFontOverrides()
+    }
+
     override func tearDown() {
         AppThemePalette.set(.system)
+        for (key, value) in preservedFontOverrides {
+            if let value {
+                UserDefaults.standard.set(value, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
         super.tearDown()
+    }
+
+    // MARK: - Font Helpers
+
+    /// Two families macOS has shipped for its whole history, so the font tests do not depend on
+    /// what this particular machine has installed. Asserted present rather than assumed.
+    private static let chromeTestFamily = "Baskerville"
+    private static let conversationTestFamily = "Palatino"
+
+    func testTheFontFixturesAreInstalled() {
+        let families = NSFontManager.shared.availableFontFamilies
+        XCTAssertTrue(families.contains(Self.chromeTestFamily))
+        XCTAssertTrue(families.contains(Self.conversationTestFamily))
+    }
+
+    /// The keys are written directly rather than through `AppSettings.shared`, so the tests do
+    /// not post `AppSettingsDidChange` into a running app's observers.
+    private func clearFontOverrides() {
+        UserDefaults.standard.removeObject(forKey: "chromeFontFamily")
+        UserDefaults.standard.removeObject(forKey: "conversationFontFamily")
+    }
+
+    /// A copy of a stock theme that names a family, which no stock theme does.
+    private func themeNaming(family: String, on theme: AppTheme) -> AppTheme {
+        var variants: [AppTheme.VariantKind: AppTheme.Variant] = [:]
+        for (kind, variant) in theme.variants {
+            var material = variant.material
+            material.fontFamily = family
+            variants[kind] = AppTheme.Variant(
+                roles: variant.roles,
+                terminalPalette: variant.terminalPalette,
+                material: material
+            )
+        }
+        return AppTheme(
+            id: AppThemeID("\(theme.id.rawValue)-family"),
+            name: theme.name,
+            mode: theme.mode,
+            summary: theme.summary,
+            variants: variants
+        )
     }
 
     // MARK: - The System Theme Changes Nothing
@@ -89,34 +153,493 @@ final class AppThemeTests: XCTestCase {
         )
     }
 
-    func testCompatibilityProjectionsFollowTheCurrentDrawingAppearance() throws {
+    /// Material follows the drawing appearance — it is read while drawing. The terminal palette
+    /// deliberately does **not**: it is consumed as data from setup code and notification
+    /// handlers, where the ambient drawing appearance is stale, so its variant is chosen by the
+    /// appearance a caller states (`terminalPalette(for:)`), and the parameterless var anchors
+    /// to the application's.
+    func testCompatibilityProjectionsFollowTheAppearanceTheyAreAskedFor() throws {
         let theme = try adaptiveFixture()
         let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
         let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
         var lightRadius: CGFloat = -1
         var darkRadius: CGFloat = -1
-        var lightTerminal = ""
-        var darkTerminal = ""
 
         lightAppearance.performAsCurrentDrawingAppearance {
             lightRadius = theme.material.panelRadius
-            lightTerminal = theme.terminalPalette.background.hexString
         }
         darkAppearance.performAsCurrentDrawingAppearance {
             darkRadius = theme.material.panelRadius
-            darkTerminal = theme.terminalPalette.background.hexString
         }
 
         XCTAssertEqual(lightRadius, AppThemeStyles.swissMinimalist.material.panelRadius)
         XCTAssertEqual(darkRadius, AppThemeStyles.cyberpunk.material.panelRadius)
         XCTAssertEqual(
-            lightTerminal,
+            theme.terminalPalette(for: lightAppearance).background.hexString,
             AppThemeStyles.swissMinimalist.terminalPalette.background.hexString
         )
         XCTAssertEqual(
-            darkTerminal,
+            theme.terminalPalette(for: darkAppearance).background.hexString,
             AppThemeStyles.cyberpunk.terminalPalette.background.hexString
         )
+    }
+
+    // MARK: - Typeface
+
+    /// The other half of a style brief: a theme states which platform typeface the chrome is
+    /// set in, `Design.Typography` interprets it, and System keeps SF exactly.
+    func testTheThemeTypefaceReachesProseAndSparesCode() throws {
+        AppThemePalette.set(.system)
+        let plain = NSFont.systemFont(ofSize: 13, weight: .regular)
+        XCTAssertEqual(Design.Typography.body().fontName, plain.fontName)
+
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        let serifBody = Design.Typography.body()
+        XCTAssertNotEqual(
+            serifBody.fontName, plain.fontName,
+            "Newsprint is a serif brief; its body must not still be SF Sans"
+        )
+        XCTAssertEqual(serifBody.pointSize, 13)
+
+        // Code is monospaced under every style; a serif diff is not a style, it is a defect.
+        let code = Design.Typography.code()
+        XCTAssertTrue(
+            code.fontDescriptor.symbolicTraits.contains(.monoSpace),
+            "code stopped being monospaced under a serif theme"
+        )
+
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        XCTAssertTrue(
+            Design.Typography.body().fontDescriptor.symbolicTraits.contains(.monoSpace),
+            "Cyberpunk is a mono brief; its prose should be monospaced"
+        )
+    }
+
+    // MARK: - A Live Switch Moves the Whole Window
+
+    /// A label keeps the `NSFont` object it was handed, exactly as a layer keeps a `CGColor`, so
+    /// a theme switch leaves it set in the previous typeface until something takes the decision
+    /// again. This is that sweep, on one label.
+    func testARecordedRoleFollowsALiveTypefaceSwitch() throws {
+        AppThemePalette.set(.system)
+        let label = NSTextField(labelWithString: "Skalman")
+        label.applyFont(.body)
+        let sans = try XCTUnwrap(label.font)
+
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        XCTAssertEqual(
+            label.font?.fontName, sans.fontName,
+            "the freeze this exists to undo stopped happening — the test is no longer testing it"
+        )
+
+        label.reapplyRecordedFontForTesting()
+        let serif = try XCTUnwrap(label.font)
+        XCTAssertEqual(serif.fontName, Design.Typography.body().fontName)
+        XCTAssertNotEqual(serif.fontName, sans.fontName, "the label kept SF Sans under Newsprint")
+        XCTAssertEqual(serif.pointSize, sans.pointSize, "the sweep changed the size as well as the design")
+    }
+
+    /// The round trip is the case nothing read back off the *font* could ever serve: under a
+    /// mono brief a prose font and a code font are byte-identical, so only the recorded role
+    /// knows that one of these two labels must return to SF Sans and the other must not.
+    func testProseReturnsFromAMonoThemeWhileCodeStaysPut() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let prose = NSTextField(labelWithString: "Ready")
+        prose.applyFont(.body)
+        let code = NSTextField(labelWithString: "git status")
+        code.applyFont(.code())
+
+        XCTAssertTrue(
+            try XCTUnwrap(prose.font).fontDescriptor.symbolicTraits.contains(.monoSpace),
+            "Cyberpunk's prose should be monospaced, which is what makes this ambiguous"
+        )
+
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        prose.reapplyRecordedFontForTesting()
+        code.reapplyRecordedFontForTesting()
+
+        XCTAssertFalse(
+            try XCTUnwrap(prose.font).fontDescriptor.symbolicTraits.contains(.monoSpace),
+            "prose stayed monospaced after leaving a mono theme"
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(code.font).fontDescriptor.symbolicTraits.contains(.monoSpace),
+            "code followed the theme into serif; a serif diff is not a style, it is a defect"
+        )
+    }
+
+    /// A role is the whole call, not a category: a weight given at the call site has to come
+    /// back after the switch, or every emphasised label quietly returns as regular.
+    func testARecordedRoleKeepsItsWeightAndScale() throws {
+        AppThemePalette.set(.system)
+        let label = NSTextField(labelWithString: "Detail")
+        label.applyFont(.detail(weight: .medium))
+
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        label.reapplyRecordedFontForTesting()
+
+        XCTAssertEqual(label.font?.fontName, Design.Typography.detail(weight: .medium).fontName)
+        XCTAssertNotEqual(
+            label.font?.fontName, Design.Typography.detail().fontName,
+            "the medium weight was dropped on the way through the sweep"
+        )
+    }
+
+    /// Numeric keeps SF's monospaced digits under every typeface — a usage column that stops
+    /// aligning costs more than a serif digit is worth.
+    func testNumericRolesDoNotFollowTheTypeface() throws {
+        AppThemePalette.set(.system)
+        let numeric = NSTextField(labelWithString: "5h 43%")
+        numeric.applyFont(.numericControl)
+        let before = try XCTUnwrap(numeric.font)
+
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        numeric.reapplyRecordedFontForTesting()
+
+        XCTAssertEqual(numeric.font?.fontName, before.fontName, "a usage column went serif")
+    }
+
+    /// A font the design system never vended is not the sweep's business — the terminal's own
+    /// font is the case that matters, and it belongs to the user's profile.
+    func testAnUnrecordedFontIsLeftAlone() throws {
+        AppThemePalette.set(.system)
+        let label = NSTextField(labelWithString: "Terminal")
+        let chosen = try XCTUnwrap(NSFont(name: "Menlo", size: 12))
+        label.font = chosen
+
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        label.reapplyRecordedFontForTesting()
+
+        XCTAssertNil(label.recordedFontRoleForTesting)
+        XCTAssertEqual(
+            label.font?.fontName, chosen.fontName,
+            "the sweep re-fonted a view the design system never vended to"
+        )
+    }
+
+    // MARK: - The User's Own Font
+
+    /// The four layers, in order, on one label. Each step removes the layer above it and the
+    /// answer has to fall exactly one rung — not to SF, which is the failure this orders against.
+    func testAnOverrideBeatsTheThemeAndFallsThroughOneLayerAtATime() throws {
+        defer { clearFontOverrides() }
+        AppThemePalette.set(AppThemeStyles.newsprint)
+
+        let serif = Design.Typography.body().familyName
+        XCTAssertEqual(
+            serif, Design.Typography.body(surface: .conversation).familyName,
+            "with no overrides set, both surfaces answer with the theme"
+        )
+
+        UserDefaults.standard.set(Self.chromeTestFamily, forKey: "chromeFontFamily")
+        XCTAssertEqual(Design.Typography.body().familyName, Self.chromeTestFamily)
+        XCTAssertEqual(
+            Design.Typography.body(surface: .conversation).familyName, Self.chromeTestFamily,
+            "the conversation must fall through to the app override, not past it to the theme"
+        )
+
+        UserDefaults.standard.set(Self.conversationTestFamily, forKey: "conversationFontFamily")
+        XCTAssertEqual(Design.Typography.body().familyName, Self.chromeTestFamily)
+        XCTAssertEqual(
+            Design.Typography.body(surface: .conversation).familyName, Self.conversationTestFamily,
+            "the nearer override must win for its own surface"
+        )
+
+        clearFontOverrides()
+        XCTAssertEqual(Design.Typography.body().familyName, serif, "the theme should be back")
+    }
+
+    /// A family the machine does not have is not an error — it is the next layer's turn. This is
+    /// the same rule a dangling terminal-theme name already follows.
+    func testAnUninstalledFamilyDegradesRatherThanFailing() throws {
+        defer { clearFontOverrides() }
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        let serif = try XCTUnwrap(Design.Typography.body().familyName)
+
+        UserDefaults.standard.set("NoSuchFamilyXYZ123", forKey: "chromeFontFamily")
+        XCTAssertEqual(
+            Design.Typography.body().familyName, serif,
+            "an uninstalled override should fall to the theme, not to a substituted font"
+        )
+
+        // And the same for a *theme* that names one, which is the portable case: a theme is
+        // authored on one machine and read on another.
+        AppThemePalette.set(themeNaming(family: "NoSuchFamilyXYZ123", on: AppThemeStyles.newsprint))
+        clearFontOverrides()
+        XCTAssertEqual(Design.Typography.body().familyName, serif)
+    }
+
+    /// A theme may be more specific than the four classes its brief states.
+    func testAThemeMayNameItsOwnFamily() throws {
+        defer { clearFontOverrides() }
+        AppThemePalette.set(themeNaming(family: Self.chromeTestFamily, on: AppThemeStyles.swissMinimalist))
+        XCTAssertEqual(Design.Typography.body().familyName, Self.chromeTestFamily)
+
+        // ...and the user still outranks it.
+        UserDefaults.standard.set(Self.conversationTestFamily, forKey: "chromeFontFamily")
+        XCTAssertEqual(Design.Typography.body().familyName, Self.conversationTestFamily)
+    }
+
+    /// Code, numerics and the terminal are the three things no font setting reaches.
+    func testTheOverrideSparesCodeAndNumerics() throws {
+        defer { clearFontOverrides() }
+        let code = Design.Typography.code().fontName
+        let numeric = Design.Typography.numericBody().fontName
+
+        UserDefaults.standard.set(Self.chromeTestFamily, forKey: "chromeFontFamily")
+        UserDefaults.standard.set(Self.conversationTestFamily, forKey: "conversationFontFamily")
+
+        XCTAssertEqual(Design.Typography.code().fontName, code, "a diff went proportional")
+        XCTAssertEqual(Design.Typography.numericBody().fontName, numeric, "a usage column stopped aligning")
+    }
+
+    /// Weight survives the family swap — the trap being that the obvious
+    /// `fontDescriptor.withFamily` route silently keeps the system font instead.
+    func testAnOverrideKeepsItsWeight() throws {
+        defer { clearFontOverrides() }
+        UserDefaults.standard.set(Self.chromeTestFamily, forKey: "chromeFontFamily")
+
+        let regular = Design.Typography.body()
+        let bold = Design.Typography.strongBody()
+        XCTAssertEqual(regular.familyName, Self.chromeTestFamily)
+        XCTAssertEqual(bold.familyName, Self.chromeTestFamily)
+        XCTAssertNotEqual(regular.fontName, bold.fontName, "both weights resolved to one face")
+        XCTAssertTrue(bold.fontDescriptor.symbolicTraits.contains(.bold))
+    }
+
+    /// A recorded role carries its surface, so the sweep re-resolves a conversation label
+    /// against the conversation's override rather than the chrome's.
+    func testTheSweepRemembersWhichSurfaceALabelBelongsTo() throws {
+        defer { clearFontOverrides() }
+        let label = NSTextField(labelWithString: "Ready")
+        label.applyFont(.body, in: .conversation)
+        XCTAssertEqual(label.recordedFontSurfaceForTesting, .conversation)
+
+        UserDefaults.standard.set(Self.conversationTestFamily, forKey: "conversationFontFamily")
+        label.reapplyRecordedFontForTesting()
+        XCTAssertEqual(label.font?.familyName, Self.conversationTestFamily)
+
+        let chrome = NSTextField(labelWithString: "Settings")
+        chrome.applyFont(.body)
+        chrome.reapplyRecordedFontForTesting()
+        XCTAssertNotEqual(
+            chrome.font?.familyName, Self.conversationTestFamily,
+            "a chrome label took the conversation's font"
+        )
+    }
+
+    /// The transcript's plain-text rows — thinking, a notice, the streaming reply — are set in
+    /// the conversation's font and record their role. The streaming label is the one the user
+    /// is watching when it matters: set in chrome, the reply changed face the instant it
+    /// finished and became rendered markdown.
+    func testConversationRowsAreSetInTheConversationFontAndFollowTheSweep() throws {
+        defer { clearFontOverrides() }
+        UserDefaults.standard.set(Self.conversationTestFamily, forKey: "conversationFontFamily")
+
+        let streaming = ConversationRowView.streaming("Working")
+        let thinking = try XCTUnwrap(ConversationRowView.thinking("Reasoning") as? NSTextField)
+        let notice = try XCTUnwrap(
+            ConversationRowView.notice("Truncated", kind: .muted) as? NSTextField
+        )
+        for label in [streaming, thinking, notice] {
+            XCTAssertEqual(label.font?.familyName, Self.conversationTestFamily)
+            XCTAssertEqual(label.recordedFontSurfaceForTesting, .conversation)
+        }
+
+        // And recorded means the sweep can take the decision again.
+        clearFontOverrides()
+        streaming.reapplyRecordedFontForTesting()
+        XCTAssertNotEqual(streaming.font?.familyName, Self.conversationTestFamily)
+    }
+
+    /// A `# Heading` scales from the body through `Typography`, which re-enters the four
+    /// layers — and it must re-enter them in its own document's surface, or a conversation
+    /// font leaves the heading in one family and its paragraph in another.
+    func testAMarkdownHeadingStaysInItsParagraphsFamily() throws {
+        defer { clearFontOverrides() }
+        UserDefaults.standard.set(Self.conversationTestFamily, forKey: "conversationFontFamily")
+
+        let blocks = Markdown.parse("# Title\n\nBody text", style: .assistant)
+        guard case .heading(let heading) = blocks.first,
+              case .paragraph(let paragraph) = blocks.dropFirst().first else {
+            return XCTFail("expected a heading and a paragraph, got \(blocks)")
+        }
+        let headingFont = try XCTUnwrap(heading.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        let bodyFont = try XCTUnwrap(paragraph.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+
+        XCTAssertEqual(headingFont.familyName, Self.conversationTestFamily)
+        XCTAssertEqual(headingFont.familyName, bodyFont.familyName)
+        XCTAssertGreaterThan(headingFont.pointSize, bodyFont.pointSize, "a heading that stopped being one")
+    }
+
+    /// Fonts are consumed as data — a label keeps the `NSFont` it was handed — so the theme's
+    /// half of the resolution anchors to the **application's** appearance, the same anchoring
+    /// `terminalPalette` chose for the same reason. Resolved under an ambient drawing
+    /// appearance that contradicts the app's, an adaptive theme whose variants state different
+    /// families must still answer with the app's variant.
+    func testProseResolvesTheVariantForTheAppsAppearanceNotTheAmbientOne() throws {
+        let base = AppThemeStyles.newsprint
+        let variant = try XCTUnwrap(base.variants.values.first)
+        func naming(_ family: String) -> AppTheme.Variant {
+            var material = variant.material
+            material.fontFamily = family
+            return AppTheme.Variant(
+                roles: variant.roles,
+                terminalPalette: variant.terminalPalette,
+                material: material
+            )
+        }
+        AppThemePalette.set(AppTheme(
+            id: AppThemeID("adaptive-faces"),
+            name: "Adaptive Faces",
+            mode: .system,
+            summary: nil,
+            variants: [
+                .light: naming(Self.chromeTestFamily),
+                .dark: naming(Self.conversationTestFamily)
+            ]
+        ))
+
+        let appKind = AppTheme.VariantKind.current(in: NSApplication.shared.effectiveAppearance)
+        let expected = appKind == .dark ? Self.conversationTestFamily : Self.chromeTestFamily
+        let contradicting = try XCTUnwrap(
+            NSAppearance(named: appKind == .dark ? .aqua : .darkAqua)
+        )
+
+        var resolved: String?
+        contradicting.performAsCurrentDrawingAppearance {
+            resolved = Design.Typography.body().familyName
+        }
+        XCTAssertEqual(resolved, expected, "the ambient appearance chose the variant")
+    }
+
+    /// `setOrRemove` never writes an empty string, but a hand-edited or migrated default could —
+    /// and `""` must read as "no override", not as a question for the descriptor matcher.
+    func testAnEmptyStringOverrideIsIgnoredRatherThanResolved() throws {
+        defer { clearFontOverrides() }
+        AppThemePalette.set(AppThemeStyles.newsprint)
+        let themed = Design.Typography.body().familyName
+
+        UserDefaults.standard.set("", forKey: "chromeFontFamily")
+        XCTAssertEqual(Design.Typography.body().familyName, themed)
+    }
+
+    /// A pre-font-family document still decodes, the same promise the typeface field made.
+    func testPreFontFamilyMaterialDocumentsDecodeWithDefaults() throws {
+        let legacy = Data(#"{"panelRadius": 18, "typeface": "serif"}"#.utf8)
+        let material = try JSONDecoder().decode(AppTheme.Material.self, from: legacy)
+        XCTAssertEqual(material.panelRadius, 18)
+        XCTAssertEqual(material.typeface, .serif)
+        XCTAssertNil(material.fontFamily)
+
+        let named = AppTheme.Material(typeface: .serif, fontFamily: "Baskerville")
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppTheme.Material.self, from: try JSONEncoder().encode(named)
+            ),
+            named
+        )
+    }
+
+    /// Why the role is recorded on the **view** and not tagged onto the font.
+    ///
+    /// Two platform facts ruled out the cheaper design, and both were measured rather than
+    /// assumed. If a future macOS changes either, this fails — which is the point: the plan
+    /// would then have an option it does not have today, and should be told rather than left
+    /// carrying a note that has quietly stopped being true.
+    func testAFontCannotBeMadeToCarryItsOwnRole() throws {
+        let key = NSFontDescriptor.AttributeName("skalmanFontRole")
+        let base = NSFont.systemFont(ofSize: 13, weight: .regular)
+        let tagged = try XCTUnwrap(
+            NSFont(descriptor: base.fontDescriptor.addingAttributes([key: "prose"]), size: 13)
+        )
+        XCTAssertNil(
+            tagged.fontDescriptor.object(forKey: key),
+            "NSFont now keeps unknown descriptor attributes — a font could carry its own role"
+        )
+
+        let descriptor = try XCTUnwrap(base.fontDescriptor.withDesign(.monospaced))
+        let proseUnderMono = try XCTUnwrap(NSFont(descriptor: descriptor, size: 13))
+        XCTAssertEqual(
+            proseUnderMono.fontName,
+            NSFont.monospacedSystemFont(ofSize: 13, weight: .regular).fontName,
+            "prose under a mono theme is no longer identical to code — inference is now possible"
+        )
+    }
+
+    /// A material document written before `typeface` existed decodes to the values the app
+    /// used then — the synthesized decoder threw on the missing key instead, and the throw
+    /// was swallowed upstream into discarding the user's whole authored material.
+    func testPreTypefaceMaterialDocumentsDecodeWithDefaults() throws {
+        let legacy = Data(#"{"panelRadius": 18, "controlRadius": 10, "borderWidth": 2}"#.utf8)
+        let material = try JSONDecoder().decode(AppTheme.Material.self, from: legacy)
+        XCTAssertEqual(material.panelRadius, 18)
+        XCTAssertEqual(material.controlRadius, 10)
+        XCTAssertEqual(material.borderWidth, 2)
+        XCTAssertEqual(material.typeface, .standard)
+
+        let sparse = Data(#"{}"#.utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode(AppTheme.Material.self, from: sparse),
+            .system
+        )
+
+        let updated = AppTheme.Material(typeface: .serif)
+        let round = try JSONDecoder().decode(
+            AppTheme.Material.self,
+            from: JSONEncoder().encode(updated)
+        )
+        XCTAssertEqual(round.typeface, .serif)
+    }
+
+    /// The paired terminal's cursor is the palette's own ink, never its accent.
+    ///
+    /// A block cursor sits *on* a character — over queued input it drew each theme's loudest
+    /// hue as an alarm block on the first letter of text that is only a suggestion. The
+    /// foreground-coloured block is the classic quiet answer: always legible, and the letter
+    /// under it inverts. Identity stays in the ANSI ramp, the ground and the selection.
+    func testEveryPairedTerminalCursorIsThePalettesOwnInk() {
+        for theme in AppThemeStyles.all {
+            for kind in theme.availableVariants {
+                guard let palette = theme.variant(kind)?.terminalPalette else { continue }
+                XCTAssertEqual(
+                    palette.cursor.hexString,
+                    palette.foreground.hexString,
+                    "\(theme.name) (\(kind.rawValue)) draws its cursor in an accent, "
+                        + "which screams over queued input"
+                )
+            }
+        }
+    }
+
+    /// The gate that catches a variant carrying the *other* appearance's code colours — the
+    /// live failure was a light variant with a dark syntax set, every keyword white-on-white.
+    func testAThemeWhoseSyntaxVanishesAgainstItsGroundIsRefused() throws {
+        let base = AppThemeStyles.swissMinimalist
+        let light = try XCTUnwrap(base.variant(.light))
+        var roles = light.roles
+        roles[.syntaxKeyword] = try XCTUnwrap(
+            NSColor(hex: base.resolved(.ground).hexString)
+        )
+
+        let broken = AppTheme(
+            id: AppThemeID("broken-syntax"),
+            name: "Broken Syntax",
+            mode: .light,
+            summary: nil,
+            variants: [.light: AppTheme.Variant(
+                roles: roles,
+                terminalPalette: light.terminalPalette,
+                material: light.material
+            )]
+        )
+
+        XCTAssertThrowsError(try AppThemeEditing.validate(broken)) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("syntax_keyword"),
+                "the refusal must name the role that vanished: \(error.localizedDescription)"
+            )
+        }
     }
 
     func testSecondVariantIsOptionalUntilThemeBecomesAdaptive() throws {
@@ -132,6 +655,44 @@ final class AppThemeTests: XCTestCase {
         )
         XCTAssertThrowsError(try AppThemeEditing.validate(invalid)) { error in
             XCTAssertTrue(error.localizedDescription.contains("both light and dark"))
+        }
+    }
+
+    /// The catalogue's one seasonal style is also its one *adaptive* style, so it is the only
+    /// stock theme whose identity has to survive both appearances rather than pinning one.
+    /// Every other style is named after a movement and a movement has a single look; a season
+    /// is snow in daylight and fir after dark.
+    func testTheSeasonalStyleAuthorsBothAppearances() throws {
+        let theme = AppThemeStyles.christmas
+        XCTAssertTrue(theme.isAdaptive)
+        XCTAssertEqual(Set(theme.availableVariants), Set(AppTheme.VariantKind.allCases))
+        XCTAssertNil(
+            theme.mode.appearance,
+            "an adaptive theme leaves NSApp.appearance unset so macOS still drives it"
+        )
+
+        let light = try XCTUnwrap(NSAppearance(named: .aqua))
+        let dark = try XCTUnwrap(NSAppearance(named: .darkAqua))
+
+        XCTAssertNotEqual(
+            theme.resolved(.ground, appearance: light).hexString,
+            theme.resolved(.ground, appearance: dark).hexString,
+            "both appearances resolve the same ground, so only one of them was authored"
+        )
+        XCTAssertNotEqual(
+            theme.terminalPalette(for: light).background.hexString,
+            theme.terminalPalette(for: dark).background.hexString,
+            "a terminal following this theme would not move with macOS"
+        )
+
+        // The pairing is the style rather than the hue — red alone is Swiss Minimalist's accent
+        // already. A control that rests fir and lifts holly is that pairing where it is seen.
+        for (name, appearance) in [("light", light), ("dark", dark)] {
+            XCTAssertNotEqual(
+                theme.resolved(.controlResting, appearance: appearance).hexString,
+                theme.resolved(.controlHover, appearance: appearance).hexString,
+                "\(name) rests and hovers in the same colour"
+            )
         }
     }
 
@@ -168,13 +729,25 @@ final class AppThemeTests: XCTestCase {
         }
     }
 
-    /// The tokens as their call sites see them, pinned against the literal expressions they
-    /// replaced. If one of these changes, the app's default appearance changed.
+    /// The tokens as their call sites see them, pinned against the expressions System states.
+    /// If one of these changes, the app's default appearance changed.
+    ///
+    /// `panel` is pinned to the ink wash rather than to the `textBackgroundColor` expression it
+    /// replaced: on the modern system grounds that colour *is* the ground, so a System panel was
+    /// a border around nothing — see `AppThemeRole.systemColor`.
     func testDesignTokensAreUnchangedUnderTheSystemTheme() {
         AppThemePalette.set(.system)
 
+        // Written out longhand so a revert to the replace-alpha expression fails this pin.
+        let halfStrengthSeparator = NSColor(name: nil) { _ in
+            guard let separator = NSColor.separatorColor.usingColorSpace(.sRGB) else {
+                return .separatorColor
+            }
+            return separator.withAlphaComponent(separator.alphaComponent * 0.5)
+        }
+
         let expected: [(String, NSColor, NSColor)] = [
-            ("panel", Design.Surface.panel, .textBackgroundColor.withAlphaComponent(0.4)),
+            ("panel", Design.Surface.panel, .labelColor.withAlphaComponent(0.05)),
             ("border", Design.Surface.border, .separatorColor),
             ("accent", Design.Surface.accent, .controlAccentColor),
             ("controlResting", Design.Surface.controlResting,
@@ -182,7 +755,12 @@ final class AppThemeTests: XCTestCase {
             ("controlHover", Design.Surface.controlHover,
              .unemphasizedSelectedContentBackgroundColor),
             ("bubbleFill", Design.Chat.bubbleFill, .controlAccentColor.withAlphaComponent(0.22)),
-            ("turnDivider", Design.Chat.turnDivider, .separatorColor.withAlphaComponent(0.5)),
+            // Half the separator's *own* strength — resolve, then multiply. The expression
+            // this replaced, `.separatorColor.withAlphaComponent(0.5)`, hit the design
+            // system's documented trap: `withAlphaComponent` replaces alpha, and
+            // `separatorColor` carries its own 10%, so the "quieter" rule drew at 50% — the
+            // one bright line in a dark window.
+            ("turnDivider", Design.Chat.turnDivider, halfStrengthSeparator),
             ("syntaxKeyword", Design.Syntax.keyword, .systemPurple),
             ("syntaxComment", Design.Syntax.comment, .tertiaryLabelColor),
             ("label", Design.Text.label, .labelColor),
@@ -338,6 +916,30 @@ final class AppThemeTests: XCTestCase {
         )
     }
 
+    /// The freeze is taken in the view's own appearance, not the thread's ambient one.
+    ///
+    /// Setup code and notification handlers run with whatever drawing appearance AppKit last
+    /// had in hand, and a surface applied there froze in it — a light window's settings cards
+    /// arrived dark. The view's own answer is the only one that is right by construction.
+    @MainActor
+    func testASurfaceFreezesInTheViewsOwnAppearanceNotTheAmbientOne() throws {
+        AppThemePalette.set(.system)
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        view.appearance = NSAppearance(named: .aqua)
+
+        // The ambient drawing appearance says dark; the view says light. The view must win.
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
+            view.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+        }
+
+        let frozen = try XCTUnwrap(view.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) })
+        XCTAssertGreaterThan(
+            frozen.usingColorSpace(.sRGB)?.brightnessComponent ?? 0, 0.5,
+            "the surface froze in the ambient dark appearance instead of the view's own light one"
+        )
+    }
+
     /// A plain view is what the sidebar used before, and it is the failure this exists to
     /// prevent: the layer keeps whatever it was handed.
     @MainActor
@@ -354,6 +956,126 @@ final class AppThemeTests: XCTestCase {
         view.appearance = NSAppearance(named: .aqua)
 
         XCTAssertEqual(view.layer?.backgroundColor, before)
+    }
+
+    // MARK: - The Sidebar's Ground
+
+    /// The identity theme's sidebar is the platform's material; a style's is its own opaque
+    /// surface. Which one is showing is the component's decision, re-taken on every theme
+    /// change without the host saying anything — the wiring a call site cannot forget.
+    @MainActor
+    func testTheSidebarBackdropShowsTheMaterialOnlyUnderTheIdentityTheme() throws {
+        AppThemePalette.set(.system)
+
+        let backdrop = SidebarBackdropView()
+        let material = try XCTUnwrap(
+            backdrop.subviews.first { $0 is NSVisualEffectView },
+            "the backdrop no longer contains the system material"
+        )
+        let fill = try XCTUnwrap(backdrop.subviews.first { $0 is ThemedSurfaceView })
+
+        XCTAssertFalse(material.isHidden, "System lost the platform's own sidebar")
+        XCTAssertTrue(fill.isHidden)
+
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.cyberpunk.id))
+
+        XCTAssertTrue(material.isHidden, "a style must state its surface, not frost the desktop")
+        XCTAssertFalse(fill.isHidden)
+    }
+
+    /// The contained effect view is legitimate; one beside the component is still a violation.
+    @MainActor
+    func testTheSidebarBackdropPermitsOnlyItsOwnMaterial() {
+        AppThemePalette.set(.system)
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        host.addSubview(SidebarBackdropView())
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
+
+        host.addSubview(NSVisualEffectView())
+        XCTAssertEqual(
+            ThemeBoundaryAudit.violations(in: host).map(\.className),
+            ["NSVisualEffectView"],
+            "the boundary leaked past the component's own material"
+        )
+    }
+
+    // MARK: - The System Terminal Pair
+
+    /// The identity theme pairs a palette per appearance the way its roles resolve per
+    /// appearance. The old single answer was pure black under both: beside a light chrome it
+    /// painted the whole backdrop black, and beside the dark chrome's `#1E1E1E` it was a hole.
+    ///
+    /// Resolved through `terminalPalette(for:)`, the explicit-appearance entry point: the
+    /// parameterless var deliberately anchors to `NSApp.effectiveAppearance`, because palettes
+    /// are consumed as data from contexts where the ambient drawing appearance is stale.
+    func testTheSystemThemePairsATerminalPalettePerAppearance() throws {
+        let lightPalette = try AppTheme.system.terminalPalette(
+            for: XCTUnwrap(NSAppearance(named: .aqua))
+        )
+        let darkPalette = try AppTheme.system.terminalPalette(
+            for: XCTUnwrap(NSAppearance(named: .darkAqua))
+        )
+
+        // Both are named after the theme, the way every app theme's palette is.
+        XCTAssertEqual(lightPalette.name, "System")
+        XCTAssertEqual(darkPalette.name, "System")
+
+        XCTAssertEqual(lightPalette.background.resolvedHex, NSColor.white.resolvedHex)
+        XCTAssertEqual(darkPalette.background.resolvedHex, NSColor(hex: "#1E1E1E")?.resolvedHex)
+        XCTAssertTrue(
+            ThemeContrast.isLegible(
+                foreground: lightPalette.foreground,
+                background: lightPalette.background
+            )
+        )
+        XCTAssertTrue(
+            ThemeContrast.isLegible(
+                foreground: darkPalette.foreground,
+                background: darkPalette.background
+            )
+        )
+    }
+
+    // MARK: - The Divider's Ownership
+
+    /// The theme's own line wherever it reads on the backdrop; the measured neutral only where
+    /// it cannot. A neutral over the chrome drew a pale grey seam across themes whose every
+    /// other rule is their own hue — and a themed line over a backdrop it vanishes against is
+    /// the invisible seam this view originally existed to restore.
+    @MainActor
+    func testTheSplitDividerTakesTheThemeBorderWhereverItReadsOnTheBackdrop() {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+
+        // The chrome's own ground: always the theme's line.
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        WindowBackdrop.set(.chrome)
+        XCTAssertEqual(
+            split.dividerColor.resolvedHex,
+            Design.Surface.border.resolvedHex,
+            "the chrome's seam ignored the theme's own border"
+        )
+
+        // Cyberpunk's border still reads on a black terminal, so the seam stays the theme's.
+        WindowBackdrop.set(.terminal(.black))
+        XCTAssertEqual(
+            split.dividerColor.resolvedHex,
+            Design.Surface.border.resolvedHex,
+            "a border that reads on the backdrop should be the seam"
+        )
+
+        // Swiss rules near-black lines; over a black terminal they vanish, so the seam falls
+        // back to the ink measured against that backdrop.
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        XCTAssertEqual(
+            split.dividerColor.resolvedHex,
+            WindowBackdrop.ink.border.resolvedHex,
+            "a border the backdrop swallows must fall back to the measured neutral"
+        )
     }
 
     // MARK: - Repainting What Is Already On Screen
@@ -520,7 +1242,7 @@ final class AppThemeTests: XCTestCase {
         let ids = AppThemeLibrary.stock.map(\.id.rawValue)
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
-        XCTAssertEqual(ids.count, 11, "the curated stock catalogue unexpectedly changed size")
+        XCTAssertEqual(ids.count, 12, "the curated stock catalogue unexpectedly changed size")
     }
 
     func testEveryStockStylePassesTheSameValidationAsAgentCreatedThemes() throws {

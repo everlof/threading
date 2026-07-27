@@ -46,9 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         // Before the first window is built, so everything is created already themed and nothing
         // has to be repainted at launch. `AppThemeRefresh` exists for the *later* changes.
+        // Extension-contributed themes and fonts are pure package data, so they register first
+        // — a restore that resolves a contributed theme must find it already in the library.
+        ExtensionManager.shared.prepareAppearanceContributions()
         AppThemeLibrary.restore()
         AppThemeRefresh.startObservingAccessibilityDisplayOptions()
         AppThemeRefresh.startObservingSystemAppearance()
+        AppThemeRefresh.startObservingFontOverrides()
 
         setupMenuBar()
 
@@ -606,6 +610,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
 
+        // The sidebar's own arrangement, beside its toggle: what the list groups and how it
+        // sorts are View concerns, and the two toggles need a home a shortcut can live in.
+        // Their checkmarks are stamped in `validateMenuItem`, which AppKit asks on every open.
+        menu.addItem(commandItem(AppCommands.ID.groupByBranch, action: #selector(toggleBranchGrouping)))
+        menu.addItem(commandItem(AppCommands.ID.loneBranchHeadings, action: #selector(toggleLoneBranchHeadings)))
+
+        menu.addItem(.separator())
+
         // The display pane's family. Their defaults live in `AppCommands`, which is also where
         // the reasoning for each now sits — ⇧⌘R rather than ⇧⌘G (the platform's Find Previous),
         // ⇧⌘I rather than ⌘I (Get Info) or ⌥⌘I (the element inspector), and ⌃` for the shell,
@@ -816,6 +828,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        // The arrangement toggles carry state, so their checks are stamped here — validation
+        // runs on every menu open, which is the one moment the check has to be true.
+        if menuItem.action == #selector(toggleBranchGrouping) {
+            menuItem.state = AppSettings.shared.groupsSessionsByBranch ? .on : .off
+            return true
+        }
+        if menuItem.action == #selector(toggleLoneBranchHeadings) {
+            menuItem.state = AppSettings.shared.groupsLoneBranches ? .on : .off
+            // The refinement has nothing to refine while grouping is off.
+            return AppSettings.shared.groupsSessionsByBranch
+        }
+
         guard menuItem.action == #selector(performExtensionCommand(_:)),
               let id = menuItem.representedObject as? String,
               let command = CommandRegistry.shared.command(id: id) else {
@@ -947,6 +971,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc private func toggleSidebar() {
         mainWindowController?.toggleSidebar()
+    }
+
+    // The two sidebar-arrangement toggles act on settings, not on the window, so they work
+    // even before a window exists — and they post `ProjectsDidChange` because that is what
+    // the sidebar rebuilds its tree on, the same route its own menus take.
+    @MainActor @objc private func toggleBranchGrouping() {
+        AppSettings.shared.groupsSessionsByBranch.toggle()
+        NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    @MainActor @objc private func toggleLoneBranchHeadings() {
+        AppSettings.shared.groupsLoneBranches.toggle()
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 
     @objc private func showFind() {

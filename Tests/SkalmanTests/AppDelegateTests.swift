@@ -61,6 +61,48 @@ final class AppDelegateTests: XCTestCase {
         delegate.application(NSApp, open: [URL(fileURLWithPath: NSTemporaryDirectory())])
     }
 
+    /// The sidebar-arrangement toggles live in the View menu with registry-backed shortcuts,
+    /// and their checkmarks are stamped by `validateMenuItem` — asserted here because nothing
+    /// else in the menu bar carries state, so nothing else would catch the stamping breaking.
+    func testViewMenuCarriesTheArrangementTogglesWithTheirChecks() throws {
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        let previousHelpMenu = NSApp.helpMenu
+        defer {
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.helpMenu = previousHelpMenu
+        }
+
+        let delegate = AppDelegate()
+        delegate.setupMenuBar()
+
+        let viewMenu = try XCTUnwrap(
+            NSApp.mainMenu?.items.compactMap(\.submenu).first {
+                $0.title == MenuIdentifiers.viewMenu
+            }
+        )
+
+        let grouping = try XCTUnwrap(viewMenu.item(withTitle: "Group Sessions by Branch"))
+        XCTAssertEqual(grouping.keyEquivalent, "b")
+        XCTAssertEqual(grouping.keyEquivalentModifierMask, [.command, .control])
+
+        let lone = try XCTUnwrap(viewMenu.item(withTitle: "Headings for Lone Branches"))
+        XCTAssertEqual(lone.keyEquivalent, "b")
+        XCTAssertEqual(lone.keyEquivalentModifierMask, [.command, .option])
+
+        // Validation stamps the check from the seeded defaults, which are both on.
+        XCTAssertTrue(delegate.validateMenuItem(grouping))
+        XCTAssertEqual(grouping.state, .on)
+        XCTAssertTrue(delegate.validateMenuItem(lone))
+        XCTAssertEqual(lone.state, .on)
+
+        // With grouping off the refinement validates false — disabled, not hidden.
+        UserDefaults.standard.set(false, forKey: "groupsSessionsByBranch")
+        defer { UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch") }
+        XCTAssertFalse(delegate.validateMenuItem(lone))
+    }
+
     func testExtensionCommandsRenderAtDeclaredHostMenuAnchors() throws {
         let previousMainMenu = NSApp.mainMenu
         let previousWindowsMenu = NSApp.windowsMenu

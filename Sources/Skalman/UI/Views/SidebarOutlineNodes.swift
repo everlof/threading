@@ -70,7 +70,10 @@ final class BranchGroupNode: NSObject {
 /// Builds the sidebar's node tree from the store's projects.
 ///
 /// Pure construction — it reads the store and git metadata but holds no view state, which
-/// is what lets it live beside the node types rather than in the view controller.
+/// is what lets it live beside the node types rather than in the view controller. Main-actor
+/// because the name order reads `displayTitle`, which is; its only callers — the sidebar
+/// and its tests — already are.
+@MainActor
 enum SidebarTreeBuilder {
 
     /// Arranges projects into the tree, grouping only where a repository has more than one
@@ -90,15 +93,11 @@ enum SidebarTreeBuilder {
         for (project, identity) in zip(projects, identities) {
             let node = ProjectNode(projectID: project.id)
             // Archived sessions are gathered separately, below the projects.
+            let order = AppSettings.sidebarSessionOrder
             let activeSessions = project.sessions
                 .filter { !$0.isArchived }
                 .enumerated()
-                .sorted {
-                    if $0.element.isPinned != $1.element.isPinned {
-                        return $0.element.isPinned
-                    }
-                    return $0.offset < $1.offset
-                }
+                .sorted { precedes($0, $1, order: order) }
                 .map(\.element)
             node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
 
@@ -130,6 +129,39 @@ enum SidebarTreeBuilder {
         // Archived sessions are not shown here at all — they live in Settings, so the sidebar
         // stays a list of what is active.
         return roots
+    }
+
+    /// Whether `lhs` sorts ahead of `rhs` under the chosen order.
+    ///
+    /// Pinned sessions are hoisted first under every order — pinning is a stronger statement
+    /// than any sort. The store offset breaks every tie, so orders built on fields that can
+    /// collide (two untouched sessions share a `lastActiveAt` second, two prompts start with
+    /// the same line) stay stable instead of jittering between rebuilds.
+    private static func precedes(
+        _ lhs: (offset: Int, element: AgentSession),
+        _ rhs: (offset: Int, element: AgentSession),
+        order: SidebarSessionOrder
+    ) -> Bool {
+        if lhs.element.isPinned != rhs.element.isPinned {
+            return lhs.element.isPinned
+        }
+
+        switch order {
+        case .manual:
+            break
+        case .recentActivity:
+            if lhs.element.lastActiveAt != rhs.element.lastActiveAt {
+                return lhs.element.lastActiveAt > rhs.element.lastActiveAt
+            }
+        case .name:
+            let comparison = lhs.element.displayTitle
+                .localizedCaseInsensitiveCompare(rhs.element.displayTitle)
+            if comparison != .orderedSame {
+                return comparison == .orderedAscending
+            }
+        }
+
+        return lhs.offset < rhs.offset
     }
 
     /// Moves every side chat under the node it was forked from, returning what is left at the
@@ -196,9 +228,15 @@ enum SidebarTreeBuilder {
 
     /// Arranges a project's sessions for display, gathering a branch's sessions under a
     /// `BranchGroupNode` when the branch has more than one — the "group only where it earns
-    /// its level" rule, applied inside a project. Sessions on lone branches, or with no
-    /// recorded branch, stay directly under the project; a group takes the position of its
-    /// first session, so the list keeps its familiar order.
+    /// its level" rule, applied inside a project. Sessions with no recorded branch stay
+    /// directly under the project; a group takes the position of its first session, so the
+    /// list keeps its familiar order.
+    ///
+    /// A branch with a *single* session earns a heading only once some branch has already
+    /// earned the level (`AppSettings.groupsLoneBranches`): a heading over the shared branch
+    /// beside a bare row on its own branch reads as though the bare row had none, but a
+    /// project whose branches are all singletons stays flat — all-or-nothing labelling, so
+    /// the extra level never appears without cause.
     private static func childNodes(
         projectID: ProjectID,
         sessions: [AgentSession],
@@ -213,11 +251,15 @@ enum SidebarTreeBuilder {
             }
         }
 
+        let hasSharedBranch = sessionCounts.values.contains { $0 > 1 }
+        let groupsLoneBranches = AppSettings.groupsLoneBranches && hasSharedBranch
+
         var children: [NSObject] = []
         var groupsByBranch: [String: BranchGroupNode] = [:]
 
         for (session, sessionNode) in zip(sessions, sessionNodes) {
-            guard let branch = session.branch, sessionCounts[branch, default: 0] > 1 else {
+            guard let branch = session.branch,
+                  groupsLoneBranches || sessionCounts[branch, default: 0] > 1 else {
                 children.append(sessionNode)
                 continue
             }

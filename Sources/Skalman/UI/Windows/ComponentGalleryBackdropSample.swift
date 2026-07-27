@@ -9,7 +9,7 @@ final class ComponentGalleryBackdropSample: BackdropOverlay {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-        label.font = Design.Typography.control()
+        label.applyFont(.control)
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         NSLayoutConstraint.activate([

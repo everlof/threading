@@ -24,6 +24,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
     // MARK: - State
 
     private var themeRedraw: ThemeRedraw?
+    private let placeholderRefresh = AppEventObservations()
 
     /// The field editor is what actually becomes first responder, so "focused" is asked of the
     /// editor rather than tracked. Redraws are triggered by the two edges below.
@@ -64,9 +65,18 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
         // Likewise the focus ring: the system's is drawn outside the control's bounds and in the
         // system accent, which is the one colour a themed page has already replaced.
         focusRingType = .none
-        font = Design.Typography.body()
+        applyFont(.body)
         textColor = Design.Text.label
         themeRedraw = ThemeRedraw(self)
+
+        // The placeholder is a *built* attributed string, so its font and its ink both freeze
+        // where the field's own would be re-resolved: `ThemeRedraw` marks the view dirty, and a
+        // stored attributed string does not care. Rebuilding it is the whole fix, and it has to
+        // run after the sweep has had the field's font, which is why it is its own observation
+        // rather than a line inside `applyPlaceholderColour`'s only current caller.
+        placeholderRefresh.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.applyPlaceholderColour()
+        }
     }
 
     /// On recent AppKit releases an on-screen text field expands into a private clip view and

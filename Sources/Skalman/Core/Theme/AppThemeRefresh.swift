@@ -94,21 +94,33 @@ extension NSView {
 
     /// Assigns a layer fill while retaining the `NSColor` that produced the frozen `CGColor`.
     /// The app-theme sweep asks that colour again after a live switch.
+    ///
+    /// The freeze is taken in the view's **own** effective appearance, not the thread's ambient
+    /// drawing appearance: these run from setup code and notification handlers, where the
+    /// ambient appearance is whatever AppKit last had in hand — which is how a pane came to
+    /// freeze dark in a light window. The view's answer is right even before it joins a window,
+    /// where it inherits the application's.
     func applyLayerBackground(_ color: NSColor) {
         wantsLayer = true
-        layer?.backgroundColor = color.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = color.cgColor
+        }
         recordedLayerColors.background = color
     }
 
     func applyLayerBorder(_ color: NSColor) {
         wantsLayer = true
-        layer?.borderColor = color.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = color.cgColor
+        }
         recordedLayerColors.border = color
     }
 
     func applyLayerShadow(_ color: NSColor) {
         wantsLayer = true
-        layer?.shadowColor = color.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.shadowColor = color.cgColor
+        }
         recordedLayerColors.shadow = color
     }
 
@@ -128,6 +140,52 @@ extension NSView {
             radius: radius,
             glow: glow
         )
+    }
+
+    /// The **opaque** colour actually behind this view.
+    ///
+    /// Every colour the app derives from a ground — the ink on the backdrop, a diff's wash —
+    /// needs the answer to "what is underneath this", and no view knows it: the same
+    /// `DiffView` is hosted over a conversation's terminal backdrop, over a review card's
+    /// resting fill, and inside a permission panel, and each of those is a different colour
+    /// under a different theme. Passing it in from the host means three call sites that must
+    /// each work out their own ancestry, which is exactly the arithmetic that goes stale.
+    ///
+    /// So it is measured. Every ancestor already records the `NSColor` it was filled with, for
+    /// the theme sweep above; walking up and compositing those records down onto the window's
+    /// own backdrop is the same sum AppKit performs when it draws them. Translucent fills stack
+    /// — a 14% card over a pane is both — and the walk stops at the first opaque one, since
+    /// nothing above it can show through.
+    ///
+    /// Call inside `performAsCurrentDrawingAppearance`, as the drawing itself does: the records
+    /// are dynamic colours, and a dynamic colour answers for whichever appearance is asking.
+    func resolvedGround() -> NSColor {
+        var fills: [NSColor] = []
+        var node: NSView? = self
+
+        while let current = node {
+            if let fill = current.recordedFill,
+               let resolved = fill.usingColorSpace(.sRGB),
+               resolved.alphaComponent > 0 {
+                fills.append(resolved)
+                if resolved.alphaComponent >= 1 { break }
+            }
+            node = current.superview
+        }
+
+        // The window's own colour is the last thing under everything — and in a terminal pane it
+        // is the *terminal palette's* background rather than the chrome's, which is the case
+        // this walk exists to get right. A view with no window yet falls back to the chrome's
+        // ground and is re-measured when it joins one.
+        let backdrop = window?.backgroundColor ?? Design.Surface.ground
+        return fills.reversed().reduce(backdrop) { ground, fill in fill.composited(over: ground) }
+    }
+
+    /// What this view was filled with, whichever way it was filled.
+    private var recordedFill: NSColor? {
+        recordedSurface?.fill
+            ?? (objc_getAssociatedObject(self, &recordedLayerColorsKey) as? RecordedLayerColors)?
+                .background
     }
 
     /// The re-apply on its own, for the test that pins the `CGColor` freeze this exists to fix.
@@ -160,8 +218,13 @@ extension NSView {
 enum AppThemeRefresh {
 
     private static let accessibilityObserver = AccessibilityDisplayOptionsObserver()
+    private static let interfaceThemeObserver = InterfaceThemeObserver()
     private static var observesAccessibilityDisplayOptions = false
     private static var appearanceObservation: NSKeyValueObservation?
+
+    /// The appearance the last adaptive-theme notification was posted for, so two triggers
+    /// firing for one switch re-resolve the terminal palettes once rather than twice.
+    private static var lastNotifiedAppearance: NSAppearance.Name?
 
     /// AppKit refreshes stock controls when these preferences move; app-owned chrome needs the
     /// same signal. Installed once at launch, after the palette is restored and before windows
@@ -190,22 +253,95 @@ enum AppThemeRefresh {
     /// The sweep for this is the one a theme change already uses; only the trigger was missing.
     /// Installed once at launch, alongside the accessibility observer, for the same reason:
     /// AppKit refreshes its own controls on these signals and app-owned chrome needs telling.
+    ///
+    /// Two triggers, deliberately. The KVO on `NSApp.effectiveAppearance` was the original one
+    /// and it is not enough on its own — measured on a live switch that left the chrome light
+    /// and every frozen layer dark: whether it fires at all, and whether it fires before AppKit
+    /// has handed the new appearance down the view tree, are both at the framework's pleasure.
+    /// The distributed interface-theme notification is the signal the system itself posts for a
+    /// light/dark switch, so both routes converge on `systemAppearanceDidChange`, which waits
+    /// for the windows to actually wear the new appearance before resolving anything against it.
     static func startObservingSystemAppearance() {
         guard appearanceObservation == nil else { return }
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { _, _ in
-            // KVO lands before AppKit has finished handing the new appearance down the view
-            // tree, and a repaint that runs first re-resolves every colour in the *old* one.
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { systemAppearanceDidChange() }
+        }
+        DistributedNotificationCenter.default().addObserver(
+            interfaceThemeObserver,
+            selector: #selector(InterfaceThemeObserver.interfaceThemeChanged),
+            name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil
+        )
+    }
+
+    /// Repaints once the windows have caught up with the system's new appearance.
+    ///
+    /// Both triggers land around the switch rather than after it, and a sweep that runs first
+    /// re-freezes every layer colour in the *old* appearance — which is indistinguishable from
+    /// the bug it exists to fix. So this checks that every unpinned window already resolves to
+    /// the application's appearance and gives AppKit another run-loop turn when one does not,
+    /// bounded so a hidden window that never catches up cannot park the sweep forever.
+    static func systemAppearanceDidChange(retriesLeft: Int = 8) {
+        let target = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        let lagging = NSApp.windows.contains { window in
+            window.appearance == nil
+                && window.isVisible
+                && window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) != target
+        }
+        if lagging, retriesLeft > 0 {
+            DispatchQueue.main.async { systemAppearanceDidChange(retriesLeft: retriesLeft - 1) }
+            return
+        }
+
+        repaintEverything()
+
+        // An adaptive theme changes more than dynamic NSColor: its material and paired
+        // terminal palette are variant-owned values. Reuse the ordinary theme event so
+        // every non-colour consumer resolves the newly active variant as well.
+        guard let resolved = target, resolved != lastNotifiedAppearance else { return }
+        lastNotifiedAppearance = resolved
+        guard AppThemeLibrary.current.isAdaptive else { return }
+        NotificationCenter.default.post(
+            AppThemeDidChange(themeID: AppThemeLibrary.current.id)
+        )
+    }
+
+    /// Repaints when the user's font overrides move.
+    ///
+    /// A chrome or conversation font is not a theme, but *everything that has to happen* when
+    /// one changes is what already happens when a theme does: the sweep re-resolves recorded
+    /// roles, drawn controls redraw, and the surfaces built from attributed strings — Git
+    /// Review's counters, a `ThemedTextField`'s placeholder — rebuild. Rather than teach a
+    /// dozen consumers a second event, this reuses the one they already answer.
+    ///
+    /// It is **guarded on the values**, because `AppSettingsDidChange` fires for every setting
+    /// in the app: without the comparison, toggling branch grouping would repaint every window
+    /// and re-read git in every open review pane.
+    static func startObservingFontOverrides() {
+        guard fontOverrideObservation == nil else { return }
+        lastFontOverrides = currentFontOverrides
+        fontOverrideObservation = NotificationCenter.default.addObserver(
+            forName: AppSettingsDidChange.name,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                let overrides = currentFontOverrides
+                guard overrides != lastFontOverrides else { return }
+                lastFontOverrides = overrides
                 repaintEverything()
-                // An adaptive theme changes more than dynamic NSColor: its material and paired
-                // terminal palette are variant-owned values. Reuse the ordinary theme event so
-                // every non-colour consumer resolves the newly active variant as well.
-                guard AppThemeLibrary.current.isAdaptive else { return }
                 NotificationCenter.default.post(
                     AppThemeDidChange(themeID: AppThemeLibrary.current.id)
                 )
             }
         }
+    }
+
+    private static var fontOverrideObservation: NSObjectProtocol?
+    private static var lastFontOverrides: [String?] = []
+
+    private static var currentFontOverrides: [String?] {
+        [AppSettings.chromeFontFamily, AppSettings.conversationFontFamily]
     }
 
     static func accessibilityDisplayOptionsChanged() {
@@ -235,6 +371,11 @@ enum AppThemeRefresh {
             // A state-specific layer colour is applied after the base surface, because it
             // represents the most recent visible state (hovered, selected, and so on).
             view.reapplyRecordedLayerColors()
+            // A theme states a typeface as well as a palette, and an `NSFont` freezes onto a
+            // label the way a `CGColor` freezes onto a layer. Same answer: the view recorded the
+            // role it asked for, so the role is resolved again here. Controls that draw their own
+            // text ask `Design.Typography` inside `draw(_:)` and need nothing.
+            view.reapplyRecordedFont()
             view.needsDisplay = true
 
             // Effect views and anything else deriving from the appearance need their own nudge,
@@ -252,6 +393,17 @@ enum AppThemeRefresh {
 private final class AccessibilityDisplayOptionsObserver: NSObject {
     @objc func displayOptionsChanged() {
         AppThemeRefresh.accessibilityDisplayOptionsChanged()
+    }
+}
+
+/// Receives the system's distributed light/dark notification, which may arrive off the main
+/// actor and before `NSApp.effectiveAppearance` has moved — both are the convergence routine's
+/// problem, not the observer's.
+private final class InterfaceThemeObserver: NSObject {
+    @objc func interfaceThemeChanged() {
+        DispatchQueue.main.async {
+            AppThemeRefresh.systemAppearanceDidChange()
+        }
     }
 }
 

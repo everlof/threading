@@ -22,6 +22,8 @@ final class ThemePreferencesViewController: NSViewController {
             The default theme applies to every terminal that has not been given one of its own. \
             A project or a single session can override it from its ⋯ menu in the sidebar.
             """
+        static let followTheme = "Follow Theme"
+        static let followAppFont = "Follow App Font"
         static let builtInNote = """
             Built-in themes cannot be edited. Duplicate this one to change its colours.
             """
@@ -109,6 +111,8 @@ final class ThemePreferencesViewController: NSViewController {
     private let colorEditor = ThemeColorEditor()
 
     private weak var appThemePopUp: ThemedPopUp?
+    private weak var chromeFontPopUp: ThemedPopUp?
+    private weak var conversationFontPopUp: ThemedPopUp?
     private weak var appThemeSubtitle: NSTextField?
     private weak var duplicateAppThemeButton: ThemedButton?
     private weak var deleteAppThemeButton: ThemedButton?
@@ -170,6 +174,7 @@ final class ThemePreferencesViewController: NSViewController {
         let page = SettingsUI.page([
             SettingsUI.heading("Themes"),
             SettingsUI.section("App", appThemeSection()),
+            SettingsUI.section("Fonts", fontSection()),
             SettingsUI.section("Terminal", themeListSection()),
             SettingsUI.section("Preview", previewView),
             SettingsUI.section("Colors", colorsSection())
@@ -231,6 +236,84 @@ final class ThemePreferencesViewController: NSViewController {
         return card
     }
 
+    // MARK: - Fonts
+
+    /// The user's own answer to the typeface question, which beats whatever the theme states.
+    ///
+    /// Two slots rather than one, and the second is the reason this is here rather than on
+    /// General: a theme states a typeface, so overriding it belongs beside the theme. The
+    /// conversation gets its own because it is the surface a reader *reads* — the terminal has
+    /// had exactly this through `TerminalProfile` since long before the chrome could be themed.
+    ///
+    /// The lists are every family the machine has, not a curated set. A typeface is a taste, and
+    /// a picker that offers four opinions is a fifth opinion.
+    private func fontSection() -> NSView {
+        let chrome = SettingsUI.popUp(target: self, action: #selector(chromeFontChanged))
+        let conversation = SettingsUI.popUp(target: self, action: #selector(conversationFontChanged))
+        chromeFontPopUp = chrome
+        conversationFontPopUp = conversation
+
+        let card = SettingsCard(rows: [
+            SettingsUI.row(
+                title: "App font",
+                subtitle: "Overrides the typeface the theme states.",
+                control: chrome
+            ),
+            SettingsUI.row(
+                title: "Conversation font",
+                subtitle: "The thread only. The terminal keeps its own font in Profile.",
+                control: conversation
+            )
+        ])
+        reloadFontControls()
+        return card
+    }
+
+    /// Rebuilds both pickers. The families are read at build time rather than cached, since a
+    /// font installed while the app is running — or registered by an extension enabling —
+    /// should appear the next time this rebuilds. `Typography.availableFamilies` is the live
+    /// list; `NSFontManager`'s snapshots on first access and misses extension fonts entirely.
+    private func reloadFontControls() {
+        let families = Design.Typography.availableFamilies
+
+        for (popUp, inherit, selected) in [
+            (chromeFontPopUp, Strings.followTheme, AppSettings.chromeFontFamily),
+            (conversationFontPopUp, Strings.followAppFont, AppSettings.conversationFontFamily)
+        ] {
+            guard let popUp else { continue }
+            popUp.removeAllItems()
+            popUp.addItem(ThemedMenuItem(title: inherit, representedValue: FontChoice.inherit))
+            for family in families {
+                popUp.addItem(ThemedMenuItem(title: family, representedValue: family))
+            }
+            // A family the user chose and has since uninstalled keeps its recorded name — the
+            // resolution falls through to the theme, and the picker says so by landing on the
+            // inherit row rather than silently claiming a font that is no longer there.
+            let index = selected.flatMap { families.firstIndex(of: $0).map { $0 + 1 } } ?? 0
+            popUp.selectItem(at: index)
+        }
+    }
+
+    @objc private func chromeFontChanged(_ sender: ThemedPopUp) {
+        AppSettings.shared.chromeFontFamily = chosenFamily(from: sender)
+    }
+
+    @objc private func conversationFontChanged(_ sender: ThemedPopUp) {
+        AppSettings.shared.conversationFontFamily = chosenFamily(from: sender)
+    }
+
+    private func chosenFamily(from popUp: ThemedPopUp) -> String? {
+        guard let raw = popUp.selectedItem?.representedValue as? String,
+              raw != FontChoice.inherit else { return nil }
+        return raw
+    }
+
+    private enum FontChoice {
+        /// A sentinel rather than `nil`, because a menu item's represented value is `Any?` and
+        /// an absent one is indistinguishable from an item that failed to carry its value.
+        static let inherit = "\u{0}inherit"
+    }
+
     @objc private func appThemeChanged(_ sender: ThemedPopUp) {
         guard let raw = sender.selectedItem?.representedValue as? String,
               let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
@@ -245,7 +328,16 @@ final class ThemePreferencesViewController: NSViewController {
         guard let popUp = appThemePopUp else { return }
         popUp.removeAllItems()
         for theme in AppThemeLibrary.all {
-            let title = AppThemeLibrary.isCustom(theme) ? "\(theme.name) — Custom" : theme.name
+            // A contributed theme is labelled by the extension it came from — that is where a
+            // user goes to update or remove it, and two extensions may both ship a "Storm".
+            let title: String
+            if AppThemeLibrary.isCustom(theme) {
+                title = "\(theme.name) — Custom"
+            } else if let contributor = AppThemeLibrary.contributorName(of: theme) {
+                title = "\(theme.name) — \(contributor)"
+            } else {
+                title = theme.name
+            }
             popUp.addItem(
                 ThemedMenuItem(title: title, representedValue: theme.id.rawValue)
             )
@@ -263,6 +355,10 @@ final class ThemePreferencesViewController: NSViewController {
         reloadAppThemeControls()
         // “Follow App Theme” is a live terminal-palette entry.
         loadThemes()
+        // A font-override change arrives as this same event (`startObservingFontOverrides`
+        // deliberately reuses it), and this page is cached across visits — without a reload a
+        // font chosen through MCP or another window leaves these pickers showing the old answer.
+        reloadFontControls()
     }
 
     private func appThemeLibraryDidChange() {
@@ -649,9 +745,9 @@ private final class ThemeListRowView: NSTableCellView {
         super.init(frame: .zero)
         identifier = Self.identifier
 
-        name.font = Design.Typography.body()
+        name.applyFont(.body)
         name.lineBreakMode = .byTruncatingTail
-        badge.font = Design.Typography.caption()
+        badge.applyFont(.caption)
         badge.textColor = Design.Text.secondary
 
         let stack = NSStackView(views: [swatch, name, NSView(), badge])

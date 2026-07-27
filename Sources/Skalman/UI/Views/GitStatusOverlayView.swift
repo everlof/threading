@@ -5,20 +5,24 @@ import AppKit
 enum GitStatusOverlayDefaults {
     static let height: CGFloat = 26
     static let fontSize: CGFloat = 11
-    static let maxWidth: CGFloat = 280
+    static let maxWidth: CGFloat = 360
     /// Quiet at rest, per the design system; full under the pointer.
-    static let restingAlpha: CGFloat = 0.85
+    ///
+    /// Carried by the card's **contents** rather than by the card. On the view it also thinned
+    /// the fill, and a fill that thins over a conversation is a card with the agent's own text
+    /// running through it.
+    static let restingContentAlpha: CGFloat = 0.85
 }
 
 // MARK: - View
 
-/// The floating card at the session pane's top-right corner: which branch the checkout is on
-/// and how much uncommitted work it carries, one click from the full review.
+/// The floating card at the session pane's top-right corner: branch and uncommitted work while
+/// idle; plan position, changed files and live line totals while the agent is working.
 ///
 /// The pane's surfaces answer "what is the agent saying"; this answers "what has it done to
 /// the checkout" without asking the conversation to run a tool. It is deliberately a summary —
-/// branch, `+N −M` — because the full answer already has a surface, the Git Review tab, which
-/// is exactly where a click lands.
+/// It remains a summary because the full answer already has a surface, the Git Review tab,
+/// which is exactly where a click lands.
 final class GitStatusOverlayView: BackdropOverlay {
 
     // MARK: - Properties
@@ -28,11 +32,23 @@ final class GitStatusOverlayView: BackdropOverlay {
 
     private let stack = NSStackView()
     private let glyph = NSImageView()
+    private let orb = WorkingOrbView()
     private var textLabel: NSTextField?
 
     /// Held so a backdrop change can rebuild the label, which carries its colours inside an
     /// attributed string and cannot be re-inked in place.
     private var lastReading: GitChangeMonitor.Reading?
+    private var isRunActive = false
+    private var runProgress: RunProgress?
+
+    /// Lifts the card's *contents* to full strength under the pointer. The surface behind them
+    /// does not move: it is what keeps the pane's text out of the card.
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            stack.alphaValue = isHovered ? 1 : GitStatusOverlayDefaults.restingContentAlpha
+        }
+    }
 
     // MARK: - Initialization
 
@@ -40,7 +56,6 @@ final class GitStatusOverlayView: BackdropOverlay {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         isHidden = true
-        alphaValue = GitStatusOverlayDefaults.restingAlpha
         toolTip = "Open Git Review (⇧⌘R)"
         setAccessibilityRole(.button)
 
@@ -58,7 +73,10 @@ final class GitStatusOverlayView: BackdropOverlay {
 
         stack.orientation = .horizontal
         stack.spacing = Design.Spacing.small
+        stack.alphaValue = GitStatusOverlayDefaults.restingContentAlpha
         stack.translatesAutoresizingMaskIntoConstraints = false
+        orb.isHidden = true
+        stack.addArrangedSubview(orb)
         stack.addArrangedSubview(glyph)
         addSubview(stack)
 
@@ -80,24 +98,71 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// This card floats on the *terminal's* background, not on the chrome's ground — see
     /// `BackdropOverlay`. Its surface and its label both come from there.
     ///
-    /// `+N −M` keeps `Design.Diff`: those two are semantic rather than decorative, and a green
-    /// that stopped meaning added would cost more than the contrast it bought.
+    /// `+N −M` stays green and red — those two are semantic rather than decorative, and a green
+    /// that stopped meaning added would cost more than the contrast it bought — but it is the
+    /// theme's green *measured against this card* (`Design.Diff.on(_:)`), which keeps the hue and
+    /// moves only the lightness when the card is too close to it. The card's colour comes from
+    /// the terminal's palette, so the app theme cannot know what its own green will land on.
+    /// **The card is opaque**, which the roles it draws from are not. It floats over the pane's
+    /// live content — a conversation, or the terminal itself — rather than over an empty stretch
+    /// of backdrop, so `ink.surface` at 14% let the text underneath run straight through the
+    /// branch name. Flattening against the ground keeps exactly the colour the role asks for and
+    /// loses only the see-through; `WindowBackdrop.opaque` carries the reasoning.
+    ///
+    /// The border flattens against the *card*, not the ground, because that is what is behind it.
     override func applyInk(_ ink: Design.Ink) {
         layer?.cornerRadius = Design.Radius.pill(height: GitStatusOverlayDefaults.height)
-        applyLayerBackground(ink.surface)
+        let surface = WindowBackdrop.opaque(ink.surface)
+        applyLayerBackground(surface)
         layer?.borderWidth = Design.Radius.border
-        applyLayerBorder(ink.border)
+        applyLayerBorder(ink.border.composited(over: surface))
         glyph.contentTintColor = ink.secondary
-        if let lastReading { update(with: lastReading) }
+        rebuild()
     }
 
     // MARK: - Public Methods
 
     func update(with reading: GitChangeMonitor.Reading) {
         lastReading = reading
-        let text = Self.attributedText(for: reading, ink: ink)
+        rebuild()
+    }
+
+    /// Promotes the ordinary branch card into the live run receipt shown in the same place.
+    ///
+    /// The checkout monitor continues feeding `update(with:)`, so file and line totals move
+    /// independently of plan updates. A rising edge prepares one orb variant; repeated plan or
+    /// diff readings do not restart its animation.
+    func updateRunState(isActive: Bool, progress: RunProgress?) {
+        if isActive, !isRunActive {
+            orb.prepareForWorking(style: AppSettings.shared.workingOrbStyle)
+        }
+        isRunActive = isActive
+        runProgress = isActive ? progress : nil
+        rebuild()
+    }
+
+    func clear() {
+        lastReading = nil
+        isRunActive = false
+        runProgress = nil
+        orb.isHidden = true
+        glyph.isHidden = false
+        isHidden = true
+    }
+
+    // MARK: - Private Methods
+
+    private func rebuild() {
+        let text = Self.attributedText(
+            for: lastReading,
+            isRunActive: isRunActive,
+            progress: runProgress,
+            ink: ink,
+            // The counters sit on the card, not on the backdrop the card floats over.
+            diff: Design.Diff.on(WindowBackdrop.opaque(ink.surface))
+        )
         guard text.length > 0 else {
-            clear()
+            isHidden = true
             return
         }
 
@@ -109,48 +174,79 @@ final class GitStatusOverlayView: BackdropOverlay {
         textLabel = label
         stack.addArrangedSubview(label)
 
+        orb.isHidden = !isRunActive
+        glyph.isHidden = isRunActive
+        setAccessibilityLabel(text.string)
         isHidden = false
     }
 
-    func clear() {
-        lastReading = nil
-        isHidden = true
-    }
-
-    // MARK: - Private Methods
-
-    /// The card's whole sentence: the branch in secondary, the counters in the diff colours.
+    /// The card's whole sentence. Idle, it is the branch and counters it has always shown.
+    /// During a run, the plan position replaces the branch and the changed-file count joins the
+    /// live line totals, matching the unit of work the orb describes.
     /// A clean checkout shows the branch alone; a detached head shows the counters alone;
     /// both absent is nothing to say, and the caller hides the card.
     private static func attributedText(
-        for reading: GitChangeMonitor.Reading,
-        ink: Design.Ink
+        for reading: GitChangeMonitor.Reading?,
+        isRunActive: Bool,
+        progress: RunProgress?,
+        ink: Design.Ink,
+        diff: Design.DiffInk
     ) -> NSAttributedString {
         let font = Design.Typography.numericDetail(weight: .medium)
         let text = NSMutableAttributedString()
 
-        if let branch = reading.branch {
+        if isRunActive {
+            text.append(NSAttributedString(
+                string: progress?.label ?? "Working…",
+                attributes: [
+                    .font: font,
+                    .foregroundColor: ink.label
+                ]
+            ))
+        } else if let branch = reading?.branch {
             text.append(NSAttributedString(string: branch, attributes: [
                 .font: font,
                 .foregroundColor: ink.secondary
             ]))
         }
 
-        if !reading.summary.isClean {
+        if let reading, !reading.summary.isClean {
             if text.length > 0 {
-                text.append(NSAttributedString(string: "  ", attributes: [.font: font]))
+                text.append(NSAttributedString(
+                    string: isRunActive ? "  ·  " : "  ",
+                    attributes: [
+                        .font: font,
+                        .foregroundColor: ink.tertiary
+                    ]
+                ))
             }
-            text.append(NSAttributedString(string: "+\(reading.summary.added)", attributes: [
+            if isRunActive {
+                let noun = reading.summary.files == 1 ? "file" : "files"
+                text.append(NSAttributedString(
+                    string: "\(formatted(reading.summary.files)) \(noun) changed ",
+                    attributes: [
+                        .font: font,
+                        .foregroundColor: ink.secondary
+                    ]
+                ))
+            }
+            text.append(NSAttributedString(string: "+\(formatted(reading.summary.added))", attributes: [
                 .font: font,
-                .foregroundColor: Design.Diff.added
+                .foregroundColor: diff.added
             ]))
-            text.append(NSAttributedString(string: " −\(reading.summary.removed)", attributes: [
+            text.append(NSAttributedString(string: " −\(formatted(reading.summary.removed))", attributes: [
                 .font: font,
-                .foregroundColor: Design.Diff.removed
+                .foregroundColor: diff.removed
             ]))
         }
 
         return text
+    }
+
+    /// Counts follow the user's locale: `8,349`, `8 349`, and their equivalents are the same
+    /// number rendered in the notation the rest of the system uses.
+    private static func formatted(_ count: Int) -> String {
+        count.formatted(.number.grouping(.automatic))
     }
 
     // MARK: - Interaction
@@ -164,18 +260,17 @@ final class GitStatusOverlayView: BackdropOverlay {
         trackingAreas.forEach(removeTrackingArea)
         addTrackingArea(NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
             owner: self
         ))
+
+        // The card is pinned to the pane's trailing edge, so opening a panel slides it out from
+        // under a pointer that never moved and no exit is delivered — see `NSView.hoverIsStale`.
+        if hoverIsStale(isHovered) { isHovered = false }
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        alphaValue = 1
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        alphaValue = GitStatusOverlayDefaults.restingAlpha
-    }
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .pointingHand)

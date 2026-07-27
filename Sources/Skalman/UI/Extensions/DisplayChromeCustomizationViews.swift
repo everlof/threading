@@ -87,7 +87,11 @@ final class DisplayPaneHeaderCustomizationView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityIdentifier("display.pane-header.component")
         setContentHuggingPriority(.required, for: .horizontal)
-        setContentCompressionResistancePriority(.required, for: .horizontal)
+        // Below the split item's holding priority (`DisplayPaneDefaults.holdingPriority`),
+        // deliberately: at `.required` this view's fitting width outranked the divider, so an
+        // extension chip arriving or changing with the active tab yanked the whole pane wider.
+        // The pane's width is the user's answer; oversized accessory content compresses instead.
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         addSubview(container)
         NSLayoutConstraint.activate([

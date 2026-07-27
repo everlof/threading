@@ -26,8 +26,11 @@ final class ThemedTabItemView: BackdropThemedControl {
     /// is what `Design.Radius.control` names.
     private static var radius: CGFloat { Design.Radius.control }
 
-    private static func font(isSelected: Bool) -> NSFont {
-        isSelected ? Design.Typography.control() : Design.Typography.controlRegular()
+    /// A **role** rather than a font, because a tab's label is a `MorphingTitleLabel` that
+    /// keeps whatever `NSFont` it was handed: assigning a resolved font here left every tab in
+    /// the window set in the previous theme's typeface until it was next selected.
+    private static func role(isSelected: Bool) -> Design.FontRole {
+        isSelected ? .control : .controlRegular
     }
 
     enum Placement {
@@ -55,7 +58,7 @@ final class ThemedTabItemView: BackdropThemedControl {
     var isSelected = false {
         didSet {
             guard isSelected != oldValue else { return }
-            titleLabel.font = Self.font(isSelected: isSelected)
+            titleLabel.applyFont(Self.role(isSelected: isSelected))
             invalidateIntrinsicContentSize()
             needsDisplay = true
         }
@@ -68,8 +71,6 @@ final class ThemedTabItemView: BackdropThemedControl {
     /// Public component content rendered after the title but still inside this native control.
     /// Keeping the slot here means selection, hover, focus and close remain one host-owned tab.
     let extensionAccessoryStack = NSStackView()
-    private var trackingArea: NSTrackingArea?
-    private var isHovered = false { didSet { needsDisplay = true } }
     private var isPressed = false { didSet { needsDisplay = true } }
 
     /// What the current title names, so a *rename* can be told from a tab being reused for
@@ -110,7 +111,7 @@ final class ThemedTabItemView: BackdropThemedControl {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.setContentHuggingPriority(.required, for: .horizontal)
 
-        titleLabel.font = Self.font(isSelected: isSelected)
+        titleLabel.applyFont(Self.role(isSelected: isSelected))
         titleLabel.setStringValue(title, animated: false)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
@@ -132,6 +133,11 @@ final class ThemedTabItemView: BackdropThemedControl {
         content.orientation = .horizontal
         content.alignment = .centerY
         content.spacing = Design.Spacing.small
+        // The close button stands a step further off than the strip's own rhythm: at the strip
+        // spacing it crowded the title on one side and the tab's edge on the other, since its
+        // target already hugs the trailing inset. Matched in `intrinsicContentSize`.
+        content.setCustomSpacing(Design.Spacing.medium, after: titleLabel)
+        content.setCustomSpacing(Design.Spacing.medium, after: extensionAccessoryStack)
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
@@ -199,10 +205,10 @@ final class ThemedTabItemView: BackdropThemedControl {
     override var intrinsicContentSize: NSSize {
         let closeWidth = closeButton.isHidden
             ? 0
-            : Design.Spacing.small + Design.Size.inlineButtonTarget
+            : Design.Spacing.medium + Design.Size.inlineButtonTarget
         let accessoryWidth = extensionAccessoryStack.isHidden
             ? 0
-            : Design.Spacing.small + ceil(extensionAccessoryStack.fittingSize.width)
+            : Design.Spacing.medium + ceil(extensionAccessoryStack.fittingSize.width)
         let width = placement.horizontalInset * 2
             + Design.Size.tabIconSlot
             + Design.Spacing.small
@@ -225,7 +231,6 @@ final class ThemedTabItemView: BackdropThemedControl {
     override func draw(_ dirtyRect: NSRect) {
         let foreground: NSColor
         let fill: NSColor
-        let border: NSColor?
 
         if isSelected {
             foreground = ink.label
@@ -233,21 +238,22 @@ final class ThemedTabItemView: BackdropThemedControl {
             // being pressed: at the hover weight it read as the loudest thing in the pane and its
             // own label had to compete with it.
             fill = isHovered ? ink.surfaceHover : ink.surface
-            border = ink.border
         } else if isPressed || isHovered || hasKeyboardFocus {
             foreground = ink.label
             fill = ink.surface
-            border = nil
         } else {
             foreground = ink.secondary
             fill = .clear
-            border = nil
         }
 
+        // No border in any state. The fill and the label weight already carry selection, and a
+        // stroked rounded rect made the selected tab the one outlined control in its row — a
+        // hard edge the close button then sat visibly tight against. Selection here follows the
+        // app's other resting surfaces: a quiet fill, not a frame.
         let path = ThemedSurface.draw(
             bounds,
             fill: fill,
-            border: border,
+            border: nil,
             radius: Self.radius
         )
         drawKeyboardFocus(around: path)
@@ -261,21 +267,6 @@ final class ThemedTabItemView: BackdropThemedControl {
     }
 
     // MARK: - Interaction
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }

@@ -56,11 +56,11 @@ final class InspectorReportViewController: NSViewController {
         view.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
 
         let headingLabel = NSTextField(labelWithString: heading)
-        headingLabel.font = Design.Typography.heading()
+        headingLabel.applyFont(.heading)
         headingLabel.textColor = Design.Text.label
 
         let subheadingLabel = NSTextField(labelWithString: subheading)
-        subheadingLabel.font = Design.Typography.subheading()
+        subheadingLabel.applyFont(.subheading)
         subheadingLabel.textColor = Design.Text.secondary
         subheadingLabel.lineBreakMode = .byTruncatingTail
 
@@ -143,7 +143,7 @@ final class InspectorReportViewController: NSViewController {
             textView.string = markdown
             textView.isEditable = false
             textView.isSelectable = true
-            textView.font = Design.Typography.code()
+            textView.applyFont(.code())
             textView.textContainerInset = NSSize(
                 width: Design.Spacing.medium,
                 height: Design.Spacing.medium
@@ -168,7 +168,7 @@ final class InspectorReportViewController: NSViewController {
         // Said rather than left to be discovered: a growing box is the only clue that a second
         // line is possible, and it appears after the key that would have submitted was pressed.
         let hint = NSTextField(labelWithString: InspectorStrings.noteHint)
-        hint.font = Design.Typography.caption()
+        hint.applyFont(.caption)
         hint.textColor = Design.Text.tertiary
 
         let stack = NSStackView(views: [noteField, hint])

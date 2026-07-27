@@ -8,7 +8,7 @@ extension Markdown {
     /// and `[label](url)`. Unmatched delimiters render as themselves rather than eating the
     /// rest of the line — half-typed emphasis is common while a message is still streaming.
     static func inline(_ text: String, style: MarkdownStyle, heading: Bool = false) -> NSAttributedString {
-        let baseFont = heading ? headingFont(style.font) : style.font
+        let baseFont = heading ? headingFont(style) : style.font
         let result = NSMutableAttributedString()
 
         var scanner = InlineScanner(text: Array(text))
@@ -56,8 +56,11 @@ extension Markdown {
 
     // MARK: - Font Variants
 
-    private static func headingFont(_ base: NSFont) -> NSFont {
-        Design.Typography.markdownHeading(from: base)
+    /// In the style's own surface: the heading re-enters the four resolution layers, and asking
+    /// as chrome from inside a conversation-styled document could answer in a different family
+    /// than the paragraph under it.
+    private static func headingFont(_ style: MarkdownStyle) -> NSFont {
+        Design.Typography.markdownHeading(from: style.font, surface: style.fontSurface)
     }
 
     private static func bold(_ base: NSFont) -> NSFont {

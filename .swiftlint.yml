@@ -29,8 +29,18 @@ custom_rules:
   stock_appkit_control:
     name: "Stock AppKit control or chrome view"
     regex: '\b(NSButton|NSComboButton|NSSwitch|NSPopUpButton|NSSearchField|NSProgressIndicator|NSColorWell|NSBox|NSScrollView|NSClipView|NSTextView|NSTableView|NSOutlineView|NSTableHeaderView|NSCollectionView|NSVisualEffectView|NSSegmentedControl|NSSlider|NSStepper|NSLevelIndicator|NSComboBox|NSDatePicker|NSTokenField|NSSecureTextField|NSPathControl|NSRuleEditor|NSPredicateEditor|NSBrowser|NSTabView|NSMatrix|NSForm|NSScroller)\s*\('
-    excluded: ".*/UI/Design/ThemeSwatchView\\.swift"
+    excluded:
+      - ".*/UI/Design/ThemeSwatchView\\.swift"
+      - ".*/UI/Design/SidebarBackdropView\\.swift"
     message: "Build from UI/Design/ — ThemedButton, ThemedToggle, ThemedPopUp, ThemedSearchField, ThemedSpinner, ThemedProgressBar, ThemedScrollView, ThemedTextView, ThemedTableView, ThemedOutlineView, SeparatorView, ThemeSwatchView. A stock control bakes in the system accent, bezel or background, so it stays system-styled on a page that has gone red. No wrapper yet? Make one in UI/Design first."
+    match_kinds:
+      - identifier
+    severity: error
+
+  frozen_theme_font:
+    name: "Frozen theme font"
+    regex: '\.font\s*=\s*(Design\s*\.\s*)?Typography\s*\.'
+    message: "Use applyFont(.role) instead. An assigned NSFont freezes exactly as a CGColor on a layer does, so a label set this way looks right and then keeps the previous typeface through every live theme switch — invisible until someone switches one. applyFont records the role so the theme sweep can take the decision again."
     match_kinds:
       - identifier
     severity: error

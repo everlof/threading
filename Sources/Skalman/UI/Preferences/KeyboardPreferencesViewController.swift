@@ -71,7 +71,7 @@ final class KeyboardPreferencesViewController: NSViewController {
             // A plain label, not a disabled recorder: a dimmed control still invites a click,
             // and these can never be clicked to any effect.
             let label = NSTextField(labelWithString: shortcut?.displayString ?? ShortcutRecorderStrings.unbound)
-            label.font = Design.Typography.code()
+            label.applyFont(.code())
             label.textColor = Design.Text.tertiary
             return SettingsUI.row(title: rowTitle(command), subtitle: nil, control: label)
         }

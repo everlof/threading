@@ -125,6 +125,4 @@ enum DiffDefaults {
 
     static let fontSize: CGFloat = 11
     static let gutterWidth: CGFloat = 14
-    static let addedAlpha: CGFloat = 0.16
-    static let removedAlpha: CGFloat = 0.16
 }

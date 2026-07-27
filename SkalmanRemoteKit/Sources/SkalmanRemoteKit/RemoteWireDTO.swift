@@ -44,16 +44,32 @@ public struct RemoteThemeDTO: Codable, Equatable {
         public let borderWidth: Double
         public let glow: Glow?
 
+        /// The typeface class the Mac's chrome is set in — `default`, `serif`, `rounded` or
+        /// `monospaced`. Optional on the wire in both directions: a client built before this
+        /// field existed ignores it, and one built after it still decodes a payload from a Mac
+        /// that predates it. A client that wants to match maps these onto its own platform's
+        /// font designs; iOS has the same four.
+        public let typeface: String?
+
+        /// A named family the theme asks for, where it is more specific than a class. **Advisory
+        /// on the wire**: it names a font installed on the *Mac*, and a phone that does not have
+        /// it should fall back to `typeface` rather than substituting something close.
+        public let fontFamily: String?
+
         public init(
             panelRadius: Double,
             controlRadius: Double,
             borderWidth: Double,
-            glow: Glow? = nil
+            glow: Glow? = nil,
+            typeface: String? = nil,
+            fontFamily: String? = nil
         ) {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
             self.borderWidth = borderWidth
             self.glow = glow
+            self.typeface = typeface
+            self.fontFamily = fontFamily
         }
     }
 

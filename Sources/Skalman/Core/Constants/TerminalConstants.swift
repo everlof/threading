@@ -77,20 +77,6 @@ enum AIDefaults {
     static let openaiDefaultModel = "gpt-4"
 }
 
-// MARK: - Shell Defaults
-
-enum ShellDefaults {
-    /// Delay before sampling child processes to identify the newly spawned shell PID.
-    static let pidCaptureDelay: TimeInterval = 0.3
-
-    /// How many times that sample is taken before giving up.
-    ///
-    /// One look is a race the child loses on a busy machine, and app launch — when every
-    /// restored session starts at once — is the busiest moment there is. Ten attempts covers
-    /// about three seconds, after which the child is not coming.
-    static let pidCaptureAttempts = 10
-}
-
 // MARK: - Agent Defaults
 
 enum AgentDefaults {
@@ -378,8 +364,12 @@ enum SidebarDefaults {
     static let headingRowHeight: CGFloat = 32
     static let indentationPerLevel: CGFloat = 14
 
-    /// Breathing room between the toolbar's safe area and the first row.
+    /// Breathing room between the header band's hairline and the first row.
     static let contentTopInset: CGFloat = 4
+
+    /// The header's arrangement control — the platform's "use groups" glyph, which is the
+    /// closest thing the menu behind it (grouping, then sorting) has to one name.
+    static let arrangementSymbol = "square.grid.3x1.below.line.grid.1x2"
 
     /// How hard the sidebar holds its width against a window resize.
     ///
@@ -408,6 +398,7 @@ enum SidebarDefaults {
 enum SidebarStrings {
     static let emptyTitle = "No Projects"
     static let emptySubtitle = "Drop a folder here, or click Add Project below."
+    static let arrangementOptions = "Grouping and Sorting"
 }
 
 // MARK: - Sidebar Row Defaults

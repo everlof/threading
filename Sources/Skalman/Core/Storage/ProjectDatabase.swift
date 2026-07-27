@@ -37,6 +37,8 @@ final class ProjectDatabase {
                 try database.execute(ProjectDatabaseSchema.version1)
             case 2:
                 try database.execute(ProjectDatabaseSchema.version2)
+            case 3:
+                try database.execute(ProjectDatabaseSchema.version3)
             default:
                 // Unreachable while `version` and the cases here are edited together, which is
                 // the point of failing loudly rather than silently skipping a step.
@@ -158,6 +160,35 @@ final class ProjectDatabase {
         ((try? database.scalar("SELECT COUNT(*) FROM panel_layout")) ?? 0) > 0
     }
 
+    // MARK: - Public Methods — Session Attachments
+
+    /// The attachment references a session has surfaced, as one `Codable` payload per session —
+    /// the same shape as the panel's row, and unconstrained against `session` for the same
+    /// reason: the two are written on their own schedules, and `retainAttachments` prunes.
+    func attachmentsPayload(for sessionID: SessionID) throws -> String? {
+        let statement = try database.prepare(
+            "SELECT data FROM session_attachments WHERE session_id = ?"
+        )
+        defer { statement.finalize() }
+        statement.bind(1, sessionID.uuidString)
+        return try statement.step() ? statement.text(0) : nil
+    }
+
+    func saveAttachmentsPayload(_ payload: String, for sessionID: SessionID) throws {
+        try database.prepare(ProjectDatabaseSchema.upsertAttachments)
+            .bind(1, sessionID.uuidString)
+            .bind(2, payload)
+            .run()
+    }
+
+    func retainAttachments(sessionIDs: Set<SessionID>) throws {
+        try deleteRows(
+            in: "session_attachments",
+            column: "session_id",
+            keeping: Set(sessionIDs.map(\.uuidString))
+        )
+    }
+
     // MARK: - Private Methods — Rows
 
     private func upsert(_ project: Project, position: Int) throws {
@@ -239,7 +270,7 @@ final class ProjectDatabase {
 
 enum ProjectDatabaseSchema {
 
-    static let version = 2
+    static let version = 3
 
     static let selectedSessionKey = "selectedSessionID"
 
@@ -305,6 +336,21 @@ enum ProjectDatabaseSchema {
 
     static let upsertPanel = """
         INSERT INTO panel_layout (session_id, data) VALUES (?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET data = excluded.data
+        """
+
+    /// One row per session, holding the attachment references the session has surfaced. The
+    /// panel's *tab* already survived a relaunch; this is the half of that promise the tab was
+    /// reopening onto an empty pane without.
+    static let version3 = """
+        CREATE TABLE session_attachments (
+            session_id TEXT PRIMARY KEY,
+            data       TEXT NOT NULL
+        );
+        """
+
+    static let upsertAttachments = """
+        INSERT INTO session_attachments (session_id, data) VALUES (?, ?)
         ON CONFLICT(session_id) DO UPDATE SET data = excluded.data
         """
 

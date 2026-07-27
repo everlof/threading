@@ -218,9 +218,9 @@ final class ElementInspectionTests: XCTestCase {
     /// rendering bug in the app rather than in the capture.
     @MainActor
     func testCaptureSuppliesTheSidebarGroundTheWindowServerDrew() throws {
-        let original = WindowBackdrop.color
+        let original = WindowBackdrop.ground
         defer { WindowBackdrop.set(original) }
-        WindowBackdrop.set(NSColor(red: 0.04, green: 0.04, blue: 0.06, alpha: 1))
+        WindowBackdrop.set(.terminal(NSColor(red: 0.04, green: 0.04, blue: 0.06, alpha: 1)))
 
         let split = NSSplitViewController()
         split.addSplitViewItem(NSSplitViewItem(sidebarWithViewController: NSViewController()))

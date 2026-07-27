@@ -368,6 +368,71 @@ extension TerminalTheme {
     /// All available themes (use ThemeManager.shared.allThemes for the full list including custom themes)
     static let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean]
 
+    // MARK: - The System App Theme's Pair
+
+    /// The palettes the **System app theme** pairs with macOS's two appearances.
+    ///
+    /// Deliberately not in `builtInThemes`: they are not entries in the terminal-theme list but
+    /// the answer "Follow App Theme" resolves to under System, the way every styled theme states
+    /// a palette per variant. Both are Terminal.app's Basic ramp — the ramp `basic` already
+    /// carries — so a terminal that stops following the app theme and picks Basic keeps its
+    /// colours and changes only its ground.
+    ///
+    /// The dark ground is the measured dark `windowBackgroundColor` rather than pure black, so
+    /// a session and the chrome beside it read as one surface with the divider as their seam —
+    /// pure black next to the chrome's near-black was a hole in the window, and in light mode it
+    /// painted the whole backdrop black behind a light app. That seam is the System theme's own
+    /// idea applied to the terminal: the palette follows the appearance, like every role does.
+    static let systemLight = TerminalTheme(
+        id: TerminalThemeID("system-light"),
+        name: "System",
+        foreground: .black,
+        background: .white,
+        cursor: NSColor(white: 0.35, alpha: 1.0),
+        selection: NSColor(hex: "#B3D7FF")!,
+        black: .black,
+        red: NSColor(hex: "#C91B00")!,
+        green: NSColor(hex: "#00C200")!,
+        yellow: NSColor(hex: "#C7C400")!,
+        blue: NSColor(hex: "#0225C7")!,
+        magenta: NSColor(hex: "#C930C7")!,
+        cyan: NSColor(hex: "#00C5C7")!,
+        white: NSColor(hex: "#C7C7C7")!,
+        brightBlack: NSColor(hex: "#676767")!,
+        brightRed: NSColor(hex: "#FF6D67")!,
+        brightGreen: NSColor(hex: "#5FF967")!,
+        brightYellow: NSColor(hex: "#FEFB67")!,
+        brightBlue: NSColor(hex: "#6871FF")!,
+        brightMagenta: NSColor(hex: "#FF76FF")!,
+        brightCyan: NSColor(hex: "#5FFDFF")!,
+        brightWhite: .white
+    )
+
+    static let systemDark = TerminalTheme(
+        id: TerminalThemeID("system-dark"),
+        name: "System",
+        foreground: NSColor(hex: "#E8E8E8")!,
+        background: NSColor(hex: "#1E1E1E")!,
+        cursor: NSColor(hex: "#E8E8E8")!,
+        selection: NSColor(white: 0.32, alpha: 1.0),
+        black: .black,
+        red: NSColor(hex: "#C91B00")!,
+        green: NSColor(hex: "#00C200")!,
+        yellow: NSColor(hex: "#C7C400")!,
+        blue: NSColor(hex: "#0225C7")!,
+        magenta: NSColor(hex: "#C930C7")!,
+        cyan: NSColor(hex: "#00C5C7")!,
+        white: NSColor(hex: "#C7C7C7")!,
+        brightBlack: NSColor(hex: "#676767")!,
+        brightRed: NSColor(hex: "#FF6D67")!,
+        brightGreen: NSColor(hex: "#5FF967")!,
+        brightYellow: NSColor(hex: "#FEFB67")!,
+        brightBlue: NSColor(hex: "#6871FF")!,
+        brightMagenta: NSColor(hex: "#FF76FF")!,
+        brightCyan: NSColor(hex: "#5FFDFF")!,
+        brightWhite: .white
+    )
+
     /// The same palette under another name. An app theme's palette is named after the *theme*,
     /// so anything that reports which colours a terminal drew with names the thing the user
     /// chose rather than the built-in it happens to equal.

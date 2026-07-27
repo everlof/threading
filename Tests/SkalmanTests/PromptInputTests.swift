@@ -84,6 +84,60 @@ final class PromptInputTests: XCTestCase {
         XCTAssertNotNil(document.textContainer)
     }
 
+    /// A dropped file has to reach the composer as a path.
+    ///
+    /// The registration assertion is the one that matters and the one nothing else made:
+    /// `PromptAttachmentTests` proves the pasteboard is read correctly, and every one of those
+    /// assertions passed while `registeredDraggedTypes` was empty and the pointer was being
+    /// refused before it ever reached that code. Reading the types is not enough on its own
+    /// either, so the drop is then performed and the field checked for the path.
+    func testDroppedFilesBecomePathsInThePrompt() throws {
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        _ = window
+        let textView = try promptTextView(in: prompt)
+
+        let registered = textView.registeredDraggedTypes
+        for type in [NSPasteboard.PasteboardType.fileURL, .png, .tiff] {
+            XCTAssertTrue(
+                registered.contains(type),
+                "\(type.rawValue) has to reach the composer; registered types were \(registered)"
+            )
+        }
+
+        let path = "/tmp/skalman-drop-fixture.png"
+        let drag = DropFixture(writing: { $0.writeObjects([URL(fileURLWithPath: path) as NSURL]) })
+
+        XCTAssertEqual(textView.draggingEntered(drag), .copy, "The drop has to be offered")
+        XCTAssertTrue(textView.performDragOperation(drag))
+        XCTAssertEqual(prompt.stringValue, path)
+    }
+
+    /// A screenshot dragged from another app carries image data and no path of its own, so the
+    /// composer has to write one out before it can name it.
+    func testDraggedImageDataIsWrittenOutAndNamed() throws {
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        _ = window
+        let textView = try promptTextView(in: prompt)
+
+        let image = NSImage(size: NSSize(width: 4, height: 4))
+        image.lockFocus()
+        NSColor.red.drawSwatch(in: NSRect(x: 0, y: 0, width: 4, height: 4))
+        image.unlockFocus()
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+
+        let drag = DropFixture(writing: { $0.setData(png, forType: .png) })
+        XCTAssertEqual(textView.draggingEntered(drag), .copy)
+        XCTAssertTrue(textView.performDragOperation(drag))
+
+        let written = prompt.stringValue
+        XCTAssertTrue(written.hasSuffix(".png"), "Got \(written)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: written), "The agent has to be able to open it")
+        try? FileManager.default.removeItem(atPath: written)
+    }
+
     func testPromptAcceptsTypedCharacters() throws {
         let prompt = PromptView()
         let window = makeWindow(hosting: prompt)
@@ -159,4 +213,49 @@ final class PromptInputTests: XCTestCase {
         type("hej", in: window)
         XCTAssertEqual(prompt.stringValue, "hej")
     }
+}
+
+// MARK: - Drop Fixture
+
+/// A drag carrying one pasteboard, which is the whole of what the composer inspects.
+///
+/// AppKit offers no way to stage a real drag from a test, and the alternative — asserting on
+/// `registeredDraggedTypes` alone — proves the pointer arrives without proving anything happens
+/// when it lands. Everything past the pasteboard is geometry and animation the drop path does
+/// not read.
+private final class DropFixture: NSObject, NSDraggingInfo {
+
+    private let pasteboard: NSPasteboard
+
+    init(writing contents: (NSPasteboard) -> Void) {
+        // A named board rather than the general one: a test must not take the user's clipboard.
+        pasteboard = NSPasteboard(name: NSPasteboard.Name("SkalmanPromptDropFixture"))
+        pasteboard.clearContents()
+        contents(pasteboard)
+        super.init()
+    }
+
+    var draggingPasteboard: NSPasteboard { pasteboard }
+    var draggingSourceOperationMask: NSDragOperation { [.copy, .generic] }
+    var draggingLocation: NSPoint { NSPoint(x: 10, y: 10) }
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggedImageLocation: NSPoint { .zero }
+    var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    var draggingFormation: NSDraggingFormation = .default
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    func resetSpringLoading() {}
+    override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    func enumerateDraggingItems(
+        options: NSDraggingItemEnumerationOptions,
+        for view: NSView?,
+        classes classArray: [AnyClass],
+        searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+        using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
 }

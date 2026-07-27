@@ -78,8 +78,6 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     private var accessibilityName: String
     private let isEmphasized: Bool
     private let actionTarget: Target
-    private var trackingArea: NSTrackingArea?
-    private var isHovered = false { didSet { needsDisplay = true } }
     private var isPressed = false { didSet { needsDisplay = true } }
 
     init(
@@ -181,21 +179,6 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
             ? (isSelected || isHovered ? ink.label : ink.secondary)
             : ink.quaternary
     }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }

@@ -53,6 +53,11 @@ extension ProjectSidebarViewController {
         addSurfaceMenu(to: menu, for: session)
         menu.addItem(makeSessionThemeItem(for: sessionID))
         menu.addItem(withTitle: "Rename Session…", action: #selector(renameSessionClicked), keyEquivalent: "")
+        menu.addItem(
+            withTitle: "Copy Session ID",
+            action: #selector(copySessionIDClicked),
+            keyEquivalent: ""
+        )
         if AppSettings.shared.remoteAccessEnabled {
             menu.addItem(.separator())
             menu.addItem(
@@ -238,6 +243,19 @@ extension ProjectSidebarViewController {
             ProjectStore.shared.renameSession(id: sessionID, to: newTitle)
             self.reload()
         }
+    }
+
+    /// Copies the identifier that names this conversation outside Skalman.
+    ///
+    /// It is the one fact about a chat that is needed *elsewhere* — grepping a transcript,
+    /// resuming from a terminal, quoting a session in a bug report — and the only way to read
+    /// it before this was to ask the agent running inside it.
+    @objc private func copySessionIDClicked() {
+        guard let sessionID = actionSessionID,
+              let session = ProjectStore.shared.session(withID: sessionID) else { return }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(session.externalIdentifier, forType: .string)
     }
 
     /// A copied link is a single-use invitation for this chat only. Collaboration and permission

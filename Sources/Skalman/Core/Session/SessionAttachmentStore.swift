@@ -40,20 +40,45 @@ struct SessionAttachmentsDidChange: AppEvent {
 /// resolving symlinks and proving the result is a regular supported file inside the checkout.
 /// This boundary matters twice: it keeps noisy terminal output from creating bogus rows, and it
 /// keeps the paired-phone endpoint from becoming an arbitrary local-file reader.
+///
+/// The list is **persisted** per session, beside the panel layout it belongs with. Detection
+/// only sees live output — a terminal's recent buffer, a conversation's streamed turns — so a
+/// list held only in memory emptied on every relaunch while the Attachments *tab* dutifully
+/// came back, which read as attachments appearing and vanishing at random. References are still
+/// re-validated against the filesystem on every read, so a file that has since been deleted
+/// drops out (and the pruned list is written back) rather than offering a dead row.
 final class SessionAttachmentStore {
 
-    static let shared = SessionAttachmentStore()
+    /// Hosted tests exercise the shared store; the user's real database is not theirs to write.
+    static let shared: SessionAttachmentStore = {
+        guard NSClassFromString("XCTestCase") == nil else { return SessionAttachmentStore() }
+        return SessionAttachmentStore(
+            loadPayload: { StateManager.shared.loadAttachmentsPayload(for: $0) },
+            savePayload: { StateManager.shared.saveAttachmentsPayload($0, for: $1) },
+            retainPersisted: { StateManager.shared.retainAttachments(sessionIDs: $0) }
+        )
+    }()
 
     private var attachmentsBySession: [SessionID: [SessionAttachment]] = [:]
+    private var loadedSessions: Set<SessionID> = []
     private let fileManager: FileManager
     private let now: () -> Date
+    private let loadPayload: ((SessionID) -> String?)?
+    private let savePayload: ((String, SessionID) -> Void)?
+    private let retainPersisted: ((Set<SessionID>) -> Void)?
 
     init(
         fileManager: FileManager = .default,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        loadPayload: ((SessionID) -> String?)? = nil,
+        savePayload: ((String, SessionID) -> Void)? = nil,
+        retainPersisted: ((Set<SessionID>) -> Void)? = nil
     ) {
         self.fileManager = fileManager
         self.now = now
+        self.loadPayload = loadPayload
+        self.savePayload = savePayload
+        self.retainPersisted = retainPersisted
     }
 
     // MARK: Recording
@@ -100,6 +125,9 @@ final class SessionAttachmentStore {
         }
         guard !made.isEmpty else { return [] }
 
+        // Loaded first, so a reference arriving before the pane was ever opened lands on top
+        // of the persisted history rather than replacing it.
+        loadIfNeeded(sessionID)
         var current = attachmentsBySession[sessionID] ?? []
         for attachment in made {
             current.removeAll { $0.relativePath == attachment.relativePath }
@@ -109,6 +137,7 @@ final class SessionAttachmentStore {
             current.removeLast(current.count - SessionAttachmentDefaults.maximumPerSession)
         }
         attachmentsBySession[sessionID] = current
+        persist(current, for: sessionID)
         NotificationCenter.default.post(SessionAttachmentsDidChange(sessionID: sessionID))
         return made
     }
@@ -116,6 +145,7 @@ final class SessionAttachmentStore {
     // MARK: Reading
 
     func attachments(for sessionID: SessionID) -> [SessionAttachment] {
+        loadIfNeeded(sessionID)
         guard let stored = attachmentsBySession[sessionID] else { return [] }
         let current = stored.compactMap {
             validatedAttachment(
@@ -127,6 +157,7 @@ final class SessionAttachmentStore {
         }
         if current != stored {
             attachmentsBySession[sessionID] = current
+            persist(current, for: sessionID)
         }
         return current
     }
@@ -140,6 +171,63 @@ final class SessionAttachmentStore {
 
     func retainOnly(sessionIDs: Set<SessionID>) {
         attachmentsBySession = attachmentsBySession.filter { sessionIDs.contains($0.key) }
+        loadedSessions = loadedSessions.intersection(sessionIDs)
+        retainPersisted?(sessionIDs)
+    }
+
+    // MARK: Persistence
+
+    /// The on-disk form of one reference. The file's bytes stay in the checkout; this is only
+    /// enough to find it again and keep the list's order.
+    private struct PersistedAttachment: Codable {
+        let projectRoot: String
+        let relativePath: String
+        let kind: SessionAttachment.Kind
+        let referencedAt: Date
+    }
+
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
+    /// Fills a session's list from the store once. Entries are not validated here — reading
+    /// already validates on every access, and a file deleted while the app was closed should
+    /// fall out the same way as one deleted while it ran.
+    private func loadIfNeeded(_ sessionID: SessionID) {
+        guard !loadedSessions.contains(sessionID) else { return }
+        loadedSessions.insert(sessionID)
+        guard attachmentsBySession[sessionID] == nil,
+              let payload = loadPayload?(sessionID),
+              let entries = try? Self.decoder.decode(
+                  [PersistedAttachment].self,
+                  from: Data(payload.utf8)
+              )
+        else { return }
+
+        attachmentsBySession[sessionID] = entries.map { entry in
+            let root = URL(fileURLWithPath: entry.projectRoot, isDirectory: true)
+            return SessionAttachment(
+                sessionID: sessionID,
+                projectRoot: root,
+                url: root.appendingPathComponent(entry.relativePath),
+                relativePath: entry.relativePath,
+                kind: entry.kind,
+                referencedAt: entry.referencedAt
+            )
+        }
+    }
+
+    private func persist(_ attachments: [SessionAttachment], for sessionID: SessionID) {
+        guard let savePayload else { return }
+        let entries = attachments.map {
+            PersistedAttachment(
+                projectRoot: $0.projectRoot.path,
+                relativePath: $0.relativePath,
+                kind: $0.kind,
+                referencedAt: $0.referencedAt
+            )
+        }
+        guard let data = try? Self.encoder.encode(entries) else { return }
+        savePayload(String(decoding: data, as: UTF8.self), sessionID)
     }
 
     // MARK: Validation
@@ -318,7 +406,9 @@ final class TerminalAttachmentObserver {
     private let currentDirectory: () -> URL?
     private let text: () -> String
     private let isEnabled: () -> Bool
+    private let now: () -> Date
     private var pendingScan: DispatchWorkItem?
+    private var lastScan: Date?
     private var pathsInLastScan: Set<String> = []
 
     init(
@@ -326,21 +416,40 @@ final class TerminalAttachmentObserver {
         projectRoot: @escaping () -> URL?,
         currentDirectory: @escaping () -> URL?,
         text: @escaping () -> String,
-        isEnabled: @escaping () -> Bool = { true }
+        isEnabled: @escaping () -> Bool = { true },
+        now: @escaping () -> Date = Date.init
     ) {
         self.sessionID = sessionID
         self.projectRoot = projectRoot
         self.currentDirectory = currentDirectory
         self.text = text
         self.isEnabled = isEnabled
+        self.now = now
     }
 
     deinit {
         pendingScan?.cancel()
     }
 
+    /// Scans now when it may, defers only as long as it must.
+    ///
+    /// Waiting for quiet alone was the "attachments arrive when the agent pauses" feel: a busy
+    /// stretch re-arms the debounce on every repaint, so a path printed early in a long build
+    /// surfaced only when the output finally stopped. The first sighting scans immediately and
+    /// sustained output re-scans on a cap; the trailing debounce still reads a burst's last
+    /// lines after they have settled.
     func noteOutput() {
         pendingScan?.cancel()
+
+        let timestamp = now()
+        let dueForScan = lastScan.map {
+            timestamp.timeIntervalSince($0) >= SessionAttachmentDefaults.terminalBusyScanInterval
+        } ?? true
+        if dueForScan {
+            scanNow()
+            return
+        }
+
         let work = DispatchWorkItem { [weak self] in self?.scanNow() }
         pendingScan = work
         DispatchQueue.main.asyncAfter(
@@ -352,6 +461,7 @@ final class TerminalAttachmentObserver {
     func scanNow() {
         pendingScan?.cancel()
         pendingScan = nil
+        lastScan = now()
         guard isEnabled() else {
             pathsInLastScan.removeAll()
             return
@@ -379,5 +489,9 @@ final class TerminalAttachmentObserver {
 enum SessionAttachmentDefaults {
     static let maximumPerSession = 32
     static let terminalQuietInterval: TimeInterval = 0.65
+    /// How stale the last scan may be before busy output scans again instead of re-arming the
+    /// quiet debounce. The scan reads a bounded buffer, so the cap costs a regex pass every
+    /// couple of seconds during sustained output and nothing when the terminal is idle.
+    static let terminalBusyScanInterval: TimeInterval = 2.0
     static let maximumTerminalScanBytes = 256 * 1024
 }

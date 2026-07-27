@@ -41,12 +41,12 @@ final class ConversationTurnPreview: NSView {
         layer?.shadowRadius = 12
         layer?.shadowOffset = .zero
 
-        userLabel.font = Design.Typography.body()
+        userLabel.applyFont(.body, in: .conversation)
         userLabel.textColor = Design.Text.label
         userLabel.lineBreakMode = .byTruncatingTail
         userLabel.maximumNumberOfLines = PreviewDefaults.userLines
 
-        assistantLabel.font = Design.Typography.subheading()
+        assistantLabel.applyFont(.subheading, in: .conversation)
         assistantLabel.textColor = Design.Text.secondary
         assistantLabel.lineBreakMode = .byTruncatingTail
         assistantLabel.maximumNumberOfLines = PreviewDefaults.assistantLines

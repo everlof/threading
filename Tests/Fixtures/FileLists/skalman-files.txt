@@ -163,6 +163,7 @@ Sources/Skalman/UI/Preferences/EmojiPickerViewController.swift
 Sources/Skalman/UI/Preferences/GeneralPreferencesViewController.swift
 Sources/Skalman/UI/Preferences/PreferencesFormBuilder.swift
 Sources/Skalman/UI/Preferences/ProfilePreferencesViewController.swift
+Sources/Skalman/UI/Preferences/RemoteAccessPreferencesViewController.swift
 Sources/Skalman/UI/Preferences/SettingsComponents.swift
 Sources/Skalman/UI/Preferences/SettingsPages.swift
 Sources/Skalman/UI/Preferences/SettingsSidebar.swift

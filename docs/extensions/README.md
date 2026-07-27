@@ -134,6 +134,7 @@ capabilities, so a small extension can grow without changing package format:
 | Component extension | `ui.components` | Properties, slots, and constrained content replacement | Documented host components |
 | Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal |
 | Identity extension | `appearance.provider-icons`, `appearance.account-icons`, `appearance.session-identity` | Primitive image recipes and constrained composition | Provider/account marks and session identity layout |
+| Appearance extension | `appearance.themes`, `appearance.fonts` | App-theme documents and font files carried as package data | Settings ▸ Themes and the chrome/conversation font pickers |
 | Hybrid extension | Any combination | Two or more contribution forms | One process sharing state across surfaces |
 | Runtime extension | None of the above | No visible contribution yet | Foundation for future capabilities |
 
@@ -143,8 +144,22 @@ extension provides. Code generators should choose the smallest capability set th
 requested behavior, and use a hybrid only when the contributions genuinely share one lifecycle
 or state model.
 
-Command, panel, settings, service, agent-tool, identity, and component extensions are connected
-to their product surfaces end to end. Component Gallery remains the direct unpacked-directory
+**Appearance contributions are data, not code.** `themes` entries name package-relative JSON
+documents written in the host's own app-theme vocabulary — the same document Skalman stores for
+a custom theme — and `fonts` entries name `.otf`/`.ttf`/`.ttc` files. Both are read, bounded,
+and validated by the inspector before any extension code runs: a theme faces the same contrast
+and material gates a custom theme faces, its library id is namespaced by the host
+(`ext.<extension>.<theme id>`), and a font must parse to at least one face. While the extension
+is enabled, its themes appear in Settings ▸ Themes labelled by the extension's name, and its
+fonts are registered process-scoped, which makes them appear in the font pickers and resolvable
+by any theme document that names their family — including the extension's own, which is how a
+theme pack styles the whole app with its own face. Disabling the extension removes both; a
+theme that was active falls back to System, and a named-but-gone family degrades one resolution
+rung exactly like an uninstalled font. Font licensing is the package author's responsibility,
+and the install disclosure names every theme and font family before anything is copied.
+
+Command, panel, settings, service, agent-tool, identity, appearance, and component extensions
+are connected to their product surfaces end to end. Component Gallery remains the direct unpacked-directory
 harness and semantic rendering fixture rather than the only place panels can run.
 The derived profiles make that distinction visible without pretending there are separate
 extension runtimes.

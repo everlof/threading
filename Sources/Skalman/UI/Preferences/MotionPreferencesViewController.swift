@@ -106,7 +106,7 @@ final class MotionPreferencesViewController: NSViewController {
             equalToConstant: SettingsUIDefaults.controlWidth
         ).isActive = true
 
-        namePreview.font = Design.Typography.emphasizedBody()
+        namePreview.applyFont(.emphasizedBody)
         namePreview.morphStyleOverride = nameStyle
         namePreview.setStringValue(previewNames[0], animated: false)
     }
@@ -138,7 +138,7 @@ final class MotionPreferencesViewController: NSViewController {
     private func nameRowPreview(for style: ChatNameMorphStyle) -> ThemedMenuPreview {
         let label = MorphingTitleLabel()
         // The row's own title role, so a demonstrating row and a plain one set type alike.
-        label.font = Design.Typography.control()
+        label.applyFont(.control)
         label.alignment = .left
         label.morphStyleOverride = style
         label.setStringValue(style.displayName, animated: false)

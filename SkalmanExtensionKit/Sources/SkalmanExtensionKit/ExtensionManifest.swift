@@ -20,6 +20,8 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let services: [ExtensionServiceDefinition]
     public let serviceDependencies: [ExtensionServiceDependency]
     public let companions: [ExtensionCompanion]
+    public let themes: [ExtensionThemeContribution]
+    public let fonts: [ExtensionFontContribution]
 
     public init(
         formatVersion: Int = Self.currentFormatVersion,
@@ -34,7 +36,9 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         settings: ExtensionSettingsContribution = .init(),
         services: [ExtensionServiceDefinition] = [],
         serviceDependencies: [ExtensionServiceDependency] = [],
-        companions: [ExtensionCompanion] = []
+        companions: [ExtensionCompanion] = [],
+        themes: [ExtensionThemeContribution] = [],
+        fonts: [ExtensionFontContribution] = []
     ) {
         self.formatVersion = formatVersion
         self.identifier = identifier
@@ -49,11 +53,13 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         self.services = services
         self.serviceDependencies = serviceDependencies
         self.companions = companions
+        self.themes = themes
+        self.fonts = fonts
     }
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities, mcpTools, settings
-        case services, serviceDependencies, companions
+        case services, serviceDependencies, companions, themes, fonts
     }
 
     public init(from decoder: Decoder) throws {
@@ -85,6 +91,14 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         companions = try container.decodeIfPresent(
             [ExtensionCompanion].self,
             forKey: .companions
+        ) ?? []
+        themes = try container.decodeIfPresent(
+            [ExtensionThemeContribution].self,
+            forKey: .themes
+        ) ?? []
+        fonts = try container.decodeIfPresent(
+            [ExtensionFontContribution].self,
+            forKey: .fonts
         ) ?? []
     }
 
@@ -252,9 +266,125 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
             ))
         }
 
+        if themes.count > ExtensionThemeContribution.maximumCount {
+            issues.append(.init(
+                path: "themes",
+                message: "must contain at most \(ExtensionThemeContribution.maximumCount) themes"
+            ))
+        }
+        var seenThemeIDs: Set<String> = []
+        var seenThemeResources: Set<String> = []
+        for (index, theme) in themes.enumerated() {
+            let path = "themes[\(index)]"
+            if !ExtensionIdentifierRules.isContributionIdentifier(theme.id) {
+                issues.append(.init(
+                    path: "\(path).id",
+                    message: ExtensionIdentifierRules.contributionMessage
+                ))
+            }
+            if !ExtensionIdentifierRules.isSafeRelativePath(theme.resource) {
+                issues.append(.init(
+                    path: "\(path).resource",
+                    message: "must be a relative path without '.' or '..' components"
+                ))
+            }
+            if !seenThemeIDs.insert(theme.id).inserted {
+                issues.append(.init(path: "\(path).id", message: "duplicates '\(theme.id)'"))
+            }
+            if !seenThemeResources.insert(theme.resource).inserted {
+                issues.append(.init(
+                    path: "\(path).resource",
+                    message: "duplicates '\(theme.resource)'"
+                ))
+            }
+        }
+        if !themes.isEmpty, !capabilities.contains(.themeProvider) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'appearance.themes' when themes are declared"
+            ))
+        }
+
+        if fonts.count > ExtensionFontContribution.maximumCount {
+            issues.append(.init(
+                path: "fonts",
+                message: "must contain at most \(ExtensionFontContribution.maximumCount) fonts"
+            ))
+        }
+        var seenFontResources: Set<String> = []
+        for (index, font) in fonts.enumerated() {
+            let path = "fonts[\(index)]"
+            if !ExtensionIdentifierRules.isSafeRelativePath(font.resource) {
+                issues.append(.init(
+                    path: "\(path).resource",
+                    message: "must be a relative path without '.' or '..' components"
+                ))
+            }
+            let fileExtension = (font.resource as NSString).pathExtension.lowercased()
+            if !ExtensionFontContribution.allowedExtensions.contains(fileExtension) {
+                issues.append(.init(
+                    path: "\(path).resource",
+                    message: "must end in one of: "
+                        + ExtensionFontContribution.allowedExtensions.sorted().joined(separator: ", ")
+                ))
+            }
+            if !seenFontResources.insert(font.resource).inserted {
+                issues.append(.init(
+                    path: "\(path).resource",
+                    message: "duplicates '\(font.resource)'"
+                ))
+            }
+        }
+        if !fonts.isEmpty, !capabilities.contains(.fontProvider) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'appearance.fonts' when fonts are declared"
+            ))
+        }
+
         if !issues.isEmpty {
             throw ExtensionValidationError(issues: issues)
         }
+    }
+}
+
+/// One app-chrome theme a package offers the host's theme library.
+///
+/// Deliberately a *reference to a document*, not the document: the theme file is written in the
+/// host's own app-theme vocabulary (the same JSON Skalman stores for a custom theme), so the
+/// vocabulary can grow — a new material field, a new role — without an SDK release. The kit
+/// only says where the file is; the host reads and validates it at inspection time, before any
+/// extension code runs, exactly as it treats a Metal `shaderResource`.
+public struct ExtensionThemeContribution: Codable, Equatable, Sendable {
+    public static let maximumCount = 16
+
+    /// Stable within the package; the host namespaces it under the extension's identifier, so
+    /// two extensions may both ship a theme called `storm` without colliding.
+    public let id: String
+    /// Package-relative path to the theme document.
+    public let resource: String
+
+    public init(id: String, resource: String) {
+        self.id = id
+        self.resource = resource
+    }
+}
+
+/// One font file a package offers the host while the extension is enabled.
+///
+/// The family name is not declared here — it belongs to the font file, and stating it twice
+/// invites drift. The host reads it from the file at inspection time and registers the font
+/// process-scoped on enable, which is what makes the family appear in the font pickers and
+/// resolvable by theme documents that name it.
+public struct ExtensionFontContribution: Codable, Equatable, Sendable {
+    public static let maximumCount = 16
+    public static let allowedExtensions: Set<String> = ["otf", "ttf", "ttc"]
+
+    /// Package-relative path to the font file.
+    public let resource: String
+
+    public init(resource: String) {
+        self.resource = resource
     }
 }
 
@@ -300,6 +430,8 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
     public static let providerIconResolver = Self(rawValue: "appearance.provider-icons")
     public static let accountIconResolver = Self(rawValue: "appearance.account-icons")
     public static let sessionIdentityRenderer = Self(rawValue: "appearance.session-identity")
+    public static let themeProvider = Self(rawValue: "appearance.themes")
+    public static let fontProvider = Self(rawValue: "appearance.fonts")
     public static let keyValueStorage = Self(rawValue: "storage.kv")
     public static let cacheStorage = Self(rawValue: "storage.cache")
     public static let secrets = Self(rawValue: "storage.secrets")

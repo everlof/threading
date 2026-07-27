@@ -80,10 +80,10 @@ final class SessionComposerViewController: NSViewController {
     // MARK: - Setup
 
     private func setupViews() {
-        headingLabel.font = Design.Typography.heading()
+        headingLabel.applyFont(.heading)
         headingLabel.textColor = Design.Text.label
 
-        subheadingLabel.font = Design.Typography.subheading()
+        subheadingLabel.applyFont(.subheading)
         subheadingLabel.textColor = Design.Text.secondary
 
         importButton.isBordered = true

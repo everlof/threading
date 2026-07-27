@@ -50,9 +50,15 @@ enum AppThemeLibrary {
     /// agent or a user creates through `AppThemeStore`.
     static var stock: [AppTheme] { [.system] + AppThemeStyles.all }
 
+    /// Themes enabled extensions contribute — a third tier between stock and custom: present
+    /// while their extension is enabled, never editable (an update to the package is how they
+    /// change), and namespaced ids (`ext.<extension>.<theme>`) so they cannot collide with or
+    /// impersonate anything in the other two tiers.
+    static var contributed: [AppTheme] { ExtensionAppearanceRegistry.shared.themes }
+
     static var custom: [AppTheme] { AppThemeStore.shared.themes }
 
-    static var all: [AppTheme] { stock + custom }
+    static var all: [AppTheme] { stock + contributed + custom }
 
     static func theme(withID id: AppThemeID) -> AppTheme? {
         all.first { $0.id == id }
@@ -62,8 +68,37 @@ enum AppThemeLibrary {
         stock.contains { $0.id == theme.id }
     }
 
+    static func isContributed(_ theme: AppTheme) -> Bool {
+        contributed.contains { $0.id == theme.id }
+    }
+
+    /// The name of the extension a contributed theme came from, for the picker and MCP listing.
+    static func contributorName(of theme: AppTheme) -> String? {
+        ExtensionAppearanceRegistry.shared.contributorName(forThemeID: theme.id)
+    }
+
     static func isCustom(_ theme: AppTheme) -> Bool {
         custom.contains { $0.id == theme.id }
+    }
+
+    /// Called by the appearance registry when the contributed tier changes.
+    ///
+    /// A vanished theme falls back exactly the way a deleted custom theme does — to System,
+    /// recorded as the new choice, so it does not snap back on a later re-enable. The one
+    /// divergence `restore()` can leave — the stored choice unresolvable at launch because its
+    /// extension had not started the session enabled — heals here: the moment the standing
+    /// choice becomes resolvable again it is taken again. A *deliberate* pick made while
+    /// fallen back is safe from that, because `apply` records even a pick that changed
+    /// nothing on screen.
+    static func contributedThemesDidChange() {
+        if theme(withID: current.id) == nil {
+            apply(.system)
+        } else if let stored = UserDefaults.standard.string(forKey: Keys.currentThemeID),
+                  stored != current.id.rawValue,
+                  let standing = theme(withID: AppThemeID(stored)) {
+            apply(standing)
+        }
+        NotificationCenter.default.post(AppThemeLibraryDidChange())
     }
 
     static func uniqueCopyName(of theme: AppTheme) -> String {
@@ -102,7 +137,10 @@ enum AppThemeLibrary {
     static func update(_ theme: AppTheme) throws {
         guard isCustom(theme) else {
             throw AppThemeEditingError.invalid(
-                "Built-in app themes cannot be edited. Duplicate this theme first."
+                isContributed(theme)
+                    ? "Extension-contributed app themes cannot be edited here. Duplicate this "
+                        + "theme to make an editable copy, or update the extension that ships it."
+                    : "Built-in app themes cannot be edited. Duplicate this theme first."
             )
         }
         guard !all.contains(where: {
@@ -158,11 +196,15 @@ enum AppThemeLibrary {
 
     /// Switches the app's theme and repaints everything already on screen.
     static func apply(_ theme: AppTheme) {
+        // Recorded before the no-op guard: a pick that changes nothing on screen is still the
+        // user's answer. The case that found this: launch falls back because a contributed
+        // theme's extension is disabled, the user then picks System deliberately — a choice
+        // the early return used to swallow, leaving the stored id pointing at the old theme.
+        UserDefaults.standard.set(theme.id.rawValue, forKey: Keys.currentThemeID)
         guard theme != current else { return }
 
         current = theme
         AppThemePalette.set(theme)
-        UserDefaults.standard.set(theme.id.rawValue, forKey: Keys.currentThemeID)
 
         // A dark theme under the light system appearance gets light scrollers, menus and text
         // selection drawn over it, which is the give-away that a theme is a paint job. Setting

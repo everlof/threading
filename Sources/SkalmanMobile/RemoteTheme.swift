@@ -20,6 +20,7 @@ enum MobileDesign {
 
     enum Size {
         static let minimumTapTarget: CGFloat = 44
+        static let navigationStatusIndicator: CGFloat = 6
         static let dialogActionHeight: CGFloat = 52
         static let conversationEstimatedRowHeight: CGFloat = 88
         static let conversationHistoryTrigger: CGFloat = 180

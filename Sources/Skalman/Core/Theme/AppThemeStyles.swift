@@ -25,7 +25,8 @@ enum AppThemeStyles {
         vaporwave,
         newsprint,
         botanical,
-        industrial
+        industrial,
+        christmas
     ]
 
     /// High-contrast neon on near-black.
@@ -70,7 +71,7 @@ enum AppThemeStyles {
             name: "Cyberpunk",
             foreground: hex("#E6FFF4"),
             background: hex("#07070B"),
-            cursor: hex("#00FF88"),
+            cursor: hex("#E6FFF4"),
             selection: hex("#103D2C"),
             black: hex("#14142A"),
             red: hex("#FF3366"),
@@ -89,13 +90,14 @@ enum AppThemeStyles {
             brightCyan: hex("#7CE9FF"),
             brightWhite: hex("#E6FFF4")
         ),
-        // Tight corners and a neon halo behind every panel — the one thing that makes this read
-        // as Cyberpunk rather than as "a dark theme".
+        // Tight corners, a neon halo behind every panel, and mono type — the brief's own
+        // trio; without the mono this read as "a dark theme", not as Cyberpunk.
         material: AppTheme.Material(
             panelRadius: 3,
             controlRadius: 2,
             borderWidth: 1,
-            glow: AppTheme.Glow(role: .accent, radius: 10, opacity: 0.28)
+            glow: AppTheme.Glow(role: .accent, radius: 10, opacity: 0.28),
+            typeface: .monospaced
         )
     )
 
@@ -149,7 +151,7 @@ enum AppThemeStyles {
             name: "Swiss Minimalist",
             foreground: hex("#111111"),
             background: hex("#FFFFFF"),
-            cursor: hex("#D6180B"),
+            cursor: hex("#111111"),
             selection: hex("#FAD5D1"),
             black: hex("#111111"),
             red: hex("#D6180B"),

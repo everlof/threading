@@ -364,7 +364,7 @@ enum ComponentCustomizationGalleryFixture {
         ])
 
         let nativeTitle = NSTextField(labelWithString: "Native session row")
-        nativeTitle.font = Design.Typography.control()
+        nativeTitle.applyFont(.control)
         nativeTitle.textColor = Design.Text.label
         nativeTitle.lineBreakMode = .byTruncatingTail
 

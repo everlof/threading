@@ -164,7 +164,7 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
 
         case .status(let text, let role):
             let label = NSTextField(labelWithString: text)
-            label.font = Design.Typography.control()
+            label.applyFont(.control)
             label.textColor = statusColor(for: role)
             label.lineBreakMode = .byTruncatingTail
             label.setAccessibilityIdentifier("extension.status")
@@ -254,19 +254,19 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
 
         switch role {
         case .heading:
-            label.font = Design.Typography.heading()
+            label.applyFont(.heading)
         case .body:
-            label.font = Design.Typography.body()
+            label.applyFont(.body)
         case .detail:
-            label.font = Design.Typography.detail()
+            label.applyFont(.detail())
         case .code:
-            label.font = Design.Typography.code()
+            label.applyFont(.code())
         case .compactBody:
-            label.font = Design.Typography.control()
+            label.applyFont(.control)
             label.maximumNumberOfLines = 1
             label.lineBreakMode = .byTruncatingTail
         case .compactDetail:
-            label.font = Design.Typography.detail()
+            label.applyFont(.detail())
             label.maximumNumberOfLines = 1
             label.lineBreakMode = .byTruncatingTail
         }

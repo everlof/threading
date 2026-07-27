@@ -15,16 +15,27 @@ struct MarkdownStyle {
     var codeColor: NSColor
     var codeBackground: NSColor
     var linkColor: NSColor
+    /// The surface `font` was resolved in, carried so a font the renderer *derives* — the
+    /// heading, which scales from the body through `Typography` — resolves in the same surface.
+    /// Without it a `# Heading` re-entered the four layers as chrome and could come back in a
+    /// different family than its own paragraph.
+    var fontSurface: Design.Typography.FontSurface = .chrome
 
+    /// The agent's prose, and the one place the conversation's own font is chosen for it.
+    ///
+    /// `.conversation` rather than `.chrome`: this is the transcript, which the reader may want
+    /// set differently from the app around it — the same say the terminal has always had through
+    /// `TerminalProfile`. `codeFont` stays code, here as everywhere.
     static var assistant: MarkdownStyle {
         MarkdownStyle(
-            font: Design.Typography.body(),
+            font: Design.Typography.body(surface: .conversation),
             textColor: Design.Text.label,
             secondaryColor: Design.Text.secondary,
             codeFont: Design.Typography.inlineCode(),
             codeColor: Design.Text.label,
             codeBackground: Design.Surface.panel,
-            linkColor: Design.Surface.accent
+            linkColor: Design.Surface.accent,
+            fontSurface: .conversation
         )
     }
 }

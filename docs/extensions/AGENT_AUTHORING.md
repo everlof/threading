@@ -425,7 +425,10 @@ Do not:
 - import SwiftUI;
 - construct `NSView`, `NSViewController`, `View`, or platform controls;
 - access Skalman application internals;
-- assume a theme colour, font, size, radius, or animation duration;
+- assume a theme colour, font, size, radius, or animation duration in *node UI* — panels and
+  component patches describe meaning and the host chooses pixels. Stating appearance is done
+  through the sanctioned data plane instead: an `appearance.themes` document or an
+  `appearance.fonts` file, which the host validates and applies on its own terms;
 - encode raw HTML as a substitute for an unsupported UI node;
 - add a capability merely to silence validation;
 - remove validation or the policy plugin.

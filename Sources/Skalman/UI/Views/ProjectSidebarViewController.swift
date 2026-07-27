@@ -20,6 +20,13 @@ final class ProjectSidebarViewController: NSViewController {
     /// its top rather than restating its height.
     private var footer: PaneFooterView!
 
+    /// The band above the list, holding the arrangement control; the list starts at its
+    /// bottom. Hidden with the list in settings mode — it acts on the list alone.
+    private var header: PaneHeaderView!
+    /// Opens the grouping and sorting menu — the sidebar's own view options, kept beside
+    /// the list they arrange rather than in Settings.
+    private var arrangeButton: ThemedIconButton!
+
     /// The settings section list, shown in place of the projects when settings is open — so
     /// the window never grows a second sidebar.
     private var settingsSidebar: SettingsSidebar?
@@ -28,7 +35,7 @@ final class ProjectSidebarViewController: NSViewController {
     let themeMenuBuilder = ThemeMenuBuilder()
 
     /// The sidebar's ground, under every theme — see `applySidebarSurface`.
-    private var themeBackdrop: NSView?
+    private var themeBackdrop: SidebarBackdropView?
     private(set) var isSettingsMode = false
 
     /// Top level of the tree: a `RepoGroupNode` for repositories with several checkouts,
@@ -53,9 +60,9 @@ final class ProjectSidebarViewController: NSViewController {
     /// Suppresses the selection delegate callback during programmatic selection.
     private var suppressSelectionCallback = false
 
-    /// The selected session whose checkout chrome is still resolving. Kept at controller level
-    /// so a reused row gets the same state when it scrolls out and back into view.
-    private var loadingSessionID: SessionID?
+    /// Which rows are spinning and why. Kept at controller level so a reused row gets the same
+    /// state when it scrolls out and back into view.
+    private var loadingState = SessionLoadingState()
 
     /// Invalidates a deferred presentation when the user makes another selection first.
     private var selectionRequestGeneration = 0
@@ -86,9 +93,10 @@ final class ProjectSidebarViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The footer first: the list ends at the band's top, so the band has to exist to be
-        // constrained against.
+        // The bands first: the list ends at the footer's top and starts at the header's
+        // bottom, so both have to exist to be constrained against.
         setupFooter()
+        setupHeader()
         setupOutlineView()
         setupEmptyState()
         observeStoreChanges()
@@ -156,13 +164,13 @@ private extension ProjectSidebarViewController {
 
         view.addSubview(scrollView)
 
-        // The sidebar fills the window's full height; the list starts below the traffic lights
-        // via the safe area, with no app-name header or section label above it — the projects
-        // are the sidebar's whole content, so a heading would only repeat what is already
-        // visible.
+        // The sidebar fills the window's full height; the list starts below the header band —
+        // which itself starts below the traffic lights via the safe area. Still no app-name
+        // label or section heading: the band holds controls that act on the list, not a
+        // repetition of what the list already shows.
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.topAnchor,
+                equalTo: header.bottomAnchor,
                 constant: SidebarDefaults.contentTopInset
             ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -175,12 +183,12 @@ private extension ProjectSidebarViewController {
     /// ways to add one. Hidden the moment the list has content.
     private func setupEmptyState() {
         let title = NSTextField(labelWithString: SidebarStrings.emptyTitle)
-        title.font = Design.Typography.emphasizedBody()
+        title.applyFont(.emphasizedBody)
         title.textColor = Design.Text.secondary
         title.alignment = .center
 
         let subtitle = NSTextField(wrappingLabelWithString: SidebarStrings.emptySubtitle)
-        subtitle.font = Design.Typography.detail()
+        subtitle.applyFont(.detail())
         subtitle.textColor = Design.Text.tertiary
         subtitle.alignment = .center
 
@@ -216,7 +224,7 @@ private extension ProjectSidebarViewController {
         addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         addButton.isBordered = false
-        addButton.font = Design.Typography.controlRegular()
+        addButton.applyFont(.controlRegular)
         addButton.target = self
         addButton.action = #selector(addProjectClicked)
 
@@ -240,6 +248,29 @@ private extension ProjectSidebarViewController {
         ])
     }
 
+    /// Header holding the arrangement control at the trailing edge — the sidebar's own view
+    /// options, kept beside the list they arrange. The band itself — the hairline, the
+    /// height, the corner-aware insets — is `PaneHeaderView`'s to state.
+    private func setupHeader() {
+        arrangeButton = ThemedIconButton(
+            symbolName: SidebarDefaults.arrangementSymbol,
+            accessibility: SidebarStrings.arrangementOptions,
+            target: .inline,
+            inkSource: .chrome
+        )
+        arrangeButton.toolTip = SidebarStrings.arrangementOptions
+        arrangeButton.onPress = { [weak self] in self?.showArrangementOptions() }
+
+        header = PaneHeaderView(trailing: [arrangeButton])
+        view.addSubview(header)
+
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
+
     @objc private func settingsClicked() {
         delegate?.projectSidebarDidToggleSettings(self)
     }
@@ -248,9 +279,8 @@ private extension ProjectSidebarViewController {
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.projectsDidChange()
         }
-        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
-            self?.applySidebarSurface()
-        }
+        // No theme observer for the ground: `SidebarBackdropView` re-decides what it shows on
+        // every theme change itself, so the controller cannot forget to tell it.
         appEvents.observe(ExtensionIdentityResolversDidChange.self) { [weak self] _ in
             self?.reload()
         }
@@ -259,34 +289,21 @@ private extension ProjectSidebarViewController {
         }
     }
 
-    /// Paints the sidebar's own ground, under every theme including System.
+    /// Installs the sidebar's own ground, under every theme including System.
     ///
-    /// This used to be conditional, and the condition was the system material: the split item
-    /// wrapped the sidebar in an `NSVisualEffectView`, which under System was the right answer
-    /// — it sampled the window's backdrop, so the terminal's colour tinted the sidebar and
-    /// there was no seam where the two met — while under a style it was what stopped the theme
-    /// meaning anything, so an opaque backdrop covered it.
-    ///
-    /// **There is no material any more.** The pane is a plain split item (see
-    /// `MainWindowController.setupSplitViewController`), so the sidebar is an opaque column
-    /// under every theme and the seam is the split view's hairline rather than an absence of
-    /// one. System keeps its own answer the way every other role does: `Surface.background`
-    /// resolves to `windowBackgroundColor` there, which is the colour AppKit's own source
-    /// lists sit on.
+    /// The pane is a plain split item (see `MainWindowController.setupSplitViewController`), so
+    /// the sidebar supplies its own column and the seam is the split view's hairline rather than
+    /// an absence of one. What that column *is* — the platform's sidebar material under the
+    /// identity theme, an opaque themed surface under a style — is `SidebarBackdropView`'s own
+    /// decision; this controller only says that the sidebar has a ground.
     ///
     /// The backdrop stays a *subview* rather than a fill on the controller's own view, because
-    /// `applySurface` makes a view layer-backed and the outline view, its scroll view and the
-    /// footer are all layered over it — one view whose only job is the ground is what keeps
-    /// the ordering obvious.
+    /// the outline view, its scroll view and the footer are all layered over it — one view whose
+    /// only job is the ground is what keeps the ordering obvious.
     private func applySidebarSurface() {
-        let backdrop = themeBackdrop ?? makeThemeBackdrop()
-        backdrop.applySurface(fill: Design.Surface.background, radius: .fixed(0))
-    }
+        guard themeBackdrop == nil else { return }
 
-    private func makeThemeBackdrop() -> NSView {
-        // `ThemedSurfaceView`, not a bare `NSView`: a layer's fill is a frozen `CGColor`, and the
-        // one thing no app-wide sweep answers is a system light/dark switch.
-        let backdrop = ThemedSurfaceView()
+        let backdrop = SidebarBackdropView()
         view.addSubview(backdrop, positioned: .below, relativeTo: nil)
 
         NSLayoutConstraint.activate([
@@ -297,7 +314,6 @@ private extension ProjectSidebarViewController {
         ])
 
         themeBackdrop = backdrop
-        return backdrop
     }
 
 }
@@ -546,23 +562,18 @@ extension ProjectSidebarViewController {
         }
     }
 
-    /// Shows or clears the selected row's activation spinner.
+    /// Shows or clears a row's spinner for one reason.
     ///
-    /// Only one session can be presented in the pane, so beginning a new load also clears the
-    /// previous row. Refreshing just those rows avoids rebuilding the complete outline during
+    /// The reason is what makes the spinner endable: whoever raises one lowers the same one,
+    /// and a row keeps spinning while any other still holds it. Refreshing just the rows
+    /// `SessionLoadingState` reports as changed avoids rebuilding the complete outline during
     /// navigation.
-    func setSessionLoading(_ isLoading: Bool, for sessionID: SessionID) {
-        let previous = loadingSessionID
-
-        if isLoading {
-            loadingSessionID = sessionID
-        } else {
-            guard loadingSessionID == sessionID else { return }
-            loadingSessionID = nil
-        }
-
-        let affected = Set([previous, loadingSessionID].compactMap { $0 })
-        for affectedSessionID in affected {
+    func setSessionLoading(
+        _ isLoading: Bool,
+        reason: SessionLoadingState.Reason,
+        for sessionID: SessionID
+    ) {
+        for affectedSessionID in loadingState.set(isLoading, reason: reason, for: sessionID) {
             refreshRow(sessionID: affectedSessionID)
         }
     }
@@ -675,13 +686,20 @@ extension ProjectSidebarViewController {
     /// turn lets AppKit paint the selection and start the layer-backed spinner immediately.
     private func requestSessionPresentation(_ sessionID: SessionID) {
         ProjectStore.shared.selectedSessionID = sessionID
-        setSessionLoading(true, for: sessionID)
+        setSessionLoading(true, reason: .presentation, for: sessionID)
 
         selectionRequestGeneration += 1
         let generation = selectionRequestGeneration
         DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  self.selectionRequestGeneration == generation,
+            guard let self else { return }
+
+            // Lowered on **every** path out, including the two that abandon the presentation.
+            // A spinner raised for work that then does not happen is the case that left a row
+            // spinning for the rest of the app's life, because the only thing that used to
+            // clear it was an unrelated git load finishing for whatever session was on screen.
+            defer { self.setSessionLoading(false, reason: .presentation, for: sessionID) }
+
+            guard self.selectionRequestGeneration == generation,
                   self.selectedNode()?.sessionID == sessionID else { return }
             self.delegate?.projectSidebar(self, didSelectSession: sessionID)
         }
@@ -689,8 +707,8 @@ extension ProjectSidebarViewController {
 
     private func cancelPendingSessionPresentation() {
         selectionRequestGeneration += 1
-        if let loadingSessionID {
-            setSessionLoading(false, for: loadingSessionID)
+        for sessionID in loadingState.loadingSessions {
+            setSessionLoading(false, reason: .presentation, for: sessionID)
         }
     }
 
@@ -720,12 +738,16 @@ extension ProjectSidebarViewController {
             scrollView.isHidden = true
             emptyStateView.isHidden = true
             addButton.isHidden = true
+            // The header goes with the list: its control arranges the projects, which are
+            // not on screen to arrange.
+            header.isHidden = true
             settingsButton.contentTintColor = Design.Text.label
         } else {
             settingsSidebar?.isHidden = true
             scrollView.isHidden = false
             emptyStateView.isHidden = !rootNodes.isEmpty
             addButton.isHidden = false
+            header.isHidden = false
             settingsButton.contentTintColor = Design.Text.secondary
         }
     }
@@ -983,11 +1005,13 @@ private extension ProjectSidebarViewController {
 
     // MARK: - Branch Grouping Options
 
-    /// The menu behind a branch heading's hover gear: the grouping toggle itself — the one
-    /// setting that governs the row it hangs from — and the door to the rest of Settings.
+    /// The menu behind a branch heading's hover gear: the grouping rules — the settings
+    /// that govern the row it hangs from — and the door to the rest of Settings.
     private func showBranchGroupingOptions(from anchor: NSView) {
         let menu = NSMenu()
+        menu.autoenablesItems = false
         menu.addItem(makeBranchGroupingItem())
+        menu.addItem(makeLoneBranchHeadingsItem())
         menu.addItem(.separator())
 
         let settings = NSMenuItem(
@@ -1005,6 +1029,17 @@ private extension ProjectSidebarViewController {
         )
     }
 
+    /// The menu behind the header's arrangement control: how the list groups, then how it
+    /// orders. Rebuilt on every open so the checks always say what is currently true.
+    private func showArrangementOptions() {
+        let menu = makeArrangementMenu()
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: arrangeButton.bounds.maxY),
+            in: arrangeButton
+        )
+    }
+
     /// The grouping toggle as a menu item, its check showing the current state.
     private func makeBranchGroupingItem() -> NSMenuItem {
         let item = NSMenuItem(
@@ -1017,9 +1052,49 @@ private extension ProjectSidebarViewController {
         return item
     }
 
+    /// The lone-branch refinement, disabled while grouping is off — it refines the grouping
+    /// rule, so without grouping there is nothing for it to say. Its menus set
+    /// `autoenablesItems = false` for exactly this line.
+    private func makeLoneBranchHeadingsItem() -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "Headings for Lone Branches",
+            action: #selector(toggleLoneBranchHeadingsClicked),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.state = AppSettings.shared.groupsLoneBranches ? .on : .off
+        item.isEnabled = AppSettings.shared.groupsSessionsByBranch
+        return item
+    }
+
+    /// One order as a checkable menu item; the chosen one carries the check.
+    private func makeOrderItem(_ order: SidebarSessionOrder) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: order.menuTitle,
+            action: #selector(sessionOrderChosen(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = order.rawValue
+        item.state = AppSettings.shared.sidebarSessionOrder == order ? .on : .off
+        return item
+    }
+
     @objc private func toggleBranchGroupingClicked() {
         AppSettings.shared.groupsSessionsByBranch.toggle()
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
+        NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    @objc private func toggleLoneBranchHeadingsClicked() {
+        AppSettings.shared.groupsLoneBranches.toggle()
+        NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    @objc private func sessionOrderChosen(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let order = SidebarSessionOrder(rawValue: raw) else { return }
+        AppSettings.shared.sidebarSessionOrder = order
         NotificationCenter.default.post(ProjectsDidChange())
     }
 
@@ -1168,7 +1243,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.configure(
                 with: session,
                 activity: AgentRuntime.shared.activity(sessionID: sessionNode.sessionID),
-                isLoading: loadingSessionID == sessionNode.sessionID
+                isLoading: loadingState.isLoading(sessionNode.sessionID)
             )
             cell.onAction = { [weak self] sessionID, anchor in
                 self?.showRowActions(for: sessionID, from: anchor)
@@ -1290,9 +1365,11 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         if item is ProjectNode {
             addProjectMenuItems(to: menu)
         } else if item is BranchGroupNode {
-            // The heading offers the display option that created it, and nothing else — it
-            // is a grouping, not a place.
+            // The heading offers the display options that created it, and nothing else — it
+            // is a grouping, not a place. Grouping is necessarily on here, so the lone-branch
+            // item is always live despite this menu autoenabling.
             menu.addItem(makeBranchGroupingItem())
+            menu.addItem(makeLoneBranchHeadingsItem())
         } else if let node = item as? SessionNode,
                   let session = ProjectStore.shared.session(withID: node.sessionID) {
             // The right-click menu offers exactly what the row's `⋯` button does, built from
@@ -1329,6 +1406,12 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         )
         menu.addItem(.separator())
         menu.addItem(makeBranchGroupingItem())
+        // Only while grouping is on: this menu autoenables, so a refinement with nothing to
+        // refine would read as live here. The arrangement control and the View menu carry
+        // the disabled-but-visible form.
+        if AppSettings.shared.groupsSessionsByBranch {
+            menu.addItem(makeLoneBranchHeadingsItem())
+        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Remove Project", action: #selector(removeClicked), keyEquivalent: "")
     }
@@ -1568,4 +1651,25 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
+}
+
+// MARK: - Arrangement Menu
+
+extension ProjectSidebarViewController {
+
+    /// Built separately from shown, so a test can assert the items without popping a menu
+    /// that would block the run loop — internal for exactly that caller, the same seam the
+    /// theme menu builders offer. Lives outside the private extension because a private
+    /// extension's members are fileprivate no matter what they intend.
+    func makeArrangementMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(makeBranchGroupingItem())
+        menu.addItem(makeLoneBranchHeadingsItem())
+        menu.addItem(.separator())
+        for order in SidebarSessionOrder.allCases {
+            menu.addItem(makeOrderItem(order))
+        }
+        return menu
+    }
 }

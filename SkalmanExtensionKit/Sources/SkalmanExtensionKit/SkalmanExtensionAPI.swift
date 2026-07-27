@@ -44,6 +44,11 @@ public enum SkalmanExtensionAPI {
         .providerIconResolver,
         .accountIconResolver,
         .sessionIdentityRenderer,
+        // Data-plane contributions: the package carries documents and font files the host
+        // reads itself. No new authority reaches the running guest, which is why they are
+        // safe — the code never sees a broker call for either.
+        .themeProvider,
+        .fontProvider,
         .keyValueStorage,
         .cacheStorage,
         .secrets

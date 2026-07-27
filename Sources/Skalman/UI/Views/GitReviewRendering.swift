@@ -97,7 +97,7 @@ extension GitReviewViewController {
     /// showing, and a sheet for "try again" would be worse than the problem.
     func makeNotice(_ text: String, isError: Bool) -> NSView {
         let label = NSTextField(labelWithString: text)
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = isError ? Design.Status.negative : Design.Text.secondary
         label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 0
@@ -187,7 +187,7 @@ extension GitReviewViewController {
         if canLoadMore {
             let more = ThemedButton(title: "Show more…", target: self, action: #selector(loadMoreCommits))
             more.isBordered = false
-            more.font = Design.Typography.caption()
+            more.applyFont(.caption)
             more.contentTintColor = Design.Text.secondary
             more.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(more)
@@ -196,7 +196,7 @@ extension GitReviewViewController {
 
     func renderDetailHeader(_ commit: GitCommitSummary) {
         let label = NSTextField(labelWithString: "\(commit.shortHash)  \(commit.subject)")
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = Design.Text.secondary
         label.lineBreakMode = .byTruncatingTail
         label.usesSingleLineMode = true

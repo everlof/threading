@@ -39,6 +39,12 @@ final class ProfilePreferencesViewController: NSViewController {
     private lazy var cursorBlinkToggle: ThemedToggle =
         SettingsUI.toggle(isOn: currentProfile.cursorBlink, target: self, action: #selector(cursorBlinkChanged))
 
+    private lazy var backgroundHarmonyToggle: ThemedToggle = SettingsUI.toggle(
+        isOn: AppSettings.shared.harmonizesTerminalBackgrounds,
+        target: self,
+        action: #selector(backgroundHarmonyChanged)
+    )
+
     private lazy var scrollbackField: NSTextField = {
         let field = SettingsUI.textField(target: self, action: #selector(scrollbackChanged))
         field.placeholderString = "10000"
@@ -100,6 +106,17 @@ final class ProfilePreferencesViewController: NSViewController {
                            control: scrollbackField)
         ])
 
+        let colour = SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Keep backgrounds in tune with the theme",
+                subtitle: "Programs that paint their own 24-bit backgrounds — an agent's diff, "
+                    + "for one — pick colours for a generic terminal. This eases them toward "
+                    + "the palette without changing how light they are, so their text stays "
+                    + "exactly as readable.",
+                control: backgroundHarmonyToggle
+            )
+        ])
+
         let preview = SettingsCard(rows: [
             SettingsUI.fullRow(previewContent())
         ])
@@ -108,6 +125,7 @@ final class ProfilePreferencesViewController: NSViewController {
             SettingsUI.heading("Profiles"),
             SettingsUI.section("Text", text),
             SettingsUI.section("Cursor", cursor),
+            SettingsUI.section("Colour", colour),
             SettingsUI.section("Scrollback", scrollback),
             SettingsUI.section("Preview", preview)
         ], hostPage: .profiles)
@@ -196,5 +214,15 @@ final class ProfilePreferencesViewController: NSViewController {
 
     @objc private func scrollbackChanged() {
         currentProfile.scrollbackLines = max(100, scrollbackField.integerValue)
+    }
+
+    /// Re-posts `ProfileDidChange` rather than relying on the setting's own notification.
+    ///
+    /// The transform is installed in `TerminalSession.applyProfile`, and the terminals listen
+    /// for `ProfileDidChange` — nothing observes `AppSettingsDidChange` on their behalf. Without
+    /// this the toggle would appear to do nothing until the next theme or font change.
+    @objc private func backgroundHarmonyChanged() {
+        AppSettings.shared.harmonizesTerminalBackgrounds = backgroundHarmonyToggle.state == .on
+        NotificationCenter.default.post(ProfileDidChange(profile: currentProfile))
     }
 }

@@ -69,13 +69,13 @@ final class GitReviewFileRow: NSView {
         applySurface(fill: Design.Surface.controlResting, radius: .control)
 
         let glyphLabel = NSTextField(labelWithString: glyph)
-        glyphLabel.font = Design.Typography.code(weight: .medium)
+        glyphLabel.applyFont(.code(weight: .medium))
         glyphLabel.textColor = Design.Text.secondary
         glyphLabel.alignment = .center
         glyphLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let nameLabel = NSTextField(labelWithString: fileNameText)
-        nameLabel.font = Design.Typography.control()
+        nameLabel.applyFont(.control)
         nameLabel.textColor = Design.Text.label
         nameLabel.lineBreakMode = .byTruncatingMiddle
         nameLabel.usesSingleLineMode = true
@@ -85,7 +85,7 @@ final class GitReviewFileRow: NSView {
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let directoryLabel = NSTextField(labelWithString: directoryText)
-        directoryLabel.font = Design.Typography.detail()
+        directoryLabel.applyFont(.detail())
         directoryLabel.textColor = Design.Text.tertiary
         directoryLabel.lineBreakMode = .byTruncatingMiddle
         directoryLabel.usesSingleLineMode = true
@@ -293,7 +293,7 @@ final class GitReviewFileRow: NSView {
         disclosure.translatesAutoresizingMaskIntoConstraints = false
 
         let label = NSTextField(labelWithString: DiffPresentation.rangeTitle(for: hunk))
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = Design.Text.secondary
         label.lineBreakMode = .byTruncatingTail
         label.usesSingleLineMode = true
@@ -374,7 +374,7 @@ final class GitReviewFileRow: NSView {
     private static func makeActionButton(_ title: String, target: AnyObject, action: Selector) -> ThemedButton {
         let button = ThemedButton(title: title, target: target, action: action)
         button.isBordered = false
-        button.font = Design.Typography.caption()
+        button.applyFont(.caption)
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -393,7 +393,7 @@ final class GitReviewFileRow: NSView {
 
     private func makeNote(_ text: String) -> NSView {
         let label = NSTextField(labelWithString: text)
-        label.font = Design.Typography.code()
+        label.applyFont(.code())
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

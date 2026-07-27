@@ -1337,6 +1337,13 @@ final class BrowserAgentBridgeTests: XCTestCase {
         XCTAssertEqual(automationCapabilities["semantic_dom"], true)
         XCTAssertEqual(automationCapabilities["request_interception"], false)
         XCTAssertEqual(automationCapabilities["browser_engine_selection"], false)
+        let webKitLimits = try XCTUnwrap(webKitCapabilities["limits"] as? [String])
+        XCTAssertTrue(webKitLimits.contains {
+            $0.contains("Password fields transfer to visible user control")
+        })
+        XCTAssertTrue(webKitLimits.contains {
+            $0.contains("Passkey and WebAuthentication prompts")
+        })
         let playwrightCapabilities = try XCTUnwrap(
             capabilityBackends.first { ($0["id"] as? String) == "playwright_isolated" }
         )
@@ -4074,6 +4081,30 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         XCTAssertFalse(passwordAttempt.ok)
         XCTAssertTrue(passwordAttempt.message.contains("user control"))
+
+        let passwordHandoff = try await browser.preparePasswordFieldForUser(
+            ref: passwordRef,
+            selector: nil
+        )
+        XCTAssertTrue(passwordHandoff.ok, passwordHandoff.message)
+        let focusedPasswordID = try await browser.evaluate(
+            "document.activeElement?.id"
+        ) as? String
+        XCTAssertEqual(focusedPasswordID, "secret")
+        XCTAssertTrue(
+            browser.passwordFieldHasFocus,
+            "the native privacy affordance should follow the isolated-world focus signal"
+        )
+        _ = try await browser.evaluate(
+            "document.querySelector('#name').focus({ preventScroll: true })"
+        )
+        for _ in 0..<20 where browser.passwordFieldHasFocus {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertFalse(
+            browser.passwordFieldHasFocus,
+            "the privacy affordance should leave when a non-password field receives focus"
+        )
 
         let fileNode = try XCTUnwrap(
             first.nodes.first { $0.role == "button" && $0.name == "Resume" },

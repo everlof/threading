@@ -267,11 +267,33 @@ final class DisplayPaneController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupBackdrop()
         setupHeader()
         setupTabBar()
         setupContent()
         setupConstraints()
         render()
+    }
+
+    /// The pane's own ground, in the chrome's colour.
+    ///
+    /// This pane sits on the *window's* backdrop, which a terminal pane paints with the terminal
+    /// palette — a colour the app theme does not own and this pane's chrome-inked tabs and
+    /// labels cannot read on. An unpainted pane therefore showed whatever the window happened to
+    /// be: white beside a dark chrome, a stray tint beside a styled one. A `ThemedSurfaceView`
+    /// is the component for exactly this — it is re-resolved by the theme sweep and re-resolves
+    /// itself on a system light/dark switch.
+    private func setupBackdrop() {
+        let backdrop = ThemedSurfaceView()
+        backdrop.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        view.addSubview(backdrop)
+
+        NSLayoutConstraint.activate([
+            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
     }
 
     // MARK: - Setup
@@ -310,6 +332,18 @@ final class DisplayPaneController: NSViewController {
 
         headerView.addSubview(headerCustomizationView)
         headerView.addSubview(newTabButton)
+
+        // The rule under the header belongs to the header, not to the tab strip inside it: the
+        // strip ends where the customization slot and `+` begin, and a rule pinned there
+        // stopped short of the pane's edge.
+        let separator = SeparatorView()
+        headerView.addSubview(separator)
+        NSLayoutConstraint.activate([
+            separator.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: headerView.bottomAnchor)
+        ])
+
         view.addSubview(headerView)
     }
 
@@ -427,7 +461,7 @@ final class DisplayPaneController: NSViewController {
 
         captionLabel = NSTextField(labelWithString: "")
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
-        captionLabel.font = Design.Typography.compactCode()
+        captionLabel.applyFont(.compactCode)
         captionLabel.textColor = Design.Text.tertiary
         captionLabel.lineBreakMode = .byTruncatingMiddle
         captionLabel.alignment = .right
@@ -443,7 +477,7 @@ final class DisplayPaneController: NSViewController {
 
         placeholderLabel = NSTextField(labelWithString: "Nothing to show yet.")
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
-        placeholderLabel.font = Design.Typography.detail()
+        placeholderLabel.applyFont(.detail())
         placeholderLabel.textColor = Design.Text.tertiary
         placeholderLabel.alignment = .center
 
@@ -460,13 +494,25 @@ final class DisplayPaneController: NSViewController {
     private func setupConstraints() {
         let padding = DisplayPaneDefaults.padding
 
+        // The strip the toolbar reserves is the header's — the same shape as the terminal
+        // pane's header, and for the same reason: pinned *below* the safe area instead, the
+        // pane's tabs sat a full row lower than the tab naming the session beside them, under
+        // an empty band the toolbar had already reserved. AppKit briefly reports a zero-height
+        // safe area while the window is attached, so the equality sits just below required and
+        // the floor keeps the row sane in a fixture with no toolbar to inset it.
+        let headerBottom = headerView.bottomAnchor.constraint(
+            equalTo: view.safeAreaLayoutGuide.topAnchor
+        )
+        headerBottom.priority = .init(999)
+
         NSLayoutConstraint.activate([
-            // Pinned to the safe area, which the toolbar insets. Pinning to the view's own top
-            // would slide the header under the toolbar.
-            headerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            headerView.topAnchor.constraint(equalTo: view.topAnchor),
+            headerBottom,
             headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            headerView.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.tabBarHeight),
+            headerView.heightAnchor.constraint(
+                greaterThanOrEqualToConstant: DisplayPaneDefaults.tabBarHeight
+            ),
 
             // The strip takes the row and gives up only what `+` needs, so a pane full of tabs
             // scrolls sideways rather than pushing the control that adds one off the edge.

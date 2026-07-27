@@ -80,12 +80,29 @@ enum AppThemeRole: String, CaseIterable, Codable {
         switch self {
         case .ground: return .windowBackgroundColor
         case .surface: return .windowBackgroundColor
-        case .panel: return .textBackgroundColor.withAlphaComponent(0.4)
+        // An ink wash rather than `textBackgroundColor` at 0.4: on both of the modern system
+        // grounds — pure white in light, `#1E1E1E` in dark — `textBackgroundColor` *is* the
+        // ground, so a panel filled with it at any alpha was the ground again and every card,
+        // prompt box and code block under System drew as a border around nothing. A twentieth
+        // of the label's ink is the same recipe styled themes derive their control fills from,
+        // and it is visibly a surface on both appearances.
+        case .panel: return .labelColor.withAlphaComponent(0.05)
         case .elevated: return .controlBackgroundColor
         case .controlResting: return .unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)
         case .controlHover: return .unemphasizedSelectedContentBackgroundColor
         case .border: return .separatorColor
-        case .divider: return .separatorColor.withAlphaComponent(0.5)
+        // Resolve, then multiply — `withAlphaComponent` *replaces* alpha, and `separatorColor`
+        // is the rare catalog colour that carries its own (white or black at 10%). Replacing
+        // gave white at **50%**: a hairline five times louder than the border it is meant to
+        // sit under, and in dark mode the one bright line in the window. The provider resolves
+        // per appearance, so light and dark each halve their own separator.
+        case .divider:
+            return NSColor(name: NSColor.Name("skalman.system.divider")) { _ in
+                guard let separator = NSColor.separatorColor.usingColorSpace(.sRGB) else {
+                    return .separatorColor
+                }
+                return separator.withAlphaComponent(separator.alphaComponent * 0.5)
+            }
         case .label: return .labelColor
         case .secondaryLabel: return .secondaryLabelColor
         case .tertiaryLabel: return .tertiaryLabelColor

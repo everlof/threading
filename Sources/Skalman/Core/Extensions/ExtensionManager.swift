@@ -964,10 +964,22 @@ final class ExtensionManager:
     /// Starts every valid package whose persisted desired state is enabled.
     func startEnabledExtensions() {
         refreshInventory(postChange: false)
+        syncAppearanceRegistry()
         for identifier in enabledIdentifiers.sorted() {
             guard packages[identifier]?.bundle != nil else { continue }
             start(identifier)
         }
+    }
+
+    /// Registers enabled packages' themes and fonts without starting any process.
+    ///
+    /// Called before `AppThemeLibrary.restore()` at launch: contributions are data the
+    /// inspector already read, so a stored contributed theme — and any font it names — must
+    /// be in force when the first window is built, not repainted in after the extension host
+    /// spins up. `startEnabledExtensions` re-syncs later and converges to the same answer.
+    func prepareAppearanceContributions() {
+        refreshInventory(postChange: false)
+        syncAppearanceRegistry()
     }
 
     /// Imports a package into app-owned storage. New installations are always disabled.
@@ -1637,7 +1649,26 @@ final class ExtensionManager:
 
     private func notifyChange() {
         syncSettingsRegistry()
+        syncAppearanceRegistry()
         NotificationCenter.default.post(ExtensionsDidChange())
+    }
+
+    /// Rebuilds the appearance registry from the enabled, valid packages — the same
+    /// wholesale-replacement shape as `syncSettingsRegistry`, so enable, disable, update and
+    /// uninstall all converge through one diff instead of each maintaining its own edge.
+    private func syncAppearanceRegistry() {
+        ExtensionAppearanceRegistry.shared.replace(
+            contributions: enabledIdentifiers.sorted().compactMap { identifier in
+                guard let bundle = packages[identifier]?.bundle,
+                      !bundle.themes.isEmpty || !bundle.fonts.isEmpty else { return nil }
+                return ExtensionAppearanceRegistry.Contribution(
+                    extensionIdentifier: identifier,
+                    extensionName: bundle.manifest.name,
+                    themes: bundle.themes.map(\.theme),
+                    fontURLs: bundle.fonts.map(\.url)
+                )
+            }
+        )
     }
 
     private func syncSettingsRegistry(postChange: Bool = true) {

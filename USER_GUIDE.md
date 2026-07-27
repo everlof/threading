@@ -74,17 +74,24 @@ The branch is re-read whenever a session finishes working, so an agent switching
 reflected the next time you hover, without you refreshing anything.
 
 ### Grouping sessions by branch
-Within a project, sessions that ran on the same branch gather under a quiet branch heading —
-but only when that branch has more than one session, so the extra level never appears
-without earning its place:
+Within a project, sessions that ran on the same branch gather under a quiet branch heading.
+A heading first appears when some branch has more than one session — and from that moment
+every session with a recorded branch gets one, so the tree is either fully flat or fully
+labelled, never a heading beside a bare row whose branch you cannot see:
 
 ```
 ▾ sonda
   ▾ feature-auth
       ✦ Claude Code
       ✦ Claude Code 2
-    ✦ Codex              ← alone on its branch, stays at the project level
+  ▾ fix-hover-state
+      ✦ Codex            ← alone on its branch, labelled once any branch groups
 ```
+
+A project where every session sits on its own branch stays flat — the extra level never
+appears without earning its place. **Headings for Lone Branches** turns the second half of
+this rule off, returning lone branches to the project level; sessions with no recorded
+branch always stay there.
 
 Each session remembers the branch the checkout was on when it last ran: it is recorded when
 the session is created and updated each time it finishes working, then kept while the
@@ -95,11 +102,27 @@ Branch headings collapse like projects do, showing a count of what they hide.
 
 The grouping can be toggled from wherever you notice it, not only from Settings:
 
+- **The arrangement control at the sidebar's top** — see
+  [Arranging the sidebar](#arranging-the-sidebar)
+- **The View menu** — **Group Sessions by Branch** (Cmd+Ctrl+B) and **Headings for Lone
+  Branches** (Cmd+Option+B), both rebindable in Settings ▸ Keyboard
 - **Hover a branch heading** — a small gear fades in at its trailing edge, opening a menu
-  with **Group Sessions by Branch** (checked when on) and **All Settings…**
-- **Right-click a project row or a branch heading** — the same toggle sits in the context
-  menu, with a checkmark showing the current state
+  with both grouping toggles (checked when on) and **All Settings…**
+- **Right-click a project row or a branch heading** — the same toggles sit in the context
+  menu, with checkmarks showing the current state
 - **Settings > General > Group sessions by branch** — the persistent home of the setting
+
+### Arranging the sidebar
+The band at the top of the sidebar holds one quiet control, opening the sidebar's view
+options in one menu: how sessions group (**Group Sessions by Branch**, **Headings for Lone
+Branches** — disabled while grouping is off), then how they sort:
+
+- **Sort by Order Added** — the order sessions were created in; the default
+- **Sort by Recent Activity** — the most recently active session first
+- **Sort by Name** — alphabetical, case-insensitive
+
+A pinned session leads the list under every order — pinning is a stronger statement than
+any sort. Sorting rearranges branch groups too: a group sits where its first session would.
 
 ### Project icons
 Every project row carries an icon: the project's own mark when one is known, a **generated
@@ -172,6 +195,7 @@ actions. The same menu is on **right-click**. Either way it offers:
 - Reveal in Finder
 - Project Icon — see [Project icons](#project-icons)
 - Group Sessions by Branch (checked when on)
+- Headings for Lone Branches (shown while grouping is on)
 - Remove Project — removes it from the sidebar only; saved conversations are never deleted
 
 Click the disclosure triangle to collapse a project. Expansion state is remembered, and a
@@ -184,7 +208,9 @@ collapsed project shows how many sessions it is hiding as a count at its trailin
 it is the only way to create one:
 
 - Click the project row, or
-- **Cmd+N** — opens the composer for the project you are currently in
+- **Cmd+N** — opens the composer for the project you are currently in, or
+- **New Session** on the empty pane — when no session is selected, the pane offers the same
+  route Cmd+N takes
 
 There is no shortcut that starts a session for you. A session carries four decisions — agent,
 account, model, and which checkout it runs in — and the menu items that used to create one
@@ -221,6 +247,13 @@ the session; **Shift+Return** (or Option+Return) breaks the line.
 An image with no file of its own — a screenshot straight from the clipboard, a picture dragged
 out of a browser — is written to a temporary file first and its path inserted, so it can be
 opened by the session you are about to start.
+
+**The terminal takes a drop too**, and answers it the same way: dropping a file on a running
+session types its path where the cursor is, escaped so a name with spaces stays one path, with
+a space after it so a second file lands beside the first rather than glued to it. An image with
+no file of its own is written out first, exactly as in the composer. This is what every terminal
+does with a dropped file, and it is the only way to hand an agent a picture — neither CLI can be
+given pixels, only a path to them.
 
 Whatever you type into the composer is kept as a **draft** for that project, saved as you
 type. Switch projects, quit, or lose the app to a crash, and the text is still there when you
@@ -754,6 +787,15 @@ or decisions through the conversation. Console, network, CSS-query, and page-sna
 explicitly marked as untrusted page data; request bodies, response bodies, headers, and cookies
 are never captured for the agent.
 
+When an agent reaches a password field, Skalman reveals the browser and focuses that exact field.
+A key-shaped **Private Input** control remains visible while it has focus; click it to return
+keyboard focus to the page after using the browser chrome. If WebKit/macOS offers an AutoFill
+suggestion for the site, select it; otherwise use your password manager's macOS integration,
+copy from Apple Passwords, or type privately. Skalman never asks a vault for the credential, and
+the field's value is unavailable to the agent, snapshots, waits, traces, and diagnostic logs.
+Passkey and WebAuthentication prompts remain WebKit/macOS system UI. Filling a password does not
+approve submission — the usual confirmation still applies.
+
 Clicking a link in an HTML document opens it in your real browser rather than navigating the
 panel, which has no back button or address bar to get you home again.
 
@@ -818,6 +860,11 @@ session pane's top-right corner showing the current branch and the uncommitted t
 the Review tab uses — and **clicking it opens Git Review**, so the diff is one click away
 without asking the agent for it. A clean checkout shows just the branch; a project that is
 not a repository shows no card at all.
+
+While the agent is working, that card becomes a live run receipt: the branch gives way to a
+working orb, the current **Step n / total** when the agent reports a plan, and the number of
+changed files beside the live `+N −M` totals. Agents that do not report a structured plan still
+show **Working…** and the diff totals. The card returns to the branch when the turn finishes.
 
 The chip at the top picks what is compared:
 
@@ -1001,12 +1048,67 @@ Deleting a theme leaves anything using it inheriting again. Renaming one keeps t
 Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
 a theme sets only the backdrop behind them.
 
+An installed extension can offer app themes of its own. They appear in the picker labelled by
+the extension's name — "Storm — Usage Rain" — while the extension is enabled, and leave with
+it; if the one you were using goes away, the app falls back to System and records that as the
+choice. An extension theme cannot be edited in place: duplicate it to make an editable copy,
+or update the extension that ships it.
+
+#### Fonts
+
+An app theme states a **typeface** as well as a palette, because the styles these themes are
+drawn from do: Newsprint, Art Deco and Botanical are serif, Cyberpunk and Vaporwave are
+monospaced, Claymorphism is rounded, and the rest are the system sans. Switching theme therefore changes
+what the app is *set in*, not only what it is coloured with, and the change takes effect
+immediately in every open window.
+
+Three things deliberately never follow it:
+
+- **Code** — tool output, diffs, paths and commands stay monospaced under every theme.
+- **Numbers** in columns keep their aligned digits, so a usage figure does not shift about.
+- **The terminal**, which has always taken its font from **Settings ▸ Profiles** instead.
+
+**Settings ▸ Themes ▸ Fonts** overrides all of it with a font of your own:
+
+| Setting | Applies to | Falls back to |
+|---|---|---|
+| **App font** | Every part of the app the theme's typeface would reach | The theme |
+| **Conversation font** | The thread in a natively rendered session, including its reply box | The app font, then the theme |
+
+Both lists offer every font family installed on the machine, not a curated set. A conversation
+font exists for the same reason the terminal has its own: it is the surface you *read*, and a
+face that suits an interface does not always suit a page of prose.
+
+Fonts bundled by an enabled extension count as installed here: they join both lists (and can be
+named by the extension's own themes) the moment the extension is enabled, and leave when it is
+disabled — the setting then falls back one level, exactly as an uninstalled font does.
+
+Choosing a font that is later uninstalled is not an error — the setting falls back one level at
+a time, and the picker returns to its inherit row (**Follow Theme** for the app font,
+**Follow App Font** for the conversation) rather than claiming a font that is no longer there.
+
 ### Profiles
 Configure in **Preferences > Profiles**:
 - Font family and size
 - Cursor style: Block, Underline, or Bar
 - Cursor blink toggle
+- **Keep backgrounds in tune with the theme** (default: on)
 - Scrollback buffer size (default: 10,000 lines)
+
+**Keep backgrounds in tune with the theme.** Some programs paint their own backgrounds in
+24-bit colour rather than using the terminal's palette — an agent's diff is the common case,
+where the added and removed rows arrive as a green and a red picked for a generic terminal. The
+palette has no say over those, so under a strongly coloured theme they land as two slabs that
+belong to nothing else on screen.
+
+With this on, those backgrounds are eased toward the colours your palette actually contains and
+their colourfulness is capped, so a diff still reads unmistakably as added and removed while
+sitting in the theme rather than on top of it. **How light each background is never changes**,
+which means text a program drew on it stays exactly as readable as the program intended. Only
+backgrounds are affected — text colour and syntax highlighting are left alone — and programs
+that use the ordinary palette were already in tune and are untouched.
+
+Turn it off to see exactly the bytes a program sent.
 
 ## Settings
 
@@ -1240,6 +1342,8 @@ recorded about it dying — is what a crash needs explaining.
 | Action | Shortcut |
 |--------|----------|
 | Toggle Sidebar | Cmd+Ctrl+S |
+| Group Sessions by Branch | Cmd+Ctrl+B |
+| Headings for Lone Branches | Cmd+Option+B |
 | Terminal (display panel tab) | Cmd+T |
 | Browser | Cmd+Shift+B |
 | Files (display panel tab) | Cmd+P |

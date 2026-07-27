@@ -132,7 +132,7 @@ final class SessionInfoPopoverViewController: NSViewController {
     private func makeRows() -> [NSView] {
         // The full title leads: it is the one thing the row itself cannot always show.
         let title = NSTextField(wrappingLabelWithString: info.title)
-        title.font = Design.Typography.control()
+        title.applyFont(.control)
         title.textColor = Design.Text.label
         title.preferredMaxLayoutWidth = SessionPopoverDefaults.contentWidth
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -185,7 +185,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         icon.widthAnchor.constraint(equalToConstant: SessionPopoverDefaults.iconSlotWidth).isActive = true
 
         let label = NSTextField(labelWithString: text)
-        label.font = Design.Typography.subheading()
+        label.applyFont(.subheading)
         label.textColor = emphasis.color
         label.lineBreakMode = .byTruncatingMiddle
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

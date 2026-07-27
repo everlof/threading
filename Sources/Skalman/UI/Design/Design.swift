@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 
 /// The app's design tokens.
 ///
@@ -151,27 +152,174 @@ enum Design {
     /// screen assembled from individually reasonable but mutually inconsistent 10/11/12/13pt
     /// decisions.
     enum Typography {
+
+        /// Which surface a font is being asked for, since two of them may be set differently.
+        ///
+        /// The terminal has always had its own font through `TerminalProfile`, so a natively
+        /// rendered conversation — the same surface by a different transport — gets the same
+        /// say. Everything else is chrome. This is a *parameter on the one transform*, not a
+        /// second `Typography`: a parallel namespace would be two copies of twenty factories
+        /// that have to keep agreeing.
+        enum FontSurface {
+            case chrome
+            case conversation
+        }
+
+        /// A prose font, resolved through the four layers that may have an opinion about it.
+        ///
+        /// This is the whole of the typeface interpreter, and the order is the design:
+        ///
+        /// 1. **The surface's own override** — `conversationFontFamily`, for the conversation.
+        /// 2. **The app-wide override** — `chromeFontFamily`. A user who set only this gets it
+        ///    everywhere, which is why the conversation falls through to it rather than to the
+        ///    theme: "set the app in Iowan" should not leave the thread in SF.
+        /// 3. **The theme's own family**, where it names one — a theme may be more specific than
+        ///    the four classes its brief states.
+        /// 4. **The theme's typeface class**, which is what a brief actually states.
+        ///
+        /// Every family lookup can fail, and none of them is an error: a family lives on the
+        /// machine rather than in the document or the defaults, so a theme authored elsewhere or
+        /// a font the user removed simply falls to the next layer. Failing *down* the list rather
+        /// than to SF matters — a removed conversation font should leave the thread wearing the
+        /// app's override, not reset it two layers.
+        ///
+        /// Code factories deliberately do not route through here — code is monospaced under
+        /// every style — and numeric factories keep SF's monospaced digits, because a usage
+        /// column that stops aligning is a higher price than a serif digit is worth.
+        private static func prose(_ font: NSFont, surface: FontSurface = .chrome) -> NSFont {
+            for family in overrideFamilies(for: surface) {
+                if let resolved = inFamily(family, like: font) { return resolved }
+            }
+
+            // The **application's** appearance, not the ambient drawing one, for the same
+            // reason `AppTheme.terminalPalette` anchors there: a font is consumed as data — a
+            // label keeps the `NSFont` it was handed — from setup code and notification
+            // handlers, where the ambient appearance is whatever AppKit last had in hand. An
+            // adaptive theme whose variants state different faces would otherwise resolve the
+            // wrong variant at build time. Radii and glow stay ambient: they are read while
+            // drawing, where the ambient appearance is the right question.
+            let material = AppThemePalette.current.material(
+                for: NSApplication.shared.effectiveAppearance
+            )
+            if let family = material.fontFamily, let resolved = inFamily(family, like: font) {
+                return resolved
+            }
+
+            guard material.typeface != .standard else { return font }
+            guard let descriptor = font.fontDescriptor.withDesign(material.typeface.systemDesign),
+                  let themed = NSFont(descriptor: descriptor, size: font.pointSize) else {
+                return font
+            }
+            return themed
+        }
+
+        /// The same font in another family, keeping its size, weight and slant — or `nil` when
+        /// the family cannot answer, which is what lets the caller fall to the next layer.
+        ///
+        /// **Built from explicit attributes rather than `fontDescriptor.withFamily(_:)`**, and
+        /// both halves of that were measured on macOS 26 rather than assumed. Asking a *system*
+        /// font's descriptor for another family does nothing at all — the `NSCTFontUIUsage`
+        /// attribute outranks the family, so `.systemFont(13).fontDescriptor.withFamily("Baskerville")`
+        /// resolves back to `.AppleSystemUIFont` — which would have made every override look
+        /// like it silently did not work. And an unknown family through that route hands back a
+        /// *fallback* rather than `nil`, so there would be nothing to detect and nothing to fall
+        /// through from. A descriptor built from `.family` + `.traits` does both correctly: it
+        /// resolves `Baskerville-SemiBold` for a semibold ask, and returns `nil` for a family
+        /// that is not installed.
+        ///
+        /// Italic is tried and then dropped, because a family that has no italic face is a
+        /// reason to lose the slant, not a reason to lose the family the user chose.
+        private static func inFamily(_ family: String, like font: NSFont) -> NSFont? {
+            let source = font.fontDescriptor
+            var weight: NSNumber?
+            if let sourceTraits = source.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any] {
+                weight = sourceTraits[.weight] as? NSNumber
+            }
+
+            if source.symbolicTraits.contains(.italic),
+               let slanted = resolve(family: family, weight: weight, italic: true, size: font.pointSize) {
+                return slanted
+            }
+            return resolve(family: family, weight: weight, italic: false, size: font.pointSize)
+        }
+
+        /// Matching a descriptor against the installed families is not free, and the drawn
+        /// controls ask from `draw(_:)` — under an override family that is a fontd round trip
+        /// per redraw. The answer for (family, weight, slant, size) depends only on what is
+        /// installed, never on a theme or an override, so a hit needs no invalidating. Only
+        /// successes are kept: a miss stays a live question, which is what lets a family that
+        /// is installed mid-run be found the next time the sweep asks for it.
+        private static let familyCacheLock = NSLock()
+        nonisolated(unsafe) private static var familyCache: [String: NSFont] = [:]
+
+        private static func resolve(
+            family: String,
+            weight: NSNumber?,
+            italic: Bool,
+            size: CGFloat
+        ) -> NSFont? {
+            let key = "\(family)|\(size)|\(weight?.doubleValue ?? .nan)|\(italic)"
+            familyCacheLock.lock()
+            let cached = familyCache[key]
+            familyCacheLock.unlock()
+            if let cached { return cached }
+
+            var traits: [NSFontDescriptor.TraitKey: Any] = [:]
+            if let weight { traits[.weight] = weight }
+            if italic { traits[.symbolic] = NSFontDescriptor.SymbolicTraits.italic.rawValue }
+            var attributes: [NSFontDescriptor.AttributeName: Any] = [.family: family]
+            if !traits.isEmpty { attributes[.traits] = traits }
+            let resolved = NSFont(descriptor: NSFontDescriptor(fontAttributes: attributes), size: size)
+
+            if let resolved {
+                familyCacheLock.lock()
+                familyCache[key] = resolved
+                familyCacheLock.unlock()
+            }
+            return resolved
+        }
+
+        /// The user's overrides for a surface, nearest first.
+        ///
+        /// An empty string is screened out rather than resolved: `setOrRemove` never writes
+        /// one, but a defaults value written by hand or by a migration would otherwise be
+        /// handed to the descriptor matcher, whose answer for `""` is not a documented `nil`.
+        private static func overrideFamilies(for surface: FontSurface) -> [String] {
+            let chrome = AppSettings.chromeFontFamily
+            let families: [String?]
+            switch surface {
+            case .chrome:
+                families = [chrome]
+            case .conversation:
+                families = [AppSettings.conversationFontFamily, chrome]
+            }
+            return families.compactMap { $0 }.filter { !$0.isEmpty }
+        }
+
         /// The one emphasised string in a view — a project name, a pane title.
-        static func heading() -> NSFont { .systemFont(ofSize: 20, weight: .semibold) }
+        static func heading(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 20, weight: .semibold), surface: surface) }
         /// A compact title inside an otherwise empty content pane.
-        static func placeholderTitle() -> NSFont { .systemFont(ofSize: 15, weight: .medium) }
+        static func placeholderTitle(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 15, weight: .medium), surface: surface) }
         /// Supporting detail directly beneath a heading, such as a path.
-        static func subheading() -> NSFont { .systemFont(ofSize: 12, weight: .regular) }
+        static func subheading(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 12, weight: .regular), surface: surface) }
         /// Editable and readable content.
-        static func body() -> NSFont { .systemFont(ofSize: 13, weight: .regular) }
+        static func body(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 13, weight: .regular), surface: surface) }
         /// A project, pane, or toolbar title at body scale.
-        static func emphasizedBody() -> NSFont { .systemFont(ofSize: 13, weight: .semibold) }
+        static func emphasizedBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 13, weight: .semibold), surface: surface) }
         /// Strong body copy used only by legacy form section labels.
-        static func strongBody() -> NSFont { .systemFont(ofSize: 13, weight: .bold) }
+        static func strongBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 13, weight: .bold), surface: surface) }
         /// Labels on controls.
-        static func control() -> NSFont { .systemFont(ofSize: 12, weight: .medium) }
+        static func control(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 12, weight: .medium), surface: surface) }
         /// A quieter control label, such as a sidebar session.
-        static func controlRegular() -> NSFont { .systemFont(ofSize: 12, weight: .regular) }
+        static func controlRegular(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 12, weight: .regular), surface: surface) }
         /// Section headings and other quiet, small type.
-        static func caption() -> NSFont { .systemFont(ofSize: 11, weight: .semibold) }
+        static func caption(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 11, weight: .semibold), surface: surface) }
         /// Metadata and secondary copy that should not carry caption emphasis.
-        static func detail(weight: NSFont.Weight = .regular) -> NSFont {
-            .systemFont(ofSize: 11, weight: weight)
+        static func detail(
+            weight: NSFont.Weight = .regular,
+            surface: FontSurface = .chrome
+        ) -> NSFont {
+            prose(.systemFont(ofSize: 11, weight: weight), surface: surface)
         }
 
         /// Tool subjects, paths, diffs, and other code-shaped content.
@@ -214,13 +362,39 @@ enum Design {
 
         /// Markdown headings scale from the caller's semantic body font while font construction
         /// remains inside the typography boundary.
-        static func markdownHeading(from base: NSFont) -> NSFont {
-            .systemFont(ofSize: base.pointSize + 3, weight: .semibold)
+        static func markdownHeading(from base: NSFont, surface: FontSurface = .chrome) -> NSFont {
+            markdownHeading(fromPointSize: base.pointSize, surface: surface)
+        }
+
+        /// The same scaling from a size alone, which is what a recorded `FontRole` can carry: a
+        /// role is re-resolved after the theme moved, so holding the old *font* would scale the
+        /// new heading from the previous typeface's metrics.
+        static func markdownHeading(
+            fromPointSize base: CGFloat,
+            surface: FontSurface = .chrome
+        ) -> NSFont {
+            prose(.systemFont(ofSize: base + 3, weight: .semibold), surface: surface)
         }
 
         /// Emoji rendered as an application control mark, not prose.
         static func accountEmoji() -> NSFont { .systemFont(ofSize: 16) }
         static func emojiPickerCell() -> NSFont { .systemFont(ofSize: 19) }
+
+        /// Every family the process can currently resolve — the list the font pickers and the
+        /// MCP authoring gate offer.
+        ///
+        /// CoreText rather than `NSFontManager`, and probed rather than assumed (2026-07-27):
+        /// `NSFontManager.availableFontFamilies` snapshots on first access and never sees a
+        /// font an enabled extension registers afterwards, while
+        /// `CTFontManagerCopyAvailableFontFamilyNames` is live in both directions — a family
+        /// appears on enable and leaves on disable, which is exactly what the pickers must
+        /// show. Dot-prefixed families are the system's hidden faces and are filtered the way
+        /// `NSFontManager` already filters them.
+        static var availableFamilies: [String] {
+            ((CTFontManagerCopyAvailableFontFamilyNames() as? [String]) ?? [])
+                .filter { !$0.hasPrefix(".") }
+                .sorted()
+        }
     }
 
     // MARK: - Symbols
@@ -725,19 +899,27 @@ extension NSView {
         wantsLayer = true
         layer?.cornerCurve = .continuous
         layer?.cornerRadius = radius.current
-        layer?.backgroundColor = fill.cgColor
 
-        if let border {
-            layer?.borderWidth = borderWidth ?? Design.Radius.border
-            layer?.borderColor = border.cgColor
-        } else {
-            // Surface state is replaceable. A focused control that loses focus must not keep
-            // the previous state's accent ring merely because the next state has no border.
-            layer?.borderWidth = 0
-            layer?.borderColor = nil
+        // Frozen in the view's **own** effective appearance rather than the thread's ambient
+        // drawing appearance, which from setup code and notification handlers is whatever
+        // AppKit last had in hand — the trap that froze a light window's cards dark. See
+        // `applyLayerBackground`.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = fill.cgColor
+
+            if let border {
+                layer?.borderWidth = borderWidth ?? Design.Radius.border
+                layer?.borderColor = border.cgColor
+            } else {
+                // Surface state is replaceable. A focused control that loses focus must not
+                // keep the previous state's accent ring merely because the next state has no
+                // border.
+                layer?.borderWidth = 0
+                layer?.borderColor = nil
+            }
+
+            applyThemeGlow(glow)
         }
-
-        applyThemeGlow(glow)
         recordSurface(
             fill: fill,
             border: border,

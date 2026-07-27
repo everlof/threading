@@ -57,10 +57,39 @@ struct AppTheme: Codable, Equatable {
     /// palette, or roles that match the appearance currently drawing; they do not need to know
     /// whether the theme stored one variant or two.
     var roles: [AppThemeRole: NSColor] { activeVariant?.roles ?? [:] }
+
+    /// The palette a terminal following this theme draws with right now.
+    ///
+    /// Anchored to the **application's** effective appearance, not to
+    /// `NSAppearance.currentDrawing()`: a palette is consumed as data — fixed colours pushed
+    /// into a terminal — from notification handlers and session setup, where the ambient
+    /// drawing appearance is whatever AppKit last had in hand rather than what the window
+    /// wears. Resolving there chose a dark terminal in a light app. A caller resolving for a
+    /// specific appearance — a preview, the remote bridge — says so with `terminalPalette(for:)`.
     var terminalPalette: TerminalTheme {
-        activeVariant?.terminalPalette ?? TerminalTheme.basic.renamed(name)
+        terminalPalette(for: NSApplication.shared.effectiveAppearance)
+    }
+
+    func terminalPalette(for appearance: NSAppearance) -> TerminalTheme {
+        if let variant = variant(for: appearance) { return variant.terminalPalette }
+        // The identity theme pairs a palette per appearance the way its roles resolve per
+        // appearance: black-on-white beside a light chrome, near-window dark beside a dark one.
+        // Pure black next to either was the one surface in the window that followed nothing —
+        // see `TerminalTheme.systemDark`.
+        let palette: TerminalTheme =
+            VariantKind.current(in: appearance) == .dark ? .systemDark : .systemLight
+        return palette.renamed(name)
     }
     var material: Material { activeVariant?.material ?? .system }
+
+    /// The material for a stated appearance, for callers consuming it as data rather than while
+    /// drawing — `Design.Typography` resolves fonts through this anchored to the application's
+    /// appearance, the same distinction `terminalPalette` draws above. The ambient `material`
+    /// stays for radii and glow, which are read at draw time where the ambient appearance is
+    /// the right question.
+    func material(for appearance: NSAppearance) -> Material {
+        variant(for: appearance)?.material ?? .system
+    }
 
     enum VariantKind: String, Codable, CaseIterable, Hashable {
         case light, dark
@@ -128,7 +157,7 @@ struct AppTheme: Codable, Equatable {
         }
     }
 
-    /// Radii, border weight and an optional panel shadow.
+    /// Radii, border weight, an optional panel shadow — and the typeface the chrome is set in.
     struct Material: Codable, Equatable {
         /// Containers holding content — cards, the prompt box.
         var panelRadius: CGFloat = 12
@@ -141,7 +170,88 @@ struct AppTheme: Codable, Equatable {
         /// their hard printed lift without teaching feature views about either style.
         var glow: Glow?
 
+        /// Which of the platform's typeface designs the chrome is set in.
+        ///
+        /// The other half of a style brief: the styles these themes are drawn from state a
+        /// typeface class as plainly as they state a palette — Newsprint is a serif style,
+        /// Cyberpunk a mono one — and a theme that recolours SF Sans is typographically still
+        /// System. The values are macOS's own font designs, so nothing is bundled and every
+        /// weight exists; `Design.Typography` is the one interpreter. Code and the terminal
+        /// deliberately do not follow it.
+        var typeface: Typeface = .standard
+
+        /// A named font family, for a theme whose identity is a *particular* face rather than a
+        /// typeface class.
+        ///
+        /// The four designs cover the classes, which is what a style brief states — but a theme
+        /// is free to be more specific than its brief, and "Newsprint, set in Baskerville" is not
+        /// expressible as one of four. So a family may be named, and it wins over `typeface`
+        /// where it resolves.
+        ///
+        /// **A name that resolves to nothing is not an error.** Families live on the machine, not
+        /// in the document, so a theme authored elsewhere — or one whose font the user later
+        /// removed — names something absent. That degrades to `typeface`, which is the same rule
+        /// terminal-theme assignments already follow for a deleted theme: an unknown name is
+        /// indistinguishable from never having chosen, and the next scope out answers.
+        ///
+        /// Nothing bundled still holds. This names a family the machine already has.
+        var fontFamily: String?
+
+        enum Typeface: String, Codable, CaseIterable {
+            /// SF Sans — the platform default, and the System theme's answer.
+            case standard = "default"
+            /// New York.
+            case serif
+            /// SF Rounded.
+            case rounded
+            /// SF Mono.
+            case monospaced
+
+            var systemDesign: NSFontDescriptor.SystemDesign {
+                switch self {
+                case .standard: return .default
+                case .serif: return .serif
+                case .rounded: return .rounded
+                case .monospaced: return .monospaced
+                }
+            }
+        }
+
         static let system = Material()
+
+        init(
+            panelRadius: CGFloat = 12,
+            controlRadius: CGFloat = 8,
+            borderWidth: CGFloat = 1,
+            glow: Glow? = nil,
+            typeface: Typeface = .standard,
+            fontFamily: String? = nil
+        ) {
+            self.panelRadius = panelRadius
+            self.controlRadius = controlRadius
+            self.borderWidth = borderWidth
+            self.glow = glow
+            self.typeface = typeface
+            self.fontFamily = fontFamily
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case panelRadius, controlRadius, borderWidth, glow, typeface, fontFamily
+        }
+
+        /// Every field is optional on the wire: a document written before a field existed
+        /// decodes to the value the app used then. The synthesized decoder threw on the
+        /// missing key instead, and the throw was swallowed upstream by a `?? .system`
+        /// fallback — which would have silently discarded the user's whole authored material.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            panelRadius = try container.decodeIfPresent(CGFloat.self, forKey: .panelRadius) ?? 12
+            controlRadius = try container.decodeIfPresent(CGFloat.self, forKey: .controlRadius) ?? 8
+            borderWidth = try container.decodeIfPresent(CGFloat.self, forKey: .borderWidth) ?? 1
+            glow = try container.decodeIfPresent(Glow.self, forKey: .glow)
+            typeface = try container.decodeIfPresent(Typeface.self, forKey: .typeface) ?? .standard
+            fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
+        }
     }
 
     struct Glow: Codable, Equatable {
@@ -205,9 +315,9 @@ struct AppTheme: Codable, Equatable {
         mode: .system,
         summary: "Follows macOS — light, dark, and your accent colour.",
         roles: [:],
-        // The palette the app has always defaulted to, so "Follow App Theme" under the System
-        // theme is not a change of appearance — it is the same terminal, said differently.
-        terminalPalette: TerminalTheme.basic.renamed("System"),
+        // No terminal palette stated here: System stores no variants, so its palette is answered
+        // adaptively by `terminalPalette` — `TerminalTheme.systemLight`/`.systemDark` per the
+        // current appearance, the way every role resolves.
         material: .system
     )
 
@@ -411,6 +521,24 @@ struct AppTheme: Codable, Equatable {
 // MARK: - Colour Helpers
 
 extension NSColor {
+
+    /// The colour actually seen where a — usually translucent — overlay is drawn on this base,
+    /// alpha-composited in sRGB.
+    ///
+    /// This is what lets a translucent line be *measured* against its ground: contrast asked of
+    /// the overlay's stored value answers for the colour nobody sees.
+    func composited(under overlay: NSColor) -> NSColor {
+        guard let base = usingColorSpace(.sRGB),
+              let top = overlay.usingColorSpace(.sRGB) else { return overlay }
+        let alpha = top.alphaComponent
+
+        return NSColor(
+            srgbRed: top.redComponent * alpha + base.redComponent * (1 - alpha),
+            green: top.greenComponent * alpha + base.greenComponent * (1 - alpha),
+            blue: top.blueComponent * alpha + base.blueComponent * (1 - alpha),
+            alpha: base.alphaComponent
+        )
+    }
 
     /// Moves a colour toward white (positive) or black (negative), in sRGB.
     ///

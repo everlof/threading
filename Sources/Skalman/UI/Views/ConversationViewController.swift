@@ -68,6 +68,13 @@ final class ConversationViewController: NSViewController {
     var workingStartedAt: TimeInterval?
     var workingStatusTimer: Timer?
 
+    /// The structured plan position most recently reported in this turn.
+    var runProgress: RunProgress?
+
+    /// Unlike `stream.isRunning`, this is one user turn currently awaiting its terminal event.
+    /// Claude keeps the transport process open between turns, while Codex does not.
+    var isTurnInFlight = false
+
     /// Suppresses per-item scrolling while a transcript is being replayed: four hundred items
     /// each scheduling their own scroll is four hundred layout passes to reach one position.
     var isReplaying = false
@@ -110,6 +117,7 @@ final class ConversationViewController: NSViewController {
     /// What the sidebar shows for this session.
     var activity: SessionActivity {
         if hasPendingPermission && !isVisible { return .needsAttention }
+        if isTurnInFlight { return .working }
         return stream.isRunning ? .idle : .dormant
     }
 
@@ -231,6 +239,8 @@ final class ConversationViewController: NSViewController {
 
         promptView = PromptView()
         promptView.translatesAutoresizingMaskIntoConstraints = false
+        // What is typed here becomes a bubble in the thread, so it is set in the thread's font.
+        promptView.fontSurface = .conversation
         promptView.placeholder = "Reply to \(agentSession.kind.displayName)"
         promptView.onSubmit = { [weak self] text in
             _ = self?.submit(text)
@@ -239,7 +249,7 @@ final class ConversationViewController: NSViewController {
 
         statusLabel = NSTextField(labelWithString: "Starting…")
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.font = Design.Typography.subheading()
+        statusLabel.applyFont(.subheading)
         statusLabel.textColor = Design.Text.tertiary
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -645,6 +655,7 @@ final class ConversationViewController: NSViewController {
         }
         guard stream.send(transported) else { return false }
         refreshConversationControls()
+        runProgress = nil
 
         // Echoed locally as it is sent. The stream never reports a live user turn back —
         // `.userMessage` exists only for replay — so producing it here is what draws it once.

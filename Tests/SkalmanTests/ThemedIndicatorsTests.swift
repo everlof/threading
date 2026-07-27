@@ -14,6 +14,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         Design.Accessibility.increaseContrastOverrideForTesting = nil
         Design.Accessibility.differentiateWithoutColorOverrideForTesting = nil
         AppThemePalette.set(.system)
+        WindowBackdrop.set(.chrome)
         super.tearDown()
     }
 
@@ -278,5 +279,142 @@ final class ThemedIndicatorsTests: XCTestCase {
         indicator.update(for: .dormant, isLoading: false)
         XCTAssertFalse(spinner.isAnimating)
         XCTAssertTrue(spinner.isHidden)
+    }
+
+    func testGitStatusCardBecomesALiveRunReceipt() {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "feature/progress",
+            summary: GitChangeSummary(files: 2, added: 35, removed: 1)
+        ))
+
+        XCTAssertEqual(card.accessibilityLabel(), "feature/progress  +35 −1")
+
+        card.updateRunState(
+            isActive: true,
+            progress: RunProgress(step: 2, total: 4)
+        )
+        XCTAssertFalse(card.isHidden)
+        XCTAssertEqual(
+            card.accessibilityLabel(),
+            "Step 2 / 4  ·  2 files changed +35 −1"
+        )
+
+        // A checkout reading and a plan update are independent streams. Either one must rebuild
+        // the receipt immediately without restarting or replacing the other.
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "feature/progress",
+            summary: GitChangeSummary(files: 1_234, added: 8_349, removed: 4_742)
+        ))
+        XCTAssertEqual(
+            card.accessibilityLabel(),
+            "Step 2 / 4  ·  \(1_234.formatted()) files changed "
+                + "+\(8_349.formatted()) −\(4_742.formatted())"
+        )
+
+        card.updateRunState(isActive: false, progress: nil)
+        XCTAssertEqual(
+            card.accessibilityLabel(),
+            "feature/progress  +\(8_349.formatted()) −\(4_742.formatted())"
+        )
+    }
+
+    func testRunReceiptRendersUnderSystemAndContrastingThemes() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+
+        for theme in [AppTheme.system, AppThemeStyles.cyberpunk, AppThemeStyles.swissMinimalist] {
+            AppThemePalette.set(theme)
+            WindowBackdrop.set(.chrome)
+
+            let card = GitStatusOverlayView()
+            card.frame = NSRect(
+                x: 0,
+                y: 0,
+                width: GitStatusOverlayDefaults.maxWidth,
+                height: GitStatusOverlayDefaults.height
+            )
+            card.update(with: GitChangeMonitor.Reading(
+                branch: "feature/progress",
+                summary: GitChangeSummary(files: 2, added: 35, removed: 1)
+            ))
+            card.updateRunState(
+                isActive: true,
+                progress: RunProgress(step: 2, total: 4)
+            )
+            card.applyInk(WindowBackdrop.ink)
+            card.layoutSubtreeIfNeeded()
+
+            let rep = try XCTUnwrap(card.bitmapImageRepForCachingDisplay(in: card.bounds))
+            card.cacheDisplay(in: card.bounds, to: rep)
+            XCTAssertNotNil(
+                rep.representation(using: .png, properties: [:]),
+                "\(theme.name) did not draw the run receipt"
+            )
+        }
+    }
+
+    /// The card floats over the pane's own content, so it has to occlude it. It did not: the
+    /// surface role is the base tone at 14% and the whole view sat at 85%, so under a native
+    /// conversation the agent's text ran straight through the branch name.
+    ///
+    /// Opaque, but *the same colour* — flattening keeps what the role asked for over this
+    /// ground and drops only the see-through, which is why the second half of this test matters
+    /// as much as the first.
+    func testTheGitCardOccludesThePaneTextItFloatsOver() throws {
+        let ground = NSColor(srgbRed: 0.05, green: 0.12, blue: 0.09, alpha: 1)
+        AppThemePalette.set(.system)
+        WindowBackdrop.set(.terminal(ground))
+        defer { WindowBackdrop.set(.chrome) }
+
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "sidebar-hover-refresh-test",
+            summary: GitChangeSummary(files: 12, added: 8_511, removed: 4_746)
+        ))
+        card.applyInk(WindowBackdrop.ink)
+
+        let fill = try XCTUnwrap(card.layer?.backgroundColor)
+        XCTAssertEqual(fill.alpha, 1, accuracy: 0.001,
+                       "the card's fill let the text behind it through")
+        let border = try XCTUnwrap(card.layer?.borderColor)
+        XCTAssertEqual(border.alpha, 1, accuracy: 0.001,
+                       "the card's border let the text behind it through")
+        XCTAssertEqual(card.alphaValue, 1,
+                       "a view-level alpha thins the fill along with what it is quieting")
+
+        // Same colour as the translucent role would have produced over this ground.
+        let expected = try XCTUnwrap(
+            WindowBackdrop.ink.surface.composited(over: ground).usingColorSpace(.sRGB)
+        )
+        let painted = try XCTUnwrap(NSColor(cgColor: fill)?.usingColorSpace(.sRGB))
+        for channel in [\NSColor.redComponent, \NSColor.greenComponent, \NSColor.blueComponent] {
+            XCTAssertEqual(painted[keyPath: channel], expected[keyPath: channel], accuracy: 0.001,
+                           "flattening changed the card's colour rather than only its opacity")
+        }
+    }
+
+    /// Hover lifts what the card *says*, not the card. The distinction is the whole fix: an
+    /// alpha on the view is a hole in it.
+    func testGitCardHoverLiftsItsContentsAndLeavesTheSurfaceOpaque() throws {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "main",
+            summary: GitChangeSummary(files: 1, added: 2, removed: 3)
+        ))
+        card.applyInk(WindowBackdrop.ink)
+        let contents = try XCTUnwrap(card.subviews.compactMap { $0 as? NSStackView }.first)
+
+        XCTAssertEqual(contents.alphaValue,
+                       GitStatusOverlayDefaults.restingContentAlpha,
+                       accuracy: 0.001)
+
+        card.mouseEntered(with: NSEvent())
+        XCTAssertEqual(contents.alphaValue, 1, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(card.layer?.backgroundColor).alpha, 1, accuracy: 0.001)
+
+        card.mouseExited(with: NSEvent())
+        XCTAssertEqual(contents.alphaValue,
+                       GitStatusOverlayDefaults.restingContentAlpha,
+                       accuracy: 0.001)
     }
 }

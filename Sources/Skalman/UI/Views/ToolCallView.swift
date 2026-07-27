@@ -51,14 +51,14 @@ final class ToolCallView: NSView {
 
         let glyph = ToolGlyph.forTool(tool)
 
-        glyphLabel = makeLabel(glyph.symbol, font: monospace(weight: .medium))
+        glyphLabel = makeLabel(glyph.symbol, role: .code(weight: .medium))
         glyphLabel.textColor = Design.Text.secondary
         glyphLabel.alignment = .center
 
-        titleLabel = makeLabel(glyph.label, font: Design.Typography.caption())
+        titleLabel = makeLabel(glyph.label, role: .caption)
         titleLabel.textColor = Design.Text.secondary
 
-        detailLabel = makeLabel(summary, font: monospace(weight: .regular))
+        detailLabel = makeLabel(summary, role: .code())
         detailLabel.textColor = Design.Text.tertiary
         detailLabel.lineBreakMode = .byTruncatingMiddle
         // The subject arrives already flattened, but a label that *can* grow on a newline is a
@@ -68,7 +68,7 @@ final class ToolCallView: NSView {
         detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Reads while a call is still running, so the row is not blank until the result lands.
-        metaLabel = makeLabel("running…", font: Design.Typography.caption())
+        metaLabel = makeLabel("running…", role: .caption)
         metaLabel.textColor = Design.Text.tertiary
 
         chevron = NSImageView()
@@ -104,23 +104,29 @@ final class ToolCallView: NSView {
             return DiffView(lines: diffLines, path: summary)
         }
 
-        let field = makeLabel("", font: monospace(weight: .regular))
+        let field = makeLabel("", role: .code())
         field.textColor = Design.Text.secondary
         field.isSelectable = true
         textBody = field
         return field
     }
 
-    private func makeLabel(_ text: String, font: NSFont) -> NSTextField {
+    /// Every label in a tool row, carrying its **role** rather than a resolved font.
+    ///
+    /// A tool row is transcript, so its prose is set in the conversation's own font; the glyph
+    /// and the command stay code, which neither a surface nor a theme moves. Taking an `NSFont`
+    /// here was the bug: the sweep re-resolves a *recorded role*, and a font argument has none,
+    /// so these four labels sat out every live theme switch.
+    private func makeLabel(
+        _ text: String,
+        role: Design.FontRole,
+        surface: Design.Typography.FontSurface = .conversation
+    ) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = font
+        label.applyFont(role, in: surface)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.maximumNumberOfLines = text.isEmpty ? 0 : 1
         return label
-    }
-
-    private func monospace(weight: NSFont.Weight) -> NSFont {
-        Design.Typography.code(weight: weight)
     }
 
     private var headerBottom: NSLayoutConstraint!
@@ -226,6 +232,13 @@ final class ToolCallView: NSView {
             options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
             owner: self
         ))
+
+        // A transcript re-lays out constantly under a still pointer — a row that moved away
+        // never heard it was left. See `NSView.hoverIsStale`.
+        if hoverIsStale(isHovered) {
+            isHovered = false
+            updateSurface()
+        }
     }
 
     override func mouseEntered(with event: NSEvent) {

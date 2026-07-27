@@ -51,6 +51,25 @@ final class AppSettings {
         }
     }
 
+    /// Whether 24-bit backgrounds a program paints are brought into the palette's own register.
+    ///
+    /// On by default. It only ever *reduces* how far a background departs from the theme, and
+    /// it holds lightness exactly, so the program's own text stays as legible as it drew it —
+    /// see `TerminalBackgroundHarmony`. Off is for anyone who wants the raw bytes.
+    var harmonizesTerminalBackgrounds: Bool {
+        get { Self.harmonizesTerminalBackgrounds }
+        set {
+            defaults.set(newValue, forKey: Keys.harmonizesTerminalBackgrounds)
+            notifyChanged()
+        }
+    }
+
+    /// Read where a terminal is being configured, which is not always on the main actor.
+    nonisolated static var harmonizesTerminalBackgrounds: Bool {
+        _ = registerStandardDefaults
+        return UserDefaults.standard.bool(forKey: Keys.harmonizesTerminalBackgrounds)
+    }
+
     /// Whether the sidebar follows the agent's own name for the conversation — the terminal
     /// title while a PTY is attached, the transcript's title records otherwise.
     var usesAgentTitleInSidebar: Bool {
@@ -88,6 +107,88 @@ final class AppSettings {
         get { Self.groupsSessionsByBranch }
         set {
             defaults.set(newValue, forKey: Keys.groupsSessionsByBranch)
+            notifyChanged()
+        }
+    }
+
+    /// Same access pattern as `groupsSessionsByBranch`, for the same reader.
+    nonisolated static var groupsLoneBranches: Bool {
+        _ = registerStandardDefaults
+        return UserDefaults.standard.bool(forKey: Keys.groupsLoneBranches)
+    }
+
+    /// Whether a branch with a single session still earns a heading, once the project shows
+    /// any branch heading at all.
+    ///
+    /// The base rule groups only where a branch has more than one session, which leaves a
+    /// mixed tree: a heading over the shared branch, and beside it a bare row whose branch is
+    /// invisible without the hover popover. With this on, the first real group pulls every
+    /// session with a recorded branch under its own heading — the tree is either fully flat
+    /// or fully labelled, never mixed. A project with no shared branch stays flat either way,
+    /// so the common one-branch project never pays an extra level for a heading that would
+    /// only repeat itself.
+    var groupsLoneBranches: Bool {
+        get { Self.groupsLoneBranches }
+        set {
+            defaults.set(newValue, forKey: Keys.groupsLoneBranches)
+            notifyChanged()
+        }
+    }
+
+    /// Same access pattern again; no seeding needed — an absent or unknown raw value reads
+    /// as `.manual`, which is the documented default.
+    nonisolated static var sidebarSessionOrder: SidebarSessionOrder {
+        let raw = UserDefaults.standard.string(forKey: Keys.sidebarSessionOrder)
+        return raw.flatMap(SidebarSessionOrder.init(rawValue:)) ?? .manual
+    }
+
+    /// How a project's sessions are arranged in the sidebar. Pinned sessions are hoisted
+    /// first under every order; this decides the order among equals.
+    var sidebarSessionOrder: SidebarSessionOrder {
+        get { Self.sidebarSessionOrder }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.sidebarSessionOrder)
+            notifyChanged()
+        }
+    }
+
+    // MARK: - Fonts
+
+    /// The family the whole chrome is set in, overriding whatever the theme states.
+    /// `nil` follows the theme.
+    ///
+    /// `nonisolated` because `Design.Typography` is: the transform runs from nonisolated call
+    /// sites (`PreferencesFormBuilder` builds its labels from one), and the font factory cannot
+    /// hop actors to answer. Unlike the seeded booleans above there is no registration trap
+    /// here — an absent key reads as `nil`, which *is* the documented default, so the seeding
+    /// the `Bool` readers need would only restate it.
+    nonisolated static var chromeFontFamily: String? {
+        UserDefaults.standard.string(forKey: Keys.chromeFontFamily)
+    }
+
+    var chromeFontFamily: String? {
+        get { Self.chromeFontFamily }
+        set {
+            setOrRemove(newValue, forKey: Keys.chromeFontFamily)
+            notifyChanged()
+        }
+    }
+
+    /// The family the **conversation** is set in, for a reader who wants the thread in something
+    /// other than the app around it. `nil` falls back to `chromeFontFamily`, then to the theme.
+    ///
+    /// The terminal has had exactly this for as long as it has had a profile — its font is the
+    /// user's, not the theme's. A natively rendered conversation is the same surface by a
+    /// different transport, so it gets the same say. Three layers, no special cases: surface,
+    /// then app, then theme.
+    nonisolated static var conversationFontFamily: String? {
+        UserDefaults.standard.string(forKey: Keys.conversationFontFamily)
+    }
+
+    var conversationFontFamily: String? {
+        get { Self.conversationFontFamily }
+        set {
+            setOrRemove(newValue, forKey: Keys.conversationFontFamily)
             notifyChanged()
         }
     }
@@ -296,8 +397,10 @@ final class AppSettings {
             Keys.confirmsBeforeClosingRunningSession: true,
             Keys.usesTerminalTitleInSidebar: true,
             Keys.groupsSessionsByBranch: true,
+            Keys.groupsLoneBranches: true,
             Keys.discoversProjectIcons: true,
             Keys.discoversAccountAvatars: true,
+            Keys.harmonizesTerminalBackgrounds: true,
             Keys.workingOrbStyle: MotionPreferencesDefaults.workingOrbStyle.rawValue,
             Keys.chatNameMorphStyle: MotionPreferencesDefaults.chatNameMorphStyle.rawValue
         ]
@@ -305,6 +408,20 @@ final class AppSettings {
 
     private func notifyChanged() {
         NotificationCenter.default.post(AppSettingsDidChange())
+    }
+
+    /// Stores a value, or removes the key when there is none.
+    ///
+    /// "No override" has to be the *absence* of the key rather than an empty string, because the
+    /// readers are `string(forKey:)` and an empty family name would resolve no font — which is
+    /// the fallback path, reached by a route that says something went wrong rather than that
+    /// nothing was chosen.
+    private func setOrRemove(_ value: String?, forKey key: String) {
+        if let value, !value.isEmpty {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     // MARK: - Keys
@@ -315,8 +432,11 @@ final class AppSettings {
         static let confirmsBeforeClosingRunningSession = "confirmsBeforeClosingRunningSession"
         static let usesTerminalTitleInSidebar = "usesTerminalTitleInSidebar"
         static let groupsSessionsByBranch = "groupsSessionsByBranch"
+        static let groupsLoneBranches = "groupsLoneBranches"
+        static let sidebarSessionOrder = "sidebarSessionOrder"
         static let discoversProjectIcons = "discoversProjectIcons"
         static let discoversAccountAvatars = "discoversAccountAvatars"
+        static let harmonizesTerminalBackgrounds = "harmonizesTerminalBackgrounds"
         static let disabledAttachmentDetectionAgentKinds = "disabledAttachmentDetectionAgentKinds"
         static let disabledToolGroupIDs = "disabledToolGroupIDs"
         static let usesContainedExtensionLauncher = "usesContainedExtensionLauncher"
@@ -325,5 +445,30 @@ final class AppSettings {
         static let remoteAccessEnabled = "remoteAccessEnabled"
         static let workingOrbStyle = "workingOrbStyle"
         static let chatNameMorphStyle = "chatNameMorphStyle"
+        static let chromeFontFamily = "chromeFontFamily"
+        static let conversationFontFamily = "conversationFontFamily"
+    }
+}
+
+// MARK: - Sidebar Session Order
+
+/// How a project's sessions are arranged in the sidebar.
+///
+/// `manual` is the store's own order — the order sessions were created in, which is also the
+/// only order the user can influence directly. The others are derived orders, re-applied on
+/// every rebuild. Raw values are stored in defaults, so a case rename is a silent reset.
+enum SidebarSessionOrder: String, CaseIterable {
+    case manual
+    case recentActivity
+    case name
+
+    /// The menu wording: what the order sorts by, since "manual" describes a mechanism and
+    /// "order added" describes what the list actually shows.
+    var menuTitle: String {
+        switch self {
+        case .manual: "Sort by Order Added"
+        case .recentActivity: "Sort by Recent Activity"
+        case .name: "Sort by Name"
+        }
     }
 }

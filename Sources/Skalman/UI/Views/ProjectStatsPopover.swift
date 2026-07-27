@@ -133,7 +133,7 @@ final class ProjectStatsPopoverViewController: NSViewController {
 
     private func makeStatsRows(_ info: Info) -> [NSView] {
         let summary = NSTextField(labelWithString: summaryLine(for: info))
-        summary.font = Design.Typography.subheading()
+        summary.applyFont(.subheading)
         summary.textColor = Design.Text.secondary
 
         let bar = CodeStatsBarView(bar: info.bar)
@@ -147,7 +147,7 @@ final class ProjectStatsPopoverViewController: NSViewController {
         rows.append(contentsOf: info.bar.segments.map(legendRow(for:)))
 
         let age = NSTextField(labelWithString: agedLine(for: info))
-        age.font = Design.Typography.subheading()
+        age.applyFont(.subheading)
         age.textColor = Design.Text.tertiary
         rows.append(age)
 
@@ -158,17 +158,17 @@ final class ProjectStatsPopoverViewController: NSViewController {
     /// more is needed afterwards — the service re-probes on its own, so there is no button.
     private func makeMissingToolRows(_ projectName: String) -> [NSView] {
         let explains = NSTextField(wrappingLabelWithString: ProjectPopoverDefaults.missingToolExplanation)
-        explains.font = Design.Typography.subheading()
+        explains.applyFont(.subheading)
         explains.textColor = Design.Text.secondary
         explains.preferredMaxLayoutWidth = ProjectPopoverDefaults.width - 2 * Design.Spacing.inset
         explains.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let command = NSTextField(labelWithString: ProjectPopoverDefaults.installCommand)
-        command.font = Design.Typography.code()
+        command.applyFont(.code())
         command.textColor = Design.Text.label
 
         let heals = NSTextField(labelWithString: ProjectPopoverDefaults.missingToolPromise)
-        heals.font = Design.Typography.subheading()
+        heals.applyFont(.subheading)
         heals.textColor = Design.Text.tertiary
 
         return [nameLabel(projectName), explains, command, heals]
@@ -176,7 +176,7 @@ final class ProjectStatsPopoverViewController: NSViewController {
 
     private func nameLabel(_ projectName: String) -> NSTextField {
         let name = NSTextField(labelWithString: projectName)
-        name.font = Design.Typography.control()
+        name.applyFont(.control)
         name.textColor = Design.Text.label
         name.lineBreakMode = .byTruncatingTail
         return name
@@ -187,7 +187,7 @@ final class ProjectStatsPopoverViewController: NSViewController {
         let dot = CodeStatsLegendDot(segment: segment)
 
         let name = NSTextField(labelWithString: segment.name)
-        name.font = Design.Typography.subheading()
+        name.applyFont(.subheading)
         name.textColor = Design.Text.secondary
         name.lineBreakMode = .byTruncatingTail
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -196,7 +196,7 @@ final class ProjectStatsPopoverViewController: NSViewController {
         name.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
         let value = NSTextField(labelWithString: valueLine(for: segment))
-        value.font = Design.Typography.numericDetail()
+        value.applyFont(.numericDetail())
         value.textColor = Design.Text.tertiary
         value.setContentHuggingPriority(.required, for: .horizontal)
         value.setContentCompressionResistancePriority(.required, for: .horizontal)

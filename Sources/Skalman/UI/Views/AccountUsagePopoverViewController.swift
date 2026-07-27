@@ -110,7 +110,7 @@ final class AccountUsagePopoverViewController: NSViewController {
 
         if let footer = footerText(usage: usage) {
             let label = NSTextField(labelWithString: footer)
-            label.font = Design.Typography.caption()
+            label.applyFont(.caption)
             label.textColor = Design.Text.tertiary
             label.lineBreakMode = .byWordWrapping
             label.maximumNumberOfLines = 0
@@ -121,7 +121,7 @@ final class AccountUsagePopoverViewController: NSViewController {
     private func headerRow(planLabel: String?) -> NSView {
         let title = "\(account.provider.displayName) — \(account.displayName)"
         let nameLabel = NSTextField(labelWithString: title)
-        nameLabel.font = Design.Typography.control()
+        nameLabel.applyFont(.control)
         nameLabel.textColor = Design.Text.label
         nameLabel.lineBreakMode = .byTruncatingTail
 
@@ -132,7 +132,7 @@ final class AccountUsagePopoverViewController: NSViewController {
 
         if let planLabel {
             let plan = NSTextField(labelWithString: planLabel)
-            plan.font = Design.Typography.caption()
+            plan.applyFont(.caption)
             plan.textColor = Design.Text.secondary
             row.addArrangedSubview(plan)
         }

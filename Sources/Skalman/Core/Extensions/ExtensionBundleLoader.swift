@@ -1,3 +1,4 @@
+import CoreText
 import Darwin
 import Foundation
 import Security
@@ -10,20 +11,45 @@ struct SkalmanExtensionBundle: Equatable {
     let sourceURL: URL?
     let manifest: ExtensionManifest
     let companions: [SkalmanExtensionCompanionBundle]
+    let themes: [SkalmanExtensionThemeDocument]
+    let fonts: [SkalmanExtensionFontFile]
 
     init(
         rootURL: URL,
         executableURL: URL,
         sourceURL: URL?,
         manifest: ExtensionManifest,
-        companions: [SkalmanExtensionCompanionBundle] = []
+        companions: [SkalmanExtensionCompanionBundle] = [],
+        themes: [SkalmanExtensionThemeDocument] = [],
+        fonts: [SkalmanExtensionFontFile] = []
     ) {
         self.rootURL = rootURL
         self.executableURL = executableURL
         self.sourceURL = sourceURL
         self.manifest = manifest
         self.companions = companions
+        self.themes = themes
+        self.fonts = fonts
     }
+}
+
+/// One font file confirmed parseable at inspection time, with the families it carries — read
+/// from the file rather than declared, so the install disclosure names what registration will
+/// actually make available.
+struct SkalmanExtensionFontFile: Equatable {
+    let url: URL
+    let familyNames: [String]
+}
+
+/// One theme document read and validated at inspection time. No code has run to produce this.
+///
+/// The theme's id is already namespaced under the extension identifier
+/// (`ext.<identifier>.<contribution id>`), so two packages both shipping a `storm` cannot
+/// collide in the library, and a document that states its own id does not get to impersonate
+/// a stock or custom theme.
+struct SkalmanExtensionThemeDocument: Equatable {
+    let contributionID: String
+    let theme: AppTheme
 }
 
 /// One statically inspected nested companion. No code has run to produce this value.
@@ -53,6 +79,8 @@ enum ExtensionBundleError: LocalizedError {
     case executableNotRunnable(String)
     case webAssemblyModuleInvalid(String)
     case editableSourceInvalid(String)
+    case themeResourceInvalid(path: String, message: String)
+    case fontResourceInvalid(path: String, message: String)
     case companionInvalid(id: String, message: String)
     case launchFailed(String)
     case timedOut
@@ -90,6 +118,10 @@ enum ExtensionBundleError: LocalizedError {
             return "The extension's WebAssembly module is invalid at \(path)."
         case .editableSourceInvalid(let message):
             return "The extension does not contain rebuildable Swift source: \(message)"
+        case .themeResourceInvalid(let path, let message):
+            return "The extension theme at \(path) is invalid: \(message)"
+        case .fontResourceInvalid(let path, let message):
+            return "The extension font at \(path) is invalid: \(message)"
         case .companionInvalid(let id, let message):
             return "Companion “\(id)” is invalid: \(message)"
         case .launchFailed(let message):
@@ -137,11 +169,18 @@ enum ExtensionBundleInspector {
         .providerIconResolver,
         .accountIconResolver,
         .sessionIdentityRenderer,
+        .themeProvider,
+        .fontProvider,
         .keyValueStorage,
         .cacheStorage,
         .secrets,
         .networkClient
     ]
+    /// A theme document is data in the store's own vocabulary; the manifest cap is generous
+    /// beside a real document's few hundred bytes.
+    static let maximumThemeBytes = 256 * 1024
+    /// A text face with broad coverage runs to a few megabytes; CJK families run larger.
+    static let maximumFontBytes = 16 * 1024 * 1024
 
     static func inspect(at directory: URL) throws -> SkalmanExtensionBundle {
         let root = directory.standardizedFileURL.resolvingSymlinksInPath()
@@ -233,14 +272,134 @@ enum ExtensionBundleInspector {
             extensionIdentifier: manifest.identifier,
             root: root
         )
+        let themes = try inspectThemes(
+            manifest.themes,
+            extensionIdentifier: manifest.identifier,
+            root: root
+        )
+        let fonts = try inspectFonts(manifest.fonts, root: root)
 
         return SkalmanExtensionBundle(
             rootURL: root,
             executableURL: executable,
             sourceURL: sourceURL,
             manifest: manifest,
-            companions: companions
+            companions: companions,
+            themes: themes,
+            fonts: fonts
         )
+    }
+
+    /// Reads and validates every declared theme document. Purely data: decode, namespace the
+    /// id, and hold it to the same gates a custom theme faces — a contributed theme with
+    /// unreadable labels or a missing role is refused at the door, not discovered as a broken
+    /// window after enabling.
+    private static func inspectThemes(
+        _ declarations: [ExtensionThemeContribution],
+        extensionIdentifier: String,
+        root: URL
+    ) throws -> [SkalmanExtensionThemeDocument] {
+        try declarations.map { declaration in
+            let url = try resolveResource(
+                declaration.resource,
+                root: root,
+                maximumBytes: maximumThemeBytes,
+                failure: { ExtensionBundleError.themeResourceInvalid(
+                    path: declaration.resource, message: $0
+                ) }
+            )
+            let document: AppTheme
+            do {
+                document = try JSONDecoder().decode(AppTheme.self, from: Data(contentsOf: url))
+            } catch {
+                throw ExtensionBundleError.themeResourceInvalid(
+                    path: declaration.resource,
+                    message: "not a readable app-theme document (\(error.localizedDescription))"
+                )
+            }
+            // The namespaced id is the host's, not the document's: whatever the file states,
+            // the library sees `ext.<extension>.<contribution>` — stable across updates, and
+            // never a stock or custom theme's identity.
+            let theme = AppTheme(
+                id: AppThemeID("ext.\(extensionIdentifier).\(declaration.id)"),
+                name: document.name,
+                mode: document.mode,
+                summary: document.summary,
+                variants: document.variants
+            )
+            do {
+                try AppThemeEditing.validate(theme)
+            } catch {
+                throw ExtensionBundleError.themeResourceInvalid(
+                    path: declaration.resource,
+                    message: (error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription
+                )
+            }
+            return SkalmanExtensionThemeDocument(
+                contributionID: declaration.id,
+                theme: theme
+            )
+        }
+    }
+
+    /// Confirms every declared font file is present, bounded, and parses to at least one face.
+    ///
+    /// Parsing happens here, at inspection — the same trust posture as compiling a declared
+    /// Metal shader: disclosed as part of the unsigned local import, and never reached without
+    /// the manifest declaring it.
+    private static func inspectFonts(
+        _ declarations: [ExtensionFontContribution],
+        root: URL
+    ) throws -> [SkalmanExtensionFontFile] {
+        try declarations.map { declaration in
+            let url = try resolveResource(
+                declaration.resource,
+                root: root,
+                maximumBytes: maximumFontBytes,
+                failure: { ExtensionBundleError.fontResourceInvalid(
+                    path: declaration.resource, message: $0
+                ) }
+            )
+            let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL)
+                as? [CTFontDescriptor]
+            guard let descriptors, !descriptors.isEmpty else {
+                throw ExtensionBundleError.fontResourceInvalid(
+                    path: declaration.resource,
+                    message: "not a parseable font file"
+                )
+            }
+            let families = descriptors.compactMap {
+                CTFontDescriptorCopyAttribute($0, kCTFontFamilyNameAttribute) as? String
+            }
+            return SkalmanExtensionFontFile(
+                url: url,
+                familyNames: Array(Set(families)).sorted()
+            )
+        }
+    }
+
+    private static func resolveResource(
+        _ relativePath: String,
+        root: URL,
+        maximumBytes: Int,
+        failure: (String) -> ExtensionBundleError
+    ) throws -> URL {
+        let candidate = root.appendingPathComponent(relativePath, isDirectory: false)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard isInside(candidate, root: root) else {
+            throw failure("resolves outside the extension directory")
+        }
+        guard let values = try? candidate.resourceValues(
+            forKeys: [.isRegularFileKey, .fileSizeKey]
+        ), values.isRegularFile == true else {
+            throw failure("missing or not a regular file")
+        }
+        guard (values.fileSize ?? Int.max) <= maximumBytes else {
+            throw failure("larger than \(maximumBytes) bytes")
+        }
+        return candidate
     }
 
     /// Reads only `formatVersion`, tolerating everything else the document may contain.

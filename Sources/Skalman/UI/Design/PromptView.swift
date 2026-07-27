@@ -121,10 +121,23 @@ final class PromptView: NSView, ThemedComponent {
         ])
     }
 
+    /// Which surface this composer belongs to, so what is typed matches what it becomes.
+    ///
+    /// `.chrome` for the session composer and the commit message; the conversation's reply box
+    /// sets `.conversation`, because the text goes straight into the thread as a user bubble and
+    /// a composer in SF feeding a bubble in Baskerville changes font on submit — the one moment
+    /// the user is looking at the words.
+    var fontSurface: Design.Typography.FontSurface = .chrome {
+        didSet {
+            guard fontSurface != oldValue else { return }
+            textView.applyFont(.body, in: fontSurface)
+        }
+    }
+
     private func setupTextView() {
         textView.delegate = self
         textView.placeholder = placeholder
-        textView.font = Design.Typography.body()
+        textView.applyFont(.body, in: fontSurface)
         textView.textColor = Design.Text.label
         // State these explicitly instead of inheriting NSTextView's initializer defaults.
         // This is the app's primary input and must never become read-only because an AppKit
@@ -329,6 +342,21 @@ private final class PromptTextView: ThemedTextView {
     /// which is the one state a focus ring may never describe.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+
+        // The drag overrides below are inert until AppKit registers the view as a drag
+        // destination, and `NSTextView` never registers one built the way this one is:
+        // programmatic text network, plain text, hosted in a scroll view. The measured state
+        // was `registeredDraggedTypes == []`, which is not "refuses images" — it is the
+        // window server never routing the drag here at all, so `acceptableDragTypes` was
+        // never read and `readSelection` never called. The composer therefore refused every
+        // dropped image while ⌘V of the same image worked, since paste reaches
+        // `readSelection` without going near drag registration.
+        //
+        // **This has to be here rather than in setup.** Registering before the view has a
+        // window leaves `registeredDraggedTypes` empty just the same; only a call once the
+        // view is in a window sticks.
+        updateDragTypeRegistration()
+
         onFocusChange?(window?.firstResponder === self)
     }
 
@@ -388,6 +416,20 @@ enum PromptAttachment {
 
         guard let data = imageData(from: pasteboard), let path = write(data) else { return [] }
         return [path]
+    }
+
+    /// Whether `paths` would find anything, without doing the work.
+    ///
+    /// A drag is answered continuously while the pointer moves, and answering it by writing a
+    /// screenshot to the temporary directory would leave a file per frame of the gesture.
+    static func canRead(_ pasteboard: NSPasteboard) -> Bool {
+        if pasteboard.canReadObject(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) {
+            return true
+        }
+        return pasteboard.availableType(from: [.png, .tiff]) != nil
     }
 
     // MARK: - Private Methods

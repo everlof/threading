@@ -92,4 +92,37 @@ final class WorkingWordsTests: XCTestCase {
         XCTAssertEqual(TurnStatusText.tokenCount(12_000), "12k")
         XCTAssertEqual(TurnStatusText.tokenCount(1_250_000), "1.3m")
     }
+
+    // MARK: - Run Progress
+
+    func testCodexPlanReportsTheActiveStep() throws {
+        let progress = try XCTUnwrap(RunProgress(tool: .plan, input: [
+            "plan": [
+                ["step": "Inspect", "status": "completed"],
+                ["step": "Implement", "status": "in_progress"],
+                ["step": "Verify", "status": "pending"],
+                ["step": "Document", "status": "pending"],
+            ]
+        ]))
+
+        XCTAssertEqual(progress, RunProgress(step: 2, total: 4))
+        XCTAssertEqual(progress.label, "Step 2 / 4")
+    }
+
+    func testClaudeTodoUsesTheSameProgressModel() throws {
+        let progress = try XCTUnwrap(RunProgress(tool: .todoWrite, input: [
+            "todos": [
+                ["content": "Inspect", "status": "completed"],
+                ["content": "Implement", "status": "completed"],
+                ["content": "Verify", "status": "pending"],
+            ]
+        ]))
+
+        XCTAssertEqual(progress, RunProgress(step: 3, total: 3))
+    }
+
+    func testUnrelatedAndEmptyToolsDoNotInventProgress() {
+        XCTAssertNil(RunProgress(tool: .bash, input: ["cmd": "swift test"]))
+        XCTAssertNil(RunProgress(tool: .plan, input: ["plan": []]))
+    }
 }

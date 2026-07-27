@@ -83,6 +83,40 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         super.init(frame: frame)
         configureForEmojiRendering()
         setupContextMenu()
+        registerForDraggedTypes([.fileURL, .png, .tiff])
+    }
+
+    // MARK: - Dropped Files
+
+    /// Dropping a file on the terminal types its path, which is what every other terminal
+    /// does and what makes an image reachable by an agent at all: neither CLI can be handed
+    /// pixels, so a path is the whole vocabulary.
+    ///
+    /// SwiftTerm's view registers no dragged types of its own, so before this the terminal
+    /// pane refused every drop while the composer beside it accepted them — the one surface
+    /// in the app where an image was most likely to be dropped.
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        PromptAttachment.canRead(sender.draggingPasteboard) ? .copy : []
+    }
+
+    /// Answered again for every movement of the gesture. AppKit does not carry the entry
+    /// answer forward, and a destination that says nothing here rejects the drop it just
+    /// accepted.
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        PromptAttachment.canRead(sender.draggingPasteboard) ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let paths = PromptAttachment.paths(from: sender.draggingPasteboard)
+        guard !paths.isEmpty else { return false }
+
+        // Through `insertText` rather than `send`, so the drop travels the same path a
+        // keystroke does and the terminal's own input handling stays the only writer.
+        insertText(
+            TerminalDrop.text(for: paths),
+            replacementRange: NSRange(location: 0, length: 0)
+        )
+        return true
     }
 
     override var frame: NSRect {

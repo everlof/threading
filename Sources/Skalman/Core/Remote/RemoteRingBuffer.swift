@@ -9,6 +9,11 @@ import Foundation
 /// garble the first paint; the ring is sized to hold a full TUI repaint so a well-behaved app
 /// repaints past it, and the client offers a reconnect.
 ///
+/// Everything in the ring must therefore be real terminal output. A session that was already
+/// running when capture began has no raw bytes to replay, so it is seeded with a synthesised
+/// repaint from `RemoteScreenSeed` — never with `getBufferAsData`, whose bare line feeds and
+/// NUL-filled blank cells drew the browser a staircase of run-together words.
+///
 /// A pure value type with no I/O, so wrap-around and truncation are unit-tested directly.
 struct RemoteRingBuffer {
 

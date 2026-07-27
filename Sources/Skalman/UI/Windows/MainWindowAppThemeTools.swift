@@ -9,10 +9,23 @@ import AppKit
 /// `get` response just to make one colour different.
 extension AgentToolCoordinator {
 
+    /// Three origins, not two: a contributed theme belongs to an extension — present while it
+    /// is enabled, and editable only by updating the package, which the wording below states
+    /// so an agent does not try `update_app_theme` on one and misread the refusal.
+    static func origin(of theme: AppTheme) -> String {
+        if AppThemeLibrary.isStock(theme) { return "built-in" }
+        if AppThemeLibrary.isContributed(theme) {
+            let contributor = AppThemeLibrary.contributorName(of: theme)
+                .map { " “\($0)”" } ?? ""
+            return "extension\(contributor)"
+        }
+        return "custom"
+    }
+
     func listAppThemes() -> MCPToolResult {
         let themes = AppThemeLibrary.all
         let lines = themes.map { theme in
-            let origin = AppThemeLibrary.isStock(theme) ? "built-in" : "custom"
+            let origin = Self.origin(of: theme)
             let active = theme.id == AppThemeLibrary.current.id ? ", active" : ""
             let variants = theme.isSystem
                 ? "light+dark system"
@@ -377,11 +390,49 @@ extension AgentToolCoordinator {
                 "material cannot set glow and remove_glow in the same patch."
             )
         }
+        guard patch.fontFamily == nil || patch.removeFontFamily != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set font_family and remove_font_family in the same patch."
+            )
+        }
 
         var material = base
         if let value = patch.panelRadius { material.panelRadius = CGFloat(value) }
         if let value = patch.controlRadius { material.controlRadius = CGFloat(value) }
         if let value = patch.borderWidth { material.borderWidth = CGFloat(value) }
+
+        if let rawTypeface = cleaned(patch.typeface) {
+            // Named rather than positional, and the accepted list travels with the refusal: an
+            // agent that guessed "sans-serif" from the style brief it is reading has no other
+            // way to learn that this vocabulary calls it "default".
+            guard let parsed = AppTheme.Material.Typeface(rawValue: rawTypeface) else {
+                let accepted = AppTheme.Material.Typeface.allCases
+                    .map(\.rawValue)
+                    .joined(separator: ", ")
+                throw AppThemeEditingError.invalid(
+                    "\"\(rawTypeface)\" is not a valid typeface. Accepted: \(accepted)."
+                )
+            }
+            material.typeface = parsed
+        }
+
+        if patch.removeFontFamily == true {
+            material.fontFamily = nil
+        } else if let family = cleaned(patch.fontFamily) {
+            // Checked here rather than left to resolve silently, because a theme is authored on
+            // one machine and read on another: an agent that names a family this machine does
+            // not have should be told at the point it can still choose a different one, not have
+            // its theme quietly fall back to the typeface. A theme that *arrives* naming an
+            // absent family still degrades rather than failing — that is the document's rule,
+            // and this is the authoring path. The live CoreText list, so a family an enabled
+            // extension registered counts as installed here too.
+            guard Design.Typography.availableFamilies.contains(family) else {
+                throw AppThemeEditingError.invalid(
+                    "\"\(family)\" is not an installed font family on this machine."
+                )
+            }
+            material.fontFamily = family
+        }
         if patch.removeGlow == true {
             material.glow = nil
         } else if let glow = patch.glow {
@@ -451,7 +502,7 @@ extension AgentToolCoordinator {
         var document: [String: Any] = [
             "id": theme.id.rawValue,
             "name": theme.name,
-            "origin": AppThemeLibrary.isStock(theme) ? "built-in" : "custom",
+            "origin": Self.origin(of: theme),
             "active": theme.id == AppThemeLibrary.current.id,
             "appearance": theme.mode.appearanceName,
             "available_variants": kinds.map(\.rawValue),
@@ -502,8 +553,10 @@ extension AgentToolCoordinator {
         var document: [String: Any] = [
             "panel_radius": Double(material.panelRadius),
             "control_radius": Double(material.controlRadius),
-            "border_width": Double(material.borderWidth)
+            "border_width": Double(material.borderWidth),
+            "typeface": material.typeface.rawValue
         ]
+        if let family = material.fontFamily { document["font_family"] = family }
         if let glow = material.glow {
             document["glow"] = [
                 "role": glow.role.wireName,

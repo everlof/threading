@@ -22,6 +22,17 @@ final class TerminalSession: NSObject {
 
     private var profile: TerminalProfile
 
+    /// A launch requested after SIGTERM but before SwiftTerm has reaped the old child.
+    ///
+    /// LocalProcess deliberately remains occupied during that interval so an exit callback can
+    /// never reap a replacement PID. Keep the user's latest launch request here and perform it
+    /// from the exact old child's termination callback.
+    private enum PendingLaunch {
+        case shell(initialDirectory: URL?)
+        case agent(AgentLaunchPlan)
+    }
+    private var pendingLaunch: PendingLaunch?
+
     /// The PID of the shell process, captured after starting.
     private(set) var shellPid: pid_t = 0
 
@@ -92,8 +103,14 @@ final class TerminalSession: NSObject {
     }
 
     private func applyProfile() {
-        let font = NSFont.monospacedSystemFont(ofSize: profile.fontSize, weight: .regular)
-        terminalView.font = font
+        // The terminal is the one surface whose typeface comes from TerminalProfile rather
+        // than the app/conversation typography stack. `profile.font` also owns the fallback
+        // when a saved family is no longer installed.
+        terminalView.font = profile.font
+
+        // Changing the font rebuilds SwiftTerm's TerminalOptions with their 500-line default,
+        // so apply the user's history size afterwards on every profile refresh.
+        terminalView.getTerminal().changeHistorySize(max(0, profile.scrollbackLines))
 
         // Install ANSI color palette
         let colors = profile.theme.asSwiftTermColors()
@@ -102,6 +119,14 @@ final class TerminalSession: NSObject {
         // Apply theme colors
         terminalView.nativeForegroundColor = profile.theme.foreground
         terminalView.nativeBackgroundColor = profile.theme.background
+
+        // Installed after the palette, because the transform is built from it. Re-installed on
+        // every profile refresh rather than once at construction: the anchors are this theme's
+        // hues, so a session that changes theme has to rebuild them or it keeps harmonising
+        // toward the palette it left.
+        terminalView.trueColorBackgroundTransform = AppSettings.harmonizesTerminalBackgrounds
+            ? TerminalBackgroundHarmony.transform(for: profile.theme)
+            : nil
         terminalView.selectedTextBackgroundColor = profile.theme.selection
         terminalView.caretColor = profile.theme.cursor
 
@@ -133,9 +158,15 @@ final class TerminalSession: NSObject {
     func startShell(initialDirectory: URL?) {
         guard !isRunning else { return }
 
-        // Capture existing child PIDs before starting
-        let existingChildren = Set(ProcessUtility.findAllChildProcesses())
+        guard !terminalView.process.running else {
+            pendingLaunch = .shell(initialDirectory: initialDirectory)
+            return
+        }
 
+        launchShell(initialDirectory: initialDirectory)
+    }
+
+    private func launchShell(initialDirectory: URL?) {
         let environment = buildEnvironment()
 
         if let dir = initialDirectory {
@@ -160,61 +191,8 @@ final class TerminalSession: NSObject {
             )
         }
 
-        isRunning = true
-
-        // Capture the new shell PID after a short delay to ensure the process is spawned
-        DispatchQueue.main.asyncAfter(deadline: .now() + ShellDefaults.pidCaptureDelay) { [weak self] in
-            self?.captureShellPid(existingChildren: existingChildren)
-        }
-
-        delegate?.terminalSessionDidStart(self)
+        finishProcessStart()
     }
-
-    /// Captures the child's PID by diffing the app's direct children across the launch.
-    ///
-    /// SwiftTerm cannot answer this on macOS: `startProcess` takes the swift-subprocess path,
-    /// which awaits the run rather than handing back a process, so `LocalProcess.shellPid` is
-    /// only ever set by the `forkpty` fallback and reads 0 here. Hence the diff.
-    ///
-    /// Three rules, each of which was absent before and produced a pid belonging to something
-    /// else entirely:
-    ///
-    /// - **No "any child" fallback.** Skalman spawns short-lived helpers of its own — the
-    ///   account email probe literally runs `claude auth status`, and icon discovery and the
-    ///   artifact scan spawn their own — so "any child" adopts a stranger, which then exits and
-    ///   leaves the session pointing at a *dead* pid. Having no pid is the better answer: every
-    ///   reader already treats 0 as "unknown", while a stranger's pid is silently wrong.
-    /// - **Pids another live session already claimed are excluded**, or two sessions launching
-    ///   in the same breath — which is exactly what restoring a window full of them does — both
-    ///   adopt the first new child either of them sees.
-    /// - **It retries.** One look 0.3s after launch is a race the child loses whenever the
-    ///   machine is busy, and app launch is the busiest moment there is.
-    private func captureShellPid(existingChildren: Set<pid_t>, attempt: Int = 0) {
-        guard isRunning, shellPid == 0 else { return }
-
-        let candidates = Set(ProcessUtility.findAllChildProcesses())
-            .subtracting(existingChildren)
-            .subtracting(Self.claimedShellPids)
-
-        // The lowest pid rather than an arbitrary member of a set, so a launch that really does
-        // see two new children resolves the same way every time instead of by hash order.
-        if let pid = candidates.min() {
-            shellPid = pid
-            Self.claimedShellPids.insert(pid)
-            return
-        }
-
-        guard attempt + 1 < ShellDefaults.pidCaptureAttempts else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + ShellDefaults.pidCaptureDelay) { [weak self] in
-            self?.captureShellPid(existingChildren: existingChildren, attempt: attempt + 1)
-        }
-    }
-
-    /// Pids already adopted by a live session, so no two sessions claim the same child.
-    ///
-    /// Main-thread only, like the rest of this type: sessions are started, captured and torn
-    /// down from AppKit callbacks.
-    private static var claimedShellPids: Set<pid_t> = []
 
     /// Starts an agent using a resolved launch plan.
     ///
@@ -223,8 +201,15 @@ final class TerminalSession: NSObject {
     func start(plan: AgentLaunchPlan) {
         guard !isRunning else { return }
 
-        let existingChildren = Set(ProcessUtility.findAllChildProcesses())
+        guard !terminalView.process.running else {
+            pendingLaunch = .agent(plan)
+            return
+        }
 
+        launchAgent(plan: plan)
+    }
+
+    private func launchAgent(plan: AgentLaunchPlan) {
         terminalView.startProcess(
             executable: plan.executable,
             args: plan.arguments,
@@ -232,12 +217,16 @@ final class TerminalSession: NSObject {
             execName: (plan.executable as NSString).lastPathComponent
         )
 
+        finishProcessStart()
+    }
+
+    /// `LocalProcess` now uses `forkpty`, which returns the exact child synchronously. Keeping
+    /// that identity at the launch seam avoids attributing one session's process to another
+    /// when several sessions start alongside unrelated app helpers.
+    private func finishProcessStart() {
+        guard terminalView.process.running, terminalView.process.shellPid > 0 else { return }
+        shellPid = terminalView.process.shellPid
         isRunning = true
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + ShellDefaults.pidCaptureDelay) { [weak self] in
-            self?.captureShellPid(existingChildren: existingChildren)
-        }
-
         delegate?.terminalSessionDidStart(self)
     }
 
@@ -246,14 +235,12 @@ final class TerminalSession: NSObject {
     /// This must actually tear the process down rather than wait for deallocation, so a
     /// session going dormant releases its PTY and file descriptors immediately.
     func terminate() {
+        // A second stop while an old child is being reaped cancels a queued rapid restart.
+        pendingLaunch = nil
         guard isRunning else { return }
 
         terminalView.terminate()
         isRunning = false
-
-        // Released, or the pid stays claimed for the life of the app and the next session to
-        // inherit that number after pid reuse refuses to adopt its own child.
-        Self.claimedShellPids.remove(shellPid)
         shellPid = 0
     }
 
@@ -375,6 +362,19 @@ extension TerminalSession: LocalProcessTerminalViewDelegate {
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {
         isRunning = false
+        shellPid = 0
+
+        if let pendingLaunch {
+            self.pendingLaunch = nil
+            switch pendingLaunch {
+            case .shell(let initialDirectory):
+                launchShell(initialDirectory: initialDirectory)
+            case .agent(let plan):
+                launchAgent(plan: plan)
+            }
+            return
+        }
+
         delegate?.terminalSession(self, didTerminateWithExitCode: exitCode)
     }
 }

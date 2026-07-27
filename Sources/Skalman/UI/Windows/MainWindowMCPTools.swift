@@ -1259,7 +1259,10 @@ final class AgentToolCoordinator: MCPToolHandling {
                 "reload_from_origin revalidates; WebKit exposes no honest per-tab cache-disable switch.",
                 "Cross-origin frame content remains opaque.",
                 "User-Agent changes affect future requests and require an explicit reload when server output matters.",
-                "Network diagnostics are metadata-only and cannot mock, rewrite, abort, or throttle requests."
+                "Network diagnostics are metadata-only and cannot mock, rewrite, abort, or throttle requests.",
+                "Passkey and WebAuthentication prompts remain owned by WebKit and macOS.",
+                "Password fields transfer to visible user control; the agent cannot inspect, type, snapshot, or trace their values.",
+                "WebKit may offer system AutoFill on supported sites; Skalman never requests password-manager plaintext itself."
             ]
         )
         let playwrightBackend = BrowserCapabilitiesPayload.Backend(
@@ -1979,9 +1982,20 @@ final class AgentToolCoordinator: MCPToolHandling {
                     guard !target.isPassword else {
                         self.revealDisplayPane(for: sessionID)
                         browser.webView.window?.makeFirstResponder(browser.webView)
+                        let focused = try await browser.preparePasswordFieldForUser(
+                            ref: arguments.ref,
+                            selector: arguments.selector,
+                            locator: arguments.locator
+                        )
                         completion(.failure(
-                            "Password fields require user control. The browser is visible so the "
-                                + "user can enter the secret without exposing it to the agent."
+                            focused.ok
+                                ? "Password fields require user control. The browser is visible "
+                                    + "and the exact field is focused for system AutoFill, a "
+                                    + "password manager, or private user input. Its value remains "
+                                    + "unavailable to the agent."
+                                : "Password fields require user control. The browser is visible, "
+                                    + "but the page changed before Skalman could focus the field: "
+                                    + focused.message
                         ))
                         return
                     }

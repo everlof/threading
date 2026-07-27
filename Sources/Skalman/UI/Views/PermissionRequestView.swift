@@ -45,18 +45,18 @@ final class PermissionRequestView: NSView {
         applySurface(fill: Design.Surface.panel, radius: .control, border: Design.Surface.accent)
 
         let title = NSTextField(labelWithString: "Allow \(request.toolName)?")
-        title.font = Design.Typography.caption()
+        title.applyFont(.caption, in: .conversation)
         title.textColor = Design.Text.label
         title.translatesAutoresizingMaskIntoConstraints = false
 
         let detail = NSTextField(wrappingLabelWithString: request.summary)
-        detail.font = Design.Typography.code()
+        detail.applyFont(.code())
         detail.textColor = Design.Text.secondary
         detail.isSelectable = true
         detail.translatesAutoresizingMaskIntoConstraints = false
 
         resolvedLabel = NSTextField(labelWithString: "")
-        resolvedLabel.font = Design.Typography.caption()
+        resolvedLabel.applyFont(.caption, in: .conversation)
         resolvedLabel.translatesAutoresizingMaskIntoConstraints = false
         resolvedLabel.isHidden = true
 

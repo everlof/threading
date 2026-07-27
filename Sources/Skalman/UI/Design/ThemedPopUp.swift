@@ -68,11 +68,6 @@ final class ThemedPopUp: ThemedControl {
 
     // MARK: - State
 
-    private var isHovered = false {
-        didSet { needsDisplay = true }
-    }
-
-    private var trackingArea: NSTrackingArea?
     private var menuSession: AnyObject?
     private var isPresentingMenu = false {
         didSet { needsDisplay = true }
@@ -153,25 +148,6 @@ final class ThemedPopUp: ThemedControl {
     }
 
     // MARK: - Interaction
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     /// Swallowed rather than passed on, which is what `NSPopUpButton` does.
     override func rightMouseDown(with event: NSEvent) {}

@@ -109,6 +109,9 @@ struct ConversationTimeline {
 
         case status(Status)
 
+        /// The latest complete plan reported during the turn, reduced to its current position.
+        case runProgress(RunProgress)
+
         /// The identifier the CLI settled on, which for a resume is not necessarily the one we
         /// asked for.
         case adoptedSessionID(TranscriptID)
@@ -272,6 +275,9 @@ struct ConversationTimeline {
             )
             let change = append(.toolCall(call))
             pendingToolRows[id] = rows.count - 1
+            if let progress = RunProgress(tool: tool, input: input) {
+                return [change, .runProgress(progress)]
+            }
             return [change]
 
         default:

@@ -167,11 +167,11 @@ final class StoragePreferencesViewController: NSViewController {
     /// report, and the one thing worth reading from across the room.
     private func summarySection() -> NSView {
         let total = NSTextField(labelWithString: Self.size.string(fromByteCount: totalBytes))
-        total.font = Design.Typography.heading()
+        total.applyFont(.heading)
         total.textColor = totalBytes > 0 ? Design.Text.label : Design.Text.secondary
 
         let caption = NSTextField(labelWithString: summaryCaption())
-        caption.font = Design.Typography.subheading()
+        caption.applyFont(.subheading)
         caption.textColor = Design.Text.secondary
 
         let labels = NSStackView(views: [total, caption])
@@ -295,7 +295,7 @@ final class StoragePreferencesViewController: NSViewController {
     /// directory, truncated in the middle so both ends survive a long worktree path.
     private func pathSection(title: String, path: String, card: NSView) -> NSView {
         let pathLabel = NSTextField(labelWithString: abbreviate(path))
-        pathLabel.font = Design.Typography.subheading()
+        pathLabel.applyFont(.subheading)
         pathLabel.textColor = Design.Text.tertiary
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -327,7 +327,7 @@ final class StoragePreferencesViewController: NSViewController {
         let total = artifacts.reduce(0) { $0 + $1.byteCount }
 
         let size = NSTextField(labelWithString: Self.size.string(fromByteCount: total))
-        size.font = Design.Typography.numericBody()
+        size.applyFont(.numericBody)
         size.textColor = Design.Text.secondary
         size.alignment = .right
 
@@ -381,7 +381,7 @@ final class StoragePreferencesViewController: NSViewController {
 
         let size = NSTextField(labelWithString: Self.size.string(fromByteCount: artifact.byteCount))
         // Monospaced digits so the sizes form a column instead of jittering row to row.
-        size.font = Design.Typography.numericBody()
+        size.applyFont(.numericBody)
         size.textColor = Design.Text.secondary
         size.alignment = .right
 

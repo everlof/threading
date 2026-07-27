@@ -84,6 +84,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
             ) {
                 $0.addressField.stringValue = "https://accounts.example.test/sign-in"
                 $0.setNavigationState(canGoBack: true, canGoForward: true, popupDepth: 0)
+                $0.setPasswordFieldFocused(true)
             },
             BrowserChromeStory(
                 name: "medium-popup",
@@ -101,6 +102,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
                 $0.addressField.stringValue = "https://example.test/responsive"
                 $0.setNavigationState(canGoBack: true, canGoForward: true, popupDepth: 0)
                 $0.setActiveTestConditionCount(4)
+                $0.setPasswordFieldFocused(true)
             }
         ]
 
@@ -174,6 +176,26 @@ final class ToolbarChromeRenderTests: XCTestCase {
             72,
             "private + pop-up + emulation should still preserve a usable address"
         )
+
+        let password = BrowserChromeBar(contextKind: .shared)
+        password.frame = NSRect(x: 0, y: 0, width: 260, height: 40)
+        password.setPasswordFieldFocused(true)
+        password.layoutSubtreeIfNeeded()
+        XCTAssertFalse(password.passwordInputButton.isHidden)
+        XCTAssertEqual(password.passwordInputButton.title, "")
+        XCTAssertGreaterThanOrEqual(
+            password.addressField.frame.width,
+            72,
+            "private input state should not consume the address at minimum width"
+        )
+
+        password.frame.size.width = 620
+        password.updateResponsiveLayout()
+        password.layoutSubtreeIfNeeded()
+        XCTAssertEqual(password.passwordInputButton.title, "Private Input")
+
+        password.setPasswordFieldFocused(false)
+        XCTAssertTrue(password.passwordInputButton.isHidden)
     }
 
     /// The claim the storybook is there to protect.
@@ -436,12 +458,12 @@ final class ToolbarChromeRenderTests: XCTestCase {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let originalBackdrop = WindowBackdrop.color
+        let originalBackdrop = WindowBackdrop.ground
         defer { WindowBackdrop.set(originalBackdrop) }
 
         var written = 0
         for backdrop in Render.backdrops {
-            WindowBackdrop.set(backdrop.colour)
+            WindowBackdrop.set(.terminal(backdrop.colour))
 
             let content = make()
             content.translatesAutoresizingMaskIntoConstraints = false

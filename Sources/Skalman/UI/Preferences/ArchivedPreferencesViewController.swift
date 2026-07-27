@@ -79,13 +79,13 @@ final class ArchivedPreferencesViewController: NSViewController {
     /// an action maps straight back to its session in `rows`.
     private func makeRow(entry: (project: Project, session: AgentSession), index: Int) -> NSView {
         let titleLabel = NSTextField(labelWithString: entry.session.displayTitle)
-        titleLabel.font = Design.Typography.body()
+        titleLabel.applyFont(.body)
         titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingTail
 
         let when = Self.relativeDate.localizedString(for: entry.session.lastActiveAt, relativeTo: Date())
         let captionLabel = NSTextField(labelWithString: "\(entry.project.name) · \(when)")
-        captionLabel.font = Design.Typography.subheading()
+        captionLabel.applyFont(.subheading)
         captionLabel.textColor = Design.Text.secondary
         captionLabel.lineBreakMode = .byTruncatingTail
 

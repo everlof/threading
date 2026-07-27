@@ -892,6 +892,82 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(button.accessibilityValue() as? Bool, true)
     }
 
+    // MARK: - Hover
+
+    /// The pane toggle sat filled with the panel closed, and the fill was a hover nobody had
+    /// left: closing the panel widens the content pane, which slides its header — and this button
+    /// with it — a few hundred points sideways, out from under a pointer that never moved. A
+    /// tracking area reports pointer crossings only, so no `mouseExited` was ever delivered, and
+    /// on a toolbar button a resting hover wears the same `surface` fill as *selected*. The button
+    /// was claiming the panel was open.
+    ///
+    /// Both directions matter. Clearing on every relayout would be just as wrong the other way —
+    /// the pointer resting on a button while a theme change or a morphing title re-lays the header
+    /// out would drop the hover under the pointer — so the correction is asked of the pointer's
+    /// actual position rather than applied blindly.
+    func testHoverEndsWhenTheControlLeavesTheStillPointerRatherThanTheOtherWayAround() throws {
+        let window = PointerFixtureWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 120),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        let root = try XCTUnwrap(window.contentView)
+        let button = ThemedIconButton(symbolName: "sidebar.trailing", accessibility: "Display panel")
+        button.translatesAutoresizingMaskIntoConstraints = true
+        button.frame = NSRect(
+            x: 400,
+            y: 40,
+            width: Design.Size.toolbarButtonWidth,
+            height: Design.Size.toolbarButtonHeight
+        )
+        root.addSubview(button)
+
+        window.pointerLocation = NSPoint(x: button.frame.midX, y: button.frame.midY)
+        button.mouseEntered(with: try enterEvent(at: window.pointerLocation, in: window))
+        XCTAssertTrue(button.isHovered, "the button did not take the pointer")
+
+        // The header re-lays out with the pointer still on the button: a redraw, not a departure.
+        button.updateTrackingAreas()
+        XCTAssertTrue(
+            button.isHovered,
+            "a relayout under a stationary pointer dropped a hover the pointer had not left"
+        )
+
+        // The panel closes: the pane grows, the header slides, the pointer stays where it was.
+        button.frame = button.frame.offsetBy(dx: -260, dy: 0)
+        button.updateTrackingAreas()
+        XCTAssertFalse(
+            button.isHovered,
+            "the button kept its hover fill after moving out from under the pointer"
+        )
+    }
+
+    /// The same correction, on a control whose hover is a layer fill and a width rather than a
+    /// drawn state — `hoverDidChange` is the seam, so the chip must narrow again too.
+    func testAChipThatSlidesOutFromUnderThePointerGivesBackItsHoverWidth() throws {
+        let window = PointerFixtureWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 120),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        let root = try XCTUnwrap(window.contentView)
+        let chip = ChipView(frame: NSRect(x: 300, y: 40, width: 120, height: Design.Size.chipHeight))
+        chip.translatesAutoresizingMaskIntoConstraints = true
+        root.addSubview(chip)
+
+        window.pointerLocation = NSPoint(x: chip.frame.midX, y: chip.frame.midY)
+        chip.mouseEntered(with: try enterEvent(at: window.pointerLocation, in: window))
+        XCTAssertTrue(chip.isHovered)
+
+        // Sideways, and still well inside the window: a control that left the window entirely
+        // would clear for a second reason and prove nothing about this one.
+        chip.frame = chip.frame.offsetBy(dx: -220, dy: 0)
+        chip.updateTrackingAreas()
+        XCTAssertFalse(chip.isHovered, "the chip stayed hovered after sliding out from under the pointer")
+    }
+
     /// The window is a row of panes, and nothing else here would have noticed if it stopped
     /// being one.
     ///
@@ -1053,6 +1129,89 @@ final class ThemedControlTests: XCTestCase {
             tabLeadsThePane(),
             "the header did not follow the divider — this is the bug the move exists to remove"
         )
+    }
+
+    /// Pairing is a journey with live state and security context, not an obscure General toggle.
+    /// Its own catalogue entry is the discoverability contract; the identifiers keep the setup
+    /// accessible to both UI tests and assistive tooling.
+    func testRemoteAccessHasADiscoverableSetupPage() throws {
+        let definition = try XCTUnwrap(SettingsPages.page(id: SettingsPages.remoteAccessID))
+        XCTAssertEqual(definition.title, "Remote Access")
+        XCTAssertTrue(
+            SettingsPages.sidebarItems.contains { $0.id == SettingsPages.remoteAccessID },
+            "Remote Access is still hidden inside another settings page"
+        )
+
+        let controller = definition.make()
+        controller.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: SettingsUIDefaults.pageWidth,
+            height: 760
+        )
+        controller.view.layoutSubtreeIfNeeded()
+
+        let ids = Set(
+            ([controller.view] + descendants(in: controller.view))
+                .compactMap { $0.accessibilityIdentifier() }
+        )
+        XCTAssertTrue(ids.contains("settings.remote-access.page"))
+        XCTAssertTrue(ids.contains("settings.remote-access.enabled"))
+        XCTAssertTrue(ids.contains("settings.remote-access.status"))
+        XCTAssertTrue(ids.contains("settings.remote-access.pair"))
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
+    }
+
+    func testRemoteAccessSetupPageRendersInBothAppearances() throws {
+        let output = ProcessInfo.processInfo.environment["SKALMAN_RENDER_OUT"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        }
+        if let output {
+            try FileManager.default.createDirectory(
+                at: output,
+                withIntermediateDirectories: true
+            )
+        }
+
+        for (name, appearanceName) in [
+            ("light", NSAppearance.Name.aqua),
+            ("dark", .darkAqua)
+        ] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            var png: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                let controller = RemoteAccessPreferencesViewController()
+                let host = NSView(frame: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: SettingsUIDefaults.pageWidth,
+                    height: 920
+                ))
+                controller.view.translatesAutoresizingMaskIntoConstraints = false
+                host.addSubview(controller.view)
+                NSLayoutConstraint.activate([
+                    controller.view.topAnchor.constraint(equalTo: host.topAnchor),
+                    controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+                    controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+                ])
+                host.appearance = appearance
+                controller.view.appearance = appearance
+                host.wantsLayer = true
+                host.layer?.backgroundColor = Design.Surface.ground.cgColor
+                host.layoutSubtreeIfNeeded()
+                png = try? renderedPNG(of: host)
+            }
+
+            let rendered = try XCTUnwrap(png)
+            XCTAssertGreaterThan(rendered.count, 20_000, "\(name) setup page rendered empty")
+            attach(rendered, named: "remote-access-settings-\(name)")
+            if let output {
+                try rendered.write(
+                    to: output.appendingPathComponent("remote-access-settings-\(name).png")
+                )
+            }
+        }
     }
 
     /// A `+` beside a closable "General ✕" reads as "add another one of these", which is the one
@@ -1505,7 +1664,7 @@ final class ThemedControlTests: XCTestCase {
     /// up at dusk.
     func testTheInkFollowsAChangeOfSystemAppearance() {
         AppThemePalette.set(.system)
-        WindowBackdrop.set(Design.Surface.ground)
+        WindowBackdrop.set(.chrome)
 
         let spy = InkSpy(frame: NSRect(x: 0, y: 0, width: 100, height: 22))
 
@@ -1704,6 +1863,7 @@ final class ThemedControlTests: XCTestCase {
                 "PromptView",
                 "SeparatorView",
                 "ShortcutRecorderView",
+                "SidebarBackdropView",
                 "ThemeSwatchImage",
                 "ThemeSwatchView",
                 "ThemedButton",
@@ -1967,6 +2127,22 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    private func enterEvent(at point: NSPoint, in window: NSWindow) throws -> NSEvent {
+        try XCTUnwrap(
+            NSEvent.enterExitEvent(
+                with: .mouseEntered,
+                location: point,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 0,
+                trackingNumber: 0,
+                userData: nil
+            )
+        )
+    }
+
     private func renderedPNG(of view: NSView) throws -> Data {
         let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -1988,6 +2164,20 @@ final class ThemedControlTests: XCTestCase {
 private final class ActionSpy: NSObject {
     private(set) var count = 0
     @objc func fire() { count += 1 }
+}
+
+/// A window that stands in for the key one, with the pointer wherever the test puts it.
+///
+/// Hover is read from the *window* rather than from an event, because the moment being tested is
+/// one where no event is being delivered — the view moved, not the pointer. There is no way to put
+/// the real pointer somewhere from a test, and a fixture window here is never ordered on screen
+/// (see the note in CLAUDE.md about what showing one does to the test host), so both answers are
+/// overridden rather than arranged.
+private final class PointerFixtureWindow: NSWindow {
+    var pointerLocation: NSPoint = .zero
+
+    override var isKeyWindow: Bool { true }
+    override var mouseLocationOutsideOfEventStream: NSPoint { pointerLocation }
 }
 
 /// A `BackdropOverlay` that only records what it was handed. It also stands as the smallest

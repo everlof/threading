@@ -67,7 +67,7 @@ struct PairingView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    Text("For your own Mac, open Skalman → Settings → General → Remote Access and choose Pair iPhone. You can also paste a one-chat link someone shared with you. Owner pairing can manage your Mac; a shared-chat link never can.")
+                    Text("For your own Mac, open Skalman → Settings → Remote Access and scan the pairing code. You can also paste a one-chat link someone shared with you. Owner pairing can manage your Mac; a shared-chat link never can.")
                         .font(.footnote)
                         .foregroundStyle(theme.secondaryLabel)
                         .frame(maxWidth: .infinity, alignment: .leading)

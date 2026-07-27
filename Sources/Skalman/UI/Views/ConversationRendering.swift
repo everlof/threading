@@ -61,6 +61,13 @@ extension ConversationViewController {
             showStreaming(text)
 
         case .status(let status):
+            let wasInFlight = isTurnInFlight
+            isTurnInFlight = {
+                if case .working = status { return true }
+                return false
+            }()
+            if !isTurnInFlight { runProgress = nil }
+
             // The orb runs only while a turn is in flight; hidden, it detaches
             // from the status row and its display link idles.
             if case .working(let word) = status {
@@ -73,6 +80,16 @@ extension ConversationViewController {
                 orbView.isHidden = true
                 endWorkingStatus()
                 setStatus(describe(status))
+            }
+            if isTurnInFlight != wasInFlight {
+                delegate?.conversationDidChangeActivity(self)
+            }
+
+        case .runProgress(let progress):
+            guard runProgress != progress else { return }
+            runProgress = progress
+            if isTurnInFlight {
+                delegate?.conversationDidChangeActivity(self)
             }
 
         case .adoptedSessionID(let agentSessionID):

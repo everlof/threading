@@ -392,6 +392,56 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(quarantineURL)), data)
     }
 
+    // MARK: - Session Attachments
+
+    /// The list survives a relaunch: a second store wired to the same state answers with what
+    /// the first recorded. Detection only sees live output, so without this the Attachments tab
+    /// reopened onto an empty pane after every restart.
+    func testSessionAttachmentsSurviveARelaunch() throws {
+        let manager = makeManager()
+        let sessionID = SessionID()
+        let root = testDirectory.appendingPathComponent("checkout", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let image = root.appendingPathComponent("plan.png")
+        try Data([0x89, 0x50]).write(to: image)
+
+        func makeStore() -> SessionAttachmentStore {
+            SessionAttachmentStore(
+                loadPayload: { manager.loadAttachmentsPayload(for: $0) },
+                savePayload: { manager.saveAttachmentsPayload($0, for: $1) },
+                retainPersisted: { manager.retainAttachments(sessionIDs: $0) }
+            )
+        }
+
+        let recorded = makeStore().record(url: image, sessionID: sessionID, projectRoot: root)
+        XCTAssertEqual(recorded?.relativePath, "plan.png")
+
+        let relaunched = makeStore()
+        XCTAssertEqual(
+            relaunched.attachments(for: sessionID).map(\.relativePath),
+            ["plan.png"]
+        )
+
+        // A file deleted while the app was closed falls out on first read, and the pruned
+        // list is written back rather than resurrecting the row on the next launch.
+        try FileManager.default.removeItem(at: image)
+        XCTAssertEqual(relaunched.attachments(for: sessionID), [])
+        XCTAssertEqual(makeStore().attachments(for: sessionID), [])
+    }
+
+    func testRetainedSessionAttachmentsDropPrunedSessions() throws {
+        let manager = makeManager()
+        let kept = SessionID()
+        let pruned = SessionID()
+        manager.saveAttachmentsPayload("[]", for: kept)
+        manager.saveAttachmentsPayload("[]", for: pruned)
+
+        manager.retainAttachments(sessionIDs: [kept])
+
+        XCTAssertNotNil(manager.loadAttachmentsPayload(for: kept))
+        XCTAssertNil(manager.loadAttachmentsPayload(for: pruned))
+    }
+
     private func makeManager() -> StateManager {
         StateManager(
             appSupportDirectory: testDirectory,

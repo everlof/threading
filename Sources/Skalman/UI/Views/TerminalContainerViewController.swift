@@ -118,9 +118,9 @@ final class TerminalContainerViewController: NSViewController {
     /// chrome, so they take the app theme's ground.
     private func themeDidChange() {
         if currentChild != nil || currentConversation != nil {
-            applyPaneBackground(ThemeAssignments.theme(for: currentSessionID).background)
+            applyPaneBackground(.terminal(ThemeAssignments.theme(for: currentSessionID).background))
         } else {
-            applyPaneBackground(Design.Surface.ground)
+            applyPaneBackground(.chrome)
         }
     }
 
@@ -242,7 +242,7 @@ final class TerminalContainerViewController: NSViewController {
 
         placeholderView.isHidden = true
         composerViewController.view.isHidden = false
-        applyPaneBackground(Design.Surface.ground)
+        applyPaneBackground(.chrome)
         composerViewController.show(projectID: projectID)
     }
 
@@ -262,7 +262,7 @@ final class TerminalContainerViewController: NSViewController {
             currentSessionID = nil
             placeholderView.isHidden = true
             composerViewController.view.isHidden = true
-            applyPaneBackground(Design.Surface.ground)
+            applyPaneBackground(.chrome)
             // The session's shell goes with the session — see `showComposer`.
             applyDrawer(for: nil)
         } else if let current = settingsPage {
@@ -270,7 +270,8 @@ final class TerminalContainerViewController: NSViewController {
             current.removeFromParent()
         }
 
-        let page = settingsPageCache[id] ?? {
+        let cached = settingsPageCache[id]
+        let page = cached ?? {
             let made = definition.make()
             settingsPageCache[id] = made
             return made
@@ -280,6 +281,12 @@ final class TerminalContainerViewController: NSViewController {
         let content = page.view
         content.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(content)
+
+        // A cached page was detached while the theme moved, and the sweep walks windows — so it
+        // never reached this tree. Re-resolve it here rather than dropping the cache: rebuilding
+        // would cost the page its scroll position and its controls' state to fix colours and
+        // fonts that one walk can simply take again.
+        if cached != nil { AppThemeRefresh.repaint(content) }
 
         // The cap is the readable measure plus the glow gutters the page pads itself with,
         // so the cards inside keep the readable width.
@@ -542,7 +549,8 @@ final class TerminalContainerViewController: NSViewController {
         // The terminal is inset below the toolbar, so the strip above it is the pane's own
         // background. Matching it to the terminal's colour keeps that strip — and the window's
         // rounded top corner — from showing the window's default grey against a themed terminal.
-        applyPaneBackground(controller.paneBackgroundColor)
+        applyPaneBackground(.terminal(controller.paneBackgroundColor))
+        refreshGitStatusOverlayRunState()
         controller.focusTerminal()
     }
 
@@ -591,13 +599,21 @@ final class TerminalContainerViewController: NSViewController {
         placeholderView.isHidden = true
         composerViewController.view.isHidden = true
 
+        // A conversation outlives its time on screen — `AgentRuntime` keeps it for a dormant
+        // session — and the theme sweep walks *windows*, so a detached surface is in none. Its
+        // layer colours and its labels' fonts both freeze at assignment, so one returning after
+        // a theme switch would come back wearing the theme it left under. Re-resolving on attach
+        // is the same sweep, scoped to the tree that missed it.
+        AppThemeRefresh.repaint(conversation.view)
+
         // A native conversation has no terminal, but it should read like one: the backdrop is
         // its resolved terminal theme's background, so it — and the sidebar sampling it — match a
         // Claude or shell session rather than the flatter `windowBackgroundColor`, which shows
         // through the sidebar's material as a subtly different tone. This is also the whole
         // extent to which a theme reaches a natively-rendered session: the conversation itself
         // is drawn in system colours, per the design system.
-        applyPaneBackground(ThemeAssignments.theme(for: currentSessionID).background)
+        applyPaneBackground(.terminal(ThemeAssignments.theme(for: currentSessionID).background))
+        refreshGitStatusOverlayRunState()
         conversation.focusPrompt()
     }
 
@@ -614,7 +630,16 @@ final class TerminalContainerViewController: NSViewController {
     /// Fills the pane behind its content. Only the strip above a toolbar-inset terminal ever
     /// shows it, but leaving a stale colour there is exactly the seam this avoids — so every
     /// surface swap sets it, resetting to the window's own colour for anything but a terminal.
-    private func applyPaneBackground(_ color: NSColor) {
+    ///
+    /// Takes the typed ground rather than a colour, because the backdrop's *ownership* travels
+    /// with it: `WindowBackdrop` tells the divider whether the theme states this ground, and a
+    /// bare `NSColor` cannot carry that answer — see `WindowBackdrop.Ground`.
+    private func applyPaneBackground(_ ground: WindowBackdrop.Ground) {
+        let color: NSColor
+        switch ground {
+        case .chrome: color = Design.Surface.ground
+        case .terminal(let terminal): color = terminal
+        }
         view.applyLayerBackground(color)
 
         // Also paint the window itself, so the terminal's colour is the backdrop the whole
@@ -626,7 +651,7 @@ final class TerminalContainerViewController: NSViewController {
 
         // And tell whatever is drawn on it. The toolbar sits over this colour rather than over
         // the chrome's ground, so its ink has to come from here — see `WindowBackdrop`.
-        WindowBackdrop.set(color)
+        WindowBackdrop.set(ground)
     }
 
     private func detachCurrentChild() {
@@ -654,13 +679,19 @@ final class TerminalContainerViewController: NSViewController {
         currentSettingsPageID = nil
         composerViewController.view.isHidden = true
         placeholderView.isHidden = false
-        applyPaneBackground(Design.Surface.ground)
-        placeholderView.onAction = nil
+        applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "terminal",
             title: "No Session Selected",
-            detail: "Select a session in the sidebar, or add a project to get started."
+            detail: "Select a session in the sidebar, or start one here.",
+            actionTitle: "New Session"
         )
+        // The one thing an empty pane is for is starting a session, so the pane offers the
+        // same route ⌘N takes rather than only describing where else to click.
+        placeholderView.onAction = { [weak self] in
+            guard let self else { return }
+            self.delegate?.terminalContainerDidRequestNewSession(self)
+        }
     }
 
     private func showDormantState(for sessionID: SessionID) {
@@ -671,7 +702,7 @@ final class TerminalContainerViewController: NSViewController {
 
         composerViewController.view.isHidden = true
         placeholderView.isHidden = false
-        applyPaneBackground(Design.Surface.ground)
+        applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "arrow.clockwise.circle",
             title: "\(agentSession.title) ended",
@@ -741,6 +772,7 @@ private extension TerminalContainerViewController {
             onChange: { [weak self] reading in
                 guard let self, self.currentSessionID == sessionID else { return }
                 self.gitStatusOverlay.update(with: reading)
+                self.refreshGitStatusOverlayRunState()
             },
             onInitialReadComplete: { [weak self] in
                 guard let self, self.currentSessionID == sessionID else { return }
@@ -761,6 +793,28 @@ private extension TerminalContainerViewController {
             return
         }
         gitChangeMonitor?.start()
+        refreshGitStatusOverlayRunState()
+    }
+
+    /// The same live checkout reading has two presentations: branch while idle, turn progress
+    /// while an agent is working. Structured conversations can add a plan position; terminal
+    /// sessions still get the working orb and live diff totals.
+    func refreshGitStatusOverlayRunState() {
+        guard gitChangeMonitor != nil else { return }
+
+        if let conversation = currentConversation {
+            gitStatusOverlay.updateRunState(
+                isActive: conversation.isTurnInFlight,
+                progress: conversation.runProgress
+            )
+        } else if let child = currentChild {
+            gitStatusOverlay.updateRunState(
+                isActive: child.activity == .working,
+                progress: nil
+            )
+        } else {
+            gitStatusOverlay.updateRunState(isActive: false, progress: nil)
+        }
     }
 }
 
@@ -796,6 +850,9 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
     }
 
     func agentSessionDidChangeState(_ controller: AgentSessionViewController) {
+        if controller.sessionID == currentSessionID {
+            refreshGitStatusOverlayRunState()
+        }
         NotificationCenter.default.post(
             SessionActivityDidChange(sessionID: controller.sessionID)
         )
@@ -831,6 +888,8 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     )
     /// The floating git status card was clicked; the window opens the review tab.
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController)
+    /// The empty state's one action: begin a session, the same route ⌘N takes.
+    func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController)
 }
 
 // MARK: - ConversationViewControllerDelegate
@@ -845,6 +904,9 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
     }
 
     func conversationDidChangeActivity(_ controller: ConversationViewController) {
+        if controller.sessionID == currentSessionID {
+            refreshGitStatusOverlayRunState()
+        }
         // Same channel a terminal session's activity uses, so the sidebar refreshes its row
         // and its attention dot the one way it already knows.
         NotificationCenter.default.post(
@@ -858,9 +920,10 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
 
 /// The strip at the top of the content pane, holding what used to be toolbar items.
 enum PaneHeaderDefaults {
-    /// Deep enough for the tab and the icon buttons beside it, with air above and below —
-    /// `Design.Size.tabHeight` plus a `Design.Spacing.small` margin each way.
-    static let height: CGFloat = Design.Size.tabHeight + Design.Spacing.small * 2
+    /// Deep enough for the tab and the icon buttons beside it, with air above and below.
+    /// Read from `PaneHeaderView` so this strip and the sidebar's header band keep one
+    /// silhouette: their hairlines land on the same line across the split.
+    static let height: CGFloat = PaneHeaderView.bandHeight
 
     /// From the pane's own edges. The leading one is what makes the tab start where the sidebar
     /// ends, which is the whole reason the header lives in the pane.

@@ -49,6 +49,10 @@ final class ShellDrawerDivider: BackdropOverlay {
         )
         addTrackingArea(area)
         trackingArea = area
+
+        // The divider moves whenever the drawer is resized, which is exactly when the pointer is
+        // holding still — see `NSView.hoverIsStale`.
+        if hoverIsStale(isHovered) { isHovered = false }
     }
 
     override func mouseEntered(with event: NSEvent) { isHovered = true }

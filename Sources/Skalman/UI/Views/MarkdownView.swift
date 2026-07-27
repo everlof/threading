@@ -7,10 +7,20 @@ import AppKit
 /// cannot express. Text blocks are still plain labels, so selection and wrapping come for free.
 final class MarkdownView: NSStackView {
 
-    private let style: MarkdownStyle
+    /// The style as an *expression* rather than a value, so `rebuild` re-resolves whatever the
+    /// caller asked for instead of assuming `.assistant`. `MarkdownStyle.assistant` is a
+    /// computed property that reads the current theme, so calling it again is the whole of
+    /// following a switch; a caller that passes a stored style re-reads that same value, which
+    /// is also what they asked for.
+    private let style: () -> MarkdownStyle
+    /// Kept so the document can be laid out again, which is the only way this surface can follow
+    /// a theme — see `rebuild()`.
+    private let markdown: String
+    private let restyle = AppEventObservations()
 
-    init(markdown: String, style: MarkdownStyle = .assistant) {
+    init(markdown: String, style: @autoclosure @escaping () -> MarkdownStyle = .assistant) {
         self.style = style
+        self.markdown = markdown
         super.init(frame: .zero)
 
         orientation = .vertical
@@ -18,36 +28,61 @@ final class MarkdownView: NSStackView {
         spacing = MarkdownDefaults.blockSpacing
         translatesAutoresizingMaskIntoConstraints = false
 
-        for block in Markdown.parse(markdown, style: style) {
-            let view = makeView(for: block)
-            addArrangedSubview(view)
-            view.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
-            view.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
-        }
+        build()
+
+        // **Markdown does not follow the sweep, and cannot.** Its paragraphs are built
+        // `NSAttributedString`s and its bullets and code blocks take a font from a `MarkdownStyle`
+        // snapshot, so both freeze at construction the way any built string does — the sweep
+        // re-resolves a *recorded role* on a view, and an attributed run has none.
+        //
+        // This is the surface the conversation font exists for, so leaving it stale would mean
+        // the flagship case only applied to messages that had not arrived yet: a thread half in
+        // one face and half in another. Re-laying the document out is cheap — the parse is a
+        // scan over a string this view is already holding — and it is local, which a rebuild
+        // driven from the controller would not be.
+        restyle.observe(AppThemeDidChange.self) { [weak self] _ in self?.rebuild() }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
+    private func build() {
+        let style = self.style()
+        for block in Markdown.parse(markdown, style: style) {
+            let view = makeView(for: block, style: style)
+            addArrangedSubview(view)
+            view.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
+            view.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+        }
+    }
+
+    private func rebuild() {
+        for view in arrangedSubviews {
+            removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        build()
+    }
+
     // MARK: - Block Views
 
-    private func makeView(for block: MarkdownBlock) -> NSView {
+    private func makeView(for block: MarkdownBlock, style: MarkdownStyle) -> NSView {
         switch block {
         case .paragraph(let text), .heading(let text):
             return label(text)
 
         case .bullets(let items):
-            return list(items, markers: items.map { _ in "•" })
+            return list(items, markers: items.map { _ in "•" }, style: style)
 
         case .ordered(let items):
-            return list(items, markers: items.indices.map { "\($0 + 1)." })
+            return list(items, markers: items.indices.map { "\($0 + 1)." }, style: style)
 
         case .code(let code):
-            return codeBlock(code)
+            return codeBlock(code, style: style)
 
         case .quote(let text):
-            return quote(text)
+            return quote(text, style: style)
         }
     }
 
@@ -63,7 +98,11 @@ final class MarkdownView: NSStackView {
 
     /// A bullet or numbered list, each row a fixed-width marker beside wrapping content, so
     /// wrapped lines hang under the text rather than under the marker.
-    private func list(_ items: [NSAttributedString], markers: [String]) -> NSView {
+    private func list(
+        _ items: [NSAttributedString],
+        markers: [String],
+        style: MarkdownStyle
+    ) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -95,7 +134,7 @@ final class MarkdownView: NSStackView {
         return stack
     }
 
-    private func codeBlock(_ code: String) -> NSView {
+    private func codeBlock(_ code: String, style: MarkdownStyle) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
         container.applySurface(fill: style.codeBackground, radius: .control)
@@ -140,7 +179,7 @@ final class MarkdownView: NSStackView {
         return container
     }
 
-    private func quote(_ text: NSAttributedString) -> NSView {
+    private func quote(_ text: NSAttributedString, style: MarkdownStyle) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
 

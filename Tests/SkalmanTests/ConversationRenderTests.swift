@@ -309,21 +309,132 @@ final class ConversationRenderTests: XCTestCase {
         XCTAssertEqual(written.count, Fixture.allCases.count * 2)
     }
 
+    // MARK: - Theme Matrix
+
+    /// Every stock theme × its appearances × every fixture, as a reviewable gallery.
+    ///
+    /// This is the render pass the individual bug reports kept asking for one cell of: a light
+    /// variant carrying dark syntax, a diff wash frozen in the wrong appearance, a palette that
+    /// reads in one agent's output shape and not the other's. The assertions elsewhere pin what
+    /// can be measured; this writes the whole combination space out as images, with an
+    /// `matrix.html` beside them so a human can sweep every cell in one scroll.
+    func testRendersTheThemeMatrix() throws {
+        let directory = Render.directory.appendingPathComponent("theme-matrix", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let original = AppThemePalette.current
+        defer { AppThemePalette.set(original) }
+
+        var rowsByFixture: [Fixture: [ConversationTimeline.Row]] = [:]
+        for fixture in Fixture.allCases {
+            rowsByFixture[fixture] = Array(try self.rows(for: fixture).prefix(Render.rowLimit))
+        }
+
+        var cells: [(themeName: String, variant: String, fixture: String, file: String)] = []
+
+        for theme in [AppTheme.system] + AppThemeStyles.all {
+            AppThemePalette.set(theme)
+
+            // An adaptive theme (System included) is two appearances; a fixed theme is the one
+            // it pins. Rendering a fixed theme in the other appearance would show something the
+            // app never draws.
+            let variants: [(String, NSAppearance.Name)] = theme.isAdaptive
+                ? [("light", .aqua), ("dark", .darkAqua)]
+                : [theme.mode == .dark ? ("dark", .darkAqua) : ("light", .aqua)]
+
+            for (variantName, appearanceName) in variants {
+                for fixture in Fixture.allCases {
+                    guard let rows = rowsByFixture[fixture] else { continue }
+                    let file = "\(theme.id.rawValue)-\(variantName)-\(fixture.rawValue).png"
+                    let data = try XCTUnwrap(
+                        image(of: rows, appearance: appearanceName, ground: Design.Surface.ground),
+                        "Failed to render \(theme.name) (\(variantName)) × \(fixture.rawValue)"
+                    )
+                    try data.write(to: directory.appendingPathComponent(file))
+                    cells.append((
+                        themeName: theme.name,
+                        variant: variantName,
+                        fixture: fixture.rawValue,
+                        file: file
+                    ))
+                }
+            }
+        }
+
+        try matrixHTML(cells: cells, fixtures: Fixture.allCases.map(\.rawValue))
+            .write(
+                to: directory.appendingPathComponent("matrix.html"),
+                atomically: true,
+                encoding: .utf8
+            )
+
+        print("Rendered \(cells.count) matrix cells to \(directory.path)/matrix.html")
+        XCTAssertFalse(cells.isEmpty)
+    }
+
+    /// One row per theme-variant, one column per fixture; images lazy-load and click through
+    /// to the full-size file.
+    private func matrixHTML(
+        cells: [(themeName: String, variant: String, fixture: String, file: String)],
+        fixtures: [String]
+    ) -> String {
+        var byRow: [String: [String: String]] = [:]
+        var rowOrder: [String] = []
+        for cell in cells {
+            let key = "\(cell.themeName) · \(cell.variant)"
+            if byRow[key] == nil { rowOrder.append(key) }
+            byRow[key, default: [:]][cell.fixture] = cell.file
+        }
+
+        var html = """
+        <!doctype html><meta charset="utf-8"><title>Skalman theme matrix</title>
+        <style>
+        body { font: 13px -apple-system, sans-serif; margin: 16px; background: #1a1a1a; color: #ddd; }
+        table { border-collapse: collapse; }
+        th, td { padding: 6px 8px; text-align: left; vertical-align: top; }
+        thead th { position: sticky; top: 0; background: #1a1a1a; z-index: 1; }
+        th.theme { position: sticky; left: 0; background: #1a1a1a; white-space: nowrap; }
+        img { width: 340px; display: block; border-radius: 6px; border: 1px solid #333; }
+        </style>
+        <h1>Theme × agent matrix</h1>
+        <table><thead><tr><th class="theme">Theme</th>
+        """
+        for fixture in fixtures { html += "<th>\(fixture)</th>" }
+        html += "</tr></thead><tbody>"
+        for key in rowOrder {
+            html += "<tr><th class=\"theme\">\(key)</th>"
+            for fixture in fixtures {
+                if let file = byRow[key]?[fixture] {
+                    html += "<td><a href=\"\(file)\"><img loading=\"lazy\" src=\"\(file)\"></a></td>"
+                } else {
+                    html += "<td>—</td>"
+                }
+            }
+            html += "</tr>"
+        }
+        html += "</tbody></table>"
+        return html
+    }
+
     /// Snapshots a laid-out view.
-    private func png(of host: NSView) -> Data? {
+    private func png(of host: NSView, ground: NSColor = .textBackgroundColor) -> Data? {
         guard host.bounds.height > 1,
               let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
 
         // The pane has no background of its own — it sits on the window's material — so one is
         // painted here, or every label draws onto transparency and the image is unreadable.
         host.wantsLayer = true
-        host.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        host.layer?.backgroundColor = ground.cgColor
 
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
     }
 
-    private func image(of rows: [ConversationTimeline.Row], appearance name: NSAppearance.Name) -> Data? {
+    private func image(
+        of rows: [ConversationTimeline.Row],
+        appearance name: NSAppearance.Name,
+        ground: NSColor = .textBackgroundColor
+    ) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
@@ -333,7 +444,7 @@ final class ConversationRenderTests: XCTestCase {
 
             guard let host = stack.superview else { return }
             host.appearance = appearance
-            data = self.png(of: host)
+            data = self.png(of: host, ground: ground)
         }
 
         // `performAsCurrentDrawingAppearance` is the only thing that makes a dynamic system

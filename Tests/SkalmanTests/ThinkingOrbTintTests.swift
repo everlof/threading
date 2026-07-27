@@ -237,6 +237,56 @@ final class ThinkingOrbTintTests: XCTestCase {
         )
     }
 
+    /// The first sighting scans at once, and sustained output re-scans on a cap — waiting for
+    /// quiet alone meant a path printed early in a long build surfaced only when the output
+    /// finally stopped.
+    func testBusyTerminalOutputStillScansOnTheFly() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let early = root.appendingPathComponent("early.png")
+        let late = root.appendingPathComponent("late.png")
+        try Data("png".utf8).write(to: early)
+        try Data("png".utf8).write(to: late)
+
+        let sessionID = SessionID()
+        var renderedText = early.path
+        var clock = Date(timeIntervalSince1970: 1_750_000_000)
+        let observer = TerminalAttachmentObserver(
+            sessionID: sessionID,
+            projectRoot: { root },
+            currentDirectory: { root },
+            text: { renderedText },
+            now: { clock }
+        )
+
+        // Leading edge: the very first output scans without waiting for quiet.
+        observer.noteOutput()
+        XCTAssertEqual(
+            SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
+            ["early.png"]
+        )
+
+        // Moments later the debounce holds — nothing new is recorded synchronously.
+        renderedText = late.path
+        clock = clock.addingTimeInterval(0.1)
+        observer.noteOutput()
+        XCTAssertEqual(
+            SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
+            ["early.png"]
+        )
+
+        // Past the busy cap the stream is still running, and the scan happens anyway.
+        clock = clock.addingTimeInterval(SessionAttachmentDefaults.terminalBusyScanInterval)
+        observer.noteOutput()
+        XCTAssertEqual(
+            SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
+            ["late.png", "early.png"]
+        )
+    }
+
     func testMorphingTitleAcceptsEverySelectableStyle() {
         let label = MorphingTitleLabel()
         label.setStringValue("Before", animated: false)

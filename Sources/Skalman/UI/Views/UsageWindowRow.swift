@@ -30,11 +30,11 @@ final class UsageWindowRow: NSView {
         let severity = UsageSeverity.from(fraction: expired ? nil : window.fraction)
 
         let nameLabel = NSTextField(labelWithString: window.label)
-        nameLabel.font = Design.Typography.control()
+        nameLabel.applyFont(.control)
         nameLabel.textColor = Design.Text.secondary
 
         let valueLabel = NSTextField(labelWithString: Self.value(for: window, expired: expired))
-        valueLabel.font = Design.Typography.control()
+        valueLabel.applyFont(.control)
         valueLabel.textColor = severity == .normal ? Design.Text.label : severity.glyphColor
 
         let spacer = NSView()
@@ -51,7 +51,7 @@ final class UsageWindowRow: NSView {
         bar.translatesAutoresizingMaskIntoConstraints = false
 
         let resetLabel = NSTextField(labelWithString: Self.reset(for: window, expired: expired))
-        resetLabel.font = Design.Typography.caption()
+        resetLabel.applyFont(.caption)
         resetLabel.textColor = Design.Text.tertiary
 
         let column = NSStackView(views: [titleRow, bar, resetLabel])

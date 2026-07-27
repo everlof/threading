@@ -270,19 +270,17 @@ these need no UI harness:
       `ShellCommand` words, then shares `ShellCommand.executing(_:in:)` with `AgentLauncher`
       for the fixed `cd … && exec …` wrapper. A real-shell regression test enters a directory
       containing quotes, semicolons, and command-substitution syntax without interpreting it.
-- [x] PID capture. The "any child" fallback is gone (Skalman spawns short-lived helpers of its
-      own, so it adopted strangers), pids another live session has claimed are excluded, the
-      lowest new pid wins so a two-child launch resolves the same way twice, the capture retries,
-      and a claim is released on teardown so pid reuse cannot lock a later session out.
+- [x] Exact child identity. The local SwiftTerm fork now launches through `forkpty`, which gives
+      `TerminalSession` the child PID synchronously and gives the child its controlling terminal.
+      The old before/after `ProcessUtility` scan, retry window, arbitrary PID ordering and
+      cross-session claim registry are gone; concurrent sessions cannot adopt one another's
+      child or one of Skalman's short-lived helper processes.
 - [x] `ProcessUtility` silent truncation: `liveProcessIdentifiers()` sizes the buffer from the
       kernel's own count and grows when the reply comes back full, so a short list means "that is
       all of them" rather than "the buffer ran out"; three copies of the fixed-4096 walk share it.
-- [ ] `ProcessUtility` main-thread scans — **narrower than it reads**. The info panel's walk is
-      already on `SessionInfoReader`'s own queue. What remains is `TerminalSession`: the two
-      snapshots around a launch (`:116`, `:205`) are synchronous *by requirement* — taken before
-      the child is spawned, or the child is mistaken for a pre-existing process and never adopted
-      — so only `captureShellPid`'s retry walk (`:174`) can move off the main thread, and it is
-      already delayed rather than blocking a launch.
+- [x] `ProcessUtility` main-thread scans. The info panel's walk was already on
+      `SessionInfoReader`'s queue, and `TerminalSession` no longer scans the process table at
+      launch now that SwiftTerm exposes the exact `forkpty` child.
 - [x] MCP HTTP parser. `parseRequest` answered `nil` for both "incomplete" and "impossible", so
       framing it could not read was *defaulted* to a zero-length body — which leaves the real
       body at the head of the buffer to be read as the next request's start line. It now returns

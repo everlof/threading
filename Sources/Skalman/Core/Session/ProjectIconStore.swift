@@ -102,13 +102,20 @@ enum ProjectIconStore {
         return composed
     }
 
-    /// Whether a mark of this tone disappears against the appearance's sidebar. Nil
-    /// luminance — an undecodable icon — never plates.
+    /// Whether a mark of this tone disappears against the appearance's sidebar.
+    ///
+    /// The rule itself lives in `IconBackplate`, which states it as a separation from the
+    /// ground the mark is actually drawn on. A project tile's ground is always the sidebar's
+    /// surface, so the appearance is a fair proxy for it here — and stating it as one keeps a
+    /// single decision for every plated mark in the app, including the ones whose ground moves
+    /// under them, like a session row's when it is selected.
     static func needsBackplate(luminance: CGFloat?, darkAppearance: Bool) -> Bool {
-        guard let luminance else { return false }
-        return darkAppearance
-            ? luminance < ProjectIconDefaults.darkAppearanceLuminanceFloor
-            : luminance > ProjectIconDefaults.lightAppearanceLuminanceCeiling
+        IconBackplate.isNeeded(
+            markTone: luminance,
+            groundTone: darkAppearance
+                ? IconBackplate.Defaults.darkAppearanceGroundTone
+                : IconBackplate.Defaults.lightAppearanceGroundTone
+        )
     }
 
     /// The icon's alpha-weighted mean luminance over its visible pixels, 0 (black) to 1
@@ -195,39 +202,9 @@ enum ProjectIconStore {
         )
     }
 
-    /// Renders into a small premultiplied bitmap and averages: with premultiplication each
-    /// channel already carries its alpha, so channel-sum over alpha-sum is the
-    /// alpha-weighted mean directly.
+    /// The measurement lives with the rule that consumes it, in `IconBackplate`.
     private static func meanVisibleLuminance(of image: NSImage) -> CGFloat? {
-        let side = ProjectIconDefaults.luminanceSampleSize
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let context = CGContext(
-                  data: nil,
-                  width: side,
-                  height: side,
-                  bitsPerComponent: 8,
-                  bytesPerRow: side * 4,
-                  space: CGColorSpaceCreateDeviceRGB(),
-                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-              ) else { return nil }
-
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
-        guard let data = context.data else { return nil }
-
-        let pixels = data.bindMemory(to: UInt8.self, capacity: side * side * 4)
-        var luminanceSum = 0.0
-        var alphaSum = 0.0
-
-        for index in 0..<(side * side) {
-            let offset = index * 4
-            luminanceSum += 0.2126 * Double(pixels[offset])
-                + 0.7152 * Double(pixels[offset + 1])
-                + 0.0722 * Double(pixels[offset + 2])
-            alphaSum += Double(pixels[offset + 3])
-        }
-
-        guard alphaSum > 0 else { return nil }
-        return CGFloat(luminanceSum / alphaSum)
+        IconBackplate.tone(of: image)
     }
 
     // MARK: - Private Methods

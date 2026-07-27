@@ -165,7 +165,7 @@ final class ExtensionPanelViewController: NSViewController {
 
         if let statusMessage {
             let status = NSTextField(wrappingLabelWithString: statusMessage)
-            status.font = Design.Typography.detail()
+            status.applyFont(.detail())
             status.textColor = Design.Text.secondary
             status.setAccessibilityIdentifier("extension.panel.status")
             contentStack.addArrangedSubview(status)
@@ -181,7 +181,7 @@ final class ExtensionPanelViewController: NSViewController {
                     "“\(fallbackTitle)” is unavailable because \(owner) is not running "
                     + "or no longer registers this panel."
             )
-            unavailable.font = Design.Typography.body()
+            unavailable.applyFont(.body)
             unavailable.textColor = Design.Text.tertiary
             unavailable.setAccessibilityIdentifier("extension.panel.unavailable")
             contentStack.addArrangedSubview(unavailable)
@@ -202,7 +202,7 @@ final class ExtensionPanelViewController: NSViewController {
 
         if let remoteFailureMessage {
             let failure = NSTextField(wrappingLabelWithString: remoteFailureMessage)
-            failure.font = Design.Typography.detail()
+            failure.applyFont(.detail())
             failure.textColor = Design.Text.secondary
             failure.setAccessibilityIdentifier("extension.remote-surface.fallback")
             contentStack.addArrangedSubview(failure)
@@ -229,7 +229,7 @@ final class ExtensionPanelViewController: NSViewController {
                 wrappingLabelWithString: "This extension panel could not be rendered: "
                     + error.localizedDescription
             )
-            failure.font = Design.Typography.body()
+            failure.applyFont(.body)
             failure.textColor = Design.Status.negative
             failure.setAccessibilityIdentifier("extension.panel.render-error")
             contentStack.addArrangedSubview(failure)

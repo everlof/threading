@@ -39,7 +39,7 @@ extension AppThemeStyles {
             name: "Bauhaus",
             foreground: "#171717",
             background: "#F4EBDD",
-            cursor: "#D62828",
+            cursor: "#171717",
             selection: "#E7C9B5",
             ansi: [
                 "#171717", "#B42318", "#197149", "#9A6700",
@@ -89,7 +89,7 @@ extension AppThemeStyles {
             name: "Art Deco",
             foreground: "#F4E8CC",
             background: "#070A10",
-            cursor: "#D7B56D",
+            cursor: "#F4E8CC",
             selection: "#29404D",
             ansi: [
                 "#151D2B", "#C45564", "#56A98F", "#C9A451",
@@ -104,7 +104,8 @@ extension AppThemeStyles {
             borderWidth: 1.5,
             glow: AppTheme.Glow(
                 role: .accent, radius: 4, opacity: 0.18, offsetX: 0, offsetY: -2
-            )
+            ),
+            typeface: .serif
         )
     )
 
@@ -139,7 +140,7 @@ extension AppThemeStyles {
             name: "Neo Brutalism",
             foreground: "#101010",
             background: "#FFF4D6",
-            cursor: "#0057FF",
+            cursor: "#101010",
             selection: "#C8D6FF",
             ansi: [
                 "#101010", "#D92D20", "#087F5B", "#A85D00",
@@ -189,7 +190,7 @@ extension AppThemeStyles {
             name: "Claymorphism",
             foreground: "#352743",
             background: "#F2E9FF",
-            cursor: "#7048C8",
+            cursor: "#352743",
             selection: "#DCC8F3",
             ansi: [
                 "#352743", "#B43E57", "#287A55", "#956000",
@@ -204,7 +205,8 @@ extension AppThemeStyles {
             borderWidth: 1.5,
             glow: AppTheme.Glow(
                 role: .accent, radius: 7, opacity: 0.20, offsetX: 0, offsetY: -5
-            )
+            ),
+            typeface: .rounded
         )
     )
 
@@ -239,7 +241,7 @@ extension AppThemeStyles {
             name: "Vaporwave",
             foreground: "#FFF1FF",
             background: "#120826",
-            cursor: "#FF5FD2",
+            cursor: "#FFF1FF",
             selection: "#403168",
             ansi: [
                 "#2A1553", "#FF5F7E", "#5EF2C2", "#FFD166",
@@ -254,7 +256,8 @@ extension AppThemeStyles {
             borderWidth: 1,
             glow: AppTheme.Glow(
                 role: .accent, radius: 9, opacity: 0.30
-            )
+            ),
+            typeface: .monospaced
         )
     )
 
@@ -289,7 +292,7 @@ extension AppThemeStyles {
             name: "Newsprint",
             foreground: "#1D1B18",
             background: "#EFE8D5",
-            cursor: "#982F2F",
+            cursor: "#1D1B18",
             selection: "#D8CBB4",
             ansi: [
                 "#1D1B18", "#982F2F", "#386641", "#8A5A16",
@@ -304,7 +307,8 @@ extension AppThemeStyles {
             borderWidth: 1.5,
             glow: AppTheme.Glow(
                 role: .label, radius: 0, opacity: 0.18, offsetX: 2, offsetY: -2
-            )
+            ),
+            typeface: .serif
         )
     )
 
@@ -339,7 +343,7 @@ extension AppThemeStyles {
             name: "Botanical",
             foreground: "#203124",
             background: "#EDF2E7",
-            cursor: "#356B46",
+            cursor: "#203124",
             selection: "#CEDCC8",
             ansi: [
                 "#203124", "#A5413F", "#2E7D4F", "#8A651F",
@@ -354,7 +358,8 @@ extension AppThemeStyles {
             borderWidth: 1,
             glow: AppTheme.Glow(
                 role: .accent, radius: 7, opacity: 0.12, offsetX: 0, offsetY: -3
-            )
+            ),
+            typeface: .serif
         )
     )
 
@@ -389,7 +394,7 @@ extension AppThemeStyles {
             name: "Industrial",
             foreground: "#E8E3D8",
             background: "#101315",
-            cursor: "#F5A623",
+            cursor: "#E8E3D8",
             selection: "#3C3526",
             ansi: [
                 "#23292D", "#D65351", "#65A977", "#C58A2C",
@@ -408,7 +413,9 @@ extension AppThemeStyles {
         )
     )
 
-    private static func terminal(
+    /// Shared with the seasonal style in `AppThemeStyles+Christmas.swift`, which is why this is
+    /// internal rather than private to this file.
+    static func terminal(
         id: String,
         name: String,
         foreground: String,

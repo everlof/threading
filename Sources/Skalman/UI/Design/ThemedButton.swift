@@ -105,15 +105,9 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     // MARK: - State
 
-    private var isHovered = false {
-        didSet { needsDisplay = true }
-    }
-
     private var isPressed = false {
         didSet { needsDisplay = true }
     }
-
-    private var trackingArea: NSTrackingArea?
 
     // MARK: - Initialization
 
@@ -174,25 +168,6 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     }
 
     // MARK: - Interaction
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }

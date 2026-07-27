@@ -83,8 +83,18 @@ final class SessionRowView: NSTableCellView {
     /// unemphasized source-list row with the accent colour. The row already shows selection
     /// as a filled shape, so the colour is reapplied here to keep the text readable instead.
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { applyTextColors() }
+        didSet {
+            applyTextColors()
+            // Selection changes the ground under the mark, not just under the text: a coral
+            // starburst on a holly-red selected row is the same hole a dark favicon is on the
+            // dark sidebar, and it appears and disappears as the row is selected.
+            applyAgentPlate()
+        }
     }
+
+    /// The agent's mark before any plate, kept so the plate can be decided again when the
+    /// ground moves. Re-plating a plated image would measure the plate.
+    private var agentMark: NSImage?
 
     // MARK: - Initialization
 
@@ -131,7 +141,7 @@ final class SessionRowView: NSTableCellView {
         accountChipView.translatesAutoresizingMaskIntoConstraints = false
         accountChipView.setAccessibilityIdentifier("sidebar.session.account")
 
-        titleLabel.font = Design.Typography.controlRegular()
+        titleLabel.applyFont(.controlRegular)
         titleLabel.setAccessibilityIdentifier("sidebar.session.title")
 
         // The ink is stated once, as a rule: the row's dormancy and selection both move
@@ -363,6 +373,13 @@ final class SessionRowView: NSTableCellView {
         )
         addTrackingArea(area)
         trackingArea = area
+
+        // A row scrolls, or the list reloads under a pointer that never moved, and no exit is
+        // delivered for either — see `NSView.hoverIsStale`. Left alone, the row keeps its
+        // actions showing and its popover open for a session the pointer is no longer on.
+        if hoverIsStale(isHovered) {
+            hoverDidEnd(animated: false)
+        }
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -381,8 +398,14 @@ final class SessionRowView: NSTableCellView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        hoverDidEnd(animated: true)
+    }
+
+    /// What leaving the row means, whether the pointer left it or it left the pointer. The
+    /// correction does not animate: the row it would animate is no longer under the pointer.
+    private func hoverDidEnd(animated: Bool) {
         isHovered = false
-        setActionVisible(false, animated: true)
+        setActionVisible(false, animated: animated)
         dismissPopover()
     }
 
@@ -572,7 +595,8 @@ final class SessionRowView: NSTableCellView {
         } else {
             image = builtInProviderImage
         }
-        iconView.image = image
+        agentMark = image
+        iconView.image = plated(image)
         iconView.setAccessibilityLabel(
             session.isSideChat
                 ? SidebarRowDefaults.sideChatAccessibilityLabel
@@ -605,6 +629,46 @@ final class SessionRowView: NSTableCellView {
         nativeIcon = iconView.image
         nativeIconTint = iconView.contentTintColor
         nativeIconAlpha = iconView.alphaValue
+    }
+
+    /// The ground is a themed colour, so it moves with the appearance as well as with the
+    /// selection — and the plate is baked into an image rather than resolved at draw time,
+    /// which is exactly the frozen-value trap `ThemedControl` exists to avoid.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAgentPlate()
+    }
+
+    /// Re-decides the mark's plate against the ground the row currently has.
+    ///
+    /// Cheap enough to run on every selection change: the tone of a mark this size is measured
+    /// from a 32×32 sample, and a mark that needs no plate returns the image it was given.
+    private func applyAgentPlate() {
+        guard let agentMark else { return }
+        iconView.image = plated(agentMark)
+        nativeIcon = iconView.image
+    }
+
+    private func plated(_ image: NSImage?) -> NSImage? {
+        guard let image else { return nil }
+        return IconBackplate.plated(
+            image,
+            againstTone: IconBackplate.tone(of: rowGround()),
+            size: SidebarRowDefaults.iconSize
+        )
+    }
+
+    /// What the mark is actually drawn on: the sidebar's surface, with the selection fill
+    /// composited onto it where there is one.
+    ///
+    /// Only the *emphasized* fill is asked about, because that is the only one the row can
+    /// tell apart — AppKit reports `.normal` both for an unselected row and for a selected one
+    /// in an unfocused sidebar, and that second fill is the accent held far down, which moves
+    /// the ground too little to lose a mark in it.
+    private func rowGround() -> NSColor {
+        let base = Design.Surface.background
+        guard backgroundStyle == .emphasized else { return base }
+        return base.composited(under: Design.Surface.accent)
     }
 
     private func resolveIdentityImage(

@@ -15,6 +15,8 @@ struct ExtensionInstallProposal: Equatable {
     let capabilities: [String]
     let companions: [ExtensionCompanion]
     let includesSource: Bool
+    let themeNames: [String]
+    let fontFamilies: [String]
 
     init(bundle: SkalmanExtensionBundle) {
         let manifest = bundle.manifest
@@ -26,6 +28,8 @@ struct ExtensionInstallProposal: Equatable {
         capabilities = manifest.capabilities.map(\.rawValue).sorted()
         companions = manifest.companions.sorted { $0.id < $1.id }
         includesSource = bundle.sourceURL != nil
+        themeNames = bundle.themes.map(\.theme.name).sorted()
+        fontFamilies = Array(Set(bundle.fonts.flatMap(\.familyNames))).sorted()
     }
 
     var title: String {
@@ -51,6 +55,23 @@ struct ExtensionInstallProposal: Equatable {
                 "It includes Metal shader source that Skalman will compile and run in a "
                     + "host-owned visual surface. Shaders cannot access AppKit or host objects, "
                     + "but they can consume GPU resources; review the included source."
+            )
+        }
+        if !themeNames.isEmpty {
+            paragraphs.append(
+                "It offers \(themeNames.count) app theme(s) for Skalman's own chrome: "
+                    + themeNames.joined(separator: ", ")
+                    + ". They appear in Settings ▸ Themes while the extension is enabled; "
+                    + "nothing applies one automatically."
+            )
+        }
+        if !fontFamilies.isEmpty {
+            paragraphs.append(
+                "It bundles font files Skalman will register for its own process while the "
+                    + "extension is enabled — family: "
+                    + fontFamilies.joined(separator: ", ")
+                    + ". Parsing a font exercises the system's font machinery; the licensing "
+                    + "of a bundled font is the package author's responsibility."
             )
         }
         if !companions.isEmpty {

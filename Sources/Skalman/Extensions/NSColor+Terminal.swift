@@ -44,4 +44,34 @@ extension NSColor {
         }
         return String(format: "#%02X%02X%02X", red, green, blue)
     }
+
+    /// This colour laid over an opaque one, as a single opaque colour.
+    ///
+    /// The arithmetic AppKit would have done at draw time, done once instead — which is the
+    /// difference between a fill that *looks* like a translucent role over its ground and one
+    /// that lets whatever is behind it show through. `blended(withFraction:of:)` is not this: it
+    /// mixes two colours and keeps the receiver's alpha, so a 14% surface stays 14% see-through.
+    ///
+    /// Both sides are resolved in sRGB, and a dynamic colour resolves against whatever drawing
+    /// appearance is current — so call this where that appearance is in force.
+    func composited(over ground: NSColor) -> NSColor {
+        guard let over = usingColorSpace(.sRGB),
+              let under = ground.usingColorSpace(.sRGB) else { return self }
+
+        let alpha = over.alphaComponent
+        guard alpha < 1 else { return over }
+
+        func mix(_ top: CGFloat, _ bottom: CGFloat) -> CGFloat {
+            top * alpha + bottom * (1 - alpha)
+        }
+
+        return NSColor(
+            srgbRed: mix(over.redComponent, under.redComponent),
+            green: mix(over.greenComponent, under.greenComponent),
+            blue: mix(over.blueComponent, under.blueComponent),
+            // The ground is what makes the result opaque; a translucent one cannot, and a card
+            // over a see-through ground has nothing to be flattened against anyway.
+            alpha: under.alphaComponent
+        )
+    }
 }

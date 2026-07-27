@@ -79,14 +79,14 @@ enum SettingsUI {
     /// The heading for a page — larger than a caption, the one emphasised string.
     static func heading(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = Design.Typography.heading()
+        label.applyFont(.heading)
         label.textColor = Design.Text.label
         return label
     }
 
     static func caption(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text.uppercased())
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
         return label
     }
@@ -94,7 +94,7 @@ enum SettingsUI {
     /// Explanatory text beneath a card, in the secondary colour.
     static func note(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = Design.Typography.subheading()
+        label.applyFont(.subheading)
         label.textColor = Design.Text.secondary
         return label
     }
@@ -113,13 +113,13 @@ enum SettingsUI {
         subtitleField: inout NSTextField?
     ) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = Design.Typography.body()
+        titleLabel.applyFont(.body)
         titleLabel.textColor = Design.Text.label
 
         var labelViews: [NSView] = [titleLabel]
         if let subtitle {
             let sub = NSTextField(wrappingLabelWithString: subtitle)
-            sub.font = Design.Typography.subheading()
+            sub.applyFont(.subheading)
             sub.textColor = Design.Text.secondary
             labelViews.append(sub)
             subtitleField = sub
@@ -202,7 +202,7 @@ enum SettingsUI {
 
     static func textField(target: AnyObject, action: Selector, width: CGFloat = SettingsUIDefaults.controlWidth) -> ThemedTextField {
         let field = ThemedTextField()
-        field.font = Design.Typography.body()
+        field.applyFont(.body)
         field.target = target
         field.action = action
         field.translatesAutoresizingMaskIntoConstraints = false

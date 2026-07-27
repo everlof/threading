@@ -517,6 +517,63 @@ final class ThemeToolTests: XCTestCase {
 
         XCTAssertNotNil(glowProperties["offset_x"])
         XCTAssertNotNil(glowProperties["offset_y"])
+
+        // A theme states a typeface as plainly as it states a palette, so the vocabulary an
+        // agent reads has to offer both — and the named family beside them, for a theme whose
+        // identity is a particular face rather than one of the four classes.
+        XCTAssertNotNil(materialProperties["typeface"])
+        XCTAssertNotNil(materialProperties["font_family"])
+        XCTAssertNotNil(materialProperties["remove_font_family"])
+        XCTAssertNil(materialProperties["fontFamily"], "the wire vocabulary is snake_case")
+
+        // The accepted values travel in the description: an agent reading a style brief that
+        // says "sans-serif" has no other way to learn this vocabulary calls it "default".
+        let typeface = try XCTUnwrap(materialProperties["typeface"] as? [String: Any])
+        let description = try XCTUnwrap(typeface["description"] as? String)
+        for value in AppTheme.Material.Typeface.allCases {
+            XCTAssertTrue(
+                description.contains("\"\(value.rawValue)\""),
+                "the typeface description does not name \(value.rawValue)"
+            )
+        }
+    }
+
+    func testMaterialPatchDecodesTypefaceAndFamily() throws {
+        let call = try call("""
+            {
+              "name": "update_app_theme",
+              "arguments": {
+                "theme_id": "custom-violet",
+                "variants": {
+                  "light": {"material": {"typeface": "serif", "font_family": "Baskerville"}}
+                }
+              }
+            }
+            """)
+
+        guard case .updateAppTheme(let arguments) = call else {
+            return XCTFail("decoded as \(call.name)")
+        }
+        let material = try XCTUnwrap(arguments.variants?["light"]?.material)
+        XCTAssertEqual(material.typeface, "serif")
+        XCTAssertEqual(material.fontFamily, "Baskerville")
+    }
+
+    /// `get_app_theme` reports the typeface it is actually set in, so an agent asked to make a
+    /// theme "a bit more formal" can read what it is starting from rather than guessing.
+    func testGetAppThemeReportsTheTypeface() throws {
+        let get = coordinator().getAppTheme(AppThemeReferenceArguments(themeID: "newsprint"))
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let light = try XCTUnwrap(variants["light"] as? [String: Any])
+        let material = try XCTUnwrap(light["material"] as? [String: Any])
+        XCTAssertEqual(
+            material["typeface"] as? String, "serif",
+            "Newsprint is a serif brief and the document should say so"
+        )
     }
 
     func testAppThemeSchemaMakesOptionalVariantsAndAdaptiveAppearanceExplicit() throws {

@@ -392,6 +392,23 @@ struct AgentSession: Codable, Identifiable {
         return title.isEmpty ? AgentDefaults.untitledSessionName : title
     }
 
+    /// The identifier that names this conversation outside Skalman.
+    ///
+    /// The agent's own identifier where it has one, because that is what a `--resume` takes,
+    /// what the transcript file is named after, and what an agent reports about itself. For
+    /// Claude the two are the same string — Skalman mints the UUID and passes it as
+    /// `--session-id` — so this only diverges for Codex, which names itself and is discovered
+    /// afterwards.
+    ///
+    /// The fallback is Skalman's own id rather than nothing: before the agent has named a
+    /// conversation, that id is still what the settings file, the MCP route, the history file
+    /// and the diagnostics journal are all keyed by, which is exactly what someone reading a
+    /// log needs. It is a `TranscriptID` the caller must not assume resumable — `resumeState`
+    /// remains the authority on that.
+    var externalIdentifier: String {
+        resumeState.transcriptID?.rawValue ?? id.uuidString.lowercased()
+    }
+
     /// The name handed to the agent at launch, or nil when the user has not chosen one.
     ///
     /// Only an explicit rename is forwarded. `--name` marks the conversation custom-titled

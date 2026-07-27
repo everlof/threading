@@ -795,23 +795,18 @@ final class ExtensionBundleLoaderTests: XCTestCase {
     /// Set `SKALMAN_SIMULATOR_RELAY_PACKAGE` to the assembled `.skalmanextension` path.
     @MainActor
     func testSimulatorRelayDogfoodProducesARealFrameAndAcceptsInput() throws {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let defaultPackage = repositoryRoot.appendingPathComponent(
-            "SkalmanExtensionKit/Examples/SimulatorRelayExtension/Build/"
-                + "se.mjukis.simulator-relay.skalmanextension",
-            isDirectory: true
-        )
-        let configuredPath = ProcessInfo.processInfo.environment[
+        guard let configuredPath = ProcessInfo.processInfo.environment[
             "SKALMAN_SIMULATOR_RELAY_PACKAGE"
-        ]
-        let packageURL = configuredPath.map {
-            URL(fileURLWithPath: $0, isDirectory: true)
-        } ?? defaultPackage
+        ]?.trimmingCharacters(in: .whitespacesAndNewlines),
+        !configuredPath.isEmpty else {
+            throw XCTSkip(
+                "Set SKALMAN_SIMULATOR_RELAY_PACKAGE to run Simulator dogfood."
+            )
+        }
+        let packageURL = URL(fileURLWithPath: configuredPath, isDirectory: true)
         guard FileManager.default.fileExists(atPath: packageURL.path) else {
-            throw XCTSkip("Set SKALMAN_SIMULATOR_RELAY_PACKAGE to run Simulator dogfood.")
+            XCTFail("Simulator relay package does not exist at \(packageURL.path).")
+            return
         }
         let bundle = try ExtensionBundleInspector.inspect(
             at: packageURL

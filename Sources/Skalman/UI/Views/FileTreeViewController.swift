@@ -291,7 +291,7 @@ private final class FileTreeRowView: NSView {
         icon.translatesAutoresizingMaskIntoConstraints = false
 
         let label = NSTextField(labelWithString: node.name)
-        label.font = Design.Typography.caption()
+        label.applyFont(.caption)
         label.textColor = node.isDirectory ? Design.Text.label : Design.Text.secondary
         label.lineBreakMode = .byTruncatingMiddle
         label.usesSingleLineMode = true

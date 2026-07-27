@@ -280,6 +280,13 @@ final class AccountUsageItemView: BackdropOverlay {
         )
         addTrackingArea(area)
         trackingArea = area
+
+        // The pill sits in the pane header, which slides sideways whenever a pane opens or
+        // closes — the move the pointer is never told about. See `NSView.hoverIsStale`.
+        if hoverIsStale(isHovered) {
+            isHovered = false
+            scheduleClose()
+        }
     }
 
     override func mouseEntered(with event: NSEvent) {

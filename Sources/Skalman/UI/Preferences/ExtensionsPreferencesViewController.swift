@@ -370,7 +370,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
 
     private func statusRow(_ status: InstalledExtensionStatus) -> NSView {
         let value = NSTextField(wrappingLabelWithString: status.summary)
-        value.font = Design.Typography.subheading()
+        value.applyFont(.subheading)
         switch status {
         case .running:
             value.textColor = Design.Status.positive
@@ -384,7 +384,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         value.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let title = NSTextField(labelWithString: "Status")
-        title.font = Design.Typography.body()
+        title.applyFont(.body)
         title.textColor = Design.Text.label
         title.setContentHuggingPriority(.required, for: .horizontal)
 

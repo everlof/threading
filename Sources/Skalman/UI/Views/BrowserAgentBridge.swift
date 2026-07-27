@@ -1236,6 +1236,71 @@ enum BrowserAgentScripts {
         });
         """#
 
+    /// Focuses one exact password field for visible user takeover without reading or accepting
+    /// its value. The normal actionability checks keep the handoff on a field the user can
+    /// actually reach; the browser-level navigation guard still blocks a hostile focus handler
+    /// from submitting its form.
+    static let focusPasswordForUser = targetPrelude + #"""
+        const element = resolveTarget();
+        if (!element) {
+          return JSON.stringify({ ok: false, message: targetFailure() });
+        }
+        const view = element.ownerDocument?.defaultView || globalThis;
+        const inputType = clean(element.getAttribute('type')).toLowerCase();
+        if (!(element instanceof view.HTMLInputElement) || inputType !== 'password') {
+          return JSON.stringify({
+            ok: false,
+            message: 'The target is no longer a password field.'
+          });
+        }
+        const actionability = await actionabilityIssue(element, {
+          enabled: true, editable: true
+        });
+        if (actionability) {
+          return JSON.stringify({ ok: false, message: actionability });
+        }
+        scrollIntoViewAcrossFrames(element);
+        element.focus({ preventScroll: true });
+        return JSON.stringify({
+          ok: true,
+          message: 'Focused the password field for private user input.'
+        });
+        """#
+
+    /// Runs in WebKit's isolated client world in every frame. Only a boolean crosses the native
+    /// bridge: never the field name, associated account, or value. Page JavaScript cannot forge
+    /// or suppress this state because it does not share the client-world global object.
+    static let passwordFocusObservation = #"""
+        (() => {
+          if (globalThis.__skalmanPasswordFocusInstalled) return;
+          globalThis.__skalmanPasswordFocusInstalled = true;
+          const frameToken = globalThis.crypto?.randomUUID?.()
+            || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const report = () => {
+            const element = document.activeElement;
+            const focused = element instanceof HTMLInputElement
+              && String(element.getAttribute('type') || '').toLowerCase() === 'password';
+            try {
+              webkit.messageHandlers.skalmanPasswordFocus.postMessage({
+                frame_token: frameToken,
+                focused
+              });
+            } catch (_) {}
+          };
+          addEventListener('focusin', report, true);
+          addEventListener('focusout', () => setTimeout(report, 0), true);
+          addEventListener('pagehide', () => {
+            try {
+              webkit.messageHandlers.skalmanPasswordFocus.postMessage({
+                frame_token: frameToken,
+                focused: false
+              });
+            } catch (_) {}
+          }, true);
+          report();
+        })();
+        """#
+
     static let screenshotTarget = targetPrelude + #"""
         const element = resolveTarget();
         const result = (ok, message, rect = null, clipped = false) => JSON.stringify({

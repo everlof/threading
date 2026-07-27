@@ -39,6 +39,11 @@ final class SessionAttachmentsViewController: NSViewController {
             guard event.sessionID == self?.sessionID else { return }
             self?.refresh()
         }
+        // The empty state names detection being off; toggling it in Settings must retitle the
+        // pane that is already open.
+        appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
+            self?.refresh()
+        }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applyPreviewTheme()
         }
@@ -74,7 +79,7 @@ final class SessionAttachmentsViewController: NSViewController {
 
     private func setupList() {
         countLabel = NSTextField(labelWithString: "")
-        countLabel.font = Design.Typography.caption()
+        countLabel.applyFont(.caption)
         countLabel.textColor = Design.Text.quaternary
         countLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -99,7 +104,7 @@ final class SessionAttachmentsViewController: NSViewController {
         emptyLabel = NSTextField(wrappingLabelWithString:
             "Images and PDFs mentioned by this session will appear here."
         )
-        emptyLabel.font = Design.Typography.detail()
+        emptyLabel.applyFont(.detail())
         emptyLabel.textColor = Design.Text.tertiary
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -127,7 +132,7 @@ final class SessionAttachmentsViewController: NSViewController {
         pdfView.translatesAutoresizingMaskIntoConstraints = false
 
         previewMessage = NSTextField(wrappingLabelWithString: "")
-        previewMessage.font = Design.Typography.detail()
+        previewMessage.applyFont(.detail())
         previewMessage.textColor = Design.Text.tertiary
         previewMessage.alignment = .center
         previewMessage.translatesAutoresizingMaskIntoConstraints = false
@@ -142,13 +147,13 @@ final class SessionAttachmentsViewController: NSViewController {
 
     private func setupActions() {
         fileLabel = NSTextField(labelWithString: "")
-        fileLabel.font = Design.Typography.subheading()
+        fileLabel.applyFont(.subheading)
         fileLabel.textColor = Design.Text.label
         fileLabel.lineBreakMode = .byTruncatingMiddle
         fileLabel.translatesAutoresizingMaskIntoConstraints = false
 
         pathLabel = NSTextField(labelWithString: "")
-        pathLabel.font = Design.Typography.compactCode()
+        pathLabel.applyFont(.compactCode)
         pathLabel.textColor = Design.Text.tertiary
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -275,6 +280,7 @@ final class SessionAttachmentsViewController: NSViewController {
         attachments = SessionAttachmentStore.shared.attachments(for: sessionID)
         countLabel.stringValue = "ATTACHMENTS  \(attachments.count)"
         tableView.reloadData()
+        emptyLabel.stringValue = emptyStateMessage()
 
         let hasAttachments = !attachments.isEmpty
         countLabel.isHidden = !hasAttachments
@@ -299,6 +305,17 @@ final class SessionAttachmentsViewController: NSViewController {
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         tableView.scrollRowToVisible(index)
         showSelected()
+    }
+
+    /// An empty pane while detection is off would read as "nothing was found", which is the
+    /// wrong explanation — so the one state names the other.
+    private func emptyStateMessage() -> String {
+        if let kind = ProjectStore.shared.session(withID: sessionID)?.kind,
+           !AppSettings.shared.detectsAttachmentReferences(for: kind) {
+            return "Attachment detection for \(kind.displayName) is turned off "
+                + "in Settings › General."
+        }
+        return "Images and PDFs mentioned by this session will appear here."
     }
 
     // MARK: - Preview
@@ -447,13 +464,13 @@ private final class SessionAttachmentRowView: NSView {
         icon.translatesAutoresizingMaskIntoConstraints = false
 
         let name = NSTextField(labelWithString: attachment.name)
-        name.font = Design.Typography.subheading()
+        name.applyFont(.subheading)
         name.textColor = Design.Text.label
         name.lineBreakMode = .byTruncatingMiddle
         name.translatesAutoresizingMaskIntoConstraints = false
 
         let path = NSTextField(labelWithString: attachment.relativePath)
-        path.font = Design.Typography.caption()
+        path.applyFont(.caption)
         path.textColor = Design.Text.tertiary
         path.lineBreakMode = .byTruncatingMiddle
         path.translatesAutoresizingMaskIntoConstraints = false

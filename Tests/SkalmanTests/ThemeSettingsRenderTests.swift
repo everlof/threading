@@ -194,6 +194,103 @@ final class ThemeSettingsRenderTests: XCTestCase {
         return host
     }
 
+    // MARK: - The Sweep Reaches a Real Tree
+
+    /// A live typeface switch has to move a page that was **already built**, which is the half
+    /// the unit tests cannot show: they drive one label, and the claim here is that every label
+    /// down a real settings page follows.
+    ///
+    /// The two themes differ in `typeface` and in nothing else — same roles, same palette, same
+    /// radii — so a pixel that moves moved because of the typeface. Switching between two stock
+    /// styles would have proved only that their colours differ.
+    @MainActor
+    func testALiveTypefaceSwitchMovesAPageThatWasAlreadyBuilt() throws {
+        let sans = AppThemeStyles.swissMinimalist
+        let serif = typefaceTwin(of: sans, .serif)
+        defer { AppThemePalette.set(.system) }
+
+        AppThemePalette.set(sans)
+        let controller = ThemePreferencesViewController()
+        let host = laidOut(controller.view, width: SettingsUIDefaults.pageWidth, height: Render.height)
+        host.layoutSubtreeIfNeeded()
+
+        let before = try XCTUnwrap(png(of: host))
+        let proseBefore = proseFonts(in: host)
+        XCTAssertFalse(proseBefore.isEmpty, "the page drew no prose at all — nothing is under test")
+        let codeBefore = codeFonts(in: host)
+
+        AppThemePalette.set(serif)
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+
+        let proseAfter = proseFonts(in: host)
+        XCTAssertEqual(proseAfter.count, proseBefore.count, "the sweep added or lost labels")
+        for (index, after) in proseAfter.enumerated() where after.family == proseBefore[index].family {
+            XCTFail("\(after.role) kept \(after.family) — the sweep did not reach it")
+        }
+        XCTAssertEqual(
+            codeFonts(in: host).map(\.family), codeBefore.map(\.family),
+            "a code label followed the typeface; code is monospaced under every style"
+        )
+
+        XCTAssertNotEqual(
+            try XCTUnwrap(png(of: host)), before,
+            "every label re-fonted and the page still drew identically"
+        )
+    }
+
+    /// The recorded roles a tree is actually carrying, so a failure names the label rather than
+    /// reporting that two images differ.
+    @MainActor
+    private func recordedFonts(in view: NSView) -> [(role: Design.FontRole, family: String)] {
+        var found: [(Design.FontRole, String)] = []
+        if let role = view.recordedFontRoleForTesting,
+           let font = (view as? FontRoleApplying)?.appliedRoleFont {
+            found.append((role, font.familyName ?? font.fontName))
+        }
+        for subview in view.subviews { found += recordedFonts(in: subview) }
+        return found
+    }
+
+    @MainActor
+    private func proseFonts(in view: NSView) -> [(role: Design.FontRole, family: String)] {
+        recordedFonts(in: view).filter(\.role.followsTheme)
+    }
+
+    @MainActor
+    private func codeFonts(in view: NSView) -> [(role: Design.FontRole, family: String)] {
+        recordedFonts(in: view).filter { !$0.role.followsTheme }
+    }
+
+    /// The same theme with one field changed, which no stock pair provides.
+    private func typefaceTwin(
+        of theme: AppTheme,
+        _ typeface: AppTheme.Material.Typeface
+    ) -> AppTheme {
+        var variants: [AppTheme.VariantKind: AppTheme.Variant] = [:]
+        for (kind, variant) in theme.variants {
+            let material = variant.material
+            variants[kind] = AppTheme.Variant(
+                roles: variant.roles,
+                terminalPalette: variant.terminalPalette,
+                material: AppTheme.Material(
+                    panelRadius: material.panelRadius,
+                    controlRadius: material.controlRadius,
+                    borderWidth: material.borderWidth,
+                    glow: material.glow,
+                    typeface: typeface
+                )
+            )
+        }
+        return AppTheme(
+            id: AppThemeID("\(theme.id.rawValue)-typeface-twin"),
+            name: theme.name,
+            mode: theme.mode,
+            summary: theme.summary,
+            variants: variants
+        )
+    }
+
     @MainActor
     private func png(of host: NSView) -> Data? {
         guard host.bounds.height > 1,

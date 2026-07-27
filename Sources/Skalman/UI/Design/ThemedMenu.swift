@@ -799,7 +799,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         scrollView.documentView = document
         addSubview(scrollView)
 
-        filterLabel.font = Design.Typography.detail()
+        filterLabel.applyFont(.detail())
         filterLabel.textColor = Design.Text.secondary
         filterLabel.lineBreakMode = .byTruncatingHead
         filterLabel.isHidden = true
@@ -970,7 +970,6 @@ private final class ThemedMenuRowView: ThemedControl {
     /// The pointer is on a row that cannot be chosen. It answers with a wash far fainter
     /// than the hover fill — feedback that the hover was seen, not an invitation.
     private var isDisabledHover = false { didSet { needsDisplay = true } }
-    private var trackingArea: NSTrackingArea?
 
     /// A preview in the title's slot is the row's name, so the row draws no text of its own.
     private var drawsTitle: Bool { item.preview?.placement != .title }
@@ -1084,28 +1083,15 @@ private final class ThemedMenuRowView: ThemedControl {
 
     override var acceptsFirstResponder: Bool { false }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
+    /// A row's hover is the menu's highlight, so it is reported rather than drawn — and for a row
+    /// that cannot be chosen it is the faint wash instead.
+    override func hoverDidChange() {
+        super.hoverDidChange()
         guard item.isEnabled else {
-            isDisabledHover = true
+            isDisabledHover = isHovered
             return
         }
-        onHighlight?(entryIndex)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isDisabledHover = false
+        if isHovered { onHighlight?(entryIndex) }
     }
 
     override func mouseDown(with event: NSEvent) {

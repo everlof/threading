@@ -155,7 +155,7 @@ final class ProjectRowView: NSTableCellView {
             moreSymbol: SidebarRowDefaults.actionSymbol,
             moreAccessibility: "Project actions"
         )
-        nameLabel.font = Design.Typography.emphasizedBody()
+        nameLabel.applyFont(.emphasizedBody)
 
         switch style {
         case .standalone:
@@ -190,7 +190,7 @@ final class ProjectRowView: NSTableCellView {
         dismissPopover()
         hideIcon()
         setHoverControls(moreSymbol: nil)
-        nameLabel.font = Design.Typography.caption()
+        nameLabel.applyFont(.caption)
         nativeName = name
         setCount(count)
         nativeToolTip = nil
@@ -212,7 +212,7 @@ final class ProjectRowView: NSTableCellView {
             moreSymbol: SidebarRowDefaults.settingsSymbol,
             moreAccessibility: "Grouping options"
         )
-        nameLabel.font = Design.Typography.caption()
+        nameLabel.applyFont(.caption)
         nativeName = branch
         setCount(collapsedSessionCount)
         nativeToolTip = branch
@@ -270,7 +270,7 @@ final class ProjectRowView: NSTableCellView {
             return isHeading ? Design.Text.secondary : Design.Text.label
         }
 
-        countLabel.font = Design.Typography.numericDetail()
+        countLabel.applyFont(.numericDetail())
         countLabel.alignment = .right
         countLabel.setContentHuggingPriority(.required, for: .horizontal)
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -509,6 +509,12 @@ final class ProjectRowView: NSTableCellView {
         )
         addTrackingArea(area)
         trackingArea = area
+
+        // The sidebar reloads and scrolls under a still pointer, and neither delivers an exit —
+        // see `NSView.hoverIsStale`.
+        if hoverIsStale(isHovered) {
+            hoverDidEnd(animated: false)
+        }
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -531,8 +537,14 @@ final class ProjectRowView: NSTableCellView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        hoverDidEnd(animated: true)
+    }
+
+    /// What leaving the row means, whether the pointer left it or it left the pointer. The
+    /// correction does not animate: the row it would animate is no longer under the pointer.
+    private func hoverDidEnd(animated: Bool) {
         isHovered = false
-        setHoverButtonVisible(false, animated: true)
+        setHoverButtonVisible(false, animated: animated)
         dismissPopover()
     }
 

@@ -199,6 +199,21 @@ extension TerminalView {
             colors [midx] = newColor
             return newColor
         case .trueColor(let r, let g, let b):
+            #if os(macOS)
+            // A background may be rewritten by the host; a foreground is never touched. The two
+            // roles take separate caches because the key here is the colour alone.
+            if !isFg, let transform = trueColorBackgroundTransform {
+                if let cached = trueColorBackgrounds [color] {
+                    return cached
+                }
+                let harmonized = transform (TTColor.make(red: CGFloat (r) / 255.0,
+                                                         green: CGFloat (g) / 255.0,
+                                                         blue: CGFloat (b) / 255.0,
+                                                         alpha: 1.0))
+                trueColorBackgrounds [color] = harmonized
+                return harmonized
+            }
+            #endif
             if let tc = trueColors [color] {
                 return tc
             }
@@ -206,7 +221,7 @@ extension TerminalView {
                                         green: CGFloat (g) / 255.0,
                                         blue: CGFloat (b) / 255.0,
                                         alpha: 1.0)
-            
+
             trueColors [color] = newColor
             return newColor
         }
@@ -217,7 +232,12 @@ extension TerminalView {
     {
         urlAttributes = [:]
         attributes = [:]
-        
+        #if os(macOS)
+        // The transform measures against the palette's own background, so every cached answer
+        // is stale the moment the palette moves.
+        trueColorBackgrounds = [:]
+        #endif
+
         terminal.updateFullScreen ()
         queuePendingDisplay()
     }
@@ -304,6 +324,14 @@ extension TerminalView {
             tf = fontSet.normal
         }
         
+        // SGR 2 (faint): half strength, blended over whatever the cell's background is by
+        // drawing the foreground at half alpha. CLIs mark autosuggestions and hints with
+        // faint, and rendering them at full strength made a suggestion indistinguishable
+        // from text the user actually typed.
+        if flags.contains (.dim) {
+            fg = fg.withAlphaComponent (fg.alphaComponent * 0.5)
+        }
+
         var nsattr: [NSAttributedString.Key:Any] = [
             .font: tf,
             .foregroundColor: fg,
@@ -364,7 +392,15 @@ extension TerminalView {
             tf = fontSet.normal
         }
         
-        let fgColor = mapColor (color: fg, isFg: true, isBold: isBold, useBrightColors: useBrightColors)
+        var fgColor = mapColor (color: fg, isFg: true, isBold: isBold, useBrightColors: useBrightColors)
+        // SGR 2 (faint): drawn at half alpha so it blends toward the cell's own background.
+        // CLIs mark autosuggestions and hints with faint, and rendering them at full
+        // strength made a suggestion indistinguishable from text the user actually typed.
+        // The attribute cache keys include the style flags, so the dimmed variant caches
+        // separately from the normal one.
+        if flags.contains (.dim) {
+            fgColor = fgColor.withAlphaComponent (fgColor.alphaComponent * 0.5)
+        }
         var nsattr: [NSAttributedString.Key:Any] = [
             .font: tf,
             .foregroundColor: fgColor,
