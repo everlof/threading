@@ -30,24 +30,36 @@ private struct ClaudeUsageResponse: Decodable {
 /// Reads Claude usage, preferring a live API read and falling back to the local status-line
 /// cache when no credentials file exists — which is the normal macOS layout, where Claude
 /// Code keeps its token in the Keychain instead.
+///
+/// Three sources, ordered by freshness: the API when there is a token on disk to call it with,
+/// then the status-line cache Claude Code pushes on every turn, then the CLI's own
+/// `cachedUsageUtilization`. The last one is also *merged into* whichever won, because it is
+/// the only one that names a model-scoped window — see `ClaudeUsageProfileCache`.
 enum ClaudeUsageFetcher {
 
     // MARK: - Public Methods
 
     static func fetch(account: AgentAccount) async throws -> AccountUsage {
+        let profile = ClaudeUsageProfileCache.read(account: account)
+
         if let credentials = try readCredentialsFile(account: account) {
             do {
-                return try await fetchFromAPI(credentials: credentials)
+                return withModelWindows(from: profile, on: try await fetchFromAPI(credentials: credentials))
             } catch UsageFetchError.tokenExpired {
                 // A stale file token can still be beaten by the local cache.
-                if let cached = ClaudeUsageCache.read(account: account) { return cached }
+                if let cached = ClaudeUsageCache.read(account: account) {
+                    return withModelWindows(from: profile, on: cached)
+                }
+                if let profile { return profile }
                 throw UsageFetchError.tokenExpired
             }
         }
 
         if let cached = ClaudeUsageCache.read(account: account) {
-            return cached
+            return withModelWindows(from: profile, on: cached)
         }
+
+        if let profile { return profile }
 
         throw UsageFetchError.noCredential(
             "No readable usage source for this Claude account."
@@ -55,6 +67,19 @@ enum ClaudeUsageFetcher {
     }
 
     // MARK: - Private Methods
+
+    /// Carries the profile cache's model-scoped windows onto a reading taken from a fresher
+    /// source, which has the account's own windows but never the scoped ones.
+    private static func withModelWindows(
+        from profile: AccountUsage?,
+        on usage: AccountUsage
+    ) -> AccountUsage {
+        guard let profile, !profile.modelWindows.isEmpty else { return usage }
+
+        var merged = usage
+        merged.modelWindows = profile.modelWindows
+        return merged
+    }
 
     private static func fetchFromAPI(
         credentials: (token: String, plan: String?)

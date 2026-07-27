@@ -165,24 +165,14 @@ extension ProjectSidebarViewController {
 
     // MARK: - Handlers
 
+    /// The move itself belongs to the coordinator, not here: it stops the session's process, so
+    /// the pane showing that session has to reopen it under the new account. A sidebar reload
+    /// alone leaves the terminal blank until the session is selected again.
     @objc private func moveToAccountClicked(_ sender: NSMenuItem) {
         guard let sessionID = actionSessionID,
               let account = sender.representedObject as? AgentAccount else { return }
 
-        switch SessionMigration.move(sessionID: sessionID, to: account) {
-        case .success:
-            reload()
-        case .failure(let error):
-            presentMigrationError(error)
-        }
-    }
-
-    private func presentMigrationError(_ error: SessionMigration.MoveError) {
-        let alert = NSAlert()
-        alert.messageText = "Couldn't move the conversation"
-        alert.informativeText = error.message
-        alert.alertStyle = .warning
-        alert.runModal()
+        delegate?.projectSidebar(self, moveSession: sessionID, toAccount: account)
     }
 
     @objc private func newSideChatClicked() {

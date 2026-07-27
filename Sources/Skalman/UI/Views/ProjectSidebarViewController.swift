@@ -1557,6 +1557,11 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     )
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
+        moveSession sessionID: SessionID,
+        toAccount account: AgentAccount
+    )
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
         createSideChatOf sessionID: SessionID,
         prompt: String?
     )

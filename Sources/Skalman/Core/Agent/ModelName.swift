@@ -49,4 +49,24 @@ enum ModelName {
         // an unfamiliar accurate one, since this is the string that says what you are paying for.
         return id + suffix
     }
+
+    /// Whether a rate limit scoped to `name` meters a session running `identifier`.
+    ///
+    /// The two vocabularies do not match on the nose and never will: a provider names the limit
+    /// after the family it meters (`Fable`, `GPT-5.3-Codex-Spark`) while a session carries the
+    /// id its CLI was launched with (`claude-fable-5[1m]`). Containment reads both, in the id
+    /// and in the friendly name, so a limit matches the whole family rather than one dated
+    /// version of it — which is the behaviour that survives the next model.
+    ///
+    /// Deliberately narrow in one direction: an unrecognised pairing is *not* a match, because a
+    /// scoped limit wrongly applied would put a session in the red over a model it is not using.
+    static func scope(_ name: String, meters identifier: String) -> Bool {
+        let scoped = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !scoped.isEmpty else { return false }
+
+        let id = identifier.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !id.isEmpty else { return false }
+
+        return id.contains(scoped) || display(for: identifier).lowercased().contains(scoped)
+    }
 }

@@ -27,6 +27,10 @@ final class AccountUsageItemView: BackdropOverlay {
 
     private(set) var account: AgentAccount?
 
+    /// The model the shown session runs, which decides whether a model-scoped window is one of
+    /// *this* session's limits or another model's business.
+    private(set) var model: String?
+
     /// Re-asks the service on a short cadence; the service's own spacing decides whether a
     /// tick actually fetches, so the timer stays cheap.
     private var refreshTimer: Timer?
@@ -144,14 +148,20 @@ final class AccountUsageItemView: BackdropOverlay {
 
     // MARK: - Public Methods
 
-    /// Points the pill at an account, or hides it when the current session has none.
-    func configure(account: AgentAccount?) {
+    /// Points the pill at an account and the model the session runs on it, or hides it when the
+    /// current session has no metered account.
+    ///
+    /// The model is part of the configuration rather than looked up here: the pill follows a
+    /// session, and which limit binds that session depends on what it runs, not only on who
+    /// pays for it.
+    func configure(account: AgentAccount?, model: String? = nil) {
         if self.account?.id != account?.id {
             cancelScheduledClose()
             popover?.close()
             popover = nil
         }
         self.account = account
+        self.model = model
 
         if let account {
             AccountUsageService.shared.refresh(account)
@@ -184,16 +194,21 @@ final class AccountUsageItemView: BackdropOverlay {
 
         isHidden = false
 
-        // The ring is the glance: one gauge, driven by whichever window is closest to its
-        // limit. The text beside it names every window, which is where the insight lives —
-        // a spent 5-hour window and a spent week mean different things.
-        let peak = usage?.peakWindow()
-        let severity = UsageSeverity.from(fraction: peak?.fraction)
+        // The ring is the glance: one gauge, driven by whichever of *this session's* windows is
+        // closest to its limit — including the one metering the model it runs, which is
+        // routinely the binding limit and was the one number the pill used to leave out. The
+        // text beside it names every window, which is where the insight lives: a spent 5-hour
+        // window, a spent week and a spent model mean three different things.
+        let binding = usage?.bindingWindow(metering: model)
+        let severity = UsageSeverity.from(fraction: binding?.fraction)
 
-        ringView.fraction = peak?.fraction
+        ringView.fraction = binding?.fraction
         ringView.tint = severity.glyphColor
 
-        summaryLabel.attributedStringValue = Self.summary(windows: usage?.windows ?? [], ink: ink)
+        summaryLabel.attributedStringValue = Self.summary(
+            windows: usage?.windows(metering: model) ?? [],
+            ink: ink
+        )
     }
 
     /// `5h 43% · 7d 73%`: each window as a quiet label and its value, the value tinted by

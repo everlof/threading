@@ -57,6 +57,84 @@ final class AccountUsageSummaryTests: XCTestCase {
         XCTAssertEqual(usage.compactSummary(at: now), "5h 10% · 7d 22%")
     }
 
+    /// …and the other half of that rule: the window that stops *this* session is the account's
+    /// own or the one metering the model it runs, whichever is fuller. The pill gauges this,
+    /// because a weekly window at 22% is comfortable as an account and spent as a session.
+    func testBindingWindowIncludesTheModelTheSessionRuns() {
+        var usage = makeUsage(windows: [
+            window(id: "5h", fraction: 0.10, resetsIn: 3600),
+            window(id: "7d", fraction: 0.22, resetsIn: 86_400)
+        ])
+        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 86_400)]
+
+        XCTAssertEqual(usage.bindingWindow(at: now, metering: "claude-fable-5[1m]")?.id, "Fable")
+        XCTAssertEqual(
+            usage.compactSummary(at: now, metering: "claude-fable-5[1m]"),
+            "5h 10% · 7d 22% · Fable 89%"
+        )
+    }
+
+    /// Another model's limit is not this session's problem, and naming no model at all is not a
+    /// licence to guess — both read as the account's own windows.
+    func testBindingWindowIgnoresLimitsForOtherModels() {
+        var usage = makeUsage(windows: [
+            window(id: "5h", fraction: 0.10, resetsIn: 3600),
+            window(id: "7d", fraction: 0.22, resetsIn: 86_400)
+        ])
+        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 86_400)]
+
+        XCTAssertEqual(usage.bindingWindow(at: now, metering: "claude-opus-4-8")?.id, "7d")
+        XCTAssertEqual(usage.bindingWindow(at: now, metering: nil)?.id, "7d")
+        XCTAssertEqual(usage.compactSummary(at: now, metering: nil), "5h 10% · 7d 22%")
+    }
+
+    /// A scoped window past its reset is skipped like any other: its percentage describes the
+    /// window before it, and gauging the ring from it would show pressure that has gone.
+    func testExpiredModelWindowDoesNotBind() {
+        var usage = makeUsage(windows: [window(id: "7d", fraction: 0.22, resetsIn: 86_400)])
+        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: -60)]
+
+        XCTAssertEqual(usage.bindingWindow(at: now, metering: "fable")?.id, "7d")
+        XCTAssertEqual(usage.compactSummary(at: now, metering: "fable"), "7d 22% · Fable —")
+    }
+
+    // MARK: - Account Menu
+
+    /// The line under each login where an account is picked. It carries the plan, every window
+    /// metering the model that would run, and when the tight one comes back — because that is
+    /// the moment the numbers change a decision, and the toolbar only speaks afterwards.
+    @MainActor
+    func testAccountMenuLineNamesPlanWindowsAndTheBindingReset() {
+        var usage = AccountUsage(
+            windows: [
+                window(id: "5h", fraction: 0.07, resetsIn: 3600),
+                window(id: "7d", fraction: 0.56, resetsIn: 54_000)
+            ],
+            planLabel: "Max",
+            observedAt: now,
+            source: .localCache
+        )
+        usage.modelWindows = [window(id: "Fable", fraction: 0.89, resetsIn: 54_000)]
+
+        XCTAssertEqual(
+            AccountUsageMenu.summary(for: usage, metering: "claude-fable-5[1m]", at: now),
+            "Max · 5h 7% · 7d 56% · Fable 89% · Fable resets in 15h"
+        )
+    }
+
+    /// Without a model the line says only what it knows, and an account with no plan label
+    /// leads with its windows rather than an empty segment.
+    @MainActor
+    func testAccountMenuLineOmitsWhatItCannotSay() {
+        let usage = makeUsage(windows: [window(id: "7d", fraction: 0.56, resetsIn: 54_000)])
+
+        XCTAssertEqual(
+            AccountUsageMenu.summary(for: usage, metering: nil, at: now),
+            "7d 56% · 7d resets in 15h"
+        )
+        XCTAssertNil(AccountUsageMenu.summary(for: makeUsage(windows: []), metering: nil, at: now))
+    }
+
     /// Banked resets are stated only when the account has some — a zero is what every account
     /// without them reports, and announcing it on all of them is noise.
     func testResetCreditsReadOnlyWhenPresent() {

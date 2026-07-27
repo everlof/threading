@@ -83,6 +83,30 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         onPresentationChanged()
     }
 
+    /// Moves a conversation to another account of the same agent and reopens it there.
+    ///
+    /// The same shape as the surface switch, and for the same reason: `SessionMigration` stops
+    /// the live process — it belongs to the old account and is still writing the transcript
+    /// being copied — so the session on screen has no terminal until something puts one back.
+    /// Reloading the sidebar alone left the pane blank until the session was selected again,
+    /// which read as the move having done nothing.
+    func moveSession(_ sessionID: SessionID, to account: AgentAccount) {
+        guard confirmMoveIfRunning(sessionID: sessionID, to: account) else { return }
+
+        switch SessionMigration.move(sessionID: sessionID, to: account) {
+        case .success:
+            container.reopenIfShowing(sessionID: sessionID)
+            sidebar.reload()
+            onPresentationChanged()
+        case .failure(let error):
+            let alert = NSAlert()
+            alert.messageText = "Couldn't move the conversation"
+            alert.informativeText = error.message
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
     func createSideChat(of sessionID: SessionID, prompt: String?) {
         // "Ask on the Side" carries its question, which names the chat the same way the
         // composer's prompt names an ordinary session. A plain fork stays "Side Chat" until
@@ -231,6 +255,25 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             : "The shell will stop. The session stays in the sidebar."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Close Session")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// A move interrupts a running agent exactly as a surface switch does, so it asks under the
+    /// same setting rather than inventing a policy of its own.
+    private func confirmMoveIfRunning(sessionID: SessionID, to account: AgentAccount) -> Bool {
+        guard AppSettings.shared.confirmsBeforeClosingRunningSession,
+              AgentRuntime.shared.isRunning(sessionID: sessionID),
+              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
+
+        let alert = NSAlert()
+        alert.messageText = "Move “\(session.displayTitle)” to \(AccountName.display(for: account))?"
+        alert.informativeText = """
+            The agent stops and starts again under that account, resuming this conversation \
+            where it left off. Anything it is working on right now is interrupted.
+            """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Move")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
     }

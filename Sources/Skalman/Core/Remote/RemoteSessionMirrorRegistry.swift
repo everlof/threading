@@ -202,12 +202,16 @@ final class RemoteSessionMirrorRegistry {
                 accounts = discoveredAccounts.map { account in
                     AccountUsageService.shared.refresh(account)
                     let usage = AccountUsageService.shared.usage(for: account)
+                    // Read against the model this account would run, as the desktop's own
+                    // account menu is: a plan metering that model separately can be nearly
+                    // spent while the account's weekly window still looks comfortable.
+                    let model = AgentModels.defaultModel(for: kind, account: account)
                     return RemoteAccountChoiceDTO(
                         id: account.handle.name,
                         name: accountNames[account.id] ?? account.displayName,
                         emoji: account.emoji,
-                        usageSummary: usage?.compactSummary(),
-                        usageFraction: usage?.peakWindow()?.fraction,
+                        usageSummary: usage?.compactSummary(metering: model),
+                        usageFraction: usage?.bindingWindow(metering: model)?.fraction,
                         usageError: AccountUsageService.shared.errorMessage(for: account),
                         models: models(for: account),
                         defaultModelID: AgentModels.defaultModel(for: kind, account: account)

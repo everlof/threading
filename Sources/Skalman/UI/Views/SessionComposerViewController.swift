@@ -412,17 +412,30 @@ final class SessionComposerViewController: NSViewController {
 
     private func accountItems() -> [ThemedMenuEntry] {
         AgentAccountDiscovery.accounts(for: selectedAgent).map { account in
+            let name = AccountName.display(for: account)
             var item = ThemedMenuItem(
-                title: AccountName.display(for: account),
+                // The emoji when the account has one: it is how the same login is identified in
+                // the sidebar, and a menu that names it differently makes the user learn it
+                // twice.
+                title: account.emoji.map { "\($0)  \(name)" } ?? name,
                 representedValue: account.handle,
                 isSelected: account.handle == selectedAccountHandle
             )
 
             // Which login to start on is decided here, so this is where what is left of each
             // one belongs — not only in the toolbar, which speaks after the choice is made.
-            AccountUsageMenu.decorate(&item, for: account)
+            // Read against the model this session will run, since the account's own windows are
+            // not the whole story when the plan meters that model separately.
+            AccountUsageMenu.decorate(&item, for: account, metering: modelToLaunch(on: account))
             return .item(item)
         }
+    }
+
+    /// The model a session started now would run on `account`: an explicit choice, else what
+    /// that account is configured to use. Resolved per account, because the configured default
+    /// is the account's own setting rather than a global one.
+    private func modelToLaunch(on account: AgentAccount) -> String? {
+        selectedModel ?? AgentModels.defaultModel(for: selectedAgent, account: account)
     }
 
     /// What the chip says: the chosen model, else the one the account is configured to use,

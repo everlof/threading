@@ -18,21 +18,62 @@ enum AccountUsageMenu {
     /// alternative to showing what is known is showing nothing while the menu is open. The
     /// refresh it kicks off is throttled by `AccountUsageService` and lands for the next open
     /// — which `prefetch` exists to make the common case.
-    static func decorate(_ item: inout ThemedMenuItem, for account: AgentAccount) {
+    ///
+    /// `model` is what the session will run if this account is chosen. It belongs here because
+    /// the plan meters some models separately: comparing two logins on their weekly windows
+    /// alone can recommend the one whose Fable window is nearly spent.
+    static func decorate(
+        _ item: inout ThemedMenuItem,
+        for account: AgentAccount,
+        metering model: String? = nil
+    ) {
         AccountUsageService.shared.refresh(account)
 
         guard let usage = AccountUsageService.shared.usage(for: account) else { return }
 
         // The ring first, because it is what makes three accounts comparable without reading
         // twelve numbers. The text stays: it is the precise answer, and the ring is the glance.
-        if let ring = UsageRingImage.make(for: usage) {
+        if let ring = UsageRingImage.make(for: usage, metering: model) {
             item.image = ring
         }
 
-        guard let summary = usage.compactSummary() else { return }
+        guard let summary = summary(for: usage, metering: model, at: Date()) else { return }
         // `ThemedMenuPresenter` draws subtitles consistently on every supported macOS version.
         // This helper describes the content without reaching into menu presentation.
         item.subtitle = summary
+    }
+
+    /// `Max · 5h 7% · 7d 56% · Fable 89% · Fable resets in 15h`.
+    ///
+    /// The line answers, in order, the three questions asked while picking a login: what plan is
+    /// this, how much of it is left, and when does the tight one come back. The reset names its
+    /// window rather than trailing the list bare — the binding window is not always the last one
+    /// written, and an unattributed countdown is read as belonging to whichever is.
+    ///
+    /// Not private, and takes its own `now`, so the line a menu will show can be asserted
+    /// without building a menu.
+    static func summary(
+        for usage: AccountUsage,
+        metering model: String?,
+        at now: Date = Date()
+    ) -> String? {
+        var parts: [String] = []
+
+        if let plan = usage.planLabel, !plan.isEmpty {
+            parts.append(plan)
+        }
+        if let windows = usage.compactSummary(at: now, metering: model) {
+            parts.append(windows)
+        }
+        if let binding = usage.bindingWindow(at: now, metering: model),
+           let resetsAt = binding.resetsAt {
+            parts.append(
+                "\(binding.id) resets in \(UsageFormat.remaining(until: resetsAt, from: now))"
+            )
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: UsageDefaults.segmentSeparator)
     }
 
     /// Warms every account of every agent, so a menu opened in a moment has numbers in it.

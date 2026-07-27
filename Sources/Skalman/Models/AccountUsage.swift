@@ -93,6 +93,38 @@ struct AccountUsage: Equatable {
     /// Expired windows are skipped: their percentage describes the previous window, and
     /// surfacing it would show pressure that no longer exists.
     func peakWindow(at now: Date = Date()) -> Window? {
+        Self.fullest(of: windows, at: now)
+    }
+
+    /// The model-scoped windows that meter `model` — the ones that will actually stop a session
+    /// running it.
+    ///
+    /// Matching by name is what makes `modelWindows` usable without lying: the same list holds
+    /// every model the plan meters separately, and only the entry naming this one applies here.
+    /// No model named (an account that has chosen nothing, a menu built before the choice) means
+    /// none of them apply, which is the conservative answer rather than the loud one.
+    func scopedWindows(metering model: String?) -> [Window] {
+        guard let model, !model.isEmpty else { return [] }
+        return modelWindows.filter { ModelName.scope($0.id, meters: model) }
+    }
+
+    /// Every window a session on `model` is measured against: the account's own, plus the
+    /// scoped ones naming that model.
+    func windows(metering model: String?) -> [Window] {
+        windows + scopedWindows(metering: model)
+    }
+
+    /// The window such a session runs out of *first* — what the toolbar's ring gauges.
+    ///
+    /// `peakWindow` answers a different question and both are needed: the account's pressure is
+    /// what compares two logins, while the binding window is what stops the work in front of
+    /// you. A weekly window at 56% beside a Fable window at 89% is comfortable as an account
+    /// and nearly spent as a session, and the ring belongs to the session.
+    func bindingWindow(at now: Date = Date(), metering model: String?) -> Window? {
+        Self.fullest(of: windows(metering: model), at: now)
+    }
+
+    private static func fullest(of windows: [Window], at now: Date) -> Window? {
         windows
             .filter { !$0.isExpired(at: now) && $0.fraction != nil }
             .max { ($0.fraction ?? 0) < ($1.fraction ?? 0) }
@@ -105,7 +137,11 @@ struct AccountUsage: Equatable {
     /// Nil when there is nothing to say, so a caller shows no line rather than an empty one.
     /// An expired window keeps its name and loses its number, for the same reason
     /// `peakWindow` skips it: the percentage describes the window before it.
-    func compactSummary(at now: Date = Date()) -> String? {
+    ///
+    /// Naming a model adds the windows that meter it — `5h 7% · 7d 56% · Fable 89%` — so a
+    /// surface that knows what the session will run on says the number that binds it.
+    func compactSummary(at now: Date = Date(), metering model: String? = nil) -> String? {
+        let windows = self.windows(metering: model)
         guard !windows.isEmpty else { return nil }
 
         return windows

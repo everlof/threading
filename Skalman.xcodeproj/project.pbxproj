@@ -119,6 +119,7 @@
 		D2E00001000000000000000D /* NotificationDeliveryE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */; };
 		5C84FCDA4C6BBD2BCBD87252 /* PromptInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */; };
 		5398CEB1C197C0C13E41018E /* TerminalMouseReportingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BAB2B4BF2D7C8705E05841E /* TerminalMouseReportingTests.swift */; };
+		A52B74E670BED3A8726FD434 /* ClaudeUsageProfileCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -283,6 +284,7 @@
 		0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserAgentBridgeTests.swift; sourceTree = "<group>"; };
 		12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptInputTests.swift; sourceTree = "<group>"; };
 		0BAB2B4BF2D7C8705E05841E /* TerminalMouseReportingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalMouseReportingTests.swift; sourceTree = "<group>"; };
+		8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeUsageProfileCacheTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -501,6 +503,7 @@
 				0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */,
 				12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */,
 				0BAB2B4BF2D7C8705E05841E /* TerminalMouseReportingTests.swift */,
+				8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -968,6 +971,7 @@
 				C759CA85DB7CF715E0E836F0 /* BrowserAgentBridgeTests.swift in Sources */,
 				5C84FCDA4C6BBD2BCBD87252 /* PromptInputTests.swift in Sources */,
 				5398CEB1C197C0C13E41018E /* TerminalMouseReportingTests.swift in Sources */,
+				A52B74E670BED3A8726FD434 /* ClaudeUsageProfileCacheTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

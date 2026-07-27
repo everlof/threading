@@ -98,7 +98,10 @@ final class AccountUsagePopoverViewController: NSViewController {
         contentStack.addArrangedSubview(headerRow(planLabel: usage?.planLabel))
 
         if let usage {
-            for window in usage.windows {
+            // Model-scoped windows follow the account's own, as in the composer's panel: the
+            // pill's peak deliberately ignores them, so the popover it opens is where a limit
+            // that binds one model rather than the plan gets said out loud.
+            for window in usage.windows + usage.modelWindows {
                 let rowView = row(for: window)
                 contentStack.addArrangedSubview(rowView)
                 rowView.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true

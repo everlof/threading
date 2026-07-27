@@ -236,6 +236,37 @@ final class ModelNameTests: XCTestCase {
         XCTAssertFalse(AgentModels.claudeSupportsFastMode(nil), "nil default is not guessed")
     }
 
+    // MARK: - Scoped Limits
+
+    /// A limit is named after the family it meters while a session carries the id its CLI was
+    /// launched with, so the match has to cross the two vocabularies — and keep crossing them
+    /// when the next Fable ships.
+    func testScopedLimitMetersItsWholeFamily() {
+        XCTAssertTrue(ModelName.scope("Fable", meters: "claude-fable-5[1m]"))
+        XCTAssertTrue(ModelName.scope("Fable", meters: "fable"))
+        XCTAssertTrue(ModelName.scope("fable", meters: "claude-fable-6-future"))
+        XCTAssertTrue(ModelName.scope("Opus", meters: "claude-opus-4-8"))
+        XCTAssertTrue(ModelName.scope("GPT-5.3-Codex-Spark", meters: "gpt-5.3-codex-spark"))
+    }
+
+    /// The direction that matters: a scoped limit wrongly applied would put a session in the red
+    /// over a model it is not running, which is exactly what keeping these windows separate is
+    /// for.
+    func testScopedLimitDoesNotMeterAnotherModel() {
+        XCTAssertFalse(ModelName.scope("Fable", meters: "claude-opus-4-8"))
+        XCTAssertFalse(ModelName.scope("Opus", meters: "claude-sonnet-5"))
+        XCTAssertFalse(ModelName.scope("Fable", meters: ""))
+        XCTAssertFalse(ModelName.scope("", meters: "claude-fable-5"))
+        XCTAssertFalse(ModelName.scope("  ", meters: "claude-fable-5"))
+    }
+
+    /// The friendly name is read too, so a limit named after what the *chip* says still matches
+    /// an id that spells it differently.
+    func testScopedLimitMatchesTheFriendlyName() {
+        XCTAssertTrue(ModelName.scope("Fable 5", meters: "claude-fable-5[1m]"))
+        XCTAssertTrue(ModelName.scope("Haiku 4.5", meters: "claude-haiku-4-5-20251001"))
+    }
+
     private func temporaryAccountDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("skalman-model-tests-\(UUID().uuidString)")

@@ -687,7 +687,11 @@ final class MainWindowController: ThemedWindowController {
         updateWindowTitle()
     }
 
-    /// Points the usage pill at the shown session's account, or clears it.
+    /// Points the usage pill at the shown session's account *and model*, or clears it.
+    ///
+    /// The model travels with the account because a model-scoped limit only binds a session
+    /// running that model. It is the effective one — the session's own choice, else what the
+    /// account is configured to use — since that is what the next turn will actually spend.
     private func updateAccountUsageItem(session: AgentSession?) {
         guard let session else {
             if accountUsageItemView.account != nil {
@@ -697,13 +701,19 @@ final class MainWindowController: ThemedWindowController {
         }
 
         let accountID = AccountID(provider: session.kind, handle: session.accountHandle)
-        guard accountUsageItemView.account?.id != accountID else { return }
-
         let account = AgentAccountDiscovery.account(
             for: session.kind,
             handle: session.accountHandle
         )
-        accountUsageItemView.configure(account: account)
+        let model = session.model
+            ?? AgentModels.defaultModel(for: session.kind, account: account)
+
+        // Re-configured when either half changes: switching model inside a session moves which
+        // limit binds it, without the account moving at all.
+        guard accountUsageItemView.account?.id != accountID
+            || accountUsageItemView.model != model else { return }
+
+        accountUsageItemView.configure(account: account, model: model)
     }
 
     /// Opens Settings, or does nothing if already open. What a *door* to a page needs — see
@@ -1070,6 +1080,19 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         for sessionID: SessionID
     ) {
         sessionCoordinator.setUsesNativeUI(usesNative, for: sessionID)
+    }
+
+    /// Moves a conversation to another account of the same agent and reopens it there.
+    ///
+    /// A move copies the transcript into the target account's config directory, so the resumed
+    /// conversation arrives with its full context; what it cannot keep is the process, which
+    /// belonged to the account it is leaving.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        moveSession sessionID: SessionID,
+        toAccount account: AgentAccount
+    ) {
+        sessionCoordinator.moveSession(sessionID, to: account)
     }
 
     /// Forks a session into a side chat and opens it.

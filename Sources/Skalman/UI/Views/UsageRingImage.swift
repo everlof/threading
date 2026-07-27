@@ -20,10 +20,16 @@ enum UsageRingImage {
         static let minimumVisibleFraction = 0.02
     }
 
-    /// The ring for an account's peak window, or nil when there is nothing to show — the same
-    /// silence the toolbar pill keeps for an account with no usage source.
-    static func make(for usage: AccountUsage, at now: Date = Date()) -> NSImage? {
-        guard let window = usage.peakWindow(at: now), let fraction = window.fraction else {
+    /// The ring for the window that binds a session running `model` on this account, or nil when
+    /// there is nothing to show — the same silence the toolbar pill keeps for an account with no
+    /// usage source.
+    ///
+    /// With no model named it gauges the account's peak, which is the honest reading when the
+    /// model is not yet part of the question. Naming one includes that model's own window, so a
+    /// menu comparing logins compares the number each will actually stop at.
+    static func make(for usage: AccountUsage, at now: Date = Date(), metering model: String? = nil) -> NSImage? {
+        guard let window = usage.bindingWindow(at: now, metering: model),
+              let fraction = window.fraction else {
             return nil
         }
         return make(fraction: fraction, tint: UsageSeverity.from(fraction: fraction).glyphColor)
