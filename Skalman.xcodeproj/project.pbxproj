@@ -118,6 +118,7 @@
 		D2E00001000000000000000C /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
 		D2E00001000000000000000D /* NotificationDeliveryE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */; };
 		5C84FCDA4C6BBD2BCBD87252 /* PromptInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */; };
+		5398CEB1C197C0C13E41018E /* TerminalMouseReportingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BAB2B4BF2D7C8705E05841E /* TerminalMouseReportingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -281,6 +282,7 @@
 		52F9EDD3BDFAAB4A7EC40C29 /* RemoteServerIntegrationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteServerIntegrationTests.swift; sourceTree = "<group>"; };
 		0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserAgentBridgeTests.swift; sourceTree = "<group>"; };
 		12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptInputTests.swift; sourceTree = "<group>"; };
+		0BAB2B4BF2D7C8705E05841E /* TerminalMouseReportingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalMouseReportingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -498,6 +500,7 @@
 				52F9EDD3BDFAAB4A7EC40C29 /* RemoteServerIntegrationTests.swift */,
 				0404F4F90816B8BB79A9C9EE /* BrowserAgentBridgeTests.swift */,
 				12B6C32AADF087D495FD2A6C /* PromptInputTests.swift */,
+				0BAB2B4BF2D7C8705E05841E /* TerminalMouseReportingTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -964,6 +967,7 @@
 				F41E2CDE4F9059144D334C9E /* RemoteServerIntegrationTests.swift in Sources */,
 				C759CA85DB7CF715E0E836F0 /* BrowserAgentBridgeTests.swift in Sources */,
 				5C84FCDA4C6BBD2BCBD87252 /* PromptInputTests.swift in Sources */,
+				5398CEB1C197C0C13E41018E /* TerminalMouseReportingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
