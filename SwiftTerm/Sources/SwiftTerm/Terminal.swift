@@ -5158,6 +5158,22 @@ open class Terminal {
       sendEvent(buttonFlags: buttonFlags, x: x, y: y, pixelX: x, pixelY: y)
     }
     
+    /// Bit 6 of `Cb`: the event is pointer motion rather than a button transition. Only
+    /// `sendMotion` sets it, and no button number or modifier bit shares it.
+    static let mouseMotionFlag = 32
+
+    /// True only for a button *release*, the one event SGR reports with a lowercase final byte.
+    ///
+    /// `Cb & 3 == 3` reads "no button", which a release and a no-button motion both encode —
+    /// so testing those bits alone reported every hover as `CSI <32;x;y m`, a left-button
+    /// release under the pointer. A TUI that toggles a row on mouse-up then toggled it on each
+    /// pixel the pointer moved, which is how a hover highlight turned into a flicker between
+    /// open and closed. The motion flag is what separates the two.
+    private func isButtonRelease (_ buttonFlags: Int) -> Bool
+    {
+        (buttonFlags & Terminal.mouseMotionFlag) == 0 && (buttonFlags & 3) == 3
+    }
+
     /**
      * Sends a mouse event for a specific button at the specific location
      * - Parameter buttonFlags: Button flags encoded in Cb mode.
@@ -5171,15 +5187,16 @@ open class Terminal {
         case .x10:
             sendResponse(cc.CSI, "M", [UInt8(buttonFlags+32), min (UInt8(255), UInt8(32 + x+1)), min (UInt8(255), UInt8(32+y+1))])
         case .sgr:
-            let bflags : Int = ((buttonFlags & 3) == 3) ? (buttonFlags & ~3) : buttonFlags
-            let m = ((buttonFlags & 3) == 3) ? "m" : "M"
+            let release = isButtonRelease (buttonFlags)
+            let bflags : Int = release ? (buttonFlags & ~3) : buttonFlags
+            let m = release ? "m" : "M"
             sendResponse(cc.CSI, "<\(bflags);\(x+1);\(y+1)\(m)")
         case .sgrPixel:
-            let bflags : Int = ((buttonFlags & 3) == 3) ? (buttonFlags & ~3) : buttonFlags
-            let m = ((buttonFlags & 3) == 3) ? "m" : "M"
-            print ("\(pixelX);\(pixelY)")
+            let release = isButtonRelease (buttonFlags)
+            let bflags : Int = release ? (buttonFlags & ~3) : buttonFlags
+            let m = release ? "m" : "M"
             sendResponse(cc.CSI, "<\(bflags);\(pixelX);\(pixelY)\(m)")
-            
+
         case .urxvt:
             sendResponse(cc.CSI, "\(buttonFlags+32);\(x+1);\(y+1)M");
         case .utf8:

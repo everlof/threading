@@ -524,7 +524,13 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     func startTracking ()
     {
         if tracking == nil {
-            tracking = NSTrackingArea (rect: frame, options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited], owner: self, userInfo: [:])
+            // `.inVisibleRect` rather than a measured rect: a tracking rect is in the owner's
+            // own coordinates, so passing `frame` displaced the region by however far the view
+            // sits inside its superview — an embedder that insets the terminal loses a band
+            // along two edges where the pointer reports nothing. It also went stale on every
+            // resize, since nothing rebuilt it. AppKit keeps an `.inVisibleRect` area aligned
+            // on its own and ignores the rect, which is passed only to satisfy the initialiser.
+            tracking = NSTrackingArea (rect: bounds, options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect], owner: self, userInfo: [:])
             addTrackingArea(tracking!)
         }
     }
@@ -572,6 +578,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     public override func mouseExited(with event: NSEvent) {
         turnOffUrlPreview()
+        // Re-entering on the same cell the pointer left from is a real move, so the suppressed
+        // cell cannot outlive the visit it belongs to.
+        lastMotionCell = nil
         super.mouseExited(with: event)
     }
     
@@ -1114,6 +1123,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
     }
     
+    /// The cell the last motion report named, so an unchanged one is not reported twice.
+    var lastMotionCell: Position? = nil
+
     public override func mouseMoved(with event: NSEvent) {
         let hit = calculateMouseHit(with: event)
         if commandActive {
@@ -1121,11 +1133,21 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                 previewUrl (payload: payload)
             }
         }
-        
-        if terminal.mouseMode.sendMotionEvent() {
-            let flags = encodeMouseEvent(with: event, overwriteRelease: true)
-            terminal.sendMotion(buttonFlags: flags, x: hit.grid.col, y: hit.grid.row, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+
+        // Motion is reported per *character cell*, not per pixel, which is the contract xterm
+        // sets for modes 1002/1003 and what every client assumes. Reporting each AppKit
+        // `mouseMoved` instead sent dozens of identical events per cell — trackpad jitter under
+        // a resting hand is enough — and a client that recomputes what is under the pointer on
+        // every report will do it against a screen its own last report just reflowed.
+        guard allowMouseReporting && terminal.mouseMode.sendMotionEvent() else {
+            lastMotionCell = nil
+            return
         }
+        guard hit.grid != lastMotionCell else { return }
+        lastMotionCell = hit.grid
+
+        let flags = encodeMouseEvent(with: event, overwriteRelease: true)
+        terminal.sendMotion(buttonFlags: flags, x: hit.grid.col, y: hit.grid.row, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
     }
     
     /// Leftover precise-scroll distance not yet worth a whole line.
