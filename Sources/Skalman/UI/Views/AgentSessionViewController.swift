@@ -363,9 +363,9 @@ protocol AgentSessionViewControllerDelegate: AnyObject {
 /// It floats over the terminal's own palette, so its ink is derived from the active backdrop.
 private final class RemoteViewportBannerView: BackdropOverlay {
     private let icon = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "Fit to iPhone")
+    private let titleLabel = NSTextField(labelWithString: L10n.string("Fit to iPhone"))
     private let detailLabel = NSTextField(
-        labelWithString: "Mac size returns when the remote view closes"
+        labelWithString: L10n.string("Mac size returns when the remote view closes")
     )
 
     override init(frame frameRect: NSRect) {
@@ -377,7 +377,7 @@ private final class RemoteViewportBannerView: BackdropOverlay {
 
         icon.image = NSImage(
             systemSymbolName: "iphone",
-            accessibilityDescription: "Controlled from iPhone"
+            accessibilityDescription: L10n.string("Controlled from iPhone")
         )
         icon.symbolConfiguration = Design.Symbol.configuration(
             Design.Symbol.control,
@@ -424,8 +424,14 @@ private final class RemoteViewportBannerView: BackdropOverlay {
     }
 
     func show(cols: Int, rows: Int) {
-        titleLabel.stringValue = "Fit to iPhone · \(cols)×\(rows)"
-        toolTip = "The iPhone controls the terminal size while its remote view is open."
+        titleLabel.stringValue = L10n.format(
+            "Fit to iPhone · %lld×%lld",
+            Int64(cols),
+            Int64(rows)
+        )
+        toolTip = L10n.string(
+            "The iPhone controls the terminal size while its remote view is open."
+        )
         isHidden = false
     }
 

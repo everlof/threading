@@ -23,9 +23,11 @@ final class AppThemeTests: XCTestCase {
         super.setUp()
         preservedFontOverrides = [
             "chromeFontFamily": UserDefaults.standard.string(forKey: "chromeFontFamily"),
-            "conversationFontFamily": UserDefaults.standard.string(forKey: "conversationFontFamily")
+            "conversationFontFamily": UserDefaults.standard.string(forKey: "conversationFontFamily"),
+            "appTextSize": UserDefaults.standard.string(forKey: "appTextSize")
         ]
         clearFontOverrides()
+        UserDefaults.standard.set(AppTextSize.standard.rawValue, forKey: "appTextSize")
     }
 
     override func tearDown() {
@@ -1614,6 +1616,72 @@ final class AppThemeTests: XCTestCase {
         let one = ("1" as NSString).size(withAttributes: [.font: numeric]).width
         let eight = ("8" as NSString).size(withAttributes: [.font: numeric]).width
         XCTAssertEqual(one, eight, accuracy: 0.001)
+    }
+
+    func testAppTextSizeScalesEverySemanticRoleAndRepaintsExistingLabels() {
+        let bodyAtStandard = Design.Typography.body().pointSize
+        let codeAtStandard = Design.Typography.code().pointSize
+        let label = NSTextField(labelWithString: "Existing label")
+        label.applyFont(.body)
+        XCTAssertEqual(label.font?.pointSize, bodyAtStandard)
+
+        UserDefaults.standard.set(AppTextSize.extraLarge.rawValue, forKey: "appTextSize")
+        AppThemeRefresh.repaint(label)
+
+        XCTAssertEqual(
+            Design.Typography.body().pointSize,
+            bodyAtStandard * AppTextSize.extraLarge.scale,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            Design.Typography.code().pointSize,
+            codeAtStandard * AppTextSize.extraLarge.scale,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            label.font?.pointSize ?? 0,
+            bodyAtStandard * AppTextSize.extraLarge.scale,
+            accuracy: 0.001,
+            "an existing host-rendered label did not follow the new text scale"
+        )
+    }
+
+    func testAppTextSizeUsesAnInjectedDefaultsDomain() throws {
+        let suite = "AppThemeTests.TextSize.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.appTextSize, .standard)
+        settings.appTextSize = .large
+        XCTAssertEqual(settings.appTextSize, .large)
+        XCTAssertEqual(defaults.string(forKey: "appTextSize"), AppTextSize.large.rawValue)
+    }
+
+    func testThemePreferencesExposeTheTextSizeControl() throws {
+        let controller = ThemePreferencesViewController()
+        _ = controller.view
+
+        let control = try XCTUnwrap(
+            descendant(
+                in: controller.view,
+                accessibilityIdentifier: "settings.themes.text-size"
+            )
+        )
+        XCTAssertTrue(control is ThemedPopUp)
+    }
+
+    private func descendant(
+        in view: NSView,
+        accessibilityIdentifier: String
+    ) -> NSView? {
+        if view.accessibilityIdentifier() == accessibilityIdentifier {
+            return view
+        }
+        return view.subviews.lazy.compactMap {
+            self.descendant(in: $0, accessibilityIdentifier: accessibilityIdentifier)
+        }.first
     }
 
     private func adaptiveFixture() throws -> AppTheme {

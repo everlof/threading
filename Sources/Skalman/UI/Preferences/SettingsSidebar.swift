@@ -13,6 +13,7 @@ final class SettingsSidebar: NSView {
         let id: String
         let title: String
         let symbol: String
+        let searchText: String
     }
 
     // MARK: - Properties
@@ -22,8 +23,18 @@ final class SettingsSidebar: NSView {
     var onSelect: ((String) -> Void)?
 
     private var items: [Item] = []
+    private var displayedItems: [Item] = []
     private var rows: [ThemedTabItemView] = []
     private(set) var selectedID: String?
+    private lazy var searchField: ThemedSearchField = {
+        let field = ThemedSearchField()
+        field.placeholderString = L10n.string("Search Settings")
+        field.setAccessibilityLabel(L10n.string("Search Settings"))
+        field.setAccessibilityIdentifier("settings.search")
+        field.delegate = self
+        field.translatesAutoresizingMaskIntoConstraints = false
+        return field
+    }()
 
     // MARK: - Initialization
 
@@ -44,7 +55,7 @@ final class SettingsSidebar: NSView {
     func select(id: String) {
         selectedID = items.contains { $0.id == id } ? id : nil
         for (offset, row) in rows.enumerated() {
-            row.isSelected = items[offset].id == selectedID
+            row.isSelected = displayedItems[offset].id == selectedID
         }
     }
 
@@ -56,11 +67,37 @@ final class SettingsSidebar: NSView {
         }
     }
 
+    /// Updates the live filter. Kept separate from the delegate callback so restored Settings
+    /// windows and tests exercise the exact same matching path as typing.
+    func updateSearchQuery(_ query: String) {
+        searchField.stringValue = query
+        rebuildResults()
+    }
+
+    var visibleItemIDs: [String] {
+        displayedItems.map(\.id)
+    }
+
     // MARK: - Private Methods
 
     private func build(_ items: [Item]) {
         self.items = items
-        rows = items.map { item in
+        rebuildResults()
+    }
+
+    private func rebuildResults() {
+        rows.forEach { $0.removeFromSuperview() }
+        subviews
+            .filter { $0 !== searchField }
+            .forEach { $0.removeFromSuperview() }
+
+        let query = searchField.stringValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        displayedItems = query.isEmpty ? items : items.filter {
+            Self.matches(query: query, text: $0.searchText)
+        }
+
+        rows = displayedItems.map { item in
             let row = ThemedTabItemView(
                 title: item.title,
                 symbolName: item.symbol,
@@ -74,15 +111,34 @@ final class SettingsSidebar: NSView {
             return row
         }
 
-        let stack = NSStackView(views: rows)
+        let noResults = NSTextField(
+            wrappingLabelWithString: L10n.string("No settings found.")
+        )
+        noResults.applyFont(.subheading)
+        noResults.textColor = Design.Text.secondary
+        noResults.alignment = .center
+        noResults.isHidden = !rows.isEmpty
+
+        let resultViews: [NSView] = rows.isEmpty ? [noResults] : rows
+        let stack = NSStackView(views: resultViews)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.hairline
         stack.translatesAutoresizingMaskIntoConstraints = false
+        if searchField.superview == nil {
+            addSubview(searchField)
+        }
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor),
+            searchField.topAnchor.constraint(equalTo: topAnchor),
+            searchField.leadingAnchor.constraint(equalTo: leadingAnchor),
+            searchField.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            stack.topAnchor.constraint(
+                equalTo: searchField.bottomAnchor,
+                constant: Design.Spacing.medium
+            ),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
@@ -91,5 +147,25 @@ final class SettingsSidebar: NSView {
         for row in rows {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
+        if rows.isEmpty {
+            noResults.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        select(id: selectedID ?? "")
+    }
+
+    private static func matches(query: String, text: String) -> Bool {
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive, .widthInsensitive]
+        let tokens = query.split(whereSeparator: \.isWhitespace)
+        return tokens.allSatisfy { token in
+            text.range(of: String(token), options: options, locale: .current) != nil
+        }
+    }
+}
+
+// MARK: - NSTextFieldDelegate
+
+extension SettingsSidebar: NSTextFieldDelegate {
+    func controlTextDidChange(_ notification: Notification) {
+        rebuildResults()
     }
 }

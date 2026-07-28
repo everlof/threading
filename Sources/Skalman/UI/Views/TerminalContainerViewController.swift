@@ -682,9 +682,11 @@ final class TerminalContainerViewController: NSViewController {
         applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "terminal",
-            title: "No Session Selected",
-            detail: "Select a session in the sidebar, or start one here.",
-            actionTitle: "New Session"
+            title: L10n.string("No Session Selected"),
+            detail: L10n.string(
+                "Select a session in the sidebar, or start one here."
+            ),
+            actionTitle: L10n.string("New Session")
         )
         // The one thing an empty pane is for is starting a session, so the pane offers the
         // same route ⌘N takes rather than only describing where else to click.
@@ -705,9 +707,11 @@ final class TerminalContainerViewController: NSViewController {
         applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "arrow.clockwise.circle",
-            title: "\(agentSession.title) ended",
+            title: L10n.format("%@ ended", agentSession.title),
             detail: dormantDetail(for: agentSession),
-            actionTitle: agentSession.isResumable ? "Resume Session" : "Start Again"
+            actionTitle: agentSession.isResumable
+                ? L10n.string("Resume Session")
+                : L10n.string("Start Again")
         )
         placeholderView.onAction = { [weak self] in
             self?.resumeCurrentSession()
@@ -717,14 +721,18 @@ final class TerminalContainerViewController: NSViewController {
     /// Explains what resuming will do, which differs once a resumable identifier is known.
     private func dormantDetail(for agentSession: AgentSession) -> String {
         if agentSession.isResumable {
-            return "The conversation is saved and will pick up where it left off."
+            return L10n.string(
+                "The conversation is saved and will pick up where it left off."
+            )
         }
 
         if agentSession.kind.supportsResume {
-            return "No saved conversation was found, so this will start fresh."
+            return L10n.string(
+                "No saved conversation was found, so this will start fresh."
+            )
         }
 
-        return "Starting again opens a new shell."
+        return L10n.string("Starting again opens a new shell.")
     }
 }
 

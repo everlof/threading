@@ -210,10 +210,22 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     private func setupContextMenu() {
         let contextMenu = NSMenu()
-        contextMenu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
-        contextMenu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        contextMenu.addItem(
+            withTitle: L10n.string("Copy"),
+            action: #selector(copy(_:)),
+            keyEquivalent: ""
+        )
+        contextMenu.addItem(
+            withTitle: L10n.string("Paste"),
+            action: #selector(paste(_:)),
+            keyEquivalent: ""
+        )
         contextMenu.addItem(NSMenuItem.separator())
-        contextMenu.addItem(withTitle: "Rename Session…", action: #selector(renameSession(_:)), keyEquivalent: "")
+        contextMenu.addItem(
+            withTitle: L10n.string("Rename Session…"),
+            action: #selector(renameSession(_:)),
+            keyEquivalent: ""
+        )
         menu = contextMenu
     }
 
@@ -229,15 +241,15 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         let session = ProjectStore.shared.session(withID: sessionID)
 
         let alert = NSAlert()
-        alert.messageText = "Rename Session"
-        alert.addButton(withTitle: "Rename")
+        alert.messageText = L10n.string("Rename Session")
+        alert.addButton(withTitle: L10n.string("Rename"))
         // The same button the sidebar's rename offers, for the same reason: returning to the
         // agent's own name is an action, and it was written out as an instruction.
         let hasCustomTitle = !(session?.customTitle ?? "").isEmpty
         if hasCustomTitle {
-            alert.addButton(withTitle: "Use Agent's Name")
+            alert.addButton(withTitle: L10n.string("Use Agent's Name"))
         }
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         let textField = ThemedTextField(frame: NSRect(
             x: 0, y: 0,

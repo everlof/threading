@@ -19,18 +19,18 @@ extension DisplayPaneController {
 
         switch currentContent?.body {
         case .image:
-            menu.addItem(withTitle: "Copy Image", action: #selector(copyImage), keyEquivalent: "")
-            menu.addItem(withTitle: "Copy File Name", action: #selector(copyFileName), keyEquivalent: "")
-            menu.addItem(withTitle: "Copy File Path", action: #selector(copyFilePath), keyEquivalent: "")
+            menu.addItem(withTitle: L10n.string("Copy Image"), action: #selector(copyImage), keyEquivalent: "")
+            menu.addItem(withTitle: L10n.string("Copy File Name"), action: #selector(copyFileName), keyEquivalent: "")
+            menu.addItem(withTitle: L10n.string("Copy File Path"), action: #selector(copyFilePath), keyEquivalent: "")
             menu.addItem(.separator())
-            menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealInFinder), keyEquivalent: "")
-            menu.addItem(withTitle: "Open in Default App", action: #selector(openInDefaultApp), keyEquivalent: "")
+            menu.addItem(withTitle: L10n.string("Reveal in Finder"), action: #selector(revealInFinder), keyEquivalent: "")
+            menu.addItem(withTitle: L10n.string("Open in Default App"), action: #selector(openInDefaultApp), keyEquivalent: "")
 
         case .html:
-            menu.addItem(withTitle: "Copy HTML", action: #selector(copyHTML), keyEquivalent: "")
+            menu.addItem(withTitle: L10n.string("Copy HTML"), action: #selector(copyHTML), keyEquivalent: "")
             menu.addItem(.separator())
-            menu.addItem(withTitle: "Open in Browser", action: #selector(openHTMLInBrowser), keyEquivalent: "")
-            menu.addItem(withTitle: "Reload", action: #selector(reloadHTML), keyEquivalent: "")
+            menu.addItem(withTitle: L10n.string("Open in Browser"), action: #selector(openHTMLInBrowser), keyEquivalent: "")
+            menu.addItem(withTitle: L10n.string("Reload"), action: #selector(reloadHTML), keyEquivalent: "")
 
         case nil:
             break

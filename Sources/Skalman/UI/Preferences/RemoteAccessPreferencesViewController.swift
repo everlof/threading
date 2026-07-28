@@ -51,7 +51,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         remoteAccessToggle.action = #selector(remoteAccessChanged)
         remoteAccessToggle.setAccessibilityIdentifier("settings.remote-access.enabled")
 
-        openLocallyButton.title = "Open in Browser"
+        openLocallyButton.title = L10n.string("Open in Browser")
         openLocallyButton.target = self
         openLocallyButton.action = #selector(openLocally)
         openLocallyButton.setAccessibilityIdentifier("settings.remote-access.open-local")
@@ -208,10 +208,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         image.contentTintColor = Design.Text.secondary
         image.translatesAutoresizingMaskIntoConstraints = false
 
-        let titleField = NSTextField(labelWithString: title)
+        let titleField = NSTextField(labelWithString: L10n.string(title))
         titleField.applyFont(.body)
         titleField.textColor = Design.Text.label
-        let detailField = NSTextField(wrappingLabelWithString: detail)
+        let detailField = NSTextField(wrappingLabelWithString: L10n.string(detail))
         detailField.applyFont(.subheading)
         detailField.textColor = Design.Text.secondary
 
@@ -256,29 +256,31 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         switch coordinator.status {
         case .disabled:
             updateConnection(
-                title: "Off",
-                detail: "This Mac is not reachable from another device.",
+                title: L10n.string("Off"),
+                detail: L10n.string("This Mac is not reachable from another device."),
                 color: Design.Text.tertiary
             )
             updatePairing(
-                title: "Connect your iPhone",
-                detail: "Turn on Remote Access. Skalman will start a local mirror and connect "
-                    + "it to a private HTTPS relay.",
-                action: "Turn On Remote Access",
+                title: L10n.string("Connect your iPhone"),
+                detail: L10n.string(
+                    "Turn on Remote Access. Skalman will start a local mirror and connect "
+                        + "it to a private HTTPS relay."
+                ),
+                action: L10n.string("Turn On Remote Access"),
                 actionEnabled: true,
                 prominent: true
             )
 
         case .starting:
             updateConnection(
-                title: "Starting",
-                detail: "Preparing the private listener on this Mac…",
+                title: L10n.string("Starting"),
+                detail: L10n.string("Preparing the private listener on this Mac…"),
                 color: Design.Status.warning
             )
             updatePairing(
-                title: "Preparing your connection",
-                detail: "This usually takes only a few seconds.",
-                action: "Starting…",
+                title: L10n.string("Preparing your connection"),
+                detail: L10n.string("This usually takes only a few seconds."),
+                action: L10n.string("Starting…"),
                 actionEnabled: false,
                 prominent: false
             )
@@ -287,29 +289,39 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             switch coordinator.relayStatus {
             case .inactive, .starting:
                 updateConnection(
-                    title: "Connecting securely",
-                    detail: "The local mirror is ready on 127.0.0.1:\(port). "
-                        + "Waiting for the encrypted relay…",
+                    title: L10n.string("Connecting securely"),
+                    detail: L10n.format(
+                        "The local mirror is ready on 127.0.0.1:%lld. "
+                            + "Waiting for the encrypted relay…",
+                        Int64(port)
+                    ),
                     color: Design.Status.warning
                 )
                 updatePairing(
-                    title: "Preparing your pairing code",
-                    detail: "The QR code appears here as soon as the secure relay is ready.",
-                    action: "Connecting…",
+                    title: L10n.string("Preparing your pairing code"),
+                    detail: L10n.string(
+                        "The QR code appears here as soon as the secure relay is ready."
+                    ),
+                    action: L10n.string("Connecting…"),
                     actionEnabled: false,
                     prominent: false
                 )
 
             case .connected(let origin):
                 updateConnection(
-                    title: "Ready",
-                    detail: "Connected through \(origin.host ?? "the secure relay").",
+                    title: L10n.string("Ready"),
+                    detail: L10n.format(
+                        "Connected through %@.",
+                        origin.host ?? L10n.string("the secure relay")
+                    ),
                     color: Design.Status.positive
                 )
                 updatePairing(
-                    title: "Scan with your iPhone",
-                    detail: "Open Skalman on iPhone, choose Pair a Mac, then scan this code.",
-                    action: "Copy Pairing Link",
+                    title: L10n.string("Scan with your iPhone"),
+                    detail: L10n.string(
+                        "Open Skalman on iPhone, choose Pair a Mac, then scan this code."
+                    ),
+                    action: L10n.string("Copy Pairing Link"),
                     actionEnabled: true,
                     prominent: false,
                     url: coordinator.remoteURL
@@ -317,14 +329,16 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
             case .unavailable(let reason):
                 updateConnection(
-                    title: "Local access only",
+                    title: L10n.string("Local access only"),
                     detail: reason,
                     color: Design.Status.warning
                 )
                 updatePairing(
-                    title: "Secure relay unavailable",
-                    detail: "You can still test the browser on this Mac, or retry the secure relay.",
-                    action: "Retry Secure Relay",
+                    title: L10n.string("Secure relay unavailable"),
+                    detail: L10n.string(
+                        "You can still test the browser on this Mac, or retry the secure relay."
+                    ),
+                    action: L10n.string("Retry Secure Relay"),
                     actionEnabled: true,
                     prominent: true
                 )
@@ -332,14 +346,16 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
         case .failed(let reason):
             updateConnection(
-                title: "Couldn’t start",
-                detail: "The private listener failed (\(reason)).",
+                title: L10n.string("Couldn’t start"),
+                detail: L10n.format("The private listener failed (%@).", reason),
                 color: Design.Status.negative
             )
             updatePairing(
-                title: "Remote Access needs attention",
-                detail: "Retry without leaving Settings. Existing launch links remain revoked.",
-                action: "Try Again",
+                title: L10n.string("Remote Access needs attention"),
+                detail: L10n.string(
+                    "Retry without leaving Settings. Existing launch links remain revoked."
+                ),
+                action: L10n.string("Try Again"),
                 actionEnabled: true,
                 prominent: true
             )
@@ -370,9 +386,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         pairingCode.image = code
         pairingCode.isHidden = code == nil
         pairingInstruction.isHidden = code == nil
-        pairingInstruction.stringValue = code == nil ? "" :
-            "Only scan this owner code on a device you control. It can access every chat "
-                + "on this Mac. The beta relay and pairing are renewed when Skalman restarts."
+        pairingInstruction.stringValue = code == nil
+            ? ""
+            : L10n.string(
+                "Only scan this owner code on a device you control. It can access every chat "
+                    + "on this Mac. The beta relay and pairing are renewed when Skalman restarts."
+            )
     }
 
     // MARK: - Actions
@@ -393,7 +412,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         if let url = coordinator.remoteURL {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(url.absoluteString, forType: .string)
-            pairingActionButton.title = "Copied"
+            pairingActionButton.title = L10n.string("Copied")
             pairingActionButton.isEnabled = false
 
             let reset = DispatchWorkItem { [weak self] in self?.refresh() }

@@ -39,11 +39,11 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
 
     var presentation: String {
         var parts = [
-            "Local import · unsigned",
-            "SHA-256 \(contentDigest.prefix(12))"
+            L10n.string("Local import · unsigned"),
+            L10n.format("SHA-256 %@", String(contentDigest.prefix(12)))
         ]
         if let sdkVersion {
-            parts.append("SDK \(sdkVersion)")
+            parts.append(L10n.format("SDK %@", sdkVersion))
         }
         return parts.joined(separator: " · ")
     }

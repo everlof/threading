@@ -197,7 +197,11 @@ extension GitReviewViewController {
         }
 
         if canLoadMore {
-            let more = ThemedButton(title: "Show more…", target: self, action: #selector(loadMoreCommits))
+            let more = ThemedButton(
+                title: L10n.string("Show more…"),
+                target: self,
+                action: #selector(loadMoreCommits)
+            )
             more.isBordered = false
             more.applyFont(.caption)
             more.contentTintColor = Design.Text.secondary

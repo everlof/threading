@@ -68,7 +68,7 @@ final class ThemeMenuBuilder: NSObject {
         let submenu = NSMenu()
 
         submenu.addItem(themeChoiceItem(
-            title: "Inherit (\(inherited))",
+            title: L10n.format("Inherit (%@)", inherited),
             choice: ThemeMenuChoice(target: target, themeID: nil),
             isChecked: assigned == nil
         ))
@@ -97,14 +97,18 @@ final class ThemeMenuBuilder: NSObject {
 
         submenu.addItem(.separator())
         let edit = NSMenuItem(
-            title: "Edit Themes…",
+            title: L10n.string("Edit Themes…"),
             action: #selector(editThemesClicked),
             keyEquivalent: ""
         )
         edit.target = self
         submenu.addItem(edit)
 
-        let item = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(
+            title: L10n.string("Theme"),
+            action: nil,
+            keyEquivalent: ""
+        )
         item.submenu = submenu
         return item
     }

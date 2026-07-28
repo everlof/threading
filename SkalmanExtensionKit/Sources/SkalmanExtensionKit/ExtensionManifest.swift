@@ -22,6 +22,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let companions: [ExtensionCompanion]
     public let themes: [ExtensionThemeContribution]
     public let fonts: [ExtensionFontContribution]
+    public let localizations: [ExtensionLocalizationContribution]
 
     public init(
         formatVersion: Int = Self.currentFormatVersion,
@@ -38,7 +39,8 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         serviceDependencies: [ExtensionServiceDependency] = [],
         companions: [ExtensionCompanion] = [],
         themes: [ExtensionThemeContribution] = [],
-        fonts: [ExtensionFontContribution] = []
+        fonts: [ExtensionFontContribution] = [],
+        localizations: [ExtensionLocalizationContribution] = []
     ) {
         self.formatVersion = formatVersion
         self.identifier = identifier
@@ -55,11 +57,12 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         self.companions = companions
         self.themes = themes
         self.fonts = fonts
+        self.localizations = localizations
     }
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities, mcpTools, settings
-        case services, serviceDependencies, companions, themes, fonts
+        case services, serviceDependencies, companions, themes, fonts, localizations
     }
 
     public init(from decoder: Decoder) throws {
@@ -99,6 +102,10 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         fonts = try container.decodeIfPresent(
             [ExtensionFontContribution].self,
             forKey: .fonts
+        ) ?? []
+        localizations = try container.decodeIfPresent(
+            [ExtensionLocalizationContribution].self,
+            forKey: .localizations
         ) ?? []
     }
 
@@ -340,6 +347,33 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
                 path: "capabilities",
                 message: "must contain 'appearance.fonts' when fonts are declared"
             ))
+        }
+
+        if localizations.count > ExtensionLocalizationContribution.maximumCount {
+            issues.append(.init(
+                path: "localizations",
+                message: "must contain at most "
+                    + "\(ExtensionLocalizationContribution.maximumCount) localizations"
+            ))
+        }
+        var seenLocalizationLocales: Set<String> = []
+        var seenLocalizationResources: Set<String> = []
+        for (index, localization) in localizations.enumerated() {
+            let path = "localizations[\(index)]"
+            issues.append(contentsOf: localization.validationIssues(path: path))
+            let locale = localization.locale.lowercased()
+            if !seenLocalizationLocales.insert(locale).inserted {
+                issues.append(.init(
+                    path: "\(path).locale",
+                    message: "duplicates '\(localization.locale)'"
+                ))
+            }
+            if !seenLocalizationResources.insert(localization.resource).inserted {
+                issues.append(.init(
+                    path: "\(path).resource",
+                    message: "duplicates '\(localization.resource)'"
+                ))
+            }
         }
 
         if !issues.isEmpty {

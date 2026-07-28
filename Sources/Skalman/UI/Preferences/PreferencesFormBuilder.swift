@@ -26,7 +26,7 @@ final class PreferencesFormBuilder {
     /// Adds a bold section header spanning both columns.
     @discardableResult
     func addSection(_ title: String) -> Self {
-        let label = NSTextField(labelWithString: title)
+        let label = NSTextField(labelWithString: L10n.string(title))
         label.applyFont(.strongBody)
 
         let row = grid.addRow(with: [label])
@@ -49,7 +49,11 @@ final class PreferencesFormBuilder {
     /// Adds a labelled control.
     @discardableResult
     func addRow(label: String, control: NSView, help: String? = nil) -> Self {
-        let labelField = NSTextField(labelWithString: label.isEmpty ? "" : "\(label):")
+        let labelField = NSTextField(
+            labelWithString: label.isEmpty
+                ? ""
+                : L10n.format("%@:", L10n.string(label))
+        )
         labelField.alignment = .right
         labelField.textColor = Design.Text.label
 
@@ -71,7 +75,7 @@ final class PreferencesFormBuilder {
     /// Adds explanatory text spanning both columns.
     @discardableResult
     func addNote(_ text: String) -> Self {
-        let note = makeHelpLabel(text)
+        let note = makeHelpLabel(L10n.string(text))
         let row = grid.addRow(with: [note])
         row.mergeCells(in: NSRange(location: 0, length: 2))
         row.cell(at: 0).xPlacement = .leading
@@ -115,7 +119,9 @@ final class PreferencesFormBuilder {
     private func addHelpIfNeeded(_ help: String?) {
         guard let help else { return }
 
-        let row = grid.addRow(with: [NSGridCell.emptyContentView, makeHelpLabel(help)])
+        let row = grid.addRow(
+            with: [NSGridCell.emptyContentView, makeHelpLabel(L10n.string(help))]
+        )
         row.topPadding = PreferencesLayout.helpSpacing
     }
 

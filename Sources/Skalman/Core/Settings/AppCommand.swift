@@ -76,8 +76,14 @@ struct AppCommand {
     ) {
         self.id = id
         self.group = group
-        self.title = title
-        self.detail = detail
+        switch origin {
+        case .builtIn:
+            self.title = L10n.string(title)
+            self.detail = detail.map { L10n.string($0) }
+        case .extensionCommand:
+            self.title = title
+            self.detail = detail
+        }
         self.defaultShortcut = defaultShortcut
         self.isEditable = isEditable
         self.origin = origin

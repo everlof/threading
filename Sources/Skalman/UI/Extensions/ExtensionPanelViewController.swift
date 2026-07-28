@@ -177,9 +177,11 @@ final class ExtensionPanelViewController: NSViewController {
             scrollView.isHidden = false
             let owner = extensionName ?? extensionIdentifier
             let unavailable = NSTextField(
-                wrappingLabelWithString:
-                    "“\(fallbackTitle)” is unavailable because \(owner) is not running "
-                    + "or no longer registers this panel."
+                wrappingLabelWithString: L10n.format(
+                    "“%@” is unavailable because %@ is not running or no longer registers this panel.",
+                    fallbackTitle,
+                    owner
+                )
             )
             unavailable.applyFont(.body)
             unavailable.textColor = Design.Text.tertiary
@@ -226,8 +228,10 @@ final class ExtensionPanelViewController: NSViewController {
             rendered.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
         } catch {
             let failure = NSTextField(
-                wrappingLabelWithString: "This extension panel could not be rendered: "
-                    + error.localizedDescription
+                wrappingLabelWithString: L10n.format(
+                    "This extension panel could not be rendered: %@",
+                    error.localizedDescription
+                )
             )
             failure.applyFont(.body)
             failure.textColor = Design.Status.negative

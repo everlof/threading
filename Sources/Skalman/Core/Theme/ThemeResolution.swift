@@ -13,9 +13,9 @@ enum ThemeScope: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .session: return "Session"
-        case .project: return "Project"
-        case .global: return "Default"
+        case .session: return L10n.string("Session")
+        case .project: return L10n.string("Project")
+        case .global: return L10n.string("Default")
         }
     }
 }

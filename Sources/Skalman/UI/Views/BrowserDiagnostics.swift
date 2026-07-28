@@ -365,10 +365,14 @@ enum BrowserVisualComparisonError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidPNG: return "The baseline or current capture is not a decodable PNG."
-        case .imageTooLarge: return "The baseline or current capture exceeds the comparison limit."
-        case .invalidThreshold: return "channel_threshold must be between 0 and 255."
-        case .invalidRatio: return "maximum_different_ratio must be between 0 and 1."
+        case .invalidPNG:
+            return L10n.string("The baseline or current capture is not a decodable PNG.")
+        case .imageTooLarge:
+            return L10n.string("The baseline or current capture exceeds the comparison limit.")
+        case .invalidThreshold:
+            return L10n.string("channel_threshold must be between 0 and 255.")
+        case .invalidRatio:
+            return L10n.string("maximum_different_ratio must be between 0 and 1.")
         }
     }
 }

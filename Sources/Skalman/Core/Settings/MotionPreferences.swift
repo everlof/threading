@@ -13,13 +13,13 @@ enum WorkingOrbStyle: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .random: return "Random"
-        case .working: return "Working"
-        case .searching: return "Searching"
-        case .solving: return "Solving"
-        case .listening: return "Listening"
-        case .composing: return "Composing"
-        case .shaping: return "Shaping"
+        case .random: return L10n.string("Random")
+        case .working: return L10n.string("Working")
+        case .searching: return L10n.string("Searching")
+        case .solving: return L10n.string("Solving")
+        case .listening: return L10n.string("Listening")
+        case .composing: return L10n.string("Composing")
+        case .shaping: return L10n.string("Shaping")
         }
     }
 }
@@ -43,17 +43,17 @@ enum ChatNameMorphStyle: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .shapeMorph: return "Shape Morph"
-        case .crossfade: return "Crossfade"
-        case .slideUp: return "Slide Up"
-        case .slideDown: return "Slide Down"
-        case .scale: return "Scale"
-        case .bounce: return "Bounce"
-        case .drop: return "Drop"
-        case .flip: return "Flip"
-        case .blur: return "Blur"
-        case .scramble: return "Scramble"
-        case .typewriter: return "Typewriter"
+        case .shapeMorph: return L10n.string("Shape Morph")
+        case .crossfade: return L10n.string("Crossfade")
+        case .slideUp: return L10n.string("Slide Up")
+        case .slideDown: return L10n.string("Slide Down")
+        case .scale: return L10n.string("Scale")
+        case .bounce: return L10n.string("Bounce")
+        case .drop: return L10n.string("Drop")
+        case .flip: return L10n.string("Flip")
+        case .blur: return L10n.string("Blur")
+        case .scramble: return L10n.string("Scramble")
+        case .typewriter: return L10n.string("Typewriter")
         }
     }
 }

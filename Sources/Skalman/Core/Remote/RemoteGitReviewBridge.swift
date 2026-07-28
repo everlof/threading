@@ -15,8 +15,8 @@ enum RemoteGitReviewBridge {
 
         var errorDescription: String? {
             switch self {
-            case .sessionUnavailable: return "Session unavailable."
-            case .notRepository: return "Not a git repository."
+            case .sessionUnavailable: return L10n.string("Session unavailable.")
+            case .notRepository: return L10n.string("Not a git repository.")
             }
         }
     }
@@ -43,7 +43,9 @@ enum RemoteGitReviewBridge {
             guard let baseline = GitTurnBaselineStore.shared.baseline(forSessionID: sessionID) else {
                 completion(snapshot(
                     mode: mode,
-                    message: "No turn recorded yet. A baseline is captured when the agent starts working."
+                    message: L10n.string(
+                        "No turn recorded yet. A baseline is captured when the agent starts working."
+                    )
                 ))
                 return
             }

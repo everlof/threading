@@ -136,11 +136,11 @@ final class ImageCompareView: NSView {
     /// The chip names the answer — which comparison is on — not the setting.
     static func name(for mode: ImageCompareMode) -> String {
         switch mode {
-        case .wipeHorizontal: return "Wipe ↔"
-        case .wipeVertical: return "Wipe ↕"
-        case .fade: return "Fade"
-        case .difference: return "Difference"
-        case .sideBySide: return "Side by Side"
+        case .wipeHorizontal: return L10n.string("Wipe ↔")
+        case .wipeVertical: return L10n.string("Wipe ↕")
+        case .fade: return L10n.string("Fade")
+        case .difference: return L10n.string("Difference")
+        case .sideBySide: return L10n.string("Side by Side")
         }
     }
 
@@ -202,7 +202,7 @@ final class ImageCompareCanvas: ThemedControl {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        setAccessibilityLabel("Image comparison")
+        setAccessibilityLabel(L10n.string("Image comparison"))
     }
 
     // MARK: - Public Methods

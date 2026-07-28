@@ -11,16 +11,21 @@ enum ExtensionProjectScaffolderError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .destinationMustBeAbsolute:
-            return "The extension project destination must be an absolute path."
+            return L10n.string("The extension project destination must be an absolute path.")
         case .destinationExists(let path):
-            return "Something already exists at \(path)."
+            return L10n.format("Something already exists at %@.", path)
         case .sdkSnapshotMissing(let path):
-            return "Skalman's embedded extension SDK is missing or incomplete at \(path)."
+            return L10n.format(
+                "Skalman’s embedded extension SDK is missing or incomplete at %@.",
+                path
+            )
         case .sdkDocumentationMissing(let path):
-            return "Skalman's embedded extension authoring documentation is missing or "
-                + "incomplete at \(path)."
+            return L10n.format(
+                "Skalman’s embedded extension authoring documentation is missing or incomplete at %@.",
+                path
+            )
         case .invalidManifest(let message):
-            return "The generated extension manifest is invalid: \(message)"
+            return L10n.format("The generated extension manifest is invalid: %@", message)
         }
     }
 }

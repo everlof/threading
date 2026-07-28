@@ -98,12 +98,12 @@ final class KeyboardPreferencesViewController: NSViewController {
     /// that it collides with something, and that it is no longer the default.
     private func subtitle(for command: AppCommand, shortcut: KeyboardShortcut?) -> String? {
         if let shortcut, let other = store.conflict(for: shortcut, excluding: command) {
-            return String(format: Strings.conflictFormat, other.title)
+            return L10n.format(Strings.conflictFormat, other.title)
         }
         if let fallback = command.defaultShortcut,
            let other = store.defaultConflict(for: command) {
-            return String(
-                format: Strings.defaultConflictFormat,
+            return L10n.format(
+                Strings.defaultConflictFormat,
                 fallback.displayString,
                 other.title
             )
@@ -111,7 +111,7 @@ final class KeyboardPreferencesViewController: NSViewController {
         guard store.isOverridden(command) else { return nil }
 
         guard let fallback = command.defaultShortcut else { return Strings.changedNoDefault }
-        return String(format: Strings.changedFormat, fallback.displayString)
+        return L10n.format(Strings.changedFormat, fallback.displayString)
     }
 
     // MARK: - Actions
@@ -134,8 +134,8 @@ final class KeyboardPreferencesViewController: NSViewController {
 
     private func presentConflict(_ shortcut: KeyboardShortcut, taken other: AppCommand) {
         let alert = NSAlert()
-        alert.messageText = String(format: Strings.conflictTitle, shortcut.displayString)
-        alert.informativeText = String(format: Strings.conflictBody, other.title)
+        alert.messageText = L10n.format(Strings.conflictTitle, shortcut.displayString)
+        alert.informativeText = L10n.format(Strings.conflictBody, other.title)
         alert.alertStyle = .warning
         alert.runModal()
     }
@@ -149,20 +149,26 @@ final class KeyboardPreferencesViewController: NSViewController {
 // MARK: - Strings
 
 private enum Strings {
-    static let heading = "Keyboard"
-    static let note = "Click a shortcut and press the keys you want. "
-        + "Escape cancels, Delete removes the shortcut."
+    static var heading: String { L10n.string("Keyboard") }
+    static var note: String {
+        L10n.string(
+            "Click a shortcut and press the keys you want. "
+                + "Escape cancels, Delete removes the shortcut."
+        )
+    }
 
     static let conflictFormat = "Already used by %@"
     static let defaultConflictFormat = "Default %@ is used by %@"
     static let changedFormat = "Changed from %@"
-    static let changedNoDefault = "Changed"
+    static var changedNoDefault: String { L10n.string("Changed") }
 
     static let conflictTitle = "%@ is already in use"
     static let conflictBody = "That combination belongs to “%@”. "
         + "Choose a different one, or clear that shortcut first."
 
-    static let resetTitle = "Reset Shortcuts"
-    static let resetSubtitle = "Puts every shortcut back to its default."
-    static let resetButton = "Reset All"
+    static var resetTitle: String { L10n.string("Reset Shortcuts") }
+    static var resetSubtitle: String {
+        L10n.string("Puts every shortcut back to its default.")
+    }
+    static var resetButton: String { L10n.string("Reset All") }
 }

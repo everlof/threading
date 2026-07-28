@@ -19,24 +19,29 @@ enum ExtensionExperimentFixture {
         commands: [
             ExtensionCommand(
                 id: "refresh",
-                title: "Refresh status",
-                description: "Refresh the example extension's project status."
+                title: L10n.string("Refresh status"),
+                description: L10n.string(
+                    "Refresh the example extension's project status."
+                )
             )
         ],
         panels: [
             ExtensionPanel(
                 id: "status",
-                title: "Status",
+                title: L10n.string("Status"),
                 root: .stack(
                     axis: .vertical,
                     spacing: .medium,
                     children: [
-                        .text("Example extension", role: .heading),
+                        .text(L10n.string("Example extension"), role: .heading),
                         .text(
-                            "This entire panel is a value tree. Skalman owns every view below it.",
+                            L10n.string(
+                                "This entire panel is a value tree. "
+                                    + "Skalman owns every view below it."
+                            ),
                             role: .detail
                         ),
-                        .status("Ready", role: .positive),
+                        .status(L10n.string("Ready"), role: .positive),
                         .divider,
                         .stack(
                             axis: .horizontal,
@@ -44,19 +49,19 @@ enum ExtensionExperimentFixture {
                             children: [
                                 .button(
                                     id: "refresh",
-                                    title: "Refresh",
+                                    title: L10n.string("Refresh"),
                                     role: .primary,
                                     isEnabled: true
                                 ),
                                 .button(
                                     id: "remove",
-                                    title: "Remove",
+                                    title: L10n.string("Remove"),
                                     role: .destructive,
                                     isEnabled: true
                                 ),
                                 .button(
                                     id: "unavailable",
-                                    title: "Unavailable",
+                                    title: L10n.string("Unavailable"),
                                     role: .standard,
                                     isEnabled: false
                                 )

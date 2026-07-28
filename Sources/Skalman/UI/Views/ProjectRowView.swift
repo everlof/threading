@@ -58,7 +58,7 @@ final class ProjectRowView: NSTableCellView {
     /// changes with the row's role. Inks from the chrome — the sidebar's own ground.
     private let hoverButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.actionSymbol,
-        accessibility: "Project actions",
+        accessibility: L10n.string("Project actions"),
         target: .inline,
         inkSource: .chrome
     )

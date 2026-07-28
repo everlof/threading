@@ -80,7 +80,7 @@ final class PromptView: NSView, ThemedComponent {
 
         submitButton.image = NSImage(
             systemSymbolName: DesignSymbols.submit,
-            accessibilityDescription: "Start session"
+            accessibilityDescription: L10n.string("Start session")
         )
         submitButton.isBordered = false
         submitButton.contentTintColor = Design.Text.tertiary

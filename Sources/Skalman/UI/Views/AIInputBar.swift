@@ -35,7 +35,7 @@ final class AIInputBar: NSView {
 
     private lazy var inputField: NSTextField = {
         let field = ThemedTextField()
-        field.placeholderString = "Ask AI to generate a command..."
+        field.placeholderString = L10n.string("Ask AI to generate a command…")
         field.applyFont(.body)
         field.delegate = self
         field.focusRingType = .none
@@ -43,14 +43,14 @@ final class AIInputBar: NSView {
     }()
 
     private lazy var submitButton: ThemedButton = {
-        let button = ThemedButton(symbol: "arrow.up.circle.fill", accessibility: "Submit", target: self, action: #selector(submit))
+        let button = ThemedButton(symbol: "arrow.up.circle.fill", accessibility: L10n.string("Submit"), target: self, action: #selector(submit))
         button.isBordered = false
         button.setContentHuggingPriority(.required, for: .horizontal)
         return button
     }()
 
     private lazy var cancelButton: ThemedButton = {
-        let button = ThemedButton(symbol: "xmark.circle", accessibility: "Cancel", target: self, action: #selector(cancel))
+        let button = ThemedButton(symbol: "xmark.circle", accessibility: L10n.string("Cancel"), target: self, action: #selector(cancel))
         button.isBordered = false
         button.setContentHuggingPriority(.required, for: .horizontal)
         return button
@@ -135,7 +135,7 @@ final class AIInputBar: NSView {
             providerLabel.stringValue = name
             providerLabel.isHidden = false
         } else {
-            providerLabel.stringValue = "Not configured"
+            providerLabel.stringValue = L10n.string("Not configured")
             providerLabel.textColor = Design.Status.warning
             providerLabel.isHidden = false
         }

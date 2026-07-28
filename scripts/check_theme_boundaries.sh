@@ -34,3 +34,5 @@ for agent_file in "$repo_root/AGENTS.md" "$repo_root/CLAUDE.md"; do
         exit 1
     fi
 done
+
+"$script_dir/check_localization_boundaries.sh"

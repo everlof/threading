@@ -445,15 +445,15 @@ enum ClaudeControlError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notRunning:
-            return "The conversation is not running."
+            return L10n.string("The conversation is not running.")
         case .encodingFailed:
-            return "Could not encode the control request."
+            return L10n.string("Could not encode the control request.")
         case .writeFailed(let detail):
-            return "Could not send the control request: \(detail)."
+            return L10n.format("Could not send the control request: %@.", detail)
         case .rejected(let reason):
             return reason
         case .timedOut:
-            return "The agent did not answer the control request."
+            return L10n.string("The agent did not answer the control request.")
         }
     }
 }

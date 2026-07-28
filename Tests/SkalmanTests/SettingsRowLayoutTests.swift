@@ -101,4 +101,87 @@ final class SettingsRowLayoutTests: XCTestCase {
 
         XCTAssertGreaterThan(wide, narrow)
     }
+
+    func testSettingsSearchMatchesAllTokensAcrossTitlesAndExplicitMetadata() {
+        let sidebar = SettingsSidebar(items: [
+            .init(
+                id: "general",
+                title: "General",
+                symbol: "gearshape",
+                searchText: "General sessions startup shell"
+            ),
+            .init(
+                id: "profiles",
+                title: "Profiles",
+                symbol: "person.crop.circle",
+                searchText: "Profiles terminal font cursor scrollback"
+            ),
+            .init(
+                id: "themes",
+                title: "Themes",
+                symbol: "paintpalette",
+                searchText: "Themes appearance text size large typography"
+            )
+        ])
+
+        sidebar.updateSearchQuery("terminal font")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["profiles"])
+
+        sidebar.updateSearchQuery("THEME large")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["themes"])
+
+        sidebar.updateSearchQuery("session")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["general"])
+
+        sidebar.updateSearchQuery("missing setting")
+        XCTAssertEqual(sidebar.visibleItemIDs, [])
+
+        sidebar.updateSearchQuery("")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["general", "profiles", "themes"])
+    }
+
+    func testSettingsCatalogueMakesTextSizeAndExtensionFieldsDiscoverable() {
+        let themes = SettingsPages.sidebarItems.first {
+            $0.id == SettingsPages.themesID
+        }
+        XCTAssertTrue(
+            themes?.searchText.localizedCaseInsensitiveContains("text size") == true
+        )
+
+        let extensionPage = RegisteredExtensionSettingsPage(
+            id: ExtensionSettingsRegistry.qualifiedPageID(
+                extensionIdentifier: "com.example.search",
+                localPageID: "integration"
+            ),
+            extensionIdentifier: "com.example.search",
+            extensionName: "Search Example",
+            page: .init(
+                id: "integration",
+                title: "Server Integration",
+                symbol: "network",
+                sections: [
+                    .init(
+                        id: "connection",
+                        title: "Connection",
+                        fields: [
+                            .init(
+                                id: "endpoint",
+                                title: "API endpoint",
+                                description: "Server used for synchronization",
+                                control: .text(
+                                    defaultValue: "",
+                                    placeholder: "https://example.test",
+                                    maximumLength: 1_000
+                                )
+                            )
+                        ]
+                    )
+                ]
+            )
+        )
+        let terms = ExtensionSettingsRegistry.searchTerms(for: extensionPage)
+        XCTAssertTrue(terms.contains("API endpoint"))
+        XCTAssertTrue(terms.contains("Server used for synchronization"))
+        XCTAssertTrue(terms.contains("https://example.test"))
+    }
 }

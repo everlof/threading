@@ -176,12 +176,12 @@ final class ToolCallView: NSView {
         let tint: NSColor = isError ? Design.Status.negative : Design.Text.secondary
         glyphLabel.textColor = tint
         titleLabel.textColor = tint
-        titleLabel.stringValue = isError ? "\(label) · failed" : label
+        titleLabel.stringValue = isError ? L10n.format("%@ · failed", label) : label
 
         // An edit already shows its diff and its `+/−` line; the result only settles whether
         // the change landed. A plain tool instead reveals its output here.
         if diffLines != nil {
-            if isError { metaLabel.stringValue = "failed" }
+            if isError { metaLabel.stringValue = L10n.string("failed") }
             return
         }
 
@@ -189,7 +189,9 @@ final class ToolCallView: NSView {
         textBody?.textColor = isError ? Design.Status.negative : Design.Text.secondary
 
         let hasText = !text.isEmpty
-        metaLabel.stringValue = hasText ? sizeSummary(text) : (isError ? "failed" : "done")
+        metaLabel.stringValue = hasText
+            ? sizeSummary(text)
+            : (isError ? L10n.string("failed") : L10n.string("done"))
         if hasText { enableExpansion() }
     }
 
@@ -197,7 +199,9 @@ final class ToolCallView: NSView {
 
     private func sizeSummary(_ text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).count
-        return lines == 1 ? "1 line" : "\(lines) lines"
+        return lines == 1
+            ? L10n.string("1 line")
+            : L10n.format("%lld lines", Int64(lines))
     }
 
     private func enableExpansion() {

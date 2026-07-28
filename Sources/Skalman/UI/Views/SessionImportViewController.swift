@@ -304,18 +304,25 @@ enum ImportLayout {
 // MARK: - Import Strings
 
 enum ImportStrings {
-    static let heading = "Import Conversation"
-    static let searchPlaceholder = "Search conversations"
-    static let importTitle = "Import"
-    static let cancelTitle = "Cancel"
+    static var heading: String { L10n.string("Import Conversation") }
+    static var searchPlaceholder: String { L10n.string("Search conversations") }
+    static var importTitle: String { L10n.string("Import") }
+    static var cancelTitle: String { L10n.string("Cancel") }
 
     static func subheading(count: Int) -> String {
         count == 1
-            ? "1 conversation found in this folder"
-            : "\(count) conversations found in this folder"
+            ? L10n.string("1 conversation found in this folder")
+            : L10n.format(
+                "%lld conversations found in this folder",
+                Int64(count)
+            )
     }
 
     static func filteredSubheading(shown: Int, of total: Int) -> String {
-        "\(shown) of \(total) conversations"
+        L10n.format(
+            "%lld of %lld conversations",
+            Int64(shown),
+            Int64(total)
+        )
     }
 }

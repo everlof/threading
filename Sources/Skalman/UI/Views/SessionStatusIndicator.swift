@@ -35,7 +35,7 @@ final class SessionStatusIndicator: NSView {
 
     private func setupViews() {
         spinner.translatesAutoresizingMaskIntoConstraints = false
-        spinner.setAccessibilityLabel("Session working")
+        spinner.setAccessibilityLabel(L10n.string("Session working"))
 
         // Through `applySurface` rather than straight onto the layer: a `cgColor` resolves once,
         // and the dot would keep the previous theme's accent until the session changed state.
@@ -47,7 +47,7 @@ final class SessionStatusIndicator: NSView {
         attentionDot.translatesAutoresizingMaskIntoConstraints = false
         attentionDot.setAccessibilityElement(true)
         attentionDot.setAccessibilityRole(.staticText)
-        attentionDot.setAccessibilityLabel("Session needs attention")
+        attentionDot.setAccessibilityLabel(L10n.string("Session needs attention"))
 
         addSubview(spinner)
         addSubview(attentionDot)
@@ -81,12 +81,12 @@ final class SessionStatusIndicator: NSView {
         // "work is pending" without adding a second competing status glyph to the row.
         if isLoading {
             attentionDot.isHidden = true
-            spinner.setAccessibilityLabel("Loading session")
+            spinner.setAccessibilityLabel(L10n.string("Loading session"))
             spinner.isAnimating = true
             return
         }
 
-        spinner.setAccessibilityLabel("Session working")
+        spinner.setAccessibilityLabel(L10n.string("Session working"))
 
         switch activity {
         case .working:

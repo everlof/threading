@@ -2797,4 +2797,82 @@ final class ExtensionContractTests: XCTestCase {
             manifests["HelloStatusExtension"]?.identifier
         )
     }
+
+    func testManifestLocalizationCataloguesRoundTripAndValidateTheirBoundary() throws {
+        let manifest = ExtensionManifest(
+            identifier: "com.example.localized",
+            name: "Localized",
+            version: "1.0.0",
+            executable: "bin/extension",
+            localizations: [
+                .init(locale: "sv-SE", resource: "Localizations/sv-SE.json"),
+                .init(locale: "fr", resource: "Localizations/fr.json")
+            ]
+        )
+
+        try manifest.validate()
+        let roundTrip = try JSONDecoder().decode(
+            ExtensionManifest.self,
+            from: JSONEncoder().encode(manifest)
+        )
+        XCTAssertEqual(roundTrip.localizations, manifest.localizations)
+
+        let unsafe = ExtensionManifest(
+            identifier: "com.example.localized",
+            name: "Localized",
+            version: "1.0.0",
+            executable: "bin/extension",
+            localizations: [
+                .init(locale: "not_a_tag", resource: "../outside.json"),
+                .init(locale: "sv", resource: "Localizations/sv.txt")
+            ]
+        )
+        XCTAssertThrowsError(try unsafe.validate()) { error in
+            let paths = (error as? ExtensionValidationError)?.issues.map(\.path) ?? []
+            XCTAssertTrue(paths.contains("localizations[0].locale"))
+            XCTAssertTrue(paths.contains("localizations[0].resource"))
+            XCTAssertTrue(paths.contains("localizations[1].resource"))
+        }
+    }
+
+    func testExtensionLocalizerNegotiatesLocaleAndFallsBackPerString() throws {
+        XCTAssertEqual(
+            ExtensionLocalizer.bestLanguage(
+                preferredLanguages: ["sv-SE", "en-GB"],
+                availableLanguages: ["en", "sv"]
+            ),
+            "sv"
+        )
+        XCTAssertEqual(
+            ExtensionLocalizer.bestLanguage(
+                preferredLanguages: ["fr-CA"],
+                availableLanguages: ["en", "fr-FR"]
+            ),
+            "fr-FR"
+        )
+
+        let preferred = String(
+            decoding: try JSONEncoder().encode(["sv-SE", "en"]),
+            as: UTF8.self
+        )
+        let strings = String(
+            decoding: try JSONEncoder().encode([
+                "Ready": "Klar",
+                "%d files": "%d filer"
+            ]),
+            as: UTF8.self
+        )
+        let localizer = ExtensionLocalizer(environment: [
+            ExtensionLocalizationEnvironment.localeIdentifier: "sv_SE",
+            ExtensionLocalizationEnvironment.preferredLanguagesJSON: preferred,
+            ExtensionLocalizationEnvironment.selectedLanguage: "sv",
+            ExtensionLocalizationEnvironment.stringsJSON: strings
+        ])
+
+        XCTAssertEqual(localizer.selectedLanguage, "sv")
+        XCTAssertEqual(localizer.preferredLanguages, ["sv-SE", "en"])
+        XCTAssertEqual(localizer.string("Ready"), "Klar")
+        XCTAssertEqual(localizer.string("Unknown"), "Unknown")
+        XCTAssertEqual(localizer.format("%d files", 3), "3 filer")
+    }
 }

@@ -25,7 +25,7 @@ final class FindBarView: NSView {
 
     private lazy var searchField: ThemedSearchField = {
         let field = ThemedSearchField()
-        field.placeholderString = "Search"
+        field.placeholderString = L10n.string("Search")
         field.target = self
         field.action = #selector(searchTextChanged)
         field.delegate = self
@@ -40,19 +40,19 @@ final class FindBarView: NSView {
     }()
 
     private lazy var previousButton: ThemedButton = {
-        let button = ThemedButton(symbol: "chevron.up", accessibility: "Previous", target: self, action: #selector(findPrevious))
+        let button = ThemedButton(symbol: "chevron.up", accessibility: L10n.string("Previous"), target: self, action: #selector(findPrevious))
         button.isBordered = false
         return button
     }()
 
     private lazy var nextButton: ThemedButton = {
-        let button = ThemedButton(symbol: "chevron.down", accessibility: "Next", target: self, action: #selector(findNext))
+        let button = ThemedButton(symbol: "chevron.down", accessibility: L10n.string("Next"), target: self, action: #selector(findNext))
         button.isBordered = false
         return button
     }()
 
     private lazy var closeButton: ThemedButton = {
-        let button = ThemedButton(symbol: "xmark", accessibility: "Close", target: self, action: #selector(closeFindBar))
+        let button = ThemedButton(symbol: "xmark", accessibility: L10n.string("Close"), target: self, action: #selector(closeFindBar))
         button.isBordered = false
         return button
     }()
@@ -137,9 +137,13 @@ final class FindBarView: NSView {
         if searchField.stringValue.isEmpty {
             resultsLabel.stringValue = ""
         } else if matchCount == 0 {
-            resultsLabel.stringValue = "No results"
+            resultsLabel.stringValue = L10n.string("No results")
         } else {
-            resultsLabel.stringValue = "\(currentMatchIndex) of \(matchCount)"
+            resultsLabel.stringValue = L10n.format(
+                "%lld of %lld",
+                Int64(currentMatchIndex),
+                Int64(matchCount)
+            )
         }
     }
 

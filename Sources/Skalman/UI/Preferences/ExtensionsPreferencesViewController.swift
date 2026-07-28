@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 
 /// Installed extension packages, their desired enablement, and their supervised runtime state.
 final class ExtensionsPreferencesViewController: NSViewController {
@@ -197,7 +198,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
             target: self,
             action: #selector(identityResolverChanged(_:))
         )
-        menu.addItem(ThemedMenuItem(title: "No extension", representedValue: ""))
+        menu.addItem(ThemedMenuItem(title: L10n.string("No extension"), representedValue: ""))
         for identifier in candidates {
             menu.addItem(ThemedMenuItem(
                 title: names[identifier] ?? identifier,
@@ -254,7 +255,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         toggle.setAccessibilityIdentifier("settings.extensions.enabled.\(item.identifier)")
         remember(toggle, action: .toggle, identifier: item.identifier)
 
-        let version = item.version.map { "Version \($0) · \(item.identifier)" }
+        let version = item.version.map {
+            L10n.format("Version %@ · %@", $0, item.identifier)
+        }
             ?? item.identifier
 
         var rows: [NSView] = [
@@ -265,7 +268,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
             ),
             SettingsUI.row(
                 title: "Type",
-                subtitle: item.profile.displayName
+                subtitle: localizedName(item.profile)
             ),
             statusRow(item.status)
         ]
@@ -273,7 +276,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
             SettingsUI.row(
                 title: "Package",
                 subtitle: item.provenance?.presentation
-                    ?? "Origin not recorded · containment still enforced"
+                    ?? L10n.string("Origin not recorded · containment still enforced")
             )
         )
 
@@ -282,7 +285,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
                 SettingsUI.row(
                     title: "Provides",
                     subtitle: item.contributionKinds
-                        .map(\.displayName)
+                        .map(localizedName)
                         .joined(separator: ", ")
                 )
             )
@@ -318,8 +321,10 @@ final class ExtensionsPreferencesViewController: NSViewController {
                             let provider = names[dependency.providerIdentifier]
                                 ?? dependency.providerIdentifier
                             let availability = manager.isServiceAvailable(dependency)
-                                ? "available"
-                                : dependency.required ? "required · unavailable" : "unavailable"
+                                ? L10n.string("available")
+                                : dependency.required
+                                    ? L10n.string("required · unavailable")
+                                    : L10n.string("unavailable")
                             return "\(provider) / \(dependency.serviceID) v\(dependency.version) · \(availability)"
                         }
                         .joined(separator: "\n")
@@ -340,21 +345,21 @@ final class ExtensionsPreferencesViewController: NSViewController {
                     title: "Advanced companions",
                     subtitle: item.companions.map { companion in
                         let activation = companion.activation == .onDemand
-                            ? "on demand"
-                            : "while enabled"
+                            ? L10n.string("on demand")
+                            : L10n.string("while enabled")
                         let capabilities = companion.capabilities.isEmpty
-                            ? "no OS-facing capabilities"
+                            ? L10n.string("no OS-facing capabilities")
                             : companion.capabilities
                                 .map(\.rawValue)
                                 .sorted()
                                 .joined(separator: ", ")
                         let status = item.companionStatuses[companion.id]?.summary
-                            ?? "unknown"
+                            ?? L10n.string("unknown")
                         let operations = companion.operations.isEmpty
-                            ? "no operations"
+                            ? L10n.string("no operations")
                             : companion.operations.map(\.id).sorted().joined(separator: ", ")
                         let surfaces = companion.surfaces.isEmpty
-                            ? "no surfaces"
+                            ? L10n.string("no surfaces")
                             : companion.surfaces.map(\.id).sorted().joined(separator: ", ")
                         return "\(companion.id) · \(activation) · \(status) · "
                             + "\(capabilities) · \(operations) · \(surfaces)"
@@ -366,6 +371,33 @@ final class ExtensionsPreferencesViewController: NSViewController {
         rows.append(SettingsUI.fullRow(actionRow(for: item)))
 
         return SettingsUI.section(item.name, SettingsCard(rows: rows))
+    }
+
+    private func localizedName(_ profile: ExtensionProfile) -> String {
+        switch profile {
+        case .runtime: L10n.string("Runtime extension")
+        case .command: L10n.string("Command extension")
+        case .panel: L10n.string("Panel extension")
+        case .agentTool: L10n.string("Agent-tool extension")
+        case .settings: L10n.string("Settings extension")
+        case .service: L10n.string("Service extension")
+        case .component: L10n.string("Component extension")
+        case .hybrid: L10n.string("Hybrid extension")
+        }
+    }
+
+    private func localizedName(_ kind: ExtensionContributionKind) -> String {
+        switch kind {
+        case .commands: L10n.string("Commands")
+        case .panels: L10n.string("Panels")
+        case .agentTools: L10n.string("Agent tools")
+        case .settings: L10n.string("Settings")
+        case .services: L10n.string("Services")
+        case .componentCustomization: L10n.string("Component customization")
+        case .providerIcons: L10n.string("Provider icons")
+        case .accountIcons: L10n.string("Account icons")
+        case .sessionIdentity: L10n.string("Session identity")
+        }
     }
 
     private func statusRow(_ status: InstalledExtensionStatus) -> NSView {
@@ -383,7 +415,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
         value.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let title = NSTextField(labelWithString: "Status")
+        let title = NSTextField(labelWithString: L10n.string("Status"))
         title.applyFont(.body)
         title.textColor = Design.Text.label
         title.setContentHuggingPriority(.required, for: .horizontal)
@@ -445,9 +477,11 @@ final class ExtensionsPreferencesViewController: NSViewController {
         guard let window = view.window else { return }
 
         let panel = NSOpenPanel()
-        panel.title = "Import Skalman Extension"
-        panel.message = "Choose a .skalmanextension package or an unpacked extension directory."
-        panel.prompt = "Import"
+        panel.title = L10n.string("Import Skalman Extension")
+        panel.message = L10n.string(
+            "Choose a .skalmanextension package or an unpacked extension directory."
+        )
+        panel.prompt = L10n.string("Import")
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -496,7 +530,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         alert.informativeText = proposal.message
         alert.alertStyle = .informational
         alert.addButton(withTitle: proposal.acceptTitle)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         let decided: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard let self else { return }
@@ -512,8 +546,11 @@ final class ExtensionsPreferencesViewController: NSViewController {
                 switch result {
                 case .success(let installed):
                     self.presentAlert(
-                        title: "Extension Installed",
-                        message: "“\(installed.name)” was copied into Skalman and is disabled until you enable it."
+                        title: L10n.string("Extension Installed"),
+                        message: L10n.format(
+                            "“%@” was copied into Skalman and is disabled until you enable it.",
+                            installed.name
+                        )
                     )
                 case .failure(let error):
                     self.present(error: error)
@@ -560,9 +597,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
 
         let panel = NSOpenPanel()
-        panel.title = "Update Skalman Extension"
-        panel.message = "Choose the new version of “\(item.name)”."
-        panel.prompt = "Choose"
+        panel.title = L10n.string("Update Skalman Extension")
+        panel.message = L10n.format("Choose the new version of “%@”.", item.name)
+        panel.prompt = L10n.string("Choose")
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -577,9 +614,13 @@ final class ExtensionsPreferencesViewController: NSViewController {
                 case .success(let plan):
                     guard plan.identifier == identifier else {
                         self.presentAlert(
-                            title: "Different Extension",
-                            message: "That package is “\(plan.identifier)”, not “\(identifier)”. "
-                                + "Import it separately instead of updating this one."
+                            title: L10n.string("Different Extension"),
+                            message: L10n.format(
+                                "That package is “%@”, not “%@”. Import it separately instead "
+                                    + "of updating this one.",
+                                plan.identifier,
+                                identifier
+                            )
                         )
                         return
                     }
@@ -600,7 +641,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         alert.informativeText = confirmation.message
         alert.alertStyle = plan.requiresApproval ? .warning : .informational
         alert.addButton(withTitle: confirmation.acceptTitle)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         manager.update(from: source, approving: plan) { [weak self] result in
@@ -608,8 +649,12 @@ final class ExtensionsPreferencesViewController: NSViewController {
             switch result {
             case .success(let updated):
                 self.presentAlert(
-                    title: "Extension Updated",
-                    message: "“\(updated.name)” is now version \(plan.candidateVersion)."
+                    title: L10n.string("Extension Updated"),
+                    message: L10n.format(
+                        "“%@” is now version %@.",
+                        updated.name,
+                        plan.candidateVersion
+                    )
                 )
             case .failure(let error):
                 self.present(error: error)
@@ -636,22 +681,26 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
 
         let alert = NSAlert()
-        alert.messageText = "Remove “\(item.name)”?"
-        alert.informativeText = "Its process will stop. The package, settings, key-value data, "
-            + "cache, and provenance move to Skalman’s recoverable Removed directory. "
-            + "Keychain secrets remain under the extension identifier for an intentional "
-            + "reinstall; remove them from the extension before uninstalling if they should "
-            + "not be retained."
+        alert.messageText = L10n.format("Remove “%@”?", item.name)
+        alert.informativeText = L10n.string(
+            "Its process will stop. The package, settings, key-value data, cache, and "
+                + "provenance move to Skalman’s recoverable Removed directory. Keychain "
+                + "secrets remain under the extension identifier for an intentional reinstall; "
+                + "remove them from the extension before uninstalling if they should not be retained."
+        )
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Remove"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         do {
             let recoveredAt = try manager.uninstall(identifier: identifier)
             presentAlert(
-                title: "Extension Removed",
-                message: "The package was moved to \(recoveredAt.path) and can be recovered from there."
+                title: L10n.string("Extension Removed"),
+                message: L10n.format(
+                    "The package was moved to %@ and can be recovered from there.",
+                    recoveredAt.path
+                )
             )
         } catch {
             present(error: error)

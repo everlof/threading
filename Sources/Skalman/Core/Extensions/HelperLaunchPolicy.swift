@@ -8,8 +8,10 @@ enum ExtensionHelperError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .helperUnavailable(let name):
-            return "Skalman's contained extension launcher (\(name)) is missing from the "
-                + "application bundle."
+            return L10n.format(
+                "Skalman’s contained extension launcher (%@) is missing from the application bundle.",
+                name
+            )
         }
     }
 }

@@ -12,9 +12,13 @@ enum ExtensionServiceBrokerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .providerUnavailable(let identifier):
-            return "The provider extension “\(identifier)” is not running."
+            return L10n.format("The provider extension “%@” is not running.", identifier)
         case .serviceUnavailable(let identifier, let version):
-            return "The provider did not register service “\(identifier)” v\(version)."
+            return L10n.format(
+                "The provider did not register service “%@” v%lld.",
+                identifier,
+                Int64(version)
+            )
         }
     }
 }
@@ -28,13 +32,24 @@ enum ExtensionManagerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .operationInProgress(let identifier):
-            return "Extension \(identifier) is already being updated."
+            return L10n.format("Extension %@ is already being updated.", identifier)
         case .companionUnavailable(let extensionIdentifier, let companionID):
-            return "Extension \(extensionIdentifier) does not declare companion \(companionID)."
+            return L10n.format(
+                "Extension %@ does not declare companion %@.",
+                extensionIdentifier,
+                companionID
+            )
         case .companionOperationUnavailable(let companionID, let operationID):
-            return "Companion \(companionID) does not declare operation \(operationID)."
+            return L10n.format(
+                "Companion %@ does not declare operation %@.",
+                companionID,
+                operationID
+            )
         case .extensionNotRunning(let identifier):
-            return "Extension \(identifier) must be enabled and running before its companion can start."
+            return L10n.format(
+                "Extension %@ must be enabled and running before its companion can start.",
+                identifier
+            )
         }
     }
 }
@@ -50,17 +65,22 @@ enum InstalledExtensionStatus: Equatable {
     var summary: String {
         switch self {
         case .disabled:
-            return "Disabled"
+            return L10n.string("Disabled")
         case .starting:
-            return "Starting…"
+            return L10n.string("Starting…")
         case .updating:
-            return "Updating…"
+            return L10n.string("Updating…")
         case .running(let commands, let panels, let tools):
-            return "Running · \(commands) command(s), \(panels) panel(s), \(tools) tool(s)"
+            return L10n.format(
+                "Running · %lld commands, %lld panels, %lld tools",
+                Int64(commands),
+                Int64(panels),
+                Int64(tools)
+            )
         case .failed(let message):
-            return "Failed · \(message)"
+            return L10n.format("Failed · %@", message)
         case .invalid(let message):
-            return "Invalid package · \(message)"
+            return L10n.format("Invalid package · %@", message)
         }
     }
 }
@@ -75,15 +95,15 @@ enum InstalledCompanionStatus: Equatable {
     var summary: String {
         switch self {
         case .disabled:
-            return "disabled"
+            return L10n.string("disabled")
         case .onDemand:
-            return "ready on demand"
+            return L10n.string("ready on demand")
         case .starting:
-            return "starting"
+            return L10n.string("starting")
         case .running:
-            return "running"
+            return L10n.string("running")
         case .failed(let message):
-            return "failed: \(message)"
+            return L10n.format("failed: %@", message)
         }
     }
 }
@@ -283,6 +303,9 @@ final class ExtensionManager:
         packages.values.map { package in
             let identifier = package.identifier
             let manifest = package.bundle?.manifest
+            let localization = ExtensionLocalizationResolver(
+                catalogs: package.bundle?.localizations ?? []
+            )
             let status: InstalledExtensionStatus
             if let problem = package.problem {
                 status = .invalid(problem)
@@ -293,14 +316,16 @@ final class ExtensionManager:
 
             return InstalledExtensionSnapshot(
                 identifier: identifier,
-                name: manifest?.name ?? identifier,
+                name: manifest.map { localization.string($0.name) } ?? identifier,
                 version: manifest?.version,
                 profile: manifest?.profile ?? .runtime,
                 contributionKinds: manifest?.contributionKinds.sorted {
                     $0.rawValue < $1.rawValue
                 } ?? [],
                 capabilities: manifest?.capabilities.map(\.rawValue).sorted() ?? [],
-                companions: manifest?.companions.sorted { $0.id < $1.id } ?? [],
+                companions: manifest?.companions
+                    .map(localization.companion)
+                    .sorted { $0.id < $1.id } ?? [],
                 companionStatuses: Dictionary(
                     uniqueKeysWithValues: (manifest?.companions ?? []).map { companion in
                         let key = CompanionKey(
@@ -318,7 +343,7 @@ final class ExtensionManager:
                         return (companion.id, companionStatuses[key] ?? fallback)
                     }
                 ),
-                services: manifest?.services ?? [],
+                services: manifest?.services.map(localization.service) ?? [],
                 serviceDependencies: manifest?.serviceDependencies ?? [],
                 packageURL: package.packageURL,
                 provenance: package.provenance,
@@ -497,13 +522,15 @@ final class ExtensionManager:
             guard enabledIdentifiers.contains(identifier),
                   sessions[identifier] != nil,
                   let processGeneration = sessionGenerations[identifier],
-                  let manifest = packages[identifier]?.bundle?.manifest else {
+                  let bundle = packages[identifier]?.bundle else {
                 return [ExtensionPanelInventoryItem]()
             }
+            let manifest = bundle.manifest
+            let localization = ExtensionLocalizationResolver(catalogs: bundle.localizations)
             return registration.panels.map {
                 ExtensionPanelInventoryItem(
                     extensionIdentifier: identifier,
-                    extensionName: manifest.name,
+                    extensionName: localization.string(manifest.name),
                     processGeneration: processGeneration,
                     panel: $0
                 )
@@ -528,7 +555,7 @@ final class ExtensionManager:
         guard enabledIdentifiers.contains(extensionIdentifier),
               sessions[extensionIdentifier] != nil,
               let processGeneration = sessionGenerations[extensionIdentifier],
-              let manifest = packages[extensionIdentifier]?.bundle?.manifest,
+              let bundle = packages[extensionIdentifier]?.bundle,
               let panel = registrations[extensionIdentifier]?.panels.first(where: {
                   $0.id == panelID
               }) else {
@@ -536,7 +563,9 @@ final class ExtensionManager:
         }
         return ExtensionPanelInventoryItem(
             extensionIdentifier: extensionIdentifier,
-            extensionName: manifest.name,
+            extensionName: ExtensionLocalizationResolver(
+                catalogs: bundle.localizations
+            ).string(bundle.manifest.name),
             processGeneration: processGeneration,
             panel: panel
         )
@@ -569,11 +598,16 @@ final class ExtensionManager:
             return false
         }
 
+        let localization = packages[extensionIdentifier]?.bundle.map {
+            ExtensionLocalizationResolver(catalogs: $0.localizations)
+        } ?? ExtensionLocalizationResolver(strings: [:])
         process.invoke(
             panelID: panelID,
             actionID: actionID,
             context: context,
-            completion: completion
+            completion: { result in
+                completion(result.map(localization.actionResponse))
+            }
         )
         return true
     }
@@ -777,11 +811,16 @@ final class ExtensionManager:
             return false
         }
 
+        let localization = packages[extensionIdentifier]?.bundle.map {
+            ExtensionLocalizationResolver(catalogs: $0.localizations)
+        } ?? ExtensionLocalizationResolver(strings: [:])
         process.invokeCommand(
             commandID: commandID,
             context: context,
             requestID: requestID,
-            completion: completion
+            completion: { result in
+                completion(result.map(localization.commandResponse))
+            }
         )
         return true
     }
@@ -790,14 +829,16 @@ final class ExtensionManager:
     /// subset is what the extension process may actually execute.
     var mcpToolInventory: [ExtensionMCPToolInventory] {
         packages.values.compactMap { package in
-            guard let manifest = package.bundle?.manifest, !manifest.mcpTools.isEmpty else {
+            guard let bundle = package.bundle, !bundle.manifest.mcpTools.isEmpty else {
                 return nil
             }
+            let manifest = bundle.manifest
+            let localization = ExtensionLocalizationResolver(catalogs: bundle.localizations)
             return ExtensionMCPToolInventory(
                 extensionIdentifier: manifest.identifier,
-                extensionName: manifest.name,
+                extensionName: localization.string(manifest.name),
                 isExtensionEnabled: enabledIdentifiers.contains(manifest.identifier),
-                declaredTools: manifest.mcpTools,
+                declaredTools: manifest.mcpTools.map(localization.mcpTool),
                 registeredTools: registrations[manifest.identifier]?.mcpTools ?? []
             )
         }
@@ -1232,6 +1273,7 @@ final class ExtensionManager:
             cache: store.storageStore
         )
         let transport = launchPolicy.hostTransport(for: bundle)
+        let localization = ExtensionLocalizationResolver(catalogs: bundle.localizations)
         let hostAuthorization: ExtensionHostAuthorization?
         do {
             hostAuthorization = try ExtensionHostService.shared.authorize(
@@ -1240,6 +1282,7 @@ final class ExtensionManager:
                 order: extensionOrder,
                 capabilities: bundle.manifest.capabilities,
                 serviceDependencies: bundle.manifest.serviceDependencies,
+                localization: localization,
                 transport: transport
             )
         } catch {
@@ -1300,6 +1343,9 @@ final class ExtensionManager:
                 environment.merge(hostAuthorization?.environment ?? [:]) {
                     _, hostValue in hostValue
                 }
+                environment.merge(localization.environment()) {
+                    _, presentationValue in presentationValue
+                }
                 let started = try ExtensionProcessSession.start(
                     bundle: bundle,
                     policy: launchPolicy,
@@ -1356,13 +1402,16 @@ final class ExtensionManager:
                     self.notifyChange()
 
                 case .success(let started):
+                    let localizedRegistration = localization.registration(
+                        started.registration
+                    )
                     self.sessions[identifier] = started.session
                     self.sessionGenerations[identifier] = processGeneration
-                    self.registrations[identifier] = started.registration
+                    self.registrations[identifier] = localizedRegistration
                     CommandRegistry.shared.replaceExtensionCommands(
                         extensionIdentifier: identifier,
-                        extensionName: bundle.manifest.name,
-                        commands: started.registration.commands
+                        extensionName: localization.string(bundle.manifest.name),
+                        commands: localizedRegistration.commands
                     )
                     self.statuses[identifier] = .running(
                         commands: started.registration.commands.count,
@@ -1661,10 +1710,15 @@ final class ExtensionManager:
             contributions: enabledIdentifiers.sorted().compactMap { identifier in
                 guard let bundle = packages[identifier]?.bundle,
                       !bundle.themes.isEmpty || !bundle.fonts.isEmpty else { return nil }
+                let localization = ExtensionLocalizationResolver(
+                    catalogs: bundle.localizations
+                )
                 return ExtensionAppearanceRegistry.Contribution(
                     extensionIdentifier: identifier,
-                    extensionName: bundle.manifest.name,
-                    themes: bundle.themes.map(\.theme),
+                    extensionName: localization.string(bundle.manifest.name),
+                    themes: bundle.themes.map {
+                        localization.theme($0.theme)
+                    },
                     fontURLs: bundle.fonts.map(\.url)
                 )
             }
@@ -1673,8 +1727,8 @@ final class ExtensionManager:
 
     private func syncSettingsRegistry(postChange: Bool = true) {
         ExtensionSettingsRegistry.shared.replace(
-            enabledManifests: enabledIdentifiers.compactMap {
-                packages[$0]?.bundle?.manifest
+            enabledBundles: enabledIdentifiers.compactMap {
+                packages[$0]?.bundle
             },
             postChange: postChange
         )
@@ -1694,9 +1748,9 @@ private enum ExtensionSettingsManagerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unknownSetting(let id):
-            return "The extension does not declare setting “\(id)”."
+            return L10n.format("The extension does not declare setting “%@”.", id)
         case .invalidValue(let id):
-            return "The value does not match extension setting “\(id)”."
+            return L10n.format("The value does not match extension setting “%@”.", id)
         case .rejected(let message):
             return message
         }

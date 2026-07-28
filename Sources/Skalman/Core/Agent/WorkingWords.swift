@@ -170,7 +170,9 @@ struct RunProgress: Equatable {
     let step: Int
     let total: Int
 
-    var label: String { "Step \(step) / \(total)" }
+    var label: String {
+        L10n.format("Step %lld / %lld", Int64(step), Int64(total))
+    }
 
     init(step: Int, total: Int) {
         self.step = step

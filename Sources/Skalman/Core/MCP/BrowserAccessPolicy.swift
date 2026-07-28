@@ -27,7 +27,7 @@ struct BrowserOrigin: Hashable, Equatable {
     }
 
     var displayName: String {
-        guard !host.isEmpty else { return "this blank page" }
+        guard !host.isEmpty else { return L10n.string("this blank page") }
         return host + (port.map { ":\($0)" } ?? "")
     }
 

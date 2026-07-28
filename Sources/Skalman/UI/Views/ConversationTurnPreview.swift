@@ -86,5 +86,5 @@ enum PreviewDefaults {
     static let width: CGFloat = 300
     static let userLines = 2
     static let assistantLines = 3
-    static let pending = "Still working…"
+    static var pending: String { L10n.string("Still working…") }
 }

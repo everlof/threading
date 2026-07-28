@@ -99,7 +99,7 @@ enum CodeStatsBarDefaults {
     /// than the cap and still give it a colour of its own.
     static let maximumSegments = 5
 
-    static let otherName = "Other"
+    static var otherName: String { L10n.string("Other") }
 
     static let height: CGFloat = 6
     static let segmentGap: CGFloat = 1

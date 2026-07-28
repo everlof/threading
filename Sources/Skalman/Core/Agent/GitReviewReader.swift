@@ -308,7 +308,7 @@ enum GitReviewReader {
         var title: String {
             switch self {
             case .revision(_, let title): return title
-            case .worktree: return "Working Tree"
+            case .worktree: return L10n.string("Working Tree")
             }
         }
     }
@@ -318,18 +318,24 @@ enum GitReviewReader {
     private static func endpoints(for request: DiffRequest, in root: URL) throws -> (Endpoint, Endpoint) {
         switch request {
         case .staged:
-            return (.revision(GitReviewCommands.head, title: "HEAD"), .revision(":0", title: "Index"))
+            return (
+                .revision(GitReviewCommands.head, title: "HEAD"),
+                .revision(":0", title: L10n.string("Index"))
+            )
         case .unstaged:
-            return (.revision(":0", title: "Index"), .worktree)
+            return (.revision(":0", title: L10n.string("Index")), .worktree)
         case .uncommitted:
             return (.revision(GitReviewCommands.head, title: "HEAD"), .worktree)
         case .branch:
             let base = try defaultBranch(in: root)
             let mergeBase = decodeTrimmed(try run(GitReviewCommands.mergeBase(base), in: root))
-            return (.revision(mergeBase, title: "Merge Base"), .worktree)
+            return (.revision(mergeBase, title: L10n.string("Merge Base")), .worktree)
         case .lastTurn(let baseline):
             guard commitExists(baseline.snapshotHash, in: root) else { throw Failure.baselineExpired }
-            return (.revision(baseline.snapshotHash, title: "Turn Start"), .worktree)
+            return (
+                .revision(baseline.snapshotHash, title: L10n.string("Turn Start")),
+                .worktree
+            )
         case .commit(let hash):
             let short = String(hash.prefix(7))
             return (.revision(hash + "^", title: "\(short)^"), .revision(hash, title: short))

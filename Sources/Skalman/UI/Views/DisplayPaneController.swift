@@ -321,13 +321,13 @@ final class DisplayPaneController: NSViewController {
 
         newTabButton = ThemedButton(
             symbol: "plus",
-            accessibility: "New tab",
+            accessibility: L10n.string("New tab"),
             target: self,
             action: #selector(newTabButtonClicked(_:))
         )
         newTabButton.translatesAutoresizingMaskIntoConstraints = false
         newTabButton.isBordered = false
-        newTabButton.toolTip = "New tab"
+        newTabButton.toolTip = L10n.string("New tab")
 
         headerCustomizationView = DisplayPaneHeaderCustomizationView(
             lookup: customizationLookup,
@@ -407,7 +407,7 @@ final class DisplayPaneController: NSViewController {
                     subtitle: item.extensionName,
                     image: NSImage(
                         systemSymbolName: "puzzlepiece.extension",
-                        accessibilityDescription: "Extension panel"
+                        accessibilityDescription: L10n.string("Extension panel")
                     ),
                     onChoose: { [weak self] in
                         _ = self?.activateExtensionPanel(
@@ -483,13 +483,15 @@ final class DisplayPaneController: NSViewController {
         // An explicit button beside the caption rather than a click target on the text or the
         // image: nothing about a caption advertises that it is clickable, and a button is the
         // only one of the three that can be seen before it is tried.
-        contentMenuButton = ThemedButton(symbol: "ellipsis.circle", accessibility: "Content actions", target: self, action: #selector(contentMenuButtonClicked)
+        contentMenuButton = ThemedButton(symbol: "ellipsis.circle", accessibility: L10n.string("Content actions"), target: self, action: #selector(contentMenuButtonClicked)
         )
         contentMenuButton.translatesAutoresizingMaskIntoConstraints = false
         contentMenuButton.isBordered = false
-        contentMenuButton.toolTip = "Actions"
+        contentMenuButton.toolTip = L10n.string("Actions")
 
-        placeholderLabel = NSTextField(labelWithString: "Nothing to show yet.")
+        placeholderLabel = NSTextField(
+            labelWithString: L10n.string("Nothing to show yet.")
+        )
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         placeholderLabel.applyFont(.detail())
         placeholderLabel.textColor = Design.Text.tertiary
@@ -935,8 +937,8 @@ final class DisplayPaneController: NSViewController {
     /// mistake visible immediately.
     private func chooseFilesToCompare(for sessionID: SessionID) {
         let panel = NSOpenPanel()
-        panel.message = "Choose two files to compare"
-        panel.prompt = "Compare"
+        panel.message = L10n.string("Choose two files to compare")
+        panel.prompt = L10n.string("Compare")
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
         guard let window = view.window else { return }

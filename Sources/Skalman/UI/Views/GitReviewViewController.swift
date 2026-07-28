@@ -151,10 +151,10 @@ final class GitReviewViewController: NSViewController {
     // MARK: - Setup
 
     private func setupHeader() {
-        backButton = ThemedButton(symbol: "chevron.left", accessibility: "Back", target: self, action: #selector(backToCommits)
+        backButton = ThemedButton(symbol: "chevron.left", accessibility: L10n.string("Back"), target: self, action: #selector(backToCommits)
         )
         backButton.isBordered = false
-        backButton.toolTip = "Back to history"
+        backButton.toolTip = L10n.string("Back to history")
         backButton.isHidden = true
 
         modeChip = ChipView()
@@ -175,12 +175,12 @@ final class GitReviewViewController: NSViewController {
         // glyphs would compete with the mode chip, which is the control that matters here.
         menuButton = ThemedButton(
             symbol: "ellipsis",
-            accessibility: "Diff options",
+            accessibility: L10n.string("Diff options"),
             target: self,
             action: #selector(showOverflowMenu(_:))
         )
         menuButton.isBordered = false
-        menuButton.toolTip = "Diff options"
+        menuButton.toolTip = L10n.string("Diff options")
 
         // A stack rather than individual constraints, because the back button is usually
         // hidden: a hidden view keeps the frame its constraints give it, so the chip sat
@@ -245,13 +245,13 @@ final class GitReviewViewController: NSViewController {
 
         jumpToEndButton = ThemedButton(
             symbol: "arrow.down",
-            accessibility: "Scroll to the end of the diff",
+            accessibility: L10n.string("Scroll to the end of the diff"),
             target: self,
             action: #selector(scrollToDiffEnd)
         )
         jumpToEndButton.translatesAutoresizingMaskIntoConstraints = false
         jumpToEndButton.isBordered = false
-        jumpToEndButton.toolTip = "Scroll to end"
+        jumpToEndButton.toolTip = L10n.string("Scroll to end")
         jumpToEndButton.applySurface(
             fill: Design.Surface.elevated,
             radius: .fixed(20),
@@ -449,7 +449,7 @@ final class GitReviewViewController: NSViewController {
             case .success(let files):
                 self.show(files.isEmpty ? .message("No changes.") : .files(files))
             case .failure(let failure):
-                self.show(.message(failure.errorDescription ?? "git failed."))
+                self.show(.message(failure.errorDescription ?? L10n.string("git failed.")))
             }
             self.isLoading = false
             self.reloadIfPending()
@@ -473,7 +473,7 @@ final class GitReviewViewController: NSViewController {
                     ? .message("No commits yet.")
                     : .commits(canLoadMore: self.lastPageWasFull))
             case .failure(let failure):
-                self.show(.message(failure.errorDescription ?? "git failed."))
+                self.show(.message(failure.errorDescription ?? L10n.string("git failed.")))
             }
             self.isLoading = false
             self.reloadIfPending()
@@ -501,7 +501,7 @@ final class GitReviewViewController: NSViewController {
                     self.show(.commitDetail(commit, files))
                 }
             case .failure(let failure):
-                self.show(.message(failure.errorDescription ?? "git failed."))
+                self.show(.message(failure.errorDescription ?? L10n.string("git failed.")))
             }
             self.isLoading = false
         }
@@ -581,14 +581,21 @@ final class GitReviewSummaryPill: NSView {
     }
 
     func configure(files: Int, added: Int, removed: Int) {
-        filesLabel.stringValue = "\(files) \(files == 1 ? "file" : "files")"
+        filesLabel.stringValue = files == 1
+            ? L10n.string("1 file")
+            : L10n.format("%lld files", Int64(files))
         filesLabel.textColor = Design.Text.secondary
         addedLabel.stringValue = "+\(added.formatted(.number.notation(.compactName)))"
         addedLabel.textColor = Design.Diff.added
         removedLabel.stringValue = "−\(removed.formatted(.number.notation(.compactName)))"
         removedLabel.textColor = Design.Diff.removed
         setAccessibilityLabel(
-            "\(files) changed files, \(added) additions, \(removed) deletions"
+            L10n.format(
+                "%lld changed files, %lld additions, %lld deletions",
+                Int64(files),
+                Int64(added),
+                Int64(removed)
+            )
         )
         applySurface(
             fill: Design.Surface.elevated,
@@ -610,7 +617,7 @@ enum GitReviewUIDefaults {
     /// The chip's mark for every mode: the change itself, not any one comparison.
     static let modeSymbol = "plus.forwardslash.minus"
 
-    static let commitPlaceholder = "Commit staged changes…"
+    static var commitPlaceholder: String { L10n.string("Commit staged changes…") }
 
     /// Delimits the patch in the copied `git apply` heredoc. Distinctive enough that a diff
     /// containing the word cannot close it early.

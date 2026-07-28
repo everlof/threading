@@ -12,7 +12,16 @@ enum SettingsPages {
         let hostPage: ExtensionHostSettingsPage?
         let title: String
         let symbol: String
+        let searchTerms: [String]
         let make: () -> NSViewController
+
+        @MainActor
+        var searchableText: String {
+            let extensionTerms = hostPage.map {
+                ExtensionSettingsRegistry.shared.searchTerms(for: $0)
+            } ?? []
+            return ([title] + searchTerms + extensionTerms).joined(separator: " ")
+        }
     }
 
     static let generalID = ExtensionHostSettingsPage.general.rawValue
@@ -29,83 +38,108 @@ enum SettingsPages {
     static let archivedID = ExtensionHostSettingsPage.archived.rawValue
 
     // Compatibility names for existing doors while they migrate to IDs.
-    static let storageTitle = "Storage"
-    static let usageTitle = "Usage"
-    static let themesTitle = "Themes"
-    static let keyboardTitle = "Keyboard"
+    static var storageTitle: String { L10n.string("Storage") }
+    static var usageTitle: String { L10n.string("Usage") }
+    static var themesTitle: String { L10n.string("Themes") }
+    static var keyboardTitle: String { L10n.string("Keyboard") }
 
     static let builtIn: [Page] = [
         Page(
             id: generalID,
             hostPage: .general,
-            title: "General",
-            symbol: "gearshape"
+            title: L10n.string("General"),
+            symbol: "gearshape",
+            searchTerms: terms(
+                "sessions", "agent", "attachments", "startup", "closing", "shell",
+                "branch", "project icons", "account avatars", "Codex hooks",
+                "Claude Remote Control"
+            )
         ) { GeneralPreferencesViewController() },
         Page(
             id: remoteAccessID,
             hostPage: nil,
-            title: "Remote Access",
-            symbol: "iphone"
+            title: L10n.string("Remote Access"),
+            symbol: "iphone",
+            searchTerms: terms("iPhone", "pair", "QR code", "remote", "device", "security")
         ) { RemoteAccessPreferencesViewController() },
         Page(
             id: accountsID,
             hostPage: .accounts,
-            title: "Accounts",
-            symbol: "person.2"
+            title: L10n.string("Accounts"),
+            symbol: "person.2",
+            searchTerms: terms("Claude", "Codex", "login", "avatar", "emoji", "name", "enabled")
         ) { AccountsPreferencesViewController() },
         Page(
             id: profilesID,
             hostPage: .profiles,
-            title: "Profiles",
-            symbol: "person.crop.circle"
+            title: L10n.string("Profiles"),
+            symbol: "person.crop.circle",
+            searchTerms: terms(
+                "terminal font", "terminal size", "cursor", "scrollback", "colour",
+                "background", "dropped images"
+            )
         ) { ProfilePreferencesViewController() },
         Page(
             id: themesID,
             hostPage: .themes,
             title: themesTitle,
-            symbol: "paintpalette"
+            symbol: "paintpalette",
+            searchTerms: terms(
+                "appearance", "app theme", "terminal theme", "font", "typeface",
+                "text size", "colors", "colours", "palette", "large text"
+            )
         ) { ThemePreferencesViewController() },
         Page(
             id: motionID,
             hostPage: .motion,
-            title: "Motion",
-            symbol: "sparkles"
+            title: L10n.string("Motion"),
+            symbol: "sparkles",
+            searchTerms: terms("animation", "working indicator", "orb", "chat names", "transition")
         ) { MotionPreferencesViewController() },
         Page(
             id: extensionsID,
             hostPage: .extensions,
-            title: "Extensions",
-            symbol: "puzzlepiece.extension"
+            title: L10n.string("Extensions"),
+            symbol: "puzzlepiece.extension",
+            searchTerms: terms(
+                "plugins", "install", "enable", "reload", "remove", "capabilities",
+                "identity rendering"
+            )
         ) { ExtensionsPreferencesViewController() },
         Page(
             id: toolsID,
             hostPage: .tools,
-            title: "Tools",
-            symbol: "wrench.and.screwdriver"
+            title: L10n.string("Tools"),
+            symbol: "wrench.and.screwdriver",
+            searchTerms: terms("MCP", "browser", "agents", "permissions", "enabled")
         ) { ToolsPreferencesViewController() },
         Page(
             id: keyboardID,
             hostPage: .keyboard,
             title: keyboardTitle,
-            symbol: "keyboard"
+            symbol: "keyboard",
+            searchTerms: terms("shortcuts", "keys", "bindings", "commands", "reset")
         ) { KeyboardPreferencesViewController() },
         Page(
             id: usageID,
             hostPage: .usage,
             title: usageTitle,
-            symbol: "chart.bar"
+            symbol: "chart.bar",
+            searchTerms: terms("tokens", "cost", "spend", "account", "checkout", "model", "day")
         ) { UsagePreferencesViewController() },
         Page(
             id: storageID,
             hostPage: .storage,
             title: storageTitle,
-            symbol: "internaldrive"
+            symbol: "internaldrive",
+            searchTerms: terms("disk", "build output", "cache", "reclaim", "remove", "space")
         ) { StoragePreferencesViewController() },
         Page(
             id: archivedID,
             hostPage: .archived,
-            title: "Archived",
-            symbol: "archivebox"
+            title: L10n.string("Archived"),
+            symbol: "archivebox",
+            searchTerms: terms("conversations", "sessions", "restore", "delete")
         ) { ArchivedPreferencesViewController() }
     ]
 
@@ -115,7 +149,8 @@ enum SettingsPages {
                 id: registered.id,
                 hostPage: nil,
                 title: "\(registered.extensionName) — \(registered.page.title)",
-                symbol: registered.page.symbol
+                symbol: registered.page.symbol,
+                searchTerms: ExtensionSettingsRegistry.searchTerms(for: registered)
             ) {
                 ExtensionSettingsViewController(page: registered)
             }
@@ -139,6 +174,25 @@ enum SettingsPages {
     }
 
     static var sidebarItems: [SettingsSidebar.Item] {
-        all.map { SettingsSidebar.Item(id: $0.id, title: $0.title, symbol: $0.symbol) }
+        all.map {
+            SettingsSidebar.Item(
+                id: $0.id,
+                title: $0.title,
+                symbol: $0.symbol,
+                searchText: $0.searchableText
+            )
+        }
+    }
+
+    private static func terms(_ values: String...) -> [String] {
+        values.flatMap { value in
+            let sentenceCase = value.prefix(1).uppercased() + String(value.dropFirst())
+            var terms = [value]
+            for candidate in [L10n.string(value), L10n.string(sentenceCase)]
+                where !terms.contains(candidate) {
+                terms.append(candidate)
+            }
+            return terms
+        }
     }
 }

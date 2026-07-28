@@ -10,6 +10,12 @@ enum ComponentCustomizationGalleryFixture {
         let title: String
         let detail: String
         let view: NSView
+
+        init(title: String, detail: String, view: NSView) {
+            self.title = L10n.string(title)
+            self.detail = L10n.string(detail)
+            self.view = view
+        }
     }
 
     static func stories() -> [Story] {
@@ -59,7 +65,7 @@ enum ComponentCustomizationGalleryFixture {
                     slots: [
                         .init(
                             slot: "after-title",
-                            children: [.status("CI passed", role: .positive)]
+                            children: [.status(L10n.string("CI passed"), role: .positive)]
                         )
                     ]
                 )
@@ -91,11 +97,11 @@ enum ComponentCustomizationGalleryFixture {
                             .image(
                                 .systemSymbol("shippingbox.fill"),
                                 role: .identity,
-                                accessibilityLabel: "Deployment"
+                                accessibilityLabel: L10n.string("Deployment")
                             ),
-                            .text("Deploy production", role: .compactBody),
+                            .text(L10n.string("Deploy production"), role: .compactBody),
                             .flexibleSpacer,
-                            .status("CI passed", role: .positive)
+                            .status(L10n.string("CI passed"), role: .positive)
                         ]
                     )
                 )
@@ -121,7 +127,7 @@ enum ComponentCustomizationGalleryFixture {
             slots: [
                 .init(
                     slot: "private-slot",
-                    children: [.status("Must not render", role: .negative)]
+                    children: [.status(L10n.string("Must not render"), role: .negative)]
                 )
             ]
         )
@@ -139,8 +145,8 @@ enum ComponentCustomizationGalleryFixture {
         )
         view.setAccessibilityHelp(
             wasRejected
-                ? "Invalid patch rejected; native content restored."
-                : "Fixture error: invalid patch was accepted."
+                ? L10n.string("Invalid patch rejected; native content restored.")
+                : L10n.string("Fixture error: invalid patch was accepted.")
         )
         return Story(
             title: "Customization · invalid fallback",
@@ -152,7 +158,10 @@ enum ComponentCustomizationGalleryFixture {
     private static func realSessionRowStory() -> Story {
         let registry = ComponentCustomizationRegistry()
         try? registry.register(HostComponentContracts.sidebarSessionRow)
-        let session = AgentSession(kind: .codex, title: "Deploy production")
+        let session = AgentSession(
+            kind: .codex,
+            title: L10n.string("Deploy production")
+        )
         let rowTarget = ExtensionComponentTarget(
             component: HostComponentContracts.sidebarSessionRow.id,
             contractVersion: HostComponentContracts.sidebarSessionRow.version,
@@ -166,7 +175,7 @@ enum ComponentCustomizationGalleryFixture {
                     slots: [
                         .init(
                             slot: "after-title",
-                            children: [.status("CI passed", role: .positive)]
+                            children: [.status(L10n.string("CI passed"), role: .positive)]
                         )
                     ]
                 )
@@ -191,7 +200,10 @@ enum ComponentCustomizationGalleryFixture {
     private static func realSessionRowReplacementStory() -> Story {
         let registry = ComponentCustomizationRegistry()
         try? registry.register(HostComponentContracts.sidebarSessionRow)
-        let session = AgentSession(kind: .codex, title: "Native session title")
+        let session = AgentSession(
+            kind: .codex,
+            title: L10n.string("Native session title")
+        )
         let rowTarget = ExtensionComponentTarget(
             component: HostComponentContracts.sidebarSessionRow.id,
             contractVersion: HostComponentContracts.sidebarSessionRow.version,
@@ -209,14 +221,14 @@ enum ComponentCustomizationGalleryFixture {
                             .image(
                                 .hostAsset("session.provider-image"),
                                 role: .identity,
-                                accessibilityLabel: "Agent"
+                                accessibilityLabel: L10n.string("Agent")
                             ),
-                            .text("Deploy production", role: .compactBody),
+                            .text(L10n.string("Deploy production"), role: .compactBody),
                             .flexibleSpacer,
-                            .status("Passed", role: .positive),
+                            .status(L10n.string("Passed"), role: .positive),
                             .button(
                                 id: "inspect-build",
-                                title: "Details",
+                                title: L10n.string("Details"),
                                 role: .standard,
                                 isEnabled: true
                             )
@@ -229,6 +241,7 @@ enum ComponentCustomizationGalleryFixture {
 
         let row = SessionRowView(customizationLookup: registry.customization(for:))
         row.onCustomizationAction = { [weak row] action in
+            // localization-ignore: Extension and action identifiers are protocol values.
             row?.setAccessibilityHelp(
                 "\(action.extensionIdentifier ?? "unknown"):\(action.actionID)"
             )
@@ -259,7 +272,10 @@ enum ComponentCustomizationGalleryFixture {
             name: "Skalman",
             folderURL: URL(fileURLWithPath: "/tmp/Skalman")
         )
-        let session = AgentSession(kind: .codex, title: "Deploy production")
+        let session = AgentSession(
+            kind: .codex,
+            title: L10n.string("Deploy production")
+        )
         let projectTarget = ExtensionComponentTarget(
             component: HostComponentContracts.sidebarProjectRow.id,
             contractVersion: HostComponentContracts.sidebarProjectRow.version,
@@ -279,7 +295,7 @@ enum ComponentCustomizationGalleryFixture {
                     slots: [
                         .init(
                             slot: "after-title",
-                            children: [.status("CI passed", role: .positive)]
+                            children: [.status(L10n.string("CI passed"), role: .positive)]
                         )
                     ]
                 ),
@@ -289,7 +305,7 @@ enum ComponentCustomizationGalleryFixture {
                     slots: [
                         .init(
                             slot: "after-title",
-                            children: [.status("Build 481", role: .positive)]
+                            children: [.status(L10n.string("Build 481"), role: .positive)]
                         )
                     ]
                 )
@@ -354,7 +370,7 @@ enum ComponentCustomizationGalleryFixture {
         let nativeIcon = NSImageView(
             image: NSImage(
                 systemSymbolName: "bubble.left.fill",
-                accessibilityDescription: "Conversation"
+                accessibilityDescription: L10n.string("Conversation")
             ) ?? NSImage()
         )
         nativeIcon.translatesAutoresizingMaskIntoConstraints = false
@@ -363,7 +379,9 @@ enum ComponentCustomizationGalleryFixture {
             nativeIcon.heightAnchor.constraint(equalToConstant: 18)
         ])
 
-        let nativeTitle = NSTextField(labelWithString: "Native session row")
+        let nativeTitle = NSTextField(
+            labelWithString: L10n.string("Native session row")
+        )
         nativeTitle.applyFont(.control)
         nativeTitle.textColor = Design.Text.label
         nativeTitle.lineBreakMode = .byTruncatingTail

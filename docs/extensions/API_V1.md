@@ -21,6 +21,9 @@ The machine-readable declaration is `SkalmanExtensionAPI` in the app-shipped
   confirmation UI before a request reaches the extension.
 - Host-rendered panels with optional generation-scoped load actions, complete Settings pages,
   and built-in Settings sections.
+- Package-owned localization catalogues with host language negotiation. The selected catalogue
+  localizes static Settings and runtime semantic contributions, and is also exposed through
+  `ExtensionLocalizer` for dynamic messages and formatted copy.
 - Dynamically registered MCP tools surfaced in Tools settings.
 - Versioned brokered services between explicitly declared extensions.
 - Host-owned settings plus private KV, reclaimable cache, and Keychain-backed secret brokers.

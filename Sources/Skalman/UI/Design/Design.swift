@@ -165,6 +165,13 @@ enum Design {
             case conversation
         }
 
+        /// Resolves the user's semantic text-size preference in the one place point sizes enter
+        /// the design system. This reaches prose, code, aligned numerics, marks, and every
+        /// host-rendered extension node while leaving an explicit terminal profile untouched.
+        private static func scaled(_ pointSize: CGFloat) -> CGFloat {
+            pointSize * AppSettings.appTextSize.scale
+        }
+
         /// A prose font, resolved through the four layers that may have an opinion about it.
         ///
         /// This is the whole of the typeface interpreter, and the order is the design:
@@ -297,67 +304,67 @@ enum Design {
         }
 
         /// The one emphasised string in a view — a project name, a pane title.
-        static func heading(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 20, weight: .semibold), surface: surface) }
+        static func heading(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(20), weight: .semibold), surface: surface) }
         /// A compact title inside an otherwise empty content pane.
-        static func placeholderTitle(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 15, weight: .medium), surface: surface) }
+        static func placeholderTitle(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(15), weight: .medium), surface: surface) }
         /// Supporting detail directly beneath a heading, such as a path.
-        static func subheading(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 12, weight: .regular), surface: surface) }
+        static func subheading(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(12), weight: .regular), surface: surface) }
         /// Editable and readable content.
-        static func body(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 13, weight: .regular), surface: surface) }
+        static func body(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .regular), surface: surface) }
         /// A project, pane, or toolbar title at body scale.
-        static func emphasizedBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 13, weight: .semibold), surface: surface) }
+        static func emphasizedBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .semibold), surface: surface) }
         /// Strong body copy used only by legacy form section labels.
-        static func strongBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 13, weight: .bold), surface: surface) }
+        static func strongBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .bold), surface: surface) }
         /// Labels on controls.
-        static func control(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 12, weight: .medium), surface: surface) }
+        static func control(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(12), weight: .medium), surface: surface) }
         /// A quieter control label, such as a sidebar session.
-        static func controlRegular(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 12, weight: .regular), surface: surface) }
+        static func controlRegular(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(12), weight: .regular), surface: surface) }
         /// Section headings and other quiet, small type.
-        static func caption(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: 11, weight: .semibold), surface: surface) }
+        static func caption(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(11), weight: .semibold), surface: surface) }
         /// Metadata and secondary copy that should not carry caption emphasis.
         static func detail(
             weight: NSFont.Weight = .regular,
             surface: FontSurface = .chrome
         ) -> NSFont {
-            prose(.systemFont(ofSize: 11, weight: weight), surface: surface)
+            prose(.systemFont(ofSize: scaled(11), weight: weight), surface: surface)
         }
 
         /// Tool subjects, paths, diffs, and other code-shaped content.
         static func code(weight: NSFont.Weight = .regular) -> NSFont {
-            .monospacedSystemFont(ofSize: 11, weight: weight)
+            .monospacedSystemFont(ofSize: scaled(11), weight: weight)
         }
 
         /// Inline code that must share the body's line box.
         static func inlineCode() -> NSFont {
-            .monospacedSystemFont(ofSize: 12, weight: .regular)
+            .monospacedSystemFont(ofSize: scaled(12), weight: .regular)
         }
 
         /// A code sample inside the compact theme-preview card.
         static func previewCode() -> NSFont {
-            .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+            .monospacedSystemFont(ofSize: scaled(11.5), weight: .regular)
         }
 
         /// Dense process metadata and compact hexadecimal values.
         static func compactCode() -> NSFont {
-            .monospacedSystemFont(ofSize: 10, weight: .regular)
+            .monospacedSystemFont(ofSize: scaled(10), weight: .regular)
         }
 
         /// A compact tool identifier; deliberately halfway between code and metadata.
         static func compactToolName() -> NSFont {
-            .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+            .monospacedSystemFont(ofSize: scaled(10.5), weight: .regular)
         }
 
         /// Numeric labels use fixed-width digits without making the surrounding prose code.
         static func numericBody() -> NSFont {
-            .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+            .monospacedDigitSystemFont(ofSize: scaled(13), weight: .regular)
         }
 
         static func numericControl() -> NSFont {
-            .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+            .monospacedDigitSystemFont(ofSize: scaled(12), weight: .regular)
         }
 
         static func numericDetail(weight: NSFont.Weight = .regular) -> NSFont {
-            .monospacedDigitSystemFont(ofSize: 11, weight: weight)
+            .monospacedDigitSystemFont(ofSize: scaled(11), weight: weight)
         }
 
         /// Markdown headings scale from the caller's semantic body font while font construction
@@ -373,12 +380,12 @@ enum Design {
             fromPointSize base: CGFloat,
             surface: FontSurface = .chrome
         ) -> NSFont {
-            prose(.systemFont(ofSize: base + 3, weight: .semibold), surface: surface)
+            prose(.systemFont(ofSize: base + scaled(3), weight: .semibold), surface: surface)
         }
 
         /// Emoji rendered as an application control mark, not prose.
-        static func accountEmoji() -> NSFont { .systemFont(ofSize: 16) }
-        static func emojiPickerCell() -> NSFont { .systemFont(ofSize: 19) }
+        static func accountEmoji() -> NSFont { .systemFont(ofSize: scaled(16)) }
+        static func emojiPickerCell() -> NSFont { .systemFont(ofSize: scaled(19)) }
 
         /// Every family the process can currently resolve — the list the font pickers and the
         /// MCP authoring gate offer.

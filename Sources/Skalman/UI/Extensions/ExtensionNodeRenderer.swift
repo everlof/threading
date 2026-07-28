@@ -19,11 +19,17 @@ enum ExtensionNodeRenderer {
         var errorDescription: String? {
             switch self {
             case .tooDeep(let maximum):
-                return "Extension UI exceeds the maximum depth of \(maximum)."
+                return L10n.format(
+                    "Extension UI exceeds the maximum depth of %lld.",
+                    Int64(maximum)
+                )
             case .tooManyNodes(let maximum):
-                return "Extension UI exceeds the maximum node count of \(maximum)."
+                return L10n.format(
+                    "Extension UI exceeds the maximum node count of %lld.",
+                    Int64(maximum)
+                )
             case .customSurfaceUnavailable:
-                return "The extension custom surface could not be created."
+                return L10n.string("The extension custom surface could not be created.")
             }
         }
     }
@@ -157,7 +163,7 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
             button.isEnabled = isEnabled
             button.setAccessibilityIdentifier("extension.action.\(id)")
             if role == .destructive {
-                button.setAccessibilityHelp("Destructive action")
+                button.setAccessibilityHelp(L10n.string("Destructive action"))
             }
             actionsByButton[ObjectIdentifier(button)] = id
             return button

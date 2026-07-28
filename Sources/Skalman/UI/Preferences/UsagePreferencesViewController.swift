@@ -275,39 +275,51 @@ final class UsagePreferencesViewController: NSViewController {
 // MARK: - Usage Strings
 
 private enum UsageStrings {
-    static let title = "Usage"
+    static var title: String { L10n.string("Usage") }
 
-    static let explanation = """
-        What your conversations have cost, read from the agents' own transcripts. Grouped by \
-        checkout, since a repository's worktrees are separate places doing separate work.
-        """
+    static var explanation: String {
+        L10n.string("""
+            What your conversations have cost, read from the agents' own transcripts. Grouped by \
+            checkout, since a repository's worktrees are separate places doing separate work.
+            """)
+    }
 
-    static let footnote = """
-        Counts input, output and cache writes — the tokens a plan is charged for. Cache reads \
-        are excluded: they are the cheap path and would drown everything else. A turn copied \
-        forward by a resume, a compaction or a side chat is counted once, and subagent threads \
-        are counted too, since their tokens appear in no other file. Claude only; Codex records \
-        its usage differently.
-        """
+    static var footnote: String {
+        L10n.string("""
+            Counts input, output and cache writes — the tokens a plan is charged for. Cache reads \
+            are excluded: they are the cheap path and would drown everything else. A turn copied \
+            forward by a resume, a compaction or a side chat is counted once, and subagent threads \
+            are counted too, since their tokens appear in no other file. Claude only; Codex records \
+            its usage differently.
+            """)
+    }
 
-    static let empty = "No usage recorded yet."
-    static let notBuilt = "Not measured yet"
-    static let building = "Reading transcripts…"
-    static let rebuild = "Rebuild"
+    static var empty: String { L10n.string("No usage recorded yet.") }
+    static var notBuilt: String { L10n.string("Not measured yet") }
+    static var building: String { L10n.string("Reading transcripts…") }
+    static var rebuild: String { L10n.string("Rebuild") }
 
-    static let byCheckout = "By checkout"
-    static let byAccount = "By account"
+    static var byCheckout: String { L10n.string("By checkout") }
+    static var byAccount: String { L10n.string("By account") }
 
-    static func windows(_ account: String) -> String { "Rate limits · \(account)" }
-    static func resets(_ remaining: String) -> String { "resets in \(remaining)" }
-    static let byDay = "By day"
-    static let byModel = "By model"
+    static func windows(_ account: String) -> String {
+        L10n.format("Rate limits · %@", account)
+    }
+    static func resets(_ remaining: String) -> String {
+        L10n.format("resets in %@", remaining)
+    }
+    static var byDay: String { L10n.string("By day") }
+    static var byModel: String { L10n.string("By model") }
 
     static let checkoutLimit = 12
     static let modelLimit = 8
 
-    static func turns(_ count: String) -> String { "\(count) turns" }
-    static func perTurn(_ tokens: String) -> String { "\(tokens)/turn" }
-    static func cached(_ percent: Int) -> String { "\(percent)% served from cache" }
-    static func measured(_ relative: String) -> String { "measured \(relative)" }
+    static func turns(_ count: String) -> String { L10n.format("%@ turns", count) }
+    static func perTurn(_ tokens: String) -> String { L10n.format("%@/turn", tokens) }
+    static func cached(_ percent: Int) -> String {
+        L10n.format("%lld%% served from cache", Int64(percent))
+    }
+    static func measured(_ relative: String) -> String {
+        L10n.format("measured %@", relative)
+    }
 }

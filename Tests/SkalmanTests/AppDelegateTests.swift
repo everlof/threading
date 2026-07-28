@@ -12,6 +12,21 @@ import XCTest
 @MainActor
 final class AppDelegateTests: XCTestCase {
 
+    func testSwedishStringCatalogCompilesAndKeepsPerStringFallback() throws {
+        let appBundle = Bundle(for: AppDelegate.self)
+        let path = try XCTUnwrap(
+            appBundle.path(forResource: "sv", ofType: "lproj"),
+            "the Swedish string catalogue was not copied into the app"
+        )
+        let swedish = try XCTUnwrap(Bundle(path: path))
+
+        XCTAssertEqual(L10n.string("Themes", bundle: swedish), "Teman")
+        XCTAssertEqual(
+            L10n.string("A future untranslated string", bundle: swedish),
+            "A future untranslated string"
+        )
+    }
+
     func testClosingTheLastTestWindowDoesNotTerminateTheHostedRunner() {
         XCTAssertFalse(
             AppDelegate().applicationShouldTerminateAfterLastWindowClosed(NSApp)

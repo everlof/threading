@@ -24,12 +24,12 @@ enum GitReviewMode: String, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .uncommitted: return "Uncommitted"
-        case .unstaged: return "Unstaged"
-        case .staged: return "Staged"
-        case .lastTurn: return "Last Turn"
-        case .branch: return "Branch"
-        case .commit: return "Commits"
+        case .uncommitted: return L10n.string("Uncommitted")
+        case .unstaged: return L10n.string("Unstaged")
+        case .staged: return L10n.string("Staged")
+        case .lastTurn: return L10n.string("Last Turn")
+        case .branch: return L10n.string("Branch")
+        case .commit: return L10n.string("Commits")
         }
     }
 }
@@ -41,8 +41,12 @@ enum GitStagingAction {
     case stage
     case unstage
 
-    var fileTitle: String { self == .stage ? "Stage File" : "Unstage File" }
-    var hunkTitle: String { self == .stage ? "Stage" : "Unstage" }
+    var fileTitle: String {
+        self == .stage ? L10n.string("Stage File") : L10n.string("Unstage File")
+    }
+    var hunkTitle: String {
+        self == .stage ? L10n.string("Stage") : L10n.string("Unstage")
+    }
 
     /// Unstaging is the same patch applied backwards, which is what makes every action here
     /// reversible by the button beside it.

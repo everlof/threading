@@ -256,19 +256,23 @@ enum InspectorReportLayout {
 // MARK: - Report Strings
 
 enum InspectorStrings {
-    static let elementHeading = "Element Report"
-    static let pointHeading = "Point Report"
-    static let regionHeading = "Region Report"
-    static let notePlaceholder = "Add a note — it leads the copied report"
-    static let noteHint = "Return copies the report · ⇧Return adds a line"
-    static let copyTitle = "Copy Report"
-    static let copiedTitle = "Copied"
-    static let closeTitle = "Close"
+    static var elementHeading: String { L10n.string("Element Report") }
+    static var pointHeading: String { L10n.string("Point Report") }
+    static var regionHeading: String { L10n.string("Region Report") }
+    static var notePlaceholder: String {
+        L10n.string("Add a note — it leads the copied report")
+    }
+    static var noteHint: String {
+        L10n.string("Return copies the report · ⇧Return adds a line")
+    }
+    static var copyTitle: String { L10n.string("Copy Report") }
+    static var copiedTitle: String { L10n.string("Copied") }
+    static var closeTitle: String { L10n.string("Close") }
 
     /// Drawn on the overlay whether anything is held or not: a modifier nothing mentions is a
     /// feature nobody finds, and element mode is where the question it answers gets asked.
-    static let layerHint = "⌃ hierarchy · ⌥ spacing"
-    static let flushOnEverySide = "flush on every side"
+    static var layerHint: String { L10n.string("⌃ hierarchy · ⌥ spacing") }
+    static var flushOnEverySide: String { L10n.string("flush on every side") }
 
     /// The key is bounded by the window; the drawing and the report are not.
     static func legendFold(_ count: Int) -> String {

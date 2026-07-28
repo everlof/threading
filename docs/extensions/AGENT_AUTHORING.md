@@ -131,7 +131,13 @@ The manifest is read before the executable starts:
     "sections": []
   },
   "services": [],
-  "serviceDependencies": []
+  "serviceDependencies": [],
+  "localizations": [
+    {
+      "locale": "sv",
+      "resource": "Resources/Localizations/sv.json"
+    }
+  ]
 }
 ```
 
@@ -151,6 +157,25 @@ Rules:
   for `Package.swift` and at least one `.swift` file under `Sources/` without compiling it.
 - The packager copies that project under `Source/` and omits `.build`, `.git`, `.swiftpm`,
   `DerivedData`, and `.DS_Store`. Do not put required source in those locations.
+- Localization resources are flat JSON objects mapping the readable base-language string to
+  its translation. Skalman negotiates `localizations` against the user's preferred languages,
+  applies the selected table to host-rendered manifest Settings and runtime contributions, and
+  passes that same table to the process. Missing keys fall back to the base string. Translations
+  must preserve every printf placeholder (`%@`, `%lld`, and so on) in the same order as the key;
+  package inspection rejects a catalogue that would make dynamic formatting unsafe.
+
+For dynamic copy, construct `ExtensionLocalizer` before registration:
+
+```swift
+let localizer = ExtensionLocalizer()
+let title = localizer.string("Open Build")
+let receipt = localizer.format("Opened build %@", buildNumber)
+```
+
+`localizer.localeIdentifier`, `preferredLanguages`, and `selectedLanguage` are available when
+formatting dates, numbers, or language-sensitive data. Do not inspect the parent process
+environment directly; these values and the selected bounded string table are the complete
+presentation context.
 
 ## Advanced companions
 

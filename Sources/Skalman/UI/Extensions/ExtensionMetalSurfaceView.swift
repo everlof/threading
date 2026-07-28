@@ -10,11 +10,11 @@ enum ExtensionMetalSurfaceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .metalUnavailable:
-            return "Metal is unavailable on this Mac."
+            return L10n.string("Metal is unavailable on this Mac.")
         case .invalidSourceEncoding:
-            return "The extension's Metal source is not UTF-8."
+            return L10n.string("The extension’s Metal source is not UTF-8.")
         case .missingFunction(let name):
-            return "The extension's Metal source does not define '\(name)'."
+            return L10n.format("The extension’s Metal source does not define “%@”.", name)
         }
     }
 }

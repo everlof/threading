@@ -4,7 +4,9 @@ import AppKit
 @MainActor
 final class ComponentGalleryBackdropSample: BackdropOverlay {
 
-    private let label = NSTextField(labelWithString: "Backdrop-aware ink")
+    private let label = NSTextField(
+        labelWithString: L10n.string("Backdrop-aware ink")
+    )
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

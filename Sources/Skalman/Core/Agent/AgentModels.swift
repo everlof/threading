@@ -9,12 +9,12 @@ struct AgentReasoningLevel: Equatable {
     /// its other surfaces while preserving an unfamiliar future value rather than dropping it.
     var displayName: String {
         switch effort {
-        case "low": return "Light"
-        case "medium": return "Medium"
-        case "high": return "High"
-        case "xhigh": return "Extra High"
-        case "max": return "Max"
-        case "ultra": return "Ultra"
+        case "low": return L10n.string("Light")
+        case "medium": return L10n.string("Medium")
+        case "high": return L10n.string("High")
+        case "xhigh": return L10n.string("Extra High")
+        case "max": return L10n.string("Max")
+        case "ultra": return L10n.string("Ultra")
         default:
             return effort
                 .replacingOccurrences(of: "_", with: " ")

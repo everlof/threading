@@ -150,15 +150,15 @@ final class AccountUsagePopoverViewController: NSViewController {
     /// value observed an hour ago should say so rather than posing as live.
     private func footerText(usage: AccountUsage?) -> String? {
         if let usage {
-            var text = "Updated \(UsageFormat.age(of: usage.observedAt))"
+            var text = L10n.format("Updated %@", UsageFormat.age(of: usage.observedAt))
             if usage.source == .localCache {
-                text += " · via Claude's status-line feed"
+                text += L10n.string(" · via Claude's status-line feed")
             }
             return text
         }
 
         return AccountUsageService.shared.errorMessage(for: account)
-            ?? "Fetching usage…"
+            ?? L10n.string("Fetching usage…")
     }
 }
 

@@ -96,10 +96,18 @@ final class SessionInfoViewController: NSViewController {
         metaLabel.textColor = Design.Text.tertiary
         metaLabel.lineBreakMode = .byTruncatingTail
 
-        revealButton = ThemedButton(title: "Finder", target: self, action: #selector(revealInFinder))
-        copyButton = ThemedButton(title: "Copy", target: self, action: #selector(copyDirectory))
-        revealButton.toolTip = "Show this folder in Finder"
-        copyButton.toolTip = "Copy the folder path"
+        revealButton = ThemedButton(
+            title: L10n.string("Finder"),
+            target: self,
+            action: #selector(revealInFinder)
+        )
+        copyButton = ThemedButton(
+            title: L10n.string("Copy"),
+            target: self,
+            action: #selector(copyDirectory)
+        )
+        revealButton.toolTip = L10n.string("Show this folder in Finder")
+        copyButton.toolTip = L10n.string("Copy the folder path")
 
         [directoryLabel, metaLabel, revealButton, copyButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
@@ -264,11 +272,11 @@ final class SessionInfoViewController: NSViewController {
         processRows.removeAll()
 
         guard isRunning else {
-            add(note: "This session isn’t running.")
+            add(note: L10n.string("This session isn’t running."))
             return
         }
 
-        add(sectionTitle: "Processes", count: snapshot.processes.count)
+        add(sectionTitle: L10n.string("Processes"), count: snapshot.processes.count)
         for group in snapshot.processGroups {
             if snapshot.namesProcessOrigins {
                 add(originTitle: group.origin)
@@ -276,9 +284,9 @@ final class SessionInfoViewController: NSViewController {
             group.processes.forEach(add(process:))
         }
 
-        add(sectionTitle: "Ports", count: snapshot.ports.count)
+        add(sectionTitle: L10n.string("Ports"), count: snapshot.ports.count)
         if snapshot.ports.isEmpty {
-            add(note: "Nothing listening.")
+            add(note: L10n.string("Nothing listening."))
         } else {
             for group in snapshot.portGroups {
                 if snapshot.namesPortOrigins {
@@ -316,13 +324,28 @@ final class SessionInfoViewController: NSViewController {
             value: port.interface.displayName,
             action: url.map { url in { [weak self] in self?.onOpenURL?(url) } }
         )
-        row.toolTip = url.map { "Open \($0.absoluteString) — bound to \(port.address)" }
-            ?? "Listening on \(port.address):\(port.port)"
+        row.toolTip = url.map {
+            L10n.format(
+                "Open %@ — bound to %@",
+                $0.absoluteString,
+                port.address
+            )
+        } ?? L10n.format(
+            "Listening on %@:%lld",
+            port.address,
+            Int64(port.port)
+        )
         addFullWidth(row)
     }
 
     private func add(sectionTitle: String, count: Int) {
-        let label = NSTextField(labelWithString: "\(sectionTitle.uppercased())  \(count)")
+        let label = NSTextField(
+            labelWithString: L10n.format(
+                "%@  %lld",
+                sectionTitle.uppercased(),
+                Int64(count)
+            )
+        )
         label.applyFont(.caption)
         label.textColor = Design.Text.quaternary
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -338,7 +361,7 @@ final class SessionInfoViewController: NSViewController {
     }
 
     private func add(originTitle origin: SessionInfoOrigin) {
-        let label = NSTextField(labelWithString: origin.rawValue)
+        let label = NSTextField(labelWithString: L10n.string(origin.rawValue))
         label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false

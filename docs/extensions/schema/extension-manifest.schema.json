@@ -134,6 +134,28 @@
           }
         }
       }
+    },
+    "localizations": {
+      "type": "array",
+      "maxItems": 16,
+      "default": [],
+      "description": "Optional package-owned translation tables. Each resource is a flat JSON object mapping base-language presentation strings to translations. The host negotiates against the user's preferred languages, localizes host-rendered contributions, and supplies the same selected table to the extension process.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["locale", "resource"],
+        "properties": {
+          "locale": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"
+          },
+          "resource": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/).+\\.json$"
+          }
+        }
+      }
     }
   },
   "$defs": {

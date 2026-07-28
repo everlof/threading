@@ -22,7 +22,11 @@ extension GitReviewViewController {
         // question from the responder chain instead and re-enable the one disabled item.
         menu.autoenablesItems = false
 
-        menu.addItem(withTitle: "Refresh", action: #selector(refreshFromMenu), keyEquivalent: "")
+        menu.addItem(
+            withTitle: L10n.string("Refresh"),
+            action: #selector(refreshFromMenu),
+            keyEquivalent: ""
+        )
 
         // Everything below speaks about a diff, so it appears only when one is on screen — the
         // history list has no lines to wrap, collapse or copy.
@@ -44,7 +48,9 @@ extension GitReviewViewController {
 
         menu.addItem(.separator())
         menu.addItem(
-            withTitle: expandable.contains(where: \.isOpen) ? "Collapse all diffs" : "Expand all diffs",
+            withTitle: expandable.contains(where: \.isOpen)
+                ? L10n.string("Collapse all diffs")
+                : L10n.string("Expand all diffs"),
             action: #selector(toggleAllExpansion),
             keyEquivalent: ""
         )
@@ -53,13 +59,15 @@ extension GitReviewViewController {
     private func addRenderingItems(to menu: NSMenu) {
         menu.addItem(.separator())
         menu.addItem(
-            withTitle: wrapsDiffLines ? "Disable word wrap" : "Enable word wrap",
+            withTitle: wrapsDiffLines
+                ? L10n.string("Disable word wrap")
+                : L10n.string("Enable word wrap"),
             action: #selector(toggleWordWrap),
             keyEquivalent: ""
         )
 
         let whitespace = menu.addItem(
-            withTitle: "Hide whitespace",
+            withTitle: L10n.string("Hide whitespace"),
             action: #selector(toggleWhitespace),
             keyEquivalent: ""
         )
@@ -69,7 +77,7 @@ extension GitReviewViewController {
     private func addCopyItem(to menu: NSMenu) {
         menu.addItem(.separator())
         let copy = menu.addItem(
-            withTitle: "Copy git apply command",
+            withTitle: L10n.string("Copy git apply command"),
             action: #selector(copyGitApplyCommand),
             keyEquivalent: ""
         )
@@ -148,14 +156,20 @@ extension GitReviewViewController {
 
             switch result {
             case .success(let patch) where patch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
-                self.report("Nothing to copy — this diff has no tracked changes.", isError: false)
+                self.report(
+                    L10n.string("Nothing to copy — this diff has no tracked changes."),
+                    isError: false
+                )
 
             case .success(let patch):
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(Self.applyCommand(for: patch), forType: .string)
 
             case .failure(let failure):
-                self.report(failure.errorDescription ?? "git failed.", isError: true)
+                self.report(
+                    failure.errorDescription ?? L10n.string("git failed."),
+                    isError: true
+                )
             }
         }
     }

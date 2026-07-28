@@ -28,9 +28,13 @@ enum ComponentCustomizationRegistryError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unknownContract(let id, let version):
-            return "Unknown component contract '\(id.rawValue)' version \(version)."
+            return L10n.format(
+                "Unknown component contract “%@” version %lld.",
+                id.rawValue,
+                Int64(version)
+            )
         case .invalidPatch(let id, let reason):
-            return "Invalid component patch '\(id)': \(reason)"
+            return L10n.format("Invalid component patch “%@”: %@", id, reason)
         }
     }
 }

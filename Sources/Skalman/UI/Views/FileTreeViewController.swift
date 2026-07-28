@@ -206,10 +206,22 @@ final class FileTreeViewController: NSViewController {
 
     private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Open", action: #selector(openClicked), keyEquivalent: "")
-        menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealClicked), keyEquivalent: "")
+        menu.addItem(
+            withTitle: L10n.string("Open"),
+            action: #selector(openClicked),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: L10n.string("Reveal in Finder"),
+            action: #selector(revealClicked),
+            keyEquivalent: ""
+        )
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Copy Path", action: #selector(copyPathClicked), keyEquivalent: "")
+        menu.addItem(
+            withTitle: L10n.string("Copy Path"),
+            action: #selector(copyPathClicked),
+            keyEquivalent: ""
+        )
         menu.items.forEach { $0.target = self }
         return menu
     }

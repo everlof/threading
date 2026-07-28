@@ -44,7 +44,9 @@ final class PermissionRequestView: NSView {
         // shouting over the conversation around it.
         applySurface(fill: Design.Surface.panel, radius: .control, border: Design.Surface.accent)
 
-        let title = NSTextField(labelWithString: "Allow \(request.toolName)?")
+        let title = NSTextField(
+            labelWithString: L10n.format("Allow %@?", request.toolName)
+        )
         title.applyFont(.caption, in: .conversation)
         title.textColor = Design.Text.label
         title.translatesAutoresizingMaskIntoConstraints = false
@@ -95,13 +97,13 @@ final class PermissionRequestView: NSView {
     }
 
     private func makeButtonRow() -> NSStackView {
-        let allow = makeButton("Allow", action: #selector(allowOnce))
+        let allow = makeButton(L10n.string("Allow"), action: #selector(allowOnce))
         allow.keyEquivalent = "\r"  // Return approves, matching the old sheet's default.
 
         let row = NSStackView(views: [
             allow,
-            makeButton("Allow for Session", action: #selector(allowSession)),
-            makeButton("Deny", action: #selector(deny))
+            makeButton(L10n.string("Allow for Session"), action: #selector(allowSession)),
+            makeButton(L10n.string("Deny"), action: #selector(deny))
         ])
         row.orientation = .horizontal
         row.spacing = Design.Spacing.small
@@ -145,7 +147,7 @@ final class PermissionRequestView: NSView {
 
     /// Resolves the request without a click, used when the session ends while it is pending.
     func resolve(_ decision: PermissionDecision) {
-        settle(decision, note: "Denied — session ended.")
+        settle(decision, note: L10n.string("Denied — session ended."))
     }
 
     /// The safe, provider-neutral part of the card a paired remote client may render.
@@ -184,9 +186,15 @@ final class PermissionRequestView: NSView {
         guard id == remoteID, !isResolved, remoteRequest.canDecide else { return false }
         switch decision {
         case "allow":
-            settle(.allow(reason: "Approved from a paired Skalman device."), note: "Allowed remotely.")
+            settle(
+                .allow(reason: "Approved from a paired Skalman device."),
+                note: L10n.string("Allowed remotely.")
+            )
         case "deny":
-            settle(.deny(reason: "The user declined from a paired Skalman device."), note: "Denied remotely.")
+            settle(
+                .deny(reason: "The user declined from a paired Skalman device."),
+                note: L10n.string("Denied remotely.")
+            )
         default:
             return false
         }
@@ -196,17 +204,17 @@ final class PermissionRequestView: NSView {
     // MARK: - Actions
 
     @objc private func allowOnce() {
-        settle(.allow(reason: "Approved in Skalman."), note: "Allowed.")
+        settle(.allow(reason: "Approved in Skalman."), note: L10n.string("Allowed."))
     }
 
     @objc private func allowSession() {
         PermissionBroker.allowAlways(toolName: request.toolName, for: request.sessionID)
         settle(.allow(reason: "Approved in Skalman for the rest of this session."),
-               note: "Allowed for this session.")
+               note: L10n.string("Allowed for this session."))
     }
 
     @objc private func deny() {
-        settle(.deny(reason: "The user declined in Skalman."), note: "Denied.")
+        settle(.deny(reason: "The user declined in Skalman."), note: L10n.string("Denied."))
     }
 
     /// Records the decision, swaps the buttons for a one-line outcome so the transcript keeps a

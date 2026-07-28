@@ -215,7 +215,7 @@ enum EmojiPickerLayout {
 // MARK: - Emoji Picker Strings
 
 enum EmojiPickerStrings {
-    static let placeholder = "or paste an emoji"
-    static let browse = " Search Emoji…"
-    static let remove = "Remove"
+    static var placeholder: String { L10n.string("or paste an emoji") }
+    static var browse: String { L10n.string(" Search Emoji…") }
+    static var remove: String { L10n.string("Remove") }
 }

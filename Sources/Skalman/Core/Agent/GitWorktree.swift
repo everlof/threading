@@ -18,9 +18,9 @@ enum GitWorktree {
         var errorDescription: String? {
             switch self {
             case .notARepository:
-                return "This project is not inside a git repository."
+                return L10n.string("This project is not inside a git repository.")
             case .destinationExists(let path):
-                return "\(path) already exists."
+                return L10n.format("%@ already exists.", path)
             case .gitFailed(let message):
                 return message
             }

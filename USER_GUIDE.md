@@ -1159,6 +1159,18 @@ of the sidebar, do the same thing.
 While Settings is the page, the header offers no **+**: that button creates a session, and a
 preferences page is no context for one.
 
+The search field at the top of the Settings sidebar searches page names and the settings they
+contain, not only the visible navigation labels. Searches may contain several words in any
+case; every word must match. Extension-provided pages and sections participate with their
+localized titles, descriptions, choices, and placeholders, and the query stays in place when
+an extension is enabled or disabled.
+
+Skalman follows the language macOS selects for the app, with English as the per-string fallback.
+Menus, built-in Settings navigation, commands, and Settings components use the app string
+catalog. Extensions carry their own translations and choose the closest language the app
+requests; a missing extension translation falls back to that extension's base string rather
+than borrowing an unrelated app translation.
+
 ### General
 - **New sessions use** — the agent the composer opens on; any other can be picked there
 - **Name sessions after the agent's own title** — see [Names](#names)

@@ -32,7 +32,7 @@ enum AgentKind: String, Codable, CaseIterable {
     }
 
     /// The agent's own interactive TUI, hosted inside Skalman's terminal surface.
-    var originalUITitle: String { "\(displayName) UI" }
+    var originalUITitle: String { L10n.format("%@ UI", displayName) }
 
     /// The executable invoked on the user's PATH.
     var executableName: String {

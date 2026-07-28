@@ -98,25 +98,81 @@ final class ExtensionSettingsRegistry {
         enabledManifests: [ExtensionManifest],
         postChange: Bool = true
     ) {
-        let replacement = Dictionary(
-            uniqueKeysWithValues: enabledManifests
+        replace(
+            owners: enabledManifests
                 .filter { !$0.settings.isEmpty }
                 .map {
-                    (
-                        $0.identifier,
-                        Owner(
-                            identifier: $0.identifier,
-                            name: $0.name,
-                            settings: $0.settings
-                        )
+                    Owner(
+                        identifier: $0.identifier,
+                        name: $0.name,
+                        settings: $0.settings
                     )
-                }
+                },
+            postChange: postChange
+        )
+    }
+
+    func replace(
+        enabledBundles: [SkalmanExtensionBundle],
+        postChange: Bool = true
+    ) {
+        replace(
+            owners: enabledBundles.compactMap { bundle in
+                guard !bundle.manifest.settings.isEmpty else { return nil }
+                let localization = ExtensionLocalizationResolver(
+                    catalogs: bundle.localizations
+                )
+                return Owner(
+                    identifier: bundle.manifest.identifier,
+                    name: localization.string(bundle.manifest.name),
+                    settings: localization.settings(bundle.manifest.settings)
+                )
+            },
+            postChange: postChange
+        )
+    }
+
+    static func searchTerms(for page: RegisteredExtensionSettingsPage) -> [String] {
+        page.page.sections.flatMap(searchTerms)
+    }
+
+    func searchTerms(for page: ExtensionHostSettingsPage) -> [String] {
+        sections(for: page).flatMap { registered in
+            [registered.extensionName] + Self.searchTerms(registered.section)
+        }
+    }
+
+    private func replace(owners newOwners: [Owner], postChange: Bool) {
+        let replacement = Dictionary(
+            uniqueKeysWithValues: newOwners.map { ($0.identifier, $0) }
         )
         guard !sameOwners(replacement) else { return }
         owners = replacement
         if postChange {
             NotificationCenter.default.post(ExtensionSettingsRegistryDidChange())
         }
+    }
+
+    private static func searchTerms(_ section: ExtensionSettingsSection) -> [String] {
+        (section.title.map { [$0] } ?? []) + section.fields.flatMap(searchTerms)
+    }
+
+    private static func searchTerms(_ section: ExtensionHostSettingsSection) -> [String] {
+        (section.title.map { [$0] } ?? []) + section.fields.flatMap(searchTerms)
+    }
+
+    private static func searchTerms(_ field: ExtensionSettingField) -> [String] {
+        var terms = [field.title]
+        if let description = field.description { terms.append(description) }
+        switch field.control {
+        case .toggle, .integer:
+            break
+        case .text(_, let placeholder, _):
+            if let placeholder { terms.append(placeholder) }
+        case .choice(_, let options):
+            terms.append(contentsOf: options.map(\.title))
+        }
+        return terms
     }
 
     static func qualifiedPageID(

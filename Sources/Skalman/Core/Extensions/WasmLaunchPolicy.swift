@@ -12,17 +12,27 @@ enum ExtensionWasmRunnerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .runnerUnavailable(let name):
-            return "Skalman's WebAssembly extension runner (\(name)) is missing from the "
-                + "application bundle."
+            return L10n.format(
+                "Skalman’s WebAssembly extension runner (%@) is missing from the application bundle.",
+                name
+            )
         case .wrongRuntime:
-            return "A non-WebAssembly extension was sent to the WebAssembly runner."
+            return L10n.string("A non-WebAssembly extension was sent to the WebAssembly runner.")
         case .unsupportedMode:
-            return "The WebAssembly runner only accepts registration and serve entry modes."
+            return L10n.string(
+                "The WebAssembly runner only accepts registration and serve entry modes."
+            )
         case .reservedDescriptor(let descriptor):
-            return "Extension descriptor \(descriptor) conflicts with the WebAssembly module."
+            return L10n.format(
+                "Extension descriptor %lld conflicts with the WebAssembly module.",
+                Int64(descriptor)
+            )
         case .moduleOpenFailed(let path, let code):
-            return "The WebAssembly module at \(path) could not be opened: "
-                + String(cString: strerror(code))
+            return L10n.format(
+                "The WebAssembly module at %@ could not be opened: %@",
+                path,
+                String(cString: strerror(code))
+            )
         }
     }
 }

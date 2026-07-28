@@ -13,8 +13,8 @@ enum ProjectFolderPrompt {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        panel.message = "Choose a folder to add as a project."
+        panel.prompt = L10n.string("Add Project")
+        panel.message = L10n.string("Choose a folder to add as a project.")
 
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
@@ -30,10 +30,10 @@ enum ProjectFolderPrompt {
     /// nothing.
     static func createNewFolder(completion: @escaping (URL) -> Void) {
         let panel = NSSavePanel()
-        panel.title = "New Project"
-        panel.prompt = "Create"
-        panel.nameFieldLabel = "Name:"
-        panel.nameFieldStringValue = "New Project"
+        panel.title = L10n.string("New Project")
+        panel.prompt = L10n.string("Create")
+        panel.nameFieldLabel = L10n.string("Name:")
+        panel.nameFieldStringValue = L10n.string("New Project")
         panel.canCreateDirectories = true
         panel.showsTagField = false
 
@@ -53,7 +53,10 @@ enum ProjectFolderPrompt {
 
     private static func presentCreationFailure(for url: URL, error: Error) {
         let alert = NSAlert()
-        alert.messageText = "Could not create \"\(url.lastPathComponent)\""
+        alert.messageText = L10n.format(
+            "Could not create “%@”",
+            url.lastPathComponent
+        )
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
         alert.runModal()

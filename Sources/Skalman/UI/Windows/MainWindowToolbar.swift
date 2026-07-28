@@ -54,9 +54,9 @@ extension MainWindowController: NSToolbarDelegate {
         case .skalmanToggleSidebar:
             let button = ThemedIconButton(
                 symbolName: "sidebar.leading",
-                accessibility: "Show or hide sidebar"
+                accessibility: L10n.string("Show or hide sidebar")
             )
-            button.toolTip = "Show or Hide the Sidebar (⌃⌘S)"
+            button.toolTip = L10n.string("Show or Hide the Sidebar (⌃⌘S)")
             button.onPress = { [weak self] in self?.toggleSidebar() }
             sidebarToolbarButton = button
             return makeOverlayItem(identifier: itemIdentifier, view: button)
@@ -76,8 +76,11 @@ extension MainWindowController: NSToolbarDelegate {
     /// what makes it move with the pane. Reading across: which page, a way to open another, then
     /// what that page's account has left to spend, then what can be done to it.
     func makePaneHeaderView() -> NSView {
-        let newSessionButton = ThemedIconButton(symbolName: "plus", accessibility: "New session")
-        newSessionButton.toolTip = "New Session (⌘N)"
+        let newSessionButton = ThemedIconButton(
+            symbolName: "plus",
+            accessibility: L10n.string("New session")
+        )
+        newSessionButton.toolTip = L10n.string("New Session (⌘N)")
         newSessionButton.onPress = { [weak self] in self?.newSession() }
         self.newSessionButton = newSessionButton
 
@@ -189,8 +192,11 @@ extension MainWindowController: NSToolbarDelegate {
     /// open (`menuNeedsUpdate`), because its checkmarks — which theme is chosen — go stale
     /// the moment they are drawn.
     private func makeSessionContextButton() -> ThemedIconButton {
-        let button = ThemedIconButton(symbolName: "ellipsis", accessibility: "Session options")
-        button.toolTip = "Session Options"
+        let button = ThemedIconButton(
+            symbolName: "ellipsis",
+            accessibility: L10n.string("Session options")
+        )
+        button.toolTip = L10n.string("Session Options")
         button.onPress = { [weak self, weak button] in
             guard let self, let button else { return }
             self.showSessionContextMenu(from: button)
@@ -232,19 +238,19 @@ extension MainWindowController: NSMenuDelegate {
             menu.addItem(themeMenuBuilder.sessionThemeItem(for: sessionID))
             menu.addItem(.separator())
             let attachments = NSMenuItem(
-                title: "Attachments",
+                title: L10n.string("Attachments"),
                 action: #selector(attachmentsClicked),
                 keyEquivalent: ""
             )
             attachments.image = NSImage(
                 systemSymbolName: "paperclip",
-                accessibilityDescription: "Attachments"
+                accessibilityDescription: L10n.string("Attachments")
             )
             attachments.target = self
             menu.addItem(attachments)
         } else {
             let item = NSMenuItem(
-                title: "Themes…",
+                title: L10n.string("Themes…"),
                 action: #selector(themeSettingsClicked),
                 keyEquivalent: ""
             )

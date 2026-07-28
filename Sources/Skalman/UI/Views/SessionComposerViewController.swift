@@ -21,7 +21,7 @@ final class SessionComposerViewController: NSViewController {
     private let surfaceChip = ChipView()
     private lazy var importButton = ThemedButton(
         symbol: ComposerDefaults.importSymbol,
-        accessibility: "Import conversation",
+        accessibility: L10n.string("Import conversation"),
         target: self,
         action: #selector(importTapped)
     )
@@ -611,18 +611,19 @@ final class SessionComposerViewController: NSViewController {
 
     private func promptForBranchName() -> String? {
         let alert = NSAlert()
-        alert.messageText = "New Worktree"
-        alert.informativeText = "A worktree lets a session run on its own branch without "
-            + "disturbing this checkout."
-        alert.addButton(withTitle: "Create")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.string("New Worktree")
+        alert.informativeText = L10n.string(
+            "A worktree lets a session run on its own branch without disturbing this checkout."
+        )
+        alert.addButton(withTitle: L10n.string("Create"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         let field = ThemedTextField(frame: NSRect(
             x: 0, y: 0,
             width: ComposerDefaults.branchFieldWidth,
             height: ComposerDefaults.branchFieldHeight
         ))
-        field.placeholderString = "branch name"
+        field.placeholderString = L10n.string("branch name")
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
 
@@ -634,10 +635,10 @@ final class SessionComposerViewController: NSViewController {
 
     private func present(error: Error) {
         let alert = NSAlert()
-        alert.messageText = "Could not create worktree"
+        alert.messageText = L10n.string("Could not create worktree")
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.string("OK"))
         alert.runModal()
     }
 }
@@ -705,28 +706,32 @@ enum ComposerDefaults {
 
     /// Only shown when the account states no model of its own — otherwise the chip names the
     /// model the session will actually run on.
-    static let defaultModelTitle = "Default model"
+    static var defaultModelTitle: String { L10n.string("Default model") }
 
     /// Marks the CLI's own choice in the model menu, so picking it explicitly and leaving it
     /// alone are visibly the same thing.
-    static let accountDefaultSuffix = "  (account default)"
-    static let noBranchTitle = "No branch"
-    static let newWorktreeTitle = "New Worktree…"
+    static var accountDefaultSuffix: String { L10n.string("  (account default)") }
+    static var noBranchTitle: String { L10n.string("No branch") }
+    static var newWorktreeTitle: String { L10n.string("New Worktree…") }
 
     /// Marks the project's own folder in the branch menu, so the default reads as a place
     /// rather than as one branch name among several.
-    static let thisCheckoutSuffix = "this checkout"
+    static var thisCheckoutSuffix: String { L10n.string("this checkout") }
 
     /// A session is the durable object; these names describe only the UI rendering it.
-    static let nativeTitle = "Native (Experimental)"
+    static var nativeTitle: String { L10n.string("Native (Experimental)") }
     static let surfaceSymbol = "bubble.left.and.text.bubble.right"
-    static let promptPlaceholder = "Describe a task or ask a question"
+    static var promptPlaceholder: String {
+        L10n.string("Describe a task or ask a question")
+    }
 
     static let importSymbol = "tray.and.arrow.down"
 
     /// Counted, because the number is what tells the user whether it is worth opening.
     static func importTitle(count: Int) -> String {
-        count == 1 ? "Import 1 conversation" : "Import \(count) conversations"
+        count == 1
+            ? L10n.string("Import 1 conversation")
+            : L10n.format("Import %lld conversations", Int64(count))
     }
 
     static let accountSymbol = "person.crop.circle"

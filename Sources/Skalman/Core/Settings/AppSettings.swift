@@ -193,6 +193,28 @@ final class AppSettings {
         }
     }
 
+    /// The semantic scale applied to every font vended by `Design.Typography`.
+    ///
+    /// The terminal remains independent because its profile stores an explicit family and point
+    /// size. Host-rendered extension UI does use the design system and therefore follows this
+    /// setting automatically.
+    nonisolated static var appTextSize: AppTextSize {
+        _ = registerStandardDefaults
+        let raw = UserDefaults.standard.string(forKey: Keys.appTextSize)
+        return raw.flatMap(AppTextSize.init(rawValue:)) ?? .standard
+    }
+
+    var appTextSize: AppTextSize {
+        get {
+            let raw = defaults.string(forKey: Keys.appTextSize)
+            return raw.flatMap(AppTextSize.init(rawValue:)) ?? .standard
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.appTextSize)
+            notifyChanged()
+        }
+    }
+
     /// Whether projects without an icon look for one automatically — the checkout's own
     /// favicon or app icon, then the repository's GitHub avatar or homepage favicon.
     /// The network sources only ever contact hosts the project itself points at.
@@ -427,7 +449,8 @@ final class AppSettings {
             Keys.discoversAccountAvatars: true,
             Keys.harmonizesTerminalBackgrounds: true,
             Keys.workingOrbStyle: MotionPreferencesDefaults.workingOrbStyle.rawValue,
-            Keys.chatNameMorphStyle: MotionPreferencesDefaults.chatNameMorphStyle.rawValue
+            Keys.chatNameMorphStyle: MotionPreferencesDefaults.chatNameMorphStyle.rawValue,
+            Keys.appTextSize: AppTextSize.standard.rawValue
         ]
     }
 
@@ -473,6 +496,39 @@ final class AppSettings {
         static let chatNameMorphStyle = "chatNameMorphStyle"
         static let chromeFontFamily = "chromeFontFamily"
         static let conversationFontFamily = "conversationFontFamily"
+        static let appTextSize = "appTextSize"
+    }
+}
+
+// MARK: - App Text Size
+
+/// A deliberately small, named scale instead of a free point-size field.
+///
+/// Font roles keep their hierarchy at every step, layout can be exercised at a bounded largest
+/// size, and the user can still move from compact to accessibility-sized chrome without
+/// knowing what point size each role started at.
+enum AppTextSize: String, CaseIterable {
+    case compact
+    case standard
+    case large
+    case extraLarge
+
+    var scale: CGFloat {
+        switch self {
+        case .compact: 0.90
+        case .standard: 1
+        case .large: 1.15
+        case .extraLarge: 1.30
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .compact: L10n.string("Compact")
+        case .standard: L10n.string("Default")
+        case .large: L10n.string("Large")
+        case .extraLarge: L10n.string("Extra Large")
+        }
     }
 }
 
@@ -505,9 +561,9 @@ enum ClaudeRemoteControl: String, CaseIterable {
     /// own config, and an unset one resolves server-side.
     var settingsTitle: String {
         switch self {
-        case .followClaude: "Follow Claude's setting"
-        case .enabled: "Always on"
-        case .disabled: "Always off"
+        case .followClaude: L10n.string("Follow Claude's setting")
+        case .enabled: L10n.string("Always on")
+        case .disabled: L10n.string("Always off")
         }
     }
 
@@ -516,9 +572,9 @@ enum ClaudeRemoteControl: String, CaseIterable {
     /// claims to know a value it cannot see.
     var inheritedMenuTitle: String {
         switch self {
-        case .followClaude: "Use Claude's Setting"
-        case .enabled: "Use Default (On)"
-        case .disabled: "Use Default (Off)"
+        case .followClaude: L10n.string("Use Claude's Setting")
+        case .enabled: L10n.string("Use Default (On)")
+        case .disabled: L10n.string("Use Default (Off)")
         }
     }
 }
@@ -539,9 +595,9 @@ enum SidebarSessionOrder: String, CaseIterable {
     /// "order added" describes what the list actually shows.
     var menuTitle: String {
         switch self {
-        case .manual: "Sort by Order Added"
-        case .recentActivity: "Sort by Recent Activity"
-        case .name: "Sort by Name"
+        case .manual: L10n.string("Sort by Order Added")
+        case .recentActivity: L10n.string("Sort by Recent Activity")
+        case .name: L10n.string("Sort by Name")
         }
     }
 }

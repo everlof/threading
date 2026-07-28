@@ -34,7 +34,7 @@ enum PortInterface: Equatable {
 
     var displayName: String {
         switch self {
-        case .allInterfaces: return "all interfaces"
+        case .allInterfaces: return L10n.string("all interfaces")
         case .localhost: return "localhost"
         case .address(let address): return address
         }

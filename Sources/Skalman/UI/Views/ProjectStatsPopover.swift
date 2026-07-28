@@ -286,7 +286,11 @@ enum ProjectPopoverDefaults {
     /// The install hint, in three lines: what is absent, the command, the promise. The
     /// command is Homebrew's because that is the one package manager a macOS user can be
     /// assumed a single line away from.
-    static let missingToolExplanation = "Code statistics are counted by scc, which is not installed."
+    static var missingToolExplanation: String {
+        L10n.string("Code statistics are counted by scc, which is not installed.")
+    }
     static let installCommand = "brew install scc"
-    static let missingToolPromise = "Counts appear on their own once it is."
+    static var missingToolPromise: String {
+        L10n.string("Counts appear on their own once it is.")
+    }
 }

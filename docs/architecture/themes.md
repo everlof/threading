@@ -165,6 +165,12 @@ one private transform, nearest first — surface override, app override, theme f
 design — and each failure falls exactly one rung rather than to SF, so a removed conversation
 font leaves the thread wearing the app's choice instead of resetting two levels.
 
+`AppSettings.appTextSize` is orthogonal to those family layers. Its four bounded semantic
+scales are applied to every `Design.Typography` role before family resolution, so headings,
+body, detail, code, numerics, conversations, Settings, and host-rendered extension UI grow
+together without flattening their hierarchy. The terminal remains outside that scale because
+its profile owns an explicit point size.
+
 The conversation gets its own slot for the reason the terminal always had one: it is the surface
 that is *read*. `Typography.FontSurface` is a parameter on that single transform rather than a
 second namespace — twenty factories in two copies would have to keep agreeing — and the composer

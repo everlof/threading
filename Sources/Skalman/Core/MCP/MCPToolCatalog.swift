@@ -9,6 +9,19 @@ struct MCPToolInfo {
     let title: String
     let detail: String
     let symbol: String
+
+    init(
+        name: String,
+        title: String,
+        detail: String,
+        symbol: String,
+        localizesCopy: Bool = true
+    ) {
+        self.name = name
+        self.title = localizesCopy ? L10n.string(title) : title
+        self.detail = localizesCopy ? L10n.string(detail) : detail
+        self.symbol = symbol
+    }
 }
 
 /// A coherent set of tools that are enabled or disabled together.
@@ -26,6 +39,23 @@ struct MCPToolGroup {
     /// The agent-facing guidance sent in the `initialize` response — included only while the group
     /// is enabled, so a disabled capability is never described to a model that cannot use it.
     let instruction: String
+
+    init(
+        id: String,
+        title: String,
+        summary: String,
+        symbol: String,
+        tools: [MCPToolInfo],
+        instruction: String,
+        localizesCopy: Bool = true
+    ) {
+        self.id = id
+        self.title = localizesCopy ? L10n.string(title) : title
+        self.summary = localizesCopy ? L10n.string(summary) : summary
+        self.symbol = symbol
+        self.tools = tools
+        self.instruction = instruction
+    }
 }
 
 // MARK: - Tool Catalogue
@@ -694,10 +724,12 @@ enum MCPToolCatalog {
                     name: tool.name,
                     title: tool.title,
                     detail: tool.detail,
-                    symbol: tool.symbol
+                    symbol: tool.symbol,
+                    localizesCopy: false
                 )
             },
-            instruction: group.instruction
+            instruction: group.instruction,
+            localizesCopy: false
         )
     }
 }

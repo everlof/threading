@@ -869,7 +869,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         for row in rows.values {
             row.isFilteredOut = !query.isEmpty && !Self.matches(row.item, query)
         }
-        filterLabel.stringValue = "Filter: \(query)"
+        filterLabel.stringValue = L10n.format("Filter: %@", query)
         filterLabel.isHidden = query.isEmpty
         needsLayout = true
     }

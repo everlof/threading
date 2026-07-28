@@ -65,7 +65,7 @@ final class WorkingOrbView: NSView {
         orb.state = candidates[choosingIndex(candidates.indices)]
         // These are visual variants of one host state, not semantic status
         // changes: VoiceOver should still hear that the agent is working.
-        orb.setAccessibilityLabel(OrbState.working.label)
+        orb.setAccessibilityLabel(OrbState.working.localizedLabel)
         hasPreparedVariant = true
     }
 
@@ -79,7 +79,7 @@ final class WorkingOrbView: NSView {
         guard let state = OrbState(rawValue: style.rawValue) else { return }
 
         orb.state = state
-        orb.setAccessibilityLabel(OrbState.working.label)
+        orb.setAccessibilityLabel(OrbState.working.localizedLabel)
         hasPreparedVariant = true
     }
 
@@ -87,6 +87,7 @@ final class WorkingOrbView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         orb.translatesAutoresizingMaskIntoConstraints = false
         addSubview(orb)
+        orb.setAccessibilityLabel(orb.state.localizedLabel)
 
         // The orb's own intrinsic size (the 20pt preset) drives the wrapper, so
         // the row reserves exactly the orb's footprint and no token guess.
@@ -117,5 +118,18 @@ final class WorkingOrbView: NSView {
             resolved = Design.Surface.accent.cgColor
         }
         orb.tint = resolved
+    }
+}
+
+extension OrbState {
+    var localizedLabel: String {
+        switch self {
+        case .working: L10n.string("Working…")
+        case .searching: L10n.string("Searching…")
+        case .solving: L10n.string("Solving…")
+        case .listening: L10n.string("Listening…")
+        case .composing: L10n.string("Composing…")
+        case .shaping: L10n.string("Shaping…")
+        }
     }
 }

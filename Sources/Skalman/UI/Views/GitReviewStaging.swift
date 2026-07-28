@@ -49,7 +49,7 @@ extension GitReviewViewController {
                 self.notice = ("Committed: \(subject)", false)
                 self.refresh(force: true)
             case .failure(let failure):
-                self.notice = (failure.errorDescription ?? "git failed.", true)
+                self.notice = (failure.errorDescription ?? L10n.string("git failed."), true)
                 self.refresh(force: true)
             }
         }
@@ -59,7 +59,7 @@ extension GitReviewViewController {
     /// the index has moved, and the pane is a picture of the index.
     func finishWrite(_ result: Result<Void, GitFailure>) {
         if case .failure(let failure) = result {
-            notice = (failure.errorDescription ?? "git failed.", true)
+            notice = (failure.errorDescription ?? L10n.string("git failed."), true)
         }
         refresh(force: true)
     }

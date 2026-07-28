@@ -13,6 +13,14 @@ enum BrowserColorScheme: String {
         case .dark: return NSAppearance(named: .darkAqua)
         }
     }
+
+    var localizedName: String {
+        switch self {
+        case .auto: L10n.string("Auto")
+        case .light: L10n.string("Light")
+        case .dark: L10n.string("Dark")
+        }
+    }
 }
 
 enum BrowserUserAgentOverride: Equatable {
@@ -36,6 +44,14 @@ enum BrowserMediaType: String {
         switch self {
         case .auto: return nil
         case .screen, .print: return rawValue
+        }
+    }
+
+    var localizedName: String {
+        switch self {
+        case .auto: L10n.string("Auto")
+        case .screen: L10n.string("Screen")
+        case .print: L10n.string("Print")
         }
     }
 }
@@ -82,18 +98,20 @@ final class BrowserChromeBar: NSView {
         static let expandedPrivateThreshold: CGFloat = 520
     }
 
-    let backButton = BrowserChromeBar.button("chevron.backward", "Back")
-    let forwardButton = BrowserChromeBar.button("chevron.forward", "Forward")
-    let reloadButton = BrowserChromeBar.button("arrow.clockwise", "Reload")
+    let backButton = BrowserChromeBar.button("chevron.backward", L10n.string("Back"))
+    let forwardButton = BrowserChromeBar.button("chevron.forward", L10n.string("Forward"))
+    let reloadButton = BrowserChromeBar.button("arrow.clockwise", L10n.string("Reload"))
     let addressField = ThemedTextField()
     let testConditionsButton = BrowserChromeBar.button(
         "slider.horizontal.3",
-        "Test Conditions"
+        L10n.string("Test Conditions")
     )
-    let closePopupButton = BrowserChromeBar.button("xmark", "Close Pop-up")
-    let overflowButton = BrowserChromeBar.button("ellipsis", "Browser Options")
-    let passwordInputButton = BrowserChromeBar.button("key.fill", "Private Password Input")
-
+    let closePopupButton = BrowserChromeBar.button("xmark", L10n.string("Close Pop-up"))
+    let overflowButton = BrowserChromeBar.button("ellipsis", L10n.string("Browser Options"))
+    let passwordInputButton = BrowserChromeBar.button(
+        "key.fill",
+        L10n.string("Private Password Input")
+    )
     private let privateIndicator = BrowserPrivateIndicator()
     private let stack: NSStackView
     private let contextKind: BrowserContextKind
@@ -164,13 +182,15 @@ final class BrowserChromeBar: NSView {
         privateIndicator.setContentCompressionResistancePriority(.required, for: .horizontal)
         privateIndicator.isHidden = contextKind != .private
         passwordInputButton.isHidden = true
-        passwordInputButton.toolTip = """
+        passwordInputButton.toolTip = L10n.string("""
             Password field under user control · use your password manager or type privately; \
             Skalman never exposes its value to the agent
-            """
+            """)
         testConditionsButton.isHidden = true
         closePopupButton.isHidden = true
-        closePopupButton.toolTip = "Close pop-up and return to its opener"
+        closePopupButton.toolTip = L10n.string(
+            "Close pop-up and return to its opener"
+        )
 
         addSubview(stack)
         NSLayoutConstraint.activate([
@@ -199,7 +219,7 @@ final class BrowserChromeBar: NSView {
     func setLoading(_ isLoading: Bool) {
         self.isLoading = isLoading
         let symbol = isLoading ? "xmark" : "arrow.clockwise"
-        let label = isLoading ? "Stop Loading" : "Reload"
+        let label = isLoading ? L10n.string("Stop Loading") : L10n.string("Reload")
         reloadButton.image = Self.image(symbol, accessibility: label)
         reloadButton.toolTip = label
         reloadButton.setAccessibilityLabel(label)
@@ -209,8 +229,8 @@ final class BrowserChromeBar: NSView {
     func setActiveTestConditionCount(_ count: Int) {
         activeTestConditionCount = count
         testConditionsButton.toolTip = count == 1
-            ? "1 Active Test Condition"
-            : "\(count) Active Test Conditions"
+            ? L10n.string("1 Active Test Condition")
+            : L10n.format("%lld Active Test Conditions", Int64(count))
         updateResponsiveLayout()
     }
 
@@ -251,11 +271,17 @@ final class BrowserChromeBar: NSView {
         }
         if conditionFoldingChanged {
             let overflowSymbol = areTestConditionsFolded ? "slider.horizontal.3" : "ellipsis"
-            overflowButton.image = Self.image(overflowSymbol, accessibility: "Browser Options")
+            overflowButton.image = Self.image(
+                overflowSymbol,
+                accessibility: L10n.string("Browser Options")
+            )
         }
         overflowButton.toolTip = areTestConditionsFolded
-            ? "\(activeTestConditionCount) Active Test Conditions · Browser Options"
-            : "Browser Options"
+            ? L10n.format(
+                "%lld Active Test Conditions · Browser Options",
+                Int64(activeTestConditionCount)
+            )
+            : L10n.string("Browser Options")
 
         // A committed pop-up already has Back, an explicit Close, and Browser Options. Ordinary
         // Reload is also in that menu; at the narrowest width it yields unless it is currently
@@ -270,7 +296,7 @@ final class BrowserChromeBar: NSView {
 
         let passwordTitle = isPasswordFieldFocused
             && width >= Layout.labelledPasswordThreshold
-            ? "Private Input"
+            ? L10n.string("Private Input")
             : ""
         if passwordInputButton.title != passwordTitle {
             passwordInputButton.title = passwordTitle
@@ -294,7 +320,7 @@ final class BrowserChromeBar: NSView {
 private final class BrowserPrivateIndicator: NSView, ThemedComponent {
 
     private let imageView: NSImageView
-    private let label = NSTextField(labelWithString: "Private")
+    private let label = NSTextField(labelWithString: L10n.string("Private"))
     private let contentStack: NSStackView
     private var themeRedraw: ThemeRedraw?
 
@@ -311,7 +337,7 @@ private final class BrowserPrivateIndicator: NSView, ThemedComponent {
         imageView = NSImageView(
             image: BrowserChromeBar.image(
                 "hand.raised.fill",
-                accessibility: "Private Browsing"
+                accessibility: L10n.string("Private Browsing")
             ) ?? NSImage()
         )
         contentStack = NSStackView(views: [imageView, label])
@@ -340,11 +366,15 @@ private final class BrowserPrivateIndicator: NSView, ThemedComponent {
             imageView.heightAnchor.constraint(equalToConstant: Design.Symbol.control + 2)
         ])
 
-        toolTip = "Private browser · isolated, non-persistent website data"
+        toolTip = L10n.string(
+            "Private browser · isolated, non-persistent website data"
+        )
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel("Private Browser")
-        setAccessibilityHelp("Uses isolated, non-persistent website data")
+        setAccessibilityLabel(L10n.string("Private Browser"))
+        setAccessibilityHelp(
+            L10n.string("Uses isolated, non-persistent website data")
+        )
     }
 
     @available(*, unavailable)
@@ -356,7 +386,11 @@ private final class BrowserPrivateIndicator: NSView, ThemedComponent {
         let compactWidth = Design.Spacing.tight * 2 + Design.Symbol.control + 2
         let expandedWidth = compactWidth
             + Design.Spacing.tight
-            + ceil("Private".size(withAttributes: [.font: Design.Typography.caption()]).width)
+            + ceil(
+                L10n.string("Private")
+                    .size(withAttributes: [.font: Design.Typography.caption()])
+                    .width
+            )
         return NSSize(
             width: isExpanded ? expandedWidth : compactWidth,
             height: Design.Size.chipHeight
@@ -1979,18 +2013,23 @@ final class BrowserViewController: NSViewController {
         var entries: [ThemedMenuEntry] = []
         if chromeBar.isReloadFolded {
             entries.append(.item(ThemedMenuItem(
-                title: "Reload",
-                image: BrowserChromeBar.image("arrow.clockwise", accessibility: "Reload"),
+                title: L10n.string("Reload"),
+                image: BrowserChromeBar.image(
+                    "arrow.clockwise",
+                    accessibility: L10n.string("Reload")
+                ),
                 onChoose: { [weak self] in self?.reload() }
             )))
         }
         entries.append(
             .item(ThemedMenuItem(
-                title: "Reload from Origin",
-                subtitle: "Revalidate cached content with the server when possible",
+                title: L10n.string("Reload from Origin"),
+                subtitle: L10n.string(
+                    "Revalidate cached content with the server when possible"
+                ),
                 image: BrowserChromeBar.image(
                     "arrow.clockwise.circle",
-                    accessibility: "Reload from Origin"
+                    accessibility: L10n.string("Reload from Origin")
                 ),
                 onChoose: { [weak self] in self?.reloadFromOrigin() }
             ))
@@ -2022,11 +2061,15 @@ final class BrowserViewController: NSViewController {
             let width = Int(viewport.width)
             let height = Int(viewport.height)
             entries.append(.item(ThemedMenuItem(
-                title: "Responsive Viewport · \(width)×\(height)",
-                subtitle: "Reset to fit the browser panel",
+                title: L10n.format(
+                    "Responsive Viewport · %lld×%lld",
+                    Int64(width),
+                    Int64(height)
+                ),
+                subtitle: L10n.string("Reset to fit the browser panel"),
                 image: BrowserChromeBar.image(
                     "aspectratio",
-                    accessibility: "Responsive Viewport"
+                    accessibility: L10n.string("Responsive Viewport")
                 ),
                 isSelected: true,
                 onChoose: { [weak self] in self?.resetResponsiveViewport() }
@@ -2035,11 +2078,14 @@ final class BrowserViewController: NSViewController {
 
         if agentColorScheme != .auto {
             entries.append(.item(ThemedMenuItem(
-                title: "Color Scheme · \(agentColorScheme.rawValue.capitalized)",
-                subtitle: "Reset to follow the system",
+                title: L10n.format(
+                    "Color Scheme · %@",
+                    agentColorScheme.localizedName
+                ),
+                subtitle: L10n.string("Reset to follow the system"),
                 image: BrowserChromeBar.image(
                     "circle.lefthalf.filled",
-                    accessibility: "Color Scheme"
+                    accessibility: L10n.string("Color Scheme")
                 ),
                 isSelected: true,
                 onChoose: { [weak self] in self?.resetColorScheme() }
@@ -2050,9 +2096,12 @@ final class BrowserViewController: NSViewController {
             let preview = String(value.prefix(BrowserDefaults.userAgentTooltipLength))
             let suffix = value.count > preview.count ? "…" : ""
             entries.append(.item(ThemedMenuItem(
-                title: "Custom User Agent",
+                title: L10n.string("Custom User Agent"),
                 subtitle: "\(preview)\(suffix)",
-                image: BrowserChromeBar.image("network", accessibility: "User Agent"),
+                image: BrowserChromeBar.image(
+                    "network",
+                    accessibility: L10n.string("User Agent")
+                ),
                 isSelected: true,
                 onChoose: { [weak self] in self?.resetUserAgent() }
             )))
@@ -2060,9 +2109,15 @@ final class BrowserViewController: NSViewController {
 
         if agentMediaType != .auto {
             entries.append(.item(ThemedMenuItem(
-                title: "CSS Media · \(agentMediaType.rawValue.capitalized)",
-                subtitle: "Reset to WebKit's default",
-                image: BrowserChromeBar.image("printer", accessibility: "CSS Media"),
+                title: L10n.format(
+                    "CSS Media · %@",
+                    agentMediaType.localizedName
+                ),
+                subtitle: L10n.string("Reset to WebKit's default"),
+                image: BrowserChromeBar.image(
+                    "printer",
+                    accessibility: L10n.string("CSS Media")
+                ),
                 isSelected: true,
                 onChoose: { [weak self] in self?.resetMediaType() }
             )))
@@ -2072,10 +2127,10 @@ final class BrowserViewController: NSViewController {
             entries += [
                 .separator,
                 .item(ThemedMenuItem(
-                    title: "Reset All Test Conditions",
+                    title: L10n.string("Reset All Test Conditions"),
                     image: BrowserChromeBar.image(
                         "arrow.counterclockwise",
-                        accessibility: "Reset All Test Conditions"
+                        accessibility: L10n.string("Reset All Test Conditions")
                     ),
                     onChoose: { [weak self] in self?.resetAllTestConditions() }
                 ))
@@ -2399,23 +2454,28 @@ extension BrowserViewController: WKUIDelegate {
         } else {
             agentRequest = nil
         }
-        let host = frame.request.url?.host ?? "this website"
+        let host = frame.request.url?.host ?? L10n.string("this website")
         let message: String
         if let agentRequest {
             let paths = agentRequest.suggestedURLs.prefix(5).map(\.path)
             let remainder = agentRequest.suggestedURLs.count - paths.count
-            let suffix = remainder > 0 ? "\n…and \(remainder) more suggested path(s)." : ""
-            message = String(
+            let suffix = remainder > 0
+                ? L10n.format("\n…and %lld more suggested paths.", Int64(remainder))
+                : ""
+            message = String(L10n.format(
                 """
-                The agent suggested these files for \(host):
-                \(paths.joined(separator: "\n"))\(suffix)
+                The agent suggested these files for %@:
+                %@%@
 
                 Review the selection. No file is shared until you click Open. You may choose \
                 different files; their paths will not be returned to the agent.
-                """.prefix(1_500)
-            )
+                """,
+                host,
+                paths.joined(separator: "\n"),
+                suffix
+            ).prefix(1_500))
         } else {
-            message = "Choose files for \(host)."
+            message = L10n.format("Choose files for %@.", host)
         }
         let decided: ([URL]?) -> Void = { urls in
             completionHandler(urls)
@@ -2467,10 +2527,10 @@ extension BrowserViewController: WKUIDelegate {
         completionHandler: @escaping () -> Void
     ) {
         let alert = websiteAlert(
-            message: frame.request.url?.host ?? "Website message",
+            message: frame.request.url?.host ?? L10n.string("Website message"),
             informativeText: message
         )
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.string("OK"))
         present(alert) { _ in completionHandler() }
     }
 
@@ -2481,11 +2541,11 @@ extension BrowserViewController: WKUIDelegate {
         completionHandler: @escaping (Bool) -> Void
     ) {
         let alert = websiteAlert(
-            message: frame.request.url?.host ?? "Website confirmation",
+            message: frame.request.url?.host ?? L10n.string("Website confirmation"),
             informativeText: message
         )
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("OK"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
         present(alert) { response in
             completionHandler(response == .alertFirstButtonReturn)
         }
@@ -2503,12 +2563,12 @@ extension BrowserViewController: WKUIDelegate {
         field.frame = NSRect(x: 0, y: 0, width: 300, height: 26)
 
         let alert = websiteAlert(
-            message: frame.request.url?.host ?? "Website prompt",
+            message: frame.request.url?.host ?? L10n.string("Website prompt"),
             informativeText: prompt
         )
         alert.accessoryView = field
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("OK"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
         present(alert) { response in
             completionHandler(response == .alertFirstButtonReturn ? field.stringValue : nil)
         }
@@ -2546,11 +2606,11 @@ extension BrowserViewController: WKDownloadDelegate {
         let identifier = ObjectIdentifier(download)
         let agentRequest = agentDownloadRequests[identifier]
         let message = agentRequest == nil
-            ? "Choose where to save this download."
-            : """
+            ? L10n.string("Choose where to save this download.")
+            : L10n.string("""
                 The agent requested this download. Review the filename and destination before \
                 saving. If you continue, the chosen path will be returned to the agent.
-                """
+                """)
         let decidedURL: (URL?) -> Void = { [weak self] destination in
             guard let self else {
                 completionHandler(nil)
@@ -2615,10 +2675,10 @@ extension BrowserViewController: WKDownloadDelegate {
             .finish(.success(destination))
 
         let alert = NSAlert()
-        alert.messageText = "Download Complete"
+        alert.messageText = L10n.string("Download Complete")
         alert.informativeText = destination.lastPathComponent
-        alert.addButton(withTitle: "Reveal in Finder")
-        alert.addButton(withTitle: "Done")
+        alert.addButton(withTitle: L10n.string("Reveal in Finder"))
+        alert.addButton(withTitle: L10n.string("Done"))
         let reveal: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .alertFirstButtonReturn else { return }
             NSWorkspace.shared.activateFileViewerSelecting([destination])
@@ -2645,9 +2705,9 @@ extension BrowserViewController: WKDownloadDelegate {
     private func showDownloadFailure(_ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Download Failed"
+        alert.messageText = L10n.string("Download Failed")
         alert.informativeText = message
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.string("OK"))
         if let window = view.window {
             alert.beginSheetModal(for: window)
         } else {
@@ -2773,7 +2833,7 @@ private final class BrowserAgentDownloadRequest {
 }
 
 enum BrowserDefaults {
-    static let addressPlaceholder = "Search or enter address"
+    static var addressPlaceholder: String { L10n.string("Search or enter address") }
     static let searchPrefix = "https://duckduckgo.com/?q="
     static let consoleMessageHandler = "skalmanConsole"
     static let networkMessageHandler = "skalmanNetwork"

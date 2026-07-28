@@ -100,7 +100,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             onPresentationChanged()
         case .failure(let error):
             let alert = NSAlert()
-            alert.messageText = "Couldn't move the conversation"
+            alert.messageText = L10n.string("Couldn't move the conversation")
             alert.informativeText = error.message
             alert.alertStyle = .warning
             alert.runModal()
@@ -249,13 +249,15 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
               let session = ProjectStore.shared.session(withID: sessionID) else { return true }
 
         let alert = NSAlert()
-        alert.messageText = "Close \"\(session.displayTitle)\"?"
+        alert.messageText = L10n.format("Close “%@”?", session.displayTitle)
         alert.informativeText = session.kind.supportsResume
-            ? "The agent will stop. The session stays in the sidebar and can be resumed."
-            : "The shell will stop. The session stays in the sidebar."
+            ? L10n.string(
+                "The agent will stop. The session stays in the sidebar and can be resumed."
+            )
+            : L10n.string("The shell will stop. The session stays in the sidebar.")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Close Session")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Close Session"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
     }
 
@@ -267,14 +269,18 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
               let session = ProjectStore.shared.session(withID: sessionID) else { return true }
 
         let alert = NSAlert()
-        alert.messageText = "Move “\(session.displayTitle)” to \(AccountName.display(for: account))?"
-        alert.informativeText = """
+        alert.messageText = L10n.format(
+            "Move “%@” to %@?",
+            session.displayTitle,
+            AccountName.display(for: account)
+        )
+        alert.informativeText = L10n.string("""
             The agent stops and starts again under that account, resuming this conversation \
             where it left off. Anything it is working on right now is interrupted.
-            """
+            """)
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Move")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Move"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
     }
 
@@ -283,16 +289,20 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
               AgentRuntime.shared.isRunning(sessionID: sessionID),
               let session = ProjectStore.shared.session(withID: sessionID) else { return true }
 
-        let surface = toNative ? "Native UI" : session.kind.originalUITitle
+        let surface = toNative ? L10n.string("Native UI") : session.kind.originalUITitle
         let alert = NSAlert()
-        alert.messageText = "Show “\(session.displayTitle)” in \(surface)?"
-        alert.informativeText = """
+        alert.messageText = L10n.format(
+            "Show “%@” in %@?",
+            session.displayTitle,
+            surface
+        )
+        alert.informativeText = L10n.string("""
             The agent stops and starts again on the new surface, resuming this conversation \
             where it left off. Anything it is working on right now is interrupted.
-            """
+            """)
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Switch UI")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Switch UI"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
     }
 }

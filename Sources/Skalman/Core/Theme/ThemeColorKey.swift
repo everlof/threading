@@ -59,13 +59,26 @@ enum ThemeColorKey: String, CaseIterable {
     /// Title case, splitting the `bright` prefix out: "Bright Magenta".
     var displayName: String {
         switch self {
-        case .foreground: return "Text"
-        case .background: return "Background"
-        case .cursor: return "Cursor"
-        case .selection: return "Selection"
-        default:
-            guard let bright = brightBase else { return rawValue.capitalized }
-            return "Bright \(bright.capitalized)"
+        case .foreground: return L10n.string("Text")
+        case .background: return L10n.string("Background")
+        case .cursor: return L10n.string("Cursor")
+        case .selection: return L10n.string("Selection")
+        case .black: return L10n.string("Black")
+        case .red: return L10n.string("Red")
+        case .green: return L10n.string("Green")
+        case .yellow: return L10n.string("Yellow")
+        case .blue: return L10n.string("Blue")
+        case .magenta: return L10n.string("Magenta")
+        case .cyan: return L10n.string("Cyan")
+        case .white: return L10n.string("White")
+        case .brightBlack: return L10n.format("Bright %@", L10n.string("Black"))
+        case .brightRed: return L10n.format("Bright %@", L10n.string("Red"))
+        case .brightGreen: return L10n.format("Bright %@", L10n.string("Green"))
+        case .brightYellow: return L10n.format("Bright %@", L10n.string("Yellow"))
+        case .brightBlue: return L10n.format("Bright %@", L10n.string("Blue"))
+        case .brightMagenta: return L10n.format("Bright %@", L10n.string("Magenta"))
+        case .brightCyan: return L10n.format("Bright %@", L10n.string("Cyan"))
+        case .brightWhite: return L10n.format("Bright %@", L10n.string("White"))
         }
     }
 

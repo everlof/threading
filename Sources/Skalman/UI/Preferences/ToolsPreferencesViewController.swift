@@ -209,13 +209,13 @@ final class ToolsPreferencesViewController: NSViewController {
     @objc private func revokeAllWebsiteAccess() {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Revoke Persistent Website Access?"
-        alert.informativeText = """
+        alert.messageText = L10n.string("Revoke Persistent Website Access?")
+        alert.informativeText = L10n.string("""
             Agents will need to ask again before using these websites in Skalman's signed-in \
             browser. One-time grants are unaffected.
-            """
-        alert.addButton(withTitle: "Revoke All")
-        alert.addButton(withTitle: "Cancel")
+            """)
+        alert.addButton(withTitle: L10n.string("Revoke All"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         let decided: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }

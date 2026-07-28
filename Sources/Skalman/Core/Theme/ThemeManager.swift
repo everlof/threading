@@ -342,11 +342,11 @@ enum ThemeImportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidFormat:
-            return "The file is not a valid Terminal theme file."
+            return L10n.string("The file is not a valid Terminal theme file.")
         case .missingColors:
-            return "The theme file is missing required color definitions."
+            return L10n.string("The theme file is missing required color definitions.")
         case .fileNotFound:
-            return "The theme file could not be found."
+            return L10n.string("The theme file could not be found.")
         }
     }
 }

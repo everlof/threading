@@ -87,7 +87,7 @@ final class ThemedTabItemView: BackdropThemedControl {
         self.placement = placement
         self.closeButton = ThemedIconButton(
             symbolName: "xmark",
-            accessibility: "Close \(title)",
+            accessibility: L10n.format("Close %@", title),
             target: .inline,
             inkSource: inkSource
         )
@@ -186,7 +186,7 @@ final class ThemedTabItemView: BackdropThemedControl {
         iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
         titleLabel.setStringValue(title, animated: isRename)
         closeButton.isHidden = !showsClose
-        closeButton.setAccessibilityTitle("Close \(title)")
+        closeButton.setAccessibilityTitle(L10n.format("Close %@", title))
 
         invalidateIntrinsicContentSize()
         needsDisplay = true

@@ -19,7 +19,7 @@ final class SessionRowView: NSTableCellView {
     /// terminal's backdrop.
     private let actionButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.actionSymbol,
-        accessibility: "Session actions",
+        accessibility: L10n.string("Session actions"),
         target: .inline,
         inkSource: .chrome
     )

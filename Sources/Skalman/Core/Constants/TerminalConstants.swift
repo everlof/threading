@@ -47,11 +47,11 @@ enum EnvironmentKeys {
 
 enum MenuIdentifiers {
     static let mainMenu = "MainMenu"
-    static let projectMenu = "Project"
-    static let editMenu = "Edit"
-    static let viewMenu = "View"
-    static let windowMenu = "Window"
-    static let helpMenu = "Help"
+    static var projectMenu: String { L10n.string("Project") }
+    static var editMenu: String { L10n.string("Edit") }
+    static var viewMenu: String { L10n.string("View") }
+    static var windowMenu: String { L10n.string("Window") }
+    static var helpMenu: String { L10n.string("Help") }
 }
 
 // MARK: - Process Tree Defaults
@@ -404,9 +404,11 @@ enum SidebarDefaults {
 // MARK: - Sidebar Strings
 
 enum SidebarStrings {
-    static let emptyTitle = "No Projects"
-    static let emptySubtitle = "Drop a folder here, or click Add Project below."
-    static let arrangementOptions = "Grouping and Sorting"
+    static var emptyTitle: String { L10n.string("No Projects") }
+    static var emptySubtitle: String {
+        L10n.string("Drop a folder here, or click Add Project below.")
+    }
+    static var arrangementOptions: String { L10n.string("Grouping and Sorting") }
 }
 
 // MARK: - Sidebar Row Defaults
@@ -422,7 +424,7 @@ enum SidebarRowDefaults {
 
     /// Marks a session forked from the one it is nested under.
     static let sideChatSymbol = "arrow.triangle.branch"
-    static let sideChatAccessibilityLabel = "Side chat"
+    static var sideChatAccessibilityLabel: String { L10n.string("Side chat") }
 
     /// Revealed on hover, opening the row's actions.
     static let actionSymbol = "ellipsis"
@@ -431,7 +433,7 @@ enum SidebarRowDefaults {
     /// Archiving is the one row action reached often enough to be worth a button of its own;
     /// it stays in the menu too, so the two surfaces cannot drift.
     static let archiveSymbol = "archivebox"
-    static let archiveAccessibilityLabel = "Archive session"
+    static var archiveAccessibilityLabel: String { L10n.string("Archive session") }
     /// The `+` on a project row's hover, opening its new-session choices.
     /// Revealed on hover over a branch heading, opening the grouping options.
     static let settingsSymbol = "gearshape"

@@ -61,9 +61,13 @@ enum SettingsUI {
     }
 
     /// A titled section: a quiet caption above a card. Pass nil to omit the caption.
-    static func section(_ title: String?, _ content: NSView) -> NSView {
+    static func section(
+        _ title: String?,
+        _ content: NSView,
+        localizesTitle: Bool = true
+    ) -> NSView {
         var views: [NSView] = []
-        if let title { views.append(caption(title)) }
+        if let title { views.append(caption(title, localizes: localizesTitle)) }
         views.append(content)
 
         let stack = NSStackView(views: views)
@@ -77,23 +81,27 @@ enum SettingsUI {
     }
 
     /// The heading for a page — larger than a caption, the one emphasised string.
-    static func heading(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
+    static func heading(_ text: String, localizes: Bool = true) -> NSTextField {
+        let label = NSTextField(labelWithString: localized(text, if: localizes))
         label.applyFont(.heading)
         label.textColor = Design.Text.label
         return label
     }
 
-    static func caption(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text.uppercased())
+    static func caption(_ text: String, localizes: Bool = true) -> NSTextField {
+        let label = NSTextField(
+            labelWithString: localized(text, if: localizes).localizedUppercase
+        )
         label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
         return label
     }
 
     /// Explanatory text beneath a card, in the secondary colour.
-    static func note(_ text: String) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: text)
+    static func note(_ text: String, localizes: Bool = true) -> NSTextField {
+        let label = NSTextField(
+            wrappingLabelWithString: localized(text, if: localizes)
+        )
         label.applyFont(.subheading)
         label.textColor = Design.Text.secondary
         return label
@@ -110,15 +118,20 @@ enum SettingsUI {
         title: String,
         subtitle: String? = nil,
         control: NSView? = nil,
-        subtitleField: inout NSTextField?
+        subtitleField: inout NSTextField?,
+        localizes: Bool = true
     ) -> NSView {
-        let titleLabel = NSTextField(labelWithString: title)
+        let titleLabel = NSTextField(
+            labelWithString: localized(title, if: localizes)
+        )
         titleLabel.applyFont(.body)
         titleLabel.textColor = Design.Text.label
 
         var labelViews: [NSView] = [titleLabel]
         if let subtitle {
-            let sub = NSTextField(wrappingLabelWithString: subtitle)
+            let sub = NSTextField(
+                wrappingLabelWithString: localized(subtitle, if: localizes)
+            )
             sub.applyFont(.subheading)
             sub.textColor = Design.Text.secondary
             labelViews.append(sub)
@@ -155,9 +168,20 @@ enum SettingsUI {
     }
 
     /// The common case — no caller needs the subtitle back.
-    static func row(title: String, subtitle: String? = nil, control: NSView? = nil) -> NSView {
+    static func row(
+        title: String,
+        subtitle: String? = nil,
+        control: NSView? = nil,
+        localizes: Bool = true
+    ) -> NSView {
         var ignored: NSTextField?
-        return row(title: title, subtitle: subtitle, control: control, subtitleField: &ignored)
+        return row(
+            title: title,
+            subtitle: subtitle,
+            control: control,
+            subtitleField: &ignored,
+            localizes: localizes
+        )
     }
 
     /// A control that spans the row's full width, such as a text field with a Choose button.
@@ -211,10 +235,23 @@ enum SettingsUI {
     }
 
     /// A quiet push button in the app's flat style.
-    static func button(_ title: String, target: AnyObject, action: Selector) -> ThemedButton {
-        let button = ThemedButton(title: title, target: target, action: action)
+    static func button(
+        _ title: String,
+        target: AnyObject,
+        action: Selector,
+        localizes: Bool = true
+    ) -> ThemedButton {
+        let button = ThemedButton(
+            title: localized(title, if: localizes),
+            target: target,
+            action: action
+        )
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
+    }
+
+    private static func localized(_ text: String, if localizes: Bool) -> String {
+        localizes ? L10n.string(text) : text
     }
 }
 

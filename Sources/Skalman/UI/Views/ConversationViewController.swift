@@ -241,13 +241,16 @@ final class ConversationViewController: NSViewController {
         promptView.translatesAutoresizingMaskIntoConstraints = false
         // What is typed here becomes a bubble in the thread, so it is set in the thread's font.
         promptView.fontSurface = .conversation
-        promptView.placeholder = "Reply to \(agentSession.kind.displayName)"
+        promptView.placeholder = L10n.format(
+            "Reply to %@",
+            agentSession.kind.displayName
+        )
         promptView.onSubmit = { [weak self] text in
             _ = self?.submit(text)
         }
         setupPromptCustomization()
 
-        statusLabel = NSTextField(labelWithString: "Starting…")
+        statusLabel = NSTextField(labelWithString: L10n.string("Starting…"))
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.applyFont(.subheading)
         statusLabel.textColor = Design.Text.tertiary
@@ -1106,15 +1109,15 @@ private enum ConversationControlDefaults {
     static let modelSymbol = "cpu"
     static let effortSymbol = "brain"
     static let speedSymbol = "bolt.fill"
-    static let defaultModel = "Default model"
-    static let defaultEffort = "Default effort"
-    static let accountDefault = "Account default"
-    static let accountDefaultSuffix = "  (account default)"
-    static let modelDefaultSuffix = "  (model default)"
-    static let standard = "Standard"
-    static let fast = "Fast"
-    static let standardDetail = "Normal speed and usage"
-    static let fastDetail = "1.5× speed, increased usage"
+    static var defaultModel: String { L10n.string("Default model") }
+    static var defaultEffort: String { L10n.string("Default effort") }
+    static var accountDefault: String { L10n.string("Account default") }
+    static var accountDefaultSuffix: String { L10n.string("  (account default)") }
+    static var modelDefaultSuffix: String { L10n.string("  (model default)") }
+    static var standard: String { L10n.string("Standard") }
+    static var fast: String { L10n.string("Fast") }
+    static var standardDetail: String { L10n.string("Normal speed and usage") }
+    static var fastDetail: String { L10n.string("1.5× speed, increased usage") }
 }
 
 private func effortDisplayName(

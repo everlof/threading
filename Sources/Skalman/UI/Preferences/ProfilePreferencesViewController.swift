@@ -61,6 +61,7 @@ final class ProfilePreferencesViewController: NSViewController {
     }()
 
     private lazy var previewLabel: NSTextField = {
+        // localization-ignore: Representative shell prompt, not natural-language UI copy.
         let label = NSTextField(labelWithString: "user@mac ~ % ls -la")
         label.isBezeled = false
         label.drawsBackground = false

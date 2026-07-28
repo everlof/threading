@@ -39,6 +39,182 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         XCTAssertEqual(loaded, registration)
     }
 
+    func testLocalizationCataloguesAreInspectedNegotiatedAndAppliedToHostUI() throws {
+        let directory = try makeBundle(
+            capabilities: [],
+            script: "#!/bin/sh\nexit 0"
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let localizationDirectory = directory.appendingPathComponent(
+            "Localizations",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: localizationDirectory,
+            withIntermediateDirectories: true
+        )
+        try JSONEncoder().encode([
+            "Status": "Status på svenska",
+            "Ready": "Klar",
+            "Refresh": "Uppdatera"
+        ]).write(to: localizationDirectory.appendingPathComponent("sv.json"))
+
+        let manifest = ExtensionManifest(
+            identifier: "com.example.loader-test",
+            name: "Loader Test",
+            version: "0.1.0",
+            executable: "bin/extension",
+            localizations: [
+                .init(locale: "sv", resource: "Localizations/sv.json")
+            ]
+        )
+        try JSONEncoder().encode(manifest).write(
+            to: directory.appendingPathComponent(ExtensionBundleInspector.manifestName)
+        )
+
+        let bundle = try ExtensionBundleInspector.inspect(at: directory)
+        XCTAssertEqual(bundle.localizations.map(\.language), ["sv"])
+
+        let resolver = ExtensionLocalizationResolver(
+            catalogs: bundle.localizations,
+            preferredLanguages: ["sv-SE", "en"]
+        )
+        XCTAssertEqual(resolver.language, "sv")
+        XCTAssertEqual(
+            resolver.panel(
+                .init(
+                    id: "status",
+                    title: "Status",
+                    root: .stack(
+                        axis: .vertical,
+                        spacing: .small,
+                        children: [
+                            .status("Ready", role: .positive),
+                            .button(
+                                id: "refresh",
+                                title: "Refresh",
+                                role: .standard,
+                                isEnabled: true
+                            )
+                        ]
+                    )
+                )
+            ),
+            .init(
+                id: "status",
+                title: "Status på svenska",
+                root: .stack(
+                    axis: .vertical,
+                    spacing: .small,
+                    children: [
+                        .status("Klar", role: .positive),
+                        .button(
+                            id: "refresh",
+                            title: "Uppdatera",
+                            role: .standard,
+                            isEnabled: true
+                        )
+                    ]
+                )
+            )
+        )
+
+        let environment = resolver.environment(
+            preferredLanguages: ["sv-SE", "en"],
+            localeIdentifier: "sv_SE"
+        )
+        XCTAssertEqual(
+            environment[ExtensionLocalizationEnvironment.selectedLanguage],
+            "sv"
+        )
+        XCTAssertNotNil(environment[ExtensionLocalizationEnvironment.stringsJSON])
+    }
+
+    func testInspectorRejectsLocalizationFilesThatAreNotFlatStringCatalogues() throws {
+        let directory = try makeBundle(
+            capabilities: [],
+            script: "#!/bin/sh\nexit 0"
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let localizationDirectory = directory.appendingPathComponent(
+            "Localizations",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: localizationDirectory,
+            withIntermediateDirectories: true
+        )
+        try Data(#"{"Ready":{"translation":"Klar"}}"#.utf8).write(
+            to: localizationDirectory.appendingPathComponent("sv.json")
+        )
+        let manifest = ExtensionManifest(
+            identifier: "com.example.loader-test",
+            name: "Loader Test",
+            version: "0.1.0",
+            executable: "bin/extension",
+            localizations: [
+                .init(locale: "sv", resource: "Localizations/sv.json")
+            ]
+        )
+        try JSONEncoder().encode(manifest).write(
+            to: directory.appendingPathComponent(ExtensionBundleInspector.manifestName)
+        )
+
+        XCTAssertThrowsError(try ExtensionBundleInspector.inspect(at: directory)) { error in
+            guard case .localizationResourceInvalid(
+                path: "Localizations/sv.json",
+                message: let message
+            ) = error as? ExtensionBundleError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertTrue(message.contains("flat JSON object"))
+        }
+    }
+
+    func testInspectorRejectsLocalizationThatChangesFormatPlaceholders() throws {
+        let directory = try makeBundle(
+            capabilities: [],
+            script: "#!/bin/sh\nexit 0"
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let localizationDirectory = directory.appendingPathComponent(
+            "Localizations",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: localizationDirectory,
+            withIntermediateDirectories: true
+        )
+        try Data(#"{"Opened build %@":"Öppnade bygge %lld"}"#.utf8).write(
+            to: localizationDirectory.appendingPathComponent("sv.json")
+        )
+        let manifest = ExtensionManifest(
+            identifier: "com.example.loader-test",
+            name: "Loader Test",
+            version: "0.1.0",
+            executable: "bin/extension",
+            localizations: [
+                .init(locale: "sv", resource: "Localizations/sv.json")
+            ]
+        )
+        try JSONEncoder().encode(manifest).write(
+            to: directory.appendingPathComponent(ExtensionBundleInspector.manifestName)
+        )
+
+        XCTAssertThrowsError(try ExtensionBundleInspector.inspect(at: directory)) { error in
+            guard case .localizationResourceInvalid(
+                path: "Localizations/sv.json",
+                message: let message
+            ) = error as? ExtensionBundleError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertTrue(message.contains("printf placeholders"))
+        }
+    }
+
     func testInspectorSaysWhichSideIsOutOfDateForAnUnknownManifestFormat() throws {
         func inspect(_ manifest: String) -> ExtensionBundleError? {
             let root = FileManager.default.temporaryDirectory

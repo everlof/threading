@@ -18,18 +18,29 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     private enum Strings {
-        static let defaultNote = """
-            The default theme applies to every terminal that has not been given one of its own. \
-            A project or a single session can override it from its ⋯ menu in the sidebar.
-            """
-        static let followTheme = "Follow Theme"
-        static let followAppFont = "Follow App Font"
-        static let builtInNote = """
-            Built-in themes cannot be edited. Duplicate this one to change its colours.
-            """
-        static let followsAppNote = """
-            These colours come from the app theme above. Duplicate them to edit a copy.
-            """
+        static var defaultNote: String {
+            L10n.string(
+                "The default theme applies to every terminal that has not been given one of its "
+                    + "own. A project or a single session can override it from its ⋯ menu in the "
+                    + "sidebar."
+            )
+        }
+
+        static var followTheme: String {
+            L10n.string("Follow Theme")
+        }
+
+        static var followAppFont: String {
+            L10n.string("Follow App Font")
+        }
+
+        static var builtInNote: String {
+            L10n.string("Built-in themes cannot be edited. Duplicate this one to change its colours.")
+        }
+
+        static var followsAppNote: String {
+            L10n.string("These colours come from the app theme above. Duplicate them to edit a copy.")
+        }
     }
 
     // MARK: - Properties
@@ -72,8 +83,16 @@ final class ThemePreferencesViewController: NSViewController {
         return scroll
     }()
 
-    private lazy var addButton = iconButton("plus", tooltip: "New Theme", action: #selector(addTheme))
-    private lazy var removeButton = iconButton("minus", tooltip: "Delete Theme", action: #selector(removeTheme))
+    private lazy var addButton = iconButton(
+        "plus",
+        tooltip: L10n.string("New Theme"),
+        action: #selector(addTheme)
+    )
+    private lazy var removeButton = iconButton(
+        "minus",
+        tooltip: L10n.string("Delete Theme"),
+        action: #selector(removeTheme)
+    )
 
     private lazy var actionButton: ThemedPopUp = {
         let button = ThemedPopUp()
@@ -83,20 +102,23 @@ final class ThemePreferencesViewController: NSViewController {
         button.addItem(
             ThemedMenuItem(
                 title: "",
-                image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Actions")
+                image: NSImage(
+                    systemSymbolName: "gearshape",
+                    accessibilityDescription: L10n.string("Actions")
+                )
             )
         )
-        button.addItem(ThemedMenuItem(title: "Duplicate", onChoose: { [weak self] in
+        button.addItem(ThemedMenuItem(title: L10n.string("Duplicate"), onChoose: { [weak self] in
             self?.duplicateTheme()
         }))
-        button.addItem(ThemedMenuItem(title: "Rename…", onChoose: { [weak self] in
+        button.addItem(ThemedMenuItem(title: L10n.string("Rename…"), onChoose: { [weak self] in
             self?.renameTheme()
         }))
         button.addSeparator()
-        button.addItem(ThemedMenuItem(title: "Import from Terminal.app…", onChoose: { [weak self] in
+        button.addItem(ThemedMenuItem(title: L10n.string("Import from Terminal.app…"), onChoose: { [weak self] in
             self?.importFromTerminal()
         }))
-        button.addItem(ThemedMenuItem(title: "Export…", onChoose: { [weak self] in
+        button.addItem(ThemedMenuItem(title: L10n.string("Export…"), onChoose: { [weak self] in
             self?.exportTheme()
         }))
 
@@ -104,7 +126,11 @@ final class ThemePreferencesViewController: NSViewController {
     }()
 
     private lazy var useThemeButton: ThemedButton = {
-        ThemedButton(title: "Use as Default", target: self, action: #selector(useSelectedTheme))
+        ThemedButton(
+            title: L10n.string("Use as Default"),
+            target: self,
+            action: #selector(useSelectedTheme)
+        )
     }()
 
     private let previewView = ThemePreviewView()
@@ -113,6 +139,7 @@ final class ThemePreferencesViewController: NSViewController {
     private weak var appThemePopUp: ThemedPopUp?
     private weak var chromeFontPopUp: ThemedPopUp?
     private weak var conversationFontPopUp: ThemedPopUp?
+    private weak var textSizePopUp: ThemedPopUp?
     private weak var appThemeSubtitle: NSTextField?
     private weak var duplicateAppThemeButton: ThemedButton?
     private weak var deleteAppThemeButton: ThemedButton?
@@ -250,10 +277,19 @@ final class ThemePreferencesViewController: NSViewController {
     private func fontSection() -> NSView {
         let chrome = SettingsUI.popUp(target: self, action: #selector(chromeFontChanged))
         let conversation = SettingsUI.popUp(target: self, action: #selector(conversationFontChanged))
+        let textSize = SettingsUI.popUp(target: self, action: #selector(textSizeChanged))
+        textSize.setAccessibilityIdentifier("settings.themes.text-size")
         chromeFontPopUp = chrome
         conversationFontPopUp = conversation
+        textSizePopUp = textSize
 
         let card = SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Text size",
+                subtitle: "Resizes app text and host-rendered extensions. "
+                    + "Terminal size stays in Profiles.",
+                control: textSize
+            ),
             SettingsUI.row(
                 title: "App font",
                 subtitle: "Overrides the typeface the theme states.",
@@ -266,6 +302,7 @@ final class ThemePreferencesViewController: NSViewController {
             )
         ])
         reloadFontControls()
+        reloadTextSizeControl()
         return card
     }
 
@@ -300,6 +337,25 @@ final class ThemePreferencesViewController: NSViewController {
 
     @objc private func conversationFontChanged(_ sender: ThemedPopUp) {
         AppSettings.shared.conversationFontFamily = chosenFamily(from: sender)
+    }
+
+    private func reloadTextSizeControl() {
+        guard let textSizePopUp else { return }
+        textSizePopUp.removeAllItems()
+        for size in AppTextSize.allCases {
+            textSizePopUp.addItem(
+                ThemedMenuItem(title: size.title, representedValue: size.rawValue)
+            )
+        }
+        textSizePopUp.selectItem(
+            at: AppTextSize.allCases.firstIndex(of: AppSettings.appTextSize) ?? 0
+        )
+    }
+
+    @objc private func textSizeChanged(_ sender: ThemedPopUp) {
+        guard let raw = sender.selectedItem?.representedValue as? String,
+              let size = AppTextSize(rawValue: raw) else { return }
+        AppSettings.shared.appTextSize = size
     }
 
     private func chosenFamily(from popUp: ThemedPopUp) -> String? {
@@ -376,7 +432,10 @@ final class ThemePreferencesViewController: NSViewController {
             try AppThemeLibrary.create(copy)
             AppThemeLibrary.apply(copy)
         } catch {
-            presentAlert("Cannot Duplicate App Theme", error.localizedDescription)
+            presentAlert(
+                L10n.string("Cannot Duplicate App Theme"),
+                error.localizedDescription
+            )
         }
     }
 
@@ -384,18 +443,20 @@ final class ThemePreferencesViewController: NSViewController {
         let theme = AppThemeLibrary.current
         guard AppThemeLibrary.isCustom(theme) else {
             presentAlert(
-                "Cannot Delete App Theme",
-                "Built-in app themes are fixed. Duplicate one to make an editable custom theme."
+                L10n.string("Cannot Delete App Theme"),
+                L10n.string(
+                    "Built-in app themes are fixed. Duplicate one to make an editable custom theme."
+                )
             )
             return
         }
 
         let alert = NSAlert()
-        alert.messageText = "Delete “\(theme.name)”?"
-        alert.informativeText = "The app will return to the System theme."
+        alert.messageText = L10n.format("Delete “%@”?", theme.name)
+        alert.informativeText = L10n.string("The app will return to the System theme.")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Delete"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         _ = AppThemeLibrary.delete(theme)
     }
@@ -522,7 +583,9 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     @objc private func addTheme() {
-        let newTheme = TerminalTheme.basic.duplicated(named: uniqueName(basedOn: "New Theme"))
+        let newTheme = TerminalTheme.basic.duplicated(
+            named: uniqueName(basedOn: L10n.string("New Theme"))
+        )
 
         guard ThemeAssignments.create(newTheme) else { return }
 
@@ -546,27 +609,34 @@ final class ThemePreferencesViewController: NSViewController {
 
         guard !isFollowsAppThemeSelected else {
             presentAlert(
-                "Cannot Delete",
-                "“\(TerminalThemeNames.followsAppTheme)” is not a palette — it draws with whatever "
-                    + "the app theme states. Change the app theme above to change what it gives you."
+                L10n.string("Cannot Delete"),
+                L10n.format(
+                    "“%@” is not a palette — it draws with whatever the app theme states. "
+                        + "Change the app theme above to change what it gives you.",
+                    TerminalThemeNames.followsAppTheme
+                )
             )
             return
         }
 
         guard !ThemeManager.shared.isBuiltIn(theme) else {
             presentAlert(
-                "Cannot Delete",
-                "Built-in themes cannot be deleted. Duplicate this one and change the copy instead."
+                L10n.string("Cannot Delete"),
+                L10n.string(
+                    "Built-in themes cannot be deleted. Duplicate this one and change the copy instead."
+                )
             )
             return
         }
 
         let alert = NSAlert()
-        alert.messageText = "Delete “\(theme.name)”?"
-        alert.informativeText = "Sessions and projects using it fall back to the theme they inherit."
+        alert.messageText = L10n.format("Delete “%@”?", theme.name)
+        alert.informativeText = L10n.string(
+            "Sessions and projects using it fall back to the theme they inherit."
+        )
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Delete"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         guard ThemeManager.shared.deleteTheme(theme) else { return }
@@ -581,7 +651,7 @@ final class ThemePreferencesViewController: NSViewController {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [type]
         panel.allowsMultipleSelection = true
-        panel.message = "Select Terminal.app theme files to import"
+        panel.message = L10n.string("Select Terminal.app theme files to import")
 
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let self else { return }
@@ -611,10 +681,13 @@ final class ThemePreferencesViewController: NSViewController {
         guard let theme = selectedTheme, !ThemeManager.shared.isBuiltIn(theme) else { return }
 
         let alert = NSAlert()
-        alert.messageText = "Rename Theme"
-        alert.informativeText = "Enter a new name for “\(theme.name)”:"
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.string("Rename Theme")
+        alert.informativeText = L10n.format(
+            "Enter a new name for “%@”:",
+            theme.name
+        )
+        alert.addButton(withTitle: L10n.string("Rename"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         let field = ThemedTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
         field.stringValue = theme.name
@@ -627,7 +700,10 @@ final class ThemePreferencesViewController: NSViewController {
         guard !newName.isEmpty, newName != theme.name else { return }
 
         guard ThemeAssignments.rename(theme, to: newName) else {
-            presentAlert("Cannot Rename", "A theme with that name already exists.")
+            presentAlert(
+                L10n.string("Cannot Rename"),
+                L10n.string("A theme with that name already exists.")
+            )
             return
         }
 
@@ -641,7 +717,7 @@ final class ThemePreferencesViewController: NSViewController {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "\(theme.name).json"
-        panel.message = "Export theme as JSON"
+        panel.message = L10n.string("Export theme as JSON")
 
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }
@@ -739,7 +815,7 @@ private final class ThemeListRowView: NSTableCellView {
 
     private let swatch = NSImageView()
     private let name = NSTextField(labelWithString: "")
-    private let badge = NSTextField(labelWithString: "Default")
+    private let badge = NSTextField(labelWithString: L10n.string("Default"))
 
     init() {
         super.init(frame: .zero)

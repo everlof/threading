@@ -23,13 +23,16 @@ enum GitFailure: LocalizedError, Equatable {
         switch self {
         case .launchFailed(let message): return message
         case .gitFailed(let message): return message
-        case .timedOut: return "git took too long to answer."
-        case .outputTooLarge: return "This diff is too large to display."
-        case .noCommits: return "No commits yet."
-        case .noDefaultBranch: return "No default branch found."
-        case .baselineExpired: return "The turn baseline has expired."
-        case .indexLocked: return "The index is in use — the agent is running a git command. Try again."
-        case .nothingStaged: return "Nothing is staged."
+        case .timedOut: return L10n.string("git took too long to answer.")
+        case .outputTooLarge: return L10n.string("This diff is too large to display.")
+        case .noCommits: return L10n.string("No commits yet.")
+        case .noDefaultBranch: return L10n.string("No default branch found.")
+        case .baselineExpired: return L10n.string("The turn baseline has expired.")
+        case .indexLocked:
+            return L10n.string(
+                "The index is in use — the agent is running a git command. Try again."
+            )
+        case .nothingStaged: return L10n.string("Nothing is staged.")
         }
     }
 }

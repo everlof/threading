@@ -89,7 +89,7 @@ final class RemoteNotificationService {
                 kind: .sharedSession,
                 hostID: RemoteHostIdentity.current.id,
                 sessionID: sessionID.uuidString,
-                title: "Chat shared with you",
+                title: L10n.string("Chat shared with you"),
                 body: Self.safeText(
                     session.displayTitle,
                     bytes: RemoteAccessDefaults.maximumNotificationBodyBytes

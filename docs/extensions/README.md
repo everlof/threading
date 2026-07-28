@@ -158,6 +158,22 @@ theme that was active falls back to System, and a named-but-gone family degrades
 rung exactly like an uninstalled font. Font licensing is the package author's responsibility,
 and the install disclosure names every theme and font family before anything is copied.
 
+**Localization is package-owned presentation data.** A manifest's `localizations` entries pair
+a BCP-47 language tag with a bounded package-relative JSON file. Each file is a flat mapping
+from readable base-language strings to translated strings. Skalman negotiates the closest
+catalogue from the app's preferred language list, then applies it to the extension name,
+commands, panels and every semantic node, Settings pages/sections/fields/options/placeholders,
+services and MCP metadata, companion operations and remote-surface accessibility labels, and
+contributed theme names. IDs, resource paths, values, schemas, routing, and capabilities are
+never translated. A missing key falls back to its base string.
+
+The same negotiated locale, preferred languages, selected catalogue, and string table are
+placed in the extension launch environment. Runtime code uses `ExtensionLocalizer` so action
+messages and other dynamic copy agree with what the host already rendered. Settings search
+indexes the localized extension metadata. Catalogues are inspected before code runs, must
+preserve each key's ordered printf placeholders, and are bounded by file size, entry count, and
+string length.
+
 Command, panel, settings, service, agent-tool, identity, appearance, and component extensions
 are connected to their product surfaces end to end. Component Gallery remains the direct unpacked-directory
 harness and semantic rendering fixture rather than the only place panels can run.

@@ -13,6 +13,7 @@ struct SkalmanExtensionBundle: Equatable {
     let companions: [SkalmanExtensionCompanionBundle]
     let themes: [SkalmanExtensionThemeDocument]
     let fonts: [SkalmanExtensionFontFile]
+    let localizations: [SkalmanExtensionLocalizationCatalog]
 
     init(
         rootURL: URL,
@@ -21,7 +22,8 @@ struct SkalmanExtensionBundle: Equatable {
         manifest: ExtensionManifest,
         companions: [SkalmanExtensionCompanionBundle] = [],
         themes: [SkalmanExtensionThemeDocument] = [],
-        fonts: [SkalmanExtensionFontFile] = []
+        fonts: [SkalmanExtensionFontFile] = [],
+        localizations: [SkalmanExtensionLocalizationCatalog] = []
     ) {
         self.rootURL = rootURL
         self.executableURL = executableURL
@@ -30,6 +32,7 @@ struct SkalmanExtensionBundle: Equatable {
         self.companions = companions
         self.themes = themes
         self.fonts = fonts
+        self.localizations = localizations
     }
 }
 
@@ -39,6 +42,12 @@ struct SkalmanExtensionBundle: Equatable {
 struct SkalmanExtensionFontFile: Equatable {
     let url: URL
     let familyNames: [String]
+}
+
+/// One bounded, statically inspected extension translation table.
+struct SkalmanExtensionLocalizationCatalog: Equatable {
+    let language: String
+    let strings: [String: String]
 }
 
 /// One theme document read and validated at inspection time. No code has run to produce this.
@@ -81,6 +90,7 @@ enum ExtensionBundleError: LocalizedError {
     case editableSourceInvalid(String)
     case themeResourceInvalid(path: String, message: String)
     case fontResourceInvalid(path: String, message: String)
+    case localizationResourceInvalid(path: String, message: String)
     case companionInvalid(id: String, message: String)
     case launchFailed(String)
     case timedOut
@@ -122,6 +132,8 @@ enum ExtensionBundleError: LocalizedError {
             return "The extension theme at \(path) is invalid: \(message)"
         case .fontResourceInvalid(let path, let message):
             return "The extension font at \(path) is invalid: \(message)"
+        case .localizationResourceInvalid(let path, let message):
+            return "The extension localization at \(path) is invalid: \(message)"
         case .companionInvalid(let id, let message):
             return "Companion “\(id)” is invalid: \(message)"
         case .launchFailed(let message):
@@ -181,6 +193,9 @@ enum ExtensionBundleInspector {
     static let maximumThemeBytes = 256 * 1024
     /// A text face with broad coverage runs to a few megabytes; CJK families run larger.
     static let maximumFontBytes = 16 * 1024 * 1024
+    static let maximumLocalizationBytes = 512 * 1024
+    static let maximumLocalizationEntries = 4_096
+    static let maximumLocalizedStringLength = 10_000
 
     static func inspect(at directory: URL) throws -> SkalmanExtensionBundle {
         let root = directory.standardizedFileURL.resolvingSymlinksInPath()
@@ -278,6 +293,7 @@ enum ExtensionBundleInspector {
             root: root
         )
         let fonts = try inspectFonts(manifest.fonts, root: root)
+        let localizations = try inspectLocalizations(manifest.localizations, root: root)
 
         return SkalmanExtensionBundle(
             rootURL: root,
@@ -286,7 +302,8 @@ enum ExtensionBundleInspector {
             manifest: manifest,
             companions: companions,
             themes: themes,
-            fonts: fonts
+            fonts: fonts,
+            localizations: localizations
         )
     }
 
@@ -376,6 +393,77 @@ enum ExtensionBundleInspector {
                 url: url,
                 familyNames: Array(Set(families)).sorted()
             )
+        }
+    }
+
+    private static func inspectLocalizations(
+        _ declarations: [ExtensionLocalizationContribution],
+        root: URL
+    ) throws -> [SkalmanExtensionLocalizationCatalog] {
+        try declarations.map { declaration in
+            let url = try resolveResource(
+                declaration.resource,
+                root: root,
+                maximumBytes: maximumLocalizationBytes,
+                failure: { ExtensionBundleError.localizationResourceInvalid(
+                    path: declaration.resource, message: $0
+                ) }
+            )
+            let strings: [String: String]
+            do {
+                strings = try JSONDecoder().decode(
+                    [String: String].self,
+                    from: Data(contentsOf: url)
+                )
+            } catch {
+                throw ExtensionBundleError.localizationResourceInvalid(
+                    path: declaration.resource,
+                    message: "must be a flat JSON object of string keys and values"
+                )
+            }
+            guard strings.count <= maximumLocalizationEntries else {
+                throw ExtensionBundleError.localizationResourceInvalid(
+                    path: declaration.resource,
+                    message: "contains more than \(maximumLocalizationEntries) strings"
+                )
+            }
+            if let invalid = strings.first(where: {
+                $0.key.isEmpty
+                    || $0.key.count > maximumLocalizedStringLength
+                    || $0.value.isEmpty
+                    || $0.value.count > maximumLocalizedStringLength
+            }) {
+                throw ExtensionBundleError.localizationResourceInvalid(
+                    path: declaration.resource,
+                    message: "key and value for '\(invalid.key)' must contain 1–"
+                        + "\(maximumLocalizedStringLength) characters"
+                )
+            }
+            if let invalid = strings.first(where: {
+                formatPlaceholders(in: $0.key) != formatPlaceholders(in: $0.value)
+            }) {
+                throw ExtensionBundleError.localizationResourceInvalid(
+                    path: declaration.resource,
+                    message: "translation for '\(invalid.key)' must preserve its printf "
+                        + "placeholders in the same order"
+                )
+            }
+            return SkalmanExtensionLocalizationCatalog(
+                language: declaration.locale,
+                strings: strings
+            )
+        }
+    }
+
+    private static func formatPlaceholders(in value: String) -> [String] {
+        let pattern =
+            #"%(\d+\$)?[-+ #0']*(\d+|\*)?(\.(\d+|\*))?(hh|h|ll|l|q|L|z|t|j)?[@diuoxXfFeEgGaAcCsSp%]"#
+        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        return expression.matches(in: value, range: range).compactMap {
+            Range($0.range, in: value).map { String(value[$0]) }
         }
     }
 

@@ -23,7 +23,7 @@ final class ComponentGalleryWindowController: ThemedWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Component Gallery"
+        window.title = L10n.string("Component Gallery")
         window.minSize = Defaults.minimumSize
         window.isReleasedWhenClosed = false
         window.contentViewController = content
@@ -64,6 +64,13 @@ final class ComponentGalleryViewController: NSViewController {
 
         var appearance: NSAppearance? {
             NSAppearance(named: self == .dark ? .darkAqua : .aqua)
+        }
+
+        var localizedName: String {
+            switch self {
+            case .light: L10n.string("Light")
+            case .dark: L10n.string("Dark")
+            }
         }
     }
 
@@ -113,7 +120,9 @@ final class ComponentGalleryViewController: NSViewController {
 
     private let themePopUp = ThemedPopUp()
     private let appearanceToggle = ThemedToggle()
-    private let receiptLabel = NSTextField(labelWithString: "Ready — interact with any story.")
+    private let receiptLabel = NSTextField(
+        labelWithString: L10n.string("Ready — interact with any story.")
+    )
     private let spinner = ThemedSpinner()
     private let workingOrbs = OrbState.allCases.map(WorkingOrbView.init(state:))
     private let morphingTitle = MorphingTitleLabel()
@@ -127,7 +136,9 @@ final class ComponentGalleryViewController: NSViewController {
     private let tableModel = ComponentGalleryTableModel()
     private let extensionLoadButton = ThemedButton()
     private let extensionProcessStatus = NSTextField(
-        wrappingLabelWithString: "Choose an extension directory to start its interactive process."
+        wrappingLabelWithString: L10n.string(
+            "Choose an extension directory to start its interactive process."
+        )
     )
     private let extensionProcessPreview = NSStackView()
     private var extensionProcessSession: ExtensionProcessSession?
@@ -160,8 +171,9 @@ final class ComponentGalleryViewController: NSViewController {
         extensionProcessSession = nil
         guard isViewLoaded else { return }
         extensionProcessStatus.textColor = Design.Text.secondary
-        extensionProcessStatus.stringValue =
+        extensionProcessStatus.stringValue = L10n.string(
             "Choose an extension directory to start its interactive process."
+        )
         replaceExtensionProcessPreview(with: nil)
     }
 
@@ -207,11 +219,15 @@ final class ComponentGalleryViewController: NSViewController {
     // MARK: Header
 
     private func makeHeader() -> NSView {
-        let title = NSTextField(labelWithString: "Component Gallery")
+        let title = NSTextField(labelWithString: L10n.string("Component Gallery"))
         title.applyFont(.heading)
         title.textColor = Design.Text.label
 
-        let subtitle = NSTextField(labelWithString: "Theme is app-wide · Light/Dark is scoped to this window")
+        let subtitle = NSTextField(
+            labelWithString: L10n.string(
+                "Theme is app-wide · Light/Dark is scoped to this window"
+            )
+        )
         subtitle.applyFont(.subheading)
         subtitle.textColor = Design.Text.secondary
 
@@ -263,14 +279,14 @@ final class ComponentGalleryViewController: NSViewController {
         themePopUp.selectItem(at: selected)
         themePopUp.target = self
         themePopUp.action = #selector(themeChanged)
-        themePopUp.setAccessibilityLabel("Gallery theme")
+        themePopUp.setAccessibilityLabel(L10n.string("Gallery theme"))
     }
 
     private func configureAppearanceToggle() {
         appearanceToggle.state = appearanceMode == .dark ? .on : .off
         appearanceToggle.target = self
         appearanceToggle.action = #selector(appearanceChanged)
-        appearanceToggle.setAccessibilityLabel("Dark appearance")
+        appearanceToggle.setAccessibilityLabel(L10n.string("Dark appearance"))
     }
 
     // MARK: Stories
@@ -328,7 +344,7 @@ final class ComponentGalleryViewController: NSViewController {
 
         let icon = ThemedButton(
             symbol: "sparkles",
-            accessibility: "Icon button",
+            accessibility: L10n.string("Icon button"),
             target: self,
             action: #selector(buttonPressed)
         )
@@ -342,18 +358,18 @@ final class ComponentGalleryViewController: NSViewController {
         let toggle = ThemedToggle()
         toggle.target = self
         toggle.action = #selector(sampleToggleChanged)
-        toggle.setAccessibilityLabel("Interactive toggle")
+        toggle.setAccessibilityLabel(L10n.string("Interactive toggle"))
 
         let onToggle = ThemedToggle()
         onToggle.state = .on
         onToggle.target = self
         onToggle.action = #selector(sampleToggleChanged)
-        onToggle.setAccessibilityLabel("On toggle")
+        onToggle.setAccessibilityLabel(L10n.string("On toggle"))
 
         let disabledToggle = ThemedToggle()
         disabledToggle.state = .on
         disabledToggle.isEnabled = false
-        disabledToggle.setAccessibilityLabel("Disabled toggle")
+        disabledToggle.setAccessibilityLabel(L10n.string("Disabled toggle"))
 
         let toggleRow = row([
             labelledInline("Off", toggle),
@@ -362,65 +378,75 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         let popUp = ThemedPopUp()
-        ["First choice", "Second choice", "Third choice"].forEach(popUp.addItem)
+        [
+            L10n.string("First choice"),
+            L10n.string("Second choice"),
+            L10n.string("Third choice")
+        ].forEach(popUp.addItem)
         popUp.target = self
         popUp.action = #selector(samplePopUpChanged)
 
         let disabledPopUp = ThemedPopUp()
-        disabledPopUp.addItem(withTitle: "Disabled")
+        disabledPopUp.addItem(withTitle: L10n.string("Disabled"))
         disabledPopUp.isEnabled = false
 
         let chip = ChipView()
-        chip.configure(symbolName: "paintpalette", title: "Open chip menu")
+        chip.configure(symbolName: "paintpalette", title: L10n.string("Open chip menu"))
         chip.setAccessibilityIdentifier("gallery.menu.chip")
         chip.itemsProvider = {
             [
                 .item(ThemedMenuItem(
-                    title: "Alpha",
-                    subtitle: "Selected item with supporting text",
+                    title: L10n.string("Alpha"),
+                    subtitle: L10n.string("Selected item with supporting text"),
                     representedValue: "Alpha",
                     isSelected: chip.selectedItem?.title == "Alpha"
                 )),
                 .item(ThemedMenuItem(
-                    title: "Beta",
+                    title: L10n.string("Beta"),
                     representedValue: "Beta",
                     isSelected: chip.selectedItem?.title == "Beta"
                 )),
                 .separator,
                 .item(ThemedMenuItem(
-                    title: "Unavailable",
-                    subtitle: "Disabled state",
+                    title: L10n.string("Unavailable"),
+                    subtitle: L10n.string("Disabled state"),
                     isEnabled: false
                 ))
             ]
         }
         chip.onSelect = { [weak self] item in
             chip.configure(symbolName: "paintpalette", title: item.title)
-            self?.showReceipt("ChipView selected “\(item.title)”.")
+            self?.showReceipt(L10n.format("ChipView selected “%@”.", item.title))
         }
 
         let activeTab = ThemedTabItemView(
-            title: "Terminal",
+            title: L10n.string("Terminal"),
             symbolName: "terminal",
             placement: .horizontal,
             showsClose: true,
             inkSource: .chrome
         )
         activeTab.isSelected = true
-        activeTab.onSelect = { [weak self] in self?.showReceipt("Selected the Terminal tab.") }
-        activeTab.onClose = { [weak self] in self?.showReceipt("Closed the Terminal tab.") }
+        activeTab.onSelect = { [weak self] in
+            self?.showReceipt(L10n.string("Selected the Terminal tab."))
+        }
+        activeTab.onClose = { [weak self] in
+            self?.showReceipt(L10n.string("Closed the Terminal tab."))
+        }
 
         let inactiveTab = ThemedTabItemView(
-            title: "Browser",
+            title: L10n.string("Browser"),
             symbolName: "globe",
             placement: .horizontal,
             showsClose: true,
             inkSource: .chrome
         )
-        inactiveTab.onSelect = { [weak self] in self?.showReceipt("Selected the Browser tab.") }
+        inactiveTab.onSelect = { [weak self] in
+            self?.showReceipt(L10n.string("Selected the Browser tab."))
+        }
 
         let sidebarTab = ThemedTabItemView(
-            title: "Themes",
+            title: L10n.string("Themes"),
             symbolName: "paintpalette",
             placement: .sidebar,
             inkSource: .chrome
@@ -430,26 +456,26 @@ final class ComponentGalleryViewController: NSViewController {
 
         let newSessionButton = ThemedIconButton(
             symbolName: "plus",
-            accessibility: "New session"
+            accessibility: L10n.string("New session")
         )
         newSessionButton.onPress = { [weak self] in
-            self?.showReceipt("Opened the new-session page.")
+            self?.showReceipt(L10n.string("Opened the new-session page."))
         }
 
         let selectedToolbarButton = ThemedIconButton(
             symbolName: "sidebar.trailing",
-            accessibility: "Selected toolbar action"
+            accessibility: L10n.string("Selected toolbar action")
         )
         selectedToolbarButton.isSelected = true
         selectedToolbarButton.onPress = { [weak self] in
-            self?.showReceipt("Pressed the selected toolbar action.")
+            self?.showReceipt(L10n.string("Pressed the selected toolbar action."))
         }
 
         // The toolbar's page tab: the *same* class as the two above it, differing only in the
         // ground it inks from. Shown beside them on purpose — this pair used to be two
         // implementations, and the gallery is where that would show.
         let activeSession = ThemedTabItemView(
-            title: "Active session",
+            title: L10n.string("Active session"),
             symbolName: "chevron.left.forwardslash.chevron.right",
             placement: .horizontal,
             showsClose: true,
@@ -457,10 +483,12 @@ final class ComponentGalleryViewController: NSViewController {
         )
         activeSession.isSelected = true
         activeSession.onSelect = { [weak self] in
-            self?.showReceipt("Revealed the active page in the sidebar.")
+            self?.showReceipt(L10n.string("Revealed the active page in the sidebar."))
         }
         activeSession.onClose = { [weak self] in
-            self?.showReceipt("Closed the active page without stopping its session.")
+            self?.showReceipt(
+                L10n.string("Closed the active page without stopping its session.")
+            )
         }
         activeSession.widthAnchor.constraint(equalToConstant: 190).isActive = true
 
@@ -505,23 +533,25 @@ final class ComponentGalleryViewController: NSViewController {
 
     /// A toolbar button whose only job is to report that it was pressed.
     private func galleryToolbarButton(symbol: String, label: String) -> ThemedIconButton {
-        let button = ThemedIconButton(symbolName: symbol, accessibility: label)
-        button.onPress = { [weak self] in self?.showReceipt("Pressed \(label).") }
+        let button = ThemedIconButton(symbolName: symbol, accessibility: L10n.string(label))
+        button.onPress = { [weak self] in
+            self?.showReceipt(L10n.format("Pressed %@.", L10n.string(label)))
+        }
         return button
     }
 
     private func makeTextSection() -> NSView {
-        let field = ThemedTextField(string: "Editable text")
-        field.placeholderString = "Type here"
+        let field = ThemedTextField(string: L10n.string("Editable text"))
+        field.placeholderString = L10n.string("Type here")
         field.target = self
         field.action = #selector(textCommitted)
 
         let search = ThemedSearchField()
-        search.placeholderString = "Filter components"
+        search.placeholderString = L10n.string("Filter components")
         search.target = self
         search.action = #selector(searchCommitted)
 
-        let disabled = ThemedTextField(string: "Disabled")
+        let disabled = ThemedTextField(string: L10n.string("Disabled"))
         disabled.isEnabled = false
 
         for field in [field, search, disabled] {
@@ -538,24 +568,28 @@ final class ComponentGalleryViewController: NSViewController {
             border: Design.Surface.border
         )
         if let text = scrollingText.documentView as? ThemedTextView {
-            text.string = """
-                ThemedTextView preserves AppKit editing while the text, insertion point, and \
-                scroll surface follow the selected theme.
-
-                Try selecting, editing, and scrolling this text.
-                """
+            text.string = L10n.string(
+                "ThemedTextView preserves AppKit editing while the text, insertion point, and "
+                    + "scroll surface follow the selected theme.\n\n"
+                    + "Try selecting, editing, and scrolling this text."
+            )
             text.applyFont(.body)
             text.textContainerInset = NSSize(width: Design.Spacing.medium, height: Design.Spacing.medium)
         }
 
         let prompt = PromptView()
-        prompt.placeholder = "Write a multi-line prompt; Return submits"
+        prompt.placeholder = L10n.string("Write a multi-line prompt; Return submits")
         prompt.minimumHeight = 72
         prompt.onChange = { [weak self] text in
-            self?.showReceipt("PromptView contains \(text.count) character\(text.count == 1 ? "" : "s").")
+            let message = text.count == 1
+                ? L10n.string("PromptView contains 1 character.")
+                : L10n.format("PromptView contains %lld characters.", Int64(text.count))
+            self?.showReceipt(message)
         }
         prompt.onSubmit = { [weak self] text in
-            self?.showReceipt("PromptView submitted “\(text.prefix(80))”.")
+            self?.showReceipt(
+                L10n.format("PromptView submitted “%@”.", String(text.prefix(80)))
+            )
         }
 
         // Armed, it swallows key equivalents, so a chord that is already a menu shortcut can be
@@ -566,7 +600,10 @@ final class ComponentGalleryViewController: NSViewController {
         )
         recorder.onRecord = { [weak self] shortcut in
             self?.showReceipt(
-                "ShortcutRecorderView captured \(shortcut?.displayString ?? "no shortcut")."
+                L10n.format(
+                    "ShortcutRecorderView captured %@.",
+                    shortcut?.displayString ?? L10n.string("no shortcut")
+                )
             )
         }
 
@@ -606,18 +643,20 @@ final class ComponentGalleryViewController: NSViewController {
 
     private func makeFeedbackSection() -> NSView {
         spinner.isAnimating = true
-        spinner.setAccessibilityLabel("Working")
+        spinner.setAccessibilityLabel(L10n.string("Working"))
 
         let spinnerButton = button("Stop spinner", action: #selector(toggleSpinner))
         spinnerButton.setAccessibilityIdentifier("gallery.spinner.toggle")
 
         for orb in workingOrbs {
-            orb.setAccessibilityLabel("\(orb.state.label) orb")
+            orb.setAccessibilityLabel(
+                L10n.format("%@ orb", orb.state.localizedLabel)
+            )
         }
         let orbButton = button("Hide orbs", action: #selector(toggleWorkingOrb))
         orbButton.setAccessibilityIdentifier("gallery.working-orb.toggle")
         let orbVariants = row(workingOrbs.map { orb in
-            labelledControl(orb.state.rawValue, control: orb)
+            labelledControl(orb.state.localizedLabel, control: orb)
         })
 
         morphingTitle.applyFont(.emphasizedBody)
@@ -813,7 +852,9 @@ final class ComponentGalleryViewController: NSViewController {
             new: .init(image: scene(circle: Design.Surface.accent, at: 120), title: "after.png")
         )
         compare.onModeChange = { [weak self] mode in
-            self?.showReceipt("Compare mode: \(ImageCompareView.name(for: mode)).")
+            self?.showReceipt(
+                L10n.format("Compare mode: %@.", ImageCompareView.name(for: mode))
+            )
         }
         NSLayoutConstraint.activate([
             compare.widthAnchor.constraint(equalToConstant: 520),
@@ -826,8 +867,11 @@ final class ComponentGalleryViewController: NSViewController {
 
         private func makePaneFooterSample() -> NSView {
         let add = ThemedButton()
-        add.title = "Add Project"
-        add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
+        add.title = L10n.string("Add Project")
+        add.image = NSImage(
+            systemSymbolName: "plus",
+            accessibilityDescription: L10n.string("Add Project")
+        )?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         add.isBordered = false
         add.applyFont(.controlRegular)
@@ -835,10 +879,13 @@ final class ComponentGalleryViewController: NSViewController {
         add.action = #selector(buttonPressed(_:))
 
         let gear = ThemedButton()
-        gear.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
+        gear.image = NSImage(
+            systemSymbolName: "gearshape",
+            accessibilityDescription: L10n.string("Settings")
+        )?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         gear.isBordered = false
-        gear.toolTip = "Settings"
+        gear.toolTip = L10n.string("Settings")
         gear.target = self
         gear.action = #selector(buttonPressed(_:))
 
@@ -888,6 +935,7 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     private func makeSurfaceLabel() -> NSView {
+        // localization-ignore: This is the literal design-token API being demonstrated.
         let label = NSTextField(labelWithString: "Surface.background")
         label.applyFont(.code())
         label.textColor = Design.Text.secondary
@@ -920,7 +968,7 @@ final class ComponentGalleryViewController: NSViewController {
         editable.isEditable = true
         editable.setColor(Design.Surface.accent, name: "Accent")
         editable.onChange = { [weak self] colour in
-            self?.showReceipt("ThemeSwatchView chose \(colour.hexString).")
+            self?.showReceipt(L10n.format("ThemeSwatchView chose %@.", colour.hexString))
         }
 
         let fixed = ThemeSwatchView(size: 34)
@@ -985,6 +1033,7 @@ final class ComponentGalleryViewController: NSViewController {
             glow: true
         )
 
+        // localization-ignore: These are the literal API type and method being demonstrated.
         let surfaceLabel = NSTextField(labelWithString: "ThemedSurface / applySurface")
         surfaceLabel.applyFont(.control)
         surfaceLabel.textColor = Design.Text.label
@@ -1024,7 +1073,9 @@ final class ComponentGalleryViewController: NSViewController {
 
         do {
             rendered = try ExtensionNodeRenderer.render(panel.root) { [weak self] action in
-                self?.showReceipt("Extension action “\(action)” was invoked.")
+                self?.showReceipt(
+                    L10n.format("Extension action “%@” was invoked.", action)
+                )
             }
             rendered.setAccessibilityIdentifier("gallery.extension.panel")
         } catch {
@@ -1034,7 +1085,7 @@ final class ComponentGalleryViewController: NSViewController {
             rendered = failure
         }
 
-        extensionLoadButton.title = "Load Extension Directory…"
+        extensionLoadButton.title = L10n.string("Load Extension Directory…")
         extensionLoadButton.target = self
         extensionLoadButton.action = #selector(chooseExtensionDirectory)
         extensionLoadButton.setAccessibilityIdentifier("gallery.extension.load")
@@ -1090,7 +1141,7 @@ final class ComponentGalleryViewController: NSViewController {
         let index = themePopUp.indexOfSelectedItem
         guard let theme = AppThemeLibrary.stock[safe: index] else { return }
         setTheme(theme)
-        showReceipt("Applied the \(theme.name) theme app-wide.")
+        showReceipt(L10n.format("Applied the %@ theme app-wide.", theme.name))
     }
 
     /// Applies a gallery theme and keeps the selector honest.
@@ -1107,7 +1158,9 @@ final class ComponentGalleryViewController: NSViewController {
 
     @objc private func appearanceChanged() {
         setAppearance(appearanceToggle.state == .on ? .dark : .light)
-        showReceipt("Gallery appearance is \(appearanceMode.rawValue).")
+        showReceipt(
+            L10n.format("Gallery appearance is %@.", appearanceMode.localizedName)
+        )
     }
 
     func setAppearance(_ mode: AppearanceMode) {
@@ -1120,15 +1173,17 @@ final class ComponentGalleryViewController: NSViewController {
     @objc private func buttonPressed(_ sender: Any?) {
         clickCount += 1
         let button = sender as? ThemedButton
-        let name = button?.accessibilityTitle() ?? "Button"
-        showReceipt("\(name) pressed · \(clickCount) total.")
+        let name = button?.accessibilityTitle() ?? L10n.string("Button")
+        showReceipt(L10n.format("%@ pressed · %lld total.", name, Int64(clickCount)))
     }
 
     @objc private func chooseExtensionDirectory() {
         let panel = NSOpenPanel()
-        panel.title = "Load Skalman Extension"
-        panel.message = "Choose a directory containing skalman-extension.json."
-        panel.prompt = "Load Extension"
+        panel.title = L10n.string("Load Skalman Extension")
+        panel.message = L10n.string(
+            "Choose a directory containing skalman-extension.json."
+        )
+        panel.prompt = L10n.string("Load Extension")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -1140,7 +1195,10 @@ final class ComponentGalleryViewController: NSViewController {
         extensionProcessSession = nil
         extensionLoadButton.isEnabled = false
         extensionProcessStatus.textColor = Design.Text.secondary
-        extensionProcessStatus.stringValue = "Inspecting and starting \(directory.lastPathComponent)…"
+        extensionProcessStatus.stringValue = L10n.format(
+            "Inspecting and starting %@…",
+            directory.lastPathComponent
+        )
         replaceExtensionProcessPreview(with: nil)
 
         DispatchQueue.global(qos: .userInitiated).async { [directory] in
@@ -1182,20 +1240,28 @@ final class ComponentGalleryViewController: NSViewController {
         case .failure(let error):
             extensionProcessStatus.stringValue = error.localizedDescription
             extensionProcessStatus.textColor = Design.Status.negative
-            showReceipt("Extension failed to start.")
+            showReceipt(L10n.string("Extension failed to start."))
 
         case .success(let (manifest, started)):
             extensionProcessSession = started.session
             extensionProcessStatus.textColor = Design.Status.positive
-            extensionProcessStatus.stringValue =
-                "\(manifest.name) is running · \(started.registration.commands.count) command(s), \(started.registration.panels.count) panel(s)."
+            extensionProcessStatus.stringValue = L10n.format(
+                "%@ is running · %lld commands, %lld panels.",
+                manifest.name,
+                Int64(started.registration.commands.count),
+                Int64(started.registration.panels.count)
+            )
 
             guard let panel = started.registration.panels.first else {
-                let empty = NSTextField(labelWithString: "The extension registered no panels.")
+                let empty = NSTextField(
+                    labelWithString: L10n.string(
+                        "The extension registered no panels."
+                    )
+                )
                 empty.applyFont(.detail())
                 empty.textColor = Design.Text.tertiary
                 replaceExtensionProcessPreview(with: empty)
-                showReceipt("Loaded extension “\(manifest.name)”.")
+                showReceipt(L10n.format("Loaded extension “%@”.", manifest.name))
                 return
             }
 
@@ -1204,7 +1270,13 @@ final class ComponentGalleryViewController: NSViewController {
                 manifest: manifest,
                 session: started.session
             ) {
-                showReceipt("Loaded extension “\(manifest.name)” and rendered “\(panel.title)”.")
+                showReceipt(
+                    L10n.format(
+                        "Loaded extension “%@” and rendered “%@”.",
+                        manifest.name,
+                        panel.title
+                    )
+                )
             }
         }
     }
@@ -1220,7 +1292,10 @@ final class ComponentGalleryViewController: NSViewController {
                 guard let self, let session,
                       self.extensionProcessSession === session else { return }
                 self.extensionProcessStatus.textColor = Design.Text.secondary
-                self.extensionProcessStatus.stringValue = "Running “\(action)”…"
+                self.extensionProcessStatus.stringValue = L10n.format(
+                    "Running “%@”…",
+                    action
+                )
                 session.invoke(panelID: panel.id, actionID: action) { [weak self, weak session] result in
                     guard let self, let session,
                           self.extensionProcessSession === session else { return }
@@ -1238,7 +1313,7 @@ final class ComponentGalleryViewController: NSViewController {
             extensionProcessStatus.textColor = Design.Status.negative
             extensionProcessStatus.stringValue = error.localizedDescription
             replaceExtensionProcessPreview(with: nil)
-            showReceipt("Extension panel rendering failed.")
+            showReceipt(L10n.string("Extension panel rendering failed."))
             return false
         }
     }
@@ -1252,13 +1327,13 @@ final class ComponentGalleryViewController: NSViewController {
         case .failure(let error):
             extensionProcessStatus.textColor = Design.Status.negative
             extensionProcessStatus.stringValue = error.localizedDescription
-            showReceipt("Extension action failed.")
+            showReceipt(L10n.string("Extension action failed."))
 
         case .success(let response):
             if let error = response.error {
                 extensionProcessStatus.textColor = Design.Status.negative
                 extensionProcessStatus.stringValue = error
-                showReceipt("Extension declined the action.")
+                showReceipt(L10n.string("Extension declined the action."))
                 return
             }
 
@@ -1268,7 +1343,7 @@ final class ComponentGalleryViewController: NSViewController {
                 }
             }
 
-            let message = response.message ?? "Extension action completed."
+            let message = response.message ?? L10n.string("Extension action completed.")
             extensionProcessStatus.textColor = Design.Status.positive
             extensionProcessStatus.stringValue = message
             showReceipt(message)
@@ -1286,19 +1361,25 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     @objc private func sampleToggleChanged(_ sender: ThemedToggle) {
-        showReceipt("ThemedToggle is \(sender.state == .on ? "on" : "off").")
+        let state = sender.state == .on ? L10n.string("on") : L10n.string("off")
+        showReceipt(L10n.format("ThemedToggle is %@.", state))
     }
 
     @objc private func samplePopUpChanged(_ sender: ThemedPopUp) {
-        showReceipt("ThemedPopUp selected “\(sender.selectedItem?.title ?? "Nothing")”.")
+        showReceipt(
+            L10n.format(
+                "ThemedPopUp selected “%@”.",
+                sender.selectedItem?.title ?? L10n.string("Nothing")
+            )
+        )
     }
 
     @objc private func textCommitted(_ sender: ThemedTextField) {
-        showReceipt("ThemedTextField committed “\(sender.stringValue)”.")
+        showReceipt(L10n.format("ThemedTextField committed “%@”.", sender.stringValue))
     }
 
     @objc private func searchCommitted(_ sender: ThemedSearchField) {
-        showReceipt("ThemedSearchField searched for “\(sender.stringValue)”.")
+        showReceipt(L10n.format("ThemedSearchField searched for “%@”.", sender.stringValue))
     }
 
     private func configureActivityMap() {
@@ -1306,7 +1387,9 @@ final class ComponentGalleryViewController: NSViewController {
         // The map sorts its universe; cycling in *its* order keeps each press touching a
         // contiguous directory run, which is the pattern the strip exists to show.
         activityDemoFiles = activityMapView.map.entries.map(\.path)
-        activityMapView.setAccessibilityLabel("File activity map sample")
+        activityMapView.setAccessibilityLabel(
+            L10n.string("File activity map sample")
+        )
         activityMapView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             activityMapView.widthAnchor.constraint(equalToConstant: 300),
@@ -1332,17 +1415,21 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     @objc private func demoAgentReads() {
-        showReceipt("FileActivityMapView read \(touchDemoFiles(count: 12, tool: .read)).")
+        showReceipt(
+            L10n.format("FileActivityMapView read %@.", touchDemoFiles(count: 12, tool: .read))
+        )
     }
 
     @objc private func demoAgentEdits() {
-        showReceipt("FileActivityMapView edited \(touchDemoFiles(count: 5, tool: .edit)).")
+        showReceipt(
+            L10n.format("FileActivityMapView edited %@.", touchDemoFiles(count: 5, tool: .edit))
+        )
     }
 
     /// Touches a contiguous run from the demo cursor through the real classifier, and
     /// answers with the neighbourhood it landed in for the receipt.
     private func touchDemoFiles(count: Int, tool: ToolIdentity) -> String {
-        guard !activityDemoFiles.isEmpty else { return "nothing" }
+        guard !activityDemoFiles.isEmpty else { return L10n.string("nothing") }
 
         var lastPath = ""
         for _ in 0..<count {
@@ -1351,31 +1438,46 @@ final class ComponentGalleryViewController: NSViewController {
             activityMapView.recordTouches(tool: tool, input: ["file_path": lastPath])
         }
         let directory = lastPath.split(separator: "/").dropLast().joined(separator: "/")
-        return "\(count) files around \(directory.isEmpty ? "the repo root" : directory)"
+        return L10n.format(
+            "%lld files around %@",
+            Int64(count),
+            directory.isEmpty ? L10n.string("the repo root") : directory
+        )
     }
 
     @objc private func toggleSpinner(_ sender: ThemedButton) {
         spinner.isAnimating.toggle()
-        sender.title = spinner.isAnimating ? "Stop spinner" : "Start spinner"
-        showReceipt("ThemedSpinner \(spinner.isAnimating ? "started" : "stopped").")
+        sender.title = spinner.isAnimating
+            ? L10n.string("Stop spinner")
+            : L10n.string("Start spinner")
+        let state = spinner.isAnimating ? L10n.string("started") : L10n.string("stopped")
+        showReceipt(L10n.format("ThemedSpinner %@.", state))
     }
 
     @objc private func toggleWorkingOrb(_ sender: ThemedButton) {
         let shouldHide = !(workingOrbs.first?.isHidden ?? false)
         workingOrbs.forEach { $0.isHidden = shouldHide }
-        sender.title = shouldHide ? "Show orbs" : "Hide orbs"
-        showReceipt("WorkingOrbView variants \(shouldHide ? "hidden and idling" : "visible and animating").")
+        sender.title = shouldHide ? L10n.string("Show orbs") : L10n.string("Hide orbs")
+        let state = shouldHide
+            ? L10n.string("hidden and idling")
+            : L10n.string("visible and animating")
+        showReceipt(L10n.format("WorkingOrbView variants %@.", state))
     }
 
     @objc private func previewTitleMorph() {
         let samples = [
-            "Rename this conversation",
-            "Polish the release notes",
-            "Trace the session lifecycle"
+            L10n.string("Rename this conversation"),
+            L10n.string("Polish the release notes"),
+            L10n.string("Trace the session lifecycle")
         ]
         morphDemoCursor = (morphDemoCursor + 1) % samples.count
         morphingTitle.setStringValue(samples[morphDemoCursor], animated: true)
-        showReceipt("MorphingTitleLabel previewed \(AppSettings.shared.chatNameMorphStyle.displayName).")
+        showReceipt(
+            L10n.format(
+                "MorphingTitleLabel previewed %@.",
+                AppSettings.shared.chatNameMorphStyle.displayName
+            )
+        )
     }
 
     @objc private func decreaseProgress() {
@@ -1389,8 +1491,9 @@ final class ComponentGalleryViewController: NSViewController {
     private func setProgress(_ value: Double) {
         progress = min(max(value, 0), 1)
         progressBar.progress = progress
+        // localization-ignore: A locale-neutral integer percentage with no language.
         progressLabel.stringValue = "\(Int((progress * 100).rounded()))%"
-        showReceipt("ThemedProgressBar is \(progressLabel.stringValue).")
+        showReceipt(L10n.format("ThemedProgressBar is %@.", progressLabel.stringValue))
     }
 
     private func showReceipt(_ text: String) {
@@ -1407,11 +1510,13 @@ final class ComponentGalleryViewController: NSViewController {
     // MARK: Building blocks
 
     private func section(_ title: String, note: String, rows: [NSView]) -> NSView {
-        let heading = NSTextField(labelWithString: title)
+        let heading = NSTextField(labelWithString: L10n.string(title))
         heading.applyFont(.heading)
         heading.textColor = Design.Text.label
 
-        let explanation = NSTextField(wrappingLabelWithString: note)
+        let explanation = NSTextField(
+            wrappingLabelWithString: L10n.string(note)
+        )
         explanation.applyFont(.subheading)
         explanation.textColor = Design.Text.secondary
 
@@ -1432,11 +1537,13 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     private func story(_ name: String, _ summary: String, _ sample: NSView) -> NSView {
-        let nameLabel = NSTextField(labelWithString: name)
+        let nameLabel = NSTextField(labelWithString: L10n.string(name))
         nameLabel.applyFont(.control)
         nameLabel.textColor = Design.Text.label
 
-        let summaryLabel = NSTextField(wrappingLabelWithString: summary)
+        let summaryLabel = NSTextField(
+            wrappingLabelWithString: L10n.string(summary)
+        )
         summaryLabel.applyFont(.subheading)
         summaryLabel.textColor = Design.Text.secondary
 
@@ -1481,7 +1588,7 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     private func labelledControl(_ title: String, control: NSView) -> NSView {
-        let label = smallLabel(title.uppercased())
+        let label = smallLabel(L10n.string(title).uppercased())
         let stack = NSStackView(views: [label, control])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -1490,7 +1597,7 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     private func labelledInline(_ title: String, _ control: NSView) -> NSView {
-        let label = smallLabel(title)
+        let label = smallLabel(L10n.string(title))
         let stack = NSStackView(views: [label, control])
         stack.orientation = .horizontal
         stack.alignment = .centerY
@@ -1506,12 +1613,12 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     private func button(_ title: String, action: Selector) -> ThemedButton {
-        ThemedButton(title: title, target: self, action: action)
+        ThemedButton(title: L10n.string(title), target: self, action: action)
     }
 
     private func column(_ identifier: String, title: String, width: CGFloat) -> NSTableColumn {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
-        column.title = title
+        column.title = L10n.string(title)
         column.width = width
         column.minWidth = 80
         return column

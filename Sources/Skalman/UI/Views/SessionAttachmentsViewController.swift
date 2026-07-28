@@ -102,7 +102,7 @@ final class SessionAttachmentsViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         emptyLabel = NSTextField(wrappingLabelWithString:
-            "Images and PDFs mentioned by this session will appear here."
+            L10n.string("Images and PDFs mentioned by this session will appear here.")
         )
         emptyLabel.applyFont(.detail())
         emptyLabel.textColor = Design.Text.tertiary
@@ -159,17 +159,17 @@ final class SessionAttachmentsViewController: NSViewController {
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
 
         openButton = ThemedButton(
-            title: "Open",
+            title: L10n.string("Open"),
             target: self,
             action: #selector(openSelected)
         )
         revealButton = ThemedButton(
-            title: "Finder",
+            title: L10n.string("Finder"),
             target: self,
             action: #selector(revealSelected)
         )
         copyButton = ThemedButton(
-            title: "Copy Path",
+            title: L10n.string("Copy Path"),
             target: self,
             action: #selector(copySelectedPath)
         )
@@ -278,7 +278,10 @@ final class SessionAttachmentsViewController: NSViewController {
 
         let previous = selectedAttachment?.relativePath ?? selectedRelativePath
         attachments = SessionAttachmentStore.shared.attachments(for: sessionID)
-        countLabel.stringValue = "ATTACHMENTS  \(attachments.count)"
+        countLabel.stringValue = L10n.format(
+            "ATTACHMENTS  %lld",
+            Int64(attachments.count)
+        )
         tableView.reloadData()
         emptyLabel.stringValue = emptyStateMessage()
 
@@ -312,10 +315,14 @@ final class SessionAttachmentsViewController: NSViewController {
     private func emptyStateMessage() -> String {
         if let kind = ProjectStore.shared.session(withID: sessionID)?.kind,
            !AppSettings.shared.detectsAttachmentReferences(for: kind) {
-            return "Attachment detection for \(kind.displayName) is turned off "
-                + "in Settings › General."
+            return L10n.format(
+                "Attachment detection for %@ is turned off in Settings › General.",
+                kind.displayName
+            )
         }
-        return "Images and PDFs mentioned by this session will appear here."
+        return L10n.string(
+            "Images and PDFs mentioned by this session will appear here."
+        )
     }
 
     // MARK: - Preview
@@ -342,14 +349,14 @@ final class SessionAttachmentsViewController: NSViewController {
 
         let size = (try? attachment.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         guard size <= SessionAttachmentsDefaults.maximumPreviewFileBytes else {
-            showPreviewMessage("This file is too large to preview here.")
+            showPreviewMessage(L10n.string("This file is too large to preview here."))
             return
         }
 
         switch attachment.kind {
         case .image:
             guard let image = NSImage(contentsOf: attachment.url), image.isValid else {
-                showPreviewMessage("The image could not be decoded.")
+                showPreviewMessage(L10n.string("The image could not be decoded."))
                 return
             }
             pdfView.document = nil
@@ -359,7 +366,7 @@ final class SessionAttachmentsViewController: NSViewController {
 
         case .pdf:
             guard let document = PDFDocument(url: attachment.url) else {
-                showPreviewMessage("The PDF could not be decoded.")
+                showPreviewMessage(L10n.string("The PDF could not be decoded."))
                 return
             }
             imageView.image = nil

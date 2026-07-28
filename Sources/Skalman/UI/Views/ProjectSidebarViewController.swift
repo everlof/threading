@@ -220,8 +220,11 @@ private extension ProjectSidebarViewController {
     /// the height, the corner-aware insets — is `PaneFooterView`'s to state.
     private func setupFooter() {
         addButton = ThemedButton()
-        addButton.title = "Add Project"
-        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
+        addButton.title = L10n.string("Add Project")
+        addButton.image = NSImage(
+            systemSymbolName: "plus",
+            accessibilityDescription: L10n.string("Add Project")
+        )?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         addButton.isBordered = false
         addButton.applyFont(.controlRegular)
@@ -231,10 +234,13 @@ private extension ProjectSidebarViewController {
         // A quiet icon-only twin of Add Project, so settings is reachable without leaving the
         // window. It carries no title, so the row reads as "add on the left, settings opposite".
         settingsButton = ThemedButton()
-        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
+        settingsButton.image = NSImage(
+            systemSymbolName: "gearshape",
+            accessibilityDescription: L10n.string("Settings")
+        )?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         settingsButton.isBordered = false
-        settingsButton.toolTip = "Settings"
+        settingsButton.toolTip = L10n.string("Settings")
         settingsButton.target = self
         settingsButton.action = #selector(settingsClicked)
 
@@ -478,7 +484,7 @@ extension ProjectSidebarViewController {
         if let clearTitle {
             alert.addButton(withTitle: clearTitle)
         }
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         let textField = ThemedTextField(frame: NSRect(
             x: 0, y: 0,
@@ -799,7 +805,7 @@ private extension ProjectSidebarViewController {
         let menu = NSMenu()
 
         let scratch = NSMenuItem(
-            title: "Start from Scratch…",
+            title: L10n.string("Start from Scratch…"),
             action: #selector(startFromScratchClicked),
             keyEquivalent: ""
         )
@@ -808,7 +814,7 @@ private extension ProjectSidebarViewController {
         menu.addItem(scratch)
 
         let existing = NSMenuItem(
-            title: "Use an Existing Folder…",
+            title: L10n.string("Use an Existing Folder…"),
             action: #selector(useExistingFolderClicked),
             keyEquivalent: ""
         )
@@ -846,7 +852,7 @@ private extension ProjectSidebarViewController {
 
         if let node = outlineView.item(atRow: row) as? ProjectNode {
             promptRename(
-                title: "Rename Project",
+                title: L10n.string("Rename Project"),
                 current: ProjectStore.shared.project(withID: node.projectID)?.name ?? ""
             ) { newName in
                 ProjectStore.shared.renameProject(id: node.projectID, to: newName)
@@ -855,7 +861,7 @@ private extension ProjectSidebarViewController {
         } else if let node = outlineView.item(atRow: row) as? SessionNode {
             let session = ProjectStore.shared.session(withID: node.sessionID)
             promptRename(
-                title: "Rename Session",
+                title: L10n.string("Rename Session"),
                 current: session?.customTitle ?? "",
                 placeholder: session?.displayTitle ?? "",
                 allowsEmpty: true
@@ -884,13 +890,18 @@ private extension ProjectSidebarViewController {
         }.count
 
         let alert = NSAlert()
-        alert.messageText = "Remove \"\(project.name)\"?"
+        alert.messageText = L10n.format("Remove “%@”?", project.name)
         alert.informativeText = runningCount > 0
-            ? "\(runningCount) running session(s) will be terminated. Saved conversations are not deleted."
-            : "Its sessions are removed from the sidebar. Saved conversations are not deleted."
+            ? L10n.format(
+                "%lld running sessions will be terminated. Saved conversations are not deleted.",
+                Int64(runningCount)
+            )
+            : L10n.string(
+                "Its sessions are removed from the sidebar. Saved conversations are not deleted."
+            )
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Remove"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
@@ -1015,7 +1026,7 @@ private extension ProjectSidebarViewController {
         menu.addItem(.separator())
 
         let settings = NSMenuItem(
-            title: "All Settings…",
+            title: L10n.string("All Settings…"),
             action: #selector(settingsClicked),
             keyEquivalent: ""
         )
@@ -1043,7 +1054,7 @@ private extension ProjectSidebarViewController {
     /// The grouping toggle as a menu item, its check showing the current state.
     private func makeBranchGroupingItem() -> NSMenuItem {
         let item = NSMenuItem(
-            title: "Group Sessions by Branch",
+            title: L10n.string("Group Sessions by Branch"),
             action: #selector(toggleBranchGroupingClicked),
             keyEquivalent: ""
         )
@@ -1057,7 +1068,7 @@ private extension ProjectSidebarViewController {
     /// `autoenablesItems = false` for exactly this line.
     private func makeLoneBranchHeadingsItem() -> NSMenuItem {
         let item = NSMenuItem(
-            title: "Headings for Lone Branches",
+            title: L10n.string("Headings for Lone Branches"),
             action: #selector(toggleLoneBranchHeadingsClicked),
             keyEquivalent: ""
         )
@@ -1396,14 +1407,22 @@ extension ProjectSidebarViewController: NSMenuDelegate {
     /// Everything a project offers. Sessions are started by selecting the project, which
     /// opens its composer.
     private func addProjectManagementItems(to menu: NSMenu) {
-        menu.addItem(withTitle: "Rename Project…", action: #selector(renameClicked), keyEquivalent: "")
-        menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealInFinderClicked), keyEquivalent: "")
+        menu.addItem(
+            withTitle: L10n.string("Rename Project…"),
+            action: #selector(renameClicked),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: L10n.string("Reveal in Finder"),
+            action: #selector(revealInFinderClicked),
+            keyEquivalent: ""
+        )
         menu.addItem(makeProjectIconItem())
         if let projectID = contextProjectID() {
             menu.addItem(makeProjectThemeItem(for: projectID))
         }
         menu.addItem(
-            withTitle: "Reclaim Disk Space…",
+            withTitle: L10n.string("Reclaim Disk Space…"),
             action: #selector(reclaimDiskSpaceClicked),
             keyEquivalent: ""
         )
@@ -1416,7 +1435,12 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             menu.addItem(makeLoneBranchHeadingsItem())
         }
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Remove Project", action: #selector(removeClicked), keyEquivalent: "")
+        menu.addItem(
+            withTitle: L10n.string("Remove Project"),
+            action: #selector(removeClicked),
+            keyEquivalent: ""
+        )
+
     }
 
     /// The icon submenu: choose one, take a site's favicon, re-run the free discovery,
@@ -1429,17 +1453,17 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
         let submenu = NSMenu()
         submenu.addItem(
-            withTitle: "Choose Icon…",
+            withTitle: L10n.string("Choose Icon…"),
             action: #selector(chooseProjectIconClicked),
             keyEquivalent: ""
         )
         submenu.addItem(
-            withTitle: "Use Website Favicon…",
+            withTitle: L10n.string("Use Website Favicon…"),
             action: #selector(useWebsiteFaviconClicked),
             keyEquivalent: ""
         )
         submenu.addItem(
-            withTitle: "Find Icon Automatically",
+            withTitle: L10n.string("Find Icon Automatically"),
             action: #selector(findProjectIconClicked),
             keyEquivalent: ""
         )
@@ -1450,10 +1474,14 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
         if isResearching {
             // Action-less, so the menu's auto-enabling leaves it disabled.
-            submenu.addItem(withTitle: "Researching…", action: nil, keyEquivalent: "")
+            submenu.addItem(
+                withTitle: L10n.string("Researching…"),
+                action: nil,
+                keyEquivalent: ""
+            )
         } else if !AgentAccountDiscovery.accounts(for: .codex).isEmpty {
             submenu.addItem(
-                withTitle: "Research Icon with Codex",
+                withTitle: L10n.string("Research Icon with Codex"),
                 action: #selector(researchProjectIconClicked),
                 keyEquivalent: ""
             )
@@ -1463,7 +1491,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             atPath: ProjectIconResearch.recordURL(for: project.id).path
         ) {
             submenu.addItem(
-                withTitle: "Open Last Research Log",
+                withTitle: L10n.string("Open Last Research Log"),
                 action: #selector(openResearchLogClicked),
                 keyEquivalent: ""
             )
@@ -1472,7 +1500,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         if project?.icon != nil {
             submenu.addItem(.separator())
             submenu.addItem(
-                withTitle: "Remove Icon",
+                withTitle: L10n.string("Remove Icon"),
                 action: #selector(removeProjectIconClicked),
                 keyEquivalent: ""
             )
@@ -1480,7 +1508,11 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
         for item in submenu.items { item.target = self }
 
-        let iconItem = NSMenuItem(title: "Project Icon", action: nil, keyEquivalent: "")
+        let iconItem = NSMenuItem(
+            title: L10n.string("Project Icon"),
+            action: nil,
+            keyEquivalent: ""
+        )
         iconItem.submenu = submenu
         return iconItem
     }
@@ -1495,14 +1527,16 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.image]
-        panel.message = "Choose an image to use as the project's icon."
+        panel.message = L10n.string("Choose an image to use as the project's icon.")
 
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
 
             guard let data = try? Data(contentsOf: url),
                   let fileName = ProjectIconStore.store(imageData: data, for: projectID) else {
-                self?.presentIconNotice("The file could not be read as an image.")
+                self?.presentIconNotice(
+                    L10n.string("The file could not be read as an image.")
+                )
                 return
             }
 
@@ -1518,7 +1552,9 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
         ProjectIconDiscovery.shared.rediscover(projectID: projectID) { [weak self] found in
             if !found {
-                self?.presentIconNotice("No icon was found for this project.")
+                self?.presentIconNotice(
+                    L10n.string("No icon was found for this project.")
+                )
             }
         }
     }
@@ -1534,7 +1570,9 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             var message = error.message
             let record = ProjectIconResearch.recordURL(for: projectID)
             if FileManager.default.fileExists(atPath: record.path) {
-                message += "\n\nThe run's full output: Project Icon > Open Last Research Log."
+                message += L10n.string(
+                    "\n\nThe run's full output: Project Icon > Open Last Research Log."
+                )
             }
             self?.presentIconNotice(message)
         }
@@ -1545,7 +1583,9 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
         promptForWebsite { [weak self] input in
             guard let origin = ProjectIconDiscovery.origin(fromWebsite: input) else {
-                self?.presentIconNotice("\"\(input)\" is not a usable web address.")
+                self?.presentIconNotice(
+                    L10n.format("“%@” is not a usable web address.", input)
+                )
                 return
             }
 
@@ -1556,7 +1596,12 @@ extension ProjectSidebarViewController: NSMenuDelegate {
                 DispatchQueue.main.async {
                     guard let data,
                           let fileName = ProjectIconStore.store(imageData: data, for: projectID) else {
-                        self?.presentIconNotice("No favicon was found at \(origin.absoluteString).")
+                        self?.presentIconNotice(
+                            L10n.format(
+                                "No favicon was found at %@.",
+                                origin.absoluteString
+                            )
+                        )
                         return
                     }
 
@@ -1579,17 +1624,19 @@ extension ProjectSidebarViewController: NSMenuDelegate {
     /// Asks for the site whose favicon to take, e.g. `sonda.io`.
     private func promptForWebsite(completion: @escaping (String) -> Void) {
         let alert = NSAlert()
-        alert.messageText = "Use Website Favicon"
-        alert.informativeText = "The site's touch icon or favicon becomes the project's icon."
-        alert.addButton(withTitle: "Use Favicon")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.string("Use Website Favicon")
+        alert.informativeText = L10n.string(
+            "The site's touch icon or favicon becomes the project's icon."
+        )
+        alert.addButton(withTitle: L10n.string("Use Favicon"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         let field = ThemedTextField(frame: NSRect(
             x: 0, y: 0,
             width: SidebarDefaults.renameFieldWidth,
             height: SidebarDefaults.renameFieldHeight
         ))
-        field.placeholderString = "example.com"
+        field.placeholderString = L10n.string("example.com")
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
 
@@ -1608,7 +1655,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
     /// A quiet informational alert; icon actions have no state worth a warning style.
     private func presentIconNotice(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "Project Icon"
+        alert.messageText = L10n.string("Project Icon")
         alert.informativeText = message
         alert.alertStyle = .informational
         alert.runModal()

@@ -199,7 +199,10 @@ private enum ExtensionComponentPatchPreviewRenderer {
             imageResolver: resolvePreviewImage,
             customSurfaceRenderer: { surface in
                 let label = NSTextField(
-                    labelWithString: "\(surface.kind.rawValue.capitalized) custom surface"
+                    labelWithString: L10n.format(
+                        "%@ custom surface",
+                        surface.kind.rawValue.capitalized
+                    )
                 )
                 label.alignment = .center
                 label.applyFont(.detail())

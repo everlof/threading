@@ -10,9 +10,12 @@ enum ExtensionHostServiceError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "Skalman's extension host service is unavailable."
+            return L10n.string("Skalman’s extension host service is unavailable.")
         case .missingCapability(let capability):
-            return "The extension did not declare the required '\(capability)' capability."
+            return L10n.format(
+                "The extension did not declare the required “%@” capability.",
+                capability
+            )
         }
     }
 }
@@ -95,6 +98,7 @@ final class ExtensionHostService {
         let order: Int
         let capabilities: Set<ExtensionCapability>
         let serviceDependencies: Set<ExtensionServiceDependency>
+        let localization: ExtensionLocalizationResolver
     }
 
     private struct Failure: Encodable {
@@ -330,6 +334,7 @@ final class ExtensionHostService {
         order: Int,
         capabilities: Set<ExtensionCapability>,
         serviceDependencies: [ExtensionServiceDependency] = [],
+        localization: ExtensionLocalizationResolver = .init(strings: [:]),
         transport: ExtensionHostTransport = .loopback
     ) throws -> ExtensionHostAuthorization? {
         let qualifying = transport == .descriptor
@@ -357,7 +362,8 @@ final class ExtensionHostService {
             processGeneration: processGeneration,
             order: order,
             capabilities: capabilities,
-            serviceDependencies: Set(serviceDependencies)
+            serviceDependencies: Set(serviceDependencies),
+            localization: localization
         )
 
         switch transport {
@@ -1536,7 +1542,7 @@ final class ExtensionHostService {
                 return
             }
             try registry.replacePatches(
-                publication.patches,
+                publication.patches.map(authority.localization.componentPatch),
                 from: ComponentCustomizationSource(
                     extensionIdentifier: authority.extensionIdentifier,
                     processGeneration: authority.processGeneration,

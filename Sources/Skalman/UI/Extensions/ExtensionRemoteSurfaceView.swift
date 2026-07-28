@@ -11,7 +11,9 @@ final class ExtensionRemoteSurfaceView:
     ThemedComponent,
     ExtensionRemoteSurfaceConsumer
 {
-    private let statusLabel = NSTextField(labelWithString: "Connecting…")
+    private let statusLabel = NSTextField(
+        labelWithString: L10n.string("Connecting…")
+    )
     private var definition: ExtensionRemoteSurface?
     private var tracking: NSTrackingArea?
     private(set) var subscription: ExtensionRemoteSurfaceSubscription?
@@ -66,10 +68,10 @@ final class ExtensionRemoteSurfaceView:
         self.subscription?.cancel()
         self.subscription = subscription
         if subscription == nil {
-            statusLabel.stringValue = "The remote surface is unavailable."
+            statusLabel.stringValue = L10n.string("The remote surface is unavailable.")
         } else {
             if definition == nil {
-                statusLabel.stringValue = "Connecting…"
+                statusLabel.stringValue = L10n.string("Connecting…")
             }
             publishViewport()
         }
@@ -109,7 +111,10 @@ final class ExtensionRemoteSurfaceView:
     func remoteSurfaceDidConnect(definition: ExtensionRemoteSurface) {
         self.definition = definition
         setAccessibilityLabel(definition.accessibilityLabel)
-        statusLabel.stringValue = "Waiting for \(definition.title)…"
+        statusLabel.stringValue = L10n.format(
+            "Waiting for %@…",
+            definition.title
+        )
         if definition.acceptsKeyboard {
             window?.makeFirstResponder(self)
         }

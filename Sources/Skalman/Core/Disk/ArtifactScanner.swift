@@ -52,16 +52,16 @@ enum ArtifactKind: String, CaseIterable, Codable {
     /// What the row calls it.
     var displayName: String {
         switch self {
-        case .rust: return "Rust build output"
-        case .node: return "Node packages"
-        case .swiftPackage: return "Swift build output"
+        case .rust: return L10n.string("Rust build output")
+        case .node: return L10n.string("Node packages")
+        case .swiftPackage: return L10n.string("Swift build output")
         case .cocoaPods: return "CocoaPods"
-        case .next: return "Next.js build"
-        case .turbo: return "Turbo cache"
-        case .pythonVenv: return "Python environment"
-        case .pythonCache: return "Python bytecode"
-        case .gradle: return "Gradle build output"
-        case .coverage: return "Coverage output"
+        case .next: return L10n.string("Next.js build")
+        case .turbo: return L10n.string("Turbo cache")
+        case .pythonVenv: return L10n.string("Python environment")
+        case .pythonCache: return L10n.string("Python bytecode")
+        case .gradle: return L10n.string("Gradle build output")
+        case .coverage: return L10n.string("Coverage output")
         }
     }
 
@@ -73,11 +73,11 @@ enum ArtifactKind: String, CaseIterable, Codable {
         case .swiftPackage: return "swift build"
         case .cocoaPods: return "pod install"
         case .next: return "next build"
-        case .turbo: return "rebuilt on next run"
-        case .pythonVenv: return "recreate the environment"
-        case .pythonCache: return "regenerated on next run"
+        case .turbo: return L10n.string("rebuilt on next run")
+        case .pythonVenv: return L10n.string("recreate the environment")
+        case .pythonCache: return L10n.string("regenerated on next run")
         case .gradle: return "gradle build"
-        case .coverage: return "re-run the tests"
+        case .coverage: return L10n.string("re-run the tests")
         }
     }
 

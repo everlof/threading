@@ -8,9 +8,12 @@ enum ExtensionSettingsValueStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .incompatibleFormat(let version):
-            return "Extension settings use unsupported format version \(version)."
+            return L10n.format(
+                "Extension settings use unsupported format version %lld.",
+                Int64(version)
+            )
         case .unreadable(let message):
-            return "Extension settings could not be read: \(message)"
+            return L10n.format("Extension settings could not be read: %@", message)
         }
     }
 }

@@ -1,6 +1,38 @@
 import AppKit
 import SkalmanRemoteKit
 
+// MARK: - Shared Session Action Presentation
+
+/// The one description of the surface a session can switch *to*.
+///
+/// The row menu and pane-header button are two entrances to the same relaunch. Keeping the
+/// target title here means a native session cannot say "Claude Code UI" in one place and
+/// "Terminal" in another, or leave the button pointing at the surface already on screen.
+struct SessionSurfaceTogglePresentation: Equatable {
+    static var nativeTitle: String { L10n.string("Native UI (Experimental)") }
+    static let nativeSymbol = "bubble.left.and.text.bubble.right"
+    static let originalSymbol = "terminal"
+
+    let targetUsesNativeUI: Bool
+    let title: String
+    let symbolName: String
+
+    init(session: AgentSession) {
+        targetUsesNativeUI = !session.usesNativeUI
+        title = Self.title(usesNativeUI: targetUsesNativeUI, kind: session.kind)
+        symbolName = targetUsesNativeUI ? Self.nativeSymbol : Self.originalSymbol
+    }
+
+    static func title(usesNativeUI: Bool, kind: AgentKind) -> String {
+        usesNativeUI ? nativeTitle : kind.originalUITitle
+    }
+}
+
+enum SessionActionMenuDefaults {
+    static var attachmentsTitle: String { L10n.string("Attachments") }
+    static let attachmentsSymbol = "paperclip"
+}
+
 // MARK: - Session Row Actions
 
 /// The menu behind a session row's `⋯` hover button and its handlers. Split from the main
@@ -36,16 +68,24 @@ extension ProjectSidebarViewController {
         let sessionID = session.id
 
         menu.addItem(
-            withTitle: session.isPinned ? "Unpin" : "Pin",
+            withTitle: session.isPinned ? L10n.string("Unpin") : L10n.string("Pin"),
             action: #selector(togglePinnedClicked),
             keyEquivalent: ""
         )
         // The sidebar only ever lists unarchived sessions, so this is always "Archive";
         // restoring one happens from Settings, where the archived sessions live.
-        menu.addItem(withTitle: "Archive", action: #selector(archiveClicked), keyEquivalent: "")
+        menu.addItem(
+            withTitle: L10n.string("Archive"),
+            action: #selector(archiveClicked),
+            keyEquivalent: ""
+        )
 
         if AgentRuntime.shared.isRunning(sessionID: sessionID) {
-            menu.addItem(withTitle: "Close Session", action: #selector(closeSessionClicked), keyEquivalent: "")
+            menu.addItem(
+                withTitle: L10n.string("Close Session"),
+                action: #selector(closeSessionClicked),
+                keyEquivalent: ""
+            )
         }
 
         menu.addItem(.separator())
@@ -53,22 +93,31 @@ extension ProjectSidebarViewController {
         addSurfaceMenu(to: menu, for: session)
         menu.addItem(makeSessionThemeItem(for: sessionID))
         addRemoteControlItem(to: menu, for: session)
-        menu.addItem(withTitle: "Rename Session…", action: #selector(renameSessionClicked), keyEquivalent: "")
         menu.addItem(
-            withTitle: "Copy Session ID",
+            withTitle: L10n.string("Rename Session…"),
+            action: #selector(renameSessionClicked),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: L10n.string("Rename Session…"),
+            action: #selector(renameSessionClicked),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: L10n.string("Copy Session ID"),
             action: #selector(copySessionIDClicked),
             keyEquivalent: ""
         )
         if AppSettings.shared.remoteAccessEnabled {
             menu.addItem(.separator())
             menu.addItem(
-                withTitle: "Share Chat…",
+                withTitle: L10n.string("Share Chat…"),
                 action: #selector(shareSessionClicked),
                 keyEquivalent: ""
             )
             if RemoteAccessCoordinator.shared.hasSessionShares(sessionID) {
                 menu.addItem(
-                    withTitle: "Stop Sharing Chat",
+                    withTitle: L10n.string("Stop Sharing Chat"),
                     action: #selector(stopSharingSessionClicked),
                     keyEquivalent: ""
                 )
@@ -76,7 +125,11 @@ extension ProjectSidebarViewController {
         }
         addMoveToAccountItem(to: menu, for: session)
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Delete Session", action: #selector(deleteSessionClicked), keyEquivalent: "")
+        menu.addItem(
+            withTitle: L10n.string("Delete Session"),
+            action: #selector(deleteSessionClicked),
+            keyEquivalent: ""
+        )
 
         for item in menu.items { item.target = self }
     }
@@ -91,14 +144,14 @@ extension ProjectSidebarViewController {
         guard session.kind.supportsForking, session.resumeState.isResumable else { return }
 
         let newItem = menu.addItem(
-            withTitle: "New Side Chat",
+            withTitle: L10n.string("New Side Chat"),
             action: #selector(newSideChatClicked),
             keyEquivalent: ""
         )
         newItem.target = self
 
         let askItem = menu.addItem(
-            withTitle: "Ask on the Side…",
+            withTitle: L10n.string("Ask on the Side…"),
             action: #selector(askOnTheSideClicked),
             keyEquivalent: ""
         )
@@ -115,9 +168,9 @@ extension ProjectSidebarViewController {
     private func addSurfaceMenu(to menu: NSMenu, for session: AgentSession) {
         guard session.kind.supportsNativeUI else { return }
 
-        let submenu = NSMenu(title: "Interface")
+        let submenu = NSMenu(title: L10n.string("Interface"))
         let native = NSMenuItem(
-            title: "Native UI (Experimental)",
+            title: L10n.string("Native UI (Experimental)"),
             action: #selector(setSurfaceClicked(_:)),
             keyEquivalent: ""
         )
@@ -136,7 +189,11 @@ extension ProjectSidebarViewController {
         original.state = session.usesNativeUI ? .off : .on
         submenu.addItem(original)
 
-        let parent = NSMenuItem(title: "Interface", action: nil, keyEquivalent: "")
+        let parent = NSMenuItem(
+            title: L10n.string("Interface"),
+            action: nil,
+            keyEquivalent: ""
+        )
         parent.submenu = submenu
         menu.addItem(parent)
     }
@@ -167,7 +224,11 @@ extension ProjectSidebarViewController {
             submenu.addItem(item)
         }
 
-        let item = NSMenuItem(title: "Claude Remote Control", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(
+            title: L10n.string("Claude Remote Control"),
+            action: nil,
+            keyEquivalent: ""
+        )
         item.submenu = submenu
         menu.addItem(item)
     }
@@ -188,7 +249,11 @@ extension ProjectSidebarViewController {
             submenu.addItem(item)
         }
 
-        let moveItem = NSMenuItem(title: "Move to Account", action: nil, keyEquivalent: "")
+        let moveItem = NSMenuItem(
+            title: L10n.string("Move to Account"),
+            action: nil,
+            keyEquivalent: ""
+        )
         moveItem.submenu = submenu
         menu.addItem(moveItem)
     }
@@ -233,11 +298,14 @@ extension ProjectSidebarViewController {
               let session = ProjectStore.shared.session(withID: sessionID) else { return }
 
         promptForText(
-            title: "Ask on the Side",
-            message: "Starts a side chat from “\(session.displayTitle)”, carrying everything "
-                + "it knows so far. Nothing you ask here joins that conversation.",
-            confirmTitle: "Ask",
-            placeholder: "What would you like to ask?"
+            title: L10n.string("Ask on the Side"),
+            message: L10n.format(
+                "Starts a side chat from “%@”, carrying everything it knows so far. "
+                    + "Nothing you ask here joins that conversation.",
+                session.displayTitle
+            ),
+            confirmTitle: L10n.string("Ask"),
+            placeholder: L10n.string("What would you like to ask?")
         ) { [weak self] question in
             guard let self, !question.isEmpty else { return }
             self.delegate?.projectSidebar(self, createSideChatOf: sessionID, prompt: question)
@@ -282,7 +350,7 @@ extension ProjectSidebarViewController {
               let session = ProjectStore.shared.session(withID: sessionID) else { return }
 
         promptRename(
-            title: "Rename Session",
+            title: L10n.string("Rename Session"),
             current: session.customTitle ?? "",
             placeholder: session.displayTitle,
             allowsEmpty: true
@@ -313,18 +381,26 @@ extension ProjectSidebarViewController {
               let session = ProjectStore.shared.session(withID: sessionID) else { return }
 
         let alert = NSAlert()
-        alert.messageText = "Share “\(session.displayTitle)”"
+        alert.messageText = L10n.format("Share “%@”", session.displayTitle)
         let isRunning = AgentRuntime.shared.isRunning(sessionID: sessionID)
-        alert.informativeText = "This single-use invitation opens only this chat and expires "
-            + "after 24 hours if nobody accepts it. Once accepted, that member keeps access "
-            + "until you stop sharing. Choose permission approval only for someone you trust."
-            + (isRunning ? "" : " Start this chat before creating a view-only link; viewing alone "
-                + "never starts an agent process.")
+        alert.informativeText = isRunning
+            ? L10n.string(
+                "This single-use invitation opens only this chat and expires after 24 hours "
+                    + "if nobody accepts it. Once accepted, that member keeps access until you "
+                    + "stop sharing. Choose permission approval only for someone you trust."
+            )
+            : L10n.string(
+                "This single-use invitation opens only this chat and expires after 24 hours "
+                    + "if nobody accepts it. Once accepted, that member keeps access until you "
+                    + "stop sharing. Choose permission approval only for someone you trust. "
+                    + "Start this chat before creating a view-only link; viewing alone never "
+                    + "starts an agent process."
+            )
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Copy View-Only Link")
-        alert.addButton(withTitle: "Copy Collaborator Link")
-        alert.addButton(withTitle: "Copy Collaborator + Approval Link")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Copy View-Only Link"))
+        alert.addButton(withTitle: L10n.string("Copy Collaborator Link"))
+        alert.addButton(withTitle: L10n.string("Copy Collaborator + Approval Link"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
         alert.buttons[0].isEnabled = isRunning
 
         let capability: RemoteCapability
@@ -349,8 +425,10 @@ extension ProjectSidebarViewController {
             canApprovePermissions: canApprovePermissions
         ) else {
             let unavailable = NSAlert()
-            unavailable.messageText = "Secure relay isn’t ready"
-            unavailable.informativeText = "Wait for Remote Access to say it is ready, then try again."
+            unavailable.messageText = L10n.string("Secure relay isn’t ready")
+            unavailable.informativeText = L10n.string(
+                "Wait for Remote Access to say it is ready, then try again."
+            )
             unavailable.alertStyle = .warning
             unavailable.runModal()
             return
@@ -397,8 +475,8 @@ private enum RemoteControlChoice: CaseIterable {
     var menuTitle: String {
         switch self {
         case .inherit: AppSettings.shared.claudeRemoteControl.inheritedMenuTitle
-        case .on: "Always On"
-        case .off: "Always Off"
+        case .on: L10n.string("Always On")
+        case .off: L10n.string("Always Off")
         }
     }
 }

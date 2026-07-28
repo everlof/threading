@@ -56,7 +56,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         isHidden = true
-        toolTip = "Open Git Review (⇧⌘R)"
+        toolTip = L10n.string("Open Git Review (⇧⌘R)")
         setAccessibilityRole(.button)
 
         wantsLayer = true
@@ -64,7 +64,7 @@ final class GitStatusOverlayView: BackdropOverlay {
 
         glyph.image = NSImage(
             systemSymbolName: "arrow.triangle.branch",
-            accessibilityDescription: "Branch"
+            accessibilityDescription: L10n.string("Branch")
         )
         glyph.symbolConfiguration = .init(
             pointSize: GitStatusOverlayDefaults.fontSize,

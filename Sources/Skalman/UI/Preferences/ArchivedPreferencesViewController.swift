@@ -150,12 +150,14 @@ final class ArchivedPreferencesViewController: NSViewController {
         guard let entry = session(for: sender) else { return }
 
         let alert = NSAlert()
-        alert.messageText = "Delete \"\(entry.session.displayTitle)\"?"
-        alert.informativeText = "It is removed from Skalman. The saved conversation on disk is not deleted, "
-            + "so it could still be imported again later."
+        alert.messageText = L10n.format("Delete “%@”?", entry.session.displayTitle)
+        alert.informativeText = L10n.string(
+            "It is removed from Skalman. The saved conversation on disk is not deleted, "
+                + "so it could still be imported again later."
+        )
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Delete"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
@@ -168,9 +170,15 @@ final class ArchivedPreferencesViewController: NSViewController {
 // MARK: - Archived Preferences Strings
 
 private enum ArchivedPreferencesStrings {
-    static let explanation = """
-        Archived conversations are kept but taken off the sidebar. Restore one to put it back \
-        where selecting it resumes the conversation, or delete it to remove it from Skalman.
-        """
-    static let empty = "No archived conversations."
+    static var explanation: String {
+        L10n.string(
+            "Archived conversations are kept but taken off the sidebar. Restore one to put it "
+                + "back where selecting it resumes the conversation, or delete it to remove it "
+                + "from Skalman."
+        )
+    }
+
+    static var empty: String {
+        L10n.string("No archived conversations.")
+    }
 }

@@ -282,11 +282,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private func presentAlreadyRunningAlert() {
         let alert = NSAlert()
-        alert.messageText = "Skalman is already running"
-        alert.informativeText = """
+        alert.messageText = L10n.string("Skalman is already running")
+        alert.informativeText = L10n.string("""
             Another Skalman is open and owns the session state. Running two at once would \
             silently overwrite each other's projects, so this one will quit.
-            """
+            """)
         alert.alertStyle = .warning
         alert.runModal()
     }
@@ -387,12 +387,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     private func makeExtensionsMenuItem() -> NSMenuItem {
-        let menu = NSMenu(title: "Extensions")
+        let menu = NSMenu(title: L10n.string("Extensions"))
         extensionMenu = menu
         rebuildExtensionMenus()
 
         let item = NSMenuItem()
-        item.title = "Extensions"
+        item.title = L10n.string("Extensions")
         item.submenu = menu
         return item
     }
@@ -425,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let hasVisibleCommands = !menu.items.isEmpty
         if !hasVisibleCommands {
             let empty = NSMenuItem(
-                title: "No Extension Commands Here",
+                title: L10n.string("No Extension Commands Here"),
                 action: nil,
                 keyEquivalent: ""
             )
@@ -514,21 +514,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let menu = NSMenu()
 
         menu.addItem(
-            withTitle: "About \(appName)",
+            withTitle: L10n.format("About %@", appName),
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         )
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Preferences…", action: #selector(showPreferences), keyEquivalent: ",")
+        menu.addItem(
+            withTitle: L10n.string("Preferences…"),
+            action: #selector(showPreferences),
+            keyEquivalent: ","
+        )
         menu.addItem(.separator())
         menu.addItem(
-            withTitle: "Hide \(appName)",
+            withTitle: L10n.format("Hide %@", appName),
             action: #selector(NSApplication.hide(_:)),
             keyEquivalent: "h"
         )
 
         let hideOthersItem = NSMenuItem(
-            title: "Hide Others",
+            title: L10n.string("Hide Others"),
             action: #selector(NSApplication.hideOtherApplications(_:)),
             keyEquivalent: "h"
         )
@@ -536,13 +540,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(hideOthersItem)
 
         menu.addItem(
-            withTitle: "Show All",
+            withTitle: L10n.string("Show All"),
             action: #selector(NSApplication.unhideAllApplications(_:)),
             keyEquivalent: ""
         )
         menu.addItem(.separator())
         menu.addItem(
-            withTitle: "Quit \(appName)",
+            withTitle: L10n.format("Quit %@", appName),
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -576,8 +580,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         projectExtensionSeparator = extensionSeparator
 
         let extensionItem = NSMenuItem()
-        extensionItem.title = "Extensions"
-        extensionItem.submenu = NSMenu(title: "Project Extensions")
+        extensionItem.title = L10n.string("Extensions")
+        extensionItem.submenu = NSMenu(title: L10n.string("Project Extensions"))
         extensionItem.isHidden = true
         menu.addItem(extensionItem)
         projectExtensionItem = extensionItem
@@ -590,13 +594,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func makeEditMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: MenuIdentifiers.editMenu)
 
-        menu.addItem(withTitle: "Undo", action: #selector(UndoManager.undo), keyEquivalent: "z")
-        menu.addItem(withTitle: "Redo", action: #selector(UndoManager.redo), keyEquivalent: "Z")
+        menu.addItem(withTitle: L10n.string("Undo"), action: #selector(UndoManager.undo), keyEquivalent: "z")
+        menu.addItem(withTitle: L10n.string("Redo"), action: #selector(UndoManager.redo), keyEquivalent: "Z")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(withTitle: L10n.string("Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        menu.addItem(withTitle: L10n.string("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        menu.addItem(withTitle: L10n.string("Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        menu.addItem(withTitle: L10n.string("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.find, action: #selector(showFind)))
 
@@ -637,7 +641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(.separator())
 
         let fullScreenItem = NSMenuItem(
-            title: "Enter Full Screen",
+            title: L10n.string("Enter Full Screen"),
             action: #selector(NSWindow.toggleFullScreen(_:)),
             keyEquivalent: "f"
         )
@@ -662,8 +666,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         viewExtensionSeparator = extensionSeparator
 
         let extensionItem = NSMenuItem()
-        extensionItem.title = "Extensions"
-        extensionItem.submenu = NSMenu(title: "View Extensions")
+        extensionItem.title = L10n.string("Extensions")
+        extensionItem.submenu = NSMenu(title: L10n.string("View Extensions"))
         extensionItem.isHidden = true
         menu.addItem(extensionItem)
         viewExtensionItem = extensionItem
@@ -677,14 +681,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let menu = NSMenu(title: MenuIdentifiers.windowMenu)
 
         menu.addItem(
-            withTitle: "Minimize",
+            withTitle: L10n.string("Minimize"),
             action: #selector(NSWindow.performMiniaturize(_:)),
             keyEquivalent: "m"
         )
-        menu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        menu.addItem(
+            withTitle: L10n.string("Zoom"),
+            action: #selector(NSWindow.performZoom(_:)),
+            keyEquivalent: ""
+        )
         menu.addItem(.separator())
         menu.addItem(
-            withTitle: "Bring All to Front",
+            withTitle: L10n.string("Bring All to Front"),
             action: #selector(NSApplication.arrangeInFront(_:)),
             keyEquivalent: ""
         )
@@ -699,7 +707,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let menu = NSMenu(title: MenuIdentifiers.helpMenu)
 
         menu.addItem(
-            withTitle: "\(appName) Help",
+            withTitle: L10n.format("%@ Help", appName),
             action: #selector(NSApplication.showHelp(_:)),
             keyEquivalent: "?"
         )
@@ -707,7 +715,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(.separator())
 
         let reportItem = NSMenuItem(
-            title: "Create Remote Support Report…",
+            title: L10n.string("Create Remote Support Report…"),
             action: #selector(createRemoteSupportReport),
             keyEquivalent: ""
         )
@@ -715,7 +723,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(reportItem)
 
         let logItem = NSMenuItem(
-            title: "Reveal Diagnostics Log",
+            title: L10n.string("Reveal Diagnostics Log"),
             action: #selector(revealDiagnosticsLog),
             keyEquivalent: ""
         )
@@ -919,9 +927,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         } catch {
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Couldn’t create support report"
-            alert.informativeText = "Skalman could not prepare the remote diagnostics file."
-            alert.addButton(withTitle: "OK")
+            alert.messageText = L10n.string("Couldn’t create support report")
+            alert.informativeText = L10n.string(
+                "Skalman could not prepare the remote diagnostics file."
+            )
+            alert.addButton(withTitle: L10n.string("OK"))
             alert.runModal()
         }
     }

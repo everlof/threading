@@ -9,13 +9,13 @@ enum ExtensionEditableSourceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .directoryMissing(let path):
-            return "The extension's editable source directory is missing at \(path)."
+            return L10n.format("The extension’s editable source directory is missing at %@.", path)
         case .packageManifestMissing(let path):
-            return "The extension source has no Package.swift at \(path)."
+            return L10n.format("The extension source has no Package.swift at %@.", path)
         case .swiftSourcesMissing(let path):
-            return "The extension source has no Swift file under \(path)/Sources."
+            return L10n.format("The extension source has no Swift file under %@/Sources.", path)
         case .symbolicLink(let path):
-            return "The extension source contains a symbolic link at \(path)."
+            return L10n.format("The extension source contains a symbolic link at %@.", path)
         }
     }
 }

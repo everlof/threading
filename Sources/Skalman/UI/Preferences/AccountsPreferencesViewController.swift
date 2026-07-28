@@ -265,12 +265,25 @@ enum AccountsPreferencesLayout {
 // MARK: - Accounts Preferences Strings
 
 enum AccountsPreferencesStrings {
-    static let explanation = """
-        Accounts are found automatically from your Claude and Codex config directories. \
-        Click an icon to pick an emoji, or rename an account to tell them apart in the \
-        sidebar. Clearing a name restores the one from your shell alias.
-        """
-    static let iconWellTooltip = "Choose an icon"
-    static let resetTooltip = "Restore this account's default icon and name"
-    static let emptyMessage = "No agent accounts found."
+    static var explanation: String {
+        L10n.string("""
+            Accounts are found automatically from your Claude and Codex config directories. \
+            Click an icon to pick an emoji, or rename an account to tell them apart in the \
+            sidebar. Clearing a name restores the one from your shell alias. Switch an account \
+            off to stop it being offered for new sessions — nothing is deleted, and sessions \
+            already running on it keep working.
+            """)
+    }
+    static var iconWellTooltip: String { L10n.string("Choose an icon") }
+    static var resetTooltip: String {
+        L10n.string("Restore this account's default icon and name")
+    }
+    static var enabledTooltip: String {
+        L10n.string("Offer this account for new sessions")
+    }
+    static var emptyMessage: String { L10n.string("No agent accounts found.") }
+
+    static func enabledLabel(_ accountName: String) -> String {
+        L10n.format("Use %@ for new sessions", accountName)
+    }
 }

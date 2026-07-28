@@ -341,7 +341,11 @@ enum AppThemeRefresh {
     private static var lastFontOverrides: [String?] = []
 
     private static var currentFontOverrides: [String?] {
-        [AppSettings.chromeFontFamily, AppSettings.conversationFontFamily]
+        [
+            AppSettings.chromeFontFamily,
+            AppSettings.conversationFontFamily,
+            AppSettings.appTextSize.rawValue
+        ]
     }
 
     static func accessibilityDisplayOptionsChanged() {

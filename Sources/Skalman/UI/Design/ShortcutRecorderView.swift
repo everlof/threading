@@ -184,7 +184,7 @@ enum ShortcutRecorderDefaults {
 }
 
 enum ShortcutRecorderStrings {
-    static let recording = "Press keys…"
+    static var recording: String { L10n.string("Press keys…") }
     static let unbound = "—"
-    static let accessibilityLabel = "Keyboard shortcut"
+    static var accessibilityLabel: String { L10n.string("Keyboard shortcut") }
 }

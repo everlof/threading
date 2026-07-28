@@ -96,5 +96,7 @@ final class UsageWindowRow: NSView {
 // MARK: - Usage Window Row Defaults
 
 enum UsageWindowRowDefaults {
-    static let expiredReset = "Reset passed — awaiting a fresh reading"
+    static var expiredReset: String {
+        L10n.string("Reset passed — awaiting a fresh reading")
+    }
 }

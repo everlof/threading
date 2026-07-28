@@ -24,6 +24,23 @@ again. `.swiftlint.yml`'s `frozen_theme_font` catches the direct form in the edi
 the canonical SwiftSyntax checker does **not** cover this one, so the fast rule is the only
 guard.
 
+`Design.Typography` also owns the user's **semantic text scale**. `AppTextSize` is a bounded
+compact/default/large/extra-large preference, and every role factory applies its scale at the
+point where a font enters the system. This includes prose, monospaced code, fixed-width
+numerics, control marks, conversations, Settings, and semantic extension nodes. It deliberately
+does not include a terminal: `TerminalProfile` stores an explicit family and point size, so
+terminal sizing remains useful independently of the surrounding interface. A text-scale change
+joins the same `AppThemeRefresh` sweep as a family override, which re-resolves roles already
+recorded on live views and rebuilds attributed surfaces through `AppThemeDidChange`.
+
+**The app and an extension have separate localization domains.** Built-in presentation copy
+resolves through `L10n` and `Localizable.xcstrings`; shared `SettingsUI` builders localize their
+built-in titles and descriptions by default. Extension Settings renderers explicitly disable
+that lookup because their strings have already passed through
+`ExtensionLocalizationResolver`. That separation prevents an extension base string such as
+“General” from accidentally borrowing Skalman's translation. Stable page IDs, setting IDs,
+command IDs, values, and schemas are never localized.
+
 Four consequences worth knowing before adding UI:
 
 - **Prose in the conversation passes `.conversation`**: `applyFont(.body, in: .conversation)`.

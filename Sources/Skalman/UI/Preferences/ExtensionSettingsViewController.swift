@@ -70,7 +70,8 @@ enum ExtensionSettingsRenderer {
             return SettingsUI.row(
                 title: field.title,
                 subtitle: field.description,
-                control: control
+                control: control,
+                localizes: false
             )
         }
 
@@ -80,7 +81,11 @@ enum ExtensionSettingsRenderer {
         } else {
             visibleTitle = title
         }
-        let content = SettingsUI.section(visibleTitle, SettingsCard(rows: rows))
+        let content = SettingsUI.section(
+            visibleTitle,
+            SettingsCard(rows: rows),
+            localizesTitle: false
+        )
         return RetainingExtensionSettingsSection(
             content: content,
             handlers: handlers,
@@ -258,9 +263,9 @@ private final class ExtensionSettingActionTarget: NSObject {
     private func present(_ error: Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Couldn’t Change Extension Setting"
+        alert.messageText = L10n.string("Couldn’t Change Extension Setting")
         alert.informativeText = error.localizedDescription
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.string("OK"))
         if let window = control?.window {
             alert.beginSheetModal(for: window)
         } else {

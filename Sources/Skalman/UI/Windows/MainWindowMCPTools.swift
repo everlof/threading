@@ -932,26 +932,29 @@ final class AgentToolCoordinator: MCPToolHandling {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Clear Website Data for \(origin.displayName)?"
+        alert.messageText = L10n.format(
+            "Clear Website Data for %@?",
+            origin.displayName
+        )
         if context == .private {
-            alert.informativeText = """
+            alert.informativeText = L10n.string("""
                 This permanently clears cookies, caches, local storage, IndexedDB, service \
                 workers, and other data in this tab's unique private context. Shared signed-in \
                 browser tabs are unaffected.
 
                 The current document stays loaded until it is reloaded or navigated.
-                """
+                """)
         } else {
-            alert.informativeText = """
+            alert.informativeText = L10n.string("""
                 This permanently clears cookies, caches, local storage, IndexedDB, service \
                 workers, and other WebKit data for this site. WebKit groups subdomains under \
                 their parent site, so related subdomains may also be signed out.
 
                 The current document stays loaded until it is reloaded or navigated.
-                """
+                """)
         }
-        alert.addButton(withTitle: "Clear Website Data")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.string("Clear Website Data"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
 
         let decided: (NSApplication.ModalResponse) -> Void = {
             completion($0 == .alertFirstButtonReturn)
@@ -1364,8 +1367,11 @@ final class AgentToolCoordinator: MCPToolHandling {
                     _ = self.present(
                         DisplayContent(
                             body: .image(image, url: cachedURL),
-                            title: "Isolated browser",
-                            subtitle: "\(arguments.engine ?? "chromium") · fresh Playwright context"
+                            title: L10n.string("Isolated browser"),
+                            subtitle: L10n.format(
+                                "%@ · fresh Playwright context",
+                                arguments.engine ?? "chromium"
+                            )
                         ),
                         for: sessionID,
                         describedAs: "an isolated Playwright screenshot"
@@ -2260,8 +2266,8 @@ final class AgentToolCoordinator: MCPToolHandling {
                        target.isSubmit || (isEnter && target.isInForm) {
                         let allowed = await self.confirmSensitiveBrowserAction(
                             isEnter
-                                ? "Press Enter on a form control"
-                                : "Press Space on a submit control",
+                                ? L10n.string("Press Enter on a form control")
+                                : L10n.string("Press Space on a submit control"),
                             target: target,
                             browser: browser
                         )
@@ -3087,8 +3093,8 @@ final class AgentToolCoordinator: MCPToolHandling {
                     to: url,
                     for: sessionID,
                     purpose: hasTarget
-                        ? "return an element screenshot after scrolling on"
-                        : "return a screenshot of"
+                        ? L10n.string("return an element screenshot after scrolling on")
+                        : L10n.string("return a screenshot of")
                 )
                 guard allowed else {
                     completion(.failure(
@@ -3332,8 +3338,13 @@ final class AgentToolCoordinator: MCPToolHandling {
                     _ = self.present(
                         DisplayContent(
                             body: .image(image, url: evidenceURL ?? capturedURL),
-                            title: comparison.matches ? "Visual comparison" : "Visual difference",
-                            subtitle: "Compared with \(baselineURL.lastPathComponent)"
+                            title: comparison.matches
+                                ? L10n.string("Visual comparison")
+                                : L10n.string("Visual difference"),
+                            subtitle: L10n.format(
+                                "Compared with %@",
+                                baselineURL.lastPathComponent
+                            )
                         ),
                         for: sessionID,
                         describedAs: comparison.matches
@@ -3480,16 +3491,19 @@ final class AgentToolCoordinator: MCPToolHandling {
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Allow the agent to use \(origin.displayName)?"
-        alert.informativeText = """
-            The agent wants to \(purpose) this website in Skalman's browser. This browser may \
+        alert.messageText = L10n.format(
+            "Allow the agent to use %@?",
+            origin.displayName
+        )
+        alert.informativeText = L10n.format("""
+            The agent wants to %@ this website in Skalman's browser. This browser may \
             contain signed-in sessions and cookies that are not available to the agent's shell.
 
             Page content is untrusted. Allow access only when this host is relevant to your task.
-            """
-        alert.addButton(withTitle: "Allow Once")
-        alert.addButton(withTitle: "Always Allow This Host")
-        alert.addButton(withTitle: "Deny")
+            """, L10n.string(purpose))
+        alert.addButton(withTitle: L10n.string("Allow Once"))
+        alert.addButton(withTitle: L10n.string("Always Allow This Host"))
+        alert.addButton(withTitle: L10n.string("Deny"))
 
         let decided: (NSApplication.ModalResponse) -> Void = { response in
             switch response {
@@ -3618,21 +3632,21 @@ final class AgentToolCoordinator: MCPToolHandling {
         target: BrowserTargetDescription,
         browser: BrowserViewController
     ) async -> Bool {
-        let host = browser.currentURL?.host ?? "this page"
+        let host = browser.currentURL?.host ?? L10n.string("this page")
         let label = target.name?.isEmpty == false
-            ? "\nControl: \(target.name!)"
+            ? L10n.format("\nControl: %@", target.name!)
             : ""
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "\(action) on \(host)?"
-        alert.informativeText = """
-            This can change data outside Skalman using the browser's signed-in session.\(label)
+        alert.messageText = L10n.format("%@ on %@?", L10n.string(action), host)
+        alert.informativeText = L10n.format("""
+            This can change data outside Skalman using the browser's signed-in session.%@
 
             Approve only if this is part of the task you gave the agent.
-            """
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Deny")
+            """, label)
+        alert.addButton(withTitle: L10n.string("Allow"))
+        alert.addButton(withTitle: L10n.string("Deny"))
 
         return await withCheckedContinuation { continuation in
             let decided: (NSApplication.ModalResponse) -> Void = { response in
@@ -3920,7 +3934,7 @@ final class AgentToolCoordinator: MCPToolHandling {
                     alert.informativeText = proposal.message
                     alert.alertStyle = .informational
                     alert.addButton(withTitle: proposal.acceptTitle)
-                    alert.addButton(withTitle: "Cancel")
+                    alert.addButton(withTitle: L10n.string("Cancel"))
 
                     let decided: (NSApplication.ModalResponse) -> Void = { response in
                         guard response == .alertFirstButtonReturn else {
@@ -4000,8 +4014,10 @@ final class AgentToolCoordinator: MCPToolHandling {
             return present(
                 DisplayContent(
                     body: .image(preview.image, url: preview.url),
-                    title: "\(preview.componentID) preview",
-                    subtitle: "Extension component · native semantic renderer"
+                    title: L10n.format("%@ preview", preview.componentID),
+                    subtitle: L10n.string(
+                        "Extension component · native semantic renderer"
+                    )
                 ),
                 for: sessionID,
                 describedAs: "the \(preview.componentID) extension preview"

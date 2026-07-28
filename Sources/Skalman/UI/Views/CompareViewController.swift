@@ -168,17 +168,21 @@ final class CompareViewController: NSViewController {
 
         switch (oldKind, newKind) {
         case (.missing, .missing):
-            return .message("Neither file exists any more.")
+            return .message(L10n.string("Neither file exists any more."))
         case (.missing, _), (_, .missing):
             let gone = oldKind == .missing ? oldPath : newPath
-            return .message("No such file: \((gone as NSString).lastPathComponent)")
+            return .message(
+                L10n.format("No such file: %@", (gone as NSString).lastPathComponent)
+            )
         case (.tooLarge, _), (_, .tooLarge):
             return .message(
-                "One side is larger than the "
-                    + ByteCountFormatter.string(
-                        fromByteCount: Int64(CompareDefaults.maximumBytes), countStyle: .file
+                L10n.format(
+                    "One side is larger than the %@ the comparison reads.",
+                    ByteCountFormatter.string(
+                        fromByteCount: Int64(CompareDefaults.maximumBytes),
+                        countStyle: .file
                     )
-                    + " the comparison reads."
+                )
             )
         case (.image, .image):
             return .images(
@@ -189,10 +193,14 @@ final class CompareViewController: NSViewController {
             return textComparison(oldPath: oldPath, newPath: newPath)
         case (.image, .text), (.text, .image):
             return .message(
-                "One side is an image and the other is text — there is no comparison to draw."
+                L10n.string(
+                    "One side is an image and the other is text — there is no comparison to draw."
+                )
             )
         default:
-            return .message("These files are binary, and not images Skalman can compare.")
+            return .message(
+                L10n.string("These files are binary, and not images Skalman can compare.")
+            )
         }
     }
 
@@ -205,7 +213,7 @@ final class CompareViewController: NSViewController {
             )
             let files = GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(data))
             guard files.contains(where: { !$0.hunks.isEmpty }) else {
-                return .message("The files are identical.")
+                return .message(L10n.string("The files are identical."))
             }
             return .text(files)
         } catch let failure as GitFailure {
@@ -233,7 +241,9 @@ final class CompareViewController: NSViewController {
             guard old != nil || new != nil else {
                 scrollView.isHidden = true
                 placeholderLabel.isHidden = false
-                placeholderLabel.stringValue = "Neither image could be read."
+                placeholderLabel.stringValue = L10n.string(
+                    "Neither image could be read."
+                )
                 return
             }
             let compare = ImageCompareView(frame: .zero)

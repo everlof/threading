@@ -529,84 +529,112 @@ private enum StorageDefaults {
 // MARK: - Storage Strings
 
 private enum StorageStrings {
-    static let title = "Storage"
+    static var title: String { L10n.string("Storage") }
 
-    static let explanation = """
-        Build output your projects can make again — Rust and Swift build directories, installed \
-        packages, caches. Worktrees are included, which is usually where most of it is hiding.
-        """
-
-    static let safety = """
-        Only directories git ignores and a known tool can rebuild are offered. Anything tracked \
-        in a repository is left alone, whatever it is called — and ignored files that are not \
-        build output, such as .env files, are never touched. Removal is immediate rather than \
-        moved to the Trash, since space in the Trash has not been reclaimed.
-        """
-
-    static let empty = "Nothing to reclaim."
-    static let nothingFound = "Nothing found to remove"
-    static let scanning = "Scanning…"
-    static let rescan = "Rescan"
-    static let remove = "Remove"
-    static let cancel = "Cancel"
-    static let removeEverything = "Remove All…"
-    static let everythingHere = "Everything above"
-    static let rebuiltOnDemand = "Removed together, rebuilt when each project next builds"
-
-    static func reclaimable(count: Int) -> String {
-        count == 1 ? "1 directory can be removed" : "\(count) directories can be removed"
+    static var explanation: String {
+        L10n.string("""
+            Build output your projects can make again — Rust and Swift build directories, installed \
+            packages, caches. Worktrees are included, which is usually where most of it is hiding.
+            """)
     }
 
-    static let removeAll = "Remove All…"
-    static let showFewer = "Show fewer"
-    static let underAGigabyte = "Under 1 GB — click to show each"
+    static var safety: String {
+        L10n.string("""
+            Only directories git ignores and a known tool can rebuild are offered. Anything tracked \
+            in a repository is left alone, whatever it is called — and ignored files that are not \
+            build output, such as .env files, are never touched. Removal is immediate rather than \
+            moved to the Trash, since space in the Trash has not been reclaimed.
+            """)
+    }
+
+    static var empty: String { L10n.string("Nothing to reclaim.") }
+    static var nothingFound: String { L10n.string("Nothing found to remove") }
+    static var scanning: String { L10n.string("Scanning…") }
+    static var rescan: String { L10n.string("Rescan") }
+    static var remove: String { L10n.string("Remove") }
+    static var cancel: String { L10n.string("Cancel") }
+    static var removeEverything: String { L10n.string("Remove All…") }
+    static var everythingHere: String { L10n.string("Everything above") }
+    static var rebuiltOnDemand: String {
+        L10n.string("Removed together, rebuilt when each project next builds")
+    }
+
+    static func reclaimable(count: Int) -> String {
+        count == 1
+            ? L10n.string("1 directory can be removed")
+            : L10n.format("%lld directories can be removed", Int64(count))
+    }
+
+    static var removeAll: String { L10n.string("Remove All…") }
+    static var showFewer: String { L10n.string("Show fewer") }
+    static var underAGigabyte: String {
+        L10n.string("Under 1 GB — click to show each")
+    }
 
     static func smallerDirectories(_ count: Int) -> String {
-        count == 1 ? "1 smaller directory" : "\(count) smaller directories"
+        count == 1
+            ? L10n.string("1 smaller directory")
+            : L10n.format("%lld smaller directories", Int64(count))
     }
 
     /// When the reading was taken. A cached number that does not say its age claims to be live.
     static func measured(_ relative: String) -> String {
-        "measured \(relative)"
+        L10n.format("measured %@", relative)
     }
 
     /// Room left on the disk, marked when it is short — the context that turns the total from a
     /// number into a decision.
     static func free(_ size: String, pressured: Bool) -> String {
-        pressured ? "only \(size) free" : "\(size) free"
+        pressured
+            ? L10n.format("only %@ free", size)
+            : L10n.format("%@ free", size)
     }
 
     static func built(_ relative: String) -> String {
-        "last written \(relative)"
+        L10n.format("last written %@", relative)
     }
 
     /// Written moments ago, which almost always means a build is running in it.
     static func inUse(_ relative: String) -> String {
-        "in use — written \(relative)"
+        L10n.format("in use — written %@", relative)
     }
 
     static func confirmInUse(count: Int) -> String {
         count == 1
-            ? "One of these was written in the last few minutes, so something is probably "
-                + "building in it right now. Removing it will interrupt that build."
-            : "\(count) of these were written in the last few minutes, so something is probably "
-                + "building in them right now. Removing them will interrupt those builds."
+            ? L10n.string(
+                "One of these was written in the last few minutes, so something is probably "
+                    + "building in it right now. Removing it will interrupt that build."
+            )
+            : L10n.format(
+                "%lld of these were written in the last few minutes, so something is probably "
+                    + "building in them right now. Removing them will interrupt those builds.",
+                Int64(count)
+            )
     }
 
     static func confirmTitle(count: Int, size: String) -> String {
         count == 1
-            ? "Remove this directory and reclaim \(size)?"
-            : "Remove \(count) directories and reclaim \(size)?"
+            ? L10n.format("Remove this directory and reclaim %@?", size)
+            : L10n.format(
+                "Remove %lld directories and reclaim %@?",
+                Int64(count),
+                size
+            )
     }
 
-    static let confirmBody = """
-        They will be deleted immediately, not moved to the Trash. Each one is rebuilt by the \
-        command shown beside it, which takes time but no decisions.
-        """
+    static var confirmBody: String {
+        L10n.string("""
+            They will be deleted immediately, not moved to the Trash. Each one is rebuilt by the \
+            command shown beside it, which takes time but no decisions.
+            """)
+    }
 
     static func confirmBusy(_ projects: String) -> String {
-        "A session is running in \(projects). If it is building right now, removing its build "
-            + "output will interrupt that build."
+        L10n.format(
+            "A session is running in %@. If it is building right now, removing its build "
+                + "output will interrupt that build.",
+            projects
+        )
     }
 }
 

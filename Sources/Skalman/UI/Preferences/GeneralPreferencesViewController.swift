@@ -224,7 +224,7 @@ final class GeneralPreferencesViewController: NSViewController {
 
     /// The shell field with its Choose button, filling the row.
     private func shellRow() -> NSView {
-        let label = NSTextField(labelWithString: "Shell path")
+        let label = NSTextField(labelWithString: L10n.string("Shell path"))
         label.applyFont(.body)
         label.textColor = Design.Text.label
         label.setContentHuggingPriority(.required, for: .horizontal)

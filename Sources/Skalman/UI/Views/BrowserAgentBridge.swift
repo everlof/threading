@@ -389,10 +389,10 @@ enum BrowserHistoryAction: String {
 
     var authorizationPurpose: String {
         switch self {
-        case .back: return "go back to"
-        case .forward: return "go forward to"
-        case .reload: return "reload"
-        case .reloadFromOrigin: return "revalidate content from"
+        case .back: return L10n.string("go back to")
+        case .forward: return L10n.string("go forward to")
+        case .reload: return L10n.string("reload")
+        case .reloadFromOrigin: return L10n.string("revalidate content from")
         }
     }
 }

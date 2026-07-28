@@ -31,29 +31,42 @@ enum ExtensionPackageStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .packageContainsSymbolicLink(let path):
-            return "The extension package contains a symbolic link at \(path)."
+            return L10n.format("The extension package contains a symbolic link at %@.", path)
         case .packageHasTooManyEntries(let maximum):
-            return "The extension package contains more than \(maximum) files and directories."
+            return L10n.format(
+                "The extension package contains more than %lld files and directories.",
+                Int64(maximum)
+            )
         case .packageIsTooLarge(let maximum):
             let size = ByteCountFormatter.string(
                 fromByteCount: maximum,
                 countStyle: .file
             )
-            return "The extension package is larger than \(size)."
+            return L10n.format("The extension package is larger than %@.", size)
         case .alreadyInstalled(let identifier):
-            return "An extension with identifier \(identifier) is already installed."
+            return L10n.format("An extension with identifier %@ is already installed.", identifier)
         case .notInstalled(let identifier):
-            return "No extension with identifier \(identifier) is installed."
+            return L10n.format("No extension with identifier %@ is installed.", identifier)
         case .installedCopyInvalid(let message):
-            return "The installed extension copy did not validate: \(message)"
+            return L10n.format("The installed extension copy did not validate: %@", message)
         case .updateChangedUnderneath(let identifier):
-            return "The update for \(identifier) changed after it was reviewed. "
-                + "Check what it now asks for and try again."
+            return L10n.format(
+                "The update for %@ changed after it was reviewed. Check what it now asks for and try again.",
+                identifier
+            )
         case .packageCouldNotBeDigested(let identifier):
-            return "The extension package for \(identifier) could not be read completely."
+            return L10n.format(
+                "The extension package for %@ could not be read completely.",
+                identifier
+            )
         case .dataVersionRollback(let identifier, let installed, let candidate):
-            return "The update for \(identifier) declares data version \(candidate), but the "
-                + "installed package already uses \(installed). Data versions cannot decrease."
+            return L10n.format(
+                "The update for %@ declares data version %lld, but the installed package already "
+                    + "uses %lld. Data versions cannot decrease.",
+                identifier,
+                Int64(candidate),
+                Int64(installed)
+            )
         }
     }
 }

@@ -39,22 +39,22 @@ enum AIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "AI provider is not configured"
+            return L10n.string("AI provider is not configured")
         case .missingAPIKey:
-            return "API key is missing. Please add your API key in Preferences."
+            return L10n.string("API key is missing. Please add your API key in Settings.")
         case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+            return L10n.format("Network error: %@", error.localizedDescription)
         case .invalidResponse:
-            return "Invalid response from AI provider"
+            return L10n.string("Invalid response from AI provider")
         case .rateLimited:
-            return "Rate limited. Please try again later."
+            return L10n.string("Rate limited. Please try again later.")
         case .serverError(let code, let message):
             if let message = message {
-                return "Server error (\(code)): \(message)"
+                return L10n.format("Server error (%lld): %@", Int64(code), message)
             }
-            return "Server error (\(code))"
+            return L10n.format("Server error (%lld)", Int64(code))
         case .timeout:
-            return "Request timed out"
+            return L10n.string("Request timed out")
         }
     }
 }

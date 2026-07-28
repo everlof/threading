@@ -98,7 +98,10 @@ final class AccountUsagePanelView: NSView {
         planLabel.stringValue = usage.planLabel ?? ""
         planLabel.isHidden = usage.planLabel == nil
 
-        footerLabel.stringValue = "Updated \(UsageFormat.age(of: usage.observedAt))"
+        footerLabel.stringValue = L10n.format(
+            "Updated %@",
+            UsageFormat.age(of: usage.observedAt)
+        )
         toolTip = error
 
         for window in usage.windows + usage.modelWindows {

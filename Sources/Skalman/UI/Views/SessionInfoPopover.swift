@@ -215,14 +215,18 @@ enum SessionPopoverDefaults {
     static let branchSymbol = "arrow.triangle.branch"
 
     /// Precedes the parent's title on a side chat's agent line.
-    static let sideChatPrefix = "forked from"
+    static var sideChatPrefix: String { L10n.string("forked from") }
 
-    static let dormantState = "Dormant · resumable"
+    static var dormantState: String { L10n.string("Dormant · resumable") }
     static let dormantSymbol = "moon.zzz"
-    static let workingState = "Working"
+    static var workingState: String { L10n.string("Working") }
     static let workingSymbol = "play.circle"
-    static let runningState = "Running"
+    static var runningState: String { L10n.string("Running") }
     static let runningSymbol = "pause.circle"
+    static var waitingState: String { L10n.string("Waiting for an answer") }
+    static let waitingSymbol = "questionmark.circle"
+    static var finishedState: String { L10n.string("Finished · not yet seen") }
+    static let finishedSymbol = "checkmark.circle"
 
     static func worktreeBranchLabel(_ branch: String, _ worktree: String) -> String {
         "\(branch) · worktree \(worktree)"

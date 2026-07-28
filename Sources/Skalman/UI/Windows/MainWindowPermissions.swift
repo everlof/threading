@@ -45,7 +45,7 @@ extension MainWindowController {
         let project = ProjectStore.shared.project(forSessionID: request.sessionID)?.name
 
         let alert = NSAlert()
-        alert.messageText = "Allow \(request.toolName)?"
+        alert.messageText = L10n.format("Allow %@?", request.toolName)
         alert.informativeText = [
             request.summary,
             [sessionName, project].compactMap { $0 }.joined(separator: " · ")
@@ -54,9 +54,9 @@ extension MainWindowController {
         .joined(separator: "\n\n")
 
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Allow for This Session")
-        alert.addButton(withTitle: "Deny")
+        alert.addButton(withTitle: L10n.string("Allow"))
+        alert.addButton(withTitle: L10n.string("Allow for This Session"))
+        alert.addButton(withTitle: L10n.string("Deny"))
 
         // An edit is approved on what it changes, not merely which file — so the sheet shows
         // the diff, the same one the conversation will. Other tools keep to the path or
