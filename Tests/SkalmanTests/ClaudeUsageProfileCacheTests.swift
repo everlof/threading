@@ -13,16 +13,17 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
     private var readAt: Date { Date(timeIntervalSince1970: Self.observedAtMs / 1000) }
 
     private var configDirectory: URL!
+    private var homeDirectory: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        configDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("claude-profile-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        configDirectory = try makeDirectory(named: "claude-profile")
+        homeDirectory = try makeDirectory(named: "claude-home")
     }
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: configDirectory)
+        try? FileManager.default.removeItem(at: homeDirectory)
         try super.tearDownWithError()
     }
 
@@ -33,7 +34,7 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
     func testReadsAccountWindowsAndTheScopedModelWindow() throws {
         try write(profile(fetchedAtMs: Self.observedAtMs))
 
-        let usage = try XCTUnwrap(ClaudeUsageProfileCache.read(account: account()))
+        let usage = try XCTUnwrap(read(account: account()))
 
         XCTAssertEqual(usage.windows.map(\.id), ["5h", "7d"])
         XCTAssertEqual(try XCTUnwrap(usage.windows.first?.fraction), 0.07, accuracy: 0.0001)
@@ -52,7 +53,7 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
     func testScopedWindowDoesNotBecomeTheAccountsPeak() throws {
         try write(profile(fetchedAtMs: Self.observedAtMs))
 
-        let usage = try XCTUnwrap(ClaudeUsageProfileCache.read(account: account()))
+        let usage = try XCTUnwrap(read(account: account()))
 
         XCTAssertEqual(usage.peakWindow(at: readAt)?.id, "7d")
     }
@@ -76,7 +77,7 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
         }
         """)
 
-        let usage = try XCTUnwrap(ClaudeUsageProfileCache.read(account: account()))
+        let usage = try XCTUnwrap(read(account: account()))
         XCTAssertTrue(usage.modelWindows.isEmpty)
     }
 
@@ -85,21 +86,57 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
         let ahead = (Date().timeIntervalSince1970 + 3600) * 1000
         try write(profile(fetchedAtMs: ahead))
 
-        XCTAssertNil(ClaudeUsageProfileCache.read(account: account()))
+        XCTAssertNil(read(account: account()))
     }
 
     /// Every absent-source failure means one thing to the caller: no reading from here.
     func testMissingFileReadsAsNoSnapshot() {
-        XCTAssertNil(ClaudeUsageProfileCache.read(account: account()))
+        XCTAssertNil(read(account: account()))
     }
 
     func testProfileWithoutUsageReadsAsNoSnapshot() throws {
         try write(#"{"userID": "abc", "projects": {}}"#)
 
-        XCTAssertNil(ClaudeUsageProfileCache.read(account: account()))
+        XCTAssertNil(read(account: account()))
+    }
+
+    /// The default login's config directory is `~/.claude`, but the file the CLI writes is
+    /// `~/.claude.json` — one level up. Reading only under the config directory is how the
+    /// default account lost its scoped window while every alternate login kept theirs.
+    func testDefaultAccountReadsTheProfileInTheHomeDirectory() throws {
+        try write(profile(fetchedAtMs: Self.observedAtMs), to: homeDirectory)
+
+        let usage = try XCTUnwrap(read(account: defaultAccount()))
+
+        XCTAssertEqual(usage.modelWindows.map(\.id), ["Fable"])
+        XCTAssertEqual(usage.windows.map(\.id), ["5h", "7d"])
+    }
+
+    /// Both places are read because the CLI has been moving the file; the later stamp is the
+    /// one it is writing now, and a leftover under the config directory must not win.
+    func testTheNewerOfTheTwoProfilesWins() throws {
+        try write(profile(fetchedAtMs: Self.observedAtMs - 86_400_000, percent: 12), to: configDirectory)
+        try write(profile(fetchedAtMs: Self.observedAtMs), to: homeDirectory)
+
+        let usage = try XCTUnwrap(read(account: defaultAccount()))
+
+        XCTAssertEqual(try XCTUnwrap(usage.modelWindows.first?.fraction), 0.89, accuracy: 0.0001)
+    }
+
+    /// An alternate login keeps its own `.claude.json` under `CLAUDE_CONFIG_DIR`. The home file
+    /// belongs to the default login, and reporting its windows here would name another
+    /// account's usage.
+    func testAlternateAccountIgnoresTheHomeProfile() throws {
+        try write(profile(fetchedAtMs: Self.observedAtMs), to: homeDirectory)
+
+        XCTAssertNil(read(account: account()))
     }
 
     // MARK: - Helpers
+
+    private func read(account: AgentAccount) -> AccountUsage? {
+        ClaudeUsageProfileCache.read(account: account, home: homeDirectory)
+    }
 
     private func account() -> AgentAccount {
         AgentAccount(
@@ -109,15 +146,30 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
         )
     }
 
-    private func write(_ json: String) throws {
+    private func defaultAccount() -> AgentAccount {
+        AgentAccount(
+            provider: .claude,
+            handle: .standard,
+            configPath: configDirectory.path
+        )
+    }
+
+    private func makeDirectory(named name: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(name)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func write(_ json: String, to directory: URL? = nil) throws {
         try json.write(
-            to: configDirectory.appendingPathComponent(".claude.json"),
+            to: (directory ?? configDirectory).appendingPathComponent(".claude.json"),
             atomically: true,
             encoding: .utf8
         )
     }
 
-    private func profile(fetchedAtMs: Double) -> String {
+    private func profile(fetchedAtMs: Double, percent: Int = 89) -> String {
         """
         {
           "userID": "abc",
@@ -137,7 +189,7 @@ final class ClaudeUsageProfileCacheTests: XCTestCase {
                   "resets_at": "2026-07-28T09:59:59.820119+00:00", "scope": null
                 },
                 {
-                  "kind": "weekly_scoped", "group": "weekly", "percent": 89,
+                  "kind": "weekly_scoped", "group": "weekly", "percent": \(percent),
                   "resets_at": "2026-07-28T09:59:59.820666+00:00",
                   "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}
                 }

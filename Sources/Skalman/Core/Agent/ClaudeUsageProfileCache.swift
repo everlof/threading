@@ -2,8 +2,9 @@ import Foundation
 
 // MARK: - Wire Types
 
-/// `<config>/.claude.json` → `cachedUsageUtilization`: the CLI's own copy of the last usage
-/// reading it took from the API, kept beside the rest of its per-account state.
+/// `.claude.json` → `cachedUsageUtilization`: the CLI's own copy of the last usage reading it
+/// took from the API, kept beside the rest of its per-account state. Which `.claude.json` is
+/// `profileURLs(for:home:)`, and it is not always the one under the config directory.
 private struct ClaudeProfileFile: Decodable {
     let cachedUsageUtilization: CachedUsage?
 
@@ -74,10 +75,37 @@ enum ClaudeUsageProfileCache {
 
     // MARK: - Public Methods
 
-    static func read(account: AgentAccount) -> AccountUsage? {
-        let url = URL(fileURLWithPath: account.configPath)
-            .appendingPathComponent(ClaudeUsageProfileDefaults.fileName)
+    static func read(
+        account: AgentAccount,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> AccountUsage? {
+        profileURLs(for: account, home: home)
+            .compactMap(read(fileAt:))
+            .max { $0.observedAt < $1.observedAt }
+    }
 
+    // MARK: - Private Methods
+
+    /// Where this account's profile file can be, newest reading winning.
+    ///
+    /// An alternate login is launched with `CLAUDE_CONFIG_DIR` pointed at its directory and
+    /// keeps its `.claude.json` inside it. The **default** login does not: its config directory
+    /// is `~/.claude`, but the file the CLI actually writes is `~/.claude.json`, one level up in
+    /// the home directory — so reading only under `configPath` finds either nothing or a
+    /// leftover stub, and the account loses exactly the windows this file alone carries. The
+    /// symptom is a default account showing its 5-hour and weekly bars, from the fresher
+    /// sources, and no scoped one beside them.
+    ///
+    /// Both places are read rather than one chosen, because the CLI has been moving this file:
+    /// whichever it is writing now is the one with the later stamp, and that is the one taken.
+    private static func profileURLs(for account: AgentAccount, home: URL) -> [URL] {
+        var urls = [URL(fileURLWithPath: account.configPath)]
+        if account.isDefault { urls.append(home) }
+
+        return urls.map { $0.appendingPathComponent(ClaudeUsageProfileDefaults.fileName) }
+    }
+
+    private static func read(fileAt url: URL) -> AccountUsage? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? Int,
               size <= ClaudeUsageProfileDefaults.maxProfileBytes,
@@ -125,8 +153,6 @@ enum ClaudeUsageProfileCache {
         usage.modelWindows = modelWindows
         return usage
     }
-
-    // MARK: - Private Methods
 
     /// The limits that belong to one model rather than to the plan.
     ///
