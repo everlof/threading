@@ -129,6 +129,21 @@ being the palette already. `TerminalBackgroundHarmonyTests` pins the three guara
 A live app-theme switch is a terminal-theme switch for any session following it, which is why
 `AgentSessionViewController` observes `AppThemeDidChange` alongside the assignment events.
 
+**The palette is only half of it: the program has to be *told* what it is drawing on.** Claude
+Code ships `"theme": "auto"`, which is not "follow macOS" — it sends `OSC 11 ; ? ST`, reads the
+background out of the reply, and assumes a **dark** terminal when nothing answers. SwiftTerm
+answered nothing (see [`dependencies.md`](dependencies.md) for the off-by-one that swallowed
+every OSC 11), so on a light theme the agent drew its dark palette: a diff's unchanged lines
+arrived as near-white text on Bauhaus's paper, invisible, while its changed lines carried
+Claude's own near-black washes — which the harmony transform then correctly left alone, because
+holding lightness is exactly what keeps a program's chosen contrast intact. Nothing in the app's
+own rendering was wrong; the terminal had simply never said what colour it was.
+
+`TerminalSession.applyProfile` runs before the child launches, so the answer is the session's own
+palette rather than SwiftTerm's default black. The question is asked **once, at startup**: a theme
+switched under a running agent does not reach it (Claude's `/theme` does), and Claude subscribes to
+no live colour-scheme notification — it parses `CSI ? 997 ; 1|2 n` but never enables the mode.
+
 ## A theme states a typeface
 
 `AppTheme.Material.typeface` is the other half of a style brief. The styles these themes come

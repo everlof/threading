@@ -40,6 +40,20 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     to read back, since it only writes the delta otherwise). Control-arrow keeps its own branch
     in `keyDown` and its xterm `CSI 1;5D`/`CSI 1;5C` form. `TerminalOptionWordKeyTests` pins each
     sequence, the unmodified keys beside them, and the composition the switch exists to protect.
+  - **Answering "what colour are you?" is ours.** `OSC 10/11/12` take a list of colours, and
+    upstream's `oscSetColors` read its `startAt` offset as an *index into the parameters*: OSC
+    11's single parameter sits at index 0, the loop began at 1, and the whole sequence was
+    dropped — no reply to `OSC 11 ; ? ST`, and no way for a program to set the background
+    either. Only OSC 10 worked, because there the two numbers coincide. This matters because
+    **Claude Code's default `"theme": "auto"` is not "follow macOS"** — it asks the terminal
+    for its background and falls back to its *dark* palette when nothing answers. So every
+    agent in every session painted dark-theme ink: on a light terminal theme (Bauhaus is paper)
+    a diff's unchanged lines came through as near-white text on cream. The offset is now
+    applied to the colour *slot*, each further parameter names the next colour along, and a
+    query is answered with the code for the colour it asked about — 10, 11 or 12, where the
+    cursor's reply used to claim to be 11. `TerminalColorQueryTests` pins the bytes on both
+    sides. An agent asks once, at startup, so a theme switched under a *running* session does
+    not reach it; Claude's own `/theme` does.
   - **Still unclaimed, and dead the same way:** `deleteToBeginningOfLine:` (Cmd-Delete). Option
     with *forward* delete never reaches `doCommand(by:)` at all — `NSDeleteFunctionKey` carries
     `.function`, so `keyDown`'s function branch answers it first and sends plain forward-delete,

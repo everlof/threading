@@ -1845,48 +1845,50 @@ open class Terminal {
     // if more parameters are provided (ie, sending OSC 10 with #ffffff,#000000,#ff0000
     // sets the foreground to #ffffff, background to #000000 and cursor to ff0000
     //
-    // - Parameter startAt: describes which of the colors is the first to try,
-    // startAt = 0 is foreground, startAt = 1 is background, startAt = 2 is
-    // the cursor Color
+    // A parameter of "?" asks rather than sets, and is answered on the wire with the OSC code
+    // for the color it named: 10 foreground, 11 background, 12 cursor.
+    //
+    // - Parameter startAt: which color the *first* parameter names — 0 foreground (OSC 10),
+    // 1 background (OSC 11), 2 cursor (OSC 12). Each further parameter names the next color
+    // along, which is why this is an offset rather than an index into the parameters: read as
+    // an index, OSC 11's single parameter sits at 0 and the loop starting at 1 never ran. Every
+    // `OSC 11 ; ? ST` therefore went unanswered — and a program that asks what colour the
+    // terminal is and hears nothing assumes a dark one, which is how a light palette ended up
+    // wearing an agent's dark-theme ink.
     func oscSetColors (_ data: ArraySlice<UInt8>, startAt: Int)
     {
         let groups = data.split(separator: UInt8 (ascii: ";"))
-        var next = startAt
-        while next < groups.count {
-            defer { next += 1 }
-            let text = groups [next]
-            
+
+        for (offset, text) in groups.enumerated() {
+            let slot = startAt + offset
+            guard slot <= 2 else { break }
+
             if text.first == UInt8 (ascii: "?") {
-                switch next {
+                switch slot {
                 case 0:
                     reportColor (oscCode: 10, color: foregroundColor)
                 case 1:
                     reportColor (oscCode: 11, color: backgroundColor)
-                case 2:
-                    reportColor (oscCode: 11, color: cursorColor ?? foregroundColor)
                 default:
-                    break
+                    reportColor (oscCode: 12, color: cursorColor ?? foregroundColor)
                 }
-                
+
                 continue
             }
 
             guard let color = Color.parseColor(text) else {
                 continue
             }
-            switch next {
+            switch slot {
             case 0:
                 foregroundColor = color
                 tdel?.setForegroundColor(source: self, color: color)
             case 1:
                 backgroundColor = color
                 tdel?.setBackgroundColor(source: self, color: color)
-            case 2:
+            default:
                 cursorColor = color
                 tdel?.setCursorColor(source: self, color: color)
-                break
-            default:
-                break
             }
         }
     }
