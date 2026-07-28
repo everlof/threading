@@ -777,6 +777,19 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             send (EscapeSequences.emacsBack)
         case #selector(moveToRightEndOfLine(_:)):
             send (EscapeSequences.emacsForward)
+        // The Option-word keys, for hosts that leave `optionAsMetaKey` off so the Option key can
+        // still compose characters (`~`, `|`, `\` on most non-US layouts). The meta branch in
+        // `keyDown` special-cases the arrows into these same sequences, but it is all-or-nothing:
+        // switching it off to keep composition working also silently dropped word editing,
+        // because AppKit resolves these keys to `moveWordLeft:`, `moveWordRight:` and
+        // `deleteWordBackward:`, and nothing below claimed them. That is the entire keypress
+        // lost — not a sequence the program misreads.
+        case #selector(moveWordLeft(_:)):
+            send (EscapeSequences.emacsBack)
+        case #selector(moveWordRight(_:)):
+            send (EscapeSequences.emacsForward)
+        case #selector(deleteWordBackward(_:)):
+            send (EscapeSequences.emacsBackwardKillWord)
         default:
             print ("Unhandle selector \(selector)")
         }

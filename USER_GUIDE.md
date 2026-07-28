@@ -1360,6 +1360,20 @@ recorded about it dying — is what a crash needs explaining.
 | Minimize | Cmd+M |
 | Settings (opens, and closes again) | Cmd+, |
 
+### In the terminal
+
+Not app commands — these are keys the terminal forwards to whatever is running in it, so what
+they do is up to that program. A shell, Claude Code and Codex all read them as word motion.
+
+| Action | Shortcut |
+|--------|----------|
+| Move a word left / right | Option+Left / Option+Right |
+| The same, in xterm's modifier form | Ctrl+Left / Ctrl+Right |
+| Delete the word behind the caret | Option+Delete |
+
+Option is otherwise left to the keyboard layout rather than claimed as a Meta key, so
+`~ | \ @ { }` and the rest still compose normally on a non-US layout.
+
 ### Changing shortcuts
 
 **Settings ▸ Keyboard** lists every command and the keys it answers to. Click a shortcut and

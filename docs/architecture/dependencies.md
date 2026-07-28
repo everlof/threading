@@ -28,6 +28,22 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets
     `Terminal.userScrolling`, so output repaints do not pull the viewport back to the bottom.
+  - **The Option-word keys are ours.** `TerminalSession` sets `optionAsMetaKey = false` so
+    Option still composes `~ | \ @` on non-US layouts. Upstream's meta branch is also the only
+    place that turned Option-arrow into word motion, so that one switch silently dropped the
+    whole family: AppKit resolves them to `moveWordLeft:`, `moveWordRight:` and
+    `deleteWordBackward:`, which `doCommand(by:)` did not claim, and the entire keypress was
+    lost — not a sequence the agent misread, nothing on the PTY at all. Those selectors now send
+    `ESC b` / `ESC f` / `ESC DEL`: readline's `backward-word`, `forward-word` and
+    `backward-kill-word`, bound by default in both zsh and bash, and all three honoured by
+    Claude Code (measured by driving its TUI through a pty — the delete needed a forced repaint
+    to read back, since it only writes the delta otherwise). Control-arrow keeps its own branch
+    in `keyDown` and its xterm `CSI 1;5D`/`CSI 1;5C` form. `TerminalOptionWordKeyTests` pins each
+    sequence, the unmodified keys beside them, and the composition the switch exists to protect.
+  - **Still unclaimed, and dead the same way:** `deleteToBeginningOfLine:` (Cmd-Delete). Option
+    with *forward* delete never reaches `doCommand(by:)` at all — `NSDeleteFunctionKey` carries
+    `.function`, so `keyDown`'s function branch answers it first and sends plain forward-delete,
+    dropping the modifier. Fixing that one means touching that branch, not this switch.
 
 - **ThinkingOrbs** (local fork): the dotted "working" thought-orb drawn beside the
   conversation status while a turn is in flight.

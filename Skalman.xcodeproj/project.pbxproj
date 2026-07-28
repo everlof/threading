@@ -129,6 +129,7 @@
 		A52B74E670BED3A8726FD434 /* ClaudeUsageProfileCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */; };
 		F483175C586526FED24CC27D /* TerminalBackgroundHarmonyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F99CD85F35AFCADB232985 /* TerminalBackgroundHarmonyTests.swift */; };
 		C3E6495290BBC2438F57A735 /* RemoteScreenSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */; };
+		A812E6D66B3C9E8D16E1B2E0 /* TerminalOptionWordKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -303,6 +304,7 @@
 		8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeUsageProfileCacheTests.swift; sourceTree = "<group>"; };
 		66F99CD85F35AFCADB232985 /* TerminalBackgroundHarmonyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalBackgroundHarmonyTests.swift; sourceTree = "<group>"; };
 		660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteScreenSeedTests.swift; sourceTree = "<group>"; };
+		F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalOptionWordKeyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -531,6 +533,7 @@
 				8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */,
 				66F99CD85F35AFCADB232985 /* TerminalBackgroundHarmonyTests.swift */,
 				660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */,
+				F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -1008,6 +1011,7 @@
 				A52B74E670BED3A8726FD434 /* ClaudeUsageProfileCacheTests.swift in Sources */,
 				F483175C586526FED24CC27D /* TerminalBackgroundHarmonyTests.swift in Sources */,
 				C3E6495290BBC2438F57A735 /* RemoteScreenSeedTests.swift in Sources */,
+				A812E6D66B3C9E8D16E1B2E0 /* TerminalOptionWordKeyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
