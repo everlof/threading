@@ -133,6 +133,30 @@ enum GitReviewReader {
         }
     }
 
+    /// One file's bytes at a request's two endpoints, for the image rows: the old side from
+    /// the revision the diff measured from, the new side from what it measured to.
+    ///
+    /// A side git does not hold at its endpoint comes back nil rather than failing the pair —
+    /// that is exactly what an added, deleted, or untracked file looks like. A renamed binary
+    /// is the accepted gap: the parser collapses it to `.binary` under its *new* path, so the
+    /// old side reads as missing and the pair presents as added.
+    static func endpointFilePair(
+        path: String,
+        request: DiffRequest,
+        in root: URL,
+        completion: @escaping @MainActor (Result<GitEndpointFilePair, Failure>) -> Void
+    ) {
+        perform(completion) {
+            let (old, new) = try endpoints(for: request, in: root)
+            return GitEndpointFilePair(
+                old: bytes(at: old, path: path, in: root),
+                new: bytes(at: new, path: path, in: root),
+                oldTitle: old.title,
+                newTitle: new.title
+            )
+        }
+    }
+
     /// The uncommitted totals for the floating status card: numstat against HEAD plus
     /// untracked line counts, without producing a single hunk. Completion arrives on main.
     static func uncommittedSummary(
@@ -271,6 +295,75 @@ enum GitReviewReader {
         case .commit(let hash):
             return try run(GitReviewCommands.show(hash, ignoringWhitespace: ws), in: root)
         }
+    }
+
+    // MARK: - Endpoints
+
+    /// Where one side of a request's diff lives: a revision `git show` can address, or the
+    /// working tree itself.
+    private enum Endpoint {
+        case revision(String, title: String)
+        case worktree
+
+        var title: String {
+            switch self {
+            case .revision(_, let title): return title
+            case .worktree: return "Working Tree"
+            }
+        }
+    }
+
+    /// The two endpoints each request measures between — the same pairs `trackedDiffData`'s
+    /// commands imply, stated as addresses a single file can be read from.
+    private static func endpoints(for request: DiffRequest, in root: URL) throws -> (Endpoint, Endpoint) {
+        switch request {
+        case .staged:
+            return (.revision(GitReviewCommands.head, title: "HEAD"), .revision(":0", title: "Index"))
+        case .unstaged:
+            return (.revision(":0", title: "Index"), .worktree)
+        case .uncommitted:
+            return (.revision(GitReviewCommands.head, title: "HEAD"), .worktree)
+        case .branch:
+            let base = try defaultBranch(in: root)
+            let mergeBase = decodeTrimmed(try run(GitReviewCommands.mergeBase(base), in: root))
+            return (.revision(mergeBase, title: "Merge Base"), .worktree)
+        case .lastTurn(let baseline):
+            guard commitExists(baseline.snapshotHash, in: root) else { throw Failure.baselineExpired }
+            return (.revision(baseline.snapshotHash, title: "Turn Start"), .worktree)
+        case .commit(let hash):
+            let short = String(hash.prefix(7))
+            return (.revision(hash + "^", title: "\(short)^"), .revision(hash, title: short))
+        }
+    }
+
+    private static func bytes(at endpoint: Endpoint, path: String, in root: URL) -> Data? {
+        switch endpoint {
+        case .revision(let revision, _):
+            return try? run(GitReviewCommands.showBlob(revision: revision, path: path), in: root)
+        case .worktree:
+            return worktreeBytes(path: path, in: root)
+        }
+    }
+
+    /// The same containment discipline as `repositoryFile` — resolve symlinks, prove the root
+    /// prefix, require a regular file — without the ls-files membership check, because the
+    /// paths here come from git's own diff output rather than from a remote request.
+    private static func worktreeBytes(path: String, in root: URL) -> Data? {
+        let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = resolvedRoot
+            .appendingPathComponent(path)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let rootPrefix = resolvedRoot.path.hasSuffix("/")
+            ? resolvedRoot.path
+            : resolvedRoot.path + "/"
+        guard candidate.path.hasPrefix(rootPrefix),
+              let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true,
+              (values.fileSize ?? 0) <= GitReviewDefaults.maximumDiffBytes else {
+            return nil
+        }
+        return try? Data(contentsOf: candidate, options: .mappedIfSafe)
     }
 
     /// The ref the Branch mode measures from: origin's HEAD when known, else the first

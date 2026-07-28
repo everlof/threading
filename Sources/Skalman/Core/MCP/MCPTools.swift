@@ -12,6 +12,32 @@ struct DisplayHTMLArguments: Decodable {
     let title: String?
 }
 
+struct DisplayCompareFilesArguments: Decodable {
+    let oldPath: String?
+    let newPath: String?
+    let oldTitle: String?
+    let newTitle: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case oldPath = "old_path"
+        case newPath = "new_path"
+        case oldTitle = "old_title"
+        case newTitle = "new_title"
+    }
+
+    init(
+        oldPath: String? = nil,
+        newPath: String? = nil,
+        oldTitle: String? = nil,
+        newTitle: String? = nil
+    ) {
+        self.oldPath = oldPath
+        self.newPath = newPath
+        self.oldTitle = oldTitle
+        self.newTitle = newTitle
+    }
+}
+
 struct BrowserNavigateArguments: Decodable {
     let url: String?
     let waitUntil: String?
@@ -649,6 +675,7 @@ struct ExtensionProposeInstallArguments: Decodable {
 enum MCPToolCall {
     case displayImage(DisplayImageArguments)
     case displayHTML(DisplayHTMLArguments)
+    case displayCompareFiles(DisplayCompareFilesArguments)
     case browserNavigate(BrowserNavigateArguments)
     case browserHistory(BrowserHistoryArguments)
     case browserStop(EmptyToolArguments)
@@ -706,6 +733,7 @@ enum MCPToolCall {
         switch self {
         case .displayImage: return MCPTools.displayImage
         case .displayHTML: return MCPTools.displayHTML
+        case .displayCompareFiles: return MCPTools.displayCompareFiles
         case .browserNavigate: return MCPTools.browserNavigate
         case .browserHistory: return MCPTools.browserHistory
         case .browserStop: return MCPTools.browserStop
@@ -786,6 +814,11 @@ struct MCPToolCallParameters: Decodable {
             call = .displayHTML(
                 try container.decodeIfPresent(DisplayHTMLArguments.self, forKey: .arguments)
                     ?? DisplayHTMLArguments(html: nil, title: nil)
+            )
+        case MCPTools.displayCompareFiles:
+            call = .displayCompareFiles(
+                try container.decodeIfPresent(DisplayCompareFilesArguments.self, forKey: .arguments)
+                    ?? DisplayCompareFilesArguments()
             )
         case MCPTools.browserNavigate:
             call = .browserNavigate(
@@ -1376,7 +1409,8 @@ enum MCPTools {
 
     static let displayImage = "display_image"
     static let displayHTML = "display_html"
-    static let displayTools = [displayImage, displayHTML]
+    static let displayCompareFiles = "display_compare_files"
+    static let displayTools = [displayImage, displayHTML, displayCompareFiles]
 
     static let browserNavigate = "browser_navigate"
     static let browserHistory = "browser_history"
@@ -1633,6 +1667,45 @@ enum MCPTools {
                     )
                 ],
                 required: ["html"]
+            )
+        ),
+        MCPToolDefinition(
+            name: displayCompareFiles,
+            description: """
+                Compare two files in Skalman's side panel. Two images open an interactive \
+                comparison the user can wipe, crossfade, or difference — use it whenever you \
+                have a before and an after: a UI screenshot against its baseline, a \
+                regenerated asset against the original. Two text files render as a native \
+                diff. What the files are is decided from their bytes, so a mismatched pair \
+                (one image, one text) is refused rather than guessed at. Asking again about \
+                the same pair re-reads the files into the existing tab.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "old_path": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            Path to the before/baseline file. Absolute, or relative to the \
+                            session's project folder.
+                            """
+                    ),
+                    "new_path": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            Path to the after/candidate file. Absolute, or relative to the \
+                            session's project folder.
+                            """
+                    ),
+                    "old_title": MCPPropertySchema(
+                        type: .string,
+                        description: "Optional caption for the old side. Defaults to the file name."
+                    ),
+                    "new_title": MCPPropertySchema(
+                        type: .string,
+                        description: "Optional caption for the new side. Defaults to the file name."
+                    )
+                ],
+                required: ["old_path", "new_path"]
             )
         ),
         MCPToolDefinition(
@@ -2874,7 +2947,8 @@ enum MCPTools {
             name: panelListTabs,
             description: """
                 List the tabs open in this session's display panel — their index, id, kind \
-                (image, document, or browser), title, and which one is active. Use it to see \
+                (image, document, browser, compare, and so on), title, and which one is \
+                active. Use it to see \
                 what you have shown the user and to get a tab's index or id for \
                 panel_activate_tab.
                 """,

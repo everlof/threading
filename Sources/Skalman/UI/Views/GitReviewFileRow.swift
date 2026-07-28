@@ -31,6 +31,25 @@ final class GitReviewFileRow: NSView {
     /// One hunk, by its index into `file.hunks`.
     var onStageHunk: ((Int) -> Void)?
 
+    /// Fetches the file's bytes at the mode's two endpoints, for an image row's body. Wired by
+    /// the pane, which knows the mode and the checkout; the row only knows it has a picture.
+    /// Completion arrives on main.
+    ///
+    /// A row restored expanded builds its body during `init`, before the pane has wired this —
+    /// the assignment kicks the fetch that was waiting on it.
+    var imagePairProvider: (
+        (GitFileDiff, @escaping (Result<GitEndpointFilePair, GitFailure>) -> Void) -> Void
+    )? {
+        didSet {
+            guard awaitsImagePairProvider, imagePairProvider != nil else { return }
+            awaitsImagePairProvider = false
+            fetchImagePair()
+        }
+    }
+
+    private weak var imageLoadingNote: NSView?
+    private var awaitsImagePairProvider = false
+
     private var chevron: NSImageView!
     private var headerBottom: NSLayoutConstraint!
     private var bodyBottom: NSLayoutConstraint!
@@ -42,7 +61,25 @@ final class GitReviewFileRow: NSView {
     private var isExpanded = false
 
     private var canExpand: Bool {
-        !file.hunks.isEmpty
+        !file.hunks.isEmpty || isImageComparison
+    }
+
+    /// Extensions the compare surface decodes — raster formats. SVG stays out on purpose: it
+    /// is text, and its diff says more than a render of it would.
+    private static let rasterImageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tiff", "tif", "bmp", "icns"
+    ]
+
+    /// A binary change whose path says raster image — including an untracked one, which the
+    /// synthesis left hunkless whether it was sniffed binary or merely over the text cap.
+    private var isImageComparison: Bool {
+        guard file.hunks.isEmpty else { return false }
+        switch file.change {
+        case .binary, .untracked: break
+        default: return false
+        }
+        let ext = (file.path as NSString).pathExtension.lowercased()
+        return Self.rasterImageExtensions.contains(ext)
     }
 
     // MARK: - Initialization
@@ -225,6 +262,11 @@ final class GitReviewFileRow: NSView {
     private func buildBody() {
         bodyBuilt = true
 
+        if isImageComparison {
+            buildImageBody()
+            return
+        }
+
         var remaining = GitReviewDefaults.fileDisplayCap
         var skipped = 0
 
@@ -244,6 +286,54 @@ final class GitReviewFileRow: NSView {
 
         if skipped > 0 {
             addBodyRow(makeNote("… \(skipped) more lines in later hunks"))
+        }
+    }
+
+    /// The compare surface, fed with the file's bytes at the mode's two endpoints. Fetched on
+    /// first expand only — the same lazy discipline as the text bodies, and blob reads are
+    /// exactly the cost the collapse pattern exists to avoid.
+    private func buildImageBody() {
+        let loading = makeNote("Loading images…")
+        imageLoadingNote = loading
+        addBodyRow(loading)
+
+        if imagePairProvider == nil {
+            awaitsImagePairProvider = true
+        } else {
+            fetchImagePair()
+        }
+    }
+
+    private func fetchImagePair() {
+        guard let imagePairProvider else { return }
+        imagePairProvider(file) { [weak self] result in
+            guard let self else { return }
+            self.imageLoadingNote?.removeFromSuperview()
+
+            switch result {
+            case .failure(let failure):
+                self.addBodyRow(self.makeNote(failure.localizedDescription))
+            case .success(let pair):
+                let old = pair.old.flatMap(NSImage.init(data:))
+                let new = pair.new.flatMap(NSImage.init(data:))
+                guard old != nil || new != nil else {
+                    self.addBodyRow(self.makeNote("The image could not be read at either end."))
+                    return
+                }
+                let compare = ImageCompareView(frame: .zero)
+                compare.translatesAutoresizingMaskIntoConstraints = false
+                compare.configure(
+                    old: old.map { .init(image: $0, title: pair.oldTitle) },
+                    new: new.map { .init(image: $0, title: pair.newTitle) }
+                )
+                self.addBodyRow(compare)
+                // The stack gives the body width but no height; the surface states the fitted
+                // height at the width the row has now, capped like any long file.
+                let width = max(self.bounds.width - Design.Spacing.medium * 2, 240)
+                compare.heightAnchor.constraint(
+                    equalToConstant: compare.preferredHeight(forWidth: width)
+                ).isActive = true
+            }
         }
     }
 
@@ -432,6 +522,12 @@ final class GitReviewFileRow: NSView {
     /// `+A −R` with each count in its own colour, or what stands in for a body that cannot
     /// be shown.
     private var metaText: NSAttributedString {
+        if isImageComparison {
+            return NSAttributedString(string: "image", attributes: [
+                .foregroundColor: Design.Text.tertiary,
+                .font: Design.Typography.caption()
+            ])
+        }
         if file.change == .binary {
             return NSAttributedString(string: "binary", attributes: [
                 .foregroundColor: Design.Text.tertiary,

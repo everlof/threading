@@ -1858,6 +1858,8 @@ final class ThemedControlTests: XCTestCase {
                 "BackdropThemedControl",
                 "ChipView",
                 "FileActivityMapView",
+                "ImageCompareCanvas",
+                "ImageCompareView",
                 "MorphingTitleLabel",
                 "PaneFooterView",
                 "PromptView",

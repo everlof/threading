@@ -47,6 +47,7 @@ final class DisplayTab {
         case files(FileTreeViewController)
         case attachments(SessionAttachmentsViewController)
         case extensionPanel(ExtensionPanelViewController)
+        case compare(CompareViewController)
     }
 
     let id: UUID
@@ -101,6 +102,11 @@ final class DisplayTab {
         return nil
     }
 
+    var compare: CompareViewController? {
+        if case .compare(let compare) = body { return compare }
+        return nil
+    }
+
     /// The tab's view controller, when its body is a live surface rather than rendered content.
     var hostedController: NSViewController? {
         switch body {
@@ -112,6 +118,7 @@ final class DisplayTab {
         case .files(let files): return files
         case .attachments(let attachments): return attachments
         case .extensionPanel(let panel): return panel
+        case .compare(let compare): return compare
         }
     }
 
@@ -135,6 +142,8 @@ final class DisplayTab {
             return "paperclip"
         case .extensionPanel:
             return "puzzlepiece.extension"
+        case .compare:
+            return "rectangle.on.rectangle"
         }
     }
 
@@ -162,6 +171,8 @@ final class DisplayTab {
             return "Attachments"
         case .extensionPanel(let panel):
             return panel.panelTitle
+        case .compare:
+            return "Compare"
         }
     }
 }
@@ -368,6 +379,9 @@ final class DisplayPaneController: NSViewController {
             }),
             ("Review", "plus.forwardslash.minus", true, {
                 [weak self] in _ = self?.activateReview(for: sessionID)
+            }),
+            ("Compare Files…", "rectangle.on.rectangle", true, {
+                [weak self] in self?.chooseFilesToCompare(for: sessionID)
             }),
             ("Info", "info.circle", true, {
                 [weak self] in _ = self?.activateInfo(for: sessionID)
@@ -820,6 +834,8 @@ final class DisplayPaneController: NSViewController {
 
         activeTab(for: sessionID)?.review?.refresh(force: false)
         activeTab(for: sessionID)?.info?.refresh()
+        // A comparison on screen through a turn is probably of files the turn was rewriting.
+        activeTab(for: sessionID)?.compare?.refresh(force: true)
     }
 
     // MARK: - Public — Info Tab
@@ -867,6 +883,96 @@ final class DisplayPaneController: NSViewController {
             self?.activateBrowser(for: sessionID).navigate(to: url.absoluteString)
         }
 
+        return controller
+    }
+
+    // MARK: - Public — Compare Tab
+
+    /// Shows a comparison of two files, reusing the tab already holding this pair — the agent
+    /// asking again about the same pair most likely just rewrote one side, so the reuse also
+    /// re-reads.
+    @discardableResult
+    func addCompareTab(
+        for sessionID: SessionID,
+        oldPath: String,
+        newPath: String,
+        oldTitle: String? = nil,
+        newTitle: String? = nil
+    ) -> CompareViewController {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+
+        if let existing = tabs.first(where: {
+            $0.compare?.oldPath == oldPath && $0.compare?.newPath == newPath
+        }), let compare = existing.compare {
+            compare.refresh(force: true)
+            activeTabIDBySession[sessionID] = existing.id
+            persist(sessionID)
+            if sessionID == currentSessionID { render() }
+            return compare
+        }
+
+        let controller = makeCompare(
+            for: sessionID,
+            oldPath: oldPath,
+            newPath: newPath,
+            oldTitle: oldTitle,
+            newTitle: newTitle,
+            mode: .wipeHorizontal
+        )
+        let tab = DisplayTab(body: .compare(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+        persist(sessionID)
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// The `+` menu's route in: the system open panel, two files. The first chosen is the old
+    /// side — the panel cannot say which is which, and the compare surface's tags make any
+    /// mistake visible immediately.
+    private func chooseFilesToCompare(for sessionID: SessionID) {
+        let panel = NSOpenPanel()
+        panel.message = "Choose two files to compare"
+        panel.prompt = "Compare"
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        guard let window = view.window else { return }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, panel.urls.count == 2 else { return }
+            _ = self?.addCompareTab(
+                for: sessionID,
+                oldPath: panel.urls[0].path,
+                newPath: panel.urls[1].path
+            )
+        }
+    }
+
+    /// Builds a compare view controller, wired to persist its mode. No project guard: the pair
+    /// is absolute paths, and a session with no project can still be shown a comparison.
+    private func makeCompare(
+        for sessionID: SessionID,
+        oldPath: String,
+        newPath: String,
+        oldTitle: String?,
+        newTitle: String?,
+        mode: ImageCompareMode
+    ) -> CompareViewController {
+        let controller = CompareViewController(
+            sessionID: sessionID,
+            oldPath: oldPath,
+            newPath: newPath,
+            oldTitle: oldTitle,
+            newTitle: newTitle,
+            mode: mode
+        )
+        addChild(controller)
+        controller.onChange = { [weak self] in self?.persist(sessionID) }
+        controller.onLoadingChange = { [weak self] isLoading in
+            self?.onReviewLoadingChange?(sessionID, isLoading)
+        }
         return controller
     }
 
@@ -1231,6 +1337,16 @@ final class DisplayPaneController: NSViewController {
             // Loads only when actually shown, the same deferred rule as the browser's page.
             review.refresh(force: false)
 
+        case .compare(let compare):
+            imageView.image = nil
+            imageView.isHidden = true
+            hideHTML()
+            captionLabel.isHidden = true
+            contentMenuButton.isHidden = true
+            installHosted(compare)
+            // The same deferred rule: a restored comparison reads its two files when looked at.
+            compare.refresh(force: false)
+
         case .info(let info):
             imageView.image = nil
             imageView.isHidden = true
@@ -1406,6 +1522,20 @@ final class DisplayPaneController: NSViewController {
                     for: sessionID
                 )
                 tabs.append(DisplayTab(id: id, body: .extensionPanel(controller)))
+
+            case .compare:
+                // Restored in its saved mode; neither file is read until the tab is shown.
+                guard let oldPath = persisted.compareOldPath,
+                      let newPath = persisted.compareNewPath else { continue }
+                let controller = makeCompare(
+                    for: sessionID,
+                    oldPath: oldPath,
+                    newPath: newPath,
+                    oldTitle: persisted.compareOldTitle,
+                    newTitle: persisted.compareNewTitle,
+                    mode: persisted.mode.flatMap(ImageCompareMode.init(rawValue:)) ?? .wipeHorizontal
+                )
+                tabs.append(DisplayTab(id: id, body: .compare(controller)))
             }
         }
 
@@ -1498,6 +1628,18 @@ final class DisplayPaneController: NSViewController {
                 cacheFile: nil,
                 extensionIdentifier: panel.extensionIdentifier,
                 extensionPanelID: panel.panelID
+            )
+        }
+
+        if let compare = tab.compare {
+            return PersistedTab(
+                id: tab.id.uuidString, kind: .compare, title: tab.title,
+                subtitle: "", url: nil, html: nil, cacheFile: nil,
+                mode: compare.compareMode.rawValue,
+                compareOldPath: compare.oldPath,
+                compareNewPath: compare.newPath,
+                compareOldTitle: compare.oldTitle,
+                compareNewTitle: compare.newTitle
             )
         }
 

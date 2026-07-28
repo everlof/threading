@@ -1,6 +1,7 @@
 # Dependencies
 
-The three local Swift packages, and the seams in each that are ours.
+The three local Swift packages plus one remote one of ours, and the seams in each that are
+ours.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -95,3 +96,21 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `alignment` all guard on equality). Each rebuilds or repaints every glyph layer, and a
     sidebar row restates all three on every configure — which happens continuously while an
     agent works.
+
+- **NativeDiffKit** (remote, ours): the diff *rendering* — line layout, syntax highlighting,
+  wrapping, sizing — shared between this app's AppKit views and a UIKit sibling.
+  - Location: resolved by SwiftPM (`XCRemoteSwiftPackageReference`), **not** a checkout in
+    this tree; editing it means working in its own repository and bumping the pin.
+  - Upstream: https://github.com/everlof/NativeDiffKit — ours.
+  - `DiffView` (in `UI/Views/`) is the boundary: a thin theme/defaults adapter over
+    `NativeDiffAppKit.DiffAppKitView`, re-resolving its palette on theme and backdrop
+    changes. Git loading, staging and app theming stay in the app; `GitFileDiff` is a
+    typealias for the package's `DiffFile`, and `GitDiffParser.files(fromUnifiedDiff:)`
+    delegates to its `UnifiedDiffParser`.
+  - **One parser trap worth knowing:** `UnifiedDiffParser` checks `isBinary` before the
+    change kind, so a binary add/delete/rename collapses to `.binary` and loses its mode and
+    rename lines — which is why Git Review's image rows cannot tell a renamed binary from an
+    added one.
+  - `ImageCompareView` lives in the app (`UI/Design/`), not the package, for now — hoisting
+    it beside the text renderer is the intended move once its modes settle, and its theme
+    adapter seam was cut to make that mechanical.

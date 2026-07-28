@@ -76,6 +76,8 @@ final class ComponentGalleryViewController: NSViewController {
         "BackdropThemedControl",
         "ChipView",
         "FileActivityMapView",
+        "ImageCompareCanvas",
+        "ImageCompareView",
         "MorphingTitleLabel",
         "PaneFooterView",
         "PromptView",
@@ -737,6 +739,13 @@ final class ComponentGalleryViewController: NSViewController {
             note: "The table, outline, header, scroll, and clip boundaries are real AppKit views.",
             rows: [
                 story(
+                    "ImageCompareView",
+                    "Two renderings of one asset. Drag the seam or arrow-key it, and pick a "
+                        + "mode from the chip — Fade held at the middle is the onion skin, "
+                        + "Difference answers whether anything changed at all.",
+                    makeImageCompareSample()
+                ),
+                story(
                     "ThemedTableView & ThemedTableHeaderView",
                     "Select rows and resize the themed header columns.",
                     tableScroll
@@ -779,7 +788,43 @@ final class ComponentGalleryViewController: NSViewController {
     /// the appearance toggle above shows the difference rather than describing it.
     /// The sidebar footer's shape at the sidebar's width: a titled plain button at the leading
     /// margin, an icon-only twin at the trailing one, both landing their ink on the same inset.
-    private func makePaneFooterSample() -> NSView {
+    /// A before and an after of the same little scene, drawn here so the story needs no asset
+    /// files: the circle moves and changes colour, which gives every mode something to show.
+    private func makeImageCompareSample() -> NSView {
+        func scene(circle: NSColor, at x: CGFloat) -> NSImage {
+            let size = NSSize(width: 260, height: 150)
+            let image = NSImage(size: size)
+            image.lockFocus()
+            Design.Surface.background.setFill()
+            NSRect(origin: .zero, size: size).fill()
+            Design.Text.tertiary.setFill()
+            NSRect(x: 16, y: 118, width: 160, height: 10).fill()
+            NSRect(x: 16, y: 98, width: 120, height: 8).fill()
+            circle.setFill()
+            NSBezierPath(ovalIn: NSRect(x: x, y: 20, width: 60, height: 60)).fill()
+            image.unlockFocus()
+            return image
+        }
+
+        let compare = ImageCompareView(frame: .zero)
+        compare.translatesAutoresizingMaskIntoConstraints = false
+        compare.configure(
+            old: .init(image: scene(circle: Design.Status.negative, at: 40), title: "before.png"),
+            new: .init(image: scene(circle: Design.Surface.accent, at: 120), title: "after.png")
+        )
+        compare.onModeChange = { [weak self] mode in
+            self?.showReceipt("Compare mode: \(ImageCompareView.name(for: mode)).")
+        }
+        NSLayoutConstraint.activate([
+            compare.widthAnchor.constraint(equalToConstant: 520),
+            compare.heightAnchor.constraint(
+                equalToConstant: compare.preferredHeight(forWidth: 520)
+            )
+        ])
+        return compare
+    }
+
+        private func makePaneFooterSample() -> NSView {
         let add = ThemedButton()
         add.title = "Add Project"
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?

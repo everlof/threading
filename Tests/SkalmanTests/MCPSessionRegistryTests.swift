@@ -217,6 +217,31 @@ final class MCPWireTests: XCTestCase {
         XCTAssertEqual(identifiedTab.tab, .identifier(tabID))
     }
 
+    func testCompareFilesArgumentsDecodeTheirSnakeCaseKeys() throws {
+        let compareRequest = try request("""
+            {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+              "name":"display_compare_files","arguments":{
+                "old_path":"/tmp/a.png","new_path":"/tmp/b.png",
+                "old_title":"Baseline","new_title":"Current"
+              }
+            }}
+            """)
+        guard case .toolCall(.displayCompareFiles(let compare)) = compareRequest.parameters else {
+            return XCTFail("Expected typed display_compare_files arguments")
+        }
+        XCTAssertEqual(compare.oldPath, "/tmp/a.png")
+        XCTAssertEqual(compare.newPath, "/tmp/b.png")
+        XCTAssertEqual(compare.oldTitle, "Baseline")
+        XCTAssertEqual(compare.newTitle, "Current")
+
+        // The tool is advertised with the display group, with both paths required.
+        XCTAssertTrue(MCPTools.displayTools.contains(MCPTools.displayCompareFiles))
+        let definition = try XCTUnwrap(
+            MCPTools.definitions.first { $0.name == MCPTools.displayCompareFiles }
+        )
+        XCTAssertEqual(definition.inputSchema.required, ["old_path", "new_path"])
+    }
+
     func testMissingArgumentsRemainToolLevelValidationButWrongTypesAreInvalidParams() throws {
         let missing = try request("""
             {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser_query"}}

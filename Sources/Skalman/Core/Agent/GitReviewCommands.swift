@@ -97,6 +97,23 @@ enum GitReviewCommands {
     static func mergeBase(_ ref: String) -> [String] {
         ["merge-base", ref, head]
     }
+
+    /// Two arbitrary files, no repository required. `--no-index` exits 1 to say the files
+    /// differ, so the runner is told both exits are answers. No `--find-renames`: there are
+    /// exactly two paths, and they are the pair.
+    static func compareFiles(oldPath: String, newPath: String) -> [String] {
+        [
+            "diff", "--no-color", "--no-ext-diff", "--no-textconv",
+            "-U\(GitReviewDefaults.contextLines)", "--no-index", "--", oldPath, newPath
+        ]
+    }
+
+    /// One file's bytes at one revision — `HEAD:path`, `:0:path` for the index, a baseline or
+    /// merge-base hash. The plain `show` builder is not reused because it appends the diff
+    /// flags, which mean nothing to a blob.
+    static func showBlob(revision: String, path: String) -> [String] {
+        ["show", "\(revision):\(path)"]
+    }
 }
 
 // MARK: - Defaults

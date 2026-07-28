@@ -220,6 +220,27 @@ off the bottom honestly. The commit rows lost their fill and gained a hover to m
 it: a rail broken once per row reads as a history that stops and restarts, so the list closes
 its gaps, and a hundred filled slabs was the tool-row problem again anyway.
 
+**An image change opens into a comparison, not a "binary" dead end.** A binary row whose path
+says raster image (`GitReviewFileRow.rasterImageExtensions` — SVG stays out on purpose: it is
+text, and its diff says more than a render of it would) becomes expandable, its meta reads
+"image" instead of "binary", and its body is the design system's `ImageCompareView` (wipe,
+fade, difference, side by side). The bytes come from `GitReviewReader.endpointFilePair`, which
+states each mode's two endpoints as addresses one file can be read from — the same pairs the
+diff commands imply: HEAD→worktree, index→worktree, HEAD→index, merge-base→worktree,
+turn-baseline→worktree, `commit^`→`commit` — and titles the sides accordingly, so the tags over
+the image say *which* two things are compared. A side git does not hold comes back nil rather
+than failing the pair: that is what added, deleted and untracked look like, and half a pair is
+still worth showing. Two accepted gaps, both from the parser's binary collapse
+(`UnifiedDiffParser` checks `isBinary` first, so a binary add/delete/rename loses its mode
+lines): a renamed binary presents as added, and added-vs-deleted cannot be told apart from
+`change` alone. Blob reads follow `repositoryFile`'s containment discipline (symlinks resolved,
+root prefix proved) without its ls-files membership check — these paths come from git's own
+diff output. Fetches happen on first expand only, the same lazy rule as the text bodies, and an
+image row never auto-expands: its line count is zero, and the auto-expand budget is a line
+budget. Untracked images matter twice here — most screenshots exceed the 256 KB synthesis cap,
+so they arrive as `.untracked` with no hunks rather than as sniffed `.binary`, and the row
+treats both the same.
+
 `NSTextField.label(attributed:)` exists because of a bug this work surfaced: a field created
 empty measures itself empty, and assigning `attributedStringValue` afterwards changes what is
 drawn without changing what was measured — so every `+N −M` counter in the pane was laying out

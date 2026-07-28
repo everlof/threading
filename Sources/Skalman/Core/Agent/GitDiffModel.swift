@@ -144,3 +144,13 @@ struct GitTurnBaseline {
     let capturedAt: Date
     let untrackedPaths: Set<String>
 }
+
+/// One file's bytes at a review request's two endpoints, with what each endpoint is called —
+/// what an image row compares. A side the endpoint does not hold (an added, deleted, or
+/// untracked file) is nil rather than an error: half a pair is still worth showing.
+struct GitEndpointFilePair {
+    let old: Data?
+    let new: Data?
+    let oldTitle: String
+    let newTitle: String
+}

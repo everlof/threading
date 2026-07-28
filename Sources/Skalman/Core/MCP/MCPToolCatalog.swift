@@ -75,6 +75,12 @@ enum MCPToolCatalog {
                 title: "Show HTML",
                 detail: "Render an HTML document — tables, charts, diagrams, rich reports.",
                 symbol: "doc.richtext"
+            ),
+            MCPToolInfo(
+                name: MCPTools.displayCompareFiles,
+                title: "Compare files",
+                detail: "Two images as an interactive wipe/fade/difference; two text files as a diff.",
+                symbol: "rectangle.on.rectangle"
             )
         ],
         instruction: """
@@ -82,6 +88,11 @@ enum MCPToolCatalog {
             chart or diagram you generated, a design asset you were asked to inspect, or a visual \
             diff. Prefer showing the image over describing it or printing its path — the user is \
             looking at the same window and the panel is right there.
+
+            Use display_compare_files whenever you have a before and an after of the same thing — \
+            a screenshot against its baseline, a regenerated asset against the original: two \
+            images open an interactive comparison the user can wipe, crossfade, or difference, \
+            which shows a visual change far better than two images shown separately.
 
             Use display_html when structure is the point and ASCII would mangle it: tables with \
             more than a few columns, charts, Mermaid or graphviz diagrams, side-by-side diffs, \

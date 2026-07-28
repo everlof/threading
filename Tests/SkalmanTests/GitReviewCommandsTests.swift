@@ -100,4 +100,29 @@ final class GitReviewCommandsTests: XCTestCase {
         XCTAssertEqual(arguments.last, "HEAD")
         XCTAssertEqual(arguments, ["diff"] + GitReviewCommands.diffFlags + ["-w", "HEAD"])
     }
+
+    /// `--no-index` takes literal paths after `--`, no rename detection, and never the shared
+    /// diff flags wholesale — `--find-renames` means nothing to a pair of named files.
+    func testCompareFilesPinsItsArgv() {
+        XCTAssertEqual(
+            GitReviewCommands.compareFiles(oldPath: "/tmp/a.txt", newPath: "/tmp/b txt.txt"),
+            [
+                "diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U3",
+                "--no-index", "--", "/tmp/a.txt", "/tmp/b txt.txt"
+            ]
+        )
+    }
+
+    /// A blob address is `revision:path` — including `:0:path`, where the empty revision
+    /// before the stage number means the index.
+    func testShowBlobPinsItsArgv() {
+        XCTAssertEqual(
+            GitReviewCommands.showBlob(revision: "HEAD", path: "Assets/icon.png"),
+            ["show", "HEAD:Assets/icon.png"]
+        )
+        XCTAssertEqual(
+            GitReviewCommands.showBlob(revision: ":0", path: "icon.png"),
+            ["show", ":0:icon.png"]
+        )
+    }
 }

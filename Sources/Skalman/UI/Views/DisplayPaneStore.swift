@@ -26,6 +26,7 @@ struct PersistedTab: Codable {
         case files
         case attachments
         case extensionPanel
+        case compare
     }
 
     var id: String
@@ -44,6 +45,12 @@ struct PersistedTab: Codable {
     /// Extension panel: stable contribution owner and local panel identifier.
     var extensionIdentifier: String? = nil
     var extensionPanelID: String? = nil
+    /// Compare: the two absolute paths and the optional per-side captions. `mode` above carries
+    /// the `ImageCompareMode` raw value the way it carries review's.
+    var compareOldPath: String? = nil
+    var compareNewPath: String? = nil
+    var compareOldTitle: String? = nil
+    var compareNewTitle: String? = nil
 }
 
 extension PersistedPanel {
@@ -63,6 +70,8 @@ extension PersistedPanel {
             case .attachments: return "a"
             case .extensionPanel:
                 return "e:\(tab.extensionIdentifier ?? "")/\(tab.extensionPanelID ?? "")"
+            case .compare:
+                return "c:\(tab.compareOldPath ?? "")→\(tab.compareNewPath ?? "")"
             }
         }
         return parts.joined(separator: "|") + "#" + (activeTabID ?? "")
@@ -101,6 +110,10 @@ extension PersistedPanel {
                 detail = "visual files referenced in this session (images and PDFs)"
             case .extensionPanel:
                 detail = "extension panel \"\(tab.title ?? "Panel")\""
+            case .compare:
+                let oldName = (tab.compareOldPath as NSString?)?.lastPathComponent ?? "old"
+                let newName = (tab.compareNewPath as NSString?)?.lastPathComponent ?? "new"
+                detail = "file comparison of \(oldName) against \(newName)"
             }
             lines.append("\(index). \(detail)\(active)")
         }

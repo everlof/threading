@@ -302,6 +302,8 @@ final class AgentToolCoordinator: MCPToolHandling {
             return displayImage(arguments, for: sessionID)
         case .displayHTML(let arguments):
             return displayHTML(arguments, for: sessionID)
+        case .displayCompareFiles(let arguments):
+            return displayCompareFiles(arguments, for: sessionID)
         default:
             return .failure("Unknown tool: \(call.name)")
         }
@@ -3675,6 +3677,8 @@ final class AgentToolCoordinator: MCPToolHandling {
                 kind = "file tree"
             } else if tab.attachments != nil {
                 kind = "attachments"
+            } else if tab.compare != nil {
+                kind = "compare"
             } else if case .image? = tab.content?.body {
                 kind = "image"
             }
@@ -4082,6 +4086,77 @@ final class AgentToolCoordinator: MCPToolHandling {
             for: sessionID,
             describedAs: "the document"
         )
+    }
+
+    private func displayCompareFiles(
+        _ arguments: DisplayCompareFilesArguments,
+        for sessionID: SessionID
+    ) -> MCPToolResult {
+        guard let oldPath = arguments.oldPath, !oldPath.isEmpty else {
+            return .failure("Missing required argument: old_path")
+        }
+        guard let newPath = arguments.newPath, !newPath.isEmpty else {
+            return .failure("Missing required argument: new_path")
+        }
+        guard let oldURL = resolve(path: oldPath, for: sessionID) else {
+            return .failure("No such file: \(oldPath)")
+        }
+        guard let newURL = resolve(path: newPath, for: sessionID) else {
+            return .failure("No such file: \(newPath)")
+        }
+        guard oldURL.standardizedFileURL != newURL.standardizedFileURL else {
+            return .failure("old_path and new_path are the same file; nothing to compare.")
+        }
+
+        // Classified from the bytes before a tab is spent on it, so a pair with no comparison
+        // to draw fails the call instead of opening a tab that says so.
+        let oldKind = CompareFileClassifier.classify(path: oldURL.path)
+        let newKind = CompareFileClassifier.classify(path: newURL.path)
+        let comparison: String
+        switch (oldKind, newKind) {
+        case (.image, .image):
+            comparison = "an interactive image comparison"
+        case (.text, .text):
+            comparison = "a diff"
+        case (.tooLarge, _), (_, .tooLarge):
+            return .failure("""
+                One side is larger than the \
+                \(byteDescription(CompareDefaults.maximumBytes)) the comparison reads.
+                """)
+        case (.image, .text), (.text, .image):
+            return .failure(
+                "One file is an image and the other is text; there is no comparison to draw."
+            )
+        default:
+            return .failure(
+                "These files are binary, and not images Skalman can compare."
+            )
+        }
+
+        if oldKind == .image, let project = ProjectStore.shared.project(forSessionID: sessionID) {
+            let projectRoot = URL(fileURLWithPath: project.folderPath, isDirectory: true)
+            for url in [oldURL, newURL] {
+                SessionAttachmentStore.shared.record(
+                    url: url, sessionID: sessionID, projectRoot: projectRoot
+                )
+            }
+        }
+
+        displayPaneController.addCompareTab(
+            for: sessionID,
+            oldPath: oldURL.path,
+            newPath: newURL.path,
+            oldTitle: arguments.oldTitle,
+            newTitle: arguments.newTitle
+        )
+        let isVisible = revealDisplayPane(for: sessionID)
+        let location = isVisible
+            ? "in the display panel"
+            : "in this session's display panel, which opens when the user selects it"
+        return .success("""
+            Showing \(comparison) of \(oldURL.lastPathComponent) against \
+            \(newURL.lastPathComponent) \(location).
+            """)
     }
 
     // MARK: Presentation

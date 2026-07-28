@@ -79,6 +79,23 @@ beside a dark terminal instead of flashing white.
 WKWebView works in the unbundled `swift build` binary — worth knowing, since needing an
 `.app` bundle for the web content process would have forced the project to Xcode-only builds.
 
+**`display_compare_files` is one tool, not two.** The agent hands over two paths
+(`old_path`/`new_path`, absolute or project-relative, optional per-side titles) and the *bytes*
+decide the presentation: two images open the interactive `ImageCompareView` (wipe, fade,
+difference, side by side), two text files render as a native diff via
+`git diff --no-index` parsed by `GitDiffParser`, and a mixed or binary-but-not-image pair
+fails the call in prose rather than opening a tab that apologises. Classification is
+`CompareFileClassifier`: git's NUL sniff for binary, then `CGImageSource` — a header decode,
+not a full image load — for "is it an image", so the extension is never trusted (`--no-index`
+exits 1 to say "the files differ", which is why `GitProcess.run` grew `acceptedExitCodes`).
+The tab is `DisplayTab.Body.compare` hosting `CompareViewController` — the review tab's
+live-view-controller shape, third time round — with the same deferred rule: nothing is read
+until the tab is shown, including after relaunch (paths, titles and mode persist on
+`PersistedTab`). Asking about the same pair again reuses that pair's tab and re-reads it,
+because a repeat almost always means the agent just rewrote one side; a turn ending re-reads a
+visible compare tab for the same reason. The user's own route in is the `+` menu's "Compare
+Files…", which is an open panel asked for exactly two files.
+
 `MCPServer` calls its handler on the main queue, because neither `ProjectStore`, `AgentRuntime`
 nor AppKit is thread-safe. Everything arriving off the network hops before touching them.
 

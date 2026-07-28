@@ -72,6 +72,7 @@ Components so far:
 | `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. |
 | `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
 | `PaneHeaderView` | The footer's mirror at a pane's top. Its height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it), so the two panes' hairlines land on one line. |
+| `ImageCompareView` | Two images against each other: a draggable wipe seam (either axis), a crossfade, a pixel difference, and side by side, with per-side title tags and a mode chip. One scrubbed fraction serves every mode — there is deliberately no slider control: the seam *is* the control (accent-inked, since it is the one thing on the surface asking to be used), fade held at the middle is the onion skin, and both images draw at one shared scale so a resized asset stays visibly resized rather than being normalised into "looks identical". The canvas is a `ThemedControl`: arrow keys nudge the scrub, Space recentres it, and VoiceOver reads it as a slider. |
 
 **Two components say "every" for a reason, and it is the design system's sharpest lesson so
 far.** Each of them was two or three implementations, and each had already been "unified" by
@@ -278,7 +279,15 @@ amount of our drawing reaches: the **`NSMenu` a `ThemedPopUp` opens**, and the *
 panel behind `ThemeSwatchView`**. Callers depend on the wrapper, not on the system part, so
 replacing either with something custom later is a change to one file.
 
-Six bugs are worth keeping, because each is a trap the next drawn control will walk into:
+Seven bugs are worth keeping, because each is a trap the next drawn control will walk into:
+
+- **`NSImage.draw` states its own compositing, so a blend mode set on the context beneath it
+  is silently overridden.** `ImageCompareView`'s difference mode set
+  `CGContext.setBlendMode(.difference)` and then drew the second image — which
+  `draw(in:from:operation:fraction:)` composited `.sourceOver` exactly as its `operation:`
+  argument said, and the "difference" was the new image, whole. The operation has to ride the
+  draw call itself. Found by the render test sampling the composite for black, not by eyes: the
+  wrong picture was a perfectly plausible one.
 
 - **`withAlphaComponent` replaces alpha, it does not scale it.** Dimming a disabled button
   against a resting surface that is *already* translucent — Cyberpunk holds its neon at 10% —

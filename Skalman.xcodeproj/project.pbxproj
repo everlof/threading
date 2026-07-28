@@ -133,6 +133,9 @@
 		A812E6D66B3C9E8D16E1B2E0 /* TerminalOptionWordKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */; };
 		5E1AEC819D53FD78F7A46B28 /* SidebarRowRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */; };
 		252FD16A0F226DBFB1451752 /* TerminalColorQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01BAEC6B5AFD8F25A42B8360 /* TerminalColorQueryTests.swift */; };
+		91A8DCA0C41308A682F62069 /* ImageCompareTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A3931499073FA9C879621E /* ImageCompareTests.swift */; };
+		F2C20C4031436016664EE00B /* ImageCompareRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 369909D9A87448DB1D0B803F /* ImageCompareRenderTests.swift */; };
+		AB2F371708D2DB348DAF1B20 /* CompareToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B032AD8F36217B58C16E5840 /* CompareToolTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -311,6 +314,9 @@
 		F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalOptionWordKeyTests.swift; sourceTree = "<group>"; };
 		E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarRowRenderTests.swift; sourceTree = "<group>"; };
 		01BAEC6B5AFD8F25A42B8360 /* TerminalColorQueryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalColorQueryTests.swift; sourceTree = "<group>"; };
+		66A3931499073FA9C879621E /* ImageCompareTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageCompareTests.swift; sourceTree = "<group>"; };
+		369909D9A87448DB1D0B803F /* ImageCompareRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageCompareRenderTests.swift; sourceTree = "<group>"; };
+		B032AD8F36217B58C16E5840 /* CompareToolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CompareToolTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -543,6 +549,9 @@
 				F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */,
 				E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */,
 				01BAEC6B5AFD8F25A42B8360 /* TerminalColorQueryTests.swift */,
+				66A3931499073FA9C879621E /* ImageCompareTests.swift */,
+				369909D9A87448DB1D0B803F /* ImageCompareRenderTests.swift */,
+				B032AD8F36217B58C16E5840 /* CompareToolTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -1024,6 +1033,9 @@
 				A812E6D66B3C9E8D16E1B2E0 /* TerminalOptionWordKeyTests.swift in Sources */,
 				5E1AEC819D53FD78F7A46B28 /* SidebarRowRenderTests.swift in Sources */,
 				252FD16A0F226DBFB1451752 /* TerminalColorQueryTests.swift in Sources */,
+				91A8DCA0C41308A682F62069 /* ImageCompareTests.swift in Sources */,
+				F2C20C4031436016664EE00B /* ImageCompareRenderTests.swift in Sources */,
+				AB2F371708D2DB348DAF1B20 /* CompareToolTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

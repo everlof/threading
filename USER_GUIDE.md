@@ -759,13 +759,21 @@ Three buttons sit at the header's right edge:
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
 
-Two kinds of content:
+Three kinds of content:
 
 - **Images** — screenshots, generated charts, design assets. Anything `NSImage` reads: PNG,
   JPEG, GIF, HEIC, PDF, SVG. Scaled to fit the panel's width.
 - **HTML** — wide tables, charts, Mermaid diagrams, side-by-side diffs, rendered reports.
   It is a real browser engine, so scripts run and libraries load from a CDN; an agent can
   pull in Chart.js or Mermaid rather than hand-rolling SVG.
+- **Comparisons** — two files against each other in a Compare tab. Two images open an
+  interactive comparison: drag the seam across the picture (or arrow-key it; Space recentres),
+  and pick the mode from the chip — **Wipe** in either direction, **Fade** (hold it in the
+  middle for an onion skin), **Difference** (identical pixels go black, so any change leaps
+  out), or **Side by Side**. Each side carries a title tag, and mismatched pixel sizes are
+  flagged rather than silently normalised. Two text files render as a native diff instead.
+  Agents open comparisons with a before and an after; you can open your own with the panel's
+  **+ ▸ Compare Files…**, which asks for exactly two files (first chosen is the old side).
 
 ### Attachments
 
@@ -836,9 +844,9 @@ Available in every session, since every session is an agent conversation.
 ### How it works
 
 Skalman runs a small MCP server on a loopback port and registers it with each Claude or Codex
-session it launches, giving that session a private endpoint. The agent gets two tools —
-`display_image` and `display_html` — and is told the panel exists so it reaches for them
-instead of printing a file path or an ASCII table.
+session it launches, giving that session a private endpoint. The agent gets three tools —
+`display_image`, `display_html` and `display_compare_files` — and is told the panel exists so
+it reaches for them instead of printing a file path or an ASCII table.
 
 Both are pre-approved, so displaying something does not raise a permission prompt every time.
 This does not affect any other tool: your normal permission rules and your own MCP servers
@@ -911,6 +919,13 @@ a row to open or close it. Untracked files appear as all-added diffs, binary fil
 `binary` note. The `+N −M` beside the chip totals the whole diff. Diffs are **syntax
 highlighted** for the languages Skalman recognises by file extension; a file it does not
 recognise renders plain rather than guessed at.
+
+**A changed image opens too.** A row whose binary file is a raster image (PNG, JPEG, GIF,
+WebP, HEIC, TIFF, BMP, ICNS) says `image` instead of `binary` and expands into the same
+interactive comparison the display panel's Compare tab uses — wipe, fade, difference, side by
+side — with each side titled for the mode's endpoints (`HEAD` against `Working Tree`, a
+commit against its parent, and so on). An added or deleted image shows its one existing side.
+Image rows never open automatically; the pictures are read only when you expand them.
 
 ### Staging and committing
 

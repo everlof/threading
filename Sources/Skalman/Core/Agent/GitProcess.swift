@@ -49,11 +49,15 @@ enum GitProcess {
 
     /// Runs git and returns stdout. `input`, when given, is written to stdin and the pipe
     /// closed — which is how a patch reaches `git apply -`.
+    ///
+    /// `acceptedExitCodes` exists for the commands whose non-zero exit is an answer rather
+    /// than a failure: `diff --no-index` exits 1 to say "the files differ".
     static func run(
         _ arguments: [String],
         in root: URL,
         input: Data? = nil,
-        maximumOutput: Int = GitReviewDefaults.maximumDiffBytes
+        maximumOutput: Int = GitReviewDefaults.maximumDiffBytes,
+        acceptedExitCodes: Set<Int32> = [0]
     ) throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: GitDefaults.executablePath)
@@ -136,7 +140,7 @@ enum GitProcess {
         if interrupted.timedOut { throw GitFailure.timedOut }
         if interrupted.oversized { throw GitFailure.outputTooLarge }
 
-        guard process.terminationStatus == 0 else {
+        guard acceptedExitCodes.contains(process.terminationStatus) else {
             let message = String(data: errorData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             SkalmanLogger.git.error(

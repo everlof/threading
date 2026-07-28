@@ -150,6 +150,18 @@ extension GitReviewViewController {
             }
             row.onStageFile = { [weak self] in self?.stageFile(file) }
             row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
+            // The row knows it holds a picture; the pane knows which two endpoints the mode
+            // measures between. `currentDiffRequest` already answers for an opened commit too.
+            row.imagePairProvider = { [weak self] file, completion in
+                guard let self, let root = self.repositoryRoot,
+                      let request = self.currentDiffRequest else {
+                    completion(.failure(.gitFailed("No comparison to read from.")))
+                    return
+                }
+                GitReviewReader.endpointFilePair(
+                    path: file.path, request: request, in: root, completion: completion
+                )
+            }
             addRow(row)
         }
     }
