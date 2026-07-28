@@ -1078,6 +1078,153 @@ final class AppThemeTests: XCTestCase {
         )
     }
 
+    // MARK: - The Divider's Weight
+
+    /// Two panes, sized so a seam between them can be read out of the pixels.
+    private func splitFixture() -> ThemedSplitView {
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 60, height: 10))
+        split.addArrangedSubview(PaintedPane())
+        split.addArrangedSubview(PaintedPane())
+        split.adjustSubviews()
+        return split
+    }
+
+    /// The gap the split view actually left between its panes, which is what a divider's
+    /// thickness *does* — the property is only the claim.
+    private func seamWidth(in split: ThemedSplitView) throws -> CGFloat {
+        let panes = split.arrangedSubviews
+        XCTAssertEqual(panes.count, 2, "the fixture lost a pane")
+        return try XCTUnwrap(panes.last).frame.minX - (try XCTUnwrap(panes.first)).frame.maxX
+    }
+
+    /// The same theme with a different rule weight, for widths no stock style states.
+    private func themeRuling(width: CGFloat, on theme: AppTheme) -> AppTheme {
+        var variants: [AppTheme.VariantKind: AppTheme.Variant] = [:]
+        for (kind, variant) in theme.variants {
+            var material = variant.material
+            material.borderWidth = width
+            variants[kind] = AppTheme.Variant(
+                roles: variant.roles,
+                terminalPalette: variant.terminalPalette,
+                material: material
+            )
+        }
+        return AppTheme(
+            id: AppThemeID("\(theme.id.rawValue)-ruled"),
+            name: theme.name,
+            mode: theme.mode,
+            summary: theme.summary,
+            variants: variants
+        )
+    }
+
+    /// A seam between two panes is a rule, and a rule's weight belongs to the theme.
+    ///
+    /// `dividerStyle = .thin` is a fixed point, while every other rule in the window — the pane
+    /// headers' and footers' `SeparatorView`s, the shell drawer's grab strip — is
+    /// `Design.Radius.border` thick. On Bauhaus (2) and Neo Brutalism (3) the window therefore
+    /// drew heavy horizontal rules and a hairline vertical seam between the very same panes:
+    /// the sidebar's header rule stepped down exactly where it crossed the split.
+    func testTheSplitSeamWeighsWhatTheThemesOtherRulesWeigh() {
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+
+        for theme in [AppTheme.system, AppThemeStyles.bauhaus, AppThemeStyles.neoBrutalism] {
+            AppThemePalette.set(theme)
+            XCTAssertEqual(
+                split.dividerThickness,
+                SeparatorView(.vertical).intrinsicContentSize.width,
+                "\(theme.name) ruled between its panes and inside them at two different weights"
+            )
+        }
+    }
+
+    /// The seam is the drag handle as well as the rule, and a theme may state any width at all —
+    /// the ones an agent writes through `create_app_theme` are not held to the stock range. Below
+    /// a point the line would still be visible and the target would not be.
+    func testTheSeamStaysGrabbableUnderAThemeThatRulesFinerThanAPoint() {
+        AppThemePalette.set(themeRuling(width: 0.25, on: AppThemeStyles.bauhaus))
+
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        XCTAssertEqual(split.dividerThickness, 1, "a fine rule left nothing to grab")
+    }
+
+    /// Read off the drawn pixels rather than the property, because a divider AppKit *places* at
+    /// one width and *paints* at another is the same mismatch by another route.
+    func testTheSeamIsPaintedAcrossItsWholeWidth() throws {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+        WindowBackdrop.set(.chrome)
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+
+        let split = splitFixture()
+        let rep = try XCTUnwrap(split.bitmapImageRepForCachingDisplay(in: split.bounds))
+        split.cacheDisplay(in: split.bounds, to: rep)
+
+        let scale = CGFloat(rep.pixelsWide) / split.bounds.width
+        let row = rep.pixelsHigh / 2
+        var inked = 0
+        for x in 0..<rep.pixelsWide {
+            let pixel = try XCTUnwrap(rep.colorAt(x: x, y: row)?.usingColorSpace(.sRGB))
+            if pixel.brightnessComponent < 0.5 { inked += 1 }
+        }
+
+        XCTAssertEqual(
+            CGFloat(inked) / scale,
+            split.dividerThickness,
+            accuracy: 0.5,
+            "the seam was drawn narrower than the space the panes left for it"
+        )
+    }
+
+    /// The fixture proves the view; this proves the window. Its panes are placed by
+    /// `NSSplitViewController` through constraints, which is a different path from a fixture's
+    /// arranged subviews and the only one the user ever looks at.
+    func testTheWindowsOwnPanesAreSpacedByTheThemesRuleWeight() throws {
+        AppThemePalette.set(AppThemeStyles.bauhaus)
+
+        let controller = MainWindowController()
+        controller.window?.setContentSize(NSSize(width: 1200, height: 700))
+        let split = controller.splitViewController.splitView
+        split.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(split.dividerThickness, 2, "Bauhaus rules at 2; the window's seam did not")
+
+        // A collapsed pane has no seam beside it. It keeps the width it had before collapsing
+        // and loses its height, so "on screen" means an area rather than a width.
+        let panes = split.arrangedSubviews
+            .filter { !$0.frame.isEmpty }
+            .sorted { $0.frame.minX < $1.frame.minX }
+        XCTAssertGreaterThanOrEqual(panes.count, 2, "the window had no seam to measure")
+        for (left, right) in zip(panes, panes.dropFirst()) {
+            XCTAssertEqual(
+                right.frame.minX - left.frame.maxX,
+                split.dividerThickness,
+                accuracy: 0.01,
+                "the window's panes were spaced by AppKit's hairline rather than the theme's rule"
+            )
+        }
+    }
+
+    /// A theme change moves the seam's weight, not only its ink, and the panes are placed against
+    /// that weight. Repainting alone left them spaced for the outgoing theme until something else
+    /// — a window resize — happened to re-lay the split out.
+    func testTheSeamIsRelaidOutWhenTheThemeChangesUnderIt() throws {
+        AppThemePalette.set(.system)
+        let split = splitFixture()
+        split.layoutSubtreeIfNeeded()
+        XCTAssertEqual(try seamWidth(in: split), 1, "the fixture did not start at a hairline")
+
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.neoBrutalism.id))
+        split.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            try seamWidth(in: split),
+            3,
+            "the panes stayed spaced for the theme that just left"
+        )
+    }
+
     // MARK: - Repainting What Is Already On Screen
 
     /// The half that dynamic colours cannot fix. A `CALayer` resolves `backgroundColor` to a
@@ -1483,6 +1630,15 @@ final class AppThemeTests: XCTestCase {
 }
 
 // MARK: - Helpers
+
+/// A pane that paints, so the seam between two of them is something a pixel read can find. An
+/// unpainted `NSView` leaves the bitmap transparent, where every column reads as ink.
+private final class PaintedPane: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.white.setFill()
+        dirtyRect.fill()
+    }
+}
 
 private extension NSColor {
     /// Compares colours by what they actually draw as, since a dynamic colour and a literal are

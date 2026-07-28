@@ -53,7 +53,11 @@ and `titlebarSeparatorStyle` both leave the inset). That is the platform's look 
 a document, and the wrong shape for a structural column beside a terminal: the margin left the
 toolbar's tab and controls reading as loose parts, and the terminal's colour ran underneath the
 sidebar it is meant to sit next to. So the pane is ours — flush to the window's edges, full
-height under the transparent titlebar, the split view's hairline as the only seam.
+height under the transparent titlebar, the split view's rule as the only seam. That rule is the
+theme's, in weight as well as ink — `ThemedSplitView` overrides `dividerThickness` so the seam
+between two panes matches the rules drawn inside them (see [`themes.md`](themes.md)); AppKit's
+`.thin` divider is a fixed point,
+which under a heavy-ruling style was the one hairline in a window of 2pt rules.
 
 Three things the behaviour supplied and now have to be stated, each found by losing it:
 

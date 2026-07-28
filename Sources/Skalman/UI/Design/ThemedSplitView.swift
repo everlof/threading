@@ -53,6 +53,20 @@ final class ThemedSplitView: NSSplitView {
     /// read — the System theme's own dark hairline sits at ~1.35:1.
     private static let visibleLineRatio: CGFloat = 1.2
 
+    /// The seam is also the drag handle, so it stays grabbable however fine a theme rules.
+    private static let minimumGrab: CGFloat = 1
+
+    /// The seam weighs what every other rule in the window weighs.
+    ///
+    /// `dividerStyle = .thin` is a *fixed* point, while every other rule here — the pane
+    /// headers' and footers' `SeparatorView`s, the shell drawer's grab strip, a table's column
+    /// rules — is `Design.Radius.border` thick, because how heavily a style rules is part of its
+    /// identity in the same way its palette is. A theme that rules at 2 (Bauhaus) or 3
+    /// (Neo Brutalism) therefore drew heavy horizontal rules meeting a one-point vertical seam
+    /// between the very same two panes, and the sidebar's header rule visibly stepped down where
+    /// it crossed the split. Two weights for one decision, and the theme only ever stated one.
+    override var dividerThickness: CGFloat { max(Self.minimumGrab, Design.Radius.border) }
+
     /// The theme's own line wherever it reads on the backdrop; measured ink where it cannot.
     override var dividerColor: NSColor {
         let border = Design.Surface.border
@@ -77,10 +91,20 @@ final class ThemedSplitView: NSSplitView {
             self?.needsDisplay = true
         }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
-            self?.needsDisplay = true
+            self?.reweigh()
         }
         appEvents.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in
-            self?.needsDisplay = true
+            self?.reweigh()
         }
+    }
+
+    /// A theme change moves the seam's *weight* as well as its ink, and the panes are placed
+    /// against that weight: the split view reads `dividerThickness` while it builds the
+    /// constraints between its arranged subviews and does not ask again on its own. Repainting
+    /// alone left the panes spaced for the outgoing theme until the window was next resized.
+    private func reweigh() {
+        needsUpdateConstraints = true
+        needsLayout = true
+        needsDisplay = true
     }
 }

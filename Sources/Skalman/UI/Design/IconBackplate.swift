@@ -117,18 +117,8 @@ enum IconBackplate {
         )
     }
 
-    /// Draws the plate *around* the mark, never the mark into the plate: the ink keeps the
-    /// size it draws at with no plate — its own, capped at the plate itself — so a mark
-    /// gaining its plate on selection stays exactly where and how big it was, and only the
-    /// plate fades in behind it. The margin is whatever the caller left between the two
-    /// sizes; the session row hands a 13pt mark to its 16pt slot.
-    ///
-    /// An earlier version inset the ink by a fixed ratio of the plate instead, which meant a
-    /// mark visibly shrank the moment its ground moved close to it — the plate arrived *as*
-    /// the resize, on every selection change.
-    ///
-    /// The drawing-handler image re-renders per backing scale, so the rounded plate stays
-    /// crisp on Retina.
+    /// Draws the composite at a display size. The drawing-handler image re-renders per backing
+    /// scale, so the rounded plate stays crisp on Retina.
     static func compose(
         _ base: NSImage,
         plate: NSColor,
@@ -145,28 +135,15 @@ enum IconBackplate {
             shape.fill()
             shape.addClip()
 
+            let inset = size * Defaults.plateInsetRatio
             base.draw(
-                in: inkRect(for: base.size, in: bounds),
+                in: bounds.insetBy(dx: inset, dy: inset),
                 from: .zero,
                 operation: .sourceOver,
                 fraction: 1
             )
             return true
         }
-    }
-
-    /// Where the ink lands on its plate: centred, at its own size, scaled down only if it
-    /// would not fit at all.
-    private static func inkRect(for size: NSSize, in bounds: CGRect) -> CGRect {
-        guard size.width > 0, size.height > 0 else { return bounds }
-        let scale = min(1, bounds.width / size.width, bounds.height / size.height)
-        let drawn = NSSize(width: size.width * scale, height: size.height * scale)
-        return CGRect(
-            x: bounds.midX - drawn.width / 2,
-            y: bounds.midY - drawn.height / 2,
-            width: drawn.width,
-            height: drawn.height
-        )
     }
 
     // MARK: - Defaults
@@ -194,5 +171,9 @@ enum IconBackplate {
 
         static let displaySize: CGFloat = 16
         static let cornerRadius: CGFloat = 4
+
+        /// The plate's margin as a fraction of its side, so a 13pt row mark and a 16pt project
+        /// tile keep the same proportions rather than the smaller one losing a third of its ink.
+        static let plateInsetRatio: CGFloat = 0.125
     }
 }

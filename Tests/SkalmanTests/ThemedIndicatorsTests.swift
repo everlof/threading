@@ -61,8 +61,9 @@ final class ThemedIndicatorsTests: XCTestCase {
     // MARK: - Separator
 
     /// The rule's thickness is the theme's border width rather than a literal 1, so a style that
-    /// draws heavy rules draws them between rows too and not only around cards. Every theme
-    /// currently states 1, so what is pinned is that it reads the token at all.
+    /// draws heavy rules draws them between rows too and not only around cards — Bauhaus rules at
+    /// 2 and Neo Brutalism at 3. The same token is what the window's split seam takes its weight
+    /// from, so the two agree by construction rather than by coincidence.
     func testTheSeparatorTakesItsThicknessFromTheThemeNotALiteral() {
         let horizontal = SeparatorView(.horizontal)
         XCTAssertEqual(horizontal.intrinsicContentSize.height, Design.Radius.border)

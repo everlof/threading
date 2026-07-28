@@ -239,6 +239,16 @@ seam: themes state specs (`AppTheme.Material`), one interpreter draws them
 (`applySurface`/`applyThemeGlow`), and feature code says only what a surface *is* — never
 `if` on a theme's identity.
 
+**`material.borderWidth` is a rule weight, and every rule in the window obeys it — including the
+one AppKit draws.** `SeparatorView`, the shell drawer's grab strip and a table's column rules all
+take `Design.Radius.border`; `NSSplitView.dividerStyle = .thin` is a fixed point and does not.
+Under Bauhaus (2) and Neo Brutalism (3) the window therefore drew heavy pane-header rules meeting
+a hairline seam between the very same panes, and the sidebar's rule visibly stepped down where it
+crossed the split — one stated decision rendered at two weights. `ThemedSplitView` overrides
+`dividerThickness` (floored at a point, because that seam is also the drag handle) and invalidates
+its constraints on `AppThemeDidChange`: the split reads the thickness while placing its panes and
+never asks again, so repainting alone left them spaced for the theme that just left.
+
 ## 2026-07-27 — extension-contributed themes and fonts (the third tier)
 
 `AppThemeLibrary.all` is now `stock + contributed + custom`. The contributed tier is

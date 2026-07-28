@@ -63,7 +63,7 @@ Components so far:
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. |
 | `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
-| `ThemedSplitView` | An `NSSplitView` whose divider is inked against the window backdrop, not the chrome's ground. |
+| `ThemedSplitView` | An `NSSplitView` whose divider is inked against the window backdrop, not the chrome's ground, and weighed by the theme's rule width rather than AppKit's fixed hairline. |
 | `ThemedSurfaceView` | A pane's ground, and the one view that re-resolves its fill on a *system* light/dark switch. |
 | `SidebarBackdropView` | The sidebar's ground: the platform's sidebar material under the identity theme, an opaque themed surface under a style. |
 | `ToolbarButtonGroupView` | Related toolbar actions as one item, so their spacing is ours rather than `NSToolbar`'s. |

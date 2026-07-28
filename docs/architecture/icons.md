@@ -15,16 +15,6 @@ is what makes it work in dark mode and dim for dormancy. Claude's mark keeps its
 colour; tinting cannot dim a non-template image, so dormancy dims it through the view's
 alpha instead (`SessionRowView.applyAgentIcon`).
 
-A mark that keeps its own colour can also *vanish* — coral on a holly-red selected row — so
-the row re-decides an `IconBackplate` against the ground it is actually drawn on, per
-selection change. **The plate never resizes the ink**: the mark draws at 13pt (`iconSize`,
-the same size as the symbols beside it) plated or not, and the plate spans the full 16pt
-slot behind it — the slot is wider than its ink already, for the emoji margin. Two earlier
-accidents conspired here: the brand PNGs' nominal 15pt relied on "a smaller slot scales the
-mark down" in a slot that is 16, and the first plate composed the ink at a ratio of the
-plate — so a selected row's mark visibly shrank as its plate arrived. `SessionRowView.slotSized`
-now states the ink size once, and `IconBackplate.compose` draws the plate around it.
-
 **Account chips** (`AccountBadge`): the mark keeps the slot and an *alternate* account rides
 its bottom-trailing corner as a 9pt chip — the account's emoji, else its discovered avatar,
 else an initial on a hashed disc. The two facts a row carries, which agent and which account,

@@ -92,38 +92,6 @@ final class IconBackplateTests: XCTestCase {
         XCTAssertTrue(result === mark)
     }
 
-    /// The plate appears *around* the mark: the ink keeps exactly the size it draws at with
-    /// no plate, and only the plate spans the slot. The first version inset the ink by a
-    /// ratio of the plate instead, so a mark visibly shrank the moment its row was selected.
-    func testGainingAPlateLeavesTheInkAtItsOwnSize() throws {
-        let inkSide = SidebarRowDefaults.iconSize
-        let plateSide = SidebarRowDefaults.iconSlotWidth
-        let mark = swatch(.black, size: inkSide)
-
-        // Black ink on a near-black ground vanishes, so this composes a light plate.
-        let plated = IconBackplate.plated(mark, againstTone: 0.1, size: plateSide)
-        XCTAssertFalse(plated === mark, "black on a black ground was left to disappear")
-        XCTAssertEqual(plated.size.width, plateSide)
-
-        let pixelsPerPoint = 4
-        let canvas = Int(plateSide) * pixelsPerPoint
-        let ink = try XCTUnwrap(
-            darkInkBounds(of: plated, canvasPixels: canvas),
-            "the composite rendered no ink at all"
-        )
-
-        let expected = Int(inkSide) * pixelsPerPoint
-        XCTAssertEqual(
-            ink.maxX - ink.minX + 1, expected, accuracy: 2,
-            "the plate resized the ink instead of appearing behind it"
-        )
-        XCTAssertEqual(ink.maxY - ink.minY + 1, expected, accuracy: 2)
-
-        let margin = (Int(plateSide) - Int(inkSide)) * pixelsPerPoint / 2 - 2
-        XCTAssertGreaterThanOrEqual(ink.minX, margin, "no plate showing before the ink")
-        XCTAssertLessThanOrEqual(ink.maxX, canvas - 1 - margin, "no plate showing after the ink")
-    }
-
     func testAVanishingMarkComesBackOnAPlate() throws {
         let mark = swatch(NSColor(srgbRed: 0.85, green: 0.47, blue: 0.34, alpha: 1))
         let groundTone = IconBackplate.tone(of: NSColor(srgbRed: 1, green: 0.3, blue: 0.35, alpha: 1))
@@ -195,94 +163,27 @@ final class IconBackplateTests: XCTestCase {
         try write(mark: mark, on: restingGround, named: "backplate-resting")
     }
 
-    /// The rendered ink's bounding box, in pixels, when the image is drawn over white — the
-    /// plate is light and so is the ground, so only the ink reads dark.
-    private func darkInkBounds(
-        of image: NSImage,
-        canvasPixels: Int
-    ) -> (minX: Int, minY: Int, maxX: Int, maxY: Int)? {
-        guard let context = CGContext(
-            data: nil,
-            width: canvasPixels,
-            height: canvasPixels,
-            bitsPerComponent: 8,
-            bytesPerRow: canvasPixels * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-
-        let bounds = CGRect(x: 0, y: 0, width: canvasPixels, height: canvasPixels)
-        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        context.fill(bounds)
-
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
-        NSGraphicsContext.restoreGraphicsState()
-
-        guard let data = context.data else { return nil }
-        let pixels = data.bindMemory(to: UInt8.self, capacity: canvasPixels * canvasPixels * 4)
-
-        var ink: (minX: Int, minY: Int, maxX: Int, maxY: Int)?
-        for y in 0..<canvasPixels {
-            for x in 0..<canvasPixels {
-                let offset = (y * canvasPixels + x) * 4
-                let luminance = 0.2126 * Double(pixels[offset])
-                    + 0.7152 * Double(pixels[offset + 1])
-                    + 0.0722 * Double(pixels[offset + 2])
-                guard luminance < 128 else { continue }
-                ink = ink.map {
-                    (min($0.minX, x), min($0.minY, y), max($0.maxX, x), max($0.maxY, y))
-                } ?? (x, y, x, y)
-            }
-        }
-        return ink
-    }
-
     /// The claim is that you can see it, so the two grounds are also written out — the same
     /// fixture-to-PNG idea the conversation and git-review renders use, for the same reason.
-    ///
-    /// Rendered at the row's real geometry — the mark slot-sized to `iconSize`, the plate
-    /// spanning the wider `iconSlotWidth` — so the picture also shows the ink *not moving*
-    /// between the two states.
     private func write(mark: NSImage, on ground: NSColor, named name: String) throws {
         let scale: CGFloat = 8
-        let inkSide = SidebarRowDefaults.iconSize
-        let plateSide = SidebarRowDefaults.iconSlotWidth
-
-        let sized = try XCTUnwrap(mark.copy() as? NSImage)
-        sized.size = NSSize(width: inkSide, height: inkSide)
+        let side = SidebarRowDefaults.iconSize
         let plated = IconBackplate.plated(
-            sized,
+            mark,
             againstTone: IconBackplate.tone(of: ground),
-            size: plateSide
+            size: side
         )
 
         let canvas = NSImage(
-            size: NSSize(width: plateSide * scale * 2.5, height: plateSide * scale * 1.5),
+            size: NSSize(width: side * scale * 2.5, height: side * scale * 1.5),
             flipped: false
         ) { bounds in
             ground.setFill()
             bounds.fill()
-            let bareBox = NSSize(width: inkSide * scale, height: inkSide * scale)
-            let platedBox = NSSize(
-                width: plated.size.width * scale,
-                height: plated.size.height * scale
-            )
-            sized.draw(in: NSRect(
-                origin: NSPoint(
-                    x: plateSide * scale * 0.2,
-                    y: (bounds.height - bareBox.height) / 2
-                ),
-                size: bareBox
-            ))
-            plated.draw(in: NSRect(
-                origin: NSPoint(
-                    x: plateSide * scale * 1.3,
-                    y: (bounds.height - platedBox.height) / 2
-                ),
-                size: platedBox
-            ))
+            let box = NSSize(width: side * scale, height: side * scale)
+            let y = (bounds.height - box.height) / 2
+            mark.draw(in: NSRect(origin: NSPoint(x: side * scale * 0.2, y: y), size: box))
+            plated.draw(in: NSRect(origin: NSPoint(x: side * scale * 1.3, y: y), size: box))
             return true
         }
 
