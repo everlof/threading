@@ -300,6 +300,11 @@ three tests genuinely need to be visible, and they are skipped by name in `Skalm
 - `ThemedControlTests/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()` and
   `testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()` — both assert on first
   responder, which requires a key window.
+- `PromptInputTests/testImagePreviewOpensTheSystemQuickLookPanel()` — screen-captures a real
+  `QLPreviewPanel`, which is a *system* window backed by an out-of-process service. Run in
+  `fast`, agents opened that panel on the user's screen all day — and when the service was
+  slow to connect, the test's `orderOut` didn't take, stranding a panel that then froze
+  (its owning test host was busy with later tests) until the host exited.
 
 **Adding a test that needs a real window?** Add it to `skippedTests` in
 `TestPlans/Skalman-Fast.xctestplan` and say why here. Anything that can be asserted against an
