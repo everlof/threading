@@ -52,6 +52,7 @@ extension ProjectSidebarViewController {
         addSideChatItems(to: menu, for: session)
         addSurfaceMenu(to: menu, for: session)
         menu.addItem(makeSessionThemeItem(for: sessionID))
+        addRemoteControlItem(to: menu, for: session)
         menu.addItem(withTitle: "Rename Session…", action: #selector(renameSessionClicked), keyEquivalent: "")
         menu.addItem(
             withTitle: "Copy Session ID",
@@ -142,6 +143,35 @@ extension ProjectSidebarViewController {
 
     /// Adds a "Move to Account" submenu when the conversation can move — it resumes by id, has
     /// a transcript recorded, and there is another account of the same agent to move it to.
+    /// This conversation's answer about **Claude's own** Remote Control bridge, which is what
+    /// lets claude.ai and the Claude mobile app drive it. Skalman's Remote Access is the
+    /// separate "Share Chat…" block below.
+    ///
+    /// Claude-only, since Codex has no equivalent. The inherit item names the app-wide default
+    /// where it can and defers where it cannot: when that default is "follow", the answer lives
+    /// in the account's own `/config` and resolves server-side when unset, so claiming a value
+    /// here would be a guess shown as a fact.
+    private func addRemoteControlItem(to menu: NSMenu, for session: AgentSession) {
+        guard session.kind == .claude else { return }
+
+        let submenu = NSMenu()
+        for choice in RemoteControlChoice.allCases {
+            let item = NSMenuItem(
+                title: choice.menuTitle,
+                action: #selector(remoteControlChoiceClicked(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = choice
+            item.state = choice.sessionValue == session.remoteControl ? .on : .off
+            submenu.addItem(item)
+        }
+
+        let item = NSMenuItem(title: "Claude Remote Control", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        menu.addItem(item)
+    }
+
     private func addMoveToAccountItem(to menu: NSMenu, for session: AgentSession) {
         guard let project = ProjectStore.shared.project(forSessionID: session.id),
               SessionMigration.canMigrate(session, in: project) else { return }
@@ -178,6 +208,17 @@ extension ProjectSidebarViewController {
               let account = sender.representedObject as? AgentAccount else { return }
 
         delegate?.projectSidebar(self, moveSession: sessionID, toAccount: account)
+    }
+
+    /// Records the choice only. A conversation already connected stays connected until it is
+    /// relaunched, because the bridge is established by the process this setting configures at
+    /// startup — silently killing a live one from a sidebar menu would be a second, hidden
+    /// meaning for the same item.
+    @objc private func remoteControlChoiceClicked(_ sender: NSMenuItem) {
+        guard let sessionID = actionSessionID,
+              let choice = sender.representedObject as? RemoteControlChoice else { return }
+
+        ProjectStore.shared.setRemoteControl(choice.sessionValue, for: sessionID)
     }
 
     @objc private func newSideChatClicked() {
@@ -321,5 +362,37 @@ extension ProjectSidebarViewController {
     @objc private func deleteSessionClicked() {
         guard let sessionID = actionSessionID else { return }
         removeSession(sessionID)
+    }
+}
+
+// MARK: - Remote Control Choice
+
+/// The three items in a session's Claude Remote Control submenu.
+///
+/// It carries the *session's* stored value, which is why inherit is nil rather than a third
+/// boolean: a conversation that never chose has to keep following the app default as that
+/// default changes, and only an absent value can do that.
+private enum RemoteControlChoice: CaseIterable {
+    case inherit
+    case on
+    case off
+
+    var sessionValue: Bool? {
+        switch self {
+        case .inherit: nil
+        case .on: true
+        case .off: false
+        }
+    }
+
+    /// The inherit item names what it defers to, which depends on the app-wide setting: an
+    /// answer when there is one to name, and Claude's own configuration when there is not.
+    @MainActor
+    var menuTitle: String {
+        switch self {
+        case .inherit: AppSettings.shared.claudeRemoteControl.inheritedMenuTitle
+        case .on: "Always On"
+        case .off: "Always Off"
+        }
     }
 }

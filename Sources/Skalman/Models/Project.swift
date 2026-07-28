@@ -209,6 +209,20 @@ struct AgentSession: Codable, Identifiable {
     /// `service_tier` override while preserving the same conversation id.
     var fastMode: Bool?
 
+    /// A per-conversation override for Claude's Remote Control bridge — the built-in feature
+    /// that lets claude.ai and the mobile app drive this session.
+    ///
+    /// Nil defers to `AppSettings.claudeRemoteControl`, which in turn may defer to Claude's own
+    /// `/config`. True and false are decisions this conversation made for itself and keep
+    /// making on every resume. The third state is what lets one chat stay off the network while
+    /// the rest follow whatever default is set later.
+    ///
+    /// Applied by writing `remoteControlAtStartup` into the per-session settings file Skalman
+    /// already passes as `--settings`; see `MCPSessionRegistry.writeHookSettings`. Claude reads
+    /// merged settings ahead of its global config, so a value here wins. Claude only — Codex has
+    /// no equivalent bridge.
+    var remoteControl: Bool?
+
     /// The branch the checkout was on when this session last ran.
     ///
     /// A branch belongs to a checkout, not a session — but a *conversation* happened on
@@ -292,6 +306,7 @@ struct AgentSession: Codable, Identifiable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.fastMode = nil
+        self.remoteControl = nil
         self.branch = nil
         self.isArchived = false
         self.isPinned = false
@@ -304,7 +319,7 @@ struct AgentSession: Codable, Identifiable {
         case id, kind, title, customTitle, createdAt, lastActiveAt
         case agentTitle = "terminalTitle"
         case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
-        case fastMode, archived, pinned, nativeUI, forkParent, themeID, themeName
+        case fastMode, remoteControl, archived, pinned, nativeUI, forkParent, themeID, themeName
     }
 
     init(from decoder: Decoder) throws {
@@ -332,6 +347,7 @@ struct AgentSession: Codable, Identifiable {
         model = try container.decodeIfPresent(String.self, forKey: .model)
         reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
         fastMode = try container.decodeIfPresent(Bool.self, forKey: .fastMode)
+        remoteControl = try container.decodeIfPresent(Bool.self, forKey: .remoteControl)
         branch = try container.decodeIfPresent(String.self, forKey: .branch)
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
@@ -360,6 +376,7 @@ struct AgentSession: Codable, Identifiable {
         try container.encodeIfPresent(model, forKey: .model)
         try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
         try container.encodeIfPresent(fastMode, forKey: .fastMode)
+        try container.encodeIfPresent(remoteControl, forKey: .remoteControl)
         try container.encodeIfPresent(branch, forKey: .branch)
         try container.encode(isArchived, forKey: .archived)
         try container.encode(isPinned, forKey: .pinned)

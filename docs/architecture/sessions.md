@@ -171,6 +171,69 @@ Claude accepts `--session-id <uuid>`, so the id is minted up front. Codex has no
 so its id is read back from the `session_meta` record at the head of the rollout file it
 writes under `~/.codex/sessions/`.
 
+### Claude's Remote Control, per conversation
+
+Claude Code has its own bridge to claude.ai and the Claude mobile app — unrelated to Skalman's
+Remote Access, which is this app's own server. It is normally an account-wide switch
+(`/config` ▸ "Enable Remote Control for all sessions"), and Skalman narrows it to one
+conversation.
+
+**Through the settings file, not a flag.** There is no `--no-remote-control`: the CLI offers
+`--remote-control [name]` to opt *in* and nothing to opt out, and no environment variable
+(measured against 2.1.220 — the `CLAUDE_CODE_REMOTE_*` variables all concern cloud-side
+sessions). What it does read is `remoteControlAtStartup` from merged settings, ahead of its
+global config:
+
+```js
+function i3o(){ return TI()?.settings.remoteControlAtStartup ?? Rt().remoteControlAtStartup }
+```
+
+So the value joins the per-session settings file Skalman already writes and already passes as
+`--settings` (`MCPSessionRegistry.writeHookSettings`). Nothing else had to change in the
+command line, and because both Claude launch paths rewrite that file, the choice re-applies on
+every **resume** rather than only on the launch that made it — which a `--settings` argument
+assembled once would not have done. Verified with `claude doctor`, which validates the key
+from a `--settings` path and rejects a non-boolean.
+
+**Three states, twice.** `AppSettings.claudeRemoteControl` is the default for new sessions and
+`AgentSession.remoteControl` is one conversation's override, and both distinguish *off* from
+*no opinion*. Only an absent key defers to the user's own `/config`; writing `false` to mean
+"we have not decided" would silently override a choice they made in the CLI, so `nil` survives
+from the setting all the way to the JSON rather than collapsing into a boolean anywhere on the
+way. `AgentLauncher.remoteControlAtStartup(for:)` is the one place the two are resolved.
+
+The one asymmetry worth knowing: the settings file is written even when the MCP listener has
+no port. Losing the hooks costs accurate activity reporting, but dropping the key would
+connect a conversation the user had switched off, and that must not depend on whether an
+unrelated listener came up.
+
+Skalman cannot display what "follow" resolves to — the value lives in the account's own config
+and an unset one resolves server-side — so the inherit menu item says *Use Claude's Setting*
+rather than naming a value it would be guessing.
+
+## Close and Archive
+
+Two row actions that read as near-synonyms and are near-opposites. **Close** acts on the
+process: the agent stops, the terminal is released, and the row stays in the sidebar to be
+resumed. **Archive** acts on the record: the row moves out of the sidebar into
+Settings ▸ Archived, and the conversation is untouched either way.
+
+**Archiving implies closing.** The sidebar lists only unarchived sessions, so an archived
+session that kept its agent would be a process nothing lists and nothing can stop — the bug
+this rule closed: the sidebar's Archive once flipped the flag and left the agent running
+invisibly, while the remote archive route had discarded the process from the start. Both
+routes now stop the agent first. Restoring implies nothing; a session comes back dormant.
+
+Every action that interrupts a running agent — close, archive, move to another account, and
+the surface switch — confirms under the single `confirmsBeforeClosingRunningSession` setting
+rather than growing a setting each, but each alert states its own consequence, because
+"where does the session go" is exactly what the verbs fail to say. All of this lives in
+`SessionCoordinator`: the row menu once discarded the process itself, skipping the
+confirmation the same action asked for as Cmd+W, which is why the sidebar delegates
+lifecycle decisions instead of touching `AgentRuntime` directly. The alerts are built
+separately from run so tests can hold their wording to what the action does
+(`SessionLifecycleConfirmationTests`).
+
 ## Session Import
 
 `SessionImporter` discovers conversations started outside Skalman by reading the transcripts

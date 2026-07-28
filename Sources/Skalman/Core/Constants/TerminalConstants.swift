@@ -114,6 +114,14 @@ enum AgentDefaults {
     static let claudeModelKey = "model"
     static let claudeEffortKey = "effortLevel"
 
+    /// Claude's own switch for its Remote Control bridge, written into the per-session
+    /// `--settings` file rather than the account's config: a settings file is read ahead of the
+    /// CLI's global config (measured against 2.1.220 — `claude doctor` validates the key from a
+    /// `--settings` path), so Skalman can override `/config` for one conversation without
+    /// touching a file the user owns. There is no launch flag for the off direction:
+    /// `--remote-control` only opts in.
+    static let claudeRemoteControlKey = "remoteControlAtStartup"
+
     /// Codex writes the model catalog it receives for each account beside config.toml.
     static let codexConfigFile = "config.toml"
     static let codexModelsCacheFile = "models_cache.json"

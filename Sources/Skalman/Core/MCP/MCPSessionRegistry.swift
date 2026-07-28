@@ -99,11 +99,21 @@ enum MCPSessionRegistry {
     /// ask and would silently block instead. Lifecycle hooks are written either way, because
     /// knowing when a turn starts and ends is worth as much to a terminal session as to a
     /// rendered one — more, since a terminal has no stream to infer it from.
+    ///
+    /// `remoteControl` is not a hook at all: it is Claude's own `remoteControlAtStartup`,
+    /// carried here because this is already the settings file the session launches with, and a
+    /// settings file outranks the CLI's global config. Nil writes no key, which is how a
+    /// session defers to `claude /config` rather than overriding it. Because both Claude launch
+    /// paths rewrite this file, the choice is re-applied on every resume rather than only on the
+    /// launch that made it.
     static func writeHookSettings(
         for sessionID: SessionID,
-        brokersPermissions: Bool
+        brokersPermissions: Bool,
+        remoteControl: Bool? = nil
     ) -> String? {
-        guard let port = MCPServer.shared.port else {
+        let port = MCPServer.shared.port
+
+        if port == nil {
             // Silent otherwise, and total: no port means no hooks, so the session falls back to
             // inferring its state from output and — if it is a rendered one — to having its
             // tools blocked outright with no card to approve them.
@@ -112,14 +122,57 @@ enum MCPSessionRegistry {
                 "session": sessionID.uuidString,
                 "brokersPermissions": brokersPermissions ? "yes" : "no"
             ])
-            return nil
-        }
 
-        let base = "http://\(MCPDefaults.host):\(port)"
-        let token = token(for: sessionID)
+            // A settings file is still written when the session has a Remote Control choice to
+            // state. Losing the hooks costs accurate activity; dropping this would silently
+            // connect a conversation the user had switched off, which is a different order of
+            // wrong and must not depend on whether an unrelated listener came up.
+            if remoteControl == nil { return nil }
+        }
 
         var hooks: [String: Any] = [:]
 
+        if let port {
+            let base = "http://\(MCPDefaults.host):\(port)"
+            let token = token(for: sessionID)
+
+            appendHooks(
+                to: &hooks,
+                base: base,
+                token: token,
+                brokersPermissions: brokersPermissions
+            )
+        }
+
+        var settings: [String: Any] = ["hooks": hooks]
+        if let remoteControl {
+            settings[AgentDefaults.claudeRemoteControlKey] = remoteControl
+        }
+
+        let file = settingsFile(for: sessionID)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONSerialization.data(withJSONObject: settings, options: [])
+            try data.write(to: file, options: .atomic)
+            return file.path
+        } catch {
+            SkalmanLogger.mcp.error("Failed to write hook settings for \(sessionID): \(error)")
+            return nil
+        }
+    }
+
+    /// The `curl` entries themselves, split out so the settings file can still be written when
+    /// there is no listener to point them at.
+    private static func appendHooks(
+        to hooks: inout [String: Any],
+        base: String,
+        token: String,
+        brokersPermissions: Bool
+    ) {
         if brokersPermissions {
             let url = "\(base)\(MCPDefaults.permissionPathPrefix)\(token)"
             let command = "curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
@@ -146,23 +199,6 @@ enum MCPSessionRegistry {
             hooks[event.claudeEventName] = [
                 ["hooks": [["type": "command", "command": command]]]
             ]
-        }
-
-        let settings: [String: Any] = ["hooks": hooks]
-
-        let file = settingsFile(for: sessionID)
-
-        do {
-            try FileManager.default.createDirectory(
-                at: file.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let data = try JSONSerialization.data(withJSONObject: settings, options: [])
-            try data.write(to: file, options: .atomic)
-            return file.path
-        } catch {
-            SkalmanLogger.mcp.error("Failed to write hook settings for \(sessionID): \(error)")
-            return nil
         }
     }
 

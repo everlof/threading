@@ -233,6 +233,18 @@ final class ProjectStore {
         notifyChanged()
     }
 
+    /// Records this conversation's own answer about Claude's Remote Control bridge. Nil clears
+    /// it, so the session follows `AppSettings.claudeRemoteControl` — and Claude's own `/config`
+    /// beyond that — again.
+    ///
+    /// Applied on the session's next launch, where the settings file is written. Nothing here
+    /// disconnects a bridge that is already open; that is `/remote-control` inside the session,
+    /// or a relaunch.
+    func setRemoteControl(_ remoteControl: Bool?, for sessionID: SessionID) {
+        update(sessionID: sessionID) { $0.remoteControl = remoteControl }
+        notifyChanged()
+    }
+
     /// Records which theme a session's terminal draws with. Nil clears the assignment, so the
     /// session inherits its project's theme — and the app default beyond that — again.
     func setThemeID(_ themeID: TerminalThemeID?, forSessionID sessionID: SessionID) {

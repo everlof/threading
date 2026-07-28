@@ -374,6 +374,25 @@ first-prompt names.
 Rename via right-click in the sidebar, or right-click inside the terminal and choose
 **Rename Session…**.
 
+### Claude's Remote Control
+Claude Code can hand a session to claude.ai and the Claude mobile app so you can check on it
+or reply from your phone. That is Claude's own feature, not Skalman's Remote Access below —
+the two are separate, and a session can use either, both, or neither.
+
+Claude normally decides this account-wide, in its own `/config`. Skalman lets you set it per
+chat instead:
+
+- **Settings > General > Claude Remote Control** sets what new Claude sessions do. *Follow
+  Claude's setting* is the default and changes nothing — the account's `/config` still
+  decides. *Always on* and *Always off* override it.
+- A single chat's **⋯** menu has a **Claude Remote Control** submenu: *Always On*, *Always
+  Off*, or the inherit item, which follows the setting above. This is the one to reach for
+  when you want everything reachable from your phone except one conversation.
+
+Both take effect the next time the session launches or resumes. A chat that is already
+connected stays connected until then — to disconnect one immediately, run `/remote-control`
+inside it.
+
 ### Moving a conversation to another account
 Hover a session's **⋯** menu and, when you have more than one login for that agent, a **Move
 to Account** submenu lists the others. Choosing one moves the whole conversation there — it

@@ -16,6 +16,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let confirmCloseToggle = ThemedToggle()
     private let codexHookToggle = ThemedToggle()
     private let codexHookTrustToggle = ThemedToggle()
+    private let remoteControlPopUp = ThemedPopUp()
     private let shellField = ThemedTextField()
 
     // MARK: - Lifecycle
@@ -69,6 +70,20 @@ final class GeneralPreferencesViewController: NSViewController {
                   isOn: AppSettings.shared.bypassesCodexHookTrust,
                   action: #selector(codexHookTrustChanged))
         codexHookTrustToggle.isEnabled = AppSettings.shared.installsCodexHooks
+
+        for value in ClaudeRemoteControl.allCases {
+            remoteControlPopUp.addItem(
+                ThemedMenuItem(title: value.settingsTitle, representedValue: value)
+            )
+        }
+        remoteControlPopUp.selectItem(
+            at: ClaudeRemoteControl.allCases.firstIndex(of: AppSettings.shared.claudeRemoteControl) ?? 0
+        )
+        remoteControlPopUp.target = self
+        remoteControlPopUp.action = #selector(remoteControlChanged)
+        remoteControlPopUp.translatesAutoresizingMaskIntoConstraints = false
+        remoteControlPopUp.widthAnchor
+            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
 
         shellField.applyFont(.body)
         shellField.placeholderString = TerminalDefaults.defaultShell
@@ -131,6 +146,7 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.section("Attachments", attachmentDetectionCard()),
             SettingsUI.section("Startup", startup),
             SettingsUI.section("Closing", closing),
+            SettingsUI.section("Claude Remote Control", claudeRemoteControlCard()),
             SettingsUI.section("Codex Hooks", codexHooksCard()),
             SettingsUI.section("Shell", shell),
             SettingsUI.note("Shell path is used by shell sessions. Agent sessions launch through your login shell regardless.")
@@ -159,6 +175,25 @@ final class GeneralPreferencesViewController: NSViewController {
                 subtitle: "Scans Codex's terminal output and Native replies for image and PDF paths. "
                     + "Turn this off if a Codex update changes how paths are rendered.",
                 control: codexAttachmentToggle
+            )
+        ])
+    }
+
+    /// Claude's own Remote Control bridge — not Skalman's Remote Access, which has its own page.
+    ///
+    /// The wording carries that distinction, because the two are easy to confuse and mean
+    /// different things: this one hands the conversation to claude.ai and the Claude mobile app,
+    /// and it is Claude's setting that Skalman is choosing a default for rather than a switch of
+    /// its own. Hence three states — the first defers instead of deciding.
+    private func claudeRemoteControlCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Remote Control for new Claude sessions",
+                subtitle: "Claude's own bridge to claude.ai and the Claude mobile app, "
+                    + "separate from Skalman's Remote Access. "
+                    + "Following leaves it to the account's own /config. "
+                    + "A single chat can still be set on or off from its ⋯ menu.",
+                control: remoteControlPopUp
             )
         ])
     }
@@ -272,6 +307,15 @@ final class GeneralPreferencesViewController: NSViewController {
                 CodexHookInstaller.uninstall(fromCodexHome: account.configPath)
             }
         }
+    }
+
+    /// Takes effect on the next launch of each session that has not chosen for itself: the value
+    /// is read when the settings file is written, so a running conversation keeps whatever it
+    /// connected with until it is relaunched.
+    @objc private func remoteControlChanged() {
+        guard let value = remoteControlPopUp.selectedItem?.representedValue
+            as? ClaudeRemoteControl else { return }
+        AppSettings.shared.claudeRemoteControl = value
     }
 
     @objc private func codexHookTrustChanged() {

@@ -140,6 +140,19 @@ enum AgentLauncher {
         }
     }
 
+    /// Whether this launch turns Claude's Remote Control bridge on, off, or says nothing.
+    ///
+    /// Three answers, resolved in the order the user set them: the conversation's own choice
+    /// first, then the app-wide default for new sessions, then nil — which writes no key and
+    /// leaves it to `claude /config`. Nil is the only answer that changes nothing, so it has to
+    /// survive all the way to the settings file rather than collapsing into `false` on the way.
+    ///
+    /// Claude-only. Codex has no comparable bridge, and its launches never carry the key.
+    static func remoteControlAtStartup(for session: AgentSession) -> Bool? {
+        guard session.kind == .claude else { return nil }
+        return session.remoteControl ?? AppSettings.shared.claudeRemoteControl.startupValue
+    }
+
     /// Claude keeps one bidirectional stream open for the lifetime of the conversation.
     private static func claudeStreamPlan(
         for session: AgentSession,
@@ -178,7 +191,8 @@ enum AgentLauncher {
         // silently blocks the tools it would otherwise prompt about.
         if let settingsPath = MCPSessionRegistry.writeHookSettings(
             for: session.id,
-            brokersPermissions: true
+            brokersPermissions: true,
+            remoteControl: remoteControlAtStartup(for: session)
         ) {
             command.append(flag: "--settings", value: settingsPath)
         }
@@ -423,7 +437,8 @@ enum AgentLauncher {
         // with a second one. What the terminal cannot say is when a turn begins and ends.
         if let settingsPath = MCPSessionRegistry.writeHookSettings(
             for: session.id,
-            brokersPermissions: false
+            brokersPermissions: false,
+            remoteControl: remoteControlAtStartup(for: session)
         ) {
             command.append(flag: "--settings", value: settingsPath)
         }

@@ -334,6 +334,31 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Claude Remote Control
+
+    /// What new Claude sessions do about **Claude's own** Remote Control bridge — the built-in
+    /// feature that lets claude.ai and the Claude mobile app drive a session. Unrelated to
+    /// Skalman's Remote Access below, which is this app's own server; the two can be set
+    /// independently and a session may be reachable through either, both, or neither.
+    ///
+    /// Defaults to `.followClaude`, which writes nothing and leaves the decision to the user's
+    /// `claude /config`. That is why the setting is three-state rather than a switch: writing
+    /// `false` to mean "we have no opinion" would silently override a `/config` the user set
+    /// deliberately, and installing a Skalman update must not change how their agent connects.
+    ///
+    /// A session that has chosen for itself (`AgentSession.remoteControl`) ignores this.
+    var claudeRemoteControl: ClaudeRemoteControl {
+        get {
+            guard let raw = defaults.string(forKey: Keys.claudeRemoteControl),
+                  let value = ClaudeRemoteControl(rawValue: raw) else { return .followClaude }
+            return value
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.claudeRemoteControl)
+            notifyChanged()
+        }
+    }
+
     // MARK: - Remote Access
 
     /// Whether the remote-access server runs (and, once implemented, its tunnel). Off by
@@ -442,11 +467,59 @@ final class AppSettings {
         static let usesContainedExtensionLauncher = "usesContainedExtensionLauncher"
         static let installsCodexHooks = "installsCodexHooks"
         static let bypassesCodexHookTrust = "bypassesCodexHookTrust"
+        static let claudeRemoteControl = "claudeRemoteControl"
         static let remoteAccessEnabled = "remoteAccessEnabled"
         static let workingOrbStyle = "workingOrbStyle"
         static let chatNameMorphStyle = "chatNameMorphStyle"
         static let chromeFontFamily = "chromeFontFamily"
         static let conversationFontFamily = "conversationFontFamily"
+    }
+}
+
+// MARK: - Claude Remote Control
+
+/// What a Claude session does about Claude's own Remote Control bridge.
+///
+/// Three states rather than a switch, because "no opinion" and "off" are different
+/// instructions to the CLI: the first writes no `remoteControlAtStartup` key at all and lets
+/// the user's `claude /config` decide, while the second writes `false` and overrides it. Only
+/// the first can be the default without changing behaviour for anyone who already chose.
+///
+/// Raw values are stored in defaults, so a case rename is a silent reset to `followClaude`.
+enum ClaudeRemoteControl: String, CaseIterable {
+    case followClaude
+    case enabled
+    case disabled
+
+    /// The value written into the session's settings file, or nil to write nothing.
+    var startupValue: Bool? {
+        switch self {
+        case .followClaude: nil
+        case .enabled: true
+        case .disabled: false
+        }
+    }
+
+    /// The settings pop-up's wording. "Follow Claude's setting" names where the decision goes
+    /// rather than what it is, because Skalman cannot read it: the value lives in the account's
+    /// own config, and an unset one resolves server-side.
+    var settingsTitle: String {
+        switch self {
+        case .followClaude: "Follow Claude's setting"
+        case .enabled: "Always on"
+        case .disabled: "Always off"
+        }
+    }
+
+    /// What a session's "inherit" menu item says, given this as the app-wide default. It names
+    /// the inherited answer where there is one and defers where there is not, so the row never
+    /// claims to know a value it cannot see.
+    var inheritedMenuTitle: String {
+        switch self {
+        case .followClaude: "Use Claude's Setting"
+        case .enabled: "Use Default (On)"
+        case .disabled: "Use Default (Off)"
+        }
     }
 }
 
