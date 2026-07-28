@@ -638,8 +638,8 @@ final class SessionRowView: NSTableCellView {
         } else {
             image = builtInProviderImage
         }
-        agentMark = image
-        iconView.image = plated(image)
+        agentMark = image.map(slotSized)
+        iconView.image = plated(agentMark)
         iconView.setAccessibilityLabel(
             session.isSideChat
                 ? SidebarRowDefaults.sideChatAccessibilityLabel
@@ -692,12 +692,36 @@ final class SessionRowView: NSTableCellView {
         nativeIcon = iconView.image
     }
 
+    /// The mark at the ink size this slot draws, `iconSize`, whether or not it is plated.
+    ///
+    /// The brand marks ship at a nominal 15pt and rely on their slot to contain them — but
+    /// this slot is deliberately wider than its ink (`iconSlotWidth`, the emoji margin), so
+    /// left alone a non-template mark drew 15pt beside the 13pt symbols, and *shrank* the
+    /// moment a plate composed it smaller. Sized here once, gaining a plate moves nothing.
+    ///
+    /// Symbols pass through unharmed: the view's `symbolConfiguration` states their point
+    /// size and wins over the image's own — a resized symbol copy renders identically.
+    private func slotSized(_ image: NSImage) -> NSImage {
+        let side = max(image.size.width, image.size.height)
+        guard side > SidebarRowDefaults.iconSize,
+              let sized = image.copy() as? NSImage else { return image }
+
+        let scale = SidebarRowDefaults.iconSize / side
+        sized.size = NSSize(
+            width: image.size.width * scale,
+            height: image.size.height * scale
+        )
+        return sized
+    }
+
+    /// The plate spans the full slot, so it appears *around* the mark rather than replacing
+    /// it: the ink stays `iconSize` either way — see `IconBackplate.compose`.
     private func plated(_ image: NSImage?) -> NSImage? {
         guard let image else { return nil }
         return IconBackplate.plated(
             image,
             againstTone: IconBackplate.tone(of: rowGround()),
-            size: SidebarRowDefaults.iconSize
+            size: SidebarRowDefaults.iconSlotWidth
         )
     }
 
