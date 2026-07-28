@@ -426,6 +426,12 @@ enum SidebarRowDefaults {
 
     /// Revealed on hover, opening the row's actions.
     static let actionSymbol = "ellipsis"
+    /// Revealed on hover beside the `⋯`, filing the session away in one press.
+    ///
+    /// Archiving is the one row action reached often enough to be worth a button of its own;
+    /// it stays in the menu too, so the two surfaces cannot drift.
+    static let archiveSymbol = "archivebox"
+    static let archiveAccessibilityLabel = "Archive session"
     /// The `+` on a project row's hover, opening its new-session choices.
     /// Revealed on hover over a branch heading, opening the grouping options.
     static let settingsSymbol = "gearshape"
@@ -455,6 +461,18 @@ enum SidebarRowDefaults {
     static let trailingSlotSize: CGFloat = Design.Size.inlineButtonTarget
     /// Gap between the `+` and `⋯` when a project row shows both on hover.
     static let hoverButtonSpacing: CGFloat = 2
+
+    /// Width of a *session* row's trailing slot, which carries two buttons on hover.
+    ///
+    /// Stated as the pair's full width rather than one button's, so both buttons lie inside
+    /// the slot. A button pinned to the slot's edge and allowed to overhang it draws
+    /// perfectly and cannot be clicked at all: `NSView.hitTest` stops at the container's
+    /// bounds, which is the same class of bug as the `⋯` the status dot used to swallow.
+    ///
+    /// The cost is real and deliberate — the title gives up this much width on every row,
+    /// hovered or not, because a slot that resized under the pointer would re-lay out the
+    /// row as the pointer crossed it.
+    static let sessionTrailingSlotWidth: CGFloat = trailingSlotSize * 2 + hoverButtonSpacing
 
     /// Matches the inset and radius of the source list's own selection shape.
     static let hoverHighlightInsetX: CGFloat = 10

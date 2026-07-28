@@ -255,6 +255,12 @@ extension ProjectSidebarViewController {
 
     @objc private func archiveClicked() {
         guard let sessionID = actionSessionID else { return }
+        archiveSession(sessionID)
+    }
+
+    /// The one archive path, shared by the menu item and the row's hover button so the two
+    /// cannot drift — the same reason `populateSessionActions` is shared with the context menu.
+    func archiveSession(_ sessionID: SessionID) {
         delegate?.projectSidebar(self, setArchived: true, for: sessionID)
     }
 

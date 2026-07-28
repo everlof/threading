@@ -24,7 +24,22 @@ final class SessionRowView: NSTableCellView {
         inkSource: .chrome
     )
 
-    /// Fixed-size container holding the status indicator and the action button overlaid,
+    /// Archiving without opening the menu first — the one row action reached often enough to
+    /// earn the row's own surface. It sits outermost, where a list is scanned to its edge.
+    private let archiveButton = ThemedIconButton(
+        symbolName: SidebarRowDefaults.archiveSymbol,
+        accessibility: SidebarRowDefaults.archiveAccessibilityLabel,
+        target: .inline,
+        inkSource: .chrome
+    )
+
+    /// The buttons the pointer reveals, crossfaded against the status indicator as one.
+    ///
+    /// Sized into the slot rather than overhanging it — see `sessionTrailingSlotWidth` for why
+    /// the slot pays for both buttons even at rest.
+    private let hoverControls = NSStackView()
+
+    /// Fixed-size container holding the status indicator and the hover controls overlaid,
     /// so swapping between them on hover never re-lays out the row.
     private let trailingSlot = NSView()
 
@@ -39,6 +54,8 @@ final class SessionRowView: NSTableCellView {
 
     /// Invoked when the row's action button is pressed, carrying the row's session.
     var onAction: ((SessionID, NSView) -> Void)?
+    /// Invoked when the row's archive button is pressed, carrying the row's session.
+    var onArchive: ((SessionID) -> Void)?
     /// Invoked for semantic actions inside extension-rendered content.
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
     private var sessionID: SessionID?
@@ -333,26 +350,47 @@ final class SessionRowView: NSTableCellView {
     private func setupTrailingSlot() {
         statusIndicator.translatesAutoresizingMaskIntoConstraints = false
 
+        // No size stated for either button: each knows its own target and padding.
         actionButton.onPress = { [weak self] in self?.actionClicked() }
-        actionButton.alphaValue = 0
         actionButton.translatesAutoresizingMaskIntoConstraints = false
+        archiveButton.onPress = { [weak self] in self?.archiveClicked() }
+        archiveButton.translatesAutoresizingMaskIntoConstraints = false
+
+        // Trailing-most last: the archive button takes the row's edge, and the `⋯` sits
+        // inboard of it.
+        hoverControls.orientation = .horizontal
+        hoverControls.alignment = .centerY
+        hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
+        hoverControls.alphaValue = 0
+        hoverControls.translatesAutoresizingMaskIntoConstraints = false
+        hoverControls.addArrangedSubview(actionButton)
+        hoverControls.addArrangedSubview(archiveButton)
 
         trailingSlot.translatesAutoresizingMaskIntoConstraints = false
         trailingSlot.setAccessibilityIdentifier("sidebar.session.trailing")
         statusIndicator.setAccessibilityIdentifier("sidebar.session.status")
         actionButton.setAccessibilityIdentifier("sidebar.session.actions")
+        archiveButton.setAccessibilityIdentifier("sidebar.session.archive")
+        hoverControls.setAccessibilityIdentifier("sidebar.session.hover-controls")
         trailingSlot.addSubview(statusIndicator)
-        trailingSlot.addSubview(actionButton)
+        trailingSlot.addSubview(hoverControls)
 
         NSLayoutConstraint.activate([
-            trailingSlot.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
+            trailingSlot.widthAnchor.constraint(
+                equalToConstant: SidebarRowDefaults.sessionTrailingSlotWidth
+            ),
             trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
-            statusIndicator.centerXAnchor.constraint(equalTo: trailingSlot.centerXAnchor),
+
+            // On the archive button's centre rather than the slot's: the archive button holds
+            // the row's trailing edge, which is exactly where the dot sat when it was the only
+            // thing in the slot. Centred in the widened slot it would drift inboard, moving
+            // the status of every row in the list to buy a button nobody is hovering.
+            statusIndicator.centerXAnchor.constraint(equalTo: archiveButton.centerXAnchor),
             statusIndicator.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
             statusIndicator.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
             statusIndicator.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
-            actionButton.centerXAnchor.constraint(equalTo: trailingSlot.centerXAnchor),
-            actionButton.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
+            hoverControls.trailingAnchor.constraint(equalTo: trailingSlot.trailingAnchor),
+            hoverControls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
         ])
     }
 
@@ -495,14 +533,14 @@ final class SessionRowView: NSTableCellView {
     /// fixed size, so the title never re-wraps under the pointer.
     private func setActionVisible(_ visible: Bool, animated: Bool) {
         guard animated else {
-            actionButton.alphaValue = visible ? 1 : 0
+            hoverControls.alphaValue = visible ? 1 : 0
             statusIndicator.alphaValue = visible ? 0 : 1
             return
         }
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Design.Motion.quick
-            actionButton.animator().alphaValue = visible ? 1 : 0
+            hoverControls.animator().alphaValue = visible ? 1 : 0
             statusIndicator.animator().alphaValue = visible ? 0 : 1
         }
     }
@@ -510,6 +548,11 @@ final class SessionRowView: NSTableCellView {
     private func actionClicked() {
         guard let sessionID else { return }
         onAction?(sessionID, actionButton)
+    }
+
+    private func archiveClicked() {
+        guard let sessionID else { return }
+        onArchive?(sessionID)
     }
 
     // MARK: - Public Methods

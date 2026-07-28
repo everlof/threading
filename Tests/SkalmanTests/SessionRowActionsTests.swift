@@ -105,9 +105,8 @@ final class SessionRowActionsTests: XCTestCase {
         defer { leave(row) }
         host.layoutSubtreeIfNeeded()
 
-        let slot = try view(named: "sidebar.session.trailing", in: row)
         let button = try view(named: "sidebar.session.actions", in: row)
-        let centre = host.convert(NSPoint(x: slot.bounds.midX, y: slot.bounds.midY), from: slot)
+        let centre = host.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), from: button)
 
         let hit = try XCTUnwrap(host.hitTest(centre), "nothing at all answered in the trailing slot")
         XCTAssertTrue(
@@ -125,9 +124,8 @@ final class SessionRowActionsTests: XCTestCase {
         defer { leave(row) }
         host.layoutSubtreeIfNeeded()
 
-        let slot = try view(named: "sidebar.session.trailing", in: row)
         let button = try view(named: "sidebar.session.actions", in: row)
-        let centre = host.convert(NSPoint(x: slot.bounds.midX, y: slot.bounds.midY), from: slot)
+        let centre = host.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), from: button)
 
         let hit = try XCTUnwrap(host.hitTest(centre))
         XCTAssertTrue(
@@ -150,8 +148,10 @@ final class SessionRowActionsTests: XCTestCase {
         row.configure(with: session, activity: .working, isLoading: true)
         host.layoutSubtreeIfNeeded()
 
-        let button = try view(named: "sidebar.session.actions", in: row)
-        XCTAssertEqual(button.alphaValue, 1, "the actions button faded out under a resting pointer")
+        // The fade lives on the container holding both buttons, so that is what carries the
+        // answer — asserting on the `⋯` alone would pass whatever the row did.
+        let controls = try view(named: "sidebar.session.hover-controls", in: row)
+        XCTAssertEqual(controls.alphaValue, 1, "the hover controls faded out under a resting pointer")
     }
 
     /// The button has to answer to the accessibility press as well as to the pointer — it is
@@ -163,5 +163,140 @@ final class SessionRowActionsTests: XCTestCase {
         let button = try view(named: "sidebar.session.actions", in: row)
         XCTAssertTrue(button.isAccessibilityElement())
         XCTAssertEqual(button.accessibilityRole(), .button)
+    }
+
+    // MARK: - Archive
+
+    /// The archive button holds the row's trailing edge, so it — not the `⋯` — is what a click
+    /// at the outer edge of the slot reaches.
+    func testTheArchiveButtonTakesTheClickAtTheRowsTrailingEdge() throws {
+        let (host, row) = hostedRow()
+        row.configure(with: session(), activity: .working)
+        enter(row)
+        defer { leave(row) }
+        host.layoutSubtreeIfNeeded()
+
+        let archive = try view(named: "sidebar.session.archive", in: row)
+        let centre = host.convert(NSPoint(x: archive.bounds.midX, y: archive.bounds.midY), from: archive)
+
+        let hit = try XCTUnwrap(host.hitTest(centre), "nothing answered at the archive button")
+        XCTAssertTrue(
+            hit === archive || hit.isDescendant(of: archive),
+            "the archive button's click went to \(type(of: hit)) instead"
+        )
+    }
+
+    /// Both buttons must lie *inside* the trailing slot. One pinned to the slot's edge and left
+    /// to overhang draws perfectly and cannot be clicked, because `NSView.hitTest` stops at the
+    /// container's bounds — the failure this layout exists to avoid.
+    func testBothHoverButtonsLieInsideTheTrailingSlot() throws {
+        let (host, row) = hostedRow()
+        row.configure(with: session(), activity: .idle)
+        enter(row)
+        defer { leave(row) }
+        host.layoutSubtreeIfNeeded()
+
+        let slot = try view(named: "sidebar.session.trailing", in: row)
+        for identifier in ["sidebar.session.actions", "sidebar.session.archive"] {
+            let button = try view(named: identifier, in: row)
+            let frame = slot.convert(button.bounds, from: button)
+            XCTAssertTrue(
+                slot.bounds.contains(frame),
+                "\(identifier) at \(frame) escapes the slot's \(slot.bounds) and cannot be clicked"
+            )
+        }
+    }
+
+    /// The archive button is the *outer* of the pair. Stated as an assertion because the order
+    /// is the request, not an accident of how the stack was built.
+    func testTheArchiveButtonSitsOutboardOfTheActionsButton() throws {
+        let (host, row) = hostedRow()
+        row.configure(with: session(), activity: .idle)
+        host.layoutSubtreeIfNeeded()
+
+        let actions = try view(named: "sidebar.session.actions", in: row)
+        let archive = try view(named: "sidebar.session.archive", in: row)
+        let actionsFrame = row.convert(actions.bounds, from: actions)
+        let archiveFrame = row.convert(archive.bounds, from: archive)
+
+        XCTAssertGreaterThan(
+            archiveFrame.minX,
+            actionsFrame.minX,
+            "the archive button should sit outboard of the ⋯, at the row's trailing edge"
+        )
+    }
+
+    /// The dot must not move when the slot widens to carry a second button: it is shown on every
+    /// row at rest, and the pair is shown on one row under the pointer.
+    func testTheStatusDotKeepsTheRowsTrailingEdge() throws {
+        let (host, row) = hostedRow()
+        row.configure(with: session(), activity: .working)
+        host.layoutSubtreeIfNeeded()
+
+        let status = try view(named: "sidebar.session.status", in: row)
+        let archive = try view(named: "sidebar.session.archive", in: row)
+        let statusCentre = row.convert(NSPoint(x: status.bounds.midX, y: status.bounds.midY), from: status)
+        let archiveCentre = row.convert(NSPoint(x: archive.bounds.midX, y: archive.bounds.midY), from: archive)
+
+        XCTAssertEqual(
+            statusCentre.x,
+            archiveCentre.x,
+            accuracy: 0.5,
+            "the status dot left the row's trailing edge when the slot widened"
+        )
+    }
+
+    /// Pressing it reports the row's session, which is what the sidebar archives.
+    func testPressingArchiveReportsTheRowsSession() throws {
+        let (host, row) = hostedRow()
+        let session = session()
+        row.configure(with: session, activity: .idle)
+        enter(row)
+        defer { leave(row) }
+        host.layoutSubtreeIfNeeded()
+
+        var archived: [SessionID] = []
+        row.onArchive = { archived.append($0) }
+
+        let archive = try view(named: "sidebar.session.archive", in: row)
+        XCTAssertTrue(archive.accessibilityPerformPress())
+
+        XCTAssertEqual(archived, [session.id])
+    }
+
+    /// It is revealed by the pointer and hidden at rest, exactly as the `⋯` is: a list of rows
+    /// each showing an archive button is a list inviting an accident.
+    func testTheArchiveButtonIsHiddenUntilTheRowIsHovered() throws {
+        let (host, row) = hostedRow()
+        let session = session()
+        row.configure(with: session, activity: .idle)
+        host.layoutSubtreeIfNeeded()
+
+        let controls = try view(named: "sidebar.session.hover-controls", in: row)
+        XCTAssertEqual(controls.alphaValue, 0, "the archive button was showing on a row at rest")
+
+        // Read through `configure`, which reasserts the hover state without animating. Reading
+        // straight after enter/exit would race the crossfade rather than test it.
+        enter(row)
+        row.configure(with: session, activity: .idle)
+        XCTAssertEqual(controls.alphaValue, 1, "the archive button stayed hidden under the pointer")
+
+        leave(row)
+        row.configure(with: session, activity: .idle)
+        XCTAssertEqual(controls.alphaValue, 0, "the archive button outstayed the pointer")
+    }
+
+    /// Reachable and labelled without a mouse.
+    func testTheArchiveButtonReportsItselfAsAPressableButton() throws {
+        let (_, row) = hostedRow()
+        row.configure(with: session(), activity: .idle)
+
+        let archive = try view(named: "sidebar.session.archive", in: row)
+        XCTAssertTrue(archive.isAccessibilityElement())
+        XCTAssertEqual(archive.accessibilityRole(), .button)
+        XCTAssertEqual(
+            archive.accessibilityTitle(),
+            SidebarRowDefaults.archiveAccessibilityLabel
+        )
     }
 }

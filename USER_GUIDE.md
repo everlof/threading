@@ -275,8 +275,12 @@ Two things do get an indicator, at the trailing edge of the row:
 
 The dot clears as soon as you select that session.
 
-Hovering a session row swaps the indicator for a **⋯** button holding the row's actions —
-Archive, Close Session, Rename, Delete — so the list stays quiet until you reach for it.
+Hovering a session row swaps the indicator for two buttons, so the list stays quiet until you
+reach for it: a **⋯** holding the row's actions — Archive, Close Session, Rename, Delete — and,
+outboard of it at the row's trailing edge, an **archive** button that files the session away in
+one press without opening the menu first. The archive button is the menu item's shortcut, not a
+second behaviour: both ask before interrupting a running agent, and both are undone the same way
+from **Settings ▸ Archived**.
 
 How it works: an idle agent writes nothing to its terminal, so sustained output means it is
 working, and output stopping means it has finished. A terminal bell counts as an explicit

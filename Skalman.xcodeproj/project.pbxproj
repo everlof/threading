@@ -131,6 +131,7 @@
 		C3E6495290BBC2438F57A735 /* RemoteScreenSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */; };
 		FE1FE5AAECE47AF858A53848 /* ClaudeRemoteControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACCE94027387ADFE6733F36C /* ClaudeRemoteControlTests.swift */; };
 		A812E6D66B3C9E8D16E1B2E0 /* TerminalOptionWordKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */; };
+		5E1AEC819D53FD78F7A46B28 /* SidebarRowRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -307,6 +308,7 @@
 		660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteScreenSeedTests.swift; sourceTree = "<group>"; };
 		ACCE94027387ADFE6733F36C /* ClaudeRemoteControlTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeRemoteControlTests.swift; sourceTree = "<group>"; };
 		F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalOptionWordKeyTests.swift; sourceTree = "<group>"; };
+		E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarRowRenderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -537,6 +539,7 @@
 				660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */,
 				ACCE94027387ADFE6733F36C /* ClaudeRemoteControlTests.swift */,
 				F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */,
+				E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -1016,6 +1019,7 @@
 				C3E6495290BBC2438F57A735 /* RemoteScreenSeedTests.swift in Sources */,
 				FE1FE5AAECE47AF858A53848 /* ClaudeRemoteControlTests.swift in Sources */,
 				A812E6D66B3C9E8D16E1B2E0 /* TerminalOptionWordKeyTests.swift in Sources */,
+				5E1AEC819D53FD78F7A46B28 /* SidebarRowRenderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

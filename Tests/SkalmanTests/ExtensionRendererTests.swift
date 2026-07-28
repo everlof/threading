@@ -1246,7 +1246,8 @@ final class ExtensionRendererTests: XCTestCase {
     func testTheRowsActionsStayAtItsTrailingEdgeWhateverTheContentIs() throws {
         let width: CGFloat = 260
 
-        func actionsFrame(
+        func frame(
+            of identifier: String,
             customization: @escaping ComponentCustomizationHost.Lookup
         ) throws -> NSRect {
             let row = SessionRowView(customizationLookup: customization)
@@ -1255,9 +1256,15 @@ final class ExtensionRendererTests: XCTestCase {
             row.layoutSubtreeIfNeeded()
 
             let actions = try XCTUnwrap(
-                descendants(in: row).first { $0.accessibilityIdentifier() == "sidebar.session.actions" }
+                descendants(in: row).first { $0.accessibilityIdentifier() == identifier }
             )
             return actions.convert(actions.bounds, to: row)
+        }
+
+        func actionsFrame(
+            customization: @escaping ComponentCustomizationHost.Lookup
+        ) throws -> NSRect {
+            try frame(of: "sidebar.session.actions", customization: customization)
         }
 
         let native = try actionsFrame { _ in .empty }
@@ -1294,10 +1301,22 @@ final class ExtensionRendererTests: XCTestCase {
             accuracy: 0.5,
             "the ⋯ moved when the row's content did — it is no longer pinned to the row"
         )
+        // Measured against the slot the *pair* occupies, not one button's width: the ⋯ is the
+        // inboard of the two now, so the archive button is what reaches the row's edge.
         XCTAssertGreaterThan(
             native.maxX,
+            width - SidebarRowDefaults.sessionTrailingSlotWidth
+                - SidebarRowDefaults.trailingInset - 1,
+            "the ⋯ is not in the row's trailing slot"
+        )
+
+        // And the outermost of the pair really does reach the edge, so "trailing" is a fact
+        // about the row rather than about whichever button happens to be checked.
+        let archive = try frame(of: "sidebar.session.archive") { _ in .empty }
+        XCTAssertGreaterThan(
+            archive.maxX,
             width - SidebarRowDefaults.trailingSlotSize - SidebarRowDefaults.trailingInset - 1,
-            "the ⋯ is not at the row's trailing edge"
+            "the archive button is not at the row's trailing edge"
         )
     }
 

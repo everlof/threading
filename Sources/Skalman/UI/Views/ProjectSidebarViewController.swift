@@ -1248,6 +1248,9 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.onAction = { [weak self] sessionID, anchor in
                 self?.showRowActions(for: sessionID, from: anchor)
             }
+            cell.onArchive = { [weak self] sessionID in
+                self?.archiveSession(sessionID)
+            }
             return true
         }
 
