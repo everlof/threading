@@ -60,6 +60,10 @@ bash scripts/run_notification_e2e.sh --claude
 `SKALMAN_E2E_CLAUDE_MODEL` can optionally name a low-cost model available to the configured
 Claude account. If omitted, Claude Code uses that account's default.
 
+Both forms are also reachable as the `e2e` level of `scripts/test.sh` — `scripts/test.sh e2e`
+and `scripts/test.sh e2e --claude` forward straight to this script. See "Test levels" in
+CLAUDE.md for the other two levels.
+
 Missing credentials cause the wrapper to stop before Xcode starts. Running the E2E scheme
 directly from Xcode is also safe: tests whose explicit environment is missing report as skipped
 instead of attempting a partial delivery.

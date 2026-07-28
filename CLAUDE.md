@@ -27,8 +27,9 @@ removed so there is one build system, not two.)
 # Build the app
 xcodebuild -project Skalman.xcodeproj -scheme Skalman -configuration Debug build
 
-# Run the tests (SkalmanTests target, hosted in the app)
-xcodebuild -project Skalman.xcodeproj -scheme Skalman -destination 'platform=macOS' test
+# Run the tests — see "Test levels" below for which one to pick
+scripts/test.sh          # fast: everything except the tests that put a window on screen
+scripts/test.sh all      # the whole SkalmanTests target
 
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)
 open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Skalman-*/Build/Products/Debug/Skalman.app | head -1)"
@@ -259,6 +260,50 @@ Sources/Skalman/
 - Unit tests for `TerminalProfile` serialization
 - Integration tests for shell spawning
 - UI tests for keyboard input handling
+
+### Test levels
+
+Three levels, one entry point — `scripts/test.sh <level>`. **Run `fast` while iterating and
+`all` before you commit or push.** Never run `all` in a loop: it steals focus.
+
+| Level | Command | Covers | Cost |
+|---|---|---|---|
+| **fast** | `scripts/test.sh` | `Skalman-Fast` test plan — the whole `SkalmanTests` target minus the three tests that order a window on screen | default; nothing appears on screen |
+| **all** | `scripts/test.sh all` | `Skalman-All` test plan — the entire target | adds ~14 live-WKWebView tests that flash real windows and load real pages |
+| **e2e** | `scripts/test.sh e2e` | `SkalmanNotificationE2E` scheme — real APNs delivery; `--claude` also spawns a real Claude | needs the four `SKALMAN_APNS_*` credentials; exits 2 without them, so it never fires by accident |
+
+The plans live in `TestPlans/` and are attached to the `Skalman` scheme, so Xcode's test-plan
+picker offers the same choice. `-only-testing:` still works through the script for a single class.
+
+**`all` is enforced on push.** `scripts/install_git_hooks.sh` installs the gate; run it once per
+clone. `core.hooksPath` points at a shared `~/.git-hooks` whose `pre-commit` already delegates to
+an optional `.git/hooks/pre-commit.local`, so the installer teaches `pre-push` the same trick
+rather than shadowing the global hooks and having to reimplement Git LFS. The shim under `.git/`
+is one line; the logic is `scripts/pre_push.sh`, which is versioned and reviewable. Deletion-only
+pushes skip the gate. Bypass deliberately with `SKALMAN_SKIP_TESTS=1 git push` — prefer it over
+`--no-verify`, which also skips Git LFS.
+
+**Never run `git push` to try something out.** `submodule.recurse` is true, so a push recurses
+into `LabelMorph`, `ThinkingOrbs` and `SwiftTerm` and publishes them to their real GitHub
+remotes — even when the outer push targets a local throwaway path, and even though the main repo
+has no remote configured. To exercise the hook, pipe fabricated ref lines into
+`scripts/pre_push.sh` directly.
+
+**Fast is defined by "orders a window on screen", not by "is UI".** Almost every UI test here —
+all the `*RenderTests`, the themed component tests, the pane header/footer tests — builds an
+*unshown* window and `cacheDisplay`s it, which draws nothing on screen and stays in `fast`. Only
+three tests genuinely need to be visible, and they are skipped by name in `Skalman-Fast.xctestplan`:
+
+- `BrowserAgentBridgeIntegrationTests` (the whole class) — WKWebView will not load or render
+  offscreen, so each test calls `orderFront`. Note the sibling class in the same file,
+  `BrowserAgentBridgeTests`, needs no window and stays in `fast`.
+- `ThemedControlTests/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()` and
+  `testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()` — both assert on first
+  responder, which requires a key window.
+
+**Adding a test that needs a real window?** Add it to `skippedTests` in
+`TestPlans/Skalman-Fast.xctestplan` and say why here. Anything that can be asserted against an
+unshown window belongs in `fast` — reach for `orderFront` only when the framework forces it.
 
 **A fixture window is built, never shown.** `AppDelegate.applicationShouldTerminateAfterLastWindowClosed`
 is `true`, which is right for the app and a trap for the test host: a window ordered on screen

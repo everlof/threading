@@ -1,0 +1,28 @@
+{
+  "configurations" : [
+    {
+      "id" : "920C049A-A385-4A1C-B1AC-E42E1C23B1D1",
+      "name" : "All",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Skalman.xcodeproj",
+      "identifier" : "F6000001000000000000001",
+      "name" : "Skalman"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:Skalman.xcodeproj",
+        "identifier" : "20A00C033DC1347FA758CD10",
+        "name" : "SkalmanTests"
+      }
+    }
+  ],
+  "version" : 1
+}
