@@ -1807,6 +1807,21 @@ final class BrowserAgentBridgeTests: XCTestCase {
     }
 }
 
+/// The tests that need a browser that really loads pages.
+///
+/// Unlike the rest of the suite, these order a window **on screen**: WKWebView will not load or
+/// render offscreen, so an unshown fixture window — which every other test here uses — produces
+/// a web view that never commits a navigation. That is why this class is the one excluded from
+/// the `fast` test level; see "Test levels" in CLAUDE.md.
+///
+/// **Every fixture window must set `isReleasedWhenClosed = false`.** It defaults to `true` on a
+/// window built in code, so `close()` releases a window ARC is still holding and the second
+/// release lands on freed memory. It does not fault where the mistake is: the window dies while
+/// an `_NSWindowTransformAnimation` is still in flight, and the bad access surfaces later inside
+/// a CoreAnimation transaction flush — which, in a test, is whatever happened to be spinning the
+/// run loop, usually `waitForExpectations`. Four tests in this class died that way, each taking
+/// the whole test host down with it and reporting `Test crashed with signal segv` against a test
+/// whose own code was fine.
 @MainActor
 final class BrowserAgentBridgeIntegrationTests: XCTestCase {
 
@@ -2051,6 +2066,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = pane
         window.orderFront(nil)
         defer {
@@ -2216,6 +2232,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = pane
         window.orderFront(nil)
         defer {
@@ -2463,6 +2480,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = browser
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
@@ -2616,6 +2634,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = pane
         window.orderFront(nil)
         defer {
@@ -2707,6 +2726,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = pane
         window.orderFront(nil)
         defer {
@@ -2798,6 +2818,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = pane
         window.orderFront(nil)
         defer {
@@ -3190,6 +3211,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = browser
         window.setContentSize(NSSize(width: 800, height: 600))
         browser.view.frame = window.contentView?.bounds
@@ -4467,6 +4489,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = browser
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
@@ -4617,6 +4640,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = browser
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
@@ -4691,6 +4715,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = browser
         window.orderFront(nil)
         defer { window.close() }
@@ -4819,6 +4844,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.contentViewController = browser
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
