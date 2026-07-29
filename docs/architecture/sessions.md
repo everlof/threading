@@ -230,8 +230,8 @@ the command, so terminating options where the prompt used to sit would have fed
 General. `SessionCoordinator` trims it and appends it after the task with one blank line, then
 hands the combined text through the existing one-shot `pendingPrompt`: a terminal launch keeps
 one trailing operand, while a Native launch sends the same string over its stream. Ordinary
-sessions, side chats (including a plain fork with no question), and sessions started from the
-paired owner device all converge there.
+sessions, side chats (including a plain fork with no question), cross-provider continuations,
+and sessions started from the paired owner device all converge there.
 
 The session title is still derived from the **per-chat task alone**. Otherwise one reusable
 instruction would give every Codex chat the same prompt-derived title while waiting for the
@@ -352,8 +352,9 @@ this rule closed: the sidebar's Archive once flipped the flag and left the agent
 invisibly, while the remote archive route had discarded the process from the start. Both
 routes now stop the agent first. Restoring implies nothing; a session comes back dormant.
 
-Every action that interrupts a running agent — close, archive, move to another account, and
-the surface switch — confirms under the single `confirmsBeforeClosingRunningSession` setting
+Every action that interrupts a running agent — close, archive, move to another account, continue
+with another provider, and the surface switch — confirms under the single
+`confirmsBeforeClosingRunningSession` setting
 rather than growing a setting each, but each alert states its own consequence, because
 "where does the session go" is exactly what the verbs fail to say. All of this lives in
 `SessionCoordinator`: the row menu once discarded the process itself, skipping the
@@ -361,6 +362,13 @@ confirmation the same action asked for as Cmd+W, which is why the sidebar delega
 lifecycle decisions instead of touching `AgentRuntime` directly. The alerts are built
 separately from run so tests can hold their wording to what the action does
 (`SessionLifecycleConfirmationTests`).
+
+**Continuation lineage is not provider lineage.** A side chat's `forkedFrom` points at a
+provider-native child that can resume the same transcript semantics. A cross-provider session's
+`continuedFrom` instead records which Skalman row supplied a frozen handoff, with
+`continuationSourceKind` retaining the decoder even if the source row is later deleted. The
+snapshot belongs to the destination row and is removed with it (or its project), so a future
+launch can regenerate the same bootstrap without depending on a mutable source transcript.
 
 ## Session Import
 

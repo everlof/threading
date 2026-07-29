@@ -3192,6 +3192,39 @@
         }
       }
     },
+    "Continue": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt"
+          }
+        }
+      }
+    },
+    "Continue with %@": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt med %@"
+          }
+        }
+      }
+    },
+    "Continue “%@” with %@?": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt “%@” med %@?"
+          }
+        }
+      }
+    },
     "Continue chats from Skalman on iPhone or a private browser. Nothing is exposed until you turn it on.": {
       "extractionState": "stale",
       "localizations": {
@@ -3210,6 +3243,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Styrs från iPhone"
+          }
+        }
+      }
+    },
+    "Conversation handoff": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Överlämning av konversation"
           }
         }
       }
@@ -3474,6 +3518,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kunde inte flytta konversationen"
+          }
+        }
+      }
+    },
+    "Couldn't continue the conversation": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att fortsätta konversationen"
           }
         }
       }
@@ -6228,6 +6283,17 @@
         }
       }
     },
+    "Let a new provider read the frozen history that created its session.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Låt en ny leverantör läsa den frysta historik som skapade sessionen."
+          }
+        }
+      }
+    },
     "Let agents discover, validate and preview Skalman UI extension components.": {
       "extractionState": "stale",
       "localizations": {
@@ -8801,6 +8867,17 @@
         }
       }
     },
+    "Read handoff history": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läs överlämningshistorik"
+          }
+        }
+      }
+    },
     "Read network activity": {
       "extractionState": "stale",
       "localizations": {
@@ -8819,6 +8896,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Läs ett kontrakt, dess begränsningar, värdresurser, exempel och JSON Schema."
+          }
+        }
+      }
+    },
+    "Read only this session's paginated, cross-provider conversation snapshot.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läs endast den här sessionens sidindelade konversationsögonblicksbild mellan leverantörer."
           }
         }
       }
@@ -11788,6 +11876,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Konversationen sparas och kommer att fortsätta där den lämnade av."
+          }
+        }
+      }
+    },
+    "The current agent stops. A new session receives a read-only snapshot, while the original conversation stays resumable.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den aktuella agenten stoppas. En ny session får en skrivskyddad ögonblicksbild, medan den ursprungliga konversationen fortfarande kan återupptas."
+          }
+        }
+      }
+    },
+    "The current agent stops. Skalman creates a new session with the other provider and gives it a read-only snapshot of this conversation. The original session stays in the sidebar and can still be resumed. Provider-specific state may not carry over.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den aktuella agenten stoppas. Skalman skapar en ny session hos den andra leverantören och ger den en skrivskyddad ögonblicksbild av konversationen. Den ursprungliga sessionen finns kvar i sidofältet och kan fortfarande återupptas. Leverantörsspecifikt tillstånd kanske inte följer med."
           }
         }
       }

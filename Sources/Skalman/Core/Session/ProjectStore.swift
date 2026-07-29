@@ -71,8 +71,12 @@ final class ProjectStore {
     }
 
     func removeProject(id: ProjectID) {
-        if let icon = project(withID: id)?.icon {
+        let removedProject = project(withID: id)
+        if let icon = removedProject?.icon {
             ProjectIconStore.remove(fileName: icon.fileName)
+        }
+        for session in removedProject?.sessions ?? [] {
+            ConversationHandoffStore.remove(for: session.id)
         }
 
         DraftStore.shared.clear(for: id)
@@ -124,7 +128,10 @@ final class ProjectStore {
         reasoningEffort: String? = nil,
         usesNativeUI: Bool = false,
         permissionMode: AgentPermissionMode? = nil,
-        title: String? = nil
+        title: String? = nil,
+        continuedFrom: SessionID? = nil,
+        continuationSourceKind: AgentKind? = nil,
+        id: SessionID = SessionID()
     ) -> AgentSession? {
         guard let index = index(ofProject: projectID) else { return nil }
 
@@ -137,7 +144,10 @@ final class ProjectStore {
             accountHandle: accountHandle,
             model: model,
             reasoningEffort: reasoningEffort,
-            usesNativeUI: usesNativeUI
+            usesNativeUI: usesNativeUI,
+            continuedFrom: continuedFrom,
+            continuationSourceKind: continuationSourceKind,
+            id: id
         )
         session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
         session.permissionMode = permissionMode
@@ -305,6 +315,7 @@ final class ProjectStore {
 
     func removeSession(id sessionID: SessionID) {
         guard let location = locate(sessionID: sessionID) else { return }
+        ConversationHandoffStore.remove(for: sessionID)
         projects[location.projectIndex].sessions.remove(at: location.sessionIndex)
 
         if selectedSessionID == sessionID {

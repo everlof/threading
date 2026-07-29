@@ -652,6 +652,10 @@ struct PanelActivateTabArguments: Decodable {
 
 struct EmptyToolArguments: Decodable {}
 
+struct ConversationHistoryArguments: Decodable {
+    let cursor: String?
+}
+
 struct ExtensionComponentReferenceArguments: Decodable {
     let component: String?
     let version: Int?
@@ -676,6 +680,7 @@ enum MCPToolCall {
     case displayImage(DisplayImageArguments)
     case displayHTML(DisplayHTMLArguments)
     case displayCompareFiles(DisplayCompareFilesArguments)
+    case conversationHistory(ConversationHistoryArguments)
     case browserNavigate(BrowserNavigateArguments)
     case browserHistory(BrowserHistoryArguments)
     case browserStop(EmptyToolArguments)
@@ -689,6 +694,7 @@ enum MCPToolCall {
     case browserCapabilities(EmptyToolArguments)
     case browserRunIsolated(BrowserIsolatedRunArguments)
     case browserSnapshot(BrowserSnapshotArguments)
+    case browserAnnotations(EmptyToolArguments)
     case browserScreenshot(BrowserScreenshotArguments)
     case browserVisualCompare(BrowserVisualCompareArguments)
     case browserQuery(BrowserSelectorArguments)
@@ -734,6 +740,7 @@ enum MCPToolCall {
         case .displayImage: return MCPTools.displayImage
         case .displayHTML: return MCPTools.displayHTML
         case .displayCompareFiles: return MCPTools.displayCompareFiles
+        case .conversationHistory: return MCPTools.conversationHistory
         case .browserNavigate: return MCPTools.browserNavigate
         case .browserHistory: return MCPTools.browserHistory
         case .browserStop: return MCPTools.browserStop
@@ -747,6 +754,7 @@ enum MCPToolCall {
         case .browserCapabilities: return MCPTools.browserCapabilities
         case .browserRunIsolated: return MCPTools.browserRunIsolated
         case .browserSnapshot: return MCPTools.browserSnapshot
+        case .browserAnnotations: return MCPTools.browserAnnotations
         case .browserScreenshot: return MCPTools.browserScreenshot
         case .browserVisualCompare: return MCPTools.browserVisualCompare
         case .browserQuery: return MCPTools.browserQuery
@@ -820,6 +828,13 @@ struct MCPToolCallParameters: Decodable {
                 try container.decodeIfPresent(DisplayCompareFilesArguments.self, forKey: .arguments)
                     ?? DisplayCompareFilesArguments()
             )
+        case MCPTools.conversationHistory:
+            call = .conversationHistory(
+                try container.decodeIfPresent(
+                    ConversationHistoryArguments.self,
+                    forKey: .arguments
+                ) ?? ConversationHistoryArguments(cursor: nil)
+            )
         case MCPTools.browserNavigate:
             call = .browserNavigate(
                 try container.decodeIfPresent(BrowserNavigateArguments.self, forKey: .arguments)
@@ -883,6 +898,11 @@ struct MCPToolCallParameters: Decodable {
             call = .browserSnapshot(
                 try container.decodeIfPresent(BrowserSnapshotArguments.self, forKey: .arguments)
                     ?? BrowserSnapshotArguments(maximumNodes: nil, ref: nil, selector: nil)
+            )
+        case MCPTools.browserAnnotations:
+            call = .browserAnnotations(
+                try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+                    ?? EmptyToolArguments()
             )
         case MCPTools.browserScreenshot:
             call = .browserScreenshot(
@@ -1412,6 +1432,9 @@ enum MCPTools {
     static let displayCompareFiles = "display_compare_files"
     static let displayTools = [displayImage, displayHTML, displayCompareFiles]
 
+    static let conversationHistory = "conversation_history"
+    static let continuationTools = [conversationHistory]
+
     static let browserNavigate = "browser_navigate"
     static let browserHistory = "browser_history"
     static let browserStop = "browser_stop"
@@ -1425,6 +1448,7 @@ enum MCPTools {
     static let browserCapabilities = "browser_capabilities"
     static let browserRunIsolated = "browser_run_isolated"
     static let browserSnapshot = "browser_snapshot"
+    static let browserAnnotations = "browser_annotations"
     static let browserScreenshot = "browser_screenshot"
     static let browserVisualCompare = "browser_visual_compare"
     static let browserQuery = "browser_query"
@@ -1456,6 +1480,7 @@ enum MCPTools {
         browserCapabilities,
         browserRunIsolated,
         browserSnapshot,
+        browserAnnotations,
         browserClick,
         browserHover,
         browserDrag,
@@ -1566,7 +1591,7 @@ enum MCPTools {
     /// Every tool the server serves. Clients pre-approve this MCP server as one app capability;
     /// browser tools then enforce origin and consequential-action approval inside Skalman, where
     /// the app can account for cookies and the page the user is actually looking at.
-    static let allTools = displayTools + browserTools + panelTools + projectTools
+    static let allTools = continuationTools + displayTools + browserTools + panelTools + projectTools
         + storageTools + notificationTools + themeTools + appThemeTools + extensionAuthoringTools
 
     /// The full `tools/list` payload. `MCPToolCatalog.enabledDefinitions` filters this to the
@@ -1598,6 +1623,29 @@ enum MCPTools {
                     )
                 ],
                 required: ["path"]
+            )
+        ),
+        MCPToolDefinition(
+            name: conversationHistory,
+            description: """
+                Read the frozen conversation snapshot that created this cross-provider \
+                continuation. The tool is scoped to this session: it cannot select another \
+                session or a file path. Call it first when the opening bootstrap asks you to, \
+                then repeat with each returned next_cursor until it is null. The history \
+                contains visible user and assistant messages plus bounded tool calls and \
+                results; private reasoning is omitted.
+                """,
+            inputSchema: MCPInputSchema(
+                properties: [
+                    "cursor": MCPPropertySchema(
+                        type: .string,
+                        description: """
+                            Omit for the first page. For later pages, pass next_cursor exactly \
+                            as returned by the previous call.
+                            """
+                    )
+                ],
+                required: []
             )
         ),
         MCPToolDefinition(
@@ -2734,6 +2782,18 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
+            name: browserAnnotations,
+            description: """
+                Read the user's native annotations for the active browser page. Each note includes \
+                its numbered pin and document-space CSS-pixel coordinates. These notes were \
+                authored explicitly in Skalman's UI, remain outside the page DOM, and are never \
+                visible to site JavaScript. The current origin still requires browser access, \
+                because a note may reveal what page the user is reviewing. This tool is read-only; \
+                only the user can create, edit, or delete annotations.
+                """,
+            inputSchema: MCPInputSchema(properties: [:], required: [])
+        ),
+        MCPToolDefinition(
             name: browserScreenshot,
             description: """
                 Capture the current browser page as PNG. By default the image is returned to you \
@@ -3364,8 +3424,11 @@ enum MCPTools {
             description: """
                 Inspect a built .skalmanextension package or unpacked package directory, show \
                 its runtime and complete capability request to the user, and install it only \
-                after explicit approval. A successful installation is always left disabled; \
-                this tool cannot enable an extension or grant capabilities silently.
+                after explicit approval. A fresh installation is always left disabled. When \
+                the package's identifier is already installed this becomes an update \
+                proposal: the user approves the capability delta, the running generation is \
+                stopped before the swap, and enablement is preserved. This tool cannot \
+                enable a new extension or grant capabilities silently.
                 """,
             inputSchema: MCPInputSchema(
                 properties: [

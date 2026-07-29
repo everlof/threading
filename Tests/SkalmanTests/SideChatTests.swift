@@ -231,6 +231,108 @@ final class SideChatTests: XCTestCase {
         XCTAssertTrue(source.contains(ShellCommand(word: project.folderPath).source), source)
     }
 
+    // MARK: - Cross-provider continuation
+
+    func testContinuationLineageRoundTripsWithoutTheSourceRecord() throws {
+        let sourceID = SessionID()
+        let session = AgentSession(
+            kind: .codex,
+            title: "Continue the parser fix",
+            continuedFrom: sourceID,
+            continuationSourceKind: .claude
+        )
+
+        let restored = try JSONDecoder().decode(
+            AgentSession.self,
+            from: JSONEncoder().encode(session)
+        )
+
+        XCTAssertEqual(restored.continuedFrom, sourceID)
+        XCTAssertEqual(restored.continuationSourceKind, .claude)
+        XCTAssertTrue(restored.isCrossProviderContinuation)
+    }
+
+    func testContinuationBootstrapExistsOnlyUntilItsFirstLaunch() {
+        var continuation = AgentSession(
+            kind: .codex,
+            title: "Continue the parser fix",
+            continuedFrom: SessionID(),
+            continuationSourceKind: .claude
+        )
+
+        let opening = ConversationContinuation.openingPrompt(for: continuation)
+        XCTAssertTrue(opening?.contains("conversation_history") == true)
+        XCTAssertTrue(opening?.contains("next_cursor") == true)
+
+        continuation.hasLaunched = true
+        XCTAssertNil(ConversationContinuation.openingPrompt(for: continuation))
+        XCTAssertNil(ConversationContinuation.openingPrompt(
+            for: AgentSession(kind: .codex, title: "Ordinary")
+        ))
+    }
+
+    func testHandoffStoreCopiesAndRemovesTheFrozenTranscript() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("skalman-handoff-\(UUID().uuidString)")
+        let source = root.appendingPathComponent("source.jsonl")
+        let sessionID = SessionID()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("one frozen record\n".utf8).write(to: source)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        try ConversationHandoffStore.save(
+            sourceTranscript: source,
+            for: sessionID,
+            rootDirectory: root
+        )
+        let snapshot = ConversationHandoffStore.url(
+            for: sessionID,
+            rootDirectory: root
+        )
+        XCTAssertEqual(try Data(contentsOf: snapshot), Data("one frozen record\n".utf8))
+
+        ConversationHandoffStore.remove(for: sessionID, rootDirectory: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshot.path))
+    }
+
+    func testHistoryPageIsNormalisedScopedAndPaginated() throws {
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/Transcripts/claude-tools-and-thinking.jsonl")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: fixture.path))
+
+        let first = try ConversationHistoryPage.render(
+            transcriptURL: fixture,
+            sourceKind: .claude,
+            sourceTitle: "Fixture",
+            cursor: nil,
+            pageCharacterLimit: 5_000
+        ).get()
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(first.utf8)) as? [String: Any]
+        )
+        let history = try XCTUnwrap(payload["history"] as? String)
+        let next = try XCTUnwrap(payload["next_cursor"] as? String)
+
+        XCTAssertEqual(payload["source_provider"] as? String, AgentKind.claude.displayName)
+        XCTAssertTrue(history.contains("<conversation_history>"))
+        XCTAssertTrue(history.contains("[ASSISTANT"))
+        XCTAssertFalse(
+            history.contains("\"signature\""),
+            "private thinking envelopes crossed the handoff boundary"
+        )
+
+        let second = try ConversationHistoryPage.render(
+            transcriptURL: fixture,
+            sourceKind: .claude,
+            sourceTitle: "Fixture",
+            cursor: next,
+            pageCharacterLimit: 5_000
+        ).get()
+        XCTAssertNotEqual(first, second)
+    }
+
     // MARK: - Helpers
 
     /// Writes an empty transcript where the CLI would keep the parent's conversation, so the

@@ -315,6 +315,41 @@ final class MCPWireTests: XCTestCase {
         ]))
     }
 
+    func testConversationHistoryCursorDecodesByName() throws {
+        let first = try request("""
+            {"jsonrpc":"2.0","id":"history","method":"tools/call","params":{
+              "name":"conversation_history","arguments":{}
+            }}
+            """)
+        guard case .toolCall(.conversationHistory(let firstArguments)) =
+                first.parameters else {
+            return XCTFail("Expected typed conversation history arguments")
+        }
+        XCTAssertNil(firstArguments.cursor)
+
+        let next = try request("""
+            {"jsonrpc":"2.0","id":"history-next","method":"tools/call","params":{
+              "name":"conversation_history","arguments":{"cursor":"7"}
+            }}
+            """)
+        guard case .toolCall(.conversationHistory(let nextArguments)) =
+                next.parameters else {
+            return XCTFail("Expected paginated conversation history arguments")
+        }
+        XCTAssertEqual(nextArguments.cursor, "7")
+    }
+
+    @MainActor
+    func testConversationHistoryIsDefinedAndCataloguedAsOneScopedTool() {
+        XCTAssertTrue(
+            MCPTools.definitions.contains { $0.name == MCPTools.conversationHistory }
+        )
+        XCTAssertEqual(
+            MCPToolCatalog.continuation.tools.map(\.name),
+            [MCPTools.conversationHistory]
+        )
+    }
+
     func testExtensionAuthoringToolArgumentsDecodeByName() throws {
         let description = try request("""
             {"jsonrpc":"2.0","id":"describe","method":"tools/call","params":{

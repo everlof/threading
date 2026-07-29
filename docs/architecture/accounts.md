@@ -58,10 +58,21 @@ process first (it belongs to the old account and is still writing the file), and
 touches a token — the official CLI authenticates under whichever account, so this is
 portability, not credential reuse.
 
-Same agent only. Cross-agent (Claude ↔ Codex) is *not* a resume — the transcript formats and
-resume paths differ — so it is deliberately not offered here; the honest cross-agent operation
-is a re-seed (replay the normalized `[StreamEvent]` into a new session on the other agent),
-which is a separate, lossy feature.
+Same agent only. Cross-agent (Claude ↔ Codex) is *not* a resume — the transcript formats,
+provider state and resume paths differ. That distinction is visible in the second verb,
+**Continue with Claude/Codex** (`ConversationContinuation`): it stops a live source after
+confirmation, freezes its raw transcript under Application Support, and creates a new
+provider-native sibling session. The source session and its transcript stay intact and
+resumable; the destination records `continuedFrom` and `continuationSourceKind`, but has a new
+provider conversation identifier.
+
+The destination's deterministic first turn asks Skalman's scoped `conversation_history` MCP
+tool for every page of the frozen snapshot. Skalman parses that snapshot through
+`TranscriptReplay` into `[StreamEvent]` and exposes visible user/assistant messages plus bounded
+tool calls and results. Private thinking, provider-only state, model selection and tool-call
+identity do not cross the boundary. That makes the operation deliberately lossy, but symmetric
+and honest in both directions: no Claude transcript is forged for Codex and no Codex transcript
+is forged for Claude.
 
 **A move is a relaunch, so it goes through `SessionCoordinator.moveSession`**, the same route as
 the surface switch and for the same reason: the migration stops the live process, and a sidebar

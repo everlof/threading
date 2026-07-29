@@ -19,6 +19,17 @@ one-run `mcp_servers` overrides, so a tool call arrives already attributed — t
 identity. `AgentSession.id` is the key, not
 `agentSessionID`, which is nil for Codex until discovery.
 
+One tool uses that routing as a data boundary rather than merely a destination.
+`conversation_history` exists for a session created by **Continue with Claude/Codex** and reads
+only the frozen handoff named by that destination session's id. Its argument is just an opaque
+page cursor: the caller cannot supply a project, source session or filesystem path. The app
+resolves lineage on the main actor, parses the snapshot off it, and returns a provider-neutral
+page of visible dialogue and bounded tool context; private thinking is omitted. A `next_cursor`
+continues large histories, and the response says when `TranscriptReplay` had to use its bounded
+replay window. The tool lives in the default-enabled **Conversation handoff** catalog group;
+turning that group off also removes the Continue menu because the destination could no longer
+receive its context.
+
 Three deliberate choices in the launch line:
 
 - **The display tool is pre-approved** with `--allowedTools mcp__skalman__*` for Claude and a

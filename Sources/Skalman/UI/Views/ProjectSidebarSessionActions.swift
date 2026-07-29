@@ -138,6 +138,7 @@ extension ProjectSidebarViewController {
             }
         }
         addMoveToAccountItem(to: menu, for: session)
+        addContinueWithProviderItem(to: menu, for: session)
         menu.addItem(.separator())
         menu.addItem(
             withTitle: L10n.string("Delete Session"),
@@ -372,6 +373,37 @@ extension ProjectSidebarViewController {
         menu.addItem(moveItem)
     }
 
+    /// Cross-provider is deliberately a different verb from Move. Move preserves one native
+    /// transcript and can be reversed; Continue creates a new session whose first turn reads a
+    /// provider-neutral handoff snapshot through MCP, while the original stays where it is.
+    private func addContinueWithProviderItem(to menu: NSMenu, for session: AgentSession) {
+        guard let project = ProjectStore.shared.project(forSessionID: session.id),
+              ConversationContinuation.canContinue(session, in: project) else { return }
+
+        let destinations = ConversationContinuation.destinations(for: session)
+        guard let provider = destinations.first?.provider else { return }
+
+        let submenu = NSMenu()
+        for account in destinations {
+            let item = NSMenuItem(
+                title: accountMenuLabel(account),
+                action: #selector(continueWithProviderClicked(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = account
+            submenu.addItem(item)
+        }
+
+        let item = NSMenuItem(
+            title: L10n.format("Continue with %@", provider.displayName),
+            action: nil,
+            keyEquivalent: ""
+        )
+        item.submenu = submenu
+        menu.addItem(item)
+    }
+
     private func accountMenuLabel(_ account: AgentAccount) -> String {
         let name = AccountName.display(for: account)
         return account.emoji.map { "\($0)  \(name)" } ?? name
@@ -387,6 +419,17 @@ extension ProjectSidebarViewController {
               let account = sender.representedObject as? AgentAccount else { return }
 
         delegate?.projectSidebar(self, moveSession: sessionID, toAccount: account)
+    }
+
+    @objc private func continueWithProviderClicked(_ sender: NSMenuItem) {
+        guard let sessionID = actionSessionID,
+              let account = sender.representedObject as? AgentAccount else { return }
+
+        delegate?.projectSidebar(
+            self,
+            continueSession: sessionID,
+            withAccount: account
+        )
     }
 
     /// Records the choice only. A conversation already connected stays connected until it is

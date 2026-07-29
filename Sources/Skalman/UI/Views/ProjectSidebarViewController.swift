@@ -1695,6 +1695,11 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     )
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
+        continueSession sessionID: SessionID,
+        withAccount account: AgentAccount
+    )
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
         createSideChatOf sessionID: SessionID,
         prompt: String?
     )

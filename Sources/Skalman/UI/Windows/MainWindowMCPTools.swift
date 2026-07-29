@@ -304,6 +304,8 @@ final class AgentToolCoordinator: MCPToolHandling {
             return displayHTML(arguments, for: sessionID)
         case .displayCompareFiles(let arguments):
             return displayCompareFiles(arguments, for: sessionID)
+        case .conversationHistory:
+            return .failure("Conversation history is loaded asynchronously; retry the tool call.")
         default:
             return .failure("Unknown tool: \(call.name)")
         }
@@ -337,6 +339,16 @@ final class AgentToolCoordinator: MCPToolHandling {
         }
 
         switch call {
+        case .conversationHistory(let arguments):
+            ConversationContinuation.loadHistoryPage(
+                for: sessionID,
+                cursor: arguments.cursor
+            ) { result in
+                switch result {
+                case .success(let page): completion(.success(page))
+                case .failure(let error): completion(.failure(error.message))
+                }
+            }
         case .browserNavigate(let arguments):
             browserNavigate(arguments, for: sessionID, completion: observed)
         case .browserHistory(let arguments):

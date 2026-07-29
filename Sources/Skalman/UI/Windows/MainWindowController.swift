@@ -1559,6 +1559,16 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         sessionCoordinator.moveSession(sessionID, to: account)
     }
 
+    /// Starts a new provider-native conversation from a frozen, MCP-readable snapshot. The
+    /// source stays as its own resumable session; this is lineage, not a transcript move.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        continueSession sessionID: SessionID,
+        withAccount account: AgentAccount
+    ) {
+        sessionCoordinator.continueSession(sessionID, with: account)
+    }
+
     /// Forks a session into a side chat and opens it.
     ///
     /// Nothing here stops the parent: a fork writes its own transcript, which is exactly what

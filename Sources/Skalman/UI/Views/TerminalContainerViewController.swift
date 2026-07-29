@@ -513,13 +513,23 @@ final class TerminalContainerViewController: NSViewController {
             return
         }
 
+        // A continuation's bootstrap is model-derived rather than stored as a free-form draft.
+        // Regenerating it here means an app quit between creation and first launch cannot strand
+        // a destination that has a snapshot but was never told to read it.
+        let effectiveInitialPrompt = initialPrompt
+            ?? ConversationContinuation.openingPrompt(for: agentSession)
+
         // Sessions Skalman renders itself take a different surface entirely: no PTY, no
         // terminal view, and a conversation drawn from the CLI's structured events. The kind
         // must still support it — a session flagged native for an agent since disabled falls
         // back to the terminal rather than launching a mode it should no longer use.
         if agentSession.usesNativeUI, agentSession.kind.supportsNativeUI,
            let project = ProjectStore.shared.project(forSessionID: sessionID) {
-            showConversation(agentSession, in: project, initialPrompt: initialPrompt)
+            showConversation(
+                agentSession,
+                in: project,
+                initialPrompt: effectiveInitialPrompt
+            )
             return
         }
 
@@ -533,7 +543,7 @@ final class TerminalContainerViewController: NSViewController {
         attach(controller)
 
         if isNewTerminal {
-            controller.launch(initialPrompt: initialPrompt)
+            controller.launch(initialPrompt: effectiveInitialPrompt)
         }
     }
 

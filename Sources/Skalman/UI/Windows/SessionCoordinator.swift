@@ -134,6 +134,37 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
     }
 
+    /// Continues a conversation with another provider.
+    ///
+    /// The source agent stops so its transcript is a stable snapshot, but its session and
+    /// transcript remain resumable. The destination is a new conversation whose deterministic
+    /// first turn loads that snapshot through Skalman's session-scoped MCP tool.
+    func continueSession(_ sessionID: SessionID, with account: AgentAccount) {
+        guard confirmContinuationIfRunning(sessionID: sessionID, with: account) else {
+            return
+        }
+
+        AgentRuntime.shared.discard(sessionID: sessionID)
+        switch ConversationContinuation.create(from: sessionID, to: account) {
+        case .success(let session):
+            pendingPrompt = NewChatOpeningMessage.compose(
+                prompt: ConversationContinuation.openingPrompt(for: session),
+                reusableMessage: AppSettings.shared.newChatOpeningMessage
+            )
+            sidebar.reload()
+            sidebar.select(sessionID: session.id)
+            onPresentationChanged()
+
+        case .failure(let error):
+            container.reopenIfShowing(sessionID: sessionID)
+            let alert = NSAlert()
+            alert.messageText = L10n.string("Couldn't continue the conversation")
+            alert.informativeText = error.message
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
     func createSideChat(of sessionID: SessionID, prompt: String?) {
         // "Ask on the Side" carries its question, which names the chat the same way the
         // composer's prompt names an ordinary session. A plain fork stays "Side Chat" until
@@ -361,6 +392,32 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             """)
         alert.alertStyle = .warning
         alert.addButton(withTitle: L10n.string("Move"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func confirmContinuationIfRunning(
+        sessionID: SessionID,
+        with account: AgentAccount
+    ) -> Bool {
+        guard AppSettings.shared.confirmsBeforeClosingRunningSession,
+              AgentRuntime.shared.isRunning(sessionID: sessionID),
+              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
+
+        let alert = NSAlert()
+        alert.messageText = L10n.format(
+            "Continue “%@” with %@?",
+            session.displayTitle,
+            account.provider.displayName
+        )
+        alert.informativeText = L10n.string(
+            "The current agent stops. Skalman creates a new session with the other provider "
+                + "and gives it a read-only snapshot of this conversation. The original "
+                + "session stays in the sidebar and can still be resumed. Provider-specific "
+                + "state may not carry over."
+        )
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.string("Continue"))
         alert.addButton(withTitle: L10n.string("Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
     }

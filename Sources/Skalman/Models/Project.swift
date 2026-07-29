@@ -264,6 +264,25 @@ struct AgentSession: Codable, Identifiable {
     /// Whether this session began as a fork of another.
     var isSideChat: Bool { forkedFrom != nil }
 
+    /// The session whose visible conversation seeded this one on another provider.
+    ///
+    /// Unlike `forkedFrom`, this is never handed to either CLI as a resume identifier. Skalman
+    /// snapshots the source transcript, normalises it through `TranscriptReplay`, and exposes
+    /// only that snapshot to this session through the scoped `conversation_history` MCP tool.
+    /// The destination then starts a genuinely new provider-native conversation.
+    var continuedFrom: SessionID?
+
+    /// The format of the frozen handoff transcript.
+    ///
+    /// Kept beside the lineage rather than recovered from the source record so the handoff
+    /// remains readable if that original row is later deleted from Skalman.
+    var continuationSourceKind: AgentKind?
+
+    /// Whether this session began as a cross-provider continuation.
+    var isCrossProviderContinuation: Bool {
+        continuedFrom != nil && continuationSourceKind != nil
+    }
+
     /// Whether Skalman renders this conversation itself instead of showing the agent's
     /// terminal. Experimental, and available only where the agent exposes a supported
     /// structured-output transport.
@@ -312,6 +331,8 @@ struct AgentSession: Codable, Identifiable {
         reasoningEffort: String? = nil,
         usesNativeUI: Bool = false,
         forkedFrom: SessionID? = nil,
+        continuedFrom: SessionID? = nil,
+        continuationSourceKind: AgentKind? = nil,
         id: SessionID = SessionID()
     ) {
         self.id = id
@@ -335,6 +356,8 @@ struct AgentSession: Codable, Identifiable {
         self.isPinned = false
         self.usesNativeUI = usesNativeUI
         self.forkedFrom = forkedFrom
+        self.continuedFrom = continuedFrom
+        self.continuationSourceKind = continuationSourceKind
         self.themeID = nil
         self.notificationsMuted = nil
     }
@@ -344,6 +367,7 @@ struct AgentSession: Codable, Identifiable {
         case agentTitle = "terminalTitle"
         case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
         case fastMode, remoteControl, permissionMode, archived, pinned, nativeUI, forkParent
+        case continuationSource, continuationSourceKind
         case themeID, themeName, notificationsMuted
     }
 
@@ -382,6 +406,14 @@ struct AgentSession: Codable, Identifiable {
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
         usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
         forkedFrom = try container.decodeIfPresent(SessionID.self, forKey: .forkParent)
+        continuedFrom = try container.decodeIfPresent(
+            SessionID.self,
+            forKey: .continuationSource
+        )
+        continuationSourceKind = try container.decodeIfPresent(
+            AgentKind.self,
+            forKey: .continuationSourceKind
+        )
         themeID = try container.decodeIfPresent(TerminalThemeID.self, forKey: .themeID)
         if themeID == nil,
            let legacyName = try container.decodeIfPresent(String.self, forKey: .themeName) {
@@ -416,6 +448,11 @@ struct AgentSession: Codable, Identifiable {
         try container.encode(isPinned, forKey: .pinned)
         try container.encode(usesNativeUI, forKey: .nativeUI)
         try container.encodeIfPresent(forkedFrom, forKey: .forkParent)
+        try container.encodeIfPresent(continuedFrom, forKey: .continuationSource)
+        try container.encodeIfPresent(
+            continuationSourceKind,
+            forKey: .continuationSourceKind
+        )
         try container.encodeIfPresent(themeID, forKey: .themeID)
         try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     }
