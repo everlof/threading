@@ -149,8 +149,17 @@ enum ProjectIconStore {
 
     /// Draws the composite at the sidebar's display size. The drawing-handler image
     /// re-renders per backing scale, so the rounded clip stays crisp on Retina.
+    ///
+    /// **The clip rounds a tile and nothing else.** A mark that arrives on transparency has
+    /// no corners to round, so clipping it can only take ink: `sonda`'s wordmark runs the
+    /// full width of its canvas along the bottom, and the corner arcs bit the outer edge off
+    /// the `s` and the `a` — about 0.8pt each at the slot's 16pt, which on a 2pt-wide letter
+    /// is most of a stem. A plate keeps its own rounded shape either way; only what the ink
+    /// is clipped to depends on `fillsItsBounds`, measured once here rather than inside the
+    /// handler, which runs again per backing scale.
     private static func compose(_ base: NSImage, plated: Bool, darkAppearance: Bool) -> NSImage {
         let side = ProjectIconDefaults.displayPointSize
+        let isTile = fillsItsBounds(base)
         return NSImage(
             size: NSSize(width: side, height: side),
             flipped: false
@@ -169,7 +178,7 @@ enum ProjectIconStore {
                 clip.fill()
             }
 
-            clip.addClip()
+            if isTile { clip.addClip() }
 
             let content = plated
                 ? bounds.insetBy(
@@ -200,6 +209,53 @@ enum ProjectIconStore {
             width: fitted.width,
             height: fitted.height
         )
+    }
+
+    /// Whether the artwork is a **tile** — opaque out to its own edges, the way an app icon
+    /// or an avatar is — rather than a loose mark standing on transparency.
+    ///
+    /// This is the question the rounded clip actually asks. A tile has square corners that
+    /// want rounding into the app's shape language; a loose mark has nothing there to round,
+    /// and letting the clip run over it merely trims whatever ink reaches the corners.
+    ///
+    /// Measured as the mean alpha around the border of a small render, so an antialiased or
+    /// slightly soft edge still counts as a tile, while a wordmark on a clear background —
+    /// three of its four edges empty — cannot. An undecodable image reports `false`: a mark
+    /// we cannot measure is one we decline to cut.
+    static func fillsItsBounds(_ image: NSImage) -> Bool {
+        let side = ProjectIconDefaults.luminanceSampleSize
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = CGContext(
+                  data: nil,
+                  width: side,
+                  height: side,
+                  bitsPerComponent: 8,
+                  bytesPerRow: side * 4,
+                  space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return false }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let data = context.data else { return false }
+
+        let pixels = data.bindMemory(to: UInt8.self, capacity: side * side * 4)
+        let alphaChannel = 3
+        var alphaSum = 0.0
+
+        for step in 0..<side {
+            let border = [
+                step,                             // bottom row
+                (side - 1) * side + step,         // top row
+                step * side,                      // leading column
+                step * side + side - 1            // trailing column
+            ]
+            for pixel in border {
+                alphaSum += Double(pixels[pixel * 4 + alphaChannel])
+            }
+        }
+
+        let samples = Double(side * 4)
+        return CGFloat(alphaSum / samples / 255) >= ProjectIconDefaults.tileEdgeOpacity
     }
 
     /// The measurement lives with the rule that consumes it, in `IconBackplate`.
@@ -286,6 +342,12 @@ enum ProjectIconDefaults {
     static let displayCornerRadius: CGFloat = 4
     static let plateInset: CGFloat = 2
     static let luminanceSampleSize = 32
+
+    /// How opaque an icon's border must read before the rounded clip is allowed to run over
+    /// it — see `ProjectIconStore.fillsItsBounds`. High enough that a mark with any real
+    /// clear margin is left alone, low enough that a tile with a soft or antialiased edge is
+    /// still rounded.
+    static let tileEdgeOpacity: CGFloat = 0.9
 
     /// Tones beyond these vanish against the matching appearance's sidebar and earn a plate.
     static let darkAppearanceLuminanceFloor: CGFloat = 0.4

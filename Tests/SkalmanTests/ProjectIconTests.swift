@@ -129,6 +129,119 @@ final class ProjectIconTests: XCTestCase {
         XCTAssertGreaterThan(luminance, 0.9)
     }
 
+    // MARK: - The Rounded Clip
+
+    func testATileIsRecognisedAndALooseMarkIsNot() throws {
+        XCTAssertTrue(
+            ProjectIconStore.fillsItsBounds(try image(of: pngData(size: 64))),
+            "an opaque favicon was not read as a tile"
+        )
+        XCTAssertFalse(
+            ProjectIconStore.fillsItsBounds(try wordmarkMark()),
+            "a mark on a clear background was read as a tile"
+        )
+    }
+
+    /// A tile still rounds — that is the whole point of the clip.
+    func testATileKeepsItsRoundedCorners() throws {
+        let black = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let composed = ProjectIconStore.roundedDisplay(
+            try image(of: pngData(size: 64, color: black))
+        )
+
+        let corner = try luminance(of: composed, atPoint: NSPoint(x: 0.5, y: 0.5))
+        let middle = try luminance(of: composed, atPoint: NSPoint(x: 8, y: 8))
+
+        XCTAssertGreaterThan(corner, 0.5, "a tile lost its rounded corner")
+        XCTAssertLessThan(middle, 0.1, "the tile did not draw at all")
+    }
+
+    /// The reported case: `sonda`'s wordmark runs the full width of its canvas along the
+    /// bottom, so the corner arcs took the outer edge off the `s` and the `a`. A mark on
+    /// transparency has no corners to round, so the clip has nothing to take but ink.
+    func testALooseMarkKeepsTheInkInItsCorners() throws {
+        let composed = ProjectIconStore.roundedDisplay(try wordmarkMark())
+        let trailingEdge: CGFloat = ProjectIconDefaults.displayPointSize - 0.5
+
+        let leading = try luminance(of: composed, atPoint: NSPoint(x: 0.5, y: 0.5))
+        let trailing = try luminance(of: composed, atPoint: NSPoint(x: trailingEdge, y: 0.5))
+
+        XCTAssertLessThan(leading, 0.1, "the clip trimmed the leading edge of the wordmark")
+        XCTAssertLessThan(trailing, 0.1, "the clip trimmed the trailing edge of the wordmark")
+    }
+
+    /// A wordmark's geometry, which is what makes this visible: ink along the whole bottom
+    /// edge, clear everywhere the corner arcs would otherwise have nothing to do.
+    ///
+    /// Rasterised rather than built from a drawing handler — a handler-backed image composed
+    /// inside another one does not keep this one's orientation, and a fixture that lands
+    /// upside down tests the corners it was not written for.
+    private func wordmarkMark(pixels: Int = 64) throws -> NSImage {
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: pixels,
+            height: pixels,
+            bitsPerComponent: 8,
+            bytesPerRow: pixels * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: pixels, height: pixels / 4))
+
+        let size = NSSize(width: pixels, height: pixels)
+        return NSImage(cgImage: try XCTUnwrap(context.makeImage()), size: size)
+    }
+
+    private func image(of data: Data) throws -> NSImage {
+        try XCTUnwrap(NSImage(data: data))
+    }
+
+    /// The luminance the composite shows at one point of its 16pt face, rasterised at 4× over
+    /// white so a fraction of a point resolves: black ink reads 0, the ground the clip
+    /// exposes reads 1.
+    private func luminance(of image: NSImage, atPoint point: NSPoint) throws -> CGFloat {
+        let scale = 4
+        let side = Int(ProjectIconDefaults.displayPointSize) * scale
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: side,
+            height: side,
+            bitsPerComponent: 8,
+            bytesPerRow: side * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        image.draw(
+            in: CGRect(x: 0, y: 0, width: side, height: side),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1
+        )
+        NSGraphicsContext.restoreGraphicsState()
+
+        let data = try XCTUnwrap(context.data)
+        let pixels = data.bindMemory(to: UInt8.self, capacity: side * side * 4)
+
+        // The point is in the image's own bottom-left space; the bitmap's rows run top-down.
+        let column: Int = min(side - 1, max(0, Int(point.x * CGFloat(scale))))
+        let scanline: Int = min(side - 1, max(0, Int(point.y * CGFloat(scale))))
+        let row: Int = side - 1 - scanline
+        let offset: Int = (row * side + column) * 4
+
+        let red = Double(pixels[offset])
+        let green = Double(pixels[offset + 1])
+        let blue = Double(pixels[offset + 2])
+        let luminance: Double = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+        return CGFloat(luminance / 255)
+    }
+
     // MARK: - Generated Tiles
 
     func testGeneratedIconIsDeterministicPerName() {

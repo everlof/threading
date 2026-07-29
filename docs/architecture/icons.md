@@ -84,6 +84,14 @@ system-colours rule: a plate exists to oppose the appearance, and every system c
 follows it. Rows retain the `ProjectIcon` and re-compose on
 `viewDidChangeEffectiveAppearance`, since the decision is per-appearance.
 
+**The clip rounds a tile, and only a tile** (`fillsItsBounds`: the mean alpha around the
+border of a small render, against `tileEdgeOpacity`). A mark that arrives on transparency
+has no corners to round, so running the clip over it can only take ink — `sonda`'s wordmark
+runs the full width of its canvas along the bottom, and the corner arcs bit the outer edge
+off the `s` and the `a`, about 0.8pt each in the 16pt slot, which on a 2pt-wide letter is
+most of a stem. An undecodable image reports "not a tile" for the same reason the backplate
+rule refuses one: a mark we cannot measure is one we decline to change.
+
 `ProjectIconResearch` asks Codex to identify the mark — headless `codex exec`, read-only
 sandbox, low reasoning effort, default account. Codex-only for the *sandbox*, not for policy:
 the run reads an unfamiliar project's files and `--sandbox read-only` bounds it in one flag,
