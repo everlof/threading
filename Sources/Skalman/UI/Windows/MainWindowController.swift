@@ -18,8 +18,20 @@ final class MainWindowController: ThemedWindowController {
     /// Owns session creation, import, worktree targeting, surface switches, and closing.
     private var sessionCoordinator: SessionCoordinator!
 
-    /// The session that was on screen before Settings opened, restored when it closes.
-    private var preSettingsSessionID: SessionID?
+    /// The page that was on screen before Settings opened, restored when it closes.
+    ///
+    /// A *page*, not a session id: a project's composer is as much somewhere to come back to as
+    /// a session is, and remembering only sessions dropped the user on the empty state — taking
+    /// a half-written prompt off the screen with it.
+    private var preSettingsPage: NavigationHistory.Page?
+
+    /// Where the window has been: the selection history behind ⌃⌘← / ⌃⌘→.
+    private var history = NavigationHistory()
+
+    /// The page a Back or Forward press is currently presenting, so its arrival is recognised
+    /// and not pushed as a fresh visit. A plain flag would not survive the sidebar's deferred
+    /// presentation — the delegate callback lands a run-loop turn after `select` returns.
+    private var pendingHistoryTarget: NavigationHistory.Page?
 
     /// The panel agents display content in, and its split item, retained so it can be
     /// revealed when content arrives.
@@ -40,8 +52,11 @@ final class MainWindowController: ThemedWindowController {
 
     /// The active page, drawn as the selected tab of the window's page strip.
     ///
-    /// The *same* class the display pane's strip uses, inked from the backdrop rather than the
-    /// chrome because the toolbar floats over the terminal's own palette — which is the only thing
+    /// Deliberately a *single* chip, not a strip: a page here swaps the whole workspace — the
+    /// drawer, the panel, the sidebar's selection — so a row of them would be a second session
+    /// switcher wearing tab clothes. The sidebar is the switcher; this names where you are.
+    /// The *same* class the pane strips use, inked from the backdrop rather than the chrome
+    /// because the header floats over the terminal's own palette — which is the only thing
     /// that differs between the two, and now the only thing stated. See `ThemedTabItemView`.
     let pageTabView = ThemedTabItemView(
         title: "",
@@ -54,18 +69,18 @@ final class MainWindowController: ThemedWindowController {
     /// Toolbar pill showing the current account's rate-limit usage.
     let accountUsageItemView = AccountUsageItemView()
 
-    /// App-owned toolbar controls, retained so pane visibility is reflected as selected state.
+    /// App-owned chrome controls, retained so pane visibility and session state stay reflected.
     var sidebarToolbarButton: ThemedIconButton?
+    var navBackToolbarButton: ThemedIconButton?
+    var navForwardToolbarButton: ThemedIconButton?
     var newSessionButton: ThemedIconButton?
     var shellDrawerToolbarButton: ThemedIconButton?
     var displayPaneToolbarButton: ThemedIconButton?
     var sessionContextToolbarButton: ThemedIconButton?
+    var surfaceToggleToolbarButton: ThemedIconButton?
 
-    /// The toolbar context button's menu, rebuilt each open so the theme checkmarks are live.
+    /// The toolbar context button's menu, rebuilt each open so all session state is live.
     let sessionContextMenu = NSMenu()
-
-    /// Builds the Theme submenu for the context button; retained because the items target it.
-    let themeMenuBuilder = ThemeMenuBuilder()
 
     /// Exposed to the toolbar delegate, which needs the split view for its tracking separator.
     var splitView: NSSplitView { splitViewController.splitView }
@@ -188,8 +203,12 @@ final class MainWindowController: ThemedWindowController {
         // be replaced by hand is exactly two things — the material, and the collapse animation
         // (`SidebarSplitViewController.toggleSidebar`) — and the app already owned the second.
         sidebarItem = NSSplitViewItem(viewController: sidebarViewController)
+        // A floor, not the floor: `updateSidebarMinimumThickness` raises it to clear the window
+        // controls floating over the column as soon as they can be measured.
         sidebarItem.minimumThickness = SidebarDefaults.minWidth
         sidebarItem.maximumThickness = SidebarDefaults.maxWidth
+        // Dragged past that minimum the column snaps shut rather than stopping dead, which is
+        // the only sensible next size once it can no longer hold its own controls.
         sidebarItem.canCollapse = true
         // The sidebar is the fixed column: a window resize is absorbed by the terminal, which is
         // what the sidebar behaviour arranged for itself and a plain item does not.
@@ -207,7 +226,7 @@ final class MainWindowController: ThemedWindowController {
         containerViewController.composerViewController.delegate = sessionCoordinator
         pageTabView.onClose = { [weak self] in self?.closeActivePageTab() }
         pageTabView.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
-        // The toolbar shows exactly one page, and it is always the current one.
+        // The header shows exactly one page, and it is always the current one.
         pageTabView.isSelected = true
 
         let contentItem = NSSplitViewItem(viewController: containerViewController)
@@ -244,8 +263,20 @@ final class MainWindowController: ThemedWindowController {
         // The pane's own header, built here because the window controller owns what these
         // controls do, and installed there because the pane owns where they sit.
         containerViewController.installHeader(makePaneHeaderView())
+        configureTabTransfer()
+        // The first update above can only reach the real NSToolbar button. Initialize the pane
+        // controls now that they exist too, especially the surface button whose glyph depends
+        // on the restored session and which must disappear when there is no session.
+        updateToolbarControlStates()
         splitViewController.sidebarTransitionDidComplete = { [weak self] isCollapsed in
             self?.updateHeaderInset(sidebarIsCollapsed: isCollapsed)
+        }
+
+        // The toolbar was installed a moment ago and has not laid its items out yet, so the
+        // sidebar's floor is claimed on the next turn of the run loop — before the window is on
+        // screen, and well before a divider can be dragged.
+        DispatchQueue.main.async { [weak self] in
+            self?.updateSidebarMinimumThickness()
         }
     }
 
@@ -319,6 +350,10 @@ final class MainWindowController: ThemedWindowController {
                 for: sessionID
             )
         }
+        displayPaneController.onSubagentSelection = { [weak self] sessionID, threadID in
+            guard let self, sessionID == self.currentSessionID else { return }
+            self.containerViewController.selectSubagent(threadID)
+        }
 
         // The shell drawer belongs to the terminal container, on the other side of the split; the
         // window is what can see both, so it is what joins them.
@@ -328,7 +363,12 @@ final class MainWindowController: ThemedWindowController {
 
         displayItem = NSSplitViewItem(viewController: displayPaneController)
         displayItem.canCollapse = true
-        displayItem.minimumThickness = DisplayPaneDefaults.minWidth
+
+        // The pane's own chrome, not the width it opens at: a split item's minimum is required,
+        // and a required constraint is also the *window's* minimum. See
+        // `DisplayPaneDefaults.slimmestWidth` for the measurement. The 200pt the panel opens at
+        // is applied as a width when it is revealed, which a window resize may squeeze past.
+        displayItem.minimumThickness = DisplayPaneDefaults.slimmestWidth
         // The divider's position is the user's answer, and it outranks what the pane's own
         // content would prefer — see `DisplayPaneDefaults.holdingPriority`.
         displayItem.holdingPriority = DisplayPaneDefaults.holdingPriority
@@ -352,6 +392,18 @@ final class MainWindowController: ThemedWindowController {
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.updateSessionTitleItem()
         }
+
+        // A clicked macOS notification lands here. Selecting through the sidebar keeps it on
+        // the same path as a local click, exactly like a remote resume.
+        appEvents.observe(SessionNotificationOpened.self) { [weak self] event in
+            guard let self,
+                  ProjectStore.shared.session(withID: event.sessionID) != nil else { return }
+            // Settings takes the sidebar over, so arriving from a notification has to leave it
+            // the same way Back does — otherwise the pane switches to the session while the
+            // sidebar keeps listing settings sections, with no row to show which one arrived.
+            self.exitSettingsForNavigation()
+            self.sidebarViewController.select(sessionID: event.sessionID)
+        }
     }
 
     /// Supplies the extension runtime broker with the same shell root as the native Info pane.
@@ -366,6 +418,9 @@ final class MainWindowController: ThemedWindowController {
         // Fires while a divider is dragged and when a pane collapses, which are the two ways the
         // content pane can arrive at the window's leading edge.
         updateHeaderInset()
+        // Cheap and idempotent, and this is the first moment on a cold launch at which the
+        // toolbar's controls have a frame to measure.
+        updateSidebarMinimumThickness()
 
         guard let displayItem, !displayItem.isCollapsed, !isRestoringDisplayPaneWidth else {
             return
@@ -400,15 +455,7 @@ final class MainWindowController: ThemedWindowController {
 
         let pane = containerViewController.view
         let paneMinX = pane.convert(pane.bounds, to: nil).minX
-        let measuredControlsMaxX = sidebarToolbarButton.map {
-            $0.convert($0.bounds, to: nil).maxX
-        }
-        // A toolbar item can already exist while its view still has a zero frame (notably while
-        // attaching a hosted test window). That is not a measurement. Keep the launch fallback
-        // until AppKit has actually placed the control, then replace it with the real edge.
-        let controlsMaxX = measuredControlsMaxX.flatMap {
-            $0 > PaneHeaderDefaults.inset ? $0 : nil
-        } ?? PaneHeaderDefaults.assumedWindowControlsWidth
+        let controlsMaxX = windowControlsTrailingEdge()
         let measuredClearance = controlsMaxX - paneMinX + Design.Spacing.medium
         // A collapsed split item can retain its pre-animation model frame even after the
         // presentation has reached the window edge. In that state subtracting `paneMinX` makes
@@ -422,6 +469,51 @@ final class MainWindowController: ThemedWindowController {
             PaneHeaderDefaults.inset,
             clearance
         )
+    }
+
+    /// Where the window's own controls end, in window coordinates.
+    ///
+    /// The *trailing-most* toolbar control, not a named one: the history group sits right of the
+    /// toggle, and clearing only the toggle would leave the pane header — or the sidebar's own
+    /// trailing edge — under it. A toolbar item can already exist while its view still has a zero
+    /// frame (notably while attaching a hosted test window). That is not a measurement, so the
+    /// launch fallback stands until AppKit has actually placed the control.
+    private func windowControlsTrailingEdge() -> CGFloat {
+        let measured = [sidebarToolbarButton, navBackToolbarButton, navForwardToolbarButton]
+            .compactMap { control in
+                control.map { $0.convert($0.bounds, to: nil).maxX }
+            }
+            .max()
+
+        return measured.flatMap {
+            $0 > PaneHeaderDefaults.inset ? $0 : nil
+        } ?? PaneHeaderDefaults.assumedWindowControlsWidth
+    }
+
+    // MARK: - Sidebar Width
+
+    /// Keeps the sidebar wide enough to hold the window controls that float over it.
+    ///
+    /// The toolbar positions its items against the *window*, so the sidebar toggle and the
+    /// history pair sit at a fixed x whatever the divider does — and at
+    /// `SidebarDefaults.minWidth` the forward chevron was cut in half by the divider, its
+    /// trailing edge hanging over the terminal. A column too narrow to hold its own controls has
+    /// no useful sizes left below it: from here the next size down is shut, which dragging past
+    /// the minimum already does (`canCollapse`).
+    ///
+    /// Measured rather than stated, for the same reason `updateHeaderInset` measures: those
+    /// controls are AppKit's to place, and an item added to the toolbar has to move this floor
+    /// with it. Idempotent — the value only ever changes when the toolbar's contents do.
+    private func updateSidebarMinimumThickness() {
+        guard let sidebarItem else { return }
+
+        let target = max(
+            SidebarDefaults.minWidth,
+            windowControlsTrailingEdge() + Design.Spacing.medium
+        )
+        guard abs(sidebarItem.minimumThickness - target) > 0.5 else { return }
+
+        sidebarItem.minimumThickness = target
     }
 
     // MARK: - Display Pane
@@ -514,7 +606,6 @@ final class MainWindowController: ThemedWindowController {
         guard AppSettings.shared.restoresLastSession,
               let sessionID = ProjectStore.shared.selectedSessionID,
               ProjectStore.shared.session(withID: sessionID) != nil else { return }
-
         sidebarViewController.select(sessionID: sessionID)
     }
 
@@ -577,7 +668,7 @@ final class MainWindowController: ThemedWindowController {
         updateToolbarControlStates()
     }
 
-    /// Keeps the toolbar naming whatever is on screen.
+    /// Keeps the header naming whatever is on screen.
     ///
     /// Each branch hands the tab an **identity** as well as a title, which is what lets a rename
     /// morph while a change of page lands directly — see `ThemedTabItemView.update`.
@@ -607,7 +698,7 @@ final class MainWindowController: ThemedWindowController {
         } else if let projectID = containerViewController.currentComposerProjectID {
             let project = ProjectStore.shared.project(withID: projectID)
             showPageTab(
-                title: project?.name ?? "New Session",
+                title: project?.name ?? L10n.string("New Session"),
                 symbolName: SessionTitleDefaults.projectSymbolName,
                 identity: projectID,
                 toolTip: project?.name
@@ -637,6 +728,153 @@ final class MainWindowController: ThemedWindowController {
             pageTabView.setIcon(icon)
         }
         pageTabView.toolTip = toolTip ?? title
+    }
+
+    // MARK: - Tab Transfer
+
+    /// Moves tabs between the window's hosts; only the window sees both.
+    private lazy var tabTransfer = TabTransferCoordinator(host: { [weak self] hostID in
+        guard let self else { return nil }
+        switch hostID {
+        case .displayPanel: return displayPaneController
+        case .drawer: return containerViewController.drawerHostController
+        }
+    })
+
+    /// Wires movement into both strip panes' context menus, the drag-out gesture, and the
+    /// browser resolution's cross-host fallback. Called once, after both panes exist.
+    private func configureTabTransfer() {
+        displayPaneController.transferEntries = { [weak self] tabID in
+            self?.transferMenuEntries(from: .displayPanel, tabID: tabID) ?? []
+        }
+        containerViewController.drawerHostController.transferEntries = { [weak self] tabID in
+            self?.transferMenuEntries(from: .drawer, tabID: tabID) ?? []
+        }
+
+        displayPaneController.dragOutDestination = { [weak self] tabID, windowPoint in
+            self?.dragDestination(from: .displayPanel, tabID: tabID, at: windowPoint) != nil
+        }
+        displayPaneController.performDragOut = { [weak self] tabID, windowPoint in
+            self?.dropDraggedTab(from: .displayPanel, tabID: tabID, at: windowPoint)
+        }
+        containerViewController.drawerHostController.dragOutDestination = {
+            [weak self] tabID, windowPoint in
+            self?.dragDestination(from: .drawer, tabID: tabID, at: windowPoint) != nil
+        }
+        containerViewController.drawerHostController.performDragOut = {
+            [weak self] tabID, windowPoint in
+            self?.dropDraggedTab(from: .drawer, tabID: tabID, at: windowPoint)
+        }
+
+        displayPaneController.browserFallback = { [weak self] sessionID in
+            self?.containerViewController.drawerHostController.browser(for: sessionID)
+        }
+    }
+
+    /// The host a tab dragged out of `sourceID` would land in at this pointer position, or nil
+    /// while the drop would do nothing. Only a *visible* strip band takes a drop — a closed
+    /// drawer or collapsed panel is reached by the context menu, which opens it on landing.
+    private func dragDestination(
+        from sourceID: TabHostID,
+        tabID: UUID,
+        at windowPoint: NSPoint
+    ) -> TabHostID? {
+        guard let sessionID = currentSessionID else { return nil }
+
+        let destinationID: TabHostID
+        let bandHit: Bool
+        switch sourceID {
+        case .displayPanel:
+            destinationID = .drawer
+            bandHit = containerViewController.isShellDrawerOpen
+                && containerViewController.drawerHostController
+                    .dropBandContains(windowPoint: windowPoint)
+        case .drawer:
+            destinationID = .displayPanel
+            bandHit = displayItem?.isCollapsed == false
+                && displayPaneController.dropBandContains(windowPoint: windowPoint)
+        }
+
+        guard bandHit, tabTransfer.canMove(
+            tabID: tabID, from: sourceID, to: destinationID, sessionID: sessionID
+        ) else { return nil }
+        return destinationID
+    }
+
+    private func dropDraggedTab(from sourceID: TabHostID, tabID: UUID, at windowPoint: NSPoint) {
+        guard let destinationID = dragDestination(
+            from: sourceID, tabID: tabID, at: windowPoint
+        ) else { return }
+        moveTab(tabID, from: sourceID, to: destinationID)
+    }
+
+    /// The "Move to …" items for one tab — offered only where the destination would say yes,
+    /// so the menu never advertises a move that would beep.
+    private func transferMenuEntries(
+        from sourceID: TabHostID,
+        tabID: UUID
+    ) -> [ThemedMenuEntry] {
+        guard let sessionID = currentSessionID else { return [] }
+
+        let destinations: [(TabHostID, String)]
+        switch sourceID {
+        case .displayPanel:
+            destinations = [(.drawer, L10n.string("Move to Shell Drawer"))]
+        case .drawer:
+            destinations = [(.displayPanel, L10n.string("Move to Display Panel"))]
+        }
+
+        return destinations.compactMap { destinationID, title in
+            guard tabTransfer.canMove(
+                tabID: tabID, from: sourceID, to: destinationID, sessionID: sessionID
+            ) else { return nil }
+            return .item(ThemedMenuItem(title: title, onChoose: { [weak self] in
+                self?.moveTab(tabID, from: sourceID, to: destinationID)
+            }))
+        }
+    }
+
+    /// Moves the tab and brings its destination into view — a move you cannot see landing is
+    /// a tab that just vanished.
+    func moveTab(_ tabID: UUID, from sourceID: TabHostID, to destinationID: TabHostID) {
+        guard let sessionID = currentSessionID,
+              tabTransfer.move(
+                  tabID: tabID, from: sourceID, to: destinationID, sessionID: sessionID
+              ) else {
+            NSSound.beep()
+            return
+        }
+
+        switch destinationID {
+        case .drawer:
+            containerViewController.openShellDrawer()
+        case .displayPanel:
+            displayPaneController.showSession(sessionID)
+            setDisplayPaneVisible(true)
+        }
+    }
+
+    /// ⌘W: the focused strip's tab when keyboard focus is inside the drawer or the panel,
+    /// else the page on screen — settings closes back to what it covered, a session or
+    /// composer page closes to the empty pane. Closing is never stopping an agent — Close
+    /// Session remains its own command, one menu away.
+    func closeActiveTab() {
+        if let host = focusedTabHost() {
+            if let activeID = host.activeTabID(for: currentSessionID),
+               host.closeTab(id: activeID, for: currentSessionID) {
+                return
+            }
+            NSSound.beep()
+            return
+        }
+
+        if containerViewController.isShowingSettings
+            || containerViewController.currentComposerProjectID != nil
+            || containerViewController.currentSessionID != nil {
+            closeActivePageTab()
+        } else {
+            NSSound.beep()
+        }
     }
 
     /// Clicking the active page tab shows *where* it is, by selecting and scrolling to its row in
@@ -732,6 +970,89 @@ final class MainWindowController: ThemedWindowController {
         sidebarViewController.selectSettingsPage(id: pageID)
         containerViewController.showSettingsPage(id: pageID)
         updateSessionTitleItem()
+        recordVisit(.settings(pageID))
+    }
+
+    // MARK: - Selection History
+
+    /// ⌃⌘← — retraces the window's page selection, Xcode's Go Back.
+    func goBack() {
+        guard let page = history.goBack() else {
+            NSSound.beep()
+            return
+        }
+        present(page)
+        updateNavigationButtons()
+    }
+
+    /// ⌃⌘→ — the step back forward.
+    func goForward() {
+        guard let page = history.goForward() else {
+            NSSound.beep()
+            return
+        }
+        present(page)
+        updateNavigationButtons()
+    }
+
+    var canGoBack: Bool { history.canGoBack }
+    var canGoForward: Bool { history.canGoForward }
+
+    /// A page actually presented, from any entrance. The one being replayed by Back or Forward
+    /// is recognised and not pushed again; everything else is a fresh visit. Cleared on every
+    /// arrival either way, so an abandoned replay cannot swallow a later genuine visit.
+    private func recordVisit(_ page: NavigationHistory.Page) {
+        if pendingHistoryTarget == page {
+            pendingHistoryTarget = nil
+        } else {
+            pendingHistoryTarget = nil
+            history.visit(page)
+        }
+        updateNavigationButtons()
+    }
+
+    /// What the pane is showing now, as a page — a session, a project's composer, or nothing.
+    /// Settings is not one of the answers: it is what the caller is about to replace.
+    private func currentPage() -> NavigationHistory.Page? {
+        if let sessionID = containerViewController.currentSessionID {
+            return .session(sessionID)
+        }
+        return containerViewController.currentComposerProjectID.map(NavigationHistory.Page.composer)
+    }
+
+    /// Presents a remembered page by replaying its ordinary entrance — the sidebar for
+    /// sessions and composers, the settings door for settings — so every side effect of a real
+    /// selection happens for a retraced one too.
+    private func present(_ page: NavigationHistory.Page) {
+        switch page {
+        case .session(let sessionID):
+            exitSettingsForNavigation()
+            pendingHistoryTarget = page
+            sidebarViewController.select(sessionID: sessionID)
+
+        case .composer(let projectID):
+            exitSettingsForNavigation()
+            pendingHistoryTarget = page
+            sidebarViewController.select(projectID: projectID)
+
+        case .settings(let pageID):
+            pendingHistoryTarget = page
+            showSettingsPage(id: pageID)
+        }
+    }
+
+    /// Leaving settings *sideways* — Back to a session rather than out through the toggle —
+    /// must still restore the sidebar's session list, and must drop the toggle's own memory of
+    /// what to restore, which history has now superseded.
+    private func exitSettingsForNavigation() {
+        guard containerViewController.isShowingSettings else { return }
+        sidebarViewController.setSettingsMode(false)
+        preSettingsPage = nil
+    }
+
+    private func updateNavigationButtons() {
+        navBackToolbarButton?.isEnabled = history.canGoBack
+        navForwardToolbarButton?.isEnabled = history.canGoForward
     }
 
     /// Opens the display panel on the current session's tabs, or closes it.
@@ -785,7 +1106,10 @@ final class MainWindowController: ThemedWindowController {
     /// Keeps toolbar controls semantic: a filled pane button means the pane is actually visible,
     /// and controls that need a session leave the key-view loop when no session is selected.
     func updateToolbarControlStates() {
-        let hasSession = containerViewController.currentSessionID != nil
+        let session = containerViewController.currentSessionID.flatMap {
+            ProjectStore.shared.session(withID: $0)
+        }
+        let hasSession = session != nil
         sidebarToolbarButton?.isSelected = !sidebarItem.isCollapsed
         // **New Session is hidden while Settings is the page.** It creates a session, which a
         // preferences page is not a context for — and beside a closable "Profiles" tab a `+`
@@ -797,9 +1121,54 @@ final class MainWindowController: ThemedWindowController {
         shellDrawerToolbarButton?.isSelected = containerViewController.isShellDrawerOpen
         displayPaneToolbarButton?.isSelected = !displayItem.isCollapsed
         sessionContextToolbarButton?.isEnabled = hasSession || containerViewController.isShowingSettings
+
+        if let session, session.kind.supportsNativeUI {
+            let presentation = SessionSurfaceTogglePresentation(session: session)
+            let accessibility = "Show as \(presentation.title)"
+            surfaceToggleToolbarButton?.isHidden = false
+            surfaceToggleToolbarButton?.isEnabled = true
+            surfaceToggleToolbarButton?.setSymbol(
+                presentation.symbolName,
+                accessibility: accessibility
+            )
+            surfaceToggleToolbarButton?.toolTip = accessibility
+        } else {
+            surfaceToggleToolbarButton?.isHidden = true
+            surfaceToggleToolbarButton?.isEnabled = false
+        }
     }
 
-    func showReview() {
+    /// Populates the pane-header menu through the row's action builder. The two entrances
+    /// therefore share not just their labels but their targets, enablement, and extensions.
+    @discardableResult
+    func populateVisibleSessionActions(_ menu: NSMenu) -> Bool {
+        guard let sessionID = currentSessionID,
+              let session = ProjectStore.shared.session(withID: sessionID) else { return false }
+
+        sidebarViewController.actionSessionID = sessionID
+        sidebarViewController.populateSessionActions(menu, for: session)
+        return true
+    }
+
+    /// The dedicated header button always points to the surface not currently on screen.
+    /// The coordinator owns the actual switch so this path keeps the same running-agent
+    /// confirmation and relaunch behavior as the Interface menu.
+    func toggleCurrentSessionSurface() {
+        guard let sessionID = currentSessionID,
+              let session = ProjectStore.shared.session(withID: sessionID),
+              session.kind.supportsNativeUI else {
+            NSSound.beep()
+            return
+        }
+
+        let presentation = SessionSurfaceTogglePresentation(session: session)
+        sessionCoordinator.setUsesNativeUI(
+            presentation.targetUsesNativeUI,
+            for: sessionID
+        )
+    }
+
+    func showReview(mode: GitReviewMode? = nil) {
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
@@ -807,7 +1176,8 @@ final class MainWindowController: ThemedWindowController {
             return
         }
 
-        displayPaneController.activateReview(for: sessionID)
+        let review = displayPaneController.activateReview(for: sessionID)
+        if let mode { review?.show(mode: mode) }
         displayPaneController.showSession(sessionID)
         setDisplayPaneVisible(true)
     }
@@ -841,6 +1211,79 @@ final class MainWindowController: ThemedWindowController {
         setDisplayPaneVisible(true)
     }
 
+    // MARK: - Tab Cycling
+
+    /// The tab host keyboard focus is inside, or nil when focus is with the page itself —
+    /// the distinction ⌘W runs on, because closing "the tab" must never reach past what the
+    /// user is looking at into a strip they are not.
+    private func focusedTabHost() -> TabHosting? {
+        guard let responder = window?.firstResponder as? NSView else { return nil }
+        if let drawerHost = containerViewController.drawerHostController,
+           containerViewController.isShellDrawerOpen,
+           responder.isDescendant(of: drawerHost.view) {
+            return drawerHost
+        }
+        if let panel = displayPaneController, panel.isViewLoaded,
+           displayItem?.isCollapsed == false,
+           responder.isDescendant(of: panel.view) {
+            return panel
+        }
+        return nil
+    }
+
+    /// The tab host the traversal commands act on: the one keyboard focus is inside, else the
+    /// display panel — the window's standing strip now that pages are not tabs. The commands'
+    /// meaning never changes — only the answer.
+    func activeTabHost() -> TabHosting? {
+        focusedTabHost() ?? displayPaneController
+    }
+
+    /// ⇧⌘[ / ⇧⌘]: the neighbouring tab in the focused host's strip, wrapping at the ends the
+    /// way every tabbed mac app does.
+    func selectAdjacentTab(offset: Int) {
+        guard let host = activeTabHost() else {
+            NSSound.beep()
+            return
+        }
+        let sessionID = currentSessionID
+        let tabs = host.tabs(for: sessionID)
+        guard tabs.count > 1,
+              let activeID = host.activeTabID(for: sessionID),
+              let index = tabs.firstIndex(where: { $0.id == activeID }) else {
+            NSSound.beep()
+            return
+        }
+
+        let target = (index + offset % tabs.count + tabs.count) % tabs.count
+        host.activateTab(id: tabs[target].id, for: sessionID)
+        revealActiveTabHost()
+    }
+
+    /// ⌘1–⌘9: the tab at that place in the focused host's strip. Out-of-range digits beep
+    /// rather than clamp — ⌘9 is not a request for the last tab, it is a miss.
+    func selectTab(atIndex index: Int) {
+        guard let host = activeTabHost() else {
+            NSSound.beep()
+            return
+        }
+        let sessionID = currentSessionID
+        let tabs = host.tabs(for: sessionID)
+        guard tabs.indices.contains(index) else {
+            NSSound.beep()
+            return
+        }
+
+        host.activateTab(id: tabs[index].id, for: sessionID)
+        revealActiveTabHost()
+    }
+
+    /// Selecting a tab by keyboard means wanting to see it: a collapsed panel would take the
+    /// command and show nothing for it.
+    private func revealActiveTabHost() {
+        guard activeTabHost() === displayPaneController else { return }
+        setDisplayPaneVisible(true)
+    }
+
     func showInfo() {
         window?.makeKeyAndOrderFront(nil)
 
@@ -862,6 +1305,10 @@ final class MainWindowController: ThemedWindowController {
             return
         }
 
+        showAttachments(for: sessionID)
+    }
+
+    private func showAttachments(for sessionID: SessionID) {
         displayPaneController.activateAttachments(for: sessionID)
         displayPaneController.showSession(sessionID)
         setDisplayPaneVisible(true)
@@ -873,18 +1320,31 @@ final class MainWindowController: ThemedWindowController {
         if containerViewController.isShowingSettings {
             sidebarViewController.setSettingsMode(false)
 
-            if let sessionID = preSettingsSessionID {
+            switch preSettingsPage {
+            case .session(let sessionID):
                 containerViewController.show(sessionID: sessionID)
                 syncDisplayPane(to: sessionID)
-            } else {
+                recordVisit(.session(sessionID))
+
+            case .composer(let projectID):
+                // Restored rather than re-shown: the composer is put back as it was left,
+                // choices, attachments and half-written prompt included. Settings is a detour,
+                // not a change of project, so nothing about it should reset the decision the
+                // user was in the middle of making.
+                containerViewController.restoreComposer(projectID: projectID)
+                syncDisplayPane(to: nil)
+                recordVisit(.composer(projectID))
+
+            case .settings, .none:
                 containerViewController.show(sessionID: nil)
             }
-            preSettingsSessionID = nil
+            preSettingsPage = nil
         } else {
-            preSettingsSessionID = containerViewController.currentSessionID
+            preSettingsPage = currentPage()
             sidebarViewController.setSettingsMode(true)
             containerViewController.showSettingsPage(id: SettingsPages.generalID)
             syncDisplayPane(to: nil)
+            recordVisit(.settings(SettingsPages.generalID))
         }
 
         updateSessionTitleItem()
@@ -1009,6 +1469,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
         containerViewController.show(sessionID: sessionID, initialPrompt: prompt)
         syncDisplayPane(to: sessionID)
+        recordVisit(.session(sessionID))
 
         // Visibility can change the attention state of the row leaving and entering the pane.
         // Those are the only two rows affected; rebuilding the entire outline made selection
@@ -1025,6 +1486,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         let previousSessionID = containerViewController.currentSessionID
         containerViewController.showComposer(projectID: projectID)
         syncDisplayPane(to: nil)
+        recordVisit(.composer(projectID))
         if let previousSessionID {
             sidebar.refreshRow(sessionID: previousSessionID)
         }
@@ -1036,19 +1498,18 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         sidebar.select(projectID: project.id)
     }
 
-    /// Archives or restores a session, and clears the pane if the archived one was showing.
+    /// Archiving and closing are lifecycle decisions, so both route through the coordinator,
+    /// which stops a running agent first and may ask before doing so.
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         setArchived archived: Bool,
         for sessionID: SessionID
     ) {
-        ProjectStore.shared.setArchived(archived, for: sessionID)
+        sessionCoordinator.setArchived(archived, for: sessionID)
+    }
 
-        if archived, sessionID == currentSessionID {
-            containerViewController.show(sessionID: nil)
-        }
-
-        sidebar.reload()
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, closeSession sessionID: SessionID) {
+        sessionCoordinator.closeSession(sessionID)
     }
 
     /// Switches a session between the terminal and the native conversation, and reopens it
@@ -1065,6 +1526,24 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         for sessionID: SessionID
     ) {
         sessionCoordinator.setUsesNativeUI(usesNative, for: sessionID)
+    }
+
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        showAttachmentsFor sessionID: SessionID
+    ) {
+        if currentSessionID != sessionID {
+            sidebar.select(sessionID: sessionID)
+            // Selection deliberately presents on the next main-loop turn so its spinner can
+            // paint first. Queue the tab behind that presentation rather than briefly showing
+            // one session's attachments beside another session's conversation.
+            DispatchQueue.main.async { [weak self] in
+                guard self?.currentSessionID == sessionID else { return }
+                self?.showAttachments(for: sessionID)
+            }
+            return
+        }
+        showAttachments(for: sessionID)
     }
 
     /// Moves a conversation to another account of the same agent and reopens it there.
@@ -1106,8 +1585,23 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         // addressing a session that no longer exists.
         let liveSessionIDs = Set(ProjectStore.shared.projects.flatMap { $0.sessions.map(\.id) })
         displayPaneController.retainOnly(sessionIDs: liveSessionIDs)
+        containerViewController.retainDrawerSessions(liveSessionIDs)
         MCPSessionRegistry.retainOnly(sessionIDs: liveSessionIDs)
         GitTurnBaselineStore.shared.retainOnly(sessionIDs: liveSessionIDs)
+        AgentRuntime.shared.retainOnly(sessionIDs: liveSessionIDs)
+
+        // Nor stay reachable through Back: a retraced page must exist to be presented.
+        history.prune { page in
+            switch page {
+            case .session(let sessionID):
+                return liveSessionIDs.contains(sessionID)
+            case .composer(let projectID):
+                return ProjectStore.shared.project(withID: projectID) != nil
+            case .settings:
+                return true
+            }
+        }
+        updateNavigationButtons()
 
         syncDisplayPane(to: containerViewController.currentSessionID)
     }
@@ -1122,6 +1616,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     ) {
         containerViewController.showSettingsPage(id: pageID)
         updateSessionTitleItem()
+        recordVisit(.settings(pageID))
     }
 }
 
@@ -1161,6 +1656,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController) {
         showReview()
+    }
+
+    func terminalContainerDidRequestTurnDiff(_ container: TerminalContainerViewController) {
+        showReview(mode: .lastTurn)
     }
 
     func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController) {
@@ -1214,6 +1713,50 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         for sessionID: SessionID
     ) {
         setSessionLoading(isLoading, reason: .gitStatus, for: sessionID)
+    }
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didSelectSubagent agent: SubagentTimeline.Agent,
+        for sessionID: SessionID
+    ) {
+        guard sessionID == currentSessionID else { return }
+        let state = AgentRuntime.shared.subagentState(for: sessionID)
+        displayPaneController.activateSubagents(
+            state.timeline,
+            selectedThreadID: agent.descriptor.threadID,
+            for: sessionID
+        )
+        displayPaneController.showSession(sessionID)
+        setDisplayPaneVisible(true)
+    }
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didUpdateSelectedSubagent agent: SubagentTimeline.Agent,
+        for sessionID: SessionID
+    ) {
+        let state = AgentRuntime.shared.subagentState(for: sessionID)
+        displayPaneController.updateSubagents(
+            state.timeline,
+            selectedThreadID: agent.descriptor.threadID,
+            for: sessionID
+        )
+    }
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        subagentsDidChange timeline: SubagentTimeline,
+        for sessionID: SessionID
+    ) {
+        let selectedThreadID = AgentRuntime.shared
+            .subagentState(for: sessionID)
+            .selectedThreadID
+        displayPaneController.updateSubagents(
+            timeline,
+            selectedThreadID: selectedThreadID,
+            for: sessionID
+        )
     }
 
 }

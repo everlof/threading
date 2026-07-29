@@ -11,7 +11,10 @@ The terminal fills the rest, under a header naming the project and session curre
 A third pane opens on the right when an agent displays something the terminal cannot render.
 See [Display Panel](#display-panel).
 
-There is no title bar — the window controls sit over the top of the sidebar.
+There is no title bar — the window controls sit over the top of the sidebar. That is also as
+narrow as the sidebar goes: drag its divider and it stops where those controls end, and dragging
+further collapses it altogether. **⌃⌘S** toggles it back, as does the sidebar button beside the
+traffic lights.
 
 ## Concepts
 
@@ -244,8 +247,14 @@ bottom, which creates one on a new branch and adds it as its own project. A bran
 checked out on is not offered — there would be nowhere to run — so making a worktree is how
 you get one.
 
-The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return** starts
-the session; **Shift+Return** (or Option+Return) breaks the line.
+The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return breaks
+the line** here, like it does in any other editor — a first message is usually a paragraph, not
+a sentence. **Start session** below the box sends it, and so does **⌘Return**, which the button
+names on its face. Beside it sits **Import _n_ conversations** when this project has
+conversations it could adopt; it is the quieter of the two on purpose.
+
+(A reply inside a running conversation is the other way round: Return sends it and
+Shift+Return breaks the line, because a reply is usually one line and the box says so.)
 
 **Drop or paste a file** into it. An ordinary file has its path inserted, which is what the
 agent can act on. An image instead appears as a thumbnail above the text; use the **×** on its
@@ -329,6 +338,16 @@ it applies equally to Codex and to plain shells running a long command.
 Redraws caused by resizing the window — or by scrolling inside a program that handles its
 own scrolling, like Claude Code — are ignored, since an agent repainting itself is not the
 same as an agent working.
+
+A session that has just queued something in the background — a test run or a build the agent
+left running while it answered you — keeps its working mark and stays out of the finished
+states until that work lands. Claude ends its turn straight away in that case and picks the
+conversation back up on its own once the command exits, so a session waiting on its own shell
+has not finished anything and does not notify as though it had.
+
+Only the turn that *started* the work waits on it. Something long-lived that the agent parked
+earlier — a dev server it started three answers ago — does not hold later turns open, so those
+finish and notify as usual while it keeps running.
 
 ### Notifications
 
@@ -927,6 +946,19 @@ survives a relaunch. **⌘⇧[** and **⌘⇧]** step through the strip, and **�
 tab by its place in it. The same menu, with the same commands, sits on the shell drawer's
 tabs.
 
+**Opening a picture properly.** An image in the panel is drawn at whatever width the pane has,
+so a screenshot is legible but not full size. Press **Space** with the image selected, or
+**double-click** it, or use the trackpad's Quick Look gesture — any of them opens it in the
+system Quick Look panel, with the zoom, rotation, sharing, Open With and full-screen that come
+with it. The **⋯** menu beside the caption offers **Quick Look** as its first item, along with
+copying the image, its name or its path, revealing it in Finder, and opening it in whatever app
+owns the file type.
+
+**The panel gives way to the window.** Showing an image opens the panel, and an open panel used
+to put a floor under how narrow the window could be made. It no longer does: drag the window's
+edge in and the panel is squeezed with everything else. Its own width is still yours — drag the
+divider to set it, and it opens there next time.
+
 Shell and browser tabs can also change *pane*: drag the tab onto the other pane's tab row —
 it dims while it is over a spot that will take it — or use the same secondary-click menu,
 which offers **Move to Shell Drawer** on a panel tab and **Move to Display Panel** on a
@@ -1311,6 +1343,18 @@ Deleting a theme leaves anything using it inheriting again. Renaming one keeps t
 Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
 a theme sets only the backdrop behind them.
 
+**The Dock icon follows the app theme.** Choosing anything other than System redraws Skalman's
+icon in that theme's ground and accent — Cyberpunk's neon green on near-black, Bauhaus's red
+with its hard printed shadow — and the ⌘-Tab switcher shows the same. The chevron itself never
+changes shape, so the app stays findable by silhouette. This lasts while the app runs: Finder,
+Spotlight and the Dock's own record keep the shipped icon, and choosing **System** puts it back
+immediately. The iPhone app has one fixed icon; iOS does not allow an app to draw its own.
+
+An extension's theme can bring its own icon *mark* — its glyph replaces the chevron, but the
+tile behind it is still drawn from the theme's own background, so an extension can never make
+Skalman's icon look like a different app. A contributed theme without a mark gets the same
+generated icon every built-in style does.
+
 An installed extension can offer app themes of its own. They appear in the picker labelled by
 the extension's name — "Storm — Usage Rain" — while the extension is enabled, and leave with
 it; if the one you were using goes away, the app falls back to System and records that as the
@@ -1637,6 +1681,7 @@ recorded about it dying — is what a crash needs explaining.
 | Action | Shortcut |
 |--------|----------|
 | New Session (opens the composer) | Cmd+N |
+| Start the session being composed (Return breaks the line instead) | Cmd+Return |
 | Add Existing Project | Cmd+Shift+N |
 | Close Tab (the focused drawer/panel tab, else the page on screen; never stops the agent) | Cmd+W |
 | Close Session (stops the agent) | unbound by default — assign one in Settings ▸ Keyboard |

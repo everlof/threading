@@ -8,12 +8,37 @@ The window uses `.fullSizeContentView` with a transparent, hidden title bar, so 
 runs the full height and the traffic lights float over it. The window title stays `Skalman`,
 since it is only surfaced where macOS names the window (Mission Control, the Window menu).
 
-**The toolbar holds one item, and everything else belongs to the pane it describes.**
-`NSToolbar` positions its items relative to the *window*, which is what makes it right for the
-sidebar toggle — that control acts on the split rather than on either side of it, and it stays
-beside the traffic lights in both collapse states — and wrong for everything else that used to
-live there. The page tab, the `+`, the usage pill and the session's actions all name or act on
-the *content pane*, so at a fixed window x they drift away from it the moment a divider moves.
+**The toolbar holds only controls that act on the window itself, and everything else belongs
+to the pane it describes.** `NSToolbar` positions its items relative to the *window*, which is
+what makes it right for exactly two things: the sidebar toggle, which acts on the split rather
+than on either side of it, and the selection-history pair (`<` `>`, ⌃⌘←/⌃⌘→), which retraces
+the window's page selection — both stay beside the traffic lights in both collapse states. It
+is wrong for everything else that used to live there: the page tab, the `+`, the usage pill
+and the session's actions all name or act on the *content pane*, so at a fixed window x they
+drift away from it the moment a divider moves.
+
+Anything that joins the toolbar joins a measurement too, and now two: `windowControlsTrailingEdge`
+answers where the window's own controls end (the **trailing-most** of the candidates, with
+`PaneHeaderDefaults.assumedWindowControlsWidth` as the pre-layout fallback), and both
+`updateHeaderInset` and `updateSidebarMinimumThickness` are that one answer applied to the two
+panes. An item added without extending the candidate list puts the pane header's tab under the
+new control — and lets the sidebar's divider cut through it.
+
+**The sidebar's minimum width is those controls, not a number.** `SidebarDefaults.minWidth` is
+what the *list* needs (icon, indented name, the row's two trailing buttons); the column actually
+stops where the toolbar does, because the toolbar positions its items against the window and they
+therefore stay put while the divider moves. At the 180pt list floor the divider ran through the
+forward chevron — measured off the running window's accessibility frames, that chevron ends 198pt
+from the window's leading edge — leaving half a button hanging over the terminal. So
+`updateSidebarMinimumThickness` raises the split item's minimum to that edge plus
+`Spacing.medium`, on the run-loop turn after setup and again on any split resize; it is
+idempotent, and it can only ever raise the constant. Below that width there is no useful size
+left, and there does not need to be: `canCollapse` means a divider dragged past the minimum snaps
+the column shut, so the sizes are "as narrow as its controls" and then "gone".
+
+A split item's minimum is a *required* constraint and therefore also a floor on the window's
+width, so this costs the window the ~28pt the sidebar gained (see `DisplayPaneDefaults.slimmestWidth`
+for the other end of that trade).
 
 `NSTrackingSeparatorToolbarItem` hid that for years, and stopped the day the sidebar became a
 plain split item: measured on macOS 26 across all three split-item kinds, it follows the divider
@@ -25,6 +50,20 @@ So those controls moved into `TerminalContainerViewController`'s own header stri
 is crossed and there is nothing to track. Two things this settles that measuring never could:
 the header follows a **collapse** as readily as a drag, and it stops where the pane stops, so
 the display panel's own strip lines up with it rather than sitting under a window-wide row.
+
+The header's leading control is the **page tab** (`MainWindowController.pageTabView`): one
+chip naming the current page — session, composer, or settings. Deliberately one, not a strip:
+a page here swaps the whole workspace, so a row of them would be a second session switcher
+duplicating the sidebar (see `sessions.md`, "Why Sessions Are Not Tabs"). It is the same
+`ThemedTabItemView` the pane strips build from, inked from the backdrop, bounded by
+`SessionTitleDefaults.minWidth/maxWidth`.
+
+The session actions at its trailing edge are one grouped control: **Context**, the renderer
+switch, **Shell**, and **Panel**. Context does not maintain a toolbar-specific action list; it
+calls `ProjectSidebarViewController.populateSessionActions`, the same builder as the row's hover
+and right-click menus. The renderer button is the short path through the same
+`SessionCoordinator.setUsesNativeUI` transition as that menu's Interface choices, and changes
+its glyph and accessible name to describe the surface it will switch *to*.
 
 The strip sits **under** the toolbar rather than in the titlebar. A view in the titlebar strip
 is behind AppKit's own titlebar container, which is what this project's earlier hand-rolled

@@ -34,21 +34,26 @@ final class TerminalContainerViewController: NSViewController {
     /// `currentSessionID`: it exists only while a session's checkout is on screen.
     private let gitStatusOverlay = GitStatusOverlayView()
     private var gitChangeMonitor: GitChangeMonitor?
+    /// Transcript reads started after the owning renderer has exited. The hierarchy survives
+    /// renderer disposal, so its selected child must remain a working destination too.
+    private var retainedSubagentTranscriptLoads = SubagentTranscriptLoadCache()
+    private var retainedTranscriptRecheckGeneration: [String: Int] = [:]
 
     /// Settings is shown as a single page centred in the pane; the page list lives in the
     /// window's sidebar, which the settings sections replace, so there is no second sidebar.
-    /// One shell per session, kept alive while the app runs — the process *is* the feature, and
-    /// a shell that forgot its directory on every session switch would be worse than useless.
-    private var drawers: [SessionID: ShellDrawerViewController] = [:]
-    private var openDrawerSessions: Set<SessionID> = []
+    /// The drawer's tabs, per session, kept alive while the app runs — the process *is* the
+    /// feature, and a shell that forgot its directory on every session switch would be worse
+    /// than useless. One host controller serves every session; switching swaps which list it
+    /// shows, exactly as the display panel does.
+    private(set) var drawerHostController: DrawerHostViewController!
 
     private var drawerHost: NSView!
     private var drawerDivider: ShellDrawerDivider!
     private var drawerHeight: NSLayoutConstraint!
 
-    /// In-memory, like the sidebar's branch-group collapse state: a drawer height is a working
-    /// preference for a window, not a fact about the session.
-    private var drawerHeightValue: CGFloat = ShellDrawerDefaults.defaultHeight
+    /// Window geometry, like the display panel's width: a drawer height is a working
+    /// preference for a window, not a fact about the session — so it persists app-wide.
+    private var drawerHeightValue: CGFloat = ShellDrawerHeight.stored
 
     private var settingsPage: NSViewController?
     private var settingsPageCache: [String: NSViewController] = [:]
@@ -246,6 +251,36 @@ final class TerminalContainerViewController: NSViewController {
         composerViewController.show(projectID: projectID)
     }
 
+    /// Puts a composer back on screen **without resetting it**, for a detour that never changed
+    /// which project is selected — Settings opening over it and closing again.
+    ///
+    /// `showComposer` configures the composer for a project, which is right when the project is
+    /// what changed: the choices reset and the prompt is re-read from `DraftStore`. Coming back
+    /// from Settings nothing changed, and re-configuring would drop what is not in the draft —
+    /// the agent, account, model and checkout just chosen, and any attached images, which are
+    /// deliberately not drafted. The composer is still here, still holding all of it; it only
+    /// needs to be visible again.
+    ///
+    /// Falls back to a full show if the composer has since moved on to another project, so the
+    /// caller cannot use this to put a stale project's composer on screen.
+    func restoreComposer(projectID: ProjectID) {
+        guard composerViewController.projectID == projectID else {
+            showComposer(projectID: projectID)
+            return
+        }
+
+        detachCurrentChild()
+        currentComposerProjectID = projectID
+        currentSettingsPageID = nil
+        currentSessionID = nil
+        applyDrawer(for: nil)
+
+        placeholderView.isHidden = true
+        composerViewController.view.isHidden = false
+        applyPaneBackground(.chrome)
+        composerViewController.refreshDerivedState()
+    }
+
     /// Shows a settings page centred in the pane, replacing whatever session or composer was on
     /// screen. The section list lives in the sidebar; this only draws the chosen page.
     ///
@@ -347,94 +382,102 @@ final class TerminalContainerViewController: NSViewController {
             drawerDivider.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
             drawerDivider.heightAnchor.constraint(equalToConstant: ShellDrawerDefaults.dividerHeight)
         ])
+
+        // Installed once and never re-parented: the zero-high band hides it when closed, and a
+        // session switch swaps which tab list it shows rather than which child sits here —
+        // detaching per switch is what used to separate shells from their scrollback views.
+        drawerHostController = DrawerHostViewController(directoryProvider: { sessionID in
+            guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+                return nil
+            }
+            // Where the agent *is*, asked at the moment the shell starts: a running terminal
+            // session reports its directory over OSC 7. A conversation has no PTY to ask, and
+            // was launched in the project's folder, which is what the fallback is.
+            return AgentRuntime.shared.controller(for: sessionID)?.session
+                .effectiveWorkingDirectory()
+                ?? URL(fileURLWithPath: project.folderPath)
+        })
+        addChild(drawerHostController)
+        drawerHostController.view.translatesAutoresizingMaskIntoConstraints = false
+        drawerHost.addSubview(drawerHostController.view)
+        NSLayoutConstraint.activate([
+            drawerHostController.view.topAnchor.constraint(equalTo: drawerHost.topAnchor),
+            drawerHostController.view.bottomAnchor.constraint(equalTo: drawerHost.bottomAnchor),
+            drawerHostController.view.leadingAnchor.constraint(equalTo: drawerHost.leadingAnchor),
+            drawerHostController.view.trailingAnchor.constraint(equalTo: drawerHost.trailingAnchor)
+        ])
     }
 
-    /// Opens or closes the shell for the session on screen. Sessions keep their own answer, so
+    /// Opens or closes the drawer for the session on screen. Sessions keep their own answer, so
     /// a drawer opened for one conversation does not follow you into the next.
     func toggleShellDrawer() {
         guard let sessionID = currentSessionID else { return }
 
-        if openDrawerSessions.contains(sessionID) {
-            openDrawerSessions.remove(sessionID)
-        } else {
-            openDrawerSessions.insert(sessionID)
-        }
-        applyDrawer(for: sessionID, focusing: openDrawerSessions.contains(sessionID))
+        let open = !drawerHostController.isOpen(for: sessionID)
+        drawerHostController.setOpen(open, for: sessionID)
+        applyDrawer(for: sessionID, focusing: open)
     }
 
     var isShellDrawerOpen: Bool {
-        currentSessionID.map { openDrawerSessions.contains($0) } ?? false
+        currentSessionID.map { drawerHostController.isOpen(for: $0) } ?? false
     }
 
-    /// Installs the session's own shell and sizes the drawer to match its state.
+    /// Points the drawer host at the session and sizes the band to its open state. The host's
+    /// children stay parented across every switch — only the visible list changes.
     private func applyDrawer(for sessionID: SessionID?, focusing: Bool = false) {
-        drawerHost.subviews.forEach { $0.removeFromSuperview() }
-        children.compactMap { $0 as? ShellDrawerViewController }.forEach { $0.removeFromParent() }
-
-        guard let sessionID, openDrawerSessions.contains(sessionID),
-              let drawer = drawer(for: sessionID) else {
+        guard let sessionID, drawerHostController.isOpen(for: sessionID) else {
+            drawerHostController.showSession(nil)
             drawerHeight.constant = 0
             drawerDivider.isHidden = true
             return
         }
 
-        addChild(drawer)
-        drawer.view.translatesAutoresizingMaskIntoConstraints = false
-        drawerHost.addSubview(drawer.view)
-        NSLayoutConstraint.activate([
-            drawer.view.topAnchor.constraint(equalTo: drawerHost.topAnchor),
-            drawer.view.bottomAnchor.constraint(equalTo: drawerHost.bottomAnchor),
-            drawer.view.leadingAnchor.constraint(equalTo: drawerHost.leadingAnchor),
-            drawer.view.trailingAnchor.constraint(equalTo: drawerHost.trailingAnchor)
-        ])
+        // The default first tab: an opened drawer with nothing in it gets the session's shell.
+        drawerHostController.ensureDefaultShellTab(for: sessionID)
+        drawerHostController.showSession(sessionID)
 
         drawerHeight.constant = clampedDrawerHeight(drawerHeightValue)
         drawerDivider.isHidden = false
-        drawer.startIfNeeded()
-        if focusing { drawer.focus() }
+        if focusing { drawerHostController.focusActiveTab() }
     }
 
     /// The session's shell-drawer root process, when it has one. Asked by the info panel, which
     /// attributes a listening port to the shell or to the agent. Deliberately does *not* build a
     /// drawer: a session whose shell was never opened has no second origin to report.
     func shellRootPid(for sessionID: SessionID) -> pid_t? {
-        drawers[sessionID]?.shellRootPid
-    }
-
-    /// A session's shell, built the first time it is asked for. A session whose project has
-    /// gone is not given one — there would be nowhere to run it.
-    private func drawer(for sessionID: SessionID) -> ShellDrawerViewController? {
-        if let existing = drawers[sessionID] { return existing }
-
-        guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return nil }
-        let drawer = ShellDrawerViewController(sessionID: sessionID) {
-            // Where the agent *is*, asked at the moment the shell starts: a running terminal
-            // session reports its directory over OSC 7. A conversation has no PTY to ask, and
-            // was launched in the project's folder, which is what the fallback is.
-            AgentRuntime.shared.controller(for: sessionID)?.session.effectiveWorkingDirectory()
-                ?? URL(fileURLWithPath: project.folderPath)
-        }
-        drawers[sessionID] = drawer
-        return drawer
+        drawerHostController.shellRootPid(for: sessionID)
     }
 
     private func resizeDrawer(by delta: CGFloat) {
         drawerHeightValue = clampedDrawerHeight(drawerHeight.constant - delta)
         drawerHeight.constant = drawerHeightValue
+        ShellDrawerHeight.stored = drawerHeightValue
     }
 
     private func clampedDrawerHeight(_ height: CGFloat) -> CGFloat {
-        let ceiling = max(
-            ShellDrawerDefaults.minimumHeight,
-            view.bounds.height * ShellDrawerDefaults.maximumHeightFraction
-        )
-        return min(max(height, ShellDrawerDefaults.minimumHeight), ceiling)
+        // The strip band rides on top of the shell, so the floor grows by exactly the band:
+        // the *content* below it keeps the old minimum's one honest line of output.
+        let floor = ShellDrawerDefaults.minimumHeight + ThemedTabStripView.bandHeight
+        let ceiling = max(floor, view.bounds.height * ShellDrawerDefaults.maximumHeightFraction)
+        return min(max(height, floor), ceiling)
     }
 
-    /// Drops a closed session's shell, so its process does not outlive the thing it belonged to.
+    /// Ends a closed session's drawer surfaces, so no shell outlives the thing it belonged to.
     func closeShellDrawer(for sessionID: SessionID) {
-        openDrawerSessions.remove(sessionID)
-        drawers.removeValue(forKey: sessionID)?.terminate()
+        drawerHostController.closeSession(sessionID)
+    }
+
+    /// Opens the drawer without toggling — where a moved-in tab just landed must come into
+    /// view, whatever state the drawer was in.
+    func openShellDrawer() {
+        guard let sessionID = currentSessionID else { return }
+        drawerHostController.setOpen(true, for: sessionID)
+        applyDrawer(for: sessionID)
+    }
+
+    /// Deletion sweep — forwarded here because the drawer host is this pane's child.
+    func retainDrawerSessions(_ sessionIDs: Set<SessionID>) {
+        drawerHostController.retainOnly(sessionIDs: sessionIDs)
     }
 
     private func setupPlaceholder() {
@@ -551,6 +594,7 @@ final class TerminalContainerViewController: NSViewController {
         // rounded top corner — from showing the window's default grey against a themed terminal.
         applyPaneBackground(.terminal(controller.paneBackgroundColor))
         refreshGitStatusOverlayRunState()
+        refreshGitStatusOverlaySubagents()
         controller.focusTerminal()
     }
 
@@ -614,6 +658,7 @@ final class TerminalContainerViewController: NSViewController {
         // is drawn in system colours, per the design system.
         applyPaneBackground(.terminal(ThemeAssignments.theme(for: currentSessionID).background))
         refreshGitStatusOverlayRunState()
+        refreshGitStatusOverlaySubagents()
         conversation.focusPrompt()
     }
 
@@ -743,11 +788,14 @@ private extension TerminalContainerViewController {
 
     /// Floats at the pane's top-right corner, above every session surface — installed after
     /// the static views, and the surfaces attach `positioned: .below` it, so nothing added
-    /// later ever covers it. Clicking is the same gesture as View ▸ Git Review.
+    /// later ever covers it. Git opens Review; the child-agent segment opens Subagents.
     func setupGitStatusOverlay() {
         gitStatusOverlay.onOpen = { [weak self] in
             guard let self else { return }
             self.delegate?.terminalContainerDidRequestGitReview(self)
+        }
+        gitStatusOverlay.onOpenSubagents = { [weak self] in
+            self?.openSubagents()
         }
         addOverlay(gitStatusOverlay)
 
@@ -769,6 +817,8 @@ private extension TerminalContainerViewController {
         gitChangeMonitor?.stop()
         gitChangeMonitor = nil
         gitStatusOverlay.clear()
+        gitStatusOverlay.showSession(currentSessionID?.uuidString.lowercased())
+        refreshGitStatusOverlaySubagents()
 
         guard let sessionID = currentSessionID,
               let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
@@ -805,23 +855,164 @@ private extension TerminalContainerViewController {
     }
 
     /// The same live checkout reading has two presentations: branch while idle, turn progress
-    /// while an agent is working. Structured conversations can add a plan position; terminal
-    /// sessions still get the working orb and live diff totals.
+    /// while a turn is in flight.
+    ///
+    /// **Only a native conversation promotes the card.** A terminal session's CLI already draws
+    /// its own spinner and working word a few lines under this corner, so the orb and "Working…"
+    /// here said the same thing twice in the same view. The card keeps saying what the terminal
+    /// does not — branch and live `+N −M` — for the whole run.
     func refreshGitStatusOverlayRunState() {
         guard gitChangeMonitor != nil else { return }
 
-        if let conversation = currentConversation {
-            gitStatusOverlay.updateRunState(
-                isActive: conversation.isTurnInFlight,
-                progress: conversation.runProgress
+        gitStatusOverlay.updateRunState(
+            isActive: currentConversation?.isTurnInFlight ?? false,
+            progress: currentConversation?.runProgress
+        )
+    }
+
+    /// Projects the provider-neutral hierarchy into the compact receipt beside Git status.
+    func refreshGitStatusOverlaySubagents() {
+        let timeline = currentConversation?.subagents
+            ?? currentChild?.subagents
+            ?? currentSessionID.map {
+                AgentRuntime.shared.subagentState(for: $0).timeline
+            }
+        gitStatusOverlay.updateSubagents(
+            workingCount: timeline?.workingCount ?? 0,
+            doneCount: timeline?.doneCount ?? 0
+        )
+    }
+
+    /// Opens the most relevant child, after which the display pane owns navigation among all
+    /// children. The persisted selection wins; otherwise prefer live work, then the newest row.
+    private func openSubagents() {
+        guard let sessionID = currentSessionID else { return }
+        let state = AgentRuntime.shared.subagentState(for: sessionID)
+        let timeline = currentConversation?.subagents
+            ?? currentChild?.subagents
+            ?? state.timeline
+        let selectedID = currentConversation?.selectedSubagentThreadID
+            ?? currentChild?.selectedSubagentThreadID
+            ?? state.selectedThreadID
+        let candidate = selectedID.flatMap { selectedID in
+            timeline.agents.first {
+                $0.descriptor.threadID == selectedID
+            }
+        } ?? timeline.agents.last(where: \.status.isWorking)
+            ?? timeline.agents.last
+        guard let candidate else { return }
+        selectSubagent(candidate.descriptor.threadID)
+    }
+
+}
+
+extension TerminalContainerViewController {
+    /// Routes selection from the Subagents side pane back to the renderer that owns transcript
+    /// loading, without reintroducing a navigator above the chat or terminal. When that renderer
+    /// has exited, the runtime's retained hierarchy remains the owner and the descriptor-backed
+    /// loader can still rebuild the selected transcript.
+    func selectSubagent(_ threadID: String) {
+        if let currentConversation {
+            currentConversation.selectSubagent(threadID)
+            return
+        }
+        if let currentChild {
+            currentChild.selectSubagent(threadID)
+            return
+        }
+
+        guard let sessionID = currentSessionID else { return }
+        let state = AgentRuntime.shared.subagentState(for: sessionID)
+        guard let selected = state.timeline.agents.first(where: {
+            $0.descriptor.threadID == threadID
+        }) else { return }
+
+        state.select(threadID: threadID)
+        delegate?.terminalContainer(
+            self,
+            didSelectSubagent: selected,
+            for: sessionID
+        )
+        loadRetainedSubagentTranscriptIfNeeded(
+            selected,
+            state: state,
+            sessionID: sessionID
+        )
+    }
+
+    private func loadRetainedSubagentTranscriptIfNeeded(
+        _ agent: SubagentTimeline.Agent,
+        state: SubagentSessionState,
+        sessionID: SessionID
+    ) {
+        let threadID = agent.descriptor.threadID
+        let cacheID = "\(sessionID.uuidString.lowercased()):\(threadID)"
+        guard agent.status.isDone,
+              let kind = ProjectStore.shared.session(withID: sessionID)?.kind,
+              let signature = SubagentTranscriptLoader.signature(for: agent.descriptor),
+              retainedSubagentTranscriptLoads.begin(
+                  threadID: cacheID,
+                  signature: signature
+              ) else { return }
+
+        SubagentTranscriptLoader.load(
+            descriptor: agent.descriptor,
+            kind: kind
+        ) { [weak self, weak state] events, isTruncated in
+            guard let self, let state else { return }
+            switch self.retainedSubagentTranscriptLoads.finish(
+                threadID: cacheID,
+                signature: signature,
+                eventCount: events.count
+            ) {
+            case .retryAfter(let delay):
+                self.scheduleRetainedTranscriptRecheck(
+                    state: state,
+                    sessionID: sessionID,
+                    threadID: threadID,
+                    after: delay
+                )
+                return
+            case .unavailable:
+                return
+            case .loaded:
+                state.replaceConversation(threadID: threadID, events: events)
+            }
+
+            if isTruncated {
+                state.apply(.activity(
+                    threadID: threadID,
+                    text: ClaudeSubagentHistoryDefaults.truncatedActivity
+                ))
+            }
+            self.delegate?.terminalContainer(
+                self,
+                subagentsDidChange: state.timeline,
+                for: sessionID
             )
-        } else if let child = currentChild {
-            gitStatusOverlay.updateRunState(
-                isActive: child.activity == .working,
-                progress: nil
+        }
+    }
+
+    private func scheduleRetainedTranscriptRecheck(
+        state: SubagentSessionState,
+        sessionID: SessionID,
+        threadID: String,
+        after delay: TimeInterval
+    ) {
+        let cacheID = "\(sessionID.uuidString.lowercased()):\(threadID)"
+        let generation = (retainedTranscriptRecheckGeneration[cacheID] ?? 0) + 1
+        retainedTranscriptRecheckGeneration[cacheID] = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak state] in
+            guard let self, let state,
+                  self.retainedTranscriptRecheckGeneration[cacheID] == generation,
+                  let agent = state.timeline.agents.first(where: {
+                      $0.descriptor.threadID == threadID
+                  }) else { return }
+            self.loadRetainedSubagentTranscriptIfNeeded(
+                agent,
+                state: state,
+                sessionID: sessionID
             )
-        } else {
-            gitStatusOverlay.updateRunState(isActive: false, progress: nil)
         }
     }
 }
@@ -866,6 +1057,38 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
         )
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
     }
+
+    func agentSessionSubagentsDidChange(_ controller: AgentSessionViewController) {
+        guard controller.sessionID == currentSessionID else { return }
+        refreshGitStatusOverlaySubagents()
+        delegate?.terminalContainer(
+            self,
+            subagentsDidChange: controller.subagents,
+            for: controller.sessionID
+        )
+    }
+
+    func agentSession(
+        _ controller: AgentSessionViewController,
+        didSelectSubagent agent: SubagentTimeline.Agent
+    ) {
+        delegate?.terminalContainer(
+            self,
+            didSelectSubagent: agent,
+            for: controller.sessionID
+        )
+    }
+
+    func agentSession(
+        _ controller: AgentSessionViewController,
+        didUpdateSelectedSubagent agent: SubagentTimeline.Agent
+    ) {
+        delegate?.terminalContainer(
+            self,
+            didUpdateSelectedSubagent: agent,
+            for: controller.sessionID
+        )
+    }
 }
 
 // MARK: - TerminalContainerViewControllerDelegate
@@ -894,8 +1117,26 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
         gitStatusLoadingDidChange isLoading: Bool,
         for sessionID: SessionID
     )
-    /// The floating git status card was clicked; the window opens the review tab.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didSelectSubagent agent: SubagentTimeline.Agent,
+        for sessionID: SessionID
+    )
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didUpdateSelectedSubagent agent: SubagentTimeline.Agent,
+        for sessionID: SessionID
+    )
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        subagentsDidChange timeline: SubagentTimeline,
+        for sessionID: SessionID
+    )
+    /// The Git portion of the floating session status card was clicked.
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController)
+    /// A turn's changed-files card asked for its diff; the window opens the review tab on
+    /// the Last Turn scope.
+    func terminalContainerDidRequestTurnDiff(_ container: TerminalContainerViewController)
     /// The empty state's one action: begin a session, the same route ⌘N takes.
     func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController)
 }
@@ -911,6 +1152,10 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
         delegate?.terminalContainer(self, sessionDidExit: controller.sessionID, exitCode: code)
     }
 
+    func conversationDidRequestTurnDiff(_ controller: ConversationViewController) {
+        delegate?.terminalContainerDidRequestTurnDiff(self)
+    }
+
     func conversationDidChangeActivity(_ controller: ConversationViewController) {
         if controller.sessionID == currentSessionID {
             refreshGitStatusOverlayRunState()
@@ -921,6 +1166,38 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
             SessionActivityDidChange(sessionID: controller.sessionID)
         )
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
+    }
+
+    func conversationSubagentsDidChange(_ controller: ConversationViewController) {
+        guard controller.sessionID == currentSessionID else { return }
+        refreshGitStatusOverlaySubagents()
+        delegate?.terminalContainer(
+            self,
+            subagentsDidChange: controller.subagents,
+            for: controller.sessionID
+        )
+    }
+
+    func conversation(
+        _ controller: ConversationViewController,
+        didSelectSubagent agent: SubagentTimeline.Agent
+    ) {
+        delegate?.terminalContainer(
+            self,
+            didSelectSubagent: agent,
+            for: controller.sessionID
+        )
+    }
+
+    func conversation(
+        _ controller: ConversationViewController,
+        didUpdateSelectedSubagent agent: SubagentTimeline.Agent
+    ) {
+        delegate?.terminalContainer(
+            self,
+            didUpdateSelectedSubagent: agent,
+            for: controller.sessionID
+        )
     }
 }
 
@@ -938,7 +1215,15 @@ enum PaneHeaderDefaults {
     static let inset: CGFloat = Design.Spacing.medium
 
     /// Stands in for the window controls' width until they have been laid out and can be
-    /// measured. Only ever used on the first pass of a launch that starts collapsed — the
-    /// measurement replaces it as soon as there is something to measure.
-    static let assumedWindowControlsWidth: CGFloat = 112
+    /// measured. Only ever used on the first pass of a launch — the measurement replaces it as
+    /// soon as there is something to measure. Covers the traffic lights, the sidebar toggle, and
+    /// the history pair beside it (two more `Design.Size.toolbarButtonWidth` buttons and their
+    /// spacing).
+    ///
+    /// It was 180, which was an under-measurement: read off the running window's accessibility
+    /// frames, the forward chevron ends at 198pt from the window's leading edge. Undersized it is
+    /// not merely imprecise — `MainWindowController.updateSidebarMinimumThickness` uses the same
+    /// answer to decide how narrow the sidebar may be, and a floor below these controls puts the
+    /// divider through them.
+    static let assumedWindowControlsWidth: CGFloat = 200
 }

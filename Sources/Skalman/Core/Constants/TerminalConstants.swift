@@ -303,8 +303,24 @@ enum MCPDefaults {
 // MARK: - Display Pane Defaults
 
 enum DisplayPaneDefaults {
+    /// The width the panel is *opened* at when nothing narrower was chosen, and the floor a
+    /// stored width is clamped to. Not the split item's minimum — see `slimmestWidth`.
     static let minWidth: CGFloat = 200
     static let defaultWidth: CGFloat = 380
+
+    /// The panel's hard floor: its own chrome and nothing more.
+    ///
+    /// `NSSplitViewItem.minimumThickness` is a **required** constraint, and a window laid out
+    /// with Auto Layout cannot be resized below what its required constraints ask for — so a
+    /// pane minimum is also a *window* minimum. Measured: the window's minimum content width was
+    /// 572pt with the panel shut and 773pt with it open at a 200pt minimum. `display_image`
+    /// opens the panel, so showing a picture quietly cost 200pt of how small the window was
+    /// allowed to be, which is not a price a panel gets to charge.
+    ///
+    /// At the pane's own chrome width the panel costs the window nothing it was not already
+    /// paying, and a divider dragged past it still snaps the panel shut (`canCollapse`). The
+    /// 200pt is still where it opens; it is simply no longer where the *window* stops.
+    static let slimmestWidth: CGFloat = 48
 
     /// How hard the panel holds the width the divider was dragged to.
     ///
@@ -382,6 +398,11 @@ enum ProjectStoreDefaults {
 // MARK: - Sidebar Defaults
 
 enum SidebarDefaults {
+    /// What the *list* needs: an icon, an indented name, and the row's two trailing buttons.
+    ///
+    /// Not where the column actually stops. The window controls float over the sidebar at a
+    /// fixed x, so the real floor is where they end — claimed at runtime by
+    /// `MainWindowController.updateSidebarMinimumThickness`, which can only ever raise this.
     static let minWidth: CGFloat = 180
     static let maxWidth: CGFloat = 400
     static let defaultWidth: CGFloat = 240

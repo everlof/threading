@@ -82,9 +82,13 @@ final class ThemedControlTests: XCTestCase {
 
     func testTheHelperBuildsAThemedToggleNotAnNSSwitch() {
         let spy = ActionSpy()
-        let control = SettingsUI.toggle(isOn: true, target: spy, action: #selector(ActionSpy.fire))
+        let control: ThemedControl = SettingsUI.toggle(
+            isOn: true,
+            target: spy,
+            action: #selector(ActionSpy.fire)
+        )
         XCTAssertTrue(control is ThemedToggle, "SettingsUI.toggle still hands back a raw switch")
-        XCTAssertEqual(control.state, .on)
+        XCTAssertEqual((control as? ThemedToggle)?.state, .on)
     }
 
     // MARK: - Toggle Motion
@@ -253,6 +257,36 @@ final class ThemedControlTests: XCTestCase {
                        "a pull-down stopped showing its own first item")
     }
 
+    /// Tinting a template directly against a view's backing context sees the surface already
+    /// drawn beneath the glyph and floods the whole image slot. The Themes-page gear exposed
+    /// this as a black square in light appearance and a white one in dark appearance.
+    func testABorderlessPullDownDrawsItsTemplateGlyphWithoutABox() throws {
+        let popUp = ThemedPopUp(frame: NSRect(x: 0, y: 0, width: 38, height: 26))
+        popUp.pullsDown = true
+        popUp.isBordered = false
+        popUp.addItem(ThemedMenuItem(
+            title: "",
+            image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Actions")
+        ))
+        popUp.addItem(withTitle: "Duplicate")
+
+        let rep = try XCTUnwrap(popUp.bitmapImageRepForCachingDisplay(in: popUp.bounds))
+        popUp.cacheDisplay(in: popUp.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / popUp.bounds.width
+
+        // The image slot begins at the standard medium inset. A gear has no ink in its upper
+        // leading corner; a flooded slot does.
+        let corner = try XCTUnwrap(rep.colorAt(
+            x: Int((Design.Spacing.medium + 1) * scale),
+            y: Int((popUp.bounds.midY + 6) * scale)
+        ))
+        XCTAssertLessThan(
+            corner.alphaComponent,
+            0.2,
+            "the template tint flooded the pop-up's image slot"
+        )
+    }
+
     /// A pull-down action is app-owned behavior on the semantic item. It runs without also
     /// firing the pop-up's selection target/action, which belongs to ordinary choices.
     func testAPerItemActionRunsWithoutFiringTheSelectionAction() {
@@ -271,7 +305,10 @@ final class ThemedControlTests: XCTestCase {
 
     func testTheHelperBuildsAThemedPopUpNotAnNSPopUpButton() {
         let spy = ActionSpy()
-        let control = SettingsUI.popUp(target: spy, action: #selector(ActionSpy.fire))
+        let control: ThemedControl = SettingsUI.popUp(
+            target: spy,
+            action: #selector(ActionSpy.fire)
+        )
         XCTAssertTrue(control is ThemedPopUp, "SettingsUI.popUp still hands back a raw pop-up")
     }
 
@@ -820,6 +857,45 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(target.count, 2, "the second click inside the bounds did not fire")
     }
 
+    /// And it keeps firing when the view it lives in is torn down mid-click.
+    ///
+    /// `ThemedButton` is what an *extension* contributes into a sidebar row — see
+    /// `ExtensionNodeRenderer` — and a sidebar row is handed back to the reuse pool whenever the
+    /// tree's shape changes. So it needs the same guarantee `ThemedIconButton` gives the row's own
+    /// archive button, for the same reason: AppKit routes a mouse-up to the view that took the
+    /// mouse-down and to no other, and delivers nothing at all once that view is detached.
+    func testAButtonCompletesItsClickEvenWhenItsViewIsTornDownFirst() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let root = try XCTUnwrap(window.contentView)
+
+        let target = ActionSpy()
+        let button = ThemedButton(title: "Run", target: target, action: #selector(ActionSpy.fire))
+        button.translatesAutoresizingMaskIntoConstraints = true
+        button.frame = NSRect(x: 40, y: 20, width: 80, height: 26)
+        root.addSubview(button)
+
+        let inside = NSPoint(x: button.frame.midX, y: button.frame.midY)
+        let outside = NSPoint(x: button.frame.maxX + 40, y: button.frame.midY)
+
+        button.mouseDown(with: try mouseEvent(.leftMouseDown, at: inside, in: window))
+        button.removeFromSuperview()
+        NSApp.sendEvent(try mouseEvent(.leftMouseUp, at: inside, in: window))
+        XCTAssertEqual(target.count, 1, "an extension's button died with the row that held it")
+
+        // And the same teardown released away from it still cancels.
+        root.addSubview(button)
+        button.mouseDown(with: try mouseEvent(.leftMouseDown, at: inside, in: window))
+        button.removeFromSuperview()
+        NSApp.sendEvent(try mouseEvent(.leftMouseUp, at: outside, in: window))
+        XCTAssertEqual(target.count, 1, "a click released away from the button fired anyway")
+    }
+
     func testButtonCanBeReachedAndActivatedWithoutAPointer() throws {
         let target = ActionSpy()
         let button = ThemedButton(title: "Continue", target: target, action: #selector(ActionSpy.fire))
@@ -890,6 +966,127 @@ final class ThemedControlTests: XCTestCase {
 
         button.isSelected = true
         XCTAssertEqual(button.accessibilityValue() as? Bool, true)
+    }
+
+    /// An icon button that performs an action still acts on the release, and lets go of the press
+    /// when the pointer leaves it — the change-your-mind affordance `ThemedButton` has always had
+    /// and this one did not. Without it the press was decided at the release and shown nowhere: a
+    /// slip off a 20-point target cancelled silently, leaving the button drawn as though held.
+    ///
+    /// Only a button that opens a *menu* acts on the press; see `presentsMenu`.
+    func testAnActionIconButtonActsOnTheReleaseAndLetsGoWhenTheDragLeavesIt() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let root = try XCTUnwrap(window.contentView)
+
+        let button = ThemedIconButton(symbolName: "archivebox", accessibility: "Archive")
+        button.translatesAutoresizingMaskIntoConstraints = true
+        button.frame = NSRect(x: 40, y: 20, width: Design.Size.inlineButtonTarget, height: Design.Size.inlineButtonTarget)
+        root.addSubview(button)
+
+        var presses = 0
+        button.onPress = { presses += 1 }
+
+        let inside = NSPoint(x: button.frame.midX, y: button.frame.midY)
+        let outside = NSPoint(x: button.frame.maxX + 30, y: button.frame.midY)
+
+        button.mouseDown(with: try mouseEvent(.leftMouseDown, at: inside, in: window))
+        XCTAssertEqual(presses, 0, "an action button fired before it was released")
+
+        button.mouseUp(with: try mouseEvent(.leftMouseUp, at: inside, in: window))
+        XCTAssertEqual(presses, 1)
+
+        button.mouseDown(with: try mouseEvent(.leftMouseDown, at: inside, in: window))
+        button.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: outside, in: window))
+        button.mouseUp(with: try mouseEvent(.leftMouseUp, at: outside, in: window))
+        XCTAssertEqual(presses, 1, "a press released off the button still fired")
+    }
+
+    /// A press outlives the view that took it.
+    ///
+    /// The third report about this family of buttons, after the `⋯`'s hit testing and its lost
+    /// release. AppKit routes a mouse-up to the view that took the mouse-down and to no other, and
+    /// delivers nothing at all when that view has been detached in between — which is exactly what
+    /// the sidebar does to every row it hands back to the reuse pool. The `⋯` escaped it by opening
+    /// its menu on the press; an action button cannot, because acting on the press is the wrong
+    /// gesture for an action and gives up the drag-out-to-cancel affordance above. So the release
+    /// is read from the event stream instead of waited for at this view.
+    ///
+    /// Asserted at the component rather than at the archive button, because that is what makes it
+    /// true of a button a row grows later — an extension's, or ours — without that button's author
+    /// having to know any of this.
+    func testAnActionIconButtonCompletesItsPressEvenWhenItsViewIsTornDownFirst() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let root = try XCTUnwrap(window.contentView)
+
+        let button = ThemedIconButton(symbolName: "archivebox", accessibility: "Archive")
+        button.translatesAutoresizingMaskIntoConstraints = true
+        button.frame = NSRect(
+            x: 40,
+            y: 20,
+            width: Design.Size.inlineButtonTarget,
+            height: Design.Size.inlineButtonTarget
+        )
+        root.addSubview(button)
+
+        var presses = 0
+        button.onPress = { presses += 1 }
+
+        let inside = NSPoint(x: button.frame.midX, y: button.frame.midY)
+        button.mouseDown(with: try mouseEvent(.leftMouseDown, at: inside, in: window))
+
+        // What `reloadData()` does to a row under the pointer: the view that took the press is no
+        // longer in the hierarchy, so AppKit has nowhere to route the release.
+        button.removeFromSuperview()
+
+        NSApp.sendEvent(try mouseEvent(.leftMouseUp, at: inside, in: window))
+        XCTAssertEqual(presses, 1, "the press died with the view that took it")
+    }
+
+    /// The same teardown, released *off* the button: the change-your-mind affordance survives too,
+    /// so the fix above cannot become "a detached button fires on any release anywhere".
+    func testAPressAbandonedOffTheButtonStillDoesNotFireAfterATeardown() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let root = try XCTUnwrap(window.contentView)
+
+        let button = ThemedIconButton(symbolName: "archivebox", accessibility: "Archive")
+        button.translatesAutoresizingMaskIntoConstraints = true
+        button.frame = NSRect(
+            x: 40,
+            y: 20,
+            width: Design.Size.inlineButtonTarget,
+            height: Design.Size.inlineButtonTarget
+        )
+        root.addSubview(button)
+
+        var presses = 0
+        button.onPress = { presses += 1 }
+
+        let inside = NSPoint(x: button.frame.midX, y: button.frame.midY)
+        let outside = NSPoint(x: button.frame.maxX + 30, y: button.frame.midY)
+
+        button.mouseDown(with: try mouseEvent(.leftMouseDown, at: inside, in: window))
+        button.removeFromSuperview()
+
+        NSApp.sendEvent(try mouseEvent(.leftMouseUp, at: outside, in: window))
+        XCTAssertEqual(presses, 0, "a press released away from the button fired anyway")
     }
 
     // MARK: - Hover
@@ -1010,24 +1207,29 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
-    /// The toolbar holds the one control that is the *window's*.
+    /// The toolbar holds only the controls that are the *window's*.
     ///
     /// A toolbar lays its items out against the window, so anything in it describing a pane
     /// drifts away from that pane the moment a divider moves — which is exactly what happened
     /// when `NSTrackingSeparatorToolbarItem` stopped tracking a non-sidebar split item. The
-    /// sidebar toggle stays because it acts on the split rather than on either side of it.
-    func testWindowToolbarHoldsOnlyTheSidebarToggle() throws {
+    /// sidebar toggle stays because it acts on the split rather than on either side of it; the
+    /// selection-history pair stays because it retraces the window's page selection.
+    func testWindowToolbarHoldsOnlyTheWindowsOwnControls() throws {
         let controller = MainWindowController()
         let items = try XCTUnwrap(controller.window?.toolbar?.items)
 
         XCTAssertEqual(
             items.map(\.itemIdentifier),
-            [.skalmanToggleSidebar],
+            [.skalmanToggleSidebar, .skalmanNavigation],
             "a toolbar item describing a pane cannot stay aligned with it — move it to the header"
         )
         XCTAssertTrue(
             items[0].view is ThemedIconButton,
             "the sidebar toggle still uses system toolbar chrome"
+        )
+        XCTAssertTrue(
+            items[1].view is ToolbarButtonGroupView,
+            "the history pair travels as one grouped item, spaced by our rules not NSToolbar's"
         )
     }
 
@@ -1038,8 +1240,9 @@ final class ThemedControlTests: XCTestCase {
         root.layoutSubtreeIfNeeded()
 
         let all = descendants(in: root)
-        let tab = try XCTUnwrap(
-            all.compactMap { $0 as? ThemedTabItemView }.first,
+        let tab = controller.pageTabView
+        XCTAssertTrue(
+            tab.isDescendant(of: root),
             "the page tab is not in the window's content — it is still a toolbar item"
         )
         let header = try XCTUnwrap(tab.superview as? NSStackView)
@@ -1053,12 +1256,12 @@ final class ThemedControlTests: XCTestCase {
             "New Session must remain directly after the active page tab"
         )
 
-        // The session's three actions travel as one group, so the row cannot space them as
-        // three unrelated controls.
+        // The session's four actions travel as one group, so the row cannot space them as
+        // unrelated controls.
         let group = try XCTUnwrap(all.compactMap { $0 as? ToolbarButtonGroupView }.first)
         XCTAssertEqual(
             descendants(in: group).compactMap { $0 as? ThemedIconButton }.count,
-            3,
+            4,
             "the session actions group lost one of its buttons"
         )
 
@@ -1076,9 +1279,8 @@ final class ThemedControlTests: XCTestCase {
     func testPaneHeaderSafeAreaConstraintYieldsDuringWindowAttachment() throws {
         let controller = MainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
-        let tab = try XCTUnwrap(
-            descendants(in: root).compactMap { $0 as? ThemedTabItemView }.first
-        )
+        let tab = controller.pageTabView
+        XCTAssertTrue(tab.isDescendant(of: root))
         let headerHost = try XCTUnwrap(tab.superview?.superview)
         let pane = try XCTUnwrap(headerHost.superview)
 
@@ -1107,7 +1309,8 @@ final class ThemedControlTests: XCTestCase {
         let split = controller.splitView
         let tab = try XCTUnwrap(
             descendants(in: try XCTUnwrap(window.contentView))
-                .compactMap { $0 as? ThemedTabItemView }.first
+                .compactMap { $0 as? ThemedIconButton }
+                .first { $0 === controller.newSessionButton }
         )
 
         func tabLeadsThePane() -> Bool {
@@ -1199,6 +1402,7 @@ final class ThemedControlTests: XCTestCase {
                 controller.view.appearance = appearance
                 host.wantsLayer = true
                 host.layer?.backgroundColor = Design.Surface.ground.cgColor
+                AppThemeRefresh.repaint(host)
                 host.layoutSubtreeIfNeeded()
                 png = try? renderedPNG(of: host)
             }
@@ -1319,6 +1523,61 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    /// The other half of the same fact: those controls sit at a fixed window x, so the sidebar
+    /// cannot be narrower than they are.
+    ///
+    /// Dragged to `SidebarDefaults.minWidth` the divider ran through the forward chevron, leaving
+    /// half a button hanging over the terminal. Below the controls there is no useful width left,
+    /// so the floor is where they end and the next size down is collapsed.
+    @MainActor
+    func testSidebarStopsWhereTheWindowControlsEnd() throws {
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1200, height: 700))
+        window.contentView?.layoutSubtreeIfNeeded()
+        // The floor is claimed one turn of the run loop after setup, once the toolbar's own
+        // items have been laid out and can be measured.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: Design.Motion.standard))
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+
+        XCTAssertGreaterThan(
+            sidebarItem.minimumThickness,
+            SidebarDefaults.minWidth,
+            "the sidebar kept the list's own floor, which is narrower than the window's controls"
+        )
+        // Pre-layout the toolbar's buttons have no frame to measure, and the fallback stands in.
+        // Where there is a real frame, it is what the floor has to clear.
+        let controlsMaxX = [
+            controller.sidebarToolbarButton,
+            controller.navBackToolbarButton,
+            controller.navForwardToolbarButton
+        ]
+            .compactMap { $0.map { button in button.convert(button.bounds, to: nil).maxX } }
+            .max() ?? 0
+        if controlsMaxX > PaneHeaderDefaults.inset {
+            XCTAssertGreaterThanOrEqual(
+                sidebarItem.minimumThickness,
+                controlsMaxX,
+                "at its minimum the sidebar's divider crossed the trailing-most toolbar control"
+            )
+        }
+
+        // With no useful width left below the minimum, the next size down is shut: pushed past
+        // it the column collapses rather than sticking at a width it cannot fill.
+        controller.splitViewController.splitView.setPosition(
+            SidebarDefaults.minWidth / 2,
+            ofDividerAt: 0
+        )
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            sidebarItem.isCollapsed,
+            "driven below its minimum the sidebar stopped dead instead of collapsing"
+        )
+    }
+
     func testActivePageTabOwnsItsCloseAffordance() throws {
         let tab = ThemedTabItemView(
             title: "Themes",
@@ -1380,6 +1639,70 @@ final class ThemedControlTests: XCTestCase {
         let focused = try renderedPNG(of: button)
 
         XCTAssertNotEqual(unfocused, focused, "keyboard focus drew no visible treatment")
+    }
+
+    /// The accounts pane's icon well is a 30pt disc — a surface *applied* to the layer rather
+    /// than drawn — and a layer corner clips what `draw(_:)` lays down. A ring built from the
+    /// rounded-rect token instead survived only where the two shapes met: four 1pt dashes at the
+    /// edge midpoints, with the corners of the ring cut away entirely, which is what "the
+    /// selection circle is broken" looked like on screen. So the ring is sampled all the way
+    /// round, diagonals included — the places the mismatch erased.
+    func testTheFocusRingClosesAllTheWayRoundAnAppliedDisc() throws {
+        AppThemePalette.set(.system)
+
+        let size = AccountsPreferencesLayout.iconWellSize
+        let well = ThemedButton(title: "✳️", target: nil, action: nil)
+        well.isBordered = false
+        well.frame = NSRect(x: 0, y: 0, width: size, height: size)
+        well.applySurface(fill: Design.Surface.controlResting, radius: .pill(height: size))
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 80, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(well)
+
+        let resting = try ringSamples(of: well)
+        XCTAssertTrue(window.makeFirstResponder(well))
+        let focused = try ringSamples(of: well)
+
+        for (angle, restingColor) in resting {
+            let focusedColor = try XCTUnwrap(focused[angle])
+            XCTAssertNotEqual(
+                focusedColor, restingColor,
+                "the focus ring is missing at \(angle)° — it is not following the well's disc"
+            )
+        }
+    }
+
+    /// Samples the drawn control on the circle the focus ring occupies: the applied radius,
+    /// pulled in by half the ring's width. Keyed by angle so a failure names where the ring
+    /// broke rather than which array index did.
+    private func ringSamples(of view: NSView) throws -> [Int: NSColor] {
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+
+        // The rep is sized in *pixels*: on a Retina backing store that is twice the points the
+        // geometry is stated in, and sampling in points would read the wrong circle.
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        let radius = try XCTUnwrap(view.appliedSurfaceRadius) - Design.Accessibility.focusRingWidth / 2
+
+        var samples: [Int: NSColor] = [:]
+        for angle in stride(from: 0, to: 360, by: 45) {
+            let radians = CGFloat(angle) * .pi / 180
+            let point = CGPoint(
+                x: (center.x + cos(radians) * radius) * scale,
+                y: (center.y + sin(radians) * radius) * scale
+            )
+            samples[angle] = try XCTUnwrap(
+                rep.colorAt(x: Int(point.x.rounded()), y: Int(point.y.rounded()))
+            ).usingColorSpace(.sRGB)
+        }
+        return samples
     }
 
     // MARK: - Accessibility Display Options
@@ -1457,6 +1780,123 @@ final class ThemedControlTests: XCTestCase {
         button.isEnabled = false
         XCTAssertFalse(button.performKeyEquivalent(with: event), "a disabled button answered Return")
         XCTAssertEqual(target.count, 1)
+    }
+
+    /// The three tiers are the two flags, named — and reading the name back has to survive
+    /// either one being set directly, since most call sites still say the flags.
+    func testEmphasisNamesTheThreeShapesTheButtonAlreadyHad() {
+        let button = ThemedButton()
+        XCTAssertEqual(button.emphasis, .secondary, "a plain bordered button is the ordinary tier")
+
+        button.emphasis = .primary
+        XCTAssertTrue(button.isProminent)
+        XCTAssertTrue(button.isBordered, "the accent fill is a *bordered* shape")
+
+        button.emphasis = .tertiary
+        XCTAssertFalse(button.isProminent)
+        XCTAssertFalse(button.isBordered)
+
+        button.isBordered = true
+        XCTAssertEqual(button.emphasis, .secondary)
+        button.isProminent = true
+        XCTAssertEqual(button.emphasis, .primary)
+    }
+
+    /// A chord on a button beside a text view has to be exact.
+    ///
+    /// `keyEquivalent` matches the character whatever is held with it, which is right for a
+    /// sheet and wrong here: AppKit offers every key-down to the view tree's key equivalents
+    /// *before* the first responder sees it, so a start button answering "\r" would eat the
+    /// Return meant for the prompt beside it — the whole reason the composer's send moved to
+    /// ⌘Return in the first place.
+    func testAShortcutAnswersItsOwnChordAndNothingElse() throws {
+        let target = ActionSpy()
+        let button = ThemedButton(
+            title: "Start session",
+            target: target,
+            action: #selector(ActionSpy.fire)
+        )
+        button.emphasis = .primary
+        button.shortcut = KeyboardShortcut(key: "\r", modifiers: .command)
+
+        func returnKey(_ modifiers: NSEvent.ModifierFlags) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                windowNumber: 0, context: nil, characters: "\r",
+                charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36
+            ))
+        }
+
+        XCTAssertFalse(
+            button.performKeyEquivalent(with: try returnKey([])),
+            "a bare Return belongs to whatever is being typed into"
+        )
+        XCTAssertFalse(
+            button.performKeyEquivalent(with: try returnKey([.command, .shift])),
+            "⇧⌘↩ is a different chord"
+        )
+        XCTAssertEqual(target.count, 0)
+
+        XCTAssertTrue(button.performKeyEquivalent(with: try returnKey(.command)))
+        XCTAssertEqual(target.count, 1)
+
+        // Caps Lock rides along on ordinary events and is nobody's key equivalent.
+        XCTAssertTrue(button.performKeyEquivalent(with: try returnKey([.command, .capsLock])))
+        XCTAssertEqual(target.count, 2)
+
+        button.isEnabled = false
+        XCTAssertFalse(button.performKeyEquivalent(with: try returnKey(.command)))
+        XCTAssertEqual(target.count, 2)
+
+        // Hidden is the one that bites: panes here are hidden rather than torn down, so the
+        // session composer's ⌘Return sits in the window all the while a conversation is being
+        // replied to.
+        button.isEnabled = true
+        button.isHidden = true
+        XCTAssertFalse(button.performKeyEquivalent(with: try returnKey(.command)))
+        XCTAssertEqual(target.count, 2)
+    }
+
+    /// The chord is drawn *after* the title and measured into the button's own width, so it
+    /// neither crowds the words nor truncates them.
+    func testAShortcutIsNamedBesideTheTitleRatherThanOverIt() throws {
+        func button(withShortcut shortcut: KeyboardShortcut?) -> ThemedButton {
+            let button = ThemedButton(title: "Start session", target: nil, action: nil)
+            button.isBordered = false
+            button.shortcut = shortcut
+            return button
+        }
+
+        let plain = button(withShortcut: nil)
+        let hinted = button(withShortcut: KeyboardShortcut(key: "\r", modifiers: .command))
+
+        let glyphs = ("⌘↩" as NSString)
+            .size(withAttributes: [.font: Design.Typography.controlRegular()])
+        XCTAssertGreaterThanOrEqual(
+            hinted.intrinsicContentSize.width - plain.intrinsicContentSize.width,
+            ceil(glyphs.width),
+            "the chord has to be measured into the button, or the title truncates around it"
+        )
+
+        // Both drawn at the same size: the hinted one puts ink where the plain one has none.
+        let frame = NSRect(origin: .zero, size: hinted.intrinsicContentSize)
+        func rightmostInk(_ button: ThemedButton) throws -> Int {
+            button.frame = frame
+            let rep = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+            button.cacheDisplay(in: button.bounds, to: rep)
+            for x in stride(from: rep.pixelsWide - 1, through: 0, by: -1) {
+                for y in 0..<rep.pixelsHigh where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.2 {
+                    return x
+                }
+            }
+            return 0
+        }
+
+        XCTAssertGreaterThan(
+            try rightmostInk(hinted),
+            try rightmostInk(plain),
+            "the chord did not draw"
+        )
     }
 
     /// A title is measured to size the button and drawn inside that size, so the two must use the
@@ -1691,6 +2131,27 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertFalse(ThemedTextView(frame: .zero, textContainer: nil).drawsBackground)
     }
 
+    func testHorizontalOnlyScrollSurfaceHandsVerticalGestureToConversation() throws {
+        let outer = ScrollWheelSpy(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        let document = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 640))
+        outer.documentView = document
+
+        let codeScroll = ThemedScrollView(frame: NSRect(x: 20, y: 20, width: 240, height: 80))
+        codeScroll.hasHorizontalScroller = true
+        codeScroll.hasVerticalScroller = false
+        codeScroll.forwardsVerticalScrollToAncestor = true
+        document.addSubview(codeScroll)
+
+        codeScroll.scrollWheel(with: try wheelEvent(horizontal: 0, vertical: 12))
+        XCTAssertEqual(outer.receivedWheelEvents, 1)
+
+        var localEvents = 0
+        codeScroll.onUserScroll = { localEvents += 1 }
+        codeScroll.scrollWheel(with: try wheelEvent(horizontal: 12, vertical: 1))
+        XCTAssertEqual(outer.receivedWheelEvents, 1)
+        XCTAssertEqual(localEvents, 1, "A horizontal gesture escaped the code block")
+    }
+
     /// A wrapper that only changes its type name is not a themed component. The process-tree
     /// header used to be such a seam; pin that it now paints a role from the active theme.
     func testThemedTableHeaderPaintsTheActiveTheme() {
@@ -1862,10 +2323,12 @@ final class ThemedControlTests: XCTestCase {
                 "ImageCompareView",
                 "MorphingTitleLabel",
                 "PaneFooterView",
+                "PaneHeaderView",
                 "PromptView",
                 "SeparatorView",
                 "ShortcutRecorderView",
                 "SidebarBackdropView",
+                "SubagentSummaryView",
                 "ThemeSwatchImage",
                 "ThemeSwatchView",
                 "ThemedButton",
@@ -1880,6 +2343,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedTableHeaderView",
                 "ThemedTableView",
                 "ThemedTabItemView",
+                "ThemedTabStripView",
                 "ThemedTextField",
                 "ThemedSearchField",
                 "ThemedTextView",
@@ -1888,6 +2352,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedSurfaceView",
                 "ThemeRedraw",
                 "ThemedIconButton",
+                "ThemedImagePreview",
                 "ToolbarButtonGroupView",
                 "WorkingOrbView",
                 "WindowBackdrop"
@@ -2021,6 +2486,13 @@ final class ThemedControlTests: XCTestCase {
         let chip = try XCTUnwrap(
             descendant(withIdentifier: "gallery.menu.chip", in: controller.view) as? ChipView
         )
+        let gallery = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.catalogue", in: controller.view) as? NSScrollView
+        )
+        let document = try XCTUnwrap(gallery.documentView)
+        let promptStory = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.story.PromptView", in: document)
+        )
 
         for theme in AppThemeLibrary.stock {
             controller.setTheme(theme)
@@ -2035,6 +2507,13 @@ final class ThemedControlTests: XCTestCase {
 
                 try captureGalleryFixture(window, named: fixtureStem)
 
+                let promptRect = promptStory.convert(promptStory.bounds, to: document)
+                document.scrollToVisible(promptRect)
+                gallery.reflectScrolledClipView(gallery.contentView)
+                try captureGalleryFixture(window, named: "\(fixtureStem)-prompt")
+
+                gallery.contentView.scroll(to: .zero)
+                gallery.reflectScrolledClipView(gallery.contentView)
                 XCTAssertTrue(chip.accessibilityPerformShowMenu())
                 try captureGalleryFixture(window, named: "\(fixtureStem)-menu")
                 let responder = try XCTUnwrap(window.firstResponder)
@@ -2145,6 +2624,18 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    private func wheelEvent(horizontal: Int32, vertical: Int32) throws -> NSEvent {
+        let event = try XCTUnwrap(CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: vertical,
+            wheel2: horizontal,
+            wheel3: 0
+        ))
+        return try XCTUnwrap(NSEvent(cgEvent: event))
+    }
+
     private func renderedPNG(of view: NSView) throws -> Data {
         let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -2166,6 +2657,14 @@ final class ThemedControlTests: XCTestCase {
 private final class ActionSpy: NSObject {
     private(set) var count = 0
     @objc func fire() { count += 1 }
+}
+
+private final class ScrollWheelSpy: ThemedScrollView {
+    private(set) var receivedWheelEvents = 0
+
+    override func scrollWheel(with event: NSEvent) {
+        receivedWheelEvents += 1
+    }
 }
 
 /// A window that stands in for the key one, with the pointer wherever the test puts it.
