@@ -11,6 +11,15 @@ struct PersistedPanel: Codable {
     /// The `signature` the agent was last known to be aware of. Compared at `initialize`: equal
     /// means the agent's own transcript already reflects the panel, so it is not re-described.
     var observedSignature: String?
+
+    /// The drawer host's selection and open state, beside the panel's. Optional so every
+    /// pre-drawer layout still decodes; the drawer's *tabs* ride in `tabs` with
+    /// `host == PersistedTab.drawerHost`.
+    var drawerActiveTabID: String? = nil
+    var drawerOpen: Bool? = nil
+
+    var panelTabs: [PersistedTab] { tabs.filter { $0.host == nil } }
+    var drawerTabs: [PersistedTab] { tabs.filter { $0.host == PersistedTab.drawerHost } }
 }
 
 /// One tab, reduced to what survives a restart. Images are cached as PNGs (`cacheFile`) so a
@@ -51,14 +60,22 @@ struct PersistedTab: Codable {
     var compareNewPath: String? = nil
     var compareOldTitle: String? = nil
     var compareNewTitle: String? = nil
+    /// Which pane hosts the tab. Nil is the display panel — the value every layout written
+    /// before the drawer became a host implicitly carries, which is the whole migration.
+    var host: String? = nil
+
+    static let drawerHost = "drawer"
 }
 
 extension PersistedPanel {
 
     /// A compact, order-sensitive fingerprint of the panel, used to decide whether the agent needs
     /// to be re-told its state. Two panels with the same tabs, order and selection compare equal.
+    ///
+    /// Panel-host tabs only: the drawer is the user's own furniture, and its tabs changing must
+    /// not re-brief an agent about a panel that did not.
     var signature: String {
-        let parts = tabs.map { tab -> String in
+        let parts = panelTabs.map { tab -> String in
             switch tab.kind {
             case .browser: return "b:\(tab.url ?? "")"
             case .html: return "h:\(tab.title ?? "")·\(tab.subtitle)"
@@ -84,7 +101,7 @@ extension PersistedPanel {
             "This session's display panel already holds these tabs (they persist across restarts):"
         ]
 
-        for (index, tab) in tabs.enumerated() {
+        for (index, tab) in panelTabs.enumerated() {
             let active = tab.id == activeTabID ? " — active" : ""
             let detail: String
             switch tab.kind {
@@ -155,12 +172,28 @@ final class DisplayPaneStore {
         return try? decoder.decode(PersistedPanel.self, from: Data(payload.utf8))
     }
 
-    /// Replaces the stored tabs and selection, preserving the observed signature (which tracks the
-    /// agent's awareness, not the layout).
+    /// Replaces the stored *panel* tabs and selection, preserving the drawer's tabs and the
+    /// observed signature (which tracks the agent's awareness, not the layout).
     func saveLayout(tabs: [PersistedTab], activeID: String?, for sessionID: SessionID) {
         var panel = loadLayout(for: sessionID) ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
-        panel.tabs = tabs
+        panel.tabs = tabs + panel.drawerTabs
         panel.activeTabID = activeID
+        write(panel, for: sessionID)
+    }
+
+    /// The drawer host's slice of the same payload: its tabs, its selection, and whether the
+    /// drawer stands open for the session. One file per session either way — the drawer's tabs
+    /// are the session's exactly as the panel's are.
+    func saveDrawerLayout(
+        tabs: [PersistedTab],
+        activeID: String?,
+        open: Bool?,
+        for sessionID: SessionID
+    ) {
+        var panel = loadLayout(for: sessionID) ?? PersistedPanel(tabs: [], activeTabID: nil, observedSignature: nil)
+        panel.tabs = panel.panelTabs + tabs
+        panel.drawerActiveTabID = activeID
+        if let open { panel.drawerOpen = open }
         write(panel, for: sessionID)
     }
 

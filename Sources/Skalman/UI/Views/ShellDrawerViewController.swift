@@ -126,8 +126,9 @@ final class ShellDrawerViewController: NSViewController {
 // MARK: - Defaults
 
 enum ShellDrawerDefaults {
-    /// Opening height, and the floor a drag can shrink it to — below this a shell shows one
-    /// line of output and reads as broken rather than small.
+    /// Opening height of the drawer's *content*, and the floor a drag can shrink it to —
+    /// below this a shell shows one line of output and reads as broken rather than small.
+    /// The tab strip's band rides on top of both; the container adds it when clamping.
     static let defaultHeight: CGFloat = 220
     static let minimumHeight: CGFloat = 80
 
@@ -136,4 +137,31 @@ enum ShellDrawerDefaults {
 
     /// The grab strip. Thin enough to read as a seam, thick enough to hit.
     static let dividerHeight: CGFloat = 5
+}
+
+// MARK: - Height Persistence
+
+/// Remembers how tall the user left the drawer.
+///
+/// Kept out of `AppSettings` for the display-panel width's reason: this is window geometry,
+/// and belongs with the frame autosave rather than beside deliberate preferences. One value
+/// app-wide — a drawer height is a working preference for a window, not a fact about the
+/// session, which is also why it was never in the session payload.
+@MainActor
+enum ShellDrawerHeight {
+    private static let key = "SkalmanShellDrawerHeight"
+
+    static var stored: CGFloat {
+        get {
+            let saved = UserDefaults.standard.double(forKey: key)
+            // Absent, or below the floor a drag could ever reach, means "never set".
+            guard saved >= ShellDrawerDefaults.minimumHeight else {
+                return ShellDrawerDefaults.defaultHeight + ThemedTabStripView.bandHeight
+            }
+            return CGFloat(saved)
+        }
+        set {
+            UserDefaults.standard.set(Double(newValue), forKey: key)
+        }
+    }
 }

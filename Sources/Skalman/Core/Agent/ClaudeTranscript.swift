@@ -27,6 +27,20 @@ enum ClaudeTranscript {
             .appendingPathExtension(AgentDefaults.transcriptExtension)
     }
 
+    /// The independently persisted child transcripts for one root conversation.
+    ///
+    /// Claude places the root at `<session-id>.jsonl` and children beneath
+    /// `<session-id>/subagents/`, with a small `.meta.json` index beside each child JSONL.
+    static func subagentsDirectory(
+        sessionID: TranscriptID,
+        account: AgentAccount,
+        in project: Project
+    ) -> URL {
+        url(sessionID: sessionID, account: account, in: project)
+            .deletingPathExtension()
+            .appendingPathComponent(AgentDefaults.claudeSubagentsSubdirectory)
+    }
+
     /// Whether a conversation has been recorded, which is what makes a resume possible.
     ///
     /// An identifier alone is not enough: Claude's is minted before the conversation exists,

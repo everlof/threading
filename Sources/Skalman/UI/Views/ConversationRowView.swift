@@ -1,5 +1,41 @@
 import AppKit
 
+// MARK: - Conversation Row Presentation
+
+/// The chronological units a compact transcript draws.
+///
+/// The timeline deliberately retains every tool call as a first-class row. Compact surfaces
+/// can reduce only adjacent calls into a disclosure without losing their position among the
+/// agent's prose or changing the canonical conversation model.
+enum ConversationRowPresentation {
+    enum Item: Equatable {
+        case row(ConversationTimeline.Row)
+        case toolCalls([ConversationTimeline.ToolCall])
+    }
+
+    static func compact(_ rows: [ConversationTimeline.Row]) -> [Item] {
+        var result: [Item] = []
+        var calls: [ConversationTimeline.ToolCall] = []
+
+        func flushCalls() {
+            guard !calls.isEmpty else { return }
+            result.append(.toolCalls(calls))
+            calls.removeAll(keepingCapacity: true)
+        }
+
+        for row in rows {
+            if case .toolCall(let call) = row {
+                calls.append(call)
+            } else {
+                flushCalls()
+                result.append(.row(row))
+            }
+        }
+        flushCalls()
+        return result
+    }
+}
+
 // MARK: - Conversation Row View
 
 /// Builds the view for one `ConversationTimeline.Row`.
@@ -35,7 +71,7 @@ enum ConversationRowView {
         case .toolCall(let call):
             let view = ToolCallView(tool: call.tool, summary: call.summary, diff: call.diff)
             if let result = call.result {
-                view.setResult(result.text, isError: result.isError)
+                view.setResult(result.text, outcome: result.outcome)
             }
             return (view, false)
         }
@@ -46,7 +82,15 @@ enum ConversationRowView {
     /// The user's turn: a right-aligned bubble, capped so a short instruction is not a
     /// full-width banner. A bubble suits an instruction; flowing text suits a long answer, and
     /// forcing either into the other's shape is what makes agent UIs read as log viewers.
+    ///
+    /// A *long* message — a pasted log, a briefing — collapses behind a fade instead
+    /// (`UserMessageBubbleView`): the user wrote it, so drawn in full it drowns the answer it
+    /// was written to get.
     static func userBubble(_ text: String) -> NSView {
+        if ConversationDefaults.collapsesUserMessage(text) {
+            return rightAligned(UserMessageBubbleView(text: text))
+        }
+
         let bubble = NSView()
         bubble.translatesAutoresizingMaskIntoConstraints = false
         bubble.applySurface(fill: Design.Chat.bubbleFill, radius: .panel)
@@ -66,6 +110,12 @@ enum ConversationRowView {
             label.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -pad)
         ])
 
+        return rightAligned(bubble)
+    }
+
+    /// The row wrapper both bubble shapes share: trailing-aligned, capped to the bubble
+    /// fraction of the pane.
+    private static func rightAligned(_ bubble: NSView) -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(bubble)

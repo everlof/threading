@@ -930,40 +930,29 @@ final class AgentToolCoordinator: MCPToolHandling {
             return
         }
 
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = L10n.format(
-            "Clear Website Data for %@?",
-            origin.displayName
-        )
-        if context == .private {
-            alert.informativeText = L10n.string("""
+        let message = context == .private
+            ? L10n.string("""
                 This permanently clears cookies, caches, local storage, IndexedDB, service \
                 workers, and other data in this tab's unique private context. Shared signed-in \
                 browser tabs are unaffected.
 
                 The current document stays loaded until it is reloaded or navigated.
                 """)
-        } else {
-            alert.informativeText = L10n.string("""
+            : L10n.string("""
                 This permanently clears cookies, caches, local storage, IndexedDB, service \
                 workers, and other WebKit data for this site. WebKit groups subdomains under \
                 their parent site, so related subdomains may also be signed out.
 
                 The current document stays loaded until it is reloaded or navigated.
                 """)
-        }
-        alert.addButton(withTitle: L10n.string("Clear Website Data"))
-        alert.addButton(withTitle: L10n.string("Cancel"))
 
-        let decided: (NSApplication.ModalResponse) -> Void = {
-            completion($0 == .alertFirstButtonReturn)
-        }
-        if let window = windowProvider() {
-            alert.beginSheetModal(for: window, completionHandler: decided)
-        } else {
-            decided(alert.runModal())
-        }
+        let request = ConfirmationRequest(
+            prompt: .clearBrowserWebsiteData,
+            title: L10n.format("Clear Website Data for %@?", origin.displayName),
+            message: message,
+            confirmTitle: L10n.string("Clear Website Data")
+        )
+        ConfirmationAlert.ask(request, in: windowProvider(), completion: completion)
     }
 
     private func browserTrace(
@@ -2266,8 +2255,8 @@ final class AgentToolCoordinator: MCPToolHandling {
                        target.isSubmit || (isEnter && target.isInForm) {
                         let allowed = await self.confirmSensitiveBrowserAction(
                             isEnter
-                                ? L10n.string("Press Enter on a form control")
-                                : L10n.string("Press Space on a submit control"),
+                                ? "Press Enter on a form control"
+                                : "Press Space on a submit control",
                             target: target,
                             browser: browser
                         )
@@ -3093,8 +3082,8 @@ final class AgentToolCoordinator: MCPToolHandling {
                     to: url,
                     for: sessionID,
                     purpose: hasTarget
-                        ? L10n.string("return an element screenshot after scrolling on")
-                        : L10n.string("return a screenshot of")
+                        ? "return an element screenshot after scrolling on"
+                        : "return a screenshot of"
                 )
                 guard allowed else {
                     completion(.failure(
@@ -3489,37 +3478,34 @@ final class AgentToolCoordinator: MCPToolHandling {
             return
         }
 
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = L10n.format(
-            "Allow the agent to use %@?",
-            origin.displayName
+        // Three affirmative answers and a way out, so this goes through `choose` rather than
+        // `ask`: "Always Allow This Host" is this prompt's own remembered answer, scoped to one
+        // host and revocable in Settings ▸ Tools. A "Don't ask again" box beside it would
+        // remember *something* about every host at once, which is why the register marks a
+        // grant `.alwaysAsks` and why `choose` refuses a suppressible prompt.
+        let request = ChoiceRequest(
+            prompt: .grantBrowserOriginAccess,
+            title: L10n.format("Allow the agent to use %@?", origin.displayName),
+            message: L10n.format("""
+                The agent wants to %@ this website in Skalman's browser. This browser may \
+                contain signed-in sessions and cookies that are not available to the agent's shell.
+
+                Page content is untrusted. Allow access only when this host is relevant to your task.
+                """, L10n.string(purpose)),
+            options: [
+                ConfirmationOption(title: L10n.string("Allow Once")),
+                ConfirmationOption(title: L10n.string("Always Allow This Host"))
+            ],
+            cancelTitle: L10n.string("Deny"),
+            style: .informational
         )
-        alert.informativeText = L10n.format("""
-            The agent wants to %@ this website in Skalman's browser. This browser may \
-            contain signed-in sessions and cookies that are not available to the agent's shell.
 
-            Page content is untrusted. Allow access only when this host is relevant to your task.
-            """, L10n.string(purpose))
-        alert.addButton(withTitle: L10n.string("Allow Once"))
-        alert.addButton(withTitle: L10n.string("Always Allow This Host"))
-        alert.addButton(withTitle: L10n.string("Deny"))
-
-        let decided: (NSApplication.ModalResponse) -> Void = { response in
-            switch response {
-            case .alertFirstButtonReturn:
-                applyDecision(.allowOnce)
-            case .alertSecondButtonReturn:
-                applyDecision(.allowPersistently)
-            default:
-                applyDecision(.deny)
+        ConfirmationAlert.choose(request, in: windowProvider()) { chosen in
+            switch chosen {
+            case 0: applyDecision(.allowOnce)
+            case 1: applyDecision(.allowPersistently)
+            default: applyDecision(.deny)
             }
-        }
-
-        if let window = windowProvider() {
-            alert.beginSheetModal(for: window, completionHandler: decided)
-        } else {
-            decided(alert.runModal())
         }
     }
 
@@ -3637,25 +3623,21 @@ final class AgentToolCoordinator: MCPToolHandling {
             ? L10n.format("\nControl: %@", target.name!)
             : ""
 
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = L10n.format("%@ on %@?", L10n.string(action), host)
-        alert.informativeText = L10n.format("""
-            This can change data outside Skalman using the browser's signed-in session.%@
+        let request = ConfirmationRequest(
+            prompt: .approveSensitiveBrowserAction,
+            title: L10n.format("%@ on %@?", L10n.string(action), host),
+            message: L10n.format("""
+                This can change data outside Skalman using the browser's signed-in session.%@
 
-            Approve only if this is part of the task you gave the agent.
-            """, label)
-        alert.addButton(withTitle: L10n.string("Allow"))
-        alert.addButton(withTitle: L10n.string("Deny"))
+                Approve only if this is part of the task you gave the agent.
+                """, label),
+            confirmTitle: L10n.string("Allow"),
+            cancelTitle: L10n.string("Deny")
+        )
 
         return await withCheckedContinuation { continuation in
-            let decided: (NSApplication.ModalResponse) -> Void = { response in
-                continuation.resume(returning: response == .alertFirstButtonReturn)
-            }
-            if let window = windowProvider() {
-                alert.beginSheetModal(for: window, completionHandler: decided)
-            } else {
-                decided(alert.runModal())
+            ConfirmationAlert.ask(request, in: windowProvider()) { allowed in
+                continuation.resume(returning: allowed)
             }
         }
     }
@@ -3691,6 +3673,8 @@ final class AgentToolCoordinator: MCPToolHandling {
                 kind = "file tree"
             } else if tab.attachments != nil {
                 kind = "attachments"
+            } else if tab.subagents != nil {
+                kind = "subagents"
             } else if tab.compare != nil {
                 kind = "compare"
             } else if case .image? = tab.content?.body {
@@ -3915,50 +3899,45 @@ final class AgentToolCoordinator: MCPToolHandling {
         }
 
         let packageURL = URL(fileURLWithPath: directory, isDirectory: true)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let inspection = Result {
-                try ExtensionBundleInspector.inspect(at: packageURL)
-            }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else {
-                    completion(.failure("Skalman’s window closed before the package was reviewed."))
-                    return
+        Task { @MainActor [weak self] in
+            let inspection = await Task.detached(priority: .userInitiated) {
+                Result {
+                    try ExtensionBundleInspector.inspect(at: packageURL)
                 }
-                switch inspection {
-                case .failure(let error):
-                    completion(.failure(error.localizedDescription))
-                case .success(let bundle):
-                    let proposal = ExtensionInstallProposal(bundle: bundle)
-                    let alert = NSAlert()
-                    alert.messageText = proposal.title
-                    alert.informativeText = proposal.message
-                    alert.alertStyle = .informational
-                    alert.addButton(withTitle: proposal.acceptTitle)
-                    alert.addButton(withTitle: L10n.string("Cancel"))
+            }.value
+            guard let self else {
+                completion(.failure("Skalman’s window closed before the package was reviewed."))
+                return
+            }
+            switch inspection {
+            case .failure(let error):
+                completion(.failure(error.localizedDescription))
+            case .success(let bundle):
+                let proposal = ExtensionInstallProposal(bundle: bundle)
+                let request = ConfirmationRequest(
+                    prompt: .approveAgentExtensionInstall,
+                    title: proposal.title,
+                    message: proposal.message,
+                    confirmTitle: proposal.acceptTitle,
+                    style: .informational
+                )
 
-                    let decided: (NSApplication.ModalResponse) -> Void = { response in
-                        guard response == .alertFirstButtonReturn else {
-                            completion(.success("The user declined the extension installation."))
-                            return
-                        }
-                        ExtensionManager.shared.install(from: packageURL) { result in
-                            switch result {
-                            case .failure(let error):
-                                completion(.failure(error.localizedDescription))
-                            case .success(let installed):
-                                completion(.success(
-                                    "Installed \(installed.name) \(installed.version ?? "") "
-                                        + "as a disabled extension. The user can enable it in "
-                                        + "Settings → Extensions."
-                                ))
-                            }
-                        }
+                ConfirmationAlert.ask(request, in: self.windowProvider()) { approved in
+                    guard approved else {
+                        completion(.success("The user declined the extension installation."))
+                        return
                     }
-
-                    if let window = self.windowProvider() {
-                        alert.beginSheetModal(for: window, completionHandler: decided)
-                    } else {
-                        decided(alert.runModal())
+                    ExtensionManager.shared.install(from: packageURL) { result in
+                        switch result {
+                        case .failure(let error):
+                            completion(.failure(error.localizedDescription))
+                        case .success(let installed):
+                            completion(.success(
+                                "Installed \(installed.name) \(installed.version ?? "") "
+                                    + "as a disabled extension. The user can enable it in "
+                                    + "Settings → Extensions."
+                            ))
+                        }
                     }
                 }
             }

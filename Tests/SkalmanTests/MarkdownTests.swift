@@ -25,6 +25,10 @@ final class MarkdownTests: XCTestCase {
             return value
         case .bullets(let items), .ordered(let items):
             return items.map(\.string).joined(separator: "\n")
+        case .table(let table):
+            return (table.headers + table.rows.flatMap { $0 })
+                .map(\.string)
+                .joined(separator: "\n")
         case nil:
             return ""
         }
@@ -119,6 +123,34 @@ final class MarkdownTests: XCTestCase {
 
         XCTAssertEqual(parsed.count, 1)
         XCTAssertEqual(text(of: parsed.first), "first line second line")
+    }
+
+    func testGFMTableKeepsColumnsRowsAlignmentAndInlineCode() {
+        let parsed = blocks("""
+        | Name | Command | Result |
+        | :--- | :-----: | -----: |
+        | Audit | `rg "NSAlert"` | **44 sites** |
+        | Escaped | left \\| right | Done |
+        """)
+
+        guard parsed.count == 1, case .table(let table) = parsed[0] else {
+            return XCTFail("a valid GFM table was flattened into prose")
+        }
+        XCTAssertEqual(table.headers.map(\.string), ["Name", "Command", "Result"])
+        XCTAssertEqual(table.alignments, [.left, .center, .right])
+        XCTAssertEqual(table.rows.map { $0.map(\.string) }, [
+            ["Audit", "rg \"NSAlert\"", "44 sites"],
+            ["Escaped", "left | right", "Done"]
+        ])
+    }
+
+    func testPipesWithoutADelimiterRemainProse() {
+        let parsed = blocks("This | remains prose\nbecause | this is not a delimiter")
+
+        XCTAssertEqual(parsed.count, 1)
+        guard case .paragraph = parsed[0] else {
+            return XCTFail("ordinary pipe-delimited prose became a table")
+        }
     }
 
     // MARK: - Inline

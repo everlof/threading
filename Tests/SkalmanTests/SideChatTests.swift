@@ -148,7 +148,17 @@ final class SideChatTests: XCTestCase {
         )
     }
 
-    func testCodexNativeFastModeMapsOntoTheNextExecRun() throws {
+    func testClaudeNativeLaunchForwardsSubagentText() throws {
+        let project = try makeProject()
+        let session = AgentSession(kind: .claude, title: "Claude")
+        let source = try XCTUnwrap(
+            AgentLauncher.streamPlan(for: session, in: project).arguments.last
+        )
+
+        XCTAssertTrue(source.contains("'--forward-subagent-text'"), source)
+    }
+
+    func testCodexNativeFastModeConfiguresThePersistentAppServer() throws {
         let project = try makeProject()
         var session = AgentSession(kind: .codex, title: "Codex", model: "future-fast-model")
         session.resumeState = .resumable(TranscriptID("thread-fast"))
@@ -161,7 +171,7 @@ final class SideChatTests: XCTestCase {
         XCTAssertTrue(source.contains("'--model' 'future-fast-model'"), source)
         XCTAssertTrue(source.contains("'--config' 'service_tier=\"priority\"'"), source)
         XCTAssertTrue(source.contains("'--config' 'features.fast_mode=true'"), source)
-        XCTAssertTrue(source.contains("'exec' 'resume' 'thread-fast'"), source)
+        XCTAssertTrue(source.contains("'app-server' '--listen' 'stdio://'"), source)
     }
 
     func testCodexNativeStandardModeOverridesAnAccountFastDefault() throws {
@@ -176,10 +186,10 @@ final class SideChatTests: XCTestCase {
 
         XCTAssertTrue(source.contains("'--config' 'service_tier=\"default\"'"), source)
         XCTAssertFalse(source.contains("features.fast_mode=true"), source)
-        XCTAssertTrue(source.contains("'exec' 'resume' 'thread-standard'"), source)
+        XCTAssertTrue(source.contains("'app-server' '--listen' 'stdio://'"), source)
     }
 
-    func testCodexNativeReasoningEffortMapsOntoTheNextExecRun() throws {
+    func testCodexNativeReasoningEffortConfiguresThePersistentAppServer() throws {
         let project = try makeProject()
         var session = AgentSession(
             kind: .codex,
@@ -197,7 +207,7 @@ final class SideChatTests: XCTestCase {
             source.contains("'--config' 'model_reasoning_effort=\"ultra\"'"),
             source
         )
-        XCTAssertTrue(source.contains("'exec' 'resume' 'thread-ultra'"), source)
+        XCTAssertTrue(source.contains("'app-server' '--listen' 'stdio://'"), source)
     }
 
     func testLaunchPlanQuotesHostilePathTitleModelAndPrompt() throws {

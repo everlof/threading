@@ -24,6 +24,13 @@ final class AgentRuntime {
     /// A session appears in exactly one of the two.
     private var conversations: [SessionID: ConversationViewController] = [:]
 
+    /// Provider-neutral child timelines outlive either renderer.
+    ///
+    /// A native/terminal switch deliberately discards its controller and process. Keeping this
+    /// state beside the controllers, rather than inside either one, preserves the hierarchy
+    /// across that switch and restores its compact snapshot after an app relaunch.
+    private var subagentStates: [SessionID: SubagentSessionState] = [:]
+
     /// Identifiers of every session currently holding a live terminal.
     var liveSessionIDs: Set<SessionID> {
         Set(controllers.keys)
@@ -44,7 +51,10 @@ final class AgentRuntime {
             return existing
         }
 
-        let controller = AgentSessionViewController(agentSession: agentSession)
+        let controller = AgentSessionViewController(
+            agentSession: agentSession,
+            subagentState: subagentState(for: agentSession.id)
+        )
         controllers[agentSession.id] = controller
         return controller
     }
@@ -65,6 +75,11 @@ final class AgentRuntime {
     /// boundaries from the stream it is already reading — it sent the message and it sees the
     /// result — so a hook would tell it something it knows, one process later.
     func applyLifecycle(_ report: HookLifecycleReport) {
+        if report.event == .subagentStarted || report.event == .subagentStopped {
+            applySubagentLifecycle(report)
+            return
+        }
+
         if report.event == .sessionStarted {
             adoptReportedIdentifier(report)
         }
@@ -94,9 +109,22 @@ final class AgentRuntime {
 
         switch report.event {
         case .turnStarted: tracker.noteTurnStarted()
-        case .turnFinished: tracker.noteTurnFinished()
+        case .turnFinished:
+            if !report.backgroundTaskIDs.isEmpty {
+                // The one line that explains a session sitting at `working` with a quiet
+                // terminal: its agent is waiting on something it started, not on the user.
+                SkalmanLogger.agent.debug(
+                    """
+                    Turn ended with \(report.backgroundTaskIDs.count, privacy: .public) \
+                    background task(s) in flight for \
+                    \(report.sessionID.uuidString, privacy: .public)
+                    """
+                )
+            }
+            tracker.noteTurnFinished(backgroundWork: report.backgroundTaskIDs)
         case .awaitingUser: tracker.noteAwaitingUser()
         case .sessionStarted: break
+        case .subagentStarted, .subagentStopped: break
         }
 
         if wasInferring, tracker.reportsOwnActivity {
@@ -107,6 +135,60 @@ final class AgentRuntime {
                 "session": report.sessionID.uuidString,
                 "event": report.event.rawValue
             ])
+        }
+    }
+
+    /// Folds terminal hook events into the same hierarchy native transports report.
+    ///
+    /// Claude native uses an Agent tool-use id as its stable UI identity, while Claude's hook
+    /// reports a different agent id. Applying both would create twins, so Claude hooks are the
+    /// terminal adapter only. Codex app-server and Codex hooks use the child thread id in both
+    /// places, allowing the hook to enrich a native row with its transcript path too.
+    private func applySubagentLifecycle(_ report: HookLifecycleReport) {
+        guard let stored = ProjectStore.shared.session(withID: report.sessionID),
+              let childID = report.subagentID, !childID.isEmpty else {
+            return
+        }
+
+        if stored.kind == .claude, conversations[report.sessionID] != nil {
+            return
+        }
+
+        let state = subagentState(for: report.sessionID)
+        state.apply(.discovered(SubagentDescriptor(
+            threadID: childID,
+            parentThreadID: report.agentSessionID,
+            role: report.subagentType,
+            path: report.subagentTranscriptPath
+        )))
+
+        switch report.event {
+        case .subagentStarted:
+            state.apply(.state(
+                threadID: childID,
+                status: .working,
+                message: nil
+            ))
+        case .subagentStopped:
+            let finalMessage = report.lastAssistantMessage.map(
+                SubagentDefaults.compactActivity
+            )
+            state.apply(.state(
+                threadID: childID,
+                status: .completed,
+                message: finalMessage
+            ))
+            if let path = report.subagentTranscriptPath, !path.isEmpty {
+                SubagentUsageReader.load(path: path, kind: stored.kind) { totalTokens in
+                    guard let totalTokens else { return }
+                    state.apply(.progress(
+                        threadID: childID,
+                        progress: SubagentProgress(totalTokens: totalTokens)
+                    ))
+                }
+            }
+        case .turnStarted, .turnFinished, .awaitingUser, .sessionStarted:
+            break
         }
     }
 
@@ -136,14 +218,33 @@ final class AgentRuntime {
         controllers[report.sessionID]?.noteStateChanged()
     }
 
+    /// The session currently on screen, as last reported by the container.
+    private(set) var visibleSessionID: SessionID?
+
     /// Marks which session is on screen, so only the others flag finished work.
     func setVisibleSession(_ sessionID: SessionID?) {
+        visibleSessionID = sessionID
         for (id, controller) in controllers {
             controller.isVisible = (id == sessionID)
         }
         for (id, conversation) in conversations {
             conversation.isVisible = (id == sessionID)
         }
+        // Coming on screen answers the session's notification the same way it lowers its
+        // sidebar flag — the no-op before `start()` keeps notification machinery out of tests.
+        if let sessionID {
+            AttentionAlertCenter.shared.sessionWasViewed(sessionID)
+        }
+    }
+
+    /// Whether the session's agent declares its own turn boundaries — a hook-reporting
+    /// terminal or a native conversation — rather than being inferred from output. What
+    /// separates "a turn ended" from "a shell went quiet".
+    func reportsOwnTurns(sessionID: SessionID) -> Bool {
+        if let controller = controllers[sessionID] {
+            return controller.activityTracker.reportsOwnActivity
+        }
+        return conversations[sessionID] != nil
     }
 
     /// Whether the session has a terminal allocated, running or exited.
@@ -157,6 +258,17 @@ final class AgentRuntime {
         conversations[sessionID]
     }
 
+    func subagentState(for sessionID: SessionID) -> SubagentSessionState {
+        if let existing = subagentStates[sessionID] { return existing }
+
+        let state = SubagentSessionState(
+            sessionID: sessionID,
+            store: SubagentStateStore.shared
+        )
+        subagentStates[sessionID] = state
+        return state
+    }
+
     /// Returns the cached conversation for a session, creating one if needed.
     func makeConversation(
         for agentSession: AgentSession,
@@ -166,7 +278,11 @@ final class AgentRuntime {
             return existing
         }
 
-        let conversation = ConversationViewController(agentSession: agentSession, project: project)
+        let conversation = ConversationViewController(
+            agentSession: agentSession,
+            project: project,
+            subagentState: subagentState(for: agentSession.id)
+        )
         conversations[agentSession.id] = conversation
         return conversation
     }
@@ -185,13 +301,28 @@ final class AgentRuntime {
 
         if let conversation = conversations.removeValue(forKey: sessionID) {
             conversation.terminate()
+            subagentStates[sessionID]?.stopWorking(
+                message: "Stopped when the session process ended."
+            )
             conversation.view.removeFromSuperview()
         }
 
         guard let controller = controllers[sessionID] else { return }
         controller.terminate()
+        subagentStates[sessionID]?.stopWorking(
+            message: "Stopped when the session process ended."
+        )
         controller.view.removeFromSuperview()
         controllers[sessionID] = nil
+    }
+
+    /// Drops memory and disk state for sessions that no longer exist.
+    func retainOnly(sessionIDs: Set<SessionID>) {
+        for (sessionID, state) in subagentStates where !sessionIDs.contains(sessionID) {
+            state.invalidate()
+        }
+        subagentStates = subagentStates.filter { sessionIDs.contains($0.key) }
+        SubagentStateStore.shared.retainOnly(sessionIDs: sessionIDs)
     }
 
     /// Tears down every live session, used on application exit.
@@ -207,5 +338,9 @@ final class AgentRuntime {
             conversations[sessionID]?.terminate()
         }
         conversations.removeAll()
+
+        for state in subagentStates.values {
+            state.flushPersistence()
+        }
     }
 }

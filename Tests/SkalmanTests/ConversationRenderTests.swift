@@ -14,6 +14,7 @@ import XCTest
 /// Both appearances are rendered, because the design derives every surface from a system colour
 /// specifically so light and dark both work, and a change that breaks one is easy to miss while
 /// working in the other.
+@MainActor
 final class ConversationRenderTests: XCTestCase {
 
     // MARK: - Configuration
@@ -309,6 +310,102 @@ final class ConversationRenderTests: XCTestCase {
         XCTAssertEqual(written.count, Fixture.allCases.count * 2)
     }
 
+    // MARK: - Long User Messages
+
+    func testTheCollapseThresholdCountsCharactersAndHardLines() {
+        XCTAssertFalse(ConversationDefaults.collapsesUserMessage("Fix the bug"))
+        XCTAssertTrue(ConversationDefaults.collapsesUserMessage(
+            String(repeating: "a", count: ConversationDefaults.longMessageCharacterCap + 1)
+        ))
+        XCTAssertTrue(ConversationDefaults.collapsesUserMessage(
+            Array(repeating: "line", count: ConversationDefaults.longMessageLineCap + 1)
+                .joined(separator: "\n")
+        ))
+        XCTAssertFalse(ConversationDefaults.collapsesUserMessage(
+            Array(repeating: "line", count: ConversationDefaults.longMessageLineCap)
+                .joined(separator: "\n")
+        ))
+    }
+
+    func testALongUserMessageRendersCollapsedAndBounded() throws {
+        // Twenty pasted lines must not become a twenty-line banner: the collapsed bubble caps
+        // at eight rendered lines plus its footer, whatever the message holds.
+        let long = (1...20).map { "Pasted log line \($0): something happened here" }
+            .joined(separator: "\n")
+        let short = "Fix the flaky test"
+
+        let stack = laidOut([.userMessage(long), .userMessage(short)], width: Render.width)
+        let rows = stack.arrangedSubviews.filter { !($0 is NSBox) }
+
+        let collapsed = try XCTUnwrap(rows.first?.subviews.first, "The long bubble went missing")
+        XCTAssertTrue(collapsed is UserMessageBubbleView, "A long message drew the plain bubble")
+
+        // Generous cap: eight body lines, the footer, and padding — but nowhere near twenty
+        // lines, which would be ~380pt.
+        XCTAssertLessThan(collapsed.frame.height, 230, "The long bubble did not collapse")
+
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if let data = png(of: stack.superview ?? stack) {
+            try data.write(to: directory.appendingPathComponent("long-user-message.png"))
+        }
+    }
+
+    // MARK: - Changed Files Card
+
+    /// The per-turn changed-files card, drawn from a synthetic tree: indentation, folder
+    /// rows, per-node ±counts and the header actions are all appearance work no assertion
+    /// would catch.
+    func testRendersTheChangedFilesCard() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        // Five files on purpose: at the auto-expand cap, so the card draws its whole tree —
+        // a sixth would (correctly) start it collapsed and the picture would show five rows.
+        let tree = ChangedFilesTree.build(from: [
+            ChangedFilesTree.File(path: "public/robots.txt", added: 4, removed: 0),
+            ChangedFilesTree.File(path: "src/layouts/BaseLayout.astro", added: 1, removed: 8),
+            ChangedFilesTree.File(path: "src/lib/constants.ts", added: 9, removed: 0),
+            ChangedFilesTree.File(path: "src/pages/index.astro", added: 2, removed: 8),
+            ChangedFilesTree.File(path: "astro.config.mjs", added: 3, removed: 1)
+        ])
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = NSAppearance(named: appearanceName)
+            var data: Data?
+
+            let render = {
+                let card = ChangedFilesCardView(tree: tree, onViewDiff: {})
+                let host = NSView(frame: NSRect(x: 0, y: 0, width: Render.width, height: 1))
+                host.addSubview(card)
+                NSLayoutConstraint.activate([
+                    card.topAnchor.constraint(equalTo: host.topAnchor),
+                    card.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    card.widthAnchor.constraint(equalToConstant: Render.width)
+                ])
+                host.appearance = appearance
+                card.appearance = appearance
+                host.layoutSubtreeIfNeeded()
+                host.frame.size.height = card.fittingSize.height
+                host.layoutSubtreeIfNeeded()
+
+                // Every row of a seven-file tree is on screen: the fixture is small enough to
+                // auto-expand, so a short card means rows collapsed that should not have.
+                XCTAssertGreaterThan(host.frame.height, 150, "The card rendered collapsed")
+                data = self.png(of: host)
+            }
+
+            if #available(macOS 11.0, *) {
+                appearance?.performAsCurrentDrawingAppearance(render)
+            } else {
+                render()
+            }
+
+            let payload = try XCTUnwrap(data, "Failed to render the changed-files card in \(name)")
+            try payload.write(to: directory.appendingPathComponent("changed-files-card-\(name).png"))
+        }
+    }
+
     // MARK: - Theme Matrix
 
     /// Every stock theme × its appearances × every fixture, as a reviewable gallery.
@@ -444,6 +541,8 @@ final class ConversationRenderTests: XCTestCase {
 
             guard let host = stack.superview else { return }
             host.appearance = appearance
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
             data = self.png(of: host, ground: ground)
         }
 
@@ -456,5 +555,574 @@ final class ConversationRenderTests: XCTestCase {
         }
 
         return data
+    }
+}
+
+@MainActor
+final class SubagentSummaryViewTests: XCTestCase {
+
+    func testTerminalSurfaceKeepsTheSubagentNavigatorOutOfTheMainPane() {
+        let session = AgentSession(kind: .claude, title: "Terminal children")
+        let state = SubagentSessionState(sessionID: session.id)
+        let controller = AgentSessionViewController(
+            agentSession: session,
+            subagentState: state
+        )
+        controller.view.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+        controller.view.layoutSubtreeIfNeeded()
+
+        state.apply(.discovered(SubagentDescriptor(
+            threadID: "terminal-child",
+            nickname: "Terminal researcher",
+            path: "/tmp/terminal-child.jsonl"
+        )))
+        state.apply(.state(
+            threadID: "terminal-child",
+            status: .working,
+            message: nil
+        ))
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            descendants(of: controller.view).compactMap { $0 as? SubagentSummaryView }.isEmpty,
+            "Child navigation belongs in the side pane, not above the terminal"
+        )
+        XCTAssertEqual(controller.subagents.workingCount, 1)
+    }
+
+    func testNativeSurfaceKeepsTheSubagentNavigatorOutOfTheMainPane() {
+        let session = AgentSession(kind: .codex, title: "Native children")
+        let state = SubagentSessionState(sessionID: session.id)
+        let controller = ConversationViewController(
+            agentSession: session,
+            project: Project(
+                name: "Native children",
+                folderURL: URL(fileURLWithPath: "/tmp/native-children")
+            ),
+            subagentState: state,
+            customizationLookup: { _ in .empty }
+        )
+        controller.view.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+        controller.view.layoutSubtreeIfNeeded()
+
+        state.apply(.discovered(SubagentDescriptor(
+            threadID: "native-child",
+            nickname: "Native researcher"
+        )))
+        state.apply(.state(
+            threadID: "native-child",
+            status: .working,
+            message: nil
+        ))
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            descendants(of: controller.view).compactMap { $0 as? SubagentSummaryView }.isEmpty,
+            "Child navigation belongs in the side pane, not above the native conversation"
+        )
+        XCTAssertEqual(controller.subagents.workingCount, 1)
+    }
+
+    func testSubagentSidePaneOwnsTheCompleteNavigator() throws {
+        var timeline = SubagentTimeline(sessionID: SessionID())
+        for index in 0..<12 {
+            let threadID = "working-\(index)"
+            timeline.apply(.discovered(SubagentDescriptor(threadID: threadID)))
+            timeline.apply(.state(
+                threadID: threadID,
+                status: .working,
+                message: nil
+            ))
+        }
+
+        let controller = SubagentTranscriptViewController()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 720)
+        controller.update(timeline, selectedThreadID: "working-11")
+        controller.view.layoutSubtreeIfNeeded()
+
+        let summary = try XCTUnwrap(
+            descendants(of: controller.view).compactMap { $0 as? SubagentSummaryView }.first
+        )
+        XCTAssertEqual(summary.selectionStyle, .navigation)
+        XCTAssertEqual(
+            descendants(of: summary).compactMap { $0 as? ThemedButton }.count,
+            12,
+            "The scrolling side pane should retain every child rather than clipping the list"
+        )
+    }
+
+    func testSubagentSidePaneSwitchesSelectedTranscriptAndReportsSelection() throws {
+        var timeline = SubagentTimeline(sessionID: SessionID())
+        for (id, name, reply) in [
+            ("child-one", "First child", "First reply"),
+            ("child-two", "Second child", "Second reply")
+        ] {
+            timeline.apply(.discovered(SubagentDescriptor(threadID: id, nickname: name)))
+            timeline.apply(.state(threadID: id, status: .completed, message: nil))
+            timeline.apply(.conversation(
+                threadID: id,
+                event: .assistantMessage(blocks: [.text(reply)])
+            ))
+        }
+
+        let controller = SubagentTranscriptViewController()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 720)
+        var selectedID: String?
+        controller.onSelectAgent = { selectedID = $0 }
+        controller.update(timeline, selectedThreadID: "child-one")
+        controller.view.layoutSubtreeIfNeeded()
+
+        let second = try XCTUnwrap(
+            descendants(of: controller.view)
+                .compactMap { $0 as? ThemedButton }
+                .first { $0.title == "Second child" }
+        )
+        _ = second.sendAction(second.action, to: second.target)
+
+        XCTAssertEqual(selectedID, "child-two")
+        XCTAssertEqual(controller.representedThreadID, "child-two")
+        XCTAssertTrue(
+            descendants(of: controller.view)
+                .compactMap { $0 as? NSTextField }
+                .contains { $0.stringValue == "Second reply" }
+        )
+    }
+
+    func testNavigationSelectionKeepsTheOverviewCompact() throws {
+        let view = SubagentSummaryView()
+        view.selectionStyle = .navigation
+        view.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "child-1",
+                    title: "Parser audit",
+                    subtitle: "Inspect the app-server event adapter.",
+                    state: .working,
+                    statusDetail: nil,
+                    detailLines: [
+                        "Started",
+                        "Read CodexAppServerEvent.swift",
+                        "Found a missing terminal-state mapping"
+                    ]
+                )
+            ],
+            workingCount: 1,
+            doneCount: 0
+        )
+
+        let collapsed = laidOut(view)
+        var selections: [String?] = []
+        view.onSelect = { selections.append($0) }
+        view.setSelection("child-1")
+        let selected = laidOut(view)
+        view.setSelection("child-1")
+
+        XCTAssertEqual(collapsed, selected)
+        XCTAssertEqual(selections.compactMap { $0 }, ["child-1", "child-1"])
+        let selectedButton = try XCTUnwrap(
+            descendants(of: view)
+                .compactMap { $0 as? ThemedButton }
+                .first { $0.title == "Parser audit" }
+        )
+        XCTAssertEqual(
+            selectedButton.accessibilityValue() as? Bool,
+            true,
+            "VoiceOver should identify the child whose transcript is on screen"
+        )
+    }
+
+    func testSelectionExpandsChildActivityWithoutChangingTheSummaryWidth() {
+        let view = SubagentSummaryView()
+        let items = [
+            SubagentSummaryItem(
+                id: "child-1",
+                title: "Parser audit",
+                subtitle: "Inspect the app-server event adapter.",
+                state: .working,
+                statusDetail: "Read · 18s · 4 tools",
+                detailLines: [
+                    "Started",
+                    "Read CodexAppServerEvent.swift",
+                    "Found a missing terminal-state mapping"
+                ]
+            ),
+            SubagentSummaryItem(
+                id: "child-2",
+                title: "Render check",
+                subtitle: nil,
+                state: .completed,
+                statusDetail: nil,
+                detailLines: ["Theme boundary passed"]
+            )
+        ]
+
+        view.update(items: items, workingCount: 1, doneCount: 1)
+        let collapsed = laidOut(view)
+        view.setSelection("child-1")
+        let expanded = laidOut(view)
+
+        XCTAssertEqual(collapsed.width, expanded.width, accuracy: 0.5)
+        XCTAssertGreaterThan(expanded.height, collapsed.height + Design.Spacing.large)
+    }
+
+    func testLongSubagentTextStaysInsideANarrowSummary() throws {
+        let view = SubagentSummaryView()
+        let title = "Investigate the native renderer and its deliberately long summary title"
+        let detail = "Reasoning: Chronology: 1. The single real user message asked for "
+            + "a thorough investigation of the renderer at a deliberately narrow pane width."
+        let transcriptURL = URL(fileURLWithPath: "/tmp/agent-af90bc36.jsonl")
+        var revealedURL: URL?
+        view.onRevealTranscript = { revealedURL = $0 }
+        view.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "child-1",
+                    title: title,
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: nil,
+                    detailLines: [detail],
+                    transcriptURL: transcriptURL
+                )
+            ],
+            workingCount: 0,
+            doneCount: 1
+        )
+        view.setSelection("child-1")
+        _ = laidOut(view, width: 360)
+
+        let button = try XCTUnwrap(
+            descendants(of: view)
+                .compactMap { $0 as? ThemedButton }
+                .first { $0.title == title }
+        )
+        XCTAssertLessThan(
+            button.frame.width,
+            button.intrinsicContentSize.width,
+            "The fixture no longer exercises a squeezed title"
+        )
+
+        let detailLabel = try XCTUnwrap(
+            descendants(of: view)
+                .compactMap { $0 as? NSTextField }
+                .first { $0.stringValue == detail }
+        )
+        XCTAssertEqual(detailLabel.lineBreakMode, .byWordWrapping)
+        XCTAssertEqual(detailLabel.maximumNumberOfLines, 3)
+
+        let revealButton = try XCTUnwrap(
+            descendants(of: view)
+                .compactMap { $0 as? ThemedIconButton }
+                .first { $0.accessibilityTitle() == L10n.string("Reveal in Finder") }
+        )
+        revealButton.onPress?()
+        XCTAssertEqual(revealedURL, transcriptURL)
+
+        for descendant in descendants(of: view) {
+            let frame = descendant.convert(descendant.bounds, to: view)
+            XCTAssertGreaterThanOrEqual(
+                frame.minX,
+                view.bounds.minX - 0.5,
+                "\(type(of: descendant)) escaped the summary's leading edge: \(frame)"
+            )
+            XCTAssertLessThanOrEqual(
+                frame.maxX,
+                view.bounds.maxX + 0.5,
+                "\(type(of: descendant)) escaped the summary's trailing edge: \(frame)"
+            )
+        }
+
+        let margin = Design.Spacing.large
+        let host = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: view.frame.width + margin * 2,
+            height: view.frame.height + margin * 2
+        ))
+        host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        view.removeFromSuperview()
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.frame.origin = NSPoint(x: margin, y: margin)
+        host.addSubview(view)
+        host.layoutSubtreeIfNeeded()
+
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        let directory = ProcessInfo.processInfo.environment["SKALMAN_RENDER_OUT"]
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(
+            to: directory.appendingPathComponent("subagent-summary-friendly-transcript.png")
+        )
+    }
+
+    func testExpandedSubagentSummaryRenders() throws {
+        let view = SubagentSummaryView()
+        view.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "child-1",
+                    title: "Cargo enrollment ffi",
+                    subtitle: "Audit the retained-parent capacity regression.",
+                    state: .working,
+                    statusDetail: "Read · 1m 42s · 14 tools · 24.2K tokens",
+                    detailLines: [
+                        "Started",
+                        "Edited rust_target_pipeline.rs",
+                        "The retained-parent capacity regression passes.",
+                        "Running the remaining native Cargo fixtures"
+                    ]
+                ),
+                SubagentSummaryItem(
+                    id: "child-2",
+                    title: "Unicode audit",
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: "28s · 6 tools · 8.1K tokens",
+                    detailLines: ["Finished"]
+                )
+            ],
+            workingCount: 1,
+            doneCount: 1
+        )
+        view.setSelection("child-1")
+
+        let size = laidOut(view)
+        let host = NSView(frame: NSRect(origin: .zero, size: size))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        view.removeFromSuperview()
+        view.frame = host.bounds
+        view.autoresizingMask = [.width, .height]
+        host.addSubview(view)
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(data.count, 1_000)
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("skalman-subagent-summary.png")
+        try data.write(to: url)
+    }
+
+    func testSubagentTranscriptReusesNativeRowsAndRendersAtPaneWidth() throws {
+        let agent = makeAgent(
+            threadID: "child-detail",
+            status: .working,
+            events: [
+                .userMessage("Audit the retained-parent capacity regression."),
+                .assistantMessage(blocks: [
+                    .thinking("I should inspect the admission path first."),
+                    .toolUse(
+                        id: "tool-1",
+                        tool: .bash,
+                        input: ["command": "swift test --filter CapacityRegression"]
+                    ),
+                    .toolUse(
+                        id: "tool-2",
+                        tool: .read,
+                        input: ["path": "Sources/Skalman/Core/Agent/ConversationTimeline.swift"]
+                    ),
+                    .text("""
+                    The focused regression now passes.
+
+                    | Check | Result |
+                    | --- | ---: |
+                    | Capacity | 44 sites |
+                    """),
+                    .toolUse(
+                        id: "tool-3",
+                        tool: .bash,
+                        input: ["command": "scripts/test.sh fast"]
+                    ),
+                    .text("The final validation passes.")
+                ])
+            ]
+        )
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 720))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+
+        let controller = SubagentTranscriptViewController()
+        controller.view.frame = host.bounds
+        controller.view.autoresizingMask = [.width, .height]
+        host.addSubview(controller.view)
+        controller.update(agent)
+        host.layoutSubtreeIfNeeded()
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.representedThreadID, "child-detail")
+        XCTAssertEqual(controller.renderedRowCount, agent.conversation.rows.count)
+        XCTAssertGreaterThan(controller.renderedRowCount, 2)
+
+        let compactItems = ConversationRowPresentation.compact(agent.conversation.rows)
+        XCTAssertEqual(
+            compactItems.compactMap { item -> Int? in
+                guard case .toolCalls(let calls) = item else { return nil }
+                return calls.count
+            },
+            [2, 1],
+            "Tool calls moved across assistant prose instead of folding in chronological runs"
+        )
+
+        let transcriptDescendants = descendants(of: controller.view)
+        XCTAssertEqual(
+            transcriptDescendants.compactMap { $0 as? TurnFoldView }.count,
+            2,
+            "The compact child transcript did not replace tool runs with disclosures"
+        )
+        XCTAssertEqual(
+            transcriptDescendants.compactMap { $0 as? ToolCallView }.filter(\.isHidden).count,
+            3,
+            "Tool rows should start hidden behind their run disclosure"
+        )
+        let summary = try XCTUnwrap(
+            transcriptDescendants.compactMap { $0 as? SubagentSummaryView }.first
+        )
+        XCTAssertEqual(summary.selectionStyle, .navigation)
+        XCTAssertTrue(
+            descendants(of: summary)
+                .compactMap { $0 as? ThemedButton }
+                .contains { $0.title == agent.descriptor.displayName },
+            "The side pane no longer exposes the child navigator"
+        )
+        XCTAssertTrue(
+            transcriptDescendants.contains { $0 is MarkdownView },
+            "The child reply did not use the native Markdown renderer"
+        )
+
+        let scrollView = try XCTUnwrap(
+            controller.view.subviews.compactMap { $0 as? NSScrollView }.first
+        )
+        let documentView = try XCTUnwrap(scrollView.documentView)
+        let stack = try XCTUnwrap(
+            documentView.subviews.compactMap { $0 as? NSStackView }.first
+        )
+        XCTAssertEqual(
+            stack.frame.width,
+            documentView.bounds.width,
+            accuracy: 1,
+            "A narrow detail pane must fill its document width so transcript rows wrap"
+        )
+
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(data.count, 1_000)
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("skalman-subagent-transcript.png")
+        try data.write(to: url)
+    }
+
+    func testDisplayPaneKeepsOneEphemeralSubagentTabAndDoesNotReopenIt() throws {
+        let sessionID = SessionID()
+        let pane = DisplayPaneController()
+        var timeline = SubagentTimeline(sessionID: sessionID)
+        timeline.apply(.discovered(SubagentDescriptor(
+            threadID: "child-pane",
+            nickname: "Pane child"
+        )))
+        timeline.apply(.state(
+            threadID: "child-pane",
+            status: .working,
+            message: nil
+        ))
+        timeline.apply(.conversation(
+            threadID: "child-pane",
+            event: .assistantMessage(blocks: [.text("First update.")])
+        ))
+
+        let controller = pane.activateSubagents(
+            timeline,
+            selectedThreadID: "child-pane",
+            for: sessionID
+        )
+        let tab = try XCTUnwrap(pane.tabs(for: sessionID).first)
+        XCTAssertTrue(tab.subagents === controller)
+        XCTAssertEqual(tab.title, "Subagents")
+        XCTAssertEqual(tab.symbolName, "person.2")
+        XCTAssertEqual(pane.activeTabID(for: sessionID), tab.id)
+
+        timeline.apply(.state(
+            threadID: "child-pane",
+            status: .completed,
+            message: nil
+        ))
+        timeline.apply(.conversation(
+            threadID: "child-pane",
+            event: .assistantMessage(blocks: [.text("Finished.")])
+        ))
+        pane.updateSubagents(
+            timeline,
+            selectedThreadID: "child-pane",
+            for: sessionID
+        )
+        let updated = try XCTUnwrap(timeline.agents.first)
+        XCTAssertEqual(
+            controller.renderedRowCount,
+            updated.conversation.rows.count
+        )
+
+        XCTAssertTrue(pane.closeTab(id: tab.id, for: sessionID))
+        pane.updateSubagents(
+            timeline,
+            selectedThreadID: "child-pane",
+            for: sessionID
+        )
+        XCTAssertTrue(pane.tabs(for: sessionID).isEmpty)
+    }
+
+    private func makeAgent(
+        sessionID: SessionID = SessionID(),
+        threadID: String,
+        status: SubagentStatus,
+        events: [StreamEvent]
+    ) -> SubagentTimeline.Agent {
+        var timeline = SubagentTimeline(sessionID: sessionID)
+        timeline.apply(.discovered(SubagentDescriptor(
+            threadID: threadID,
+            nickname: "Cargo enrollment ffi",
+            prompt: "Audit the retained-parent capacity regression."
+        )))
+        timeline.apply(.state(
+            threadID: threadID,
+            status: status,
+            message: status.isDone ? "Finished" : "Working"
+        ))
+        timeline.apply(.activity(
+            threadID: threadID,
+            text: "Edited rust_target_pipeline.rs"
+        ))
+        for event in events {
+            timeline.apply(.conversation(threadID: threadID, event: event))
+        }
+        return timeline.agents[0]
+    }
+
+    private func laidOut(_ view: SubagentSummaryView, width: CGFloat = 560) -> CGSize {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 800))
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+        let size = view.fittingSize
+        view.frame = NSRect(origin: .zero, size: NSSize(width: width, height: size.height))
+        view.layoutSubtreeIfNeeded()
+        return view.frame.size
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
 }

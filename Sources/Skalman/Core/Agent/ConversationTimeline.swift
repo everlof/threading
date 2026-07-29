@@ -63,6 +63,10 @@ struct ConversationTimeline {
 
             /// Whether the text was cut to `ConversationDefaults.toolResultLimit`.
             let isTruncated: Bool
+
+            /// Settled once, when the result attaches — `isError` plus the text sniff, so the
+            /// view never re-derives it and live and replay cannot disagree.
+            let outcome: ToolOutcome
         }
     }
 
@@ -75,11 +79,23 @@ struct ConversationTimeline {
         /// Index into `rows` of the user message that opened it, so a view can scroll to it.
         let rowIndex: Int
 
+        /// Index of the last row belonging to this turn — the row before the next user
+        /// message, or the newest row for the turn still in flight.
+        let endIndex: Int
+
+        /// Index of the final assistant message — the row a fold keeps visible. Nil for a
+        /// turn that produced no text reply.
+        let finalAssistantIndex: Int?
+
         let userText: String
 
         /// The *last* assistant message before the next user turn — the conclusion rather than
         /// the thinking-aloud on the way there. Nil while a turn is still in flight.
         let assistantText: String?
+
+        /// How long the turn ran, retained from its terminal event. Nil while in flight, and
+        /// for replayed transcripts whose records carried no usable timestamps.
+        let duration: TimeInterval?
     }
 
     /// What the composer reports. Distinct from the row list: it describes the session, not
@@ -109,8 +125,14 @@ struct ConversationTimeline {
 
         case status(Status)
 
-        /// The latest complete plan reported during the turn, reduced to its current position.
-        case runProgress(RunProgress)
+        /// The latest plan reported during the turn, reduced to its current position. Nil
+        /// clears a plan whose provider explicitly replaced it with an empty list.
+        case runProgress(RunProgress?)
+
+        /// The turn that opened at this row index finished. `interrupted` marks one that was
+        /// stopped or failed rather than completed — the view folds a settled turn, but an
+        /// interrupted one stays expanded so the user keeps their place; the next turn folds it.
+        case turnSettled(startIndex: Int, interrupted: Bool)
 
         /// The identifier the CLI settled on, which for a resume is not necessarily the one we
         /// asked for.
@@ -130,6 +152,19 @@ struct ConversationTimeline {
     /// does emit when a command is retried — appends rather than overwriting silently.
     private var pendingToolRows: [String: Int] = [:]
 
+    /// Stateful because current Claude releases create and update one task at a time. Codex and
+    /// legacy Claude snapshots pass through the same reducer, so replay cannot diverge from live.
+    private var runProgressReducer = RunProgressReducer()
+
+    /// Durations reported by each turn's terminal event, keyed by the row index of the user
+    /// message that opened the turn. Kept beside `rows` rather than on a parallel turn list —
+    /// a duration is a fact only the event stream carries, and row indices never move.
+    private var turnDurations: [Int: TimeInterval] = [:]
+
+    /// Row index of the user message that opened the turn currently in flight, so its
+    /// terminal event can be attributed to it.
+    private var currentTurnStartIndex: Int?
+
     private let sessionID: SessionID
 
     // MARK: - Initialization
@@ -148,16 +183,21 @@ struct ConversationTimeline {
             if let agentSessionID {
                 changes.append(.adoptedSessionID(agentSessionID))
             }
-            // Codex reports `thread.started` at the head of every one-shot turn, so this fires
-            // mid-conversation too. Only a reported model promotes the status — calling it
-            // Ready unconditionally would overwrite Working while the model is still running.
+            // A transport can restate the active thread while resuming or reconnecting, so this
+            // may fire mid-conversation too. Only a reported model promotes the status — calling
+            // it Ready unconditionally would overwrite Working while the model is still running.
             if let model {
                 changes.append(.status(.ready(model: model, lastTurn: nil)))
             }
             return changes
 
         case .userMessage(let text):
-            return [append(.userMessage(text))]
+            let change = append(.userMessage(text))
+            currentTurnStartIndex = rows.count - 1
+            return [change]
+
+        case .transcriptNotice(let text):
+            return [append(.notice(text, kind: .muted))]
 
         case .textDelta(let text):
             streamingText += text
@@ -167,9 +207,9 @@ struct ConversationTimeline {
             // Reasoning is streamed but not shown as it arrives: it needs a fold to sit behind,
             // and it lands complete in the finished message anyway.
             //
-            // It no longer moves the status either. Claude streams these and Codex does not, so
-            // a status raised here described the same wait differently per transport; the turn
-            // already said it was working when it started, and it still is.
+            // It no longer moves the status either. Providers do not all stream these at the
+            // same cadence, so a status raised here described the same wait differently per
+            // transport; the turn already said it was working when it started, and it still is.
             return []
 
         case .assistantMessage(let blocks):
@@ -180,20 +220,43 @@ struct ConversationTimeline {
             return changes
 
         case .toolResults(let results):
-            return results.map { attach($0) }
+            var changes: [Change] = []
+            for result in results {
+                changes.append(attach(result))
+                append(runProgressReducer.apply(result: result), to: &changes)
+            }
+            return changes
+
+        case .runPlanUpdated(let steps):
+            var changes: [Change] = []
+            append(runProgressReducer.apply(plan: steps), to: &changes)
+            return changes
 
         case .turnFinished(let text, let isError, let metrics):
             var changes = clearStreaming()
+            changes.append(contentsOf: settleUnansweredToolCalls())
             // Only a failed turn is reported. A successful one's text is the assistant message
             // already rendered, and showing it twice reads as the agent repeating itself.
             if isError, let text, !text.isEmpty {
                 changes.append(append(.notice(text, kind: .error)))
+            }
+            if let startIndex = currentTurnStartIndex {
+                if let duration = metrics.duration {
+                    turnDurations[startIndex] = duration
+                }
+                changes.append(.turnSettled(startIndex: startIndex, interrupted: isError))
+                currentTurnStartIndex = nil
             }
             changes.append(.status(.ready(
                 model: nil,
                 lastTurn: metrics.isEmpty ? nil : metrics
             )))
             return changes
+
+        case .backgroundWork:
+            // Nothing to draw. It says whether the *session* has finished, which is the
+            // sidebar's question and the notification's, not a row in the conversation.
+            return []
 
         case .unknown:
             return []
@@ -213,33 +276,42 @@ struct ConversationTimeline {
             let compacted = Self.compact(text)
             guard !compacted.isEmpty else { continue }
 
+            let conclusion = finalAssistant(after: index)
             turns.append(Turn(
                 rowIndex: index,
+                endIndex: conclusion.endIndex,
+                finalAssistantIndex: conclusion.index,
                 userText: compacted,
-                assistantText: finalAssistantText(after: index)
+                assistantText: conclusion.text,
+                duration: turnDurations[index]
             ))
         }
 
         return turns
     }
 
-    /// The last assistant message between this user turn and the next.
-    private func finalAssistantText(after userIndex: Int) -> String? {
-        var latest: String?
+    /// The last assistant message between this user turn and the next, with where the turn's
+    /// rows end. Any user row is a boundary, even one whose text compacts to nothing.
+    private func finalAssistant(
+        after userIndex: Int
+    ) -> (index: Int?, text: String?, endIndex: Int) {
+        var latest: (index: Int?, text: String?) = (nil, nil)
+        var endIndex = userIndex
 
-        for row in rows[rows.index(after: userIndex)...] {
-            switch row {
+        for index in rows.indices[rows.index(after: userIndex)...] {
+            switch rows[index] {
             case .userMessage:
-                return latest
+                return (latest.index, latest.text, endIndex)
             case .assistant(let markdown):
                 let compacted = Self.compact(markdown)
-                if !compacted.isEmpty { latest = compacted }
+                if !compacted.isEmpty { latest = (index, compacted) }
+                endIndex = index
             default:
-                continue
+                endIndex = index
             }
         }
 
-        return latest
+        return (latest.index, latest.text, endIndex)
     }
 
     /// Collapses whitespace, so a preview of a markdown message is one readable line rather
@@ -275,10 +347,12 @@ struct ConversationTimeline {
             )
             let change = append(.toolCall(call))
             pendingToolRows[id] = rows.count - 1
-            if let progress = RunProgress(tool: tool, input: input) {
-                return [change, .runProgress(progress)]
-            }
-            return [change]
+            var changes = [change]
+            append(
+                runProgressReducer.apply(toolUseID: id, tool: tool, input: input),
+                to: &changes
+            )
+            return changes
 
         default:
             // An empty text block, which both CLIs emit around tool calls.
@@ -298,9 +372,41 @@ struct ConversationTimeline {
             return append(.notice(text, kind: .muted))
         }
 
-        call.result = ToolCall.Result(text: text, isError: result.isError, isTruncated: isTruncated)
+        call.result = ToolCall.Result(
+            text: text,
+            isError: result.isError,
+            isTruncated: isTruncated,
+            outcome: ToolOutcome.classify(text: text, isError: result.isError, tool: call.tool)
+        )
         rows[index] = .toolCall(call)
         return .resultAttached(index: index)
+    }
+
+    /// A turn that ends with calls still unanswered would leave them reading "running…"
+    /// forever — ambiguity is temporary, not permanent. They settle as interrupted, but stay
+    /// in the pending map: a result that does arrive late still attaches over the placeholder.
+    private mutating func settleUnansweredToolCalls() -> [Change] {
+        var changes: [Change] = []
+        for index in pendingToolRows.values.sorted() {
+            guard case .toolCall(var call) = rows[index], call.result == nil else { continue }
+            call.result = ToolCall.Result(
+                text: "",
+                isError: false,
+                isTruncated: false,
+                outcome: .interrupted
+            )
+            rows[index] = .toolCall(call)
+            changes.append(.resultAttached(index: index))
+        }
+        return changes
+    }
+
+    private func append(
+        _ update: RunProgressReducer.Update,
+        to changes: inout [Change]
+    ) {
+        guard case .changed(let progress) = update else { return }
+        changes.append(.runProgress(progress))
     }
 
     private mutating func clearStreaming() -> [Change] {

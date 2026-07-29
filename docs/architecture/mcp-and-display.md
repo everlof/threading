@@ -42,9 +42,19 @@ returns a standard MCP image block as well as caching and optionally displaying 
 
 ## Display Panel
 
-`DisplayContent.Body` is an enum, so the panel shows either an `NSImageView` or a `WKWebView`
-and the `⋯` menu offers only the actions that fit — an image and a document share almost
-nothing worth acting on.
+`DisplayContent.Body` is an enum, so the panel shows either a `ThemedImagePreview` or a
+`WKWebView` and the `⋯` menu offers only the actions that fit — an image and a document share
+almost nothing worth acting on.
+
+**The picture is a control.** An image the agent just produced is the thing the user most wants
+to open properly, and Quick Look is where macOS already keeps zoom, rotate, share, Open With and
+full screen. Every route lands on the same `performPrimaryAction`: click to focus and Space or
+Return, a double-click, the trackpad's own Quick Look gesture, VoiceOver's press, and the `⋯`
+menu's first item — the menu because it is the one affordance that *advertises* what can be
+done, and a gesture nobody tries is not a feature. Double-click rather than single, unlike the
+prompt's attachment thumbnails: a 40pt chip is not something anyone is reading, a pane-filling
+picture is. `QuickLookPresenter` owns the panel's data for both call sites, because
+`QLPreviewPanel.dataSource` is non-retaining and the panel is one system window.
 
 Four things were measured rather than assumed, each having first been wrong:
 
@@ -61,7 +71,27 @@ Four things were measured rather than assumed, each having first been wrong:
   minimum. Width is set with a temporary constraint, released once honoured so the divider
   stays draggable.
 - **`NSImageView`'s intrinsic content size is the image's own size**, so left alone it drives
-  the split view and a 900px image opens a 900pt panel. Both content priorities are floored.
+  the split view and a 900px image opens a 900pt panel. Flooring both content priorities stopped
+  that from *winning* but left the size in the layout, and still answering for `fittingSize` —
+  so the picture kept lending the pane an opinion about its width. `ThemedImagePreview` states
+  `noIntrinsicMetric` instead: the opinion is removed rather than out-prioritised, and the image
+  scales into whatever the pane is given.
+- **A split item's `minimumThickness` is a *required* constraint, and a window laid out with
+  Auto Layout cannot be resized below what its required constraints ask for** — so a pane
+  minimum is also a window minimum. Measured: the window's minimum content width was 572pt with
+  the panel shut and 773pt with it open at a 200pt minimum, and `display_image` opens the panel,
+  so showing a picture quietly cost the user 200pt of how small their window could be. The item
+  now holds only `DisplayPaneDefaults.slimmestWidth` — the pane's own chrome, which the window
+  was paying for anyway. The 200pt is still where the panel *opens* (applied as a width on
+  reveal, and the floor a stored width is clamped to); it is no longer where the window stops.
+- **A height computed from a width has to be recomputed when the width changes.** The compare
+  tab's canvas took `preferredHeight(forWidth:)` once, as a constant, from `view.bounds.width`
+  while the body was being built — before the pane had laid out at all on a first show. The box
+  then held that height for life: dragging the divider refitted the images inside a canvas that
+  never moved, which read as a compare tab that could not be resized.
+  `CompareViewController.viewDidLayout` updates the constraint, and skips the write when the
+  value has not changed, since assigning a constant dirties the view and would otherwise lay the
+  pane out forever.
 - **The width observer fired during the uncollapse layout**, recording the transient 260pt
   minimum as the user's width and then restoring *that*. `isRestoringDisplayPaneWidth`
   suppresses recording for the reveal, and the target width is read before uncollapsing.
@@ -103,3 +133,30 @@ The listener must be ready before any launch, since a launch reads the port — 
 `AppDelegate` defers `restoreSelectedSession()` to the `start` callback. That callback fires
 whether the listener came up or not: a failed server costs sessions their panel, not their
 launch (`mcpFlags` returns "" and the command line is unchanged).
+
+**Tab order belongs to the user's hand.** The strip is `ThemedTabStripView` (the design
+system's, shared with every tab host) and tabs reorder by drag or by the chip's
+secondary-click menu, persisted in list order. `panel_list_tabs` reports strip order, so an
+index an agent memorised can go stale the same way it already could when a tab closed — the
+`id` is the stable name, and `panel_activate_tab` by id is the reliable spelling. The
+extension contract anticipated this: `tabOrder` has been `hostOwnedBehavior` since the
+catalogue first named it.
+
+**Tabs move between hosts, and the agent contract holds still.** `TabTransferCoordinator`
+(window-owned — only the window sees both hosts) reparents the same `PaneTab` between the
+panel and the drawer: detach without teardown, adopt, both sides persist their own slice.
+Movement is bounded by what the destination could *restore* after a relaunch (`canAdopt`), so
+a moved tab is never one the layout later forgets — which is why shells and browsers travel
+and the singleton surfaces stay panel-side. `panel_list_tabs` / `panel_activate_tab` remain
+display-panel-scoped: a tab moved out disappears from them exactly as a user-closed one does,
+and the existing "the user changed it while you were away" prose covers it. `browser_*` tools
+keep working wherever the browser lives — `DisplayPaneController.browser(for:)` falls back to
+the drawer host (`browserFallback`) when the panel holds none.
+
+Two entrances, one move: the chip's **"Move to …"** menu items, and **dragging the chip onto
+the other strip's band** — the strip asks the window (`externalDropTarget`, window
+coordinates), dims the traveller while a drop would land (`Design.Opacity.dragAway`), and
+reports the drop (`onDropOut`); the window resolves both entrances through the same
+`dragDestination`/`moveTab` path. A drop needs a *visible* band — a closed drawer or
+collapsed panel is reached by the menu, which opens the destination on landing. The menu
+remains the gesture's pointerless twin, per the design system's rule.

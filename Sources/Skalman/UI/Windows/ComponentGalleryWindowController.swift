@@ -87,10 +87,12 @@ final class ComponentGalleryViewController: NSViewController {
         "ImageCompareView",
         "MorphingTitleLabel",
         "PaneFooterView",
+        "PaneHeaderView",
         "PromptView",
         "SeparatorView",
         "ShortcutRecorderView",
         "SidebarBackdropView",
+        "SubagentSummaryView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
         "ThemedButton",
@@ -105,6 +107,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedTableHeaderView",
         "ThemedTableView",
         "ThemedTabItemView",
+        "ThemedTabStripView",
         "ThemedTextField",
         "ThemedSearchField",
         "ThemedTextView",
@@ -113,6 +116,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSurfaceView",
         "ThemeRedraw",
         "ThemedIconButton",
+        "ThemedImagePreview",
         "ToolbarButtonGroupView",
         "WorkingOrbView",
         "WindowBackdrop"
@@ -126,6 +130,17 @@ final class ComponentGalleryViewController: NSViewController {
     private let spinner = ThemedSpinner()
     private let workingOrbs = OrbState.allCases.map(WorkingOrbView.init(state:))
     private let morphingTitle = MorphingTitleLabel()
+
+    /// The tab strip's live model, so its story can be driven rather than looked at: closing
+    /// and dragging mutate this and the strip re-renders from it, exactly as a host would.
+    private let tabStrip = ThemedTabStripView(inkSource: .chrome)
+    private var stripTabs: [(id: UUID, title: String, symbolName: String)] = [
+        (UUID(), L10n.string("Terminal"), "terminal"),
+        (UUID(), L10n.string("Browser"), "globe"),
+        (UUID(), L10n.string("Review"), "plus.forwardslash.minus"),
+        (UUID(), L10n.string("Files"), "folder")
+    ]
+    private var stripActiveTabID: UUID?
     private let activityMapView = FileActivityMapView()
     private var activityDemoFiles: [String] = []
     private var activityDemoCursor = 0
@@ -518,6 +533,11 @@ final class ComponentGalleryViewController: NSViewController {
                     row([activeTab, inactiveTab, sidebarTab])
                 ),
                 story(
+                    "ThemedTabStripView",
+                    "The strip those tabs live in: select, close, drag a chip along it, or reorder from its secondary-click menu.",
+                    makeTabStripStory()
+                ),
+                story(
                     "ThemedIconButton",
                     "Active page tab with its own close control, then New Session and selected pane actions.",
                     row([activeSession, newSessionButton, selectedToolbarButton])
@@ -529,6 +549,83 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    /// The strip wired to its live model: every gesture mutates `stripTabs` and re-renders,
+    /// which is also what proves chip reuse — the dragged chip survives its own re-render.
+    private func makeTabStripStory() -> NSView {
+        stripActiveTabID = stripTabs.first?.id
+
+        tabStrip.onSelect = { [weak self] id in
+            guard let self else { return }
+            stripActiveTabID = id
+            renderTabStripStory()
+            let title = stripTabs.first { $0.id == id }?.title ?? ""
+            showReceipt(L10n.format("Selected the %@ tab.", title))
+        }
+        tabStrip.onClose = { [weak self] id in
+            guard let self, let index = stripTabs.firstIndex(where: { $0.id == id }) else {
+                return
+            }
+            let removed = stripTabs.remove(at: index)
+            if stripActiveTabID == id {
+                let neighbour = stripTabs.indices.contains(index)
+                    ? stripTabs[index] : stripTabs.last
+                stripActiveTabID = neighbour?.id
+            }
+            renderTabStripStory()
+            showReceipt(L10n.format("Closed the %@ tab.", removed.title))
+        }
+        tabStrip.onReorder = { [weak self] id, index in
+            guard let self else { return }
+            moveStripTab(id: id, toIndex: index)
+        }
+        tabStrip.contextEntries = { [weak self] id in
+            guard let self, let index = stripTabs.firstIndex(where: { $0.id == id }) else {
+                return []
+            }
+            return [
+                .item(ThemedMenuItem(
+                    title: L10n.string("Move Left"),
+                    isEnabled: index > 0,
+                    onChoose: { [weak self] in self?.moveStripTab(id: id, toIndex: index - 1) }
+                )),
+                .item(ThemedMenuItem(
+                    title: L10n.string("Move Right"),
+                    isEnabled: index < stripTabs.count - 1,
+                    onChoose: { [weak self] in self?.moveStripTab(id: id, toIndex: index + 1) }
+                ))
+            ]
+        }
+
+        renderTabStripStory()
+        NSLayoutConstraint.activate([
+            tabStrip.widthAnchor.constraint(equalToConstant: 420),
+            tabStrip.heightAnchor.constraint(
+                equalToConstant: ThemedTabStripView.bandHeight
+            )
+        ])
+        return tabStrip
+    }
+
+    private func moveStripTab(id: UUID, toIndex index: Int) {
+        guard let from = stripTabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = stripTabs.remove(at: from)
+        let target = min(max(index, 0), stripTabs.count)
+        stripTabs.insert(tab, at: target)
+        renderTabStripStory()
+        showReceipt(L10n.format("Moved the %@ tab to slot %d.", tab.title, target + 1))
+    }
+
+    private func renderTabStripStory() {
+        tabStrip.update(items: stripTabs.map {
+            TabStripItem(
+                id: $0.id,
+                title: $0.title,
+                symbolName: $0.symbolName,
+                isActive: $0.id == stripActiveTabID
+            )
+        })
     }
 
     /// A toolbar button whose only job is to report that it was pressed.
@@ -578,8 +675,21 @@ final class ComponentGalleryViewController: NSViewController {
         }
 
         let prompt = PromptView()
+        prompt.showsImageAttachments = true
         prompt.placeholder = L10n.string("Write a multi-line prompt; Return submits")
         prompt.minimumHeight = 72
+        let previewPaths = [
+            AgentIconDefaults.claudeResource,
+            AgentIconDefaults.codexResource
+        ].compactMap { name -> String? in
+            guard let url = Bundle.main.url(
+                forResource: name,
+                withExtension: AgentIconDefaults.resourceExtension,
+                subdirectory: AgentIconDefaults.resourceSubdirectory
+            ) else { return nil }
+            return url.path
+        }
+        prompt.attachFiles(at: previewPaths)
         prompt.onChange = { [weak self] text in
             let message = text.count == 1
                 ? L10n.string("PromptView contains 1 character.")
@@ -778,11 +888,25 @@ final class ComponentGalleryViewController: NSViewController {
             note: "The table, outline, header, scroll, and clip boundaries are real AppKit views.",
             rows: [
                 story(
+                    "SubagentSummaryView",
+                    "Working and completed child agents; select a row to inspect its bounded activity.",
+                    makeSubagentSummarySample()
+                ),
+                story(
                     "ImageCompareView",
                     "Two renderings of one asset. Drag the seam or arrow-key it, and pick a "
                         + "mode from the chip — Fade held at the middle is the onion skin, "
                         + "Difference answers whether anything changed at all.",
                     makeImageCompareSample()
+                ),
+                story(
+                    "ThemedImagePreview",
+                    "A picture that takes the size it is given rather than lending its own: "
+                        + "scaled down to fit, never up, hung from the top. Tab to it for the "
+                        + "focus ring, then Space — or double-click — to open the file in "
+                        + "Quick Look. The one below has no file behind it, so it refuses and "
+                        + "stays out of the key loop; that refusal is the state to check.",
+                    makeImagePreviewSample()
                 ),
                 story(
                     "ThemedTableView & ThemedTableHeaderView",
@@ -818,15 +942,20 @@ final class ComponentGalleryViewController: NSViewController {
                         + "sits on the stated margin — corner-adapted when the band meets a "
                         + "rounded window corner.",
                     makePaneFooterSample()
+                ),
+                story(
+                    "PaneHeaderView",
+                    "The footer's mirror at the top of a pane: the same band height, the same "
+                        + "align-by-ink margin, hairline below instead of above. Shown over a "
+                        + "footer so the two bands can be checked against each other — the "
+                        + "height is one measure, and a pane wearing both should read as a "
+                        + "matched pair.",
+                    makePaneHeaderSample()
                 )
             ]
         )
     }
 
-    /// The sidebar's own ground, at gallery scale — and beside it the plain view it replaced, so
-    /// the appearance toggle above shows the difference rather than describing it.
-    /// The sidebar footer's shape at the sidebar's width: a titled plain button at the leading
-    /// margin, an icon-only twin at the trailing one, both landing their ink on the same inset.
     /// A before and an after of the same little scene, drawn here so the story needs no asset
     /// files: the circle moves and changes colour, which gives every mode something to show.
     private func makeImageCompareSample() -> NSView {
@@ -865,7 +994,124 @@ final class ComponentGalleryViewController: NSViewController {
         return compare
     }
 
-        private func makePaneFooterSample() -> NSView {
+    /// Two of them side by side at one height: a picture wider than its box and one far
+    /// smaller. The pair is the story — the wide one fills the width, the small one keeps its
+    /// own size and centres, and neither makes the row any wider than it was given.
+    private func makeImagePreviewSample() -> NSView {
+        func plate(_ size: NSSize, tint: NSColor) -> NSImage {
+            let image = NSImage(size: size)
+            image.lockFocus()
+            tint.setFill()
+            NSRect(origin: .zero, size: size).fill()
+            Design.Surface.background.setFill()
+            NSRect(x: size.width / 4, y: size.height / 4,
+                   width: size.width / 2, height: size.height / 2).fill()
+            image.unlockFocus()
+            return image
+        }
+
+        let wide = ThemedImagePreview()
+        wide.image = plate(NSSize(width: 900, height: 400), tint: Design.Surface.accent)
+
+        let small = ThemedImagePreview()
+        small.image = plate(NSSize(width: 48, height: 48), tint: Design.Status.positive)
+
+        let row = NSStackView(views: [wide, small])
+        row.orientation = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = Design.Spacing.medium
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            row.widthAnchor.constraint(equalToConstant: 520),
+            row.heightAnchor.constraint(equalToConstant: 160)
+        ])
+        return row
+    }
+
+    private func makeSubagentSummarySample() -> NSView {
+        let summary = SubagentSummaryView()
+        summary.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "cargo-ffi",
+                    title: "Cargo enrollment ffi",
+                    subtitle: "Audit the retained-parent capacity regressions.",
+                    state: .working,
+                    statusDetail: "Read · 1m 42s · 14 tools · 24.2K tokens",
+                    detailLines: [
+                        "Started",
+                        "Edited rust_target_pipeline.rs",
+                        "Running the remaining native Cargo fixtures"
+                    ]
+                ),
+                SubagentSummaryItem(
+                    id: "unicode",
+                    title: "Unicode audit",
+                    subtitle: "Check format controls and display-byte behavior.",
+                    state: .completed,
+                    statusDetail: "28s · 6 tools · 8.1K tokens",
+                    detailLines: ["Found and corrected two format-control comparisons."]
+                )
+            ],
+            workingCount: 1,
+            doneCount: 1
+        )
+        summary.setSelection("cargo-ffi")
+        summary.onSelect = { [weak self] threadID in
+            self?.showReceipt(
+                threadID.map { "Selected subagent \($0)." } ?? "Collapsed subagent activity."
+            )
+        }
+        summary.widthAnchor.constraint(equalToConstant: 520).isActive = true
+        return summary
+    }
+
+    /// The header at sidebar width, above the footer it mirrors: a titled action at the leading
+    /// margin, an icon-only twin at the trailing one. Paired deliberately — the bug the shared
+    /// component exists to prevent is the two bands disagreeing about height or margin, and that
+    /// is only visible when they are seen together.
+    private func makePaneHeaderSample() -> NSView {
+        let title = ThemedButton()
+        title.title = L10n.string("Projects")
+        title.isBordered = false
+        title.applyFont(.controlRegular)
+        title.target = self
+        title.action = #selector(buttonPressed(_:))
+
+        let arrange = ThemedButton()
+        arrange.image = NSImage(
+            systemSymbolName: "line.3.horizontal.decrease",
+            accessibilityDescription: L10n.string("Arrange")
+        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        arrange.isBordered = false
+        arrange.toolTip = L10n.string("Arrange")
+        arrange.target = self
+        arrange.action = #selector(buttonPressed(_:))
+
+        let header = PaneHeaderView(leading: [title], trailing: [arrange])
+
+        let pane = ThemedSurfaceView()
+        pane.applySurface(fill: Design.Surface.background, radius: .control)
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(header)
+
+        NSLayoutConstraint.activate([
+            pane.widthAnchor.constraint(equalToConstant: SidebarDefaults.defaultWidth),
+            pane.heightAnchor.constraint(equalToConstant: PaneHeaderView.bandHeight * 2),
+            header.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            header.topAnchor.constraint(equalTo: pane.topAnchor)
+        ])
+
+        return pane
+    }
+
+    /// The sidebar's own ground, at gallery scale — and beside it the plain view it replaced, so
+    /// the appearance toggle above shows the difference rather than describing it.
+    /// The sidebar footer's shape at the sidebar's width: a titled plain button at the leading
+    /// margin, an icon-only twin at the trailing one, both landing their ink on the same inset.
+    private func makePaneFooterSample() -> NSView {
         let add = ThemedButton()
         add.title = L10n.string("Add Project")
         add.image = NSImage(

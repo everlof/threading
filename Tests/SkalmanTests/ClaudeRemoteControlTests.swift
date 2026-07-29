@@ -14,12 +14,15 @@ import XCTest
 final class ClaudeRemoteControlTests: XCTestCase {
 
     private var previousDefault: ClaudeRemoteControl = .followClaude
+    private var previousLifecycleReporting = true
 
     override func setUp() {
         super.setUp()
         previousDefault = AppSettings.shared.claudeRemoteControl
-        addTeardownBlock { @MainActor [previousDefault] in
+        previousLifecycleReporting = AppSettings.shared.reportsClaudeLifecycleEvents
+        addTeardownBlock { @MainActor [previousDefault, previousLifecycleReporting] in
             AppSettings.shared.claudeRemoteControl = previousDefault
+            AppSettings.shared.reportsClaudeLifecycleEvents = previousLifecycleReporting
         }
     }
 
@@ -75,11 +78,24 @@ final class ClaudeRemoteControlTests: XCTestCase {
 
     // MARK: - Settings File
 
+    func testLifecycleReportingDefaultsOnAndPersistsAnOptOut() throws {
+        let suite = "ClaudeLifecycleReporting.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.reportsClaudeLifecycleEvents)
+
+        settings.reportsClaudeLifecycleEvents = false
+        XCTAssertFalse(AppSettings(defaults: defaults).reportsClaudeLifecycleEvents)
+    }
+
     func testSettingsFileCarriesTheChoice() throws {
         let sessionID = SessionID()
         let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
             for: sessionID,
             brokersPermissions: false,
+            reportsLifecycle: true,
             remoteControl: false
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
@@ -93,6 +109,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
             for: sessionID,
             brokersPermissions: false,
+            reportsLifecycle: true,
             remoteControl: true
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
@@ -110,6 +127,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let path = MCPSessionRegistry.writeHookSettings(
             for: sessionID,
             brokersPermissions: false,
+            reportsLifecycle: true,
             remoteControl: nil
         )
 
@@ -127,13 +145,94 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
             for: sessionID,
             brokersPermissions: true,
-            remoteControl: false
+            reportsLifecycle: true,
+            remoteControl: false,
+            listenerPort: 4_321
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
         let settings = try settingsJSON(at: path)
         XCTAssertEqual(settings[AgentDefaults.claudeRemoteControlKey] as? Bool, false)
         XCTAssertNotNil(settings["hooks"] as? [String: Any])
+    }
+
+    func testTerminalOptOutWritesNoSettingsFileWithoutAnotherSettingToCarry() {
+        XCTAssertNil(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: false,
+            reportsLifecycle: false,
+            remoteControl: nil
+        ))
+    }
+
+    func testTerminalOptOutRemovesAnEarlierAppManagedSettingsFile() throws {
+        let sessionID = SessionID()
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: sessionID,
+            brokersPermissions: false,
+            reportsLifecycle: true,
+            remoteControl: false,
+            listenerPort: 4_321
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+
+        XCTAssertNil(MCPSessionRegistry.writeHookSettings(
+            for: sessionID,
+            brokersPermissions: false,
+            reportsLifecycle: false,
+            remoteControl: nil,
+            listenerPort: 4_321
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+    }
+
+    func testTerminalOptOutCanCarryRemoteControlWithoutAnEmptyHooksSection() throws {
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: false,
+            reportsLifecycle: false,
+            remoteControl: false
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let settings = try settingsJSON(at: path)
+        XCTAssertEqual(settings[AgentDefaults.claudeRemoteControlKey] as? Bool, false)
+        XCTAssertNil(settings["hooks"])
+    }
+
+    func testNativePermissionHookSurvivesLifecycleOptOut() throws {
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: true,
+            reportsLifecycle: false,
+            remoteControl: false,
+            listenerPort: 4_321
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let settings = try settingsJSON(at: path)
+        let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        XCTAssertEqual(Set(hooks.keys), ["PreToolUse"])
+    }
+
+    func testLifecycleReportingDoesNotAddTheNativePermissionHook() throws {
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: false,
+            reportsLifecycle: true,
+            remoteControl: false,
+            listenerPort: 4_321
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let settings = try settingsJSON(at: path)
+        let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        XCTAssertEqual(
+            Set(hooks.keys),
+            Set(HookLifecycleEvent.allCases.map(\.claudeEventName))
+        )
+        XCTAssertNil(hooks["PreToolUse"])
     }
 
     // MARK: - Persistence
@@ -265,6 +364,10 @@ final class ClaudeRemoteControlTests: XCTestCase {
             ClaudeRemoteControl.allCases.map(\.settingsTitle)
         )
         XCTAssertEqual(popUp.selectedItem?.representedValue as? ClaudeRemoteControl, .disabled)
+        XCTAssertTrue(
+            labels(in: host).contains("Report Claude turn and subagent activity"),
+            "the Claude lifecycle opt-out is not on the General page"
+        )
         XCTAssertGreaterThan(controller.view.frame.height, 200, "the page collapsed")
 
         write(host, named: "general-claude-remote-control")
@@ -311,6 +414,14 @@ final class ClaudeRemoteControlTests: XCTestCase {
             if let found = remoteControlPopUp(in: subview) { return found }
         }
         return nil
+    }
+
+    private func labels(in view: NSView) -> [String] {
+        var result = (view as? NSTextField).map { [$0.stringValue] } ?? []
+        for subview in view.subviews {
+            result.append(contentsOf: labels(in: subview))
+        }
+        return result
     }
 
     private func laidOut(_ view: NSView, width: CGFloat = SettingsUIDefaults.pageWidth) -> NSView {

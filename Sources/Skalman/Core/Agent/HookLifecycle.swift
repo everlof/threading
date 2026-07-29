@@ -25,6 +25,12 @@ enum HookLifecycleEvent: String, CaseIterable {
     /// A session began, which is where an agent-assigned identifier first becomes known.
     case sessionStarted
 
+    /// A delegated child began running.
+    case subagentStarted
+
+    /// A delegated child stopped and may now name its durable transcript.
+    case subagentStopped
+
     /// The name Claude's settings file knows this event by.
     var claudeEventName: String {
         switch self {
@@ -32,6 +38,8 @@ enum HookLifecycleEvent: String, CaseIterable {
         case .turnFinished: return "Stop"
         case .awaitingUser: return "Notification"
         case .sessionStarted: return "SessionStart"
+        case .subagentStarted: return "SubagentStart"
+        case .subagentStopped: return "SubagentStop"
         }
     }
 
@@ -46,6 +54,8 @@ enum HookLifecycleEvent: String, CaseIterable {
         case .turnFinished: return "Stop"
         case .sessionStarted: return "SessionStart"
         case .awaitingUser: return nil
+        case .subagentStarted: return "SubagentStart"
+        case .subagentStopped: return "SubagentStop"
         }
     }
 }
@@ -66,6 +76,28 @@ struct HookLifecycleReport {
     /// The prompt text, on `turnStarted` only.
     let prompt: String?
 
+    /// Provider-issued child identity and metadata on subagent events.
+    let subagentID: String?
+    let subagentType: String?
+    let subagentTranscriptPath: String?
+    let lastAssistantMessage: String?
+    let turnID: String?
+
+    /// The agent's own work still in flight as its turn ends, by the identifier it gave each.
+    ///
+    /// Claude states this on `Stop` as `background_tasks`, and its own description of the field
+    /// is the reason this is read at all: it exists to let a hook tell "session is done" from
+    /// "session is paused waiting for background work to wake it". A backgrounded shell, a
+    /// detached subagent or an MCP monitor will re-enter the conversation on its own, without
+    /// the user, so the `Stop` that precedes it is not the end of anything.
+    ///
+    /// Identities rather than a count, because `BackgroundWorkLedger` has to tell work this
+    /// turn started from work carried over from an earlier one — a count cannot.
+    ///
+    /// Empty where the key is absent, which is every event but `Stop`/`SubagentStop`, and every
+    /// Codex report — 0.144.6 has no equivalent, so those sessions keep the old behaviour.
+    let backgroundTaskIDs: [String]
+
     /// Builds a report from a hook's JSON payload, or nil if it names no event.
     init?(sessionID: SessionID, event: HookLifecycleEvent?, payload: [String: Any]) {
         guard let event else { return nil }
@@ -74,6 +106,19 @@ struct HookLifecycleReport {
         self.event = event
         self.agentSessionID = payload["session_id"] as? String
         self.prompt = payload["prompt"] as? String
+        self.subagentID = payload["agent_id"] as? String
+        self.subagentType = payload["agent_type"] as? String
+        self.subagentTranscriptPath = payload["agent_transcript_path"] as? String
+        self.lastAssistantMessage = payload["last_assistant_message"] as? String
+        self.turnID = payload["turn_id"] as? String
+        // Only the identity is taken: the rest of each entry describes work this side never
+        // renders. An entry whose id is missing falls back to its position, which is stable
+        // across boundaries for as long as the entry is — so unreadable work still reads as
+        // carried over rather than as new on every turn.
+        let tasks = payload["background_tasks"] as? [[String: Any]] ?? []
+        self.backgroundTaskIDs = tasks.enumerated().map { index, task in
+            task["id"] as? String ?? "#\(index)"
+        }
     }
 }
 

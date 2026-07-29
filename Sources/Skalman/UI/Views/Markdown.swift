@@ -51,14 +51,21 @@ enum MarkdownBlock {
     case ordered([NSAttributedString])
     case code(String)
     case quote(NSAttributedString)
+    case table(MarkdownTable)
+}
+
+struct MarkdownTable {
+    let headers: [NSAttributedString]
+    let alignments: [NSTextAlignment]
+    let rows: [[NSAttributedString]]
 }
 
 // MARK: - Markdown
 
 /// A small CommonMark subset — enough to make an assistant reply read as written rather than
-/// as a wall of asterisks. Deliberately not a full parser: no tables, no nested lists, no
-/// reference links. What it does cover is what a coding agent actually emits — headings,
-/// paragraphs, fenced code, simple lists, inline emphasis and code spans.
+/// as a wall of asterisks. Deliberately not a full parser: no nested lists or reference links.
+/// What it does cover is what a coding agent actually emits — headings, paragraphs, fenced
+/// code, simple lists, GFM pipe tables, inline emphasis and code spans.
 ///
 /// Written by hand rather than pulled in, because the project depends only on SwiftTerm and a
 /// hundred lines of well-understood scanning is cheaper to own than a package to track.
@@ -70,7 +77,14 @@ enum Markdown {
         -> (MarkdownBlock, Int)?
 
     /// Ordered by precedence: a `> - item` is a quote, not a list, because quote reads first.
-    private static let readers: [Reader] = [readFence, readHeading, readQuote, readBullets, readOrdered]
+    private static let readers: [Reader] = [
+        readFence,
+        readTable,
+        readHeading,
+        readQuote,
+        readBullets,
+        readOrdered
+    ]
 
     /// Splits a document into blocks, styling the inline runs within each.
     static func parse(_ text: String, style: MarkdownStyle) -> [MarkdownBlock] {
@@ -122,6 +136,48 @@ enum Markdown {
             cursor += 1
         }
         return (.code(code.joined(separator: "\n")), cursor + 1)
+    }
+
+    /// GitHub-flavoured pipe tables are common in audit replies. Their separator row is the
+    /// unambiguous signal; a prose sentence containing `|` remains an ordinary paragraph.
+    private static func readTable(
+        _ lines: [String],
+        _ index: Int,
+        _ style: MarkdownStyle
+    ) -> (MarkdownBlock, Int)? {
+        guard index + 1 < lines.count,
+              let headerCells = tableCells(lines[index]),
+              let delimiterCells = tableCells(lines[index + 1]),
+              headerCells.count == delimiterCells.count else { return nil }
+
+        let alignments = delimiterCells.compactMap(tableAlignment)
+        guard alignments.count == delimiterCells.count else { return nil }
+
+        var body: [[NSAttributedString]] = []
+        var cursor = index + 2
+        while cursor < lines.count, let cells = tableCells(lines[cursor]) {
+            var normalized = cells
+            if normalized.count < headerCells.count {
+                normalized.append(contentsOf: repeatElement(
+                    "",
+                    count: headerCells.count - normalized.count
+                ))
+            } else if normalized.count > headerCells.count {
+                let overflow = normalized.dropFirst(headerCells.count - 1).joined(separator: " | ")
+                normalized = Array(normalized.prefix(headerCells.count - 1)) + [overflow]
+            }
+            body.append(normalized.map { inline($0, style: style) })
+            cursor += 1
+        }
+
+        return (
+            .table(MarkdownTable(
+                headers: headerCells.map { inline($0, style: style) },
+                alignments: alignments,
+                rows: body
+            )),
+            cursor
+        )
     }
 
     private static func readHeading(_ lines: [String], _ index: Int, _ style: MarkdownStyle) -> (MarkdownBlock, Int)? {
@@ -176,7 +232,7 @@ enum Markdown {
         var cursor = index
         while cursor < lines.count {
             let line = trimmed(lines, cursor)
-            if line.isEmpty || startsBlock(line) { break }
+            if line.isEmpty || startsBlock(line) || isTableStart(lines, cursor) { break }
             paragraph.append(line)
             cursor += 1
         }
@@ -193,6 +249,63 @@ enum Markdown {
     private static func startsBlock(_ line: String) -> Bool {
         line.hasPrefix("```") || headingLevel(line) != nil || line.hasPrefix("> ")
             || isBullet(line) || orderedContent(line) != nil
+    }
+
+    private static func isTableStart(_ lines: [String], _ index: Int) -> Bool {
+        guard index + 1 < lines.count,
+              let headers = tableCells(lines[index]),
+              let delimiters = tableCells(lines[index + 1]),
+              headers.count == delimiters.count else { return false }
+        return delimiters.allSatisfy { tableAlignment($0) != nil }
+    }
+
+    /// Splits on unescaped pipes outside inline-code spans. Leading and trailing pipes are
+    /// optional in GFM and do not create empty columns.
+    private static func tableCells(_ line: String) -> [String]? {
+        let source = Array(line.trimmingCharacters(in: .whitespaces))
+        guard source.contains("|") else { return nil }
+
+        var cells: [String] = []
+        var cell = ""
+        var index = 0
+        var isCode = false
+
+        while index < source.count {
+            let character = source[index]
+            if character == "\\", index + 1 < source.count, source[index + 1] == "|" {
+                cell.append("|")
+                index += 2
+                continue
+            }
+            if character == "`" {
+                isCode.toggle()
+                cell.append(character)
+            } else if character == "|", !isCode {
+                cells.append(cell.trimmingCharacters(in: .whitespaces))
+                cell = ""
+            } else {
+                cell.append(character)
+            }
+            index += 1
+        }
+        cells.append(cell.trimmingCharacters(in: .whitespaces))
+
+        if source.first == "|" { cells.removeFirst() }
+        if source.last == "|" { cells.removeLast() }
+        return cells.count >= 2 ? cells : nil
+    }
+
+    private static func tableAlignment(_ cell: String) -> NSTextAlignment? {
+        let trimmed = cell.trimmingCharacters(in: .whitespaces)
+        let isLeftMarked = trimmed.first == ":"
+        let isRightMarked = trimmed.last == ":"
+        let rule = trimmed.dropFirst(isLeftMarked ? 1 : 0)
+            .dropLast(isRightMarked ? 1 : 0)
+        guard rule.count >= 3, rule.allSatisfy({ $0 == "-" }) else { return nil }
+
+        if isLeftMarked, isRightMarked { return .center }
+        if isRightMarked { return .right }
+        return .left
     }
 
     private static func headingLevel(_ line: String) -> Int? {

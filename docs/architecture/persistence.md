@@ -32,6 +32,14 @@ an update that recreated its storage directory without migrating took users' leg
 with it. The same applies to the panel layouts, which were `panels/<uuid>.json` and are now
 rows; their cached PNGs stay files, because a PNG in a database is a PNG with extra steps.
 
+The panel payload (`PersistedPanel`) carries **both tab hosts** for a session: the display
+panel's tabs (`host` absent — which is what every pre-drawer layout implicitly says, so old
+rows migrate by decoding) and the drawer's (`host == "drawer"`, plus `drawerActiveTabID` and
+`drawerOpen`). Each host saves only its own slice (`saveLayout` / `saveDrawerLayout` preserve
+the other's), and the agent-facing `signature`/`agentDescription` filter to panel tabs so the
+user rearranging their drawer never re-briefs an agent about a panel that did not change.
+Never delete on decode failure; the `try?`-and-fall-back posture stands.
+
 Quarantine still works exactly as it did for the document, because `ProjectStore` never learned
 the difference: an unopenable database is moved aside (with its `-wal` and `-shm` sidecars
 deleted, or SQLite would recover a fresh database from them) and reported, which is what lets
@@ -101,3 +109,24 @@ re-arms — which happens when an *unrelated* session starts a PTY — and libdi
 unexpected `EV_VANISHED` as a fatal client bug. The source is cancelled where the child is
 reaped, and deliberately not in `terminate()`: cancelling before the exit event arrives would
 leave a zombie instead.
+
+## Subagent Navigator Snapshots
+
+Child transcript contents remain provider-owned JSONL, but their navigator metadata has to
+outlive a renderer: Native → Terminal destroys one controller and starts another, and Codex
+app-server offers no durable child index to query afterwards. `SubagentStateStore` writes one
+versioned JSON snapshot per session under `Subagents/<session-id>.json`. It contains descriptors,
+states, progress and bounded recent activity only; conversation rows are replayed lazily from
+the stored provider transcript path. Progress updates are coalesced before atomic writes, so a
+busy child does not turn telemetry into synchronous disk churn.
+
+The same `SubagentSessionState` object is retained by `AgentRuntime` across an in-app renderer
+switch, preserving live details without a disk round-trip. A full app relaunch loads the compact
+snapshot and changes unfinished children to Stopped: persistence proves they existed, not that
+their terminated process is still working. Deleting sessions calls `retainOnly`, which removes
+both the runtime state and orphaned snapshot files. An unreadable snapshot is moved aside with
+an `.unreadable-<uuid>` suffix before new state may be written; if quarantine itself fails,
+writes for that session remain blocked rather than overwriting the only recoverable bytes.
+Removing a session also invalidates its in-memory state before deleting the file. This matters
+because token accounting finishes off-main: a late completion must not recreate a snapshot for
+a session that no longer exists.

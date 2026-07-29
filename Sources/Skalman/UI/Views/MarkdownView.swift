@@ -83,6 +83,9 @@ final class MarkdownView: NSStackView {
 
         case .quote(let text):
             return quote(text, style: style)
+
+        case .table(let model):
+            return table(model, style: style)
         }
     }
 
@@ -147,6 +150,7 @@ final class MarkdownView: NSStackView {
         scroll.hasHorizontalScroller = true
         scroll.hasVerticalScroller = false
         scroll.horizontalScrollElasticity = .allowed
+        scroll.forwardsVerticalScrollToAncestor = true
 
         let field = NSTextField(labelWithString: code)
         field.font = style.codeFont
@@ -207,5 +211,121 @@ final class MarkdownView: NSStackView {
         ])
 
         return container
+    }
+
+    /// A compact GFM table. Columns keep a readable width and the block scrolls horizontally
+    /// when the detail pane cannot hold them, while vertical gestures continue scrolling the
+    /// conversation.
+    private func table(_ model: MarkdownTable, style: MarkdownStyle) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.applySurface(
+            fill: style.codeBackground.withAlphaComponent(0.45),
+            radius: .control
+        )
+
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasHorizontalScroller = true
+        scroll.hasVerticalScroller = false
+        scroll.horizontalScrollElasticity = .allowed
+        scroll.forwardsVerticalScrollToAncestor = true
+
+        let rows = NSStackView()
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = 0
+        rows.translatesAutoresizingMaskIntoConstraints = false
+
+        addTableRow(
+            model.headers,
+            alignments: model.alignments,
+            style: style,
+            isHeader: true,
+            to: rows
+        )
+        for values in model.rows {
+            let separator = SeparatorView()
+            rows.addArrangedSubview(separator)
+            NSLayoutConstraint.activate([
+                separator.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
+                separator.trailingAnchor.constraint(equalTo: rows.trailingAnchor)
+            ])
+            addTableRow(
+                values,
+                alignments: model.alignments,
+                style: style,
+                isHeader: false,
+                to: rows
+            )
+        }
+
+        let document = NSView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(rows)
+        scroll.documentView = document
+        container.addSubview(scroll)
+
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: container.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            rows.topAnchor.constraint(equalTo: document.topAnchor),
+            rows.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            rows.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            rows.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            document.widthAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.widthAnchor),
+            document.heightAnchor.constraint(equalTo: scroll.contentView.heightAnchor)
+        ])
+
+        return container
+    }
+
+    private func addTableRow(
+        _ values: [NSAttributedString],
+        alignments: [NSTextAlignment],
+        style: MarkdownStyle,
+        isHeader: Bool,
+        to table: NSStackView
+    ) {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.distribution = .fillEqually
+        row.spacing = 0
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        for (index, value) in values.enumerated() {
+            let cell = NSView()
+            cell.translatesAutoresizingMaskIntoConstraints = false
+            if isHeader {
+                cell.applySurface(fill: Design.Surface.controlHover, radius: .fixed(0))
+            }
+
+            let text = label(value)
+            text.alignment = alignments[index]
+            if isHeader {
+                text.textColor = Design.Text.label
+            }
+            cell.addSubview(text)
+
+            let inset = Design.Spacing.small
+            NSLayoutConstraint.activate([
+                cell.widthAnchor.constraint(
+                    greaterThanOrEqualToConstant: MarkdownDefaults.tableColumnWidth
+                ),
+                text.topAnchor.constraint(equalTo: cell.topAnchor, constant: inset),
+                text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: inset),
+                text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -inset),
+                text.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -inset)
+            ])
+            row.addArrangedSubview(cell)
+        }
+
+        table.addArrangedSubview(row)
+        row.leadingAnchor.constraint(equalTo: table.leadingAnchor).isActive = true
+        row.trailingAnchor.constraint(equalTo: table.trailingAnchor).isActive = true
     }
 }

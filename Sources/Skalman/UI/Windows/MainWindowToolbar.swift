@@ -6,6 +6,9 @@ extension NSToolbarItem.Identifier {
     /// App-owned sidebar toggle; the first thing in the toolbar, sitting over the sidebar.
     static let skalmanToggleSidebar = NSToolbarItem.Identifier("SkalmanToggleSidebar")
 
+    /// Back and forward through the window's selection history, as one grouped item beside
+    /// the sidebar toggle.
+    static let skalmanNavigation = NSToolbarItem.Identifier("SkalmanNavigation")
 }
 
 // MARK: - NSToolbarDelegate
@@ -29,16 +32,19 @@ extension MainWindowController: NSToolbarDelegate {
 
     // MARK: Delegate
 
-    /// One item, and that is the point.
+    /// Only what acts on the window itself, and that is the point.
     ///
     /// Everything else that lived here — the page tab, the `+`, the usage pill, the session's
     /// actions — belongs to the *content pane* and now sits in the pane's own header (see
     /// `TerminalContainerViewController.setupHeader`). A toolbar positions its items relative to
     /// the window, so anything in it that describes a pane drifts away from that pane the moment
-    /// a divider moves. The sidebar toggle is the exception because it is genuinely the window's:
-    /// it acts on the split, not on either side of it, and it belongs beside the traffic lights.
+    /// a divider moves. The two exceptions are genuinely the window's: the sidebar toggle acts
+    /// on the split, not on either side of it, and the history buttons retrace the *window's*
+    /// page selection — both belong beside the traffic lights. Anything added here must also be
+    /// measured by `updateHeaderInset`, which clears the pane header past the trailing-most
+    /// toolbar control when the sidebar is collapsed.
     public func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.skalmanToggleSidebar]
+        [.skalmanToggleSidebar, .skalmanNavigation]
     }
 
     public func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -60,6 +66,30 @@ extension MainWindowController: NSToolbarDelegate {
             button.onPress = { [weak self] in self?.toggleSidebar() }
             sidebarToolbarButton = button
             return makeOverlayItem(identifier: itemIdentifier, view: button)
+
+        case .skalmanNavigation:
+            let back = ThemedIconButton(
+                symbolName: "chevron.left",
+                accessibility: L10n.string("Go back")
+            )
+            back.toolTip = L10n.string("Go Back (⌃⌘←)")
+            back.onPress = { [weak self] in self?.goBack() }
+            back.isEnabled = false
+            navBackToolbarButton = back
+
+            let forward = ThemedIconButton(
+                symbolName: "chevron.right",
+                accessibility: L10n.string("Go forward")
+            )
+            forward.toolTip = L10n.string("Go Forward (⌃⌘→)")
+            forward.onPress = { [weak self] in self?.goForward() }
+            forward.isEnabled = false
+            navForwardToolbarButton = forward
+
+            return makeOverlayItem(
+                identifier: itemIdentifier,
+                view: ToolbarButtonGroupView(buttons: [back, forward])
+            )
 
         default:
             return nil
@@ -147,7 +177,7 @@ extension MainWindowController: NSToolbarDelegate {
         return item
     }
 
-    /// The session's three actions, as one group.
+    /// The session's four actions, as one group.
     ///
     /// They belong together: each one acts on the session named at the other end of the header,
     /// and two of them toggle a pane of the window. Kept as separate toolbar items they were
@@ -155,6 +185,7 @@ extension MainWindowController: NSToolbarDelegate {
     private func makeSessionActionsGroup() -> ToolbarButtonGroupView {
         ToolbarButtonGroupView(buttons: [
             makeSessionContextButton(),
+            makeSurfaceToggleButton(),
             makePaneToggleButton(
                 symbolName: "rectangle.bottomthird.inset.filled",
                 label: "Shell",
@@ -188,15 +219,30 @@ extension MainWindowController: NSToolbarDelegate {
         return button
     }
 
-    /// The context button: a menu of what applies to the session on screen. Rebuilt on every
-    /// open (`menuNeedsUpdate`), because its checkmarks — which theme is chosen — go stale
-    /// the moment they are drawn.
+    /// A one-click surface switch. Its glyph and accessible name are updated from the visible
+    /// session: a terminal session points at native conversation rendering, and a native
+    /// session points back at the agent's own terminal UI.
+    private func makeSurfaceToggleButton() -> ThemedIconButton {
+        let button = ThemedIconButton(
+            symbolName: SessionSurfaceTogglePresentation.nativeSymbol,
+            accessibility: L10n.string("Switch session interface")
+        )
+        button.onPress = { [weak self] in
+            self?.toggleCurrentSessionSurface()
+        }
+        surfaceToggleToolbarButton = button
+        return button
+    }
+
+    /// The context button: the same menu as the session row, rebuilt on every open so live
+    /// checkmarks, runtime actions, accounts, and extension commands cannot drift.
     private func makeSessionContextButton() -> ThemedIconButton {
         let button = ThemedIconButton(
             symbolName: "ellipsis",
             accessibility: L10n.string("Session options")
         )
         button.toolTip = L10n.string("Session Options")
+        button.presentsMenu = true
         button.onPress = { [weak self, weak button] in
             guard let self, let button else { return }
             self.showSessionContextMenu(from: button)
@@ -204,10 +250,6 @@ extension MainWindowController: NSToolbarDelegate {
         sessionContextToolbarButton = button
 
         sessionContextMenu.delegate = self
-
-        themeMenuBuilder.onEditThemes = { [weak self] in
-            self?.showSettingsPage(title: SettingsPages.themesTitle)
-        }
 
         return button
     }
@@ -232,39 +274,21 @@ extension MainWindowController: NSMenuDelegate {
         guard menu === sessionContextMenu else { return }
         menu.removeAllItems()
 
-        // Theme, scoped to the session on screen. With none there is still a door to the
-        // themes page, so the button never opens onto nothing.
-        if let sessionID = currentSessionID {
-            menu.addItem(themeMenuBuilder.sessionThemeItem(for: sessionID))
-            menu.addItem(.separator())
-            let attachments = NSMenuItem(
-                title: L10n.string("Attachments"),
-                action: #selector(attachmentsClicked),
-                keyEquivalent: ""
-            )
-            attachments.image = NSImage(
-                systemSymbolName: "paperclip",
-                accessibilityDescription: L10n.string("Attachments")
-            )
-            attachments.target = self
-            menu.addItem(attachments)
-        } else {
-            let item = NSMenuItem(
-                title: L10n.string("Themes…"),
-                action: #selector(themeSettingsClicked),
-                keyEquivalent: ""
-            )
-            item.target = self
-            menu.addItem(item)
-        }
+        guard !populateVisibleSessionActions(menu) else { return }
+
+        // Settings has no session row to mirror, but the context button remains its door to
+        // theme editing instead of opening an empty menu.
+        let item = NSMenuItem(
+            title: L10n.string("Themes…"),
+            action: #selector(themeSettingsClicked),
+            keyEquivalent: ""
+        )
+        item.target = self
+        menu.addItem(item)
     }
 
     @objc private func themeSettingsClicked() {
         showSettingsPage(title: SettingsPages.themesTitle)
-    }
-
-    @objc private func attachmentsClicked() {
-        showAttachments()
     }
 }
 

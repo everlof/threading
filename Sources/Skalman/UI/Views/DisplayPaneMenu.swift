@@ -13,12 +13,28 @@ extension DisplayPaneController {
     ///
     /// Built per click rather than once at setup: an image and a document have almost nothing
     /// in common to act on, and a menu of mostly-disabled items is worse than a short one.
-    private func makeContentMenu() -> NSMenu {
+    ///
+    /// Internal rather than private so it can be asserted on: a popped menu is modal and
+    /// unreachable from a script, and the one item whose presence is conditional — Quick Look,
+    /// which needs the file to still exist — is exactly the kind of thing that rots silently.
+    func makeContentMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
         switch currentContent?.body {
-        case .image:
+        case .image(_, let url):
+            // First, and separated: it is the one action that keeps the user where they are.
+            // The rest hand the file to something else — the clipboard, Finder, another app.
+            // Offered only when the file is still there, since a Quick Look of a deleted file
+            // can do nothing but beep.
+            if QuickLookPresenter.canPreview(url) {
+                menu.addItem(
+                    withTitle: L10n.string("Quick Look"),
+                    action: #selector(quickLookImage),
+                    keyEquivalent: ""
+                )
+                menu.addItem(.separator())
+            }
             menu.addItem(withTitle: L10n.string("Copy Image"), action: #selector(copyImage), keyEquivalent: "")
             menu.addItem(withTitle: L10n.string("Copy File Name"), action: #selector(copyFileName), keyEquivalent: "")
             menu.addItem(withTitle: L10n.string("Copy File Path"), action: #selector(copyFilePath), keyEquivalent: "")
@@ -52,6 +68,17 @@ extension DisplayPaneController {
     }
 
     // MARK: Image Actions
+
+    /// The same panel the picture itself opens on Space or a double-click. Here as well
+    /// because the `⋯` button is the one affordance that *advertises* what can be done with
+    /// what is on screen — a gesture nobody tries is not a feature.
+    @objc private func quickLookImage() {
+        guard case .image(_, let url) = currentContent?.body else { return }
+        guard QuickLookPresenter.shared.present(url) else {
+            NSSound.beep()
+            return
+        }
+    }
 
     @objc private func copyImage() {
         guard case .image(let image, _) = currentContent?.body else { return }

@@ -70,11 +70,11 @@ Components so far:
 | `ThemedControl` | The base for a control that draws itself from the theme. |
 | `ThemedToggle` | A drop-in `NSSwitch` whose on-track is the theme's accent. |
 | `ThemedPopUp` | A drop-in `NSPopUpButton`, button included and dropdown excepted. |
-| `ThemedButton` | A drop-in `NSButton`: bordered, plain, or accent-filled. |
+| `ThemedButton` | A drop-in `NSButton`: bordered, plain, or accent-filled — `emphasis` names those three as primary/secondary/tertiary, and `shortcut` draws the chord it answers to on its own face. |
 | `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. |
 | `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
 | `ThemedSpinner` / `ThemedProgressBar` | `NSProgressIndicator`, in the theme's accent. |
-| `ThemedScrollView` | An `NSScrollView` that starts transparent — the stock one paints a system surface. |
+| `ThemedScrollView` | An `NSScrollView` that starts transparent — the stock one paints a system surface. A nested horizontal-only viewport opts into `forwardsVerticalScrollToAncestor`, so code and tables do not trap a conversation's vertical gesture. |
 | `ThemedTextView` | An `NSTextView` in theme colours; `.scrolling()` replaces `scrollableTextView()`. |
 | `ThemedTableView` / `ThemedOutlineView` | Tables that start transparent, replacing the system background. |
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
@@ -86,9 +86,11 @@ Components so far:
 | `ToolbarButtonGroupView` | Related toolbar actions as one item, so their spacing is ours rather than `NSToolbar`'s. |
 | `WorkingOrbView` | The dotted "working" orb, tinted with the accent — the theme boundary for the `ThinkingOrbs` view. |
 | `ThemedTabItemView` | **Every** tab: the display pane's strip, the settings sidebar, and the toolbar's active page. |
+| `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its `bandHeight` is `PaneHeaderView.bandHeight`, so every strip's hairline lands on the panes' shared line. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. |
 | `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. |
 | `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
 | `PaneHeaderView` | The footer's mirror at a pane's top. Its height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it), so the two panes' hairlines land on one line. |
+| `PairingCodeImage` | The Remote Access QR code, drawn rather than scaled up from `CIQRCodeGenerator`: Chromium's geometry (dots at 0.8 of the pitch, rounded finder patterns), a four-module quiet zone Core Image does not supply, and a plate and ink carrying the accent's hue at a stated saturation. The only artwork here a *machine* has to read, so it is tested by decoding the render, not by asserting on the constants that drew it. |
 | `ImageCompareView` | Two images against each other: a draggable wipe seam (either axis), a crossfade, a pixel difference, and side by side, with per-side title tags and a mode chip. One scrubbed fraction serves every mode — there is deliberately no slider control: the seam *is* the control (accent-inked, since it is the one thing on the surface asking to be used), fade held at the middle is the onion skin, and both images draw at one shared scale so a resized asset stays visibly resized rather than being normalised into "looks identical". The canvas is a `ThemedControl`: arrow keys nudge the scrub, Space recentres it, and VoiceOver reads it as a slider. |
 
 **Two components say "every" for a reason, and it is the design system's sharpest lesson so
@@ -110,6 +112,22 @@ no size parameter, because that is the seam a fourth slightly-different button a
 The hover fill is part of the role too: a toolbar button lifts to `surface` because it sits on
 the bare backdrop, an inline one to `surfaceHover` because it sits on a fill that is *already*
 `surface` — a distinction previously set by hand at the one call site that had noticed.
+
+**A menu opens on the press; an action fires on the release.** Which of the two a button does is
+`ThemedIconButton.presentsMenu`, and the split is not a preference — press-drag-release onto an
+item is the platform's menu gesture (`ChipView` and `ThemedPopUp` already present theirs on the
+press, and `NSMenu.popUp` is modal, so the button reads as held for exactly as long as its menu is
+up). It is also the only *reliable* half. A press that waits for its release depends on AppKit
+routing that release back to the same view instance, and nothing promises it will: the sidebar
+rebuilds a row under the pointer whenever the tree's shape changes, `reloadData` hands every cell
+back to the reuse pool, and a detached view is sent no mouse-up while the view that replaced it is
+sent none either. Measured against AppKit directly — down, remove the view, up — the mouse-up
+reaches nobody, so the press disappears with nothing on screen to say so. That is the `⋯` that
+"needs three or four presses", and it is why the report about it came back after the hit-testing
+fault behind the first one (a status dot over the button) had been fixed. An action button keeps
+the release, and now also lets go of the press when the drag leaves it, which `ThemedButton` did
+from the start and this one did not: the press was decided at the release and shown nowhere, so a
+slip off a 20-point target cancelled silently and left the button drawn as though held.
 
 **A surface role is translucent on purpose, and that purpose ends where live content begins.**
 `surface` is the base tone at 14%, which is what makes a pill read as a lift off the backdrop
@@ -137,6 +155,62 @@ chrome (`NSMenu`, `NSPopover`, `NSAlert`, the file panels) stay allowed — they
 the theme owns. `config/theme-boundary.json` owns the list; the build and test suite both run
 its SwiftSyntax checker, while `.swiftlint.yml` provides fast editor feedback. A class with no
 wrapper yet gets one in `UI/Design/` first.
+
+### Confirmations
+
+`NSAlert` stays allowed as contained system chrome, but *asking the user a question* does not.
+Every confirmation goes through `ConfirmationAlert` in `UI/Alerts/`, and every one names a case
+in `ConfirmationPrompt`.
+
+The register exists because the alternative is a reflex. There were 44 alerts and no suppression
+anywhere: writing one more `NSAlert` with two buttons required no decision about whether the
+interruption was earned, and offered no way to stop it. `ConfirmationPrompt.policy` is an
+exhaustive `switch` with no `default:` and no defaulted value, so a case added to the register
+does not compile until somebody has answered the question — and the answer is a type rather than
+a `Bool`, because a `Bool` records which way it went and not that anyone chose.
+
+Five rules, each one a bug it prevents:
+
+- **`.suppressible` carries its settings copy as a payload, not an optional computed property.**
+  An optional can be `nil`, and a `nil` there ships a prompt the user can silence with nowhere to
+  un-silence it. A payload cannot be absent. The Settings ▸ General card is built from
+  `ConfirmationPrompt.suppressible`, and `GeneralSettingsRenderTests` holds every case to having
+  a row — the half of the invariant a type cannot state.
+- **`.alwaysAsks` names *which* kind of irrevocability, and the name does something.**
+  `.irreversible` puts Return on Cancel and marks the action destructive; `.securityGrant`
+  deliberately leaves Return on the affirmative button, because the agent is blocked while the
+  sheet is up, approving is the common answer, and every grant is scoped and revocable in
+  Settings. A free-text `reason:` was the first design and was rejected: prose can be `"because"`,
+  nothing reads it, so nothing can be wrong. This version generalises the rule
+  `ExtensionCommandInvoker` had applied by hand to exactly one alert out of eight.
+- **Suppression is remembered only when the action was accepted.** Ticking the box and pressing
+  Cancel stores nothing, or the next attempt sails past an action the user had just declined.
+  `ConfirmationAlert.remembers(accepted:suppressionChecked:)` is pure so the matrix is testable
+  without a modal — the same split `AttentionAlertPolicy` keeps from its center.
+- **`choose` refuses a suppressible prompt.** A remembered answer has to be *an* answer, and a
+  checkbox beside three affirmative buttons says nothing about which one it would repeat. Grants
+  live on that path and carry their own narrower memory instead: "Always Allow This Host" is one
+  host, "Allow for This Session" is one tool in one chat.
+- **`AppSettings.asks(before:)` consults the policy before the stored set.** The suppressed set is
+  raw strings on disk. Without that guard, a prompt reclassified `.suppressible` → `.alwaysAsks`
+  in a later release stays silent for exactly the users who had switched it off — the population
+  least able to notice that a destructive action stopped asking.
+
+**The lint is what makes the register the only door**, because the exhaustive switch only forces a
+decision for prompts already routed through it — it says nothing about the 45th raw `NSAlert`.
+Banning `NSAlert` would need an exception per OK-only alert; the precise signal is narrower:
+*an informational alert never inspects its response*. So `confirmationResponse` reports any read of
+`alertFirstButtonReturn` / `alertSecondButtonReturn` / `alertThirdButtonReturn` outside
+`confirmationGateDirectories`. One exception exists, for the JavaScript dialogs a web page
+dictates in `BrowserViewController`. Honest gaps: comparing `response.rawValue == 1000`, running a
+two-button alert and discarding the answer, or adding a second gate. Those are deliberate evasion;
+reflex is what the lint catches.
+
+`TextPromptAlert` lives in the same directory and carries no prompt, because an input prompt's
+answer *is* the input and cannot be remembered. It is there so the lint's exception list stays at
+one entry rather than holing five files that also hold real confirmations — and collapsing the
+five copies fixed a drift while it was at it: two trimmed whitespace only and three trimmed
+newlines too, so a pasted name kept its trailing return in some places and not others.
 
 **A choice that *is* an animation is shown in the list, not named in it.** A dropdown row can
 carry a live view (`ThemedMenuPreview` on `ThemedMenuItem`), and the Motion settings page is
@@ -182,9 +256,25 @@ string every install has.
 `PromptView` is an `NSTextView`, not an `NSTextField`, for two things a single-line field
 cannot do: a task worth describing runs past one line, and what is dropped on a composer is
 as often an image as it is text. It grows with its content to `Design.Size.inputMaxHeight`
-and scrolls past it; Return submits and Shift/Option-Return breaks the line, which is the
-shape every chat composer has and is what lets it be multi-line without losing the one-key
-send.
+and scrolls past it.
+
+**What Return does follows where the send control is** (`PromptView.SubmitPlacement`), because
+the two answer the same question and must not disagree:
+
+- **`.inside`** — the glyph in the box's corner. Return submits, Shift/Option-Return breaks the
+  line. The shape every chat composer has, and what lets a reply box be multi-line without
+  losing the one-key send. The conversation's reply, the commit message, an inspector note.
+- **`.outside`** — no glyph; the owner places a button. Return is an ordinary line break and
+  ⌘Return sends. The session composer, whose prompt is a *brief* rather than a message: a task
+  worth describing is several lines plus a pasted paragraph of context, and Return-sends turned
+  each of those breaks into an accidental launch.
+
+⌘Return sends under **both**, handled in the text view rather than only by a button, because
+the chord belongs to the field — a prompt is used with no button beside it at all.
+
+The two halves move together on purpose. A glyph cannot name a chord, so a composer that took
+the send away from Return had to put it somewhere with room to say `⌘↩` — which is exactly what
+`ThemedButton.shortcut` draws.
 
 Height is re-measured in `layout()`, not only when the text is set. Text height depends on
 the width the box was given, which is unknown at assignment — a draft restored before layout
@@ -192,10 +282,26 @@ measured against a container of the wrong width and opened at the wrong height, 
 *tail* of the prompt. Setting text also scrolls back to the top for the same reason.
 
 Drops and pastes both land in `readSelection(from:type:)`, so one implementation serves the
-pointer and the keyboard. Files become their own paths; raw image data is written to the
-temporary directory first (`PromptAttachment`) — a screenshot on the pasteboard has no path,
-and a path is the only form of an image either CLI can act on. This is what the agent CLIs do
-with their own pasted images.
+pointer and the keyboard. Non-image files become their own paths in the text. Images instead
+join a thumbnail strip above it, with one accessible remove control per image; their paths stay
+out of the editor and are appended only to the string submitted to the CLI. Raw image data is
+written to the temporary directory first (`PromptAttachment`) — a screenshot on the pasteboard
+has no path, and a path is still the only form of an image either CLI can act on. The visual
+distinction is for the person composing the prompt, not a second transport. A thumbnail is also
+a keyboard-focusable control: click it, or focus it and press Space/Return, to hand its path to
+the system Quick Look panel. Its corner remove button remains a separate action. The context menu
+keeps file actions at this boundary too: Quick Look, the default app, Finder reveal, copying the
+pixels/name/path, and removal.
+
+The strip adds its height to the text input rather than consuming the text's existing minimum.
+That matters most in `SessionComposerViewController`, whose generous empty prompt asks for a
+description: attaching a screenshot must not turn that back into a one-line field. More images
+scroll horizontally instead of shrinking into unrecognisable tiles. The same `PromptView` serves
+the first message and the native conversation reply, so attachment behavior cannot drift between
+the two surfaces; a terminal follow-up remains the CLI's own input. Thumbnail mode is an explicit
+`showsImageAttachments` capability rather than the component's default, because `PromptView` also
+serves commit messages and inspector notes — those are plain text fields where a dropped path must
+remain plain text.
 
 The vocabulary these encode, which new work should follow:
 
@@ -206,6 +312,19 @@ The vocabulary these encode, which new work should follow:
   and model chips both do this.
 - **Content leads.** One element per view carries emphasis, usually what is being typed into
   or read. Everything else is secondary or tertiary label colour.
+- **Three tiers of button, one primary per screen.** `ThemedButton.Emphasis` names the shapes
+  the control always had: **primary** is the accent fill (`isProminent`), **secondary** the
+  surface-and-hairline (`isBordered`), **tertiary** the mark with no surface until the pointer
+  reaches it. There is deliberately no destructive colour — a destructive button says so in its
+  *title*, and red on a theme whose accent is already red says nothing. A second primary makes
+  both of them ordinary: the composer's action row is one primary ("Start session") beside one
+  secondary ("Import 90 conversations"), which is what tells you which of the two the screen is
+  about. A button that owns a chord names it on its own face through `shortcut` — one
+  `KeyboardShortcut` drives both the drawing and the match, so a button cannot answer a chord it
+  does not name or name one it does not answer. That match is modifier-exact, unlike
+  `keyEquivalent`, which matches the character whatever is held with it: a `"\r"` key equivalent
+  on a pane holding a text field claims the Return meant for the field, since AppKit offers every
+  key-down to the view tree before the first responder sees it.
 - **System colours only.** Every surface derives from a system colour, so light and dark both
   work and the accent is the user's own. No hardcoded RGB.
 - **`.continuous` corners.** The default circular curve looks subtly wrong beside system
@@ -249,6 +368,16 @@ why it is laid out generously rather than compactly, and why its column is
 `ComposerDefaults.contentWidth` (720) rather than `Design.Size.readableWidth`: that measure
 paces prose, and squeezing a row of chips into it collapsed every one of them to an
 unlabelled icon.
+
+**The send is a button, not a glyph, and Return is a line break.** A composer's prompt is the
+one place in the app where the text is a *brief*: several lines, usually a pasted paragraph of
+context, written before anything runs. Return-sends spent that on an accidental launch every
+time a line was broken, and the glyph in the corner of the box had nowhere to say otherwise. The
+prompt therefore takes `SubmitPlacement.outside` and the row underneath carries the send —
+primary, titled, naming `⌘↩` on its face — with **Import _n_ conversations** beside it as the
+secondary. Two buttons, one loud: which of them the screen is about is now visible rather than
+inferred. The chord is a `ThemedButton.shortcut` rather than a `keyEquivalent`, since a bare
+`"\r"` equivalent in this pane would take the Return back off the prompt it was just given to.
 
 **A chip names the answer, not the setting.** The model chip said "Default model", which tells
 the user the one thing they already know — that they have not chosen — while the question it
@@ -296,7 +425,7 @@ amount of our drawing reaches: the **`NSMenu` a `ThemedPopUp` opens**, and the *
 panel behind `ThemeSwatchView`**. Callers depend on the wrapper, not on the system part, so
 replacing either with something custom later is a change to one file.
 
-Seven bugs are worth keeping, because each is a trap the next drawn control will walk into:
+Nine bugs are worth keeping, because each is a trap the next drawn control will walk into:
 
 - **`NSImage.draw` states its own compositing, so a blend mode set on the context beneath it
   is silently overridden.** `ImageCompareView`'s difference mode set
@@ -306,15 +435,41 @@ Seven bugs are worth keeping, because each is a trap the next drawn control will
   draw call itself. Found by the render test sampling the composite for black, not by eyes: the
   wrong picture was a perfectly plausible one.
 
+- **A layer corner clips what `draw(_:)` lays down, and a stroke is centred on its path.** Both
+  halves cost the focus ring. `applySurface` puts the corner on the *layer*, so a control drawing
+  over its own applied surface is drawing inside that shape whether it knows it or not: the
+  accounts pane's 30pt icon well is a disc, the ring was built from
+  `Design.Radius.control(fitting:)` — a rounded rect — and the two shapes meet only at the four
+  edge midpoints, so what survived was four 1pt dashes and no corners at all. Half of the ring's
+  width also falls *outside* whatever path it is centred on, and the clip takes that too, which
+  is why every other control's ring drew at half weight. `ThemedControl.drawKeyboardFocus` now
+  takes a `ThemedSurface.Shape` — a rect and a corner, insettable, where a `NSBezierPath` is
+  not — resolves it against `appliedSurfaceRadius` when a surface was applied, and insets by half
+  the ring's width. Pinned by sampling the drawn control all the way round the ring, diagonals
+  included: those are the places the mismatch erased.
+
 - **`withAlphaComponent` replaces alpha, it does not scale it.** Dimming a disabled button
   against a resting surface that is *already* translucent — Cyberpunk holds its neon at 10% —
   made the disabled controls the loudest things on the page. Resolve, then multiply.
 - **`NSString.draw(in:)` wraps.** A title measured a hair too narrow for its own rect breaks at
   the space and draws its second word below the button, with no ellipsis to show for it: the
   sidebar footer read "Add" instead of "Add Project". Measure and draw with the *same*
-  attributes, and give the draw a paragraph style that truncates.
+  attributes, and give the draw a paragraph style that truncates. Centring the title's full
+  intrinsic width after Auto Layout has squeezed the control is a different version of the same
+  escape: its origin moves outside the leading edge and the visible text becomes an arbitrary
+  middle slice. Centre while the content fits; otherwise lead-align it and truncate the tail.
 - **`NSTextField(string:)` is a class factory method**, free to return a plain `NSTextField`. A
   subclass declares its own or is one only by the annotation at the call site.
+- **A single-line field draws on the *field's* baseline, not the string's.** A label built from
+  a plain string and then handed attributed text keeps AppKit's 13pt default font, so a string
+  of 11pt runs drew a little over two points below the baseline the field itself reported —
+  while `firstBaselineOffsetFromTop`, the baseline anchors and the intrinsic size all said
+  otherwise. The words sat low in their own box, close enough to clip a descender, and anything
+  centred beside them read high: the git card's branch mark was centred correctly on a line the
+  words were not on. `NSTextField.label(attributed:)` now adopts the string's tallest font
+  before assigning it — the measured size does not move, only the drawing. Pinned by measuring
+  the *ink* (`ThemedIndicatorsTests.testTheGitCardsMarkAndItsWordsShareOneOpticalLine`), since
+  every frame involved was already right.
 - **A `CGColor` on a layer is frozen**, which is the whole reason these controls draw. The one
   place a layer is unavoidable is `ThemedSpinner` — it animates off the main thread — so its
   `strokeColor` is re-applied on every redraw instead.

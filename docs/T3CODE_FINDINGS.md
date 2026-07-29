@@ -358,57 +358,93 @@ Then:
 
 ## 7. Borrowables — full ranked list, then the shortlist
 
-Ranked by leverage for Skalman's shape (native conversation surface + Git Review + sidebar):
+Ranked by leverage for Skalman's shape (native conversation surface + Git Review + sidebar).
+**Kept as a working checklist**, IMPROVEMENTS.md-style: adopted items are marked with where
+their decisions now live, and stay listed so the ranking's reasoning survives.
 
-1. **Turn folding** ("Worked for 42s") — §3.1. Finishes the tool-row-quieting work; the
-   interrupt-stays-expanded and user-message-start-boundary rules come free.
-2. **macOS notifications on `needsAttention`** — their 42-vote gap, still unbuilt on their
-   desktop; `UNUserNotificationCenter` + the existing activity tracker makes this nearly
-   free for a native app. Cheapest proven-demand win in the whole document.
+1. ~~**Turn folding**~~ ("Worked for 42s") — §3.1. **Adopted 2026-07-28** →
+   `docs/architecture/native-conversations.md`. The interrupt-stays-expanded rule came free
+   as designed; the unplanned prerequisite was `TranscriptReplay` synthesizing `.turnFinished`
+   from record timestamps, which also settled never-answered tool calls as "stopped".
+2. ~~**macOS notifications on `needsAttention`**~~ — their 42-vote gap, still unbuilt on
+   their desktop. **Adopted 2026-07-28** → `docs/architecture/session-activity.md`
+   (`AttentionAlertPolicy` / `AttentionAlertCenter`). As cheap as predicted, with one design
+   decision the doc records: `.finished` is gated on `reportsOwnTurns`, so shells going
+   quiet never notify.
 3. **Diff-comment → composer round trip** — §3.7. Connects two systems Skalman already has
    (Git Review's `DiffView` + the composer) into "tell the agent what to fix, anchored to
-   the lines it wrote."
-4. **The three-mode auto-scroll machine with gesture-generation counter** — §3.2. The
-   native surface needs exactly this; their #3925 shows the naive version fails.
-5. **Tool-row outcome glyphs + failure-text sniffing** — §3.3. Our rows show a size but
-   not an outcome; "neutral promotes to success at settle" avoids permanent ambiguity.
+   the lines it wrote." *Open — the next big pass.* Scouted 2026-07-28: needs line-selection
+   API in `NativeDiffKit` first (its rows are inert text fields), then `PromptView`'s
+   attachment model generalized beyond image paths, a new timeline row kind, and replay
+   parsing so the card survives a resume. Four subsystems deep; budget accordingly.
+4. ~~**The three-mode auto-scroll machine**~~ — §3.2. **Adopted 2026-07-28** →
+   `ConversationAutoScroll`, documented in `native-conversations.md`. The
+   gesture-generation counter proved unnecessary on AppKit: `scrollWheel` and the
+   live-scroll notifications only ever fire for the user's hand.
+5. ~~**Tool-row outcome glyphs + failure-text sniffing**~~ — §3.3. **Adopted 2026-07-28** →
+   `ToolOutcome`, documented in `native-conversations.md`. Narrowed twice for precision:
+   sniffing is shell-output-only, and generic phrases are trusted only in the opening lines.
+   Success stays quiet per the design language — the ✗ override is the only new per-row ink.
 6. **Settle/snooze + the recede rule** — §3.6. The biggest *idea* here, but it deserves its
    own design pass: Skalman's grouping (repo → checkout → branch → session) carries
    information their flat inbox discards; the semantics (derived settling, raising a hand,
-   PR-merge + 1 h idle) could layer onto the tree without flattening it.
+   PR-merge + 1 h idle) could layer onto the tree without flattening it. *Open.* Note the
+   sidebar has since gained **Archive** (row button + ⋯ menu); a design pass must reconcile
+   settle-vs-archive semantics explicitly rather than adding a third shelf.
 7. **Per-turn checkpoints as hidden git refs** — generalizes `GitTurnBaselineStore` (refs
    solve the gc-prunability that forced ours in-memory and single-turn) → Turn-N diff
    history + revert-to-message. Interacts with Claude's `--resume-session-at` /
-   `rollbackThread` question — needs measurement.
-8. **Per-turn changed-files card** — §3.4, with the ≤5-files/≤200-lines auto-expand rule.
-9. **AI-generated commit messages** in Git Review's commit composer — one headless one-shot
-   run, the `ProjectIconResearch` pattern; their policy presets (conventional commits) are
-   a nice touch.
+   `rollbackThread` question — needs measurement. *Open.* Now also what the changed-files
+   card (#8) is waiting on: its View diff is latest-turn-only and its cards are live-only,
+   both because a single in-memory baseline is all there is.
+8. ~~**Per-turn changed-files card**~~ — §3.4. **Adopted 2026-07-28** →
+   `ChangedFilesTree` / `ChangedFilesCardView`, documented in `native-conversations.md`.
+   Auto-expand thresholds and single-child compression taken verbatim; the compact
+   chip-preview was replaced by a start-folded tree so the card stays one visual system.
+9. ~~**AI-generated commit messages**~~ in Git Review's commit composer. **Adopted
+   2026-07-28** → `CommitMessageComposer`, documented in `docs/architecture/git.md`. The
+   `ProjectIconResearch` pattern verbatim (read-only Codex one-shot, manual only, per-repo
+   re-entrancy). Their policy presets were replaced by something better suited here: the ten
+   newest subjects travel as a voice sample, so the draft matches the repository rather
+   than a convention.
 10. **Steering/queueing a message while the agent works** — their 47-vote demand, half-built
     (steering works, no queue UI). For our native surface `--input-format stream-json`
-    likely permits it; needs a probe.
-11. **Long-user-message collapse** — §3.5.
+    likely permits it; needs a probe. *Open.*
+11. ~~**Long-user-message collapse**~~ — §3.5. **Adopted 2026-07-28** →
+    `UserMessageBubbleView`, documented in `native-conversations.md`. Thresholds verbatim
+    (8 lines / 600 chars); the fade is a real alpha mask per their rule, and copy copies the
+    whole message while collapsed.
 12. **Composer triggers** — `@` file mentions first; `/` commands and `$` skills later.
-13. **Context-window meter** — distinct from the account usage pill; Claude's stream
-    carries the numbers already.
+    *Open.*
+13. ~~**Context-window meter**~~ — **Adopted 2026-07-28** → `TurnStatusText.context` +
+    the status row's `contextLabel`, documented in `native-conversations.md`. Percentage
+    with warning past 90% where the provider states the window (Codex); absolute tokens
+    where it does not (Claude) — inventing per-model windows is how they earned #2034, and
+    the doc records the second trap: Codex's cumulative total exceeds the window, so
+    `last_token_usage` is the reading.
 14. **Scope-keyed ephemeral state** — §3.7; a pattern, not a feature: state carries its
-    scope key and reads as empty on mismatch. No cleanup, no staleness.
-15. **Subagents as nested rows** — their 25-vote gap; we currently skip `isSidechain`
-    records in replay entirely. Both products under-serve this.
+    scope key and reads as empty on mismatch. No cleanup, no staleness. *Standing guidance.*
+15. ~~**Subagents as nested rows**~~ — their 25-vote gap. **Overtaken by events**: the
+    "we skip `isSidechain` entirely" claim is stale — Skalman now has the subagent
+    navigator, per-child timelines, the durable history index, and `SubagentSessionState`
+    surviving surface switches. Skalman is ahead here; nothing left to borrow.
 16. Snooze preset arithmetic (evening-suppression, DST-safe `setDate`, ceil'd minutes so a
-    snooze never reads "0m") — if #6 happens, take these rules verbatim.
+    snooze never reads "0m") — if #6 happens, take these rules verbatim. *Travels with #6.*
 
 ### The shortlist (adopt first)
 
-1. Turn folding
-2. macOS notifications on `needsAttention`
-3. Diff-comment → composer loop
-4. Auto-scroll state machine for the native surface
-5. Tool-row outcome glyphs
+1. ~~Turn folding~~ — adopted
+2. ~~macOS notifications on `needsAttention`~~ — adopted
+3. Diff-comment → composer loop — **the one shortlist item still open**
+4. ~~Auto-scroll state machine for the native surface~~ — adopted
+5. ~~Tool-row outcome glyphs~~ — adopted
 
-Settle/snooze is deliberately *not* on the shortlist despite being the biggest idea — it
-changes the sidebar's philosophy and must be designed against our grouping model, not
-copied.
+Four of five landed 2026-07-28, plus #8, #9, #11 and #13 from the longer list the same day —
+nine of sixteen closed, one struck as overtaken. Still open: the diff-comment loop (#3, the
+big pass), settle/snooze (#6, the design pass), checkpoints-as-refs (#7, needs measurement),
+steering (#10, needs a probe), and composer triggers (#12). Settle/snooze is deliberately
+*not* on the shortlist despite being the biggest idea — it changes the sidebar's philosophy
+and must be designed against our grouping model, not copied.
 
 ---
 

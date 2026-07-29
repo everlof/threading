@@ -19,7 +19,12 @@ import Foundation
 /// carries the fast-mode flag. Codex's per-turn `exec` has no equivalent live channel, so the
 /// capability protocols below are Claude-only and the UI offers the control only when the cast
 /// succeeds.
-final class ClaudeStreamSession: ConversationStreamSession, ModelSwitchableConversation, FastModeConversation {
+final class ClaudeStreamSession:
+    ConversationStreamSession,
+    ModelSwitchableConversation,
+    FastModeConversation,
+    SubagentReportingConversation,
+    SubagentHistoryConversation {
 
     // MARK: - Properties
 
@@ -27,9 +32,14 @@ final class ClaudeStreamSession: ConversationStreamSession, ModelSwitchableConve
 
     private let plan: () -> AgentLaunchPlan
     private let effort: String?
+    private let subagentTranscriptPlan: () -> ClaudeSubagentTranscriptPlan?
 
     /// Fired on the main queue for every parsed event.
     var onEvent: ((StreamEvent) -> Void)?
+
+    /// Fired on the main queue for child-agent events. Forwarded child output is deliberately
+    /// absent from `onEvent`, because it belongs to the child's drill-in transcript.
+    var onSubagentEvent: ((SubagentEvent) -> Void)?
 
     /// Fired when the process ends, for any reason.
     var onExit: ((Int32) -> Void)?
@@ -48,6 +58,8 @@ final class ClaudeStreamSession: ConversationStreamSession, ModelSwitchableConve
     private var parseDiagnostics = StreamParseDiagnostics()
     var malformedLineCount: Int { parseDiagnostics.malformedLineCount }
 
+    private var subagentAdapter = ClaudeSubagentEventAdapter()
+
     /// In-flight control requests, keyed by the id the response echoes back. Everything here runs
     /// on the main queue — reads, writes and the response routing all hop there — so the map needs
     /// no locking. A monotonic counter mints the ids rather than a UUID, so the wire is legible.
@@ -64,10 +76,12 @@ final class ClaudeStreamSession: ConversationStreamSession, ModelSwitchableConve
     init(
         sessionID: SessionID,
         effort: String? = nil,
+        subagentTranscriptPlan: @escaping () -> ClaudeSubagentTranscriptPlan? = { nil },
         plan: @escaping () -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.effort = effort
+        self.subagentTranscriptPlan = subagentTranscriptPlan
         self.plan = plan
     }
 
@@ -97,6 +111,7 @@ final class ClaudeStreamSession: ConversationStreamSession, ModelSwitchableConve
         buffer.removeAll(keepingCapacity: true)
         errorBuffer.removeAll(keepingCapacity: true)
         parseDiagnostics.reset()
+        subagentAdapter.reset()
 
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
@@ -188,6 +203,30 @@ final class ClaudeStreamSession: ConversationStreamSession, ModelSwitchableConve
         guard isRunning else { return }
         finish()
         process?.terminate()
+    }
+
+    // MARK: - Child Transcript History
+
+    func loadSubagentHistory(completion: @escaping ([SubagentEvent]) -> Void) {
+        guard let plan = subagentTranscriptPlan() else {
+            DispatchQueue.main.async { completion([]) }
+            return
+        }
+        ClaudeSubagentTranscriptReplay.loadIndex(plan: plan, completion: completion)
+    }
+
+    func loadSubagentTranscript(
+        for descriptor: SubagentDescriptor,
+        completion: @escaping ([StreamEvent], Bool) -> Void
+    ) {
+        guard let path = descriptor.path, !path.isEmpty else {
+            DispatchQueue.main.async { completion([], false) }
+            return
+        }
+        ClaudeSubagentTranscriptReplay.loadConversation(
+            at: URL(fileURLWithPath: path),
+            completion: completion
+        )
     }
 
     // MARK: - Control Channel
@@ -289,6 +328,11 @@ final class ClaudeStreamSession: ConversationStreamSession, ModelSwitchableConve
 
             HookOutcomeLog.note(line: line, sessionID: sessionID)
 
+            if let route = subagentAdapter.route(line) {
+                for event in route.events { onSubagentEvent?(event) }
+                guard route.belongsToParent else { continue }
+            }
+
             switch StreamEvent.parse(line) {
             case .events(let events):
                 for event in events { onEvent?(completingTurnMetrics(in: event)) }
@@ -316,6 +360,10 @@ final class ClaudeStreamSession: ConversationStreamSession, ModelSwitchableConve
 
         // A request whose reply will now never arrive fails rather than sitting on its timeout.
         failPendingControlRequests(with: ClaudeControlError.notRunning)
+
+        for event in subagentAdapter.terminationEvents(status: status) {
+            onSubagentEvent?(event)
+        }
 
         if status != 0 {
             let diagnostics = String(decoding: errorBuffer, as: UTF8.self)

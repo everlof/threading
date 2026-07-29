@@ -26,20 +26,26 @@ extension ConversationViewController {
                 view = nativeView
             }
 
+            // A turn that stayed expanded because it was interrupted folds the moment the next
+            // one begins — the user has moved on, and t3code's rule is exactly this handoff.
+            if startsTurn, let pending = pendingFold {
+                pendingFold = nil
+                foldTurn(startingAt: pending.startIndex, stopped: pending.interrupted)
+            }
+
             // Not before the first turn: a rule at the very top of the pane separates the
             // conversation from nothing.
-            if startsTurn, !stack.arrangedSubviews.isEmpty {
+            if startsTurn, timeline.rows.count > 1 {
                 addRow(ConversationRowView.turnDivider(), newTurn: true)
             }
 
-            // Navigation follows the outer row so extension annotations are part of its visible
-            // extent. A tool result instead updates the retained native ToolCallView directly.
-            switch row {
-            case .userMessage:
-                rowViews[index] = view
-            case .toolCall:
+            // Every row's outer view is retained by index: navigation scrolls to user rows,
+            // and a settling turn folds the views between its user message and its conclusion.
+            // The outer row, so extension annotations fold and scroll with their row. A tool
+            // result instead updates the retained native ToolCallView directly.
+            rowViews[index] = view
+            if case .toolCall = row {
                 pendingToolViews[index] = nativeView as? ToolCallView
-            default: break
             }
 
             addRow(view, newTurn: startsTurn)
@@ -52,8 +58,10 @@ extension ConversationViewController {
                   let toolView = pendingToolViews[index],
                   let result = call.result else { return }
 
-            toolView.setResult(result.text, isError: result.isError)
-            pendingToolViews[index] = nil
+            toolView.setResult(result.text, outcome: result.outcome)
+            // An interrupted row keeps its view reference: the real result can still arrive
+            // after the turn ends, and it should land on the row rather than be lost.
+            if result.outcome != .interrupted { pendingToolViews[index] = nil }
             scrollToBottom()
 
         case .streaming(let text):
@@ -67,6 +75,14 @@ extension ConversationViewController {
                 return false
             }()
             if !isTurnInFlight { runProgress = nil }
+
+            // The meter follows metrics, not the status: a Ready that carries none — the
+            // post-replay reset, a model change — must not blank a reading that still holds.
+            if case .ready(_, let lastTurn) = status,
+               let tokens = lastTurn?.contextTokens {
+                lastContextReading = (tokens, lastTurn?.contextWindow)
+                updateContextMeter()
+            }
 
             // The orb runs only while a turn is in flight; hidden, it detaches
             // from the status row and its display link idles.
@@ -82,6 +98,10 @@ extension ConversationViewController {
                 setStatus(describe(status))
             }
             if isTurnInFlight != wasInFlight {
+                // The edge is the turn boundary, and the only place the agent's own running
+                // work is weighed. A status restated without an edge — a re-init, a model
+                // change — is not a boundary and must not spend it.
+                noteTurnBoundary()
                 delegate?.conversationDidChangeActivity(self)
             }
 
@@ -92,6 +112,17 @@ extension ConversationViewController {
                 delegate?.conversationDidChangeActivity(self)
             }
 
+        case .turnSettled(let startIndex, let interrupted):
+            // A settled turn folds at once. An interrupted one stays expanded so the user
+            // keeps their place, and the *next* turn folds it — but it reads "Stopped after"
+            // rather than claiming to have worked.
+            if interrupted {
+                pendingFold = (startIndex, true)
+            } else {
+                foldTurn(startingAt: startIndex, stopped: false)
+            }
+            appendChangedFilesCard(forTurnStartingAt: startIndex)
+
         case .adoptedSessionID(let agentSessionID):
             // The CLI's own identifier wins: a resume can settle on one other than the
             // identifier we asked for, and resuming again must use what it actually used.
@@ -99,6 +130,94 @@ extension ConversationViewController {
                 $0.resumeState = .resumable(agentSessionID)
             }
         }
+    }
+
+    // MARK: - Turn Folding
+
+    /// Collapses a settled turn's work — everything between its user message and its final
+    /// assistant reply — behind a one-line `TurnFoldView`.
+    ///
+    /// Hiding rather than removing: an `NSStackView` detaches hidden arranged views, so the
+    /// spacing collapses with them, and the fold can restore the exact views on click.
+    /// Permission cards deliberately stay visible — a decided card is the record of what was
+    /// allowed, which is worth more than the symmetry.
+    func foldTurn(startingAt startIndex: Int, stopped: Bool) {
+        guard !foldedTurnStarts.contains(startIndex),
+              let turn = timeline.turns.first(where: { $0.rowIndex == startIndex }),
+              turn.endIndex > turn.rowIndex,
+              let userView = rowViews[turn.rowIndex],
+              let userPosition = stack.arrangedSubviews.firstIndex(of: userView) else { return }
+
+        let hiddenIndices = (turn.rowIndex + 1 ... turn.endIndex)
+            .filter { $0 != turn.finalAssistantIndex }
+        let hiddenViews = hiddenIndices.compactMap { rowViews[$0] }
+        guard !hiddenViews.isEmpty else { return }
+
+        foldedTurnStarts.insert(startIndex)
+        hiddenViews.forEach { $0.isHidden = true }
+
+        let fold = TurnFoldView(duration: turn.duration, stopped: stopped, folding: hiddenViews)
+        stack.insertArrangedSubview(fold, at: userPosition + 1)
+        NSLayoutConstraint.activate([
+            fold.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
+            fold.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
+        ])
+    }
+
+    // MARK: - Changed Files Card
+
+    /// Asks git what the settled turn changed and, when the answer is non-empty, leaves the
+    /// summary card at the end of the turn.
+    ///
+    /// Live turns only: a replayed turn's baseline is long gone, and diffing today's checkout
+    /// against it would attribute later work to an old exchange. The diff reuses the Last Turn
+    /// machinery — the same `stash create` baseline, the same reader — so the card and the
+    /// review pane cannot disagree about what a turn touched.
+    func appendChangedFilesCard(forTurnStartingAt startIndex: Int) {
+        guard !isReplaying,
+              !changedFilesCardTurns.contains(startIndex),
+              let project = ProjectStore.shared.project(forSessionID: agentSession.id),
+              let root = GitInfo.repositoryRoot(for: project.folderPath),
+              let baseline = GitTurnBaselineStore.shared.baseline(forSessionID: agentSession.id)
+        else { return }
+
+        changedFilesCardTurns.insert(startIndex)
+
+        // The insert position is remembered as a view, not an index: by the time the diff
+        // returns, the user may already have sent the next message, and the card belongs to
+        // the turn that earned it, not to the bottom of the conversation.
+        let anchor = stack.arrangedSubviews.last
+
+        GitReviewReader.diff(.lastTurn(baseline), in: root) { [weak self] result in
+            guard let self, case .success(let files) = result, !files.isEmpty else { return }
+
+            let tree = ChangedFilesTree.build(from: files.map {
+                ChangedFilesTree.File(path: $0.path, added: $0.added, removed: $0.removed)
+            })
+            self.insertChangedFilesCard(tree, after: anchor)
+        }
+    }
+
+    private func insertChangedFilesCard(_ tree: ChangedFilesTree, after anchor: NSView?) {
+        let card = ChangedFilesCardView(tree: tree) { [weak self] in
+            guard let self else { return }
+            self.delegate?.conversationDidRequestTurnDiff(self)
+        }
+
+        // Only the newest card's View diff still describes what the Last Turn scope shows.
+        latestChangedFilesCard?.hideViewDiff()
+        latestChangedFilesCard = card
+
+        let position = anchor
+            .flatMap { stack.arrangedSubviews.firstIndex(of: $0) }
+            .map { $0 + 1 }
+            ?? stack.arrangedSubviews.count
+        stack.insertArrangedSubview(card, at: position)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
+            card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
+        ])
+        scrollToBottom()
     }
 
     /// Conversation contracts are scoped to the session, not to message text or row indexes.
@@ -218,12 +337,34 @@ extension ConversationViewController {
         statusLabel.stringValue = text
     }
 
+    /// Draws the context meter from the retained reading: a percentage where the provider
+    /// states the window, absolute tokens where it does not, and the warning role past 90% —
+    /// full context is the one condition here worth ink before the user asks.
+    func updateContextMeter() {
+        guard let reading = lastContextReading else {
+            contextLabel.isHidden = true
+            return
+        }
+        contextLabel.stringValue = TurnStatusText.context(
+            tokens: reading.tokens,
+            window: reading.window
+        )
+        contextLabel.textColor = TurnStatusText.contextIsNearlyFull(
+            tokens: reading.tokens,
+            window: reading.window
+        ) ? Design.Status.warning : Design.Text.tertiary
+        contextLabel.isHidden = false
+    }
+
     func scrollToBottom() {
-        guard !isReplaying else { return }
+        // Following is a mode, not a reflex: while the user reads elsewhere (`free`) or their
+        // sent message holds the top (`anchored`), new content must not move the view.
+        guard !isReplaying, autoScroll.followsNewContent else { return }
 
         // After layout, or the scroll targets the height the stack had before this message.
         DispatchQueue.main.async { [weak self] in
-            guard let self, let documentView = self.scrollView.documentView else { return }
+            guard let self, self.autoScroll.followsNewContent,
+                  let documentView = self.scrollView.documentView else { return }
 
             let overflow = documentView.bounds.height - self.scrollView.contentSize.height
             documentView.scroll(NSPoint(x: 0, y: max(0, overflow)))

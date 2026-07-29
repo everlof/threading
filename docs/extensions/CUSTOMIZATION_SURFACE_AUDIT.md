@@ -32,6 +32,7 @@ general; a selector such as `NSView > NSStackView:nth-child(2)` is not.
 | Permission card | `conversation.permission-card@1` | display-only protected hook | queue, context, decisions, remote mirroring | Implemented |
 | Display-pane header | `display.pane-header@1` | protected command/status hook | tab ownership, close/select/order, overflow, persistence, `+` menu | Implemented |
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
+| Session corner card | `session.corner-card@1` | display-only placement slot | card navigation, visibility, activity presentation, refresh | Implemented |
 
 ## Project hover-card precedent
 
@@ -95,6 +96,21 @@ only place where Allow or Deny can originate.
 
 Thinking, notices and the streaming placeholder are not public components. They are transient
 states whose durable output becomes an assistant-message row.
+
+## Corner-card precedent
+
+The floating card over the session's content pane is the first contract whose **slot IDs are
+placements**. `session.corner-card@1` names the surface generically — the card shows the
+checkout's branch and counters today, and may show agents or attachments tomorrow, so neither
+"git" nor any content kind appears in the ID. `top-trailing` is the only corner with a card;
+when a leading card ships, it becomes an additive `top-leading` slot on the same contract
+version rather than a rename or a sibling component.
+
+The slot is display-only. Built-in segments own navigation — Git opens Review and child-agent
+status opens Subagents — so an extension button inside the same compact line would fight the
+host's hit targets; extensions with more to say use hover cards or a panel. Rows ride the native
+card's visibility. Git state usually supplies that visibility, while child-agent state can keep
+the session card present without a Git sentence; there is still no extension-only presentation.
 
 ## Gate for every new surface
 

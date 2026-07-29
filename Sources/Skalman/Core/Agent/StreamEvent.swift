@@ -25,8 +25,33 @@ enum StreamEvent {
     /// what was typed as it is sent, so emitting it here too would render it twice.
     case userMessage(String)
 
+    /// Provider-owned transcript chrome worth retaining without pretending the user said it.
+    ///
+    /// Claude records slash-command invocations as XML-shaped user messages. Replay reduces
+    /// those records to one quiet line instead of drawing the transport envelope as a chat turn.
+    case transcriptNotice(String)
+
     /// Results attached to earlier tool calls by their provider-issued item identifier.
     case toolResults([ToolResult])
+
+    /// A complete ordered run plan reported independently of the tool-item stream.
+    ///
+    /// Codex app-server sends this as `turn/plan/updated`. Keeping it as its own event avoids
+    /// inventing a tool row for a notification and lets the same timeline reducer consume live
+    /// updates and any future replay source.
+    case runPlanUpdated([RunProgress.Step])
+
+    /// The work the agent has left running outside the turn, restated whenever it changes.
+    ///
+    /// Claude's stream sends the whole in-flight list on every change
+    /// (`system` / `background_tasks_changed`), so this is a level rather than an edge and the
+    /// last one seen is always current. It exists because a backgrounded shell re-enters the
+    /// conversation on its own: the turn that queued it ends, and the agent then speaks again
+    /// with nobody having typed. A session in that state has not finished anything.
+    ///
+    /// Carries identities rather than a count so `BackgroundWorkLedger` can tell work a turn
+    /// started from work parked in an earlier one.
+    case backgroundWork(inFlight: [String])
 
     /// The turn finished. `isError` marks a turn that failed rather than completed.
     ///
@@ -52,19 +77,37 @@ struct TurnMetrics: Equatable {
     var outputTokens: Int?
     var effort: String?
 
+    /// How much of the model's context the last request occupied — prompt, cache reads and
+    /// completion together. Distinct from `outputTokens` on purpose: that answers "how much
+    /// did it say", this answers "how full is the window".
+    var contextTokens: Int?
+
+    /// The model's context capacity, where the provider states it. Codex reports
+    /// `model_context_window` beside its token counts; Claude's stream does not name a
+    /// limit, so its reading stays absolute.
+    var contextWindow: Int?
+
     static let empty = TurnMetrics()
 
     var isEmpty: Bool {
         duration == nil && outputTokens == nil && effort == nil
+            && contextTokens == nil && contextWindow == nil
     }
 
     /// Adds facts known by the process wrapper without replacing more authoritative values
     /// decoded from the provider's terminal event.
-    func filling(duration: TimeInterval?, effort: String?) -> TurnMetrics {
+    func filling(
+        duration: TimeInterval?,
+        effort: String?,
+        contextTokens: Int? = nil,
+        contextWindow: Int? = nil
+    ) -> TurnMetrics {
         TurnMetrics(
             duration: self.duration ?? duration,
             outputTokens: outputTokens,
-            effort: self.effort ?? effort
+            effort: self.effort ?? effort,
+            contextTokens: self.contextTokens ?? contextTokens,
+            contextWindow: self.contextWindow ?? contextWindow
         )
     }
 }
@@ -87,6 +130,10 @@ enum ToolIdentity: Hashable {
     case webFetch
     case webSearch
     case task
+    case taskCreate
+    case taskUpdate
+    case taskList
+    case taskGet
     case todoWrite
     case todoRead
     case toolSearch
@@ -111,7 +158,10 @@ enum ToolIdentity: Hashable {
         "Bash": .bash, "Read": .read, "Write": .write, "Edit": .edit,
         "MultiEdit": .multiEdit, "NotebookEdit": .notebookEdit, "NotebookRead": .notebookRead,
         "Glob": .glob, "Grep": .grep, "WebFetch": .webFetch, "WebSearch": .webSearch,
-        "Task": .task, "TodoWrite": .todoWrite, "TodoRead": .todoRead,
+        "Task": .task, "Agent": .task,
+        "TaskCreate": .taskCreate, "TaskUpdate": .taskUpdate,
+        "TaskList": .taskList, "TaskGet": .taskGet,
+        "TodoWrite": .todoWrite, "TodoRead": .todoRead,
         "ToolSearch": .toolSearch, "Plan": .plan,
 
         // Codex. `write_stdin` writes into a process an earlier command opened, which is part
@@ -152,6 +202,10 @@ enum ToolIdentity: Hashable {
         case .webFetch: return "WebFetch"
         case .webSearch: return "WebSearch"
         case .task: return "Task"
+        case .taskCreate: return "TaskCreate"
+        case .taskUpdate: return "TaskUpdate"
+        case .taskList: return "TaskList"
+        case .taskGet: return "TaskGet"
         case .todoWrite: return "TodoWrite"
         case .todoRead: return "TodoRead"
         case .toolSearch: return "ToolSearch"
@@ -301,10 +355,26 @@ extension StreamEvent {
         let event: StreamEvent
         switch wire.type {
         case "system":
-            guard wire.subtype == "init" else {
+            switch wire.subtype {
+            case "init":
+                event = .initialised(
+                    sessionID: wire.sessionID.map(TranscriptID.init),
+                    model: wire.model
+                )
+            case "background_tasks_changed":
+                // The list is the whole truth each time, including empty. Verified against CLI
+                // 2.1.220: one of these arrives as a backgrounded shell starts and another,
+                // empty, as the last one ends. The stream spells the identity `task_id` where
+                // the hook payload spells it `id`; a missing one falls back to its position,
+                // which is stable for as long as the entry is.
+                event = .backgroundWork(
+                    inFlight: (wire.backgroundTasks ?? []).enumerated().map { index, task in
+                        task.objectValue?["task_id"]?.stringValue ?? "#\(index)"
+                    }
+                )
+            default:
                 return .events([.unknown(type: "system")])
             }
-            event = .initialised(sessionID: wire.sessionID.map(TranscriptID.init), model: wire.model)
 
         case "stream_event":
             event = parseStreamEvent(wire.event)
@@ -324,7 +394,8 @@ extension StreamEvent {
                 isError: wire.isError,
                 metrics: TurnMetrics(
                     duration: wire.durationMS.map { $0 / 1_000 },
-                    outputTokens: wire.usage?.outputTokens
+                    outputTokens: wire.usage?.outputTokens,
+                    contextTokens: wire.usage?.contextTokens
                 )
             )
 
@@ -451,11 +522,17 @@ private struct ClaudeWireEvent: Decodable {
     let durationMS: TimeInterval?
     let usage: ClaudeWireUsage?
 
+    /// The in-flight background work carried by `background_tasks_changed`. Kept opaque: each
+    /// entry describes a shell, child or monitor this side never renders, and only the count
+    /// is read.
+    let backgroundTasks: [JSONValue]?
+
     private enum CodingKeys: String, CodingKey {
         case type, subtype, model, event, message, result, usage
         case sessionID = "session_id"
         case isError = "is_error"
         case durationMS = "duration_ms"
+        case backgroundTasks = "tasks"
     }
 
     init(from decoder: Decoder) throws {
@@ -470,14 +547,35 @@ private struct ClaudeWireEvent: Decodable {
         isError = (try? container.decode(Bool.self, forKey: .isError)) ?? false
         durationMS = try? container.decode(TimeInterval.self, forKey: .durationMS)
         usage = try? container.decode(ClaudeWireUsage.self, forKey: .usage)
+        backgroundTasks = try? container.decode([JSONValue].self, forKey: .backgroundTasks)
     }
 }
 
 private struct ClaudeWireUsage: Decodable {
     let outputTokens: Int?
+    let inputTokens: Int?
+    let cacheReadInputTokens: Int?
+    let cacheCreationInputTokens: Int?
+
+    /// The window the last request occupied: prompt, cache reads and creation, and the
+    /// completion together. Claude's `input_tokens` excludes what was served from cache, so
+    /// the parts are summed rather than any one being trusted alone. Nil when the record
+    /// carried no input-side numbers at all — an output-only reading says nothing about
+    /// context.
+    var contextTokens: Int? {
+        guard inputTokens != nil || cacheReadInputTokens != nil
+                || cacheCreationInputTokens != nil else { return nil }
+        return (inputTokens ?? 0)
+            + (cacheReadInputTokens ?? 0)
+            + (cacheCreationInputTokens ?? 0)
+            + (outputTokens ?? 0)
+    }
 
     private enum CodingKeys: String, CodingKey {
         case outputTokens = "output_tokens"
+        case inputTokens = "input_tokens"
+        case cacheReadInputTokens = "cache_read_input_tokens"
+        case cacheCreationInputTokens = "cache_creation_input_tokens"
     }
 }
 

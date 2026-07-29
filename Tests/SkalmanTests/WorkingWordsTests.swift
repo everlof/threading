@@ -125,4 +125,127 @@ final class WorkingWordsTests: XCTestCase {
         XCTAssertNil(RunProgress(tool: .bash, input: ["cmd": "swift test"]))
         XCTAssertNil(RunProgress(tool: .plan, input: ["plan": []]))
     }
+
+    func testClaudeIncrementalTasksReconcileCreateResultsAndUpdates() throws {
+        var reducer = RunProgressReducer()
+
+        XCTAssertEqual(
+            try changedProgress(reducer.apply(
+                toolUseID: "create-1",
+                tool: .taskCreate,
+                input: ["subject": "Inspect", "activeForm": "Inspecting"]
+            )),
+            RunProgress(step: 1, total: 1)
+        )
+        XCTAssertEqual(
+            try changedProgress(reducer.apply(result: ToolResult(
+                toolUseID: "create-1",
+                text: "Task #1 created successfully: Inspect",
+                isError: false
+            ))),
+            RunProgress(step: 1, total: 1)
+        )
+
+        _ = reducer.apply(
+            toolUseID: "create-2",
+            tool: .taskCreate,
+            input: ["subject": "Implement"]
+        )
+        _ = reducer.apply(result: ToolResult(
+            toolUseID: "create-2",
+            text: "Task #2 created successfully: Implement",
+            isError: false
+        ))
+        XCTAssertEqual(
+            try changedProgress(reducer.apply(
+                toolUseID: "update-1",
+                tool: .taskUpdate,
+                input: ["taskId": "1", "status": "completed"]
+            )),
+            RunProgress(step: 2, total: 2)
+        )
+        XCTAssertEqual(
+            try changedProgress(reducer.apply(
+                toolUseID: "update-2",
+                tool: .taskUpdate,
+                input: ["taskId": "2", "status": "in_progress"]
+            )),
+            RunProgress(step: 2, total: 2)
+        )
+    }
+
+    func testClaudeFailedCreateAndDeletedTaskRemoveTheirProgressEntries() throws {
+        var reducer = RunProgressReducer()
+        _ = reducer.apply(
+            toolUseID: "create-1",
+            tool: .taskCreate,
+            input: ["subject": "Temporary"]
+        )
+        XCTAssertNil(try changedProgress(reducer.apply(result: ToolResult(
+            toolUseID: "create-1",
+            text: "Could not create task",
+            isError: true
+        ))))
+
+        _ = reducer.apply(
+            toolUseID: "update-unknown",
+            tool: .taskUpdate,
+            input: ["taskId": "7", "status": "in_progress", "subject": "Recovered"]
+        )
+        XCTAssertNil(try changedProgress(reducer.apply(
+            toolUseID: "delete-7",
+            tool: .taskUpdate,
+            input: ["taskId": "7", "status": "deleted"]
+        )))
+    }
+
+    func testParallelClaudeTasksUseCountsInsteadOfInventingALinearStep() throws {
+        var reducer = RunProgressReducer()
+        _ = reducer.apply(
+            toolUseID: "update-1",
+            tool: .taskUpdate,
+            input: ["taskId": "1", "status": "in_progress", "subject": "Audit"]
+        )
+        let progress = try XCTUnwrap(try changedProgress(reducer.apply(
+            toolUseID: "update-2",
+            tool: .taskUpdate,
+            input: ["taskId": "2", "status": "in_progress", "subject": "Test"]
+        )))
+
+        XCTAssertNil(progress.step)
+        XCTAssertEqual(progress.label, "0 / 2 done · 2 active")
+    }
+
+    // MARK: - Context Meter
+
+    func testContextReadsAsAPercentageOnlyWhenTheWindowIsKnown() {
+        // Codex states its window; Claude does not, and inventing one per model name is how
+        // t3code earned its wrong-context-math bug (#2034). Absolute tokens are honest.
+        XCTAssertEqual(TurnStatusText.context(tokens: 108_291, window: 258_400), "42% context")
+        XCTAssertEqual(TurnStatusText.context(tokens: 216_000, window: nil), "216k context")
+        XCTAssertEqual(TurnStatusText.context(tokens: 950, window: nil), "950 context")
+    }
+
+    func testContextNeverReadsPastFull() {
+        // A reading past the window is the accounting drifting, not a number to show.
+        XCTAssertEqual(TurnStatusText.context(tokens: 300_000, window: 258_400), "100% context")
+    }
+
+    func testContextWarnsPastNinetyPercent() {
+        XCTAssertTrue(TurnStatusText.contextIsNearlyFull(tokens: 233_000, window: 258_400))
+        XCTAssertFalse(TurnStatusText.contextIsNearlyFull(tokens: 200_000, window: 258_400))
+        // With no window there is no fraction to warn about.
+        XCTAssertFalse(TurnStatusText.contextIsNearlyFull(tokens: 999_999, window: nil))
+    }
+
+    private func changedProgress(_ update: RunProgressReducer.Update) throws -> RunProgress? {
+        guard case .changed(let progress) = update else {
+            throw ProgressTestError.unchanged
+        }
+        return progress
+    }
+
+    private enum ProgressTestError: Error {
+        case unchanged
+    }
 }

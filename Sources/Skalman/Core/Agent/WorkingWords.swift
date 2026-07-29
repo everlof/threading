@@ -8,11 +8,10 @@ import Foundation
 /// draws a new word, which is where the variety belongs — between turns, not within one.
 ///
 /// This also settles an asymmetry between the two transports. The status used to be raised by
-/// whatever each CLI happened to report: Claude streams reasoning deltas and so flipped to
-/// "Thinking…" almost immediately, while `codex exec --json` emits reasoning only as a
-/// finished block and so sat on "Working…" for the whole turn. The same wait was described
-/// two different ways for no reason a user could see. A word chosen at submit is transport
-/// independent by construction — neither CLI is asked.
+/// whatever each CLI happened to report: a transport streaming reasoning deltas flipped to
+/// "Thinking…" immediately while one reporting only finished reasoning stayed on "Working…".
+/// The same wait was described two different ways for no reason a user could see. A word chosen
+/// at submit is transport independent by construction — neither CLI is asked.
 enum WorkingWords {
 
     /// Twenty of them, so a working session does not repeat itself within a sitting.
@@ -125,6 +124,24 @@ enum TurnStatusText {
         return "Ready · last turn \(details.joined(separator: " · "))"
     }
 
+    /// Past this share of the window, the context reading changes voice — t3code paints its
+    /// donut red past 90%, and the number is the same warning here.
+    static let contextWarningFraction = 0.9
+
+    /// The context meter's text: a percentage where the provider states the window (Codex),
+    /// an absolute count where it does not (Claude). Never over 100 — a reading past the
+    /// window is the accounting drifting, not a number a user can act on.
+    static func context(tokens: Int, window: Int?) -> String {
+        guard let window, window > 0 else { return "\(tokenCount(tokens)) context" }
+        let percent = min(100, Int((Double(tokens) / Double(window) * 100).rounded()))
+        return "\(percent)% context"
+    }
+
+    static func contextIsNearlyFull(tokens: Int, window: Int?) -> Bool {
+        guard let window, window > 0 else { return false }
+        return Double(tokens) / Double(window) >= contextWarningFraction
+    }
+
     static func duration(_ interval: TimeInterval) -> String {
         let total = max(0, Int(interval.rounded(.down)))
         let hours = total / 3_600
@@ -163,45 +180,305 @@ enum TurnStatusText {
 
 /// A provider-neutral position inside the plan an agent reports while a turn is running.
 ///
-/// Codex calls this `update_plan` and Claude's older vocabulary calls it `TodoWrite`; both carry
-/// a complete ordered list on every update. Reducing that list here keeps provider argument
-/// shapes out of the view and makes "Step n / total" one fact rather than display-time inference.
+/// Codex reports complete ordered snapshots. Claude can do the same through `TodoWrite`, while
+/// current releases build a task list incrementally with `TaskCreate` and `TaskUpdate`.
+/// `RunProgressReducer` reconciles those wire shapes; this value is only their presentation.
 struct RunProgress: Equatable {
-    let step: Int
+    struct Step: Equatable {
+        enum Status: Equatable {
+            case pending
+            case inProgress
+            case completed
+
+            init?(providerValue: String) {
+                switch providerValue {
+                case "pending":
+                    self = .pending
+                case "inProgress", "in_progress":
+                    self = .inProgress
+                case "completed":
+                    self = .completed
+                default:
+                    return nil
+                }
+            }
+        }
+
+        let id: String?
+        let title: String
+        let status: Status
+    }
+
+    private enum Presentation: Equatable {
+        case step(Int)
+        case tasks(completed: Int, active: Int)
+    }
+
+    private let presentation: Presentation
     let total: Int
 
+    var step: Int? {
+        guard case .step(let value) = presentation else { return nil }
+        return value
+    }
+
     var label: String {
-        L10n.format("Step %lld / %lld", Int64(step), Int64(total))
+        switch presentation {
+        case .step(let step):
+            return L10n.format(
+                "Step %lld / %lld",
+                Int64(step),
+                Int64(total)
+            )
+        case .tasks(let completed, let active):
+            let activeLabel = active == 1
+                ? L10n.string("1 active")
+                : L10n.format("%lld active", Int64(active))
+            return L10n.format(
+                "%lld / %lld done · %@",
+                Int64(completed),
+                Int64(total),
+                activeLabel
+            )
+        }
     }
 
     init(step: Int, total: Int) {
-        self.step = step
+        let total = max(1, total)
+        self.presentation = .step(min(max(1, step), total))
         self.total = total
     }
 
+    init(completed: Int, active: Int, total: Int) {
+        self.presentation = .tasks(
+            completed: min(max(0, completed), max(0, total)),
+            active: max(0, active)
+        )
+        self.total = max(0, total)
+    }
+
+    init?(steps: [Step]) {
+        guard !steps.isEmpty else { return nil }
+
+        let activeIndices = steps.indices.filter { steps[$0].status == .inProgress }
+        if activeIndices.count > 1 {
+            self.init(
+                completed: steps.count { $0.status == .completed },
+                active: activeIndices.count,
+                total: steps.count
+            )
+            return
+        }
+
+        let next = activeIndices.first
+            ?? steps.firstIndex { $0.status != .completed }
+            ?? (steps.count - 1)
+        self.init(step: next + 1, total: steps.count)
+    }
+
     init?(tool: ToolIdentity, input: [String: Any]) {
+        guard let steps = Self.steps(tool: tool, input: input), !steps.isEmpty else {
+            return nil
+        }
+        self.init(steps: steps)
+    }
+
+    static func steps(tool: ToolIdentity, input: [String: Any]) -> [Step]? {
         let items: [[String: Any]]
+        let titleKey: String
         switch tool {
         case .plan:
-            items = input["plan"] as? [[String: Any]] ?? []
+            guard let plan = input["plan"] as? [[String: Any]] else { return nil }
+            items = plan
+            titleKey = "step"
         case .todoWrite:
-            items = input["todos"] as? [[String: Any]] ?? []
+            guard let todos = input["todos"] as? [[String: Any]] else { return nil }
+            items = todos
+            titleKey = "content"
         default:
             return nil
         }
 
-        guard !items.isEmpty else { return nil }
-
-        let activeIndex = items.firstIndex {
-            ($0["status"] as? String) == "in_progress"
+        var steps: [Step] = []
+        steps.reserveCapacity(items.count)
+        for (index, item) in items.enumerated() {
+            guard let statusValue = item["status"] as? String,
+                  let status = Step.Status(providerValue: statusValue) else {
+                return nil
+            }
+            let title = (item[titleKey] as? String)
+                ?? (item["activeForm"] as? String)
+                ?? "Step \(index + 1)"
+            steps.append(Step(
+                id: item["id"] as? String,
+                title: title,
+                status: status
+            ))
         }
-        let nextIndex = items.firstIndex {
-            ($0["status"] as? String) != "completed"
+        return steps
+    }
+}
+
+/// Reconstructs the current run plan from both snapshot and incremental provider events.
+///
+/// Claude's own 2.1.220 client follows the same lifecycle: a `TaskCreate` is held by tool-use
+/// id until its result returns `Task #<id> created successfully`, then later `TaskUpdate`
+/// calls mutate or delete that stable id. Mirroring that state machine is more reliable than
+/// parsing the prose Claude draws around its checklist and works unchanged during JSONL replay.
+struct RunProgressReducer {
+    enum Update {
+        case unchanged
+        case changed(RunProgress?)
+    }
+
+    private var tasks: [String: RunProgress.Step] = [:]
+    private var order: [String] = []
+    private var pendingTaskKeyByToolUseID: [String: String] = [:]
+
+    mutating func apply(plan steps: [RunProgress.Step]) -> Update {
+        replace(with: steps)
+        return .changed(progress)
+    }
+
+    mutating func apply(
+        toolUseID: String,
+        tool: ToolIdentity,
+        input: [String: Any]
+    ) -> Update {
+        if let steps = RunProgress.steps(tool: tool, input: input) {
+            replace(with: steps)
+            return .changed(progress)
         }
 
-        self.init(
-            step: (activeIndex ?? nextIndex ?? (items.count - 1)) + 1,
-            total: items.count
-        )
+        switch tool {
+        case .taskCreate:
+            guard let title = nonEmpty(input["subject"] as? String)
+                    ?? nonEmpty(input["activeForm"] as? String) else {
+                return .unchanged
+            }
+            let key = "pending:\(toolUseID)"
+            let step = RunProgress.Step(id: nil, title: title, status: .pending)
+            if tasks[key] == nil { order.append(key) }
+            tasks[key] = step
+            pendingTaskKeyByToolUseID[toolUseID] = key
+            return .changed(progress)
+
+        case .taskUpdate:
+            guard let taskID = taskID(in: input) else { return .unchanged }
+            let key = "task:\(taskID)"
+            let statusValue = input["status"] as? String
+
+            if statusValue == "deleted" {
+                remove(key)
+                return .changed(progress)
+            }
+
+            let existing = tasks[key]
+            let status = statusValue.flatMap(RunProgress.Step.Status.init(providerValue:))
+                ?? existing?.status
+                ?? .pending
+            let title = nonEmpty(input["subject"] as? String)
+                ?? nonEmpty(input["activeForm"] as? String)
+                ?? existing?.title
+                ?? taskID
+
+            if existing == nil { order.append(key) }
+            tasks[key] = RunProgress.Step(id: taskID, title: title, status: status)
+            return .changed(progress)
+
+        default:
+            return .unchanged
+        }
+    }
+
+    mutating func apply(result: ToolResult) -> Update {
+        guard let pendingKey = pendingTaskKeyByToolUseID[result.toolUseID] else {
+            return .unchanged
+        }
+
+        if result.isError {
+            pendingTaskKeyByToolUseID.removeValue(forKey: result.toolUseID)
+            remove(pendingKey)
+            return .changed(progress)
+        }
+
+        guard let taskID = Self.createdTaskID(in: result.text),
+              let pending = tasks[pendingKey] else {
+            return .unchanged
+        }
+
+        pendingTaskKeyByToolUseID.removeValue(forKey: result.toolUseID)
+        let stableKey = "task:\(taskID)"
+        if let existing = tasks[stableKey] {
+            tasks[stableKey] = RunProgress.Step(
+                id: taskID,
+                title: existing.title == taskID ? pending.title : existing.title,
+                status: existing.status
+            )
+            remove(pendingKey)
+        } else {
+            tasks.removeValue(forKey: pendingKey)
+            tasks[stableKey] = RunProgress.Step(
+                id: taskID,
+                title: pending.title,
+                status: pending.status
+            )
+            if let index = order.firstIndex(of: pendingKey) {
+                order[index] = stableKey
+            } else {
+                order.append(stableKey)
+            }
+        }
+        return .changed(progress)
+    }
+
+    private var progress: RunProgress? {
+        RunProgress(steps: order.compactMap { tasks[$0] })
+    }
+
+    private mutating func replace(with steps: [RunProgress.Step]) {
+        tasks.removeAll(keepingCapacity: true)
+        order.removeAll(keepingCapacity: true)
+        pendingTaskKeyByToolUseID.removeAll(keepingCapacity: true)
+
+        for (index, step) in steps.enumerated() {
+            let base = step.id.map { "task:\($0)" } ?? "snapshot:\(index)"
+            var key = base
+            var duplicate = 2
+            while tasks[key] != nil {
+                key = "\(base):\(duplicate)"
+                duplicate += 1
+            }
+            tasks[key] = step
+            order.append(key)
+        }
+    }
+
+    private mutating func remove(_ key: String) {
+        tasks.removeValue(forKey: key)
+        order.removeAll { $0 == key }
+    }
+
+    private func taskID(in input: [String: Any]) -> String? {
+        nonEmpty(input["taskId"] as? String)
+            ?? nonEmpty(input["task_id"] as? String)
+            ?? nonEmpty(input["id"] as? String)
+    }
+
+    private func nonEmpty(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
+    }
+
+    private static func createdTaskID(in text: String) -> String? {
+        let prefix = "Task #"
+        guard text.hasPrefix(prefix),
+              let suffix = text.range(
+                  of: " created successfully",
+                  range: text.index(text.startIndex, offsetBy: prefix.count)..<text.endIndex
+              ) else { return nil }
+        let id = text[text.index(text.startIndex, offsetBy: prefix.count)..<suffix.lowerBound]
+        return id.isEmpty ? nil : String(id)
     }
 }

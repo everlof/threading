@@ -170,28 +170,43 @@ final class ToolCallView: NSView {
 
     // MARK: - Public Methods
 
-    /// Attaches the result once the tool has run.
-    func setResult(_ text: String, isError: Bool) {
-        let label = ToolGlyph.forTool(tool).label
-        let tint: NSColor = isError ? Design.Status.negative : Design.Text.secondary
+    /// Attaches the result once the tool has run — or marks the row stopped when the turn
+    /// ended around a call that never reported back.
+    ///
+    /// Failure overrides the identity glyph with a destructive `✗`: the title still names the
+    /// tool, and a row that went wrong is the one place per-row ink is relevant rather than
+    /// noise. Success stays quiet — twenty check marks down a working turn would be exactly
+    /// the slab-ink the resting-fill rule was written against.
+    func setResult(_ text: String, outcome: ToolOutcome) {
+        if outcome == .interrupted {
+            metaLabel.stringValue = L10n.string("stopped")
+            return
+        }
+
+        let failed = outcome == .failed
+        let style = ToolGlyph.forTool(tool)
+        let tint: NSColor = failed ? Design.Status.negative : Design.Text.secondary
+        glyphLabel.stringValue = failed ? ToolGlyph.failureSymbol : style.symbol
         glyphLabel.textColor = tint
         titleLabel.textColor = tint
-        titleLabel.stringValue = isError ? L10n.format("%@ · failed", label) : label
+        titleLabel.stringValue = failed
+            ? L10n.format("%@ · failed", style.label)
+            : style.label
 
         // An edit already shows its diff and its `+/−` line; the result only settles whether
         // the change landed. A plain tool instead reveals its output here.
         if diffLines != nil {
-            if isError { metaLabel.stringValue = L10n.string("failed") }
+            if failed { metaLabel.stringValue = L10n.string("failed") }
             return
         }
 
         textBody?.stringValue = text
-        textBody?.textColor = isError ? Design.Status.negative : Design.Text.secondary
+        textBody?.textColor = failed ? Design.Status.negative : Design.Text.secondary
 
         let hasText = !text.isEmpty
         metaLabel.stringValue = hasText
             ? sizeSummary(text)
-            : (isError ? L10n.string("failed") : L10n.string("done"))
+            : (failed ? L10n.string("failed") : L10n.string("done"))
         if hasText { enableExpansion() }
     }
 
@@ -275,6 +290,11 @@ enum ToolGlyph {
         let label: String
     }
 
+    /// Overrides the identity glyph when a call fails — t3code's destructive-✗ cascade. `✓`
+    /// is not its counterpart here: it already means Todo in this column, and success stays
+    /// quiet anyway.
+    static let failureSymbol = "✗"
+
     static func forTool(_ name: String) -> Style {
         forTool(ToolIdentity(name))
     }
@@ -301,8 +321,10 @@ enum ToolGlyph {
             return Style(symbol: "◈", label: "Search")
         case .task:
             return Style(symbol: "⌘", label: "Task")
-        case .todoWrite:
+        case .todoWrite, .taskCreate, .taskUpdate:
             return Style(symbol: "✓", label: "Todo")
+        case .taskList, .taskGet:
+            return Style(symbol: "•", label: tool.rawName)
         case .mcp(let name):
             return Style(symbol: "◇", label: name.components(separatedBy: "__").last ?? name)
         case .notebookEdit, .notebookRead, .todoRead, .toolSearch, .plan:

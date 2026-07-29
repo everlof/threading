@@ -186,4 +186,5 @@ enum MarkdownDefaults {
     static let listIndent: CGFloat = 18
     static let blockSpacing: CGFloat = 6
     static let quoteBarWidth: CGFloat = 2
+    static let tableColumnWidth: CGFloat = 180
 }

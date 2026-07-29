@@ -67,13 +67,68 @@ enum JSONLReader {
         if !buffer.isEmpty { _ = handle(buffer) }
     }
 
+    /// Reads the last complete JSON object without walking the whole file.
+    ///
+    /// Subagent history uses this to distinguish a child that reached `end_turn` from one whose
+    /// process stopped mid-tool. The read grows backwards until it finds the preceding newline,
+    /// so even an unusually large final record is never truncated at a guessed byte cap.
+    static func lastRecord(at url: URL) -> [String: Any]? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? file.close() }
+
+        guard let fileSize = try? file.seekToEnd(), fileSize > 0 else { return nil }
+
+        var offset = fileSize
+        var buffer = Data()
+        let newline = UInt8(ascii: "\n")
+
+        while offset > 0 {
+            let count = min(UInt64(JSONLDefaults.chunkBytes), offset)
+            offset -= count
+
+            do {
+                try file.seek(toOffset: offset)
+                guard let chunk = try file.read(upToCount: Int(count)), !chunk.isEmpty else {
+                    return nil
+                }
+                buffer.insert(contentsOf: chunk, at: buffer.startIndex)
+            } catch {
+                return nil
+            }
+
+            var logicalEnd = buffer.endIndex
+            while logicalEnd > buffer.startIndex,
+                  buffer[buffer.index(before: logicalEnd)] == newline {
+                logicalEnd = buffer.index(before: logicalEnd)
+            }
+            guard logicalEnd > buffer.startIndex else { continue }
+
+            if let delimiter = buffer[buffer.startIndex..<logicalEnd].lastIndex(of: newline) {
+                let line = buffer[buffer.index(after: delimiter)..<logicalEnd]
+                return dictionary(from: line)
+            }
+
+            if offset == 0 {
+                return dictionary(from: buffer[buffer.startIndex..<logicalEnd])
+            }
+        }
+
+        return nil
+    }
+
     /// Parses one line and passes it on, reporting whether reading should continue.
     private static func deliver(_ line: Data, to handle: ([String: Any]) -> Bool) -> Bool {
-        guard !line.isEmpty,
-              let record = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
-        else { return true }
+        guard let record = dictionary(from: line) else { return true }
 
         return handle(record)
+    }
+
+    private static func dictionary<T: DataProtocol>(from line: T) -> [String: Any]? {
+        guard !line.isEmpty,
+              let object = try? JSONSerialization.jsonObject(with: Data(line)) else {
+            return nil
+        }
+        return object as? [String: Any]
     }
 }
 

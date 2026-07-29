@@ -32,6 +32,22 @@ class ThemedClipView: NSClipView, ThemedComponent {
 /// buy drift from that behaviour with nothing gained.
 class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
 
+    /// Hands vertical-dominant gestures to the nearest enclosing scroll view.
+    ///
+    /// Opt this in for a nested, horizontal-only viewport such as a Markdown code block. AppKit
+    /// otherwise sends the whole trackpad gesture to the view beneath the pointer, even when
+    /// that view has no vertical range, which makes the surrounding conversation appear stuck.
+    /// Horizontal-dominant gestures remain local.
+    var forwardsVerticalScrollToAncestor = false
+
+    /// Reports a wheel or trackpad event before it scrolls, momentum included.
+    ///
+    /// This is how a caller tells the user's hand from its own `setBoundsOrigin`: AppKit
+    /// routes only real gestures through here, so no generation counter is needed to keep
+    /// programmatic scrolls from being mistaken for the user leaving. Scroller-thumb drags
+    /// never pass through `scrollWheel` — watch the live-scroll notifications for those.
+    var onUserScroll: (() -> Void)?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         drawsBackground = false
@@ -41,6 +57,29 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if forwardsVerticalScrollToAncestor,
+           abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
+           let ancestorScrollView {
+            ancestorScrollView.scrollWheel(with: event)
+            return
+        }
+
+        onUserScroll?()
+        super.scrollWheel(with: event)
+    }
+
+    private var ancestorScrollView: NSScrollView? {
+        var ancestor = superview
+        while let current = ancestor {
+            if let scrollView = current as? NSScrollView {
+                return scrollView
+            }
+            ancestor = current.superview
+        }
+        return nil
     }
 
     /// A table with a header makes AppKit insert a second clip view beside `contentView`.

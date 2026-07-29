@@ -282,6 +282,179 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertTrue(spinner.isHidden)
     }
 
+    // MARK: - The Two Attention Marks
+
+    /// The mark, whichever it is. It is the one subview that is not the spinner.
+    private func mark(of indicator: SessionStatusIndicator) throws -> NSView {
+        try XCTUnwrap(indicator.subviews.first { !($0 is ThemedSpinner) })
+    }
+
+    /// Resolves a token the way `applySurface` does, so a comparison is between two colours
+    /// settled in the same appearance rather than across two.
+    private func resolved(_ colour: NSColor, in view: NSView) -> CGColor {
+        var result: CGColor?
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            result = colour.cgColor
+        }
+        return result ?? colour.cgColor
+    }
+
+    /// A session blocked on a question has stopped until it is answered, so it takes the loud
+    /// mark: filled, in the warning role.
+    func testABlockedSessionTakesTheFilledWarningDot() throws {
+        let indicator = SessionStatusIndicator()
+        let dot = try mark(of: indicator)
+
+        indicator.update(for: .awaitingUser)
+
+        XCTAssertFalse(dot.isHidden)
+        XCTAssertEqual(dot.layer?.backgroundColor, resolved(Design.Status.warning, in: dot))
+        XCTAssertEqual(dot.layer?.borderWidth, 0, "a filled mark carries no ring")
+        XCTAssertEqual(dot.accessibilityLabel(), "Session waiting for an answer")
+    }
+
+    /// A turn that ended unseen is unread, not stuck, so it takes the quiet one: a hollow ring
+    /// in the accent.
+    func testAFinishedSessionTakesTheHollowAccentRing() throws {
+        let indicator = SessionStatusIndicator()
+        let dot = try mark(of: indicator)
+
+        indicator.update(for: .needsAttention)
+
+        XCTAssertFalse(dot.isHidden)
+        XCTAssertEqual(
+            dot.layer?.backgroundColor?.alpha,
+            0,
+            "a hollow mark is a ring around nothing"
+        )
+        XCTAssertGreaterThan(try XCTUnwrap(dot.layer?.borderWidth), 0)
+        XCTAssertEqual(dot.layer?.borderColor, resolved(Design.Surface.accent, in: dot))
+        XCTAssertEqual(dot.accessibilityLabel(), "Session needs attention")
+    }
+
+    /// Filled versus hollow is what carries the distinction where colour cannot — the two must
+    /// differ in ink at the centre, not only in hue.
+    func testTheTwoMarksDifferInShapeRatherThanOnlyInColour() throws {
+        func centreAlpha(for activity: SessionActivity) throws -> CGFloat {
+            let indicator = SessionStatusIndicator()
+            indicator.frame = NSRect(x: 0, y: 0, width: 12, height: 12)
+            indicator.update(for: activity)
+            indicator.layoutSubtreeIfNeeded()
+
+            let dot = try mark(of: indicator)
+            let layer = try XCTUnwrap(dot.layer)
+            let size = 8
+            let context = try XCTUnwrap(CGContext(
+                data: nil,
+                width: size,
+                height: size,
+                bitsPerComponent: 8,
+                bytesPerRow: size * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.scaleBy(
+                x: CGFloat(size) / max(layer.bounds.width, 1),
+                y: CGFloat(size) / max(layer.bounds.height, 1)
+            )
+            layer.render(in: context)
+
+            let pixels = try XCTUnwrap(context.data)
+            let centre = (size / 2) * size * 4 + (size / 2) * 4
+            return CGFloat(pixels.load(fromByteOffset: centre + 3, as: UInt8.self)) / 255
+        }
+
+        XCTAssertGreaterThan(try centreAlpha(for: .awaitingUser), 0.5, "filled: ink at the centre")
+        XCTAssertLessThan(try centreAlpha(for: .needsAttention), 0.5, "hollow: a hole at the centre")
+    }
+
+    /// The mark changes style under a row that is already showing one — the session was blocked,
+    /// was answered, worked on and then finished — so the surface has to be laid down again.
+    func testTheMarkRestylesWithoutBeingRebuilt() throws {
+        let indicator = SessionStatusIndicator()
+        let dot = try mark(of: indicator)
+
+        indicator.update(for: .awaitingUser)
+        indicator.update(for: .working)
+        indicator.update(for: .needsAttention)
+
+        XCTAssertEqual(dot.layer?.backgroundColor?.alpha, 0, "the filled fill must not survive")
+        XCTAssertGreaterThan(try XCTUnwrap(dot.layer?.borderWidth), 0)
+    }
+
+    /// Draws the four states as the sidebar actually stacks them, light and dark.
+    ///
+    /// The assertions above pin the two marks apart; this is what says whether they read apart —
+    /// a 6pt ring and a 6pt dot at the end of a row is exactly the size where a distinction can
+    /// be true and invisible.
+    func testRendersTheStatusMarkStorybook() throws {
+        let directory: URL = {
+            if let override = ProcessInfo.processInfo.environment["SKALMAN_RENDER_OUT"] {
+                return URL(fileURLWithPath: override)
+            }
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("SkalmanRenders", isDirectory: true)
+        }()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let states: [(String, SessionActivity)] = [
+            ("Working on the thing", .working),
+            ("Asked you a question", .awaitingUser),
+            ("Finished while you were away", .needsAttention),
+            ("Waiting at its prompt", .idle)
+        ]
+
+        var written = 0
+        for (appearanceName, appearanceID) in [("light", NSAppearance.Name.aqua),
+                                               ("dark", NSAppearance.Name.darkAqua)] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceID))
+            var data: Data?
+
+            appearance.performAsCurrentDrawingAppearance {
+                MainActor.assumeIsolated {
+                    let host = NSView(frame: NSRect(
+                        x: 0,
+                        y: 0,
+                        width: SidebarDefaults.defaultWidth,
+                        height: CGFloat(states.count) * SidebarDefaults.rowHeight
+                    ))
+                    host.appearance = appearance
+                    host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+
+                    for (index, state) in states.enumerated() {
+                        let row = SessionRowView()
+                        row.frame = NSRect(
+                            x: 0,
+                            y: CGFloat(states.count - 1 - index) * SidebarDefaults.rowHeight,
+                            width: host.bounds.width,
+                            height: SidebarDefaults.rowHeight
+                        )
+                        row.configure(
+                            with: AgentSession(kind: .claude, title: state.0),
+                            activity: state.1
+                        )
+                        host.addSubview(row)
+                    }
+
+                    host.layoutSubtreeIfNeeded()
+                    guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                        return
+                    }
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    data = rep.representation(using: .png, properties: [:])
+                }
+            }
+
+            try XCTUnwrap(data).write(
+                to: directory.appendingPathComponent("session-status-\(appearanceName).png")
+            )
+            written += 1
+        }
+
+        XCTAssertEqual(written, 2)
+        print("Rendered session status marks to \(directory.path)")
+    }
+
     func testGitStatusCardBecomesALiveRunReceipt() {
         let card = GitStatusOverlayView()
         card.update(with: GitChangeMonitor.Reading(
@@ -301,6 +474,20 @@ final class ThemedIndicatorsTests: XCTestCase {
             "Step 2 / 4  ·  2 files changed +35 −1"
         )
 
+        card.updateRunState(
+            isActive: true,
+            progress: RunProgress(completed: 1, active: 2, total: 4)
+        )
+        XCTAssertEqual(
+            card.accessibilityLabel(),
+            "1 / 4 done · 2 active  ·  2 files changed +35 −1"
+        )
+
+        card.updateRunState(
+            isActive: true,
+            progress: RunProgress(step: 2, total: 4)
+        )
+
         // A checkout reading and a plan update are independent streams. Either one must rebuild
         // the receipt immediately without restarting or replacing the other.
         card.update(with: GitChangeMonitor.Reading(
@@ -318,6 +505,33 @@ final class ThemedIndicatorsTests: XCTestCase {
             card.accessibilityLabel(),
             "feature/progress  +\(8_349.formatted()) −\(4_742.formatted())"
         )
+    }
+
+    func testGitStatusCardCarriesASeparateSubagentDestination() throws {
+        let card = GitStatusOverlayView()
+        var openedSubagents = 0
+        card.onOpenSubagents = { openedSubagents += 1 }
+
+        card.updateSubagents(workingCount: 2, doneCount: 3)
+        XCTAssertFalse(card.isHidden, "Subagents should retain the corner card without Git data")
+
+        let button = try XCTUnwrap(
+            card.subviews
+                .compactMap { $0 as? NSStackView }
+                .flatMap(\.arrangedSubviews)
+                .compactMap { $0 as? ThemedButton }
+                .first { $0.title == "2 working · 3 done" }
+        )
+        XCTAssertEqual(button.accessibilityTitle(), "2 working · 3 done")
+        XCTAssertEqual(button.accessibilityHelp(), "Open Subagents")
+        _ = button.sendAction(button.action, to: button.target)
+        XCTAssertEqual(openedSubagents, 1)
+
+        card.updateSubagents(workingCount: 0, doneCount: 3)
+        XCTAssertEqual(button.title, "3 done")
+
+        card.updateSubagents(workingCount: 0, doneCount: 0)
+        XCTAssertTrue(card.isHidden)
     }
 
     func testRunReceiptRendersUnderSystemAndContrastingThemes() throws {
@@ -394,6 +608,62 @@ final class ThemedIndicatorsTests: XCTestCase {
         }
     }
 
+    /// The branch mark and the branch name have to sit on one line, and the pair has to sit in
+    /// the middle of the pill. Neither held: `NSTextField.label(attributed:)` left the field on
+    /// AppKit's 13pt default, and a single-line field draws on the *field's* baseline, so 11pt
+    /// runs landed a little over two points below the baseline the field itself reported. The
+    /// words sat low in the card and the mark, centred on the same box, read high beside them.
+    ///
+    /// Measured on the drawing, because the constraints were right the whole time.
+    func testTheGitCardsMarkAndItsWordsShareOneOpticalLine() throws {
+        let card = GitStatusOverlayView()
+        // Capitals only: the ink box of `MASTER` is exactly the cap band, so its centre can be
+        // compared with the mark's without a descender dragging the measurement down.
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "MASTER",
+            summary: GitChangeSummary(files: 2, added: 35, removed: 1)
+        ))
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 60))
+        host.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            card.centerYAnchor.constraint(equalTo: host.centerYAnchor)
+        ])
+        card.applyInk(WindowBackdrop.ink)
+        host.layoutSubtreeIfNeeded()
+
+        let stack = try XCTUnwrap(card.subviews.compactMap { $0 as? NSStackView }.first)
+        let mark = try XCTUnwrap(stack.arrangedSubviews.compactMap { $0 as? NSImageView }.first)
+        let words = try XCTUnwrap(stack.arrangedSubviews.compactMap { $0 as? NSTextField }.first)
+
+        let ink = try RenderedInk(of: card, scale: 8)
+        let fill = try XCTUnwrap(card.layer?.backgroundColor.flatMap(NSColor.init(cgColor:)))
+        // Only the band between the pill's ends, so neither border nor corner counts as ink.
+        let band = Design.Radius.border * 2 ... card.bounds.height - Design.Radius.border * 2
+
+        let markInk = try XCTUnwrap(
+            ink.rows(from: mark.frame.minX, to: mark.frame.maxX, within: band, unlike: fill),
+            "the branch mark drew nothing"
+        )
+        // The leading half of the label, which is the branch name rather than the counters.
+        let wordsInk = try XCTUnwrap(
+            ink.rows(
+                from: words.frame.minX,
+                to: words.frame.minX + words.frame.width / 2,
+                within: band,
+                unlike: fill
+            ),
+            "the branch name drew nothing"
+        )
+
+        XCTAssertEqual(markInk.middle, wordsInk.middle, accuracy: 0.75,
+                       "the mark and the name are drawn on different lines")
+        for (name, drawn) in [("mark", markInk), ("name", wordsInk)] {
+            XCTAssertEqual(drawn.middle, card.bounds.height / 2, accuracy: 0.75,
+                           "the \(name) sits off the centre of the pill it is in")
+        }
+    }
+
     /// Hover lifts what the card *says*, not the card. The distinction is the whole fix: an
     /// alpha on the view is a hole in it.
     func testGitCardHoverLiftsItsContentsAndLeavesTheSurfaceOpaque() throws {
@@ -418,4 +688,80 @@ final class ThemedIndicatorsTests: XCTestCase {
                        GitStatusOverlayDefaults.restingContentAlpha,
                        accuracy: 0.001)
     }
+}
+
+// MARK: - Rendered Ink
+
+/// One view drawn at a magnification, so a measurement can be taken of what it *drew* rather
+/// than of the frames it was given. The distinction is the point: the git card's mark and its
+/// words were laid out on one centre line and drawn on two.
+private struct RenderedInk {
+
+    private let rep: NSBitmapImageRep
+    private let scale: CGFloat
+
+    @MainActor
+    init(of view: NSView, scale: Int) throws {
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(view.bounds.width) * scale,
+            pixelsHigh: Int(view.bounds.height) * scale,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), "the view has no drawable bounds")
+        // Point size on a pixel grid that is `scale` times denser, which is what makes a
+        // fraction-of-a-point misalignment measurable at all.
+        rep.size = view.bounds.size
+        view.cacheDisplay(in: view.bounds, to: rep)
+        self.rep = rep
+        self.scale = CGFloat(scale)
+    }
+
+    /// The rows carrying ink in a column band, in points **from the top** — the direction a
+    /// reader compares two things in, and the opposite of the view's own coordinates.
+    func rows(
+        from minX: CGFloat,
+        to maxX: CGFloat,
+        within band: ClosedRange<CGFloat>,
+        unlike fill: NSColor
+    ) -> ClosedRange<CGFloat>? {
+        var first: Int?
+        var last = 0
+        for y in Int(band.lowerBound * scale)..<Int(band.upperBound * scale) {
+            for x in Int(minX * scale)..<Int(maxX * scale)
+            where rep.colorAt(x: x, y: y)?.isInk(over: fill) == true {
+                if first == nil { first = y }
+                last = y
+                break
+            }
+        }
+        guard let first else { return nil }
+        return CGFloat(first) / scale ... CGFloat(last + 1) / scale
+    }
+}
+
+private extension NSColor {
+
+    /// Far enough from the surface behind it to be something drawn on it. The threshold clears
+    /// the antialiased skirt of a glyph without needing the ink's own colour, which here is
+    /// three different roles — a grey name, a green count, a red one.
+    func isInk(over fill: NSColor) -> Bool {
+        guard let ink = usingColorSpace(.sRGB), let ground = fill.usingColorSpace(.sRGB) else {
+            return false
+        }
+        return max(
+            abs(ink.redComponent - ground.redComponent),
+            abs(ink.greenComponent - ground.greenComponent),
+            abs(ink.blueComponent - ground.blueComponent)
+        ) > 0.08
+    }
+}
+
+private extension ClosedRange where Bound == CGFloat {
+    var middle: CGFloat { (lowerBound + upperBound) / 2 }
 }

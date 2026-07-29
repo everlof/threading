@@ -1,6 +1,7 @@
 # Session Activity
 
-Deriving dormant/idle/working/needsAttention, and the lifecycle hooks that replace the inference.
+Deriving dormant/idle/working/awaitingUser/needsAttention, and the lifecycle hooks that replace
+the inference.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -30,14 +31,29 @@ Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
 `DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
 
 **An agent that reports its own turns is believed instead.** All of the above is a proxy, and
-the guards exist because it cannot tell thinking from repainting. Claude's own hooks say so
-outright, so `AgentLauncher.claudeCommand` now writes a `--settings` file for *terminal*
-sessions too — lifecycle hooks only, no `PreToolUse`, because a terminal session raises the
-CLI's own permission prompt and intercepting it would replace a working prompt with a second
-one. `UserPromptSubmit`, `Stop`, `Notification` and `SessionStart` curl back to the listener
+the guards exist because it cannot tell thinking from repainting. When
+`AppSettings.reportsClaudeLifecycleEvents` is on, `AgentLauncher.claudeCommand` writes a
+per-session `--settings` file for *terminal* sessions too — lifecycle hooks only, no
+`PreToolUse`, because a terminal session raises the CLI's own permission prompt and intercepting
+it would replace a working prompt with a second one. `UserPromptSubmit`, `Stop`, `Notification`,
+`SessionStart`, `SubagentStart`, and
+`SubagentStop` curl back to the listener
 (`MCPDefaults.lifecyclePathPrefix`), and `HookLifecycleRelay` hands each report to the session's
 tracker. Verified end to end against CLI 2.1.217: the three ordinary events arrive in order,
 carrying the prompt text.
+
+Reporting is on by default to preserve the richer terminal state, but it is observational and
+optional. Off with no Remote Control override means no Claude settings file at all; off with an
+override writes that key without a `hooks` dictionary. Native Claude still writes `PreToolUse`
+because its headless process has no CLI approval prompt, but does not write lifecycle hooks. The
+native structured stream remains the source of turn and child state either way.
+
+The child pair does not drive `SessionActivityTracker`; it feeds the provider-neutral
+`SubagentSessionState`. Start supplies the child id/type, and Stop supplies its transcript path
+and last assistant message. Claude native deliberately ignores these hook child ids because its
+structured stream uses the spawning Agent tool-use id as the stable UI identity; mixing the two
+would create duplicate children. Claude terminal uses the hooks. Codex uses its child thread id
+in both app-server and hooks, so the hook can enrich either surface without a second row.
 
 Three things shape it, and each was wrong first or would have been:
 
@@ -55,9 +71,167 @@ Three things shape it, and each was wrong first or would have been:
   flicker between them. `markRunning` clears the latch, because the settings file is written per
   launch and can fail — a latched tracker with no reports coming would sit idle forever.
 
+**The turn and the question are separate facts, and collapsing them cost a whole run.** The
+tracker used to hold one enum and let each report assign the state it thought followed, which
+made `UserPromptSubmit` the *only* way back into `working`. But an agent asks for a permission
+inside a turn it goes on to finish: `Notification` arrives mid-turn, the row goes to
+`needsAttention`, the user answers — and nothing says `working` again until their next prompt.
+Worse, the natural response to an attention dot is to open the session, and opening it cleared
+the flag to `idle`, so the row went completely blank while the agent worked on. Found with three
+sessions showing no indicator at all while still appending to their own transcripts; the sidebar
+had been read as "the loader is broken", and the loader was fine.
+
+So `SessionActivityTracker` now keeps `turnInFlight`, `awaitsUser` and `isDormant`, and `settle()`
+is the single place that turns them into a `SessionActivity`. Three rules fall out of that:
+
+- **`awaitingUser` and a bell raise the flag without touching the turn.** Where nothing reports,
+  the bell still ends the inferred turn — it is the only boundary a shell has, and leaving the
+  turn open would strand it `working` with no quiet timer left to stop it.
+- **Being looked at lowers the flag and returns to the turn**, so a session asked-and-answered
+  mid-turn goes back to `working`, while one that genuinely finished off screen still goes `idle`.
+- **Output may lower the flag, and may do nothing else.** Answering in place raises no hook at
+  all, so a fresh burst inside a flagged turn is the only evidence the agent resumed. It is
+  admitted on screen only — off screen the flag is the one thing saying the session is waiting,
+  and nobody answers a prompt they are not looking at. It can never start or end a turn, which
+  is what keeps the latch's guarantee intact.
+
+**The same split is what lets the sidebar say *which* kind of attention a session wants.** The
+flag raised inside an open turn is `awaitingUser` — a turn stopped dead — and the same flag with
+the turn closed is `needsAttention`, a turn nobody has read. They cost the user different things,
+and with ten sessions in the list only one of them is worth interrupting yourself for. The
+distinction is free: it is the pair of facts `settle()` already holds. It also disambiguates a
+report that used to be unreadable — Claude raises `Notification` both for a permission prompt and
+once its prompt has sat idle a while, and the turn is what tells those apart.
+
+Three consequences worth knowing before changing any of it:
+
+- **The marks are ranked by what they cost, not by novelty.** Blocked is a filled dot in the
+  warning role; unread is a hollow accent ring. Filled-versus-hollow carries the meaning on its
+  own, so it survives Differentiate Without Colour — checked by rendering both and comparing the
+  ink at the centre, since a colour-only distinction passes every assertion you would think to
+  write about it.
+- **`GitTurnBaselineStore` had to learn the difference.** It captures the Last Turn baseline on
+  the edge into `working`, and answering a question mid-turn is now such an edge — re-baselining
+  there would silently drop everything the turn had already changed. It skips the edge out of
+  `awaitingUser`, which is the one that is a resumption rather than a start.
+- **Extensions still see one state.** `ExtensionSessionActivity` is a published vocabulary an
+  installed extension already switches on, so both map to `needs-attention` rather than handing
+  every extension a value it has no branch for.
+
+**A `Stop` is the end of a turn, not the end of the session — and the agent says which.** An
+agent that backgrounds a test run ends its turn at once ("queued; will report when it lands"),
+and the CLI wakes it a minute later by submitting the task's completion as a prompt of its own.
+Read as a finish, that `Stop` posted *Finished its turn* and dropped a completed mark on a
+session that then went on talking. Found in one transcript three times in six minutes — 11:07,
+11:09 and 11:12, each about 45 seconds ahead of the wake that followed it.
+
+The fact was already in the payload. Claude's `Stop` carries `background_tasks`, and the CLI's
+own description of the field is the reason it is read: it exists so a hook can tell *"session is
+done"* from *"session is paused waiting for background work to wake it"*. It lists shells,
+detached children, MCP monitors and workflows whose status is `running` or `pending`, and is an
+empty array when there are none — measured against 2.1.220 by ending a turn on top of a
+`sleep 45`. Codex 0.144.6 sends no such key, so its sessions read zero and behave as they did.
+
+`pausedOnOwnWork` is therefore a **fourth fact rather than a longer turn**, and the distinction
+is the one the split above already paid for: the turn is what a `Notification` is read against,
+so borrowing it here would make Claude's idle-prompt notice — which holds nothing up — arrive
+looking like a blocked turn. Two rules follow:
+
+- **It keeps the session out of `idle` without opening a turn.** `settle()` reports `working`,
+  because "still going" is what the sidebar has to say and there is no third mark worth
+  teaching every reader of `SessionActivity`.
+- **It suppresses the unread mark too, not just the notification.** A turn ended on top of its
+  own running work has said nothing for the user to read, so `noteTurnFinished` leaves
+  `awaitsUser` down even off screen.
+
+**Being in flight is not enough, and `BackgroundWorkLedger` is why.** The obvious rule — any
+in-flight work keeps the session out of `idle` — is right for a test run and wrong for a dev
+server: a process that lives for hours would hold *every* later turn open behind it and silence
+the session for as long as it ran. But "will this speak again" is true of everything in the
+list, because both CLIs wake a session when a background task ends, so it separates nothing.
+What separates them is **when the work appeared**:
+
+- Work the agent started **in the turn that just ended** is the reason that turn ended early.
+  That is the pause.
+- Work **carried over** from an earlier turn is parked. The turn really did hand back.
+
+So the ledger keeps the ids that were already in flight at the previous boundary, and only a
+boundary that brings something new pauses the session. Both surfaces carry identities rather
+than counts for exactly this — `background_tasks[].id` on the hook, `tasks[].task_id` on the
+stream — and both hold their own ledger, reset with the process. Traced against the transcript
+that started this: three consecutive turns each queued a *new* task, so all three paused
+correctly; a fourth turn with only the old task still running would not have.
+
+Classifying the command instead (`npm run dev` is long-lived, `npm test` is not) was the
+obvious alternative and is worse. It is a name-matching guess where an exact fact is already in
+the payload, it covers only `shell` tasks and not subagents or monitors, and being wrong in the
+long-lived direction re-opens the very bug this closes.
+
+What it still holds open is a turn that starts long-lived work and is never followed by another
+turn. Nothing further happens in that session to notify about, so what remains is a working
+mark beside a session that does in fact still have something running — which is what the CLI's
+own footer says for exactly as long.
+
+The native surface has the same bug and a better signal: the stream sends
+`system` / `background_tasks_changed` carrying the whole in-flight list on every change, so
+`ConversationViewController` holds a level rather than reconstructing one. It is recorded and
+deliberately **not** announced — work can only be backgrounded from inside a turn, so the rise
+never changes the activity, and the fall lands in the gap between a task finishing and the CLI
+waking the agent, where announcing it would post *Finished its turn* microseconds before the
+turn resumed. `noteTurnBoundary()` reads the level, and it is called on the status *edge* only:
+a status restated without one — a re-init, a model change — is not a boundary and must not
+spend the ledger's judgement on a turn that never ended.
+
 `--settings` **layers rather than replaces** (measured: with one `SessionStart` in the file, two
 `SessionStart` hooks fire — ours and the user's own), so this does not disable whatever the user
 already has wired into their agents.
+
+**The activity states also feed macOS notifications** (`AttentionAlerts.swift`), and the
+split above is what makes them worth having: `awaitingUser` posts with sound (a turn stopped
+dead), `needsAttention` posts silently (unread), and the *visible* session finishing while the
+app is inactive posts too — that case exists because the visible session settles to `idle`
+precisely so it needs no in-app flag, and a native conversation reports `idle` off screen as
+well. `AttentionAlertPolicy` is the pure judgement, tested as a matrix; `AttentionAlertCenter`
+owns delivery. Three rules keep it honest: the `.finished` alert is gated on
+`AgentRuntime.reportsOwnTurns` (a shell's working→idle is a quiet timer expiring, and
+notifying on each `ls` would bury the rest); banners are suppressed while the app is frontmost
+(`willPresent` returns nothing — in-app, the sidebar mark and the permission card are the
+cues); and every alert is withdrawn the moment it stops being true — the edge out of an
+attention state, the session coming on screen (`setVisibleSession` →
+`sessionWasViewed`), or the app coming back to the front over the visible session. Hygiene is
+half the feature. `start()` runs only from the real app startup, which is what keeps
+`UNUserNotificationCenter` and its permission prompt out of the test host.
+
+**Which of the three arrive is the user's, on four levels**, because the kinds are not equally
+welcome — being blocked is work stopping, a turn ending in the background is the chatty one —
+and one switch forces a choice between all of it and none of it. `notifiesOnAttention` stays
+the master, an outer gate rather than a fallback: it is what people reach for meaning "silence,
+all of it", so a per-session exception must not outlive it. Under it sit a toggle per
+`AttentionAlert` (stored as the *disabled* set, so a kind added later needs no defaults
+migration), the sound (separate from the banner it rides on — wanting to see that a turn is
+blocked without being pinged is a real answer), and `notificationsMuted` on the session and its
+project. Those two are `Bool?` for the reason the theme's are: **inherit has to be a state**, or
+a session inside a muted project offers an Unmute that does nothing. `AttentionAlertScope`
+resolves session → project → not muted; the row menus write `nil` where the answer already
+matches the project, so the session keeps *following* it. The judgement stays split: the
+policy reads the state edge, `AttentionAlertCenter.wants` reads the preferences, and an edge
+whose alert is unwanted **withdraws** rather than doing nothing — the notification already on
+screen described the old state either way. Muting is not a settings change, so the row menus
+call `preferencesChanged()` themselves: `ProjectStore` knows nothing about notifications and
+should not learn.
+
+**Clicking one opens its session through the sidebar**, on the same path as a local click —
+`SessionNotificationOpened` → `ProjectSidebarViewController.select`. That path fails *silently*
+by construction: a row that is not on screen has no index, `row(forItem:)` answers `-1`, and
+every guard along the way reads that as "nothing to do", so the app simply stays where it was.
+So the arrival has to open every level above the row first, and the chain is longer than the
+sidebar looks — repository heading, project, branch heading, and the session a **side chat**
+was forked from. That last level was missed, which meant a notification from a side chat the
+user had folded away switched to nothing at all. `SidebarTreeBuilder.ancestors(of:in:)` walks
+it, from the roots down rather than up from the row, because `NSOutlineView.parent(forItem:)`
+only answers for an item it has already been asked to display. Settings is the other way in
+from off screen: it replaces the session list entirely, so the arrival leaves it the way Back
+does.
 
 `Notification` is the one event with no Codex equivalent in 0.144.6, which is why
 `HookLifecycleEvent.codexEventName` is optional and pinned by a test.

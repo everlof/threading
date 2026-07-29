@@ -48,9 +48,22 @@ one of the selected choices in the row — when it is an action. One control, on
 which checkout does this session run in.
 
 A *session*, though, carries its own branch record (`AgentSession.branch`): captured at
-creation, re-read by `ProjectStore.refreshBranch` at the same stopped-working moment, and
-frozen while dormant — a conversation happened on whatever was checked out at the time, and
-that stays true after the checkout moves on. It drives the sidebar's **branch grouping**
+creation, re-read by `ProjectStore.refreshBranch` at the same stopped-working moment, and —
+by default — **followed while dormant**. The record froze while dormant once, on the argument
+that a conversation happened on whatever was checked out at the time; in practice the frozen
+answer misled about the thing the sidebar is for — a dormant session *resumes* onto whatever
+its checkout is on now, and after a switch in another session the chat sat grouped under a
+branch it would never run on again. `CheckoutBranchFollower` is the following: one
+branch-scoped `GitCheckoutWatcher` per unique checkout (keyed by `worktreeIdentity`, watching
+only the worktree's own `HEAD`, so builds and agent edits never wake it), applying a switch to
+every session standing in that checkout via `ProjectStore.refreshBranches(forCheckoutAt:)` —
+whether the mover was another session, the shell drawer, or a terminal outside Skalman.
+A detached reading is never applied on this path: a rebase detaches `HEAD` for seconds at a
+time, and clearing every record for the flicker would regroup the sidebar twice per rebase; a
+genuine detachment still lands per session at its own stopped-working moment. **Settings >
+General > "Follow the checkout's branch"** turns the following off and restores the frozen
+record, for whoever wants the sidebar to say where a conversation *happened* rather than
+where it would resume. The record drives the sidebar's **branch grouping**
 (`SidebarTreeBuilder`, `BranchGroupNode`): inside a project, sessions sharing a branch gather
 under a heading — the earns-its-level rule as repository grouping, applied one level down —
 and once *any* branch has earned the level, lone branches earn headings too
@@ -154,6 +167,19 @@ holds it in one place; `GitPatch` rebuilds a one-hunk patch from the parsed mode
 pane no longer has the bytes, and passes `\ No newline at end of file` through unprefixed —
 dropping it silently re-adds a newline the file never had.
 
+**The composer can draft its own message** (`CommitMessageComposer`, the sparkle beside the
+field): one read-only sandboxed `codex exec` one-shot on the default account —
+`ProjectIconResearch`'s pattern, including its gates: manual only, because the run spends
+the user's usage; offered only where a Codex login exists; one run per repository at a time.
+The staged diff is fetched fresh at click (what is staged is what will be committed), capped,
+and travels with the ten newest commit subjects so the draft matches the repository's own
+voice rather than a generic convention — a `feat:` prefix in a repo of plain sentences is a
+wrong answer even when it is a good message. `GitReviewCommands.recentSubjects` exists
+because `log()` always pays for `--numstat` and a hundred-commit page, rightly for the
+history browser and wastefully for a voice sample. Busy-ness lives on the controller like
+the message itself — the composer row is rebuilt on every re-read. Failures land in the
+pane's own notice line, never an alert.
+
 Reads and writes share `GitProcess`, which is where the pipe handling, the timeout and the
 oversized-output guard live; the writes drop `--no-optional-locks`, because a write needs the
 lock it is about to take. Losing that lock to the agent's own git is its own failure case
@@ -174,11 +200,36 @@ index, the watcher would see it, and the pane would re-read itself forever.
 The selected session's **floating status card** is fed by `GitChangeMonitor`, a smaller
 read-side coordinator over that same watcher. It serializes summary reads and remembers one
 trailing refresh when a new write lands mid-read, so a burst always ends on a reading taken
-after its last write. Idle, the card says branch and `+N −M`. While an agent turn is active it
-keeps that exact monitor alive but changes the presentation to a working orb, structured plan
-position when available, changed-file count and `+N −M`. The totals are still the checkout's
-uncommitted totals — not a count inferred from Edit tools — and clicking either presentation
-opens Git Review.
+after its last write. Idle, the card says branch and `+N −M`. While a **native conversation's**
+turn is active it keeps that exact monitor alive but changes the presentation to a working orb,
+structured plan position when available, changed-file count and `+N −M`. The totals are still the
+checkout's uncommitted totals — not a count inferred from Edit tools — and clicking either
+Git presentation opens Git Review. When the session has children, a separately clickable
+working/done segment joins the same line and opens the Subagents display-pane tab. It remains
+visible even when there is no Git sentence to show, making the surface a session status card
+rather than forcing child navigation back into the conversation.
+
+The mark sits closer to the branch name than the sentence's own gap between name and counters,
+so it reads as belonging to the name rather than as a third item in the row — and it sits on the
+same optical line, which took a fix in the label helper rather than in the card (see
+`design-system.md`).
+
+The card is also an **extension surface**: `session.corner-card@1` exposes one display-only
+slot whose ID is the placement — `top-trailing` today, `top-leading` reserved for a future
+leading card — deliberately named after the corner rather than after git, since the card may
+carry more than the checkout's reading one day. Extension rows render below the summary line
+and the card grows downward; with the slot empty the collapsed constraint reproduces the
+original single-line geometry exactly, which is what keeps the render tests honest. Rows ride
+the card's own visibility, share the contents' resting alpha and hover lift, and stay
+display-only. Built-in Git and Subagents segments may have distinct destinations, but an
+extension row still cannot add a competing control. The contract's reasoning lives with the
+extension docs
+(`docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md`).
+
+A **terminal** session never gets that second presentation, though its activity is known: the CLI
+draws its own spinner and working word a few lines below the card, so an orb and "Working…" in the
+corner were the same sentence twice in one view. There the card stays the branch card for the
+whole run, saying the one thing the terminal does not — the checkout's live totals.
 
 The card **occludes**, which took two corrections. It sits at the pane's top-right corner over
 whatever the pane is showing, and under a native conversation that is text rather than the empty

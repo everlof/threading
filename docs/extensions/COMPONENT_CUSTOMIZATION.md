@@ -496,6 +496,23 @@ the durable extension surface.
 - [x] Exercise selection, close, action routing and extension-removal fallback in the real
   display-pane controller.
 
+### Phase 14 — corner-card placement slots
+
+- [x] Publish a session-scoped `session.corner-card@1` contract for the floating card over the
+  session's content pane. The ID deliberately names the surface, not its current content — the
+  card carries the checkout's branch and counters today and may carry agents or attachments
+  tomorrow.
+- [x] Encode **placement as the slot ID**: `top-trailing` is the only corner with a card today;
+  a future leading card arrives as an additive `top-leading` slot on the same contract rather
+  than a rename or a second component.
+- [x] Keep the slot display-only (compact text/status rows, no buttons): built-in Git and
+  Subagents segments own the card's navigation, alongside visibility, the idle/working activity
+  presentation, and the data-refresh cadence.
+- [x] Extension rows ride the native card's visibility. Git or child-agent status can present
+  the card, but extension content alone cannot — the card is session state, not a blank easel.
+- [x] Preserve the card's occlusion decisions: slot rows render inside the flattened
+  `WindowBackdrop.opaque` fill and share the contents' resting alpha and hover lift.
+
 ## Expected intrusion
 
 Core extension machinery is additive and removable:

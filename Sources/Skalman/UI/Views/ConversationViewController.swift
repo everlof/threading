@@ -18,8 +18,11 @@ final class ConversationViewController: NSViewController {
     /// tree follows the changes it reports rather than being built straight from events, so
     /// every decision about the shape of a row is testable on its own.
     var timeline: ConversationTimeline
+    private let subagentState: SubagentSessionState
+    var subagents: SubagentTimeline { subagentState.timeline }
+    var selectedSubagentThreadID: String? { subagentState.selectedThreadID }
 
-    var scrollView: NSScrollView!
+    var scrollView: ThemedScrollView!
     var stack: NSStackView!
 
     /// Fills the scroll view so the column can be capped inside it rather than being the
@@ -33,6 +36,9 @@ final class ConversationViewController: NSViewController {
     private var promptView: PromptView!
     private var promptContentContainer: ComponentContentContainer!
     private var promptCustomizationHost: ComponentCustomizationHost!
+    private var selectedSubagentID: String?
+    private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
+    private var transcriptRecheckGeneration: [String: Int] = [:]
     let customizationLookup: ComponentCustomizationHost.Lookup
 
     /// Invoked for semantic actions in extension-provided reply accessories.
@@ -52,6 +58,15 @@ final class ConversationViewController: NSViewController {
     /// The Fast/Standard picker: Codex's tri-state Fast/Standard/Account-default tier and Claude's
     /// live on/off fast mode, offered on the same chip so the two providers read alike.
     private let speedChip = ChipView()
+
+    /// The context meter — how full the model's window is, updated at each turn boundary.
+    /// Distinct from the account usage pill, which is quota; this is the conversation's own
+    /// weight. Hidden until the stream has reported a reading.
+    let contextLabel = NSTextField(labelWithString: "")
+
+    /// The newest context reading, kept apart from `Status` so a later status that carries
+    /// no metrics — the post-replay Ready, a model change — cannot blank the meter.
+    var lastContextReading: (tokens: Int, window: Int?)?
     private var isChangingConversationConfiguration = false
     private var reportedModel: String?
 
@@ -72,17 +87,68 @@ final class ConversationViewController: NSViewController {
     var runProgress: RunProgress?
 
     /// Unlike `stream.isRunning`, this is one user turn currently awaiting its terminal event.
-    /// Claude keeps the transport process open between turns, while Codex does not.
+    /// Both native transports keep their process open between turns.
     var isTurnInFlight = false
+
+    /// The backgrounded shells, children and monitors the agent currently has running.
+    ///
+    /// Claude restates the whole list whenever it changes; Codex has no equivalent, so its
+    /// sessions leave this empty. Read at the turn boundary, never as it arrives — see
+    /// `handle(_:)`.
+    var backgroundWorkInFlight: [String] = []
+
+    /// Whether the turn that just ended was waiting on work it had started itself.
+    ///
+    /// Separate from the turn on purpose: the turn really does end, the composer really can be
+    /// typed into — what has not happened is the *session* finishing, because this work speaks
+    /// back into the conversation on its own.
+    var pausedOnOwnWork = false
+
+    /// Tells work a turn started from work parked in an earlier one — see
+    /// `BackgroundWorkLedger`, which the terminal surface judges by too.
+    private var backgroundWork = BackgroundWorkLedger()
+
+    /// A turn opened or closed, which is the only moment the in-flight list is read.
+    ///
+    /// Called from the status edge in `ConversationRendering` rather than as the list arrives,
+    /// so a task finishing between turns cannot momentarily declare the session done.
+    func noteTurnBoundary() {
+        pausedOnOwnWork = isTurnInFlight
+            ? false
+            : backgroundWork.turnEnded(leaving: backgroundWorkInFlight)
+    }
 
     /// Suppresses per-item scrolling while a transcript is being replayed: four hundred items
     /// each scheduling their own scroll is four hundred layout passes to reach one position.
     var isReplaying = false
 
-    /// Views for rows that can still change, keyed by their index in `timeline.rows` — which is
-    /// only tool calls, awaiting their result. Entries are dropped once resolved, so this holds
-    /// the handful of calls in flight rather than the whole conversation.
+    /// Whether new content may move the view — see `ConversationAutoScroll`.
+    var autoScroll = ConversationAutoScroll()
+
+    /// When the user's hand last touched the scroll view, so a bounds change can be read as
+    /// theirs rather than as one of our own scrolls landing.
+    var lastUserScrollAt: TimeInterval = 0
+
+    /// Every row's outer view, keyed by its index in `timeline.rows`. Turn navigation scrolls
+    /// to the user rows; a settling turn folds the views between its user message and its
+    /// conclusion. The views are retained by the stack anyway, so this costs references only.
     var rowViews: [Int: NSView] = [:]
+
+    /// Turns already folded, by the row index of their opening user message, so a fold is
+    /// never inserted twice.
+    var foldedTurnStarts: Set<Int> = []
+
+    /// An interrupted turn waiting to fold. It stays expanded so the user keeps their place;
+    /// the next turn folds it.
+    var pendingFold: (startIndex: Int, interrupted: Bool)?
+
+    /// Turns whose changed-files card was already requested, so a repeated settle event
+    /// cannot append twins.
+    var changedFilesCardTurns: Set<Int> = []
+
+    /// The newest turn's card — the only one whose View diff still describes what Git
+    /// Review's Last Turn scope shows. Superseded cards lose the button.
+    weak var latestChangedFilesCard: ChangedFilesCardView?
 
     /// Native tool rows waiting for their asynchronous result. This is separate from
     /// `rowViews`, which holds the outer customized row used by turn navigation.
@@ -115,10 +181,21 @@ final class ConversationViewController: NSViewController {
     }
 
     /// What the sidebar shows for this session.
+    ///
+    /// A request pending inside a turn is the blocked state, not the unread one: the turn has
+    /// stopped until it is answered. Off screen only, as before — on screen the permission card
+    /// is the cue, and a second mark in the sidebar would only repeat it.
+    ///
+    /// Work left running outranks `idle` for the same reason it does in `SessionActivityTracker`:
+    /// a turn that ends on top of a backgrounded shell is not the session finishing, and saying
+    /// it is posts "finished its turn" for an answer the agent is still about to give.
     var activity: SessionActivity {
-        if hasPendingPermission && !isVisible { return .needsAttention }
+        if hasPendingPermission, !isVisible {
+            return isTurnInFlight ? .awaitingUser : .needsAttention
+        }
         if isTurnInFlight { return .working }
-        return stream.isRunning ? .idle : .dormant
+        guard stream.isRunning else { return .dormant }
+        return pausedOnOwnWork ? .working : .idle
     }
 
     // MARK: - Initialization
@@ -126,6 +203,7 @@ final class ConversationViewController: NSViewController {
     init(
         agentSession: AgentSession,
         project: Project,
+        subagentState: SubagentSessionState? = nil,
         customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
             ComponentCustomizationProviderSlot.shared.customization(for: $0)
         }
@@ -134,6 +212,8 @@ final class ConversationViewController: NSViewController {
         self.project = project
         self.customizationLookup = customizationLookup
         self.timeline = ConversationTimeline(sessionID: agentSession.id)
+        self.subagentState = subagentState
+            ?? SubagentSessionState(sessionID: agentSession.id)
         let account = AgentAccountDiscovery.account(
             for: agentSession.kind,
             handle: agentSession.accountHandle
@@ -144,9 +224,9 @@ final class ConversationViewController: NSViewController {
             account: account
         )
 
-        // Rebuild the plan for every turn. Claude asks only once, while Codex asks once per
-        // child process; after `thread.started`, the latest stored identifier makes the next
-        // Codex plan an `exec resume` automatically.
+        // Claude and Codex each launch one persistent transport process. The closure is still
+        // resolved at launch time so account routing and a newly stored resume identifier are
+        // current when a dormant native conversation is reopened.
         let plan = {
             let current = ProjectStore.shared.session(withID: agentSession.id) ?? agentSession
             return AgentLauncher.streamPlan(for: current, in: project)
@@ -157,20 +237,56 @@ final class ConversationViewController: NSViewController {
             self.stream = ClaudeStreamSession(
                 sessionID: agentSession.id,
                 effort: configuredEffort,
+                subagentTranscriptPlan: {
+                    let current = ProjectStore.shared.session(withID: agentSession.id)
+                        ?? agentSession
+                    guard let transcriptID = current.resumeState.transcriptID,
+                          let transcriptAccount = AgentAccountDiscovery.account(
+                              for: current.kind,
+                              handle: current.accountHandle
+                          ) else { return nil }
+                    return ClaudeSubagentTranscriptPlan(
+                        rootThreadID: transcriptID.rawValue,
+                        directory: ClaudeTranscript.subagentsDirectory(
+                            sessionID: transcriptID,
+                            account: transcriptAccount,
+                            in: project
+                        )
+                    )
+                },
                 plan: plan
             )
         case .codex:
             self.stream = CodexStreamSession(
                 sessionID: agentSession.id,
-                effortProvider: {
+                configurationProvider: {
                     let current = ProjectStore.shared.session(withID: agentSession.id)
                         ?? agentSession
                     let model = current.model
                         ?? AgentModels.defaultModel(for: current.kind, account: account)
-                    return AgentModels.effectiveEffort(
+                    let effort = AgentModels.effectiveEffort(
                         for: current,
                         model: model,
                         account: account
+                    )
+                    let serviceTier: String?
+                    if let fastMode = current.fastMode {
+                        if fastMode {
+                            serviceTier = AgentModels.option(
+                                identifier: model,
+                                for: current.kind,
+                                account: account
+                            )?.fastServiceTier ?? AgentDefaults.codexFastServiceTier
+                        } else {
+                            serviceTier = AgentDefaults.codexStandardServiceTier
+                        }
+                    } else {
+                        serviceTier = nil
+                    }
+                    return CodexTurnConfiguration(
+                        model: model,
+                        effort: effort,
+                        serviceTier: serviceTier
                     )
                 },
                 plan: plan
@@ -241,6 +357,7 @@ final class ConversationViewController: NSViewController {
         promptView.translatesAutoresizingMaskIntoConstraints = false
         // What is typed here becomes a bubble in the thread, so it is set in the thread's font.
         promptView.fontSurface = .conversation
+        promptView.showsImageAttachments = true
         promptView.placeholder = L10n.format(
             "Reply to %@",
             agentSession.kind.displayName
@@ -262,12 +379,17 @@ final class ConversationViewController: NSViewController {
         statusSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         statusSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        contextLabel.applyFont(.subheading)
+        contextLabel.textColor = Design.Text.tertiary
+        contextLabel.translatesAutoresizingMaskIntoConstraints = false
+        contextLabel.isHidden = true
+
         // The orb leads the status text and is shown only while a turn is in
         // flight. A stack detaches a hidden arranged view, so idle status sits
         // flush at the leading edge rather than behind a reserved orb-sized gap.
         orbView.isHidden = true
         statusRow = NSStackView(views: [
-            orbView, statusLabel, statusSpacer, modelChip, effortChip, speedChip
+            orbView, statusLabel, statusSpacer, contextLabel, modelChip, effortChip, speedChip
         ])
         statusRow.orientation = .horizontal
         statusRow.alignment = .centerY
@@ -334,10 +456,8 @@ final class ConversationViewController: NSViewController {
         )
     }
 
-    /// Codex's native transport starts a new process for every turn. These controls edit the
-    /// persisted session while it is idle; the plan closure reads that record synchronously
-    /// when the next turn launches, so `exec resume` keeps the thread and changes only its
-    /// model/tier.
+    /// These controls edit the persisted session while it is idle. Claude uses its control
+    /// channel; Codex reads the same record into the next app-server `turn/start` request.
     private func wireConversationControls() {
         modelChip.itemsProvider = { [weak self] in self?.modelItems() ?? [] }
         modelChip.onSelect = { [weak self] item in
@@ -430,12 +550,26 @@ final class ConversationViewController: NSViewController {
     }
 
     private func setupStream() {
+        subagentState.onChange = { [weak self] in
+            guard let self else { return }
+            self.refreshSubagentState()
+            guard !self.isReplaying else { return }
+            self.notifySelectedSubagentUpdated()
+        }
+        selectedSubagentID = subagentState.selectedThreadID
+        refreshSubagentState()
+
         stream.onEvent = { [weak self] event in self?.handle(event) }
         stream.onExit = { [weak self] status in self?.handleExit(status) }
         stream.onSendAvailabilityChange = { [weak self] in
             self?.refreshConversationControls()
             guard let self else { return }
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
+        }
+        if let reporting = stream as? SubagentReportingConversation {
+            reporting.onSubagentEvent = { [weak self] event in
+                self?.handleSubagent(event)
+            }
         }
 
         // The rail brightens the turns on screen, which only means anything if it is told when
@@ -447,9 +581,38 @@ final class ConversationViewController: NSViewController {
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
+
+        // Both roads a gesture arrives by: wheel and trackpad through the scroll view's own
+        // event, scroller-thumb drags through the live-scroll notifications. Programmatic
+        // scrolls pass through neither, which is what lets a bounds change be attributed.
+        scrollView.onUserScroll = { [weak self] in
+            self?.lastUserScrollAt = ProcessInfo.processInfo.systemUptime
+        }
+        for name in [
+            NSScrollView.willStartLiveScrollNotification,
+            NSScrollView.didLiveScrollNotification
+        ] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(userScrolled),
+                name: name,
+                object: scrollView
+            )
+        }
+    }
+
+    @objc private func userScrolled() {
+        lastUserScrollAt = ProcessInfo.processInfo.systemUptime
     }
 
     @objc private func visibleRegionChanged() {
+        // A bounds change on the user's own heels is the user leaving or returning; one from
+        // our scrolls landing is not, and must never release the pin — the failure mode
+        // behind t3code's own auto-scroll bug.
+        let sinceGesture = ProcessInfo.processInfo.systemUptime - lastUserScrollAt
+        if sinceGesture < ConversationDefaults.gestureAttribution {
+            autoScroll.noteUserScrolled(nearBottom: isNearConversationBottom)
+        }
         updateVisibleTurns()
     }
 
@@ -503,6 +666,9 @@ final class ConversationViewController: NSViewController {
     private func scrollToRow(_ index: Int) {
         guard let rowView = rowViews[index] else { return }
 
+        // The user deliberately went somewhere; only their own gesture re-pins.
+        autoScroll.noteJumpedToRow()
+
         let frame = rowView.convert(rowView.bounds, to: documentView)
         let target = max(0, frame.minY - Design.Spacing.large)
 
@@ -537,14 +703,30 @@ final class ConversationViewController: NSViewController {
 
             self.isReplaying = true
             for event in events { self.handle(event) }
-            self.isReplaying = false
-            self.scrollToBottom()
-
-            self.stream.start()
-            self.apply(.status(.ready(model: nil, lastTurn: nil)))
-            self.restoreConversationConfiguration()
-            self.refreshConversationControls()
+            self.replaySubagentHistoryAndStart()
         }
+    }
+
+    private func replaySubagentHistoryAndStart() {
+        guard let history = stream as? SubagentHistoryConversation else {
+            finishReplayAndStart()
+            return
+        }
+        history.loadSubagentHistory { [weak self] events in
+            guard let self else { return }
+            for event in events { self.handleSubagent(event) }
+            self.finishReplayAndStart()
+        }
+    }
+
+    private func finishReplayAndStart() {
+        isReplaying = false
+        autoScroll.noteReplayFinished()
+        scrollToBottom()
+        stream.start()
+        apply(.status(.ready(model: nil, lastTurn: nil)))
+        restoreConversationConfiguration()
+        refreshConversationControls()
     }
 
     func terminate() {
@@ -607,7 +789,9 @@ final class ConversationViewController: NSViewController {
                     toolName: call.name,
                     summary: call.summary,
                     result: call.result?.text,
-                    isError: call.result?.isError ?? false
+                    // The settled outcome, not the raw wire flag, so a sniffed failure reads
+                    // as failed on remote clients too.
+                    isError: call.result?.outcome == .failed
                 )
             case .notice(let text, let kind):
                 return RemoteConversationRowDTO(
@@ -662,19 +846,42 @@ final class ConversationViewController: NSViewController {
 
         // Echoed locally as it is sent. The stream never reports a live user turn back —
         // `.userMessage` exists only for replay — so producing it here is what draws it once.
+        // Anchoring is decided *before* the echo lands so its `addRow` cannot first yank the
+        // view to the bottom.
+        autoScroll.noteMessageSent()
         apply(timeline.apply(.userMessage(trimmed)))
+        anchorSentMessage(at: timeline.rows.count - 1)
 
         // Drawn here, which is the moment the turn starts and the only place the status enters
         // `working` — so the word is fixed for the whole wait and a new one arrives with the
         // next turn.
         apply(.status(.working(word: workingWords.next())))
-        promptView.stringValue = ""
+        promptView.clear()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
         return true
     }
 
     private func apply(_ changes: [ConversationTimeline.Change]) {
         for change in changes { apply(change) }
+    }
+
+    /// Scrolls the just-sent bubble toward the top of the pane, where the reply will stream
+    /// in below it while it holds still.
+    ///
+    /// "Toward": no blank space is reserved below short content, so the bubble rises as far
+    /// as the content allows — the clip view clamps the rest — and holds the top once enough
+    /// reply has arrived to put it there.
+    private func anchorSentMessage(at index: Int) {
+        // After layout, or the target is the frame the row had before it existed.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.autoScroll.mode == .anchored,
+                  let rowView = self.rowViews[index] else { return }
+
+            let frame = rowView.convert(rowView.bounds, to: self.documentView)
+            let target = max(0, frame.minY - Design.Spacing.large)
+            self.scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: target))
+            self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
+        }
     }
 
     // MARK: - Events
@@ -688,10 +895,150 @@ final class ConversationViewController: NSViewController {
         if case .initialised(_, let model) = event, let model {
             reportedModel = model
         }
+        // Recorded, deliberately not announced. Work can only be backgrounded from inside a
+        // turn, so the rise never changes the activity; the fall arrives in the gap between a
+        // task finishing and the CLI waking the agent with its result, and announcing *that*
+        // would post "finished its turn" microseconds before the turn resumed. The level is
+        // read where it matters, at the turn boundary in `ConversationRendering`.
+        if case .backgroundWork(let inFlight) = event {
+            backgroundWorkInFlight = inFlight
+        }
         recordAttachments(in: event)
         for change in timeline.apply(event) { apply(change) }
         refreshConversationControls()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+    }
+
+    private func handleSubagent(_ event: SubagentEvent) {
+        subagentState.apply(event)
+    }
+
+    private func notifySelectedSubagentUpdated() {
+        guard let selectedSubagentID,
+              let selected = subagents.agents.first(where: {
+                  $0.descriptor.threadID == selectedSubagentID
+              }) else { return }
+        delegate?.conversation(self, didUpdateSelectedSubagent: selected)
+    }
+
+    private func refreshSubagentState() {
+        let agents = subagents.agents
+        guard !agents.isEmpty else {
+            selectedSubagentID = nil
+            delegate?.conversationSubagentsDidChange(self)
+            return
+        }
+
+        if let selectedSubagentID,
+           let selected = agents.first(where: {
+               $0.descriptor.threadID == selectedSubagentID
+           }) {
+            // A Codex stop hook can add the first real transcript filename after selection.
+            loadSubagentTranscriptIfNeeded(selected)
+        }
+        delegate?.conversationSubagentsDidChange(self)
+    }
+
+    func selectSubagent(_ threadID: String?) {
+        guard let threadID,
+              let selected = subagents.agents.first(where: {
+                  $0.descriptor.threadID == threadID
+              }) else { return }
+        selectedSubagentID = threadID
+        subagentState.select(threadID: threadID)
+        delegate?.conversation(self, didSelectSubagent: selected)
+        loadSubagentTranscriptIfNeeded(selected)
+    }
+
+    private var isNearConversationBottom: Bool {
+        guard isViewLoaded else { return true }
+        let overflow = documentView.bounds.height - scrollView.contentSize.height
+        return overflow <= 0
+            || scrollView.contentView.bounds.origin.y
+                >= overflow - ConversationDefaults.bottomTolerance
+    }
+
+    private func loadSubagentTranscriptIfNeeded(_ agent: SubagentTimeline.Agent) {
+        let threadID = agent.descriptor.threadID
+        guard agent.status.isDone,
+              let signature = SubagentTranscriptLoader.signature(for: agent.descriptor),
+              subagentTranscriptLoads.begin(
+                  threadID: threadID,
+                  signature: signature
+              ) else {
+            return
+        }
+
+        let completion: ([StreamEvent], Bool) -> Void = { [weak self] events, isTruncated in
+            guard let self else { return }
+            switch self.subagentTranscriptLoads.finish(
+                threadID: threadID,
+                signature: signature,
+                eventCount: events.count
+            ) {
+            case .retryAfter(let delay):
+                self.scheduleTranscriptRecheck(threadID: threadID, after: delay)
+                return
+            case .unavailable:
+                return
+            case .loaded:
+                break
+            }
+            self.isReplaying = true
+            self.subagentState.replaceConversation(threadID: threadID, events: events)
+            if isTruncated {
+                self.handleSubagent(.activity(
+                    threadID: threadID,
+                    text: ClaudeSubagentHistoryDefaults.truncatedActivity
+                ))
+            }
+            self.isReplaying = false
+            self.refreshSubagentState()
+            self.notifySelectedSubagentUpdated()
+            self.scheduleTranscriptStabilityChecks(threadID: threadID)
+        }
+
+        if let history = stream as? SubagentHistoryConversation {
+            history.loadSubagentTranscript(for: agent.descriptor, completion: completion)
+        } else {
+            SubagentTranscriptLoader.load(
+                descriptor: agent.descriptor,
+                kind: agentSession.kind,
+                completion: completion
+            )
+        }
+    }
+
+    private func scheduleTranscriptRecheck(threadID: String, after delay: TimeInterval) {
+        let generation = (transcriptRecheckGeneration[threadID] ?? 0) + 1
+        transcriptRecheckGeneration[threadID] = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self,
+                  self.transcriptRecheckGeneration[threadID] == generation,
+                  let agent = self.subagents.agents.first(where: {
+                      $0.descriptor.threadID == threadID
+                  }) else {
+                return
+            }
+            self.loadSubagentTranscriptIfNeeded(agent)
+        }
+    }
+
+    private func scheduleTranscriptStabilityChecks(threadID: String) {
+        let generation = (transcriptRecheckGeneration[threadID] ?? 0) + 1
+        transcriptRecheckGeneration[threadID] = generation
+        for delay in [0.5, 1.5] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.transcriptRecheckGeneration[threadID] == generation,
+                      let agent = self.subagents.agents.first(where: {
+                          $0.descriptor.threadID == threadID
+                      }) else {
+                    return
+                }
+                self.loadSubagentTranscriptIfNeeded(agent)
+            }
+        }
     }
 
     /// Native output is already structured, so only finished assistant prose is inspected.
@@ -727,6 +1074,10 @@ final class ConversationViewController: NSViewController {
 
     private func handleExit(_ status: Int32) {
         clearStreaming()
+        // The process that owned those tasks is gone, and nothing will report them ending.
+        backgroundWorkInFlight = []
+        pausedOnOwnWork = false
+        backgroundWork.forget()
         apply(.status(.ended(code: status)))
         promptContentContainer.isHidden = true
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
@@ -764,8 +1115,7 @@ final class ConversationViewController: NSViewController {
             // model round-trip without restarting the persistent process.
             canConfigure = stream.isRunning
         case .codex:
-            // Codex has no persistent input channel. Its choice changes only at the clean
-            // boundary between one `exec` child and the next.
+            // App-server accepts model, effort and service tier on the next turn request.
             canConfigure = stream.canSend
         }
 

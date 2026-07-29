@@ -12,9 +12,13 @@ final class AgentSessionViewController: NSViewController {
 
     let sessionID: SessionID
     let session: TerminalSession
+    private let agentKind: AgentKind
+    private let subagentState: SubagentSessionState
     private let appEvents = AppEventObservations()
 
     private(set) var isRunning = false
+    var subagents: SubagentTimeline { subagentState.timeline }
+    var selectedSubagentThreadID: String? { subagentState.selectedThreadID }
 
     /// Derives whether the session is working, idle, or wants attention.
     let activityTracker = SessionActivityTracker()
@@ -38,17 +42,30 @@ final class AgentSessionViewController: NSViewController {
     private var pendingLaunchPlan: AgentLaunchPlan?
     private let remoteViewportBanner = RemoteViewportBannerView()
     private var attachmentObserver: TerminalAttachmentObserver?
+    private var selectedSubagentID: String?
+    private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
+    private var transcriptRecheckGeneration: [String: Int] = [:]
 
     // MARK: - Initialization
 
-    init(agentSession: AgentSession) {
+    init(
+        agentSession: AgentSession,
+        subagentState: SubagentSessionState? = nil
+    ) {
         self.sessionID = agentSession.id
+        self.agentKind = agentSession.kind
+        self.subagentState = subagentState
+            ?? SubagentSessionState(sessionID: agentSession.id)
         self.session = TerminalSession(
             profile: ThemeAssignments.profile(for: agentSession.id),
             identifier: agentSession.id
         )
         super.init(nibName: nil, bundle: nil)
         session.delegate = self
+
+        // The CLI hosted here is what a dropped image has to be readable by. The shell drawer
+        // below it says nothing and keeps the default, which converts nothing.
+        session.terminalView.dropReader = .agent(agentSession.kind)
 
         let terminalSession = session
         attachmentObserver = TerminalAttachmentObserver(
@@ -79,6 +96,9 @@ final class AgentSessionViewController: NSViewController {
             guard let self else { return }
             self.delegate?.agentSessionDidChangeState(self)
         }
+        self.subagentState.onChange = { [weak self] in
+            self?.refreshSubagentState()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -99,11 +119,13 @@ final class AgentSessionViewController: NSViewController {
         view.addSubview(session.terminalView)
         view.addSubview(remoteViewportBanner)
 
+        let terminalAtTopConstraint = session.terminalView.topAnchor.constraint(
+            equalTo: view.topAnchor,
+            constant: TerminalPadding.top
+        )
+
         NSLayoutConstraint.activate([
-            session.terminalView.topAnchor.constraint(
-                equalTo: view.topAnchor,
-                constant: TerminalPadding.top
-            ),
+            terminalAtTopConstraint,
             session.terminalView.bottomAnchor.constraint(
                 equalTo: view.bottomAnchor,
                 constant: -TerminalPadding.bottom
@@ -127,6 +149,8 @@ final class AgentSessionViewController: NSViewController {
         ])
 
         applyBackgroundColor()
+        selectedSubagentID = subagentState.selectedThreadID
+        refreshSubagentState()
 
         // Two notifications, one response: the profile changed (font, cursor, the app-wide
         // default theme), or an assignment did (this session's, or its project's). Either way
@@ -196,6 +220,118 @@ final class AgentSessionViewController: NSViewController {
 
     func focusTerminal() {
         view.window?.makeFirstResponder(session.terminalView)
+    }
+
+    func selectSubagent(_ threadID: String?) {
+        guard let threadID,
+              let selected = subagentState.timeline.agents.first(where: {
+                  $0.descriptor.threadID == threadID
+              }) else { return }
+
+        selectedSubagentID = threadID
+        subagentState.select(threadID: threadID)
+        delegate?.agentSession(self, didSelectSubagent: selected)
+        loadSubagentTranscriptIfNeeded(selected)
+    }
+
+    private func refreshSubagentState() {
+        let timeline = subagentState.timeline
+        let hasAgents = !timeline.agents.isEmpty
+
+        guard hasAgents else {
+            selectedSubagentID = nil
+            delegate?.agentSessionSubagentsDidChange(self)
+            return
+        }
+
+        if let selectedSubagentID,
+           let selected = timeline.agents.first(where: {
+               $0.descriptor.threadID == selectedSubagentID
+           }) {
+            delegate?.agentSession(self, didUpdateSelectedSubagent: selected)
+            // Codex learns the real rollout filename from the stop hook, after the logical
+            // child row already exists. Retry here when that descriptor becomes loadable.
+            loadSubagentTranscriptIfNeeded(selected)
+        }
+        delegate?.agentSessionSubagentsDidChange(self)
+    }
+
+    private func loadSubagentTranscriptIfNeeded(_ agent: SubagentTimeline.Agent) {
+        let threadID = agent.descriptor.threadID
+        // Terminal mode has lifecycle hooks, not a structured child stream. Reading a growing
+        // JSONL once would freeze a partial transcript behind the loaded-id cache, so wait for
+        // the stop event and then replay the provider's completed file.
+        guard agent.status.isDone,
+              let signature = SubagentTranscriptLoader.signature(for: agent.descriptor),
+              subagentTranscriptLoads.begin(
+                  threadID: threadID,
+                  signature: signature
+              ) else {
+            return
+        }
+
+        SubagentTranscriptLoader.load(
+            descriptor: agent.descriptor,
+            kind: agentKind
+        ) { [weak self] events, isTruncated in
+            guard let self else { return }
+            switch self.subagentTranscriptLoads.finish(
+                threadID: threadID,
+                signature: signature,
+                eventCount: events.count
+            ) {
+            case .retryAfter(let delay):
+                self.scheduleTranscriptRecheck(threadID: threadID, after: delay)
+                return
+            case .unavailable:
+                return
+            case .loaded:
+                self.subagentState.replaceConversation(
+                    threadID: threadID,
+                    events: events
+                )
+            }
+            if isTruncated {
+                self.subagentState.apply(.activity(
+                    threadID: threadID,
+                    text: ClaudeSubagentHistoryDefaults.truncatedActivity
+                ))
+            }
+            self.refreshSubagentState()
+            self.scheduleTranscriptStabilityChecks(threadID: threadID)
+        }
+    }
+
+    private func scheduleTranscriptRecheck(threadID: String, after delay: TimeInterval) {
+        let generation = (transcriptRecheckGeneration[threadID] ?? 0) + 1
+        transcriptRecheckGeneration[threadID] = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self,
+                  self.transcriptRecheckGeneration[threadID] == generation,
+                  let agent = self.subagentState.timeline.agents.first(where: {
+                      $0.descriptor.threadID == threadID
+                  }) else {
+                return
+            }
+            self.loadSubagentTranscriptIfNeeded(agent)
+        }
+    }
+
+    private func scheduleTranscriptStabilityChecks(threadID: String) {
+        let generation = (transcriptRecheckGeneration[threadID] ?? 0) + 1
+        transcriptRecheckGeneration[threadID] = generation
+        for delay in [0.5, 1.5] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.transcriptRecheckGeneration[threadID] == generation,
+                      let agent = self.subagentState.timeline.agents.first(where: {
+                          $0.descriptor.threadID == threadID
+                      }) else {
+                    return
+                }
+                self.loadSubagentTranscriptIfNeeded(agent)
+            }
+        }
     }
 
     // MARK: - Private Methods
@@ -355,6 +491,15 @@ protocol AgentSessionViewControllerDelegate: AnyObject {
     func agentSession(_ controller: AgentSessionViewController, titleChangedTo title: String)
     func agentSession(_ controller: AgentSessionViewController, didExitWithCode exitCode: Int32?)
     func agentSessionDidChangeState(_ controller: AgentSessionViewController)
+    func agentSessionSubagentsDidChange(_ controller: AgentSessionViewController)
+    func agentSession(
+        _ controller: AgentSessionViewController,
+        didSelectSubagent agent: SubagentTimeline.Agent
+    )
+    func agentSession(
+        _ controller: AgentSessionViewController,
+        didUpdateSelectedSubagent agent: SubagentTimeline.Agent
+    )
 }
 
 // MARK: - Remote Viewport Banner

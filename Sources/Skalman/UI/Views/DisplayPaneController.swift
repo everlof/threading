@@ -2,181 +2,6 @@ import AppKit
 import SkalmanExtensionKit
 import WebKit
 
-// MARK: - Display Content
-
-/// One piece of content shown in the panel.
-struct DisplayContent {
-
-    /// What is being shown, which decides both the view used and the actions offered.
-    enum Body {
-        /// An image on disk. The URL is kept so the panel can act on the file itself —
-        /// reveal it, copy its path, open it elsewhere.
-        case image(NSImage, url: URL)
-
-        /// A self-contained HTML document the agent generated.
-        case html(String)
-    }
-
-    let body: Body
-
-    /// The agent's own caption, when it supplied one.
-    let title: String?
-
-    /// What was shown, in the app's words rather than the agent's.
-    let subtitle: String
-}
-
-// MARK: - Display Tab
-
-/// One tab in the display pane. A tab is either a piece of rendered content — an image or an HTML
-/// document — or a live surface (the browser, the git review), which is a whole view controller
-/// rather than a value.
-///
-/// A reference type, because a live tab owns a view controller whose state — a browser's page
-/// and history, a review's mode and scroll position — must survive the tab being switched off
-/// screen and back.
-@MainActor
-final class DisplayTab {
-
-    enum Body {
-        case content(DisplayContent)
-        case browser(BrowserViewController)
-        case review(GitReviewViewController)
-        case info(SessionInfoViewController)
-        case terminal(ShellDrawerViewController)
-        case files(FileTreeViewController)
-        case attachments(SessionAttachmentsViewController)
-        case extensionPanel(ExtensionPanelViewController)
-        case compare(CompareViewController)
-    }
-
-    let id: UUID
-    var body: Body
-
-    /// For an image tab: the PNG filename cached on disk, kept so it can be removed when the tab
-    /// closes and re-loaded when the session is restored.
-    var cacheFile: String?
-
-    init(id: UUID = UUID(), body: Body) {
-        self.id = id
-        self.body = body
-    }
-
-    var content: DisplayContent? {
-        if case .content(let content) = body { return content }
-        return nil
-    }
-
-    var browser: BrowserViewController? {
-        if case .browser(let browser) = body { return browser }
-        return nil
-    }
-
-    var review: GitReviewViewController? {
-        if case .review(let review) = body { return review }
-        return nil
-    }
-
-    var info: SessionInfoViewController? {
-        if case .info(let info) = body { return info }
-        return nil
-    }
-
-    var terminal: ShellDrawerViewController? {
-        if case .terminal(let terminal) = body { return terminal }
-        return nil
-    }
-
-    var files: FileTreeViewController? {
-        if case .files(let files) = body { return files }
-        return nil
-    }
-
-    var attachments: SessionAttachmentsViewController? {
-        if case .attachments(let attachments) = body { return attachments }
-        return nil
-    }
-
-    var extensionPanel: ExtensionPanelViewController? {
-        if case .extensionPanel(let panel) = body { return panel }
-        return nil
-    }
-
-    var compare: CompareViewController? {
-        if case .compare(let compare) = body { return compare }
-        return nil
-    }
-
-    /// The tab's view controller, when its body is a live surface rather than rendered content.
-    var hostedController: NSViewController? {
-        switch body {
-        case .content: return nil
-        case .browser(let browser): return browser
-        case .review(let review): return review
-        case .info(let info): return info
-        case .terminal(let terminal): return terminal
-        case .files(let files): return files
-        case .attachments(let attachments): return attachments
-        case .extensionPanel(let panel): return panel
-        case .compare(let compare): return compare
-        }
-    }
-
-    /// The glyph the tab strip draws — the terminal-familiar vocabulary of the surface kind.
-    var symbolName: String {
-        switch body {
-        case .content(let content):
-            if case .image = content.body { return "photo" }
-            return "doc.richtext"
-        case .browser(let browser):
-            return browser.contextKind == .private ? "hand.raised.fill" : "globe"
-        case .review:
-            return "plus.forwardslash.minus"
-        case .info:
-            return "info.circle"
-        case .terminal:
-            return "terminal"
-        case .files:
-            return "folder"
-        case .attachments:
-            return "paperclip"
-        case .extensionPanel:
-            return "puzzlepiece.extension"
-        case .compare:
-            return "rectangle.on.rectangle"
-        }
-    }
-
-    /// What the strip and header call the tab: the agent's caption, else the file, the kind, or
-    /// the live page's own title.
-    var title: String {
-        switch body {
-        case .content(let content):
-            if let title = content.title, !title.isEmpty { return title }
-            if case .image(_, let url) = content.body { return url.lastPathComponent }
-            return "Document"
-        case .browser(let browser):
-            if let title = browser.currentTitle, !title.isEmpty { return title }
-            return browser.currentURL?.host
-                ?? (browser.contextKind == .private ? "Private Browser" : "Browser")
-        case .review:
-            return "Review"
-        case .info:
-            return "Info"
-        case .terminal:
-            return "Terminal"
-        case .files:
-            return "Files"
-        case .attachments:
-            return "Attachments"
-        case .extensionPanel(let panel):
-            return panel.panelTitle
-        case .compare:
-            return "Compare"
-        }
-    }
-}
-
 // MARK: - Display Pane Controller
 
 /// The panel beside the terminal, showing content an agent asked Skalman to display.
@@ -199,7 +24,7 @@ final class DisplayPaneController: NSViewController {
     private var headerCustomizationView: DisplayPaneHeaderCustomizationView!
     private var newTabMenuSession: AnyObject?
     private var tabBar: DisplayTabBar!
-    private var imageView: NSImageView!
+    private var imageView: ThemedImagePreview!
     private var webView: WKWebView!
     private var hostedView: NSView!
     private var captionLabel: NSTextField!
@@ -236,6 +61,9 @@ final class DisplayPaneController: NSViewController {
 
     /// Called when the user closes the pane's last content tab.
     var onClose: (() -> Void)?
+
+    /// Routes child selection back to the renderer that owns provider transcript loading.
+    var onSubagentSelection: ((SessionID, String) -> Void)?
 
     /// Reports an active review's background read and main-thread render as one operation.
     var onReviewLoadingChange: ((SessionID, Bool) -> Void)?
@@ -437,26 +265,29 @@ final class DisplayPaneController: NSViewController {
         )
         tabBar.onSelect = { [weak self] id in self?.userActivatedTab(id) }
         tabBar.onClose = { [weak self] id in self?.userClosedTab(id) }
+        tabBar.onReorder = { [weak self] id, index in
+            guard let self, let sessionID = self.currentSessionID else { return }
+            self.moveTab(id: id, toIndex: index, for: sessionID)
+        }
+        tabBar.contextEntries = { [weak self] id in
+            self?.tabContextEntries(for: id) ?? []
+        }
+        tabBar.externalDropTarget = { [weak self] id, windowPoint in
+            self?.dragOutDestination?(id, windowPoint) ?? false
+        }
+        tabBar.onDropOut = { [weak self] id, windowPoint in
+            self?.performDragOut?(id, windowPoint)
+        }
         headerView.addSubview(tabBar)
     }
 
     private func setupContent() {
-        imageView = NSImageView()
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-
-        // Top-aligned, not centred. The view fills the pane's height, so a wide image centred
-        // in it floats in the middle with dead space above; anchored to the top it sits under
-        // the header where the eye already is.
-        imageView.imageAlignment = .alignTop
-
-        // An NSImageView reports the image's own dimensions as its intrinsic content size, so
-        // left alone it drives the layout: the split view sizes the pane to fit the picture,
-        // and a 900px image opens a 900pt panel. Dropping both priorities to the floor means
-        // the pane decides its width and the image scales into whatever it is given.
-        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
-            imageView.setContentHuggingPriority(.init(1), for: axis)
-            imageView.setContentCompressionResistancePriority(.init(1), for: axis)
-        }
+        // A `ThemedImagePreview` rather than an `NSImageView`, for two reasons that both belong
+        // to this pane: the picture must not lend the panel its own dimensions (an image view
+        // does, and flooring its priorities only stopped that from *winning* — the size stayed
+        // in the layout and stayed what `fittingSize` answered), and the picture is the thing
+        // the user wants to open properly, which is Quick Look. See the type's own note.
+        imageView = ThemedImagePreview()
 
         webView = WKWebView()
         webView.translatesAutoresizingMaskIntoConstraints = false
@@ -527,7 +358,7 @@ final class DisplayPaneController: NSViewController {
             headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             headerView.heightAnchor.constraint(
-                greaterThanOrEqualToConstant: DisplayPaneDefaults.tabBarHeight
+                greaterThanOrEqualToConstant: ThemedTabStripView.bandHeight
             ),
 
             // The strip takes the row and gives up only what `+` needs, so a pane full of tabs
@@ -783,6 +614,10 @@ final class DisplayPaneController: NSViewController {
         return controller
     }
 
+    /// Consulted when the panel holds no browser for the session — wired by the window to the
+    /// drawer host, so an agent's `browser_*` tools keep finding a browser the user moved.
+    var browserFallback: ((SessionID) -> BrowserViewController?)?
+
     /// The most recently selected browser. A content tool may put a screenshot or document in
     /// front of it, but that output must not change which independent browser receives the next
     /// browser action.
@@ -798,7 +633,10 @@ final class DisplayPaneController: NSViewController {
            let recent = tabs.first(where: { $0.id == browserID })?.browser {
             return recent
         }
-        return tabs.first(where: { $0.browser != nil })?.browser
+        if let own = tabs.first(where: { $0.browser != nil })?.browser {
+            return own
+        }
+        return browserFallback?(sessionID)
     }
 
     // MARK: - Public — Review Tab
@@ -1123,6 +961,114 @@ final class DisplayPaneController: NSViewController {
         return controller
     }
 
+    // MARK: - Public — Subagents Tab
+
+    /// Opens the session's ephemeral child-agent transcript surface and selects one child.
+    ///
+    /// The tab is not persisted: its rows are live app-server state owned by the parent
+    /// conversation, unlike a browser URL or file tree that can be reconstructed after launch.
+    @discardableResult
+    func activateSubagent(
+        _ agent: SubagentTimeline.Agent,
+        for sessionID: SessionID
+    ) -> SubagentTranscriptViewController {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+
+        if let existing = tabs.first(where: { $0.subagents != nil }),
+           let controller = existing.subagents {
+            controller.update(agent)
+            wireSubagentSelection(controller, sessionID: sessionID)
+            activeTabIDBySession[sessionID] = existing.id
+            if sessionID == currentSessionID { render() }
+            return controller
+        }
+
+        let controller = SubagentTranscriptViewController()
+        addChild(controller)
+        wireSubagentSelection(controller, sessionID: sessionID)
+        controller.update(agent)
+
+        let tab = DisplayTab(body: .subagents(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// Opens the session-level Subagents surface: the compact navigator and one selected
+    /// transcript live together in the side pane rather than taking space above the main chat.
+    @discardableResult
+    func activateSubagents(
+        _ timeline: SubagentTimeline,
+        selectedThreadID: String?,
+        for sessionID: SessionID
+    ) -> SubagentTranscriptViewController {
+        restoreIfNeeded(sessionID)
+        var tabs = tabsBySession[sessionID] ?? []
+
+        if let existing = tabs.first(where: { $0.subagents != nil }),
+           let controller = existing.subagents {
+            wireSubagentSelection(controller, sessionID: sessionID)
+            controller.update(timeline, selectedThreadID: selectedThreadID)
+            activeTabIDBySession[sessionID] = existing.id
+            if sessionID == currentSessionID { render() }
+            return controller
+        }
+
+        let controller = SubagentTranscriptViewController()
+        addChild(controller)
+        wireSubagentSelection(controller, sessionID: sessionID)
+        controller.update(timeline, selectedThreadID: selectedThreadID)
+
+        let tab = DisplayTab(body: .subagents(controller))
+        tabs.append(tab)
+        tabsBySession[sessionID] = tabs
+        activeTabIDBySession[sessionID] = tab.id
+
+        if sessionID == currentSessionID { render() }
+        return controller
+    }
+
+    /// Refreshes an already-open detail without creating, selecting, or revealing its tab.
+    ///
+    /// That distinction lets a user close the live view while a child keeps working: the next
+    /// activity event must not reopen a pane they just dismissed.
+    func updateSubagent(
+        _ agent: SubagentTimeline.Agent,
+        for sessionID: SessionID
+    ) {
+        guard let controller = tabsBySession[sessionID]?
+            .first(where: { $0.subagents != nil })?
+            .subagents,
+              controller.representedThreadID == agent.descriptor.threadID else { return }
+        controller.update(agent)
+    }
+
+    /// Refreshes a side pane that is already open without revealing one the user closed.
+    func updateSubagents(
+        _ timeline: SubagentTimeline,
+        selectedThreadID: String?,
+        for sessionID: SessionID
+    ) {
+        guard let controller = tabsBySession[sessionID]?
+            .first(where: { $0.subagents != nil })?
+            .subagents else { return }
+        wireSubagentSelection(controller, sessionID: sessionID)
+        controller.update(timeline, selectedThreadID: selectedThreadID)
+    }
+
+    private func wireSubagentSelection(
+        _ controller: SubagentTranscriptViewController,
+        sessionID: SessionID
+    ) {
+        controller.onSelectAgent = { [weak self] threadID in
+            self?.onSubagentSelection?(sessionID, threadID)
+        }
+    }
+
     // MARK: - Public — Tab List (for the agent)
 
     /// The session's tabs in strip order, so the agent can list them and pick one.
@@ -1161,36 +1107,82 @@ final class DisplayPaneController: NSViewController {
     }
 
     /// Closes a tab by id. Returns false when the id is stale or belongs to another session.
+    ///
+    /// Which neighbour inherits the selection is `TabListState`'s rule, shared with every other
+    /// tab host; the panel's own concerns — ending what the tab held, the cached image, the
+    /// agent's browser target — stay here.
     @discardableResult
     func closeTab(id: UUID, for sessionID: SessionID) -> Bool {
         restoreIfNeeded(sessionID)
-        guard var tabs = tabsBySession[sessionID],
-              let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+        var state = TabListState(
+            tabs: tabsBySession[sessionID] ?? [],
+            activeTabID: activeTabIDBySession[sessionID]
+        )
+        guard let (removed, index) = state.remove(id: id) else { return false }
 
-        let removed = tabs.remove(at: index)
         teardownHosted(removed)
         if let cacheFile = removed.cacheFile {
             DisplayPaneStore.shared.removeCachedImage(cacheFile, for: sessionID)
         }
-        tabsBySession[sessionID] = tabs
+        tabsBySession[sessionID] = state.tabs
+        activeTabIDBySession[sessionID] = state.activeTabID
 
-        // Move selection to the neighbour that slid into this slot, else the new last tab.
-        if activeTabIDBySession[sessionID] == id {
-            let neighbour = tabs.indices.contains(index) ? tabs[index] : tabs.last
-            activeTabIDBySession[sessionID] = neighbour?.id
-        }
         if activeBrowserTabIDBySession[sessionID] == id {
-            let nextBrowser = tabs.enumerated()
-                .filter { $0.element.browser != nil }
-                .min { abs($0.offset - index) < abs($1.offset - index) }?
-                .element
-            activeBrowserTabIDBySession[sessionID] = nextBrowser?.id
+            activeBrowserTabIDBySession[sessionID] = state.nearest(to: index) {
+                $0.browser != nil
+            }?.id
         }
         persist(sessionID)
 
         if sessionID == currentSessionID { render() }
-        if tabs.isEmpty { onClose?() }
+        if state.tabs.isEmpty { onClose?() }
         return true
+    }
+
+    /// Moves a tab within the session's strip; `index` is its position after the move. Order is
+    /// the user's where a hand has touched it — persisted with the tabs themselves.
+    @discardableResult
+    func moveTab(id: UUID, toIndex index: Int, for sessionID: SessionID) -> Bool {
+        restoreIfNeeded(sessionID)
+        var state = TabListState(
+            tabs: tabsBySession[sessionID] ?? [],
+            activeTabID: activeTabIDBySession[sessionID]
+        )
+        guard state.move(id: id, toIndex: index) else { return false }
+        tabsBySession[sessionID] = state.tabs
+        persist(sessionID)
+        if sessionID == currentSessionID { render() }
+        return true
+    }
+
+    /// Extra context-menu entries for a tab — the window appends "Move to …" here, because
+    /// where else a tab could live is the window's knowledge, not this pane's.
+    var transferEntries: ((UUID) -> [ThemedMenuEntry])?
+
+    /// The drag half of the same wiring: whether a window point is over another pane that
+    /// would adopt the tab, and the move itself when the drop lands there. The context menu
+    /// stays the gesture's pointerless twin.
+    var dragOutDestination: ((UUID, NSPoint) -> Bool)?
+    var performDragOut: ((UUID, NSPoint) -> Void)?
+
+    /// Whether a window point lands where a dropped tab would join this pane — the header
+    /// band, full width, since an emptier strip is narrower than the drop it invites.
+    func dropBandContains(windowPoint: NSPoint) -> Bool {
+        guard isViewLoaded, view.window != nil, let headerView else { return false }
+        return headerView.bounds.contains(headerView.convert(windowPoint, from: nil))
+    }
+
+    /// What else can be done with a tab, offered by the strip on secondary click and through
+    /// accessibility — the pointerless route to reordering and to movement.
+    private func tabContextEntries(for id: UUID) -> [ThemedMenuEntry] {
+        guard let sessionID = currentSessionID else { return [] }
+        var entries = standardTabEntries(for: id, sessionID: sessionID)
+        guard !entries.isEmpty else { return [] }
+        if let transfers = transferEntries?(id), !transfers.isEmpty {
+            entries.append(.separator)
+            entries.append(contentsOf: transfers)
+        }
+        return entries
     }
 
     // MARK: - Public — Session Lifecycle
@@ -1307,8 +1299,9 @@ final class DisplayPaneController: NSViewController {
         case .content(let content):
             installHosted(nil)
             switch content.body {
-            case .image(let image, _):
+            case .image(let image, let url):
                 imageView.image = image
+                imageView.fileURL = url
                 imageView.isHidden = false
                 webView.isHidden = true
             case .html(let html):
@@ -1391,6 +1384,14 @@ final class DisplayPaneController: NSViewController {
             installHosted(attachments)
             attachments.refresh()
 
+        case .subagents(let subagents):
+            imageView.image = nil
+            imageView.isHidden = true
+            hideHTML()
+            captionLabel.isHidden = true
+            contentMenuButton.isHidden = true
+            installHosted(subagents)
+
         case .extensionPanel(let panel):
             imageView.image = nil
             imageView.isHidden = true
@@ -1465,7 +1466,7 @@ final class DisplayPaneController: NSViewController {
         }
 
         var tabs: [DisplayTab] = []
-        for persisted in panel.tabs {
+        for persisted in panel.panelTabs {
             let id = UUID(uuidString: persisted.id) ?? UUID()
             switch persisted.kind {
             case .browser:
@@ -1704,5 +1705,97 @@ extension DisplayPaneController: WKNavigationDelegate {
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         SkalmanLogger.mcp.error("Display panel web content process terminated; re-rendering")
         render()
+    }
+}
+
+// MARK: - Tab Hosting
+
+/// The display panel through the host-neutral contract, so tab commands and transfers can act
+/// on it without knowing which pane they reached. The panel's own methods keep their
+/// non-optional session signatures; this bridges the "current scope" spelling onto them.
+extension DisplayPaneController: TabHosting {
+
+    var hostID: TabHostID { .displayPanel }
+
+    private func resolvedSession(_ sessionID: SessionID?) -> SessionID? {
+        sessionID ?? currentSessionID
+    }
+
+    func tabs(for sessionID: SessionID?) -> [PaneTab] {
+        resolvedSession(sessionID).map { tabs(for: $0) } ?? []
+    }
+
+    func activeTabID(for sessionID: SessionID?) -> UUID? {
+        resolvedSession(sessionID).flatMap { activeTabID(for: $0) }
+    }
+
+    @discardableResult
+    func activateTab(id: UUID, for sessionID: SessionID?) -> Bool {
+        guard let session = resolvedSession(sessionID) else { return false }
+        return activateTab(id: id, for: session)
+    }
+
+    @discardableResult
+    func closeTab(id: UUID, for sessionID: SessionID?) -> Bool {
+        guard let session = resolvedSession(sessionID) else { return false }
+        return closeTab(id: id, for: session)
+    }
+
+    @discardableResult
+    func moveTab(id: UUID, toIndex index: Int, for sessionID: SessionID?) -> Bool {
+        guard let session = resolvedSession(sessionID) else { return false }
+        return moveTab(id: id, toIndex: index, for: session)
+    }
+
+    /// The panel shows every tab kind there is — it is where each of them was built to live.
+    func canAdopt(_ tab: PaneTab) -> Bool {
+        true
+    }
+
+    func detachTab(id: UUID, for sessionID: SessionID?) -> PaneTab? {
+        guard let session = resolvedSession(sessionID) else { return nil }
+        restoreIfNeeded(session)
+        var state = TabListState(
+            tabs: tabsBySession[session] ?? [],
+            activeTabID: activeTabIDBySession[session]
+        )
+        guard let (removed, index) = state.remove(id: id) else { return nil }
+
+        // Unparent without ending: the whole point of a detach is that the browser keeps its
+        // page and the shell its process, for whichever host adopts them next.
+        if let controller = removed.hostedController {
+            if installedController === controller { installHosted(nil) }
+            controller.view.removeFromSuperview()
+            controller.removeFromParent()
+        }
+
+        tabsBySession[session] = state.tabs
+        activeTabIDBySession[session] = state.activeTabID
+        if activeBrowserTabIDBySession[session] == id {
+            activeBrowserTabIDBySession[session] = state.nearest(to: index) {
+                $0.browser != nil
+            }?.id
+        }
+        persist(session)
+        if session == currentSessionID { render() }
+        return removed
+    }
+
+    func adopt(_ tab: PaneTab, at index: Int?, for sessionID: SessionID?) {
+        guard let session = resolvedSession(sessionID) else { return }
+        restoreIfNeeded(session)
+        var state = TabListState(
+            tabs: tabsBySession[session] ?? [],
+            activeTabID: activeTabIDBySession[session]
+        )
+        state.insert(tab, at: index)
+        state.activate(id: tab.id)
+        tabsBySession[session] = state.tabs
+        activeTabIDBySession[session] = state.activeTabID
+        if tab.browser != nil {
+            activeBrowserTabIDBySession[session] = tab.id
+        }
+        persist(session)
+        if session == currentSessionID { render() }
     }
 }

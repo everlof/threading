@@ -76,8 +76,48 @@ enum TranscriptReplay {
         var events: [StreamEvent] = []
         var dropped = 0
 
+        // Both formats stamp every record, and dropping those stamps is what left every
+        // replayed turn without an end: nothing on disk says "turn finished", but the gap
+        // between a turn's opening user record and its last record does. A synthetic
+        // `.turnFinished` per boundary is what lets a resumed conversation fold its settled
+        // turns and settle tool calls that never reported back — the same events, so replay
+        // and live cannot diverge.
+        var turnStartedAt: Date?
+        var turnIsOpen = false
+        var lastEventAt: Date?
+        var lastContextTokens: Int?
+        var lastContextWindow: Int?
+
+        func endOpenTurn() {
+            guard turnIsOpen else { return }
+            turnIsOpen = false
+
+            var metrics = TurnMetrics.empty
+            if let started = turnStartedAt, let ended = lastEventAt,
+               ended > started {
+                metrics.duration = ended.timeIntervalSince(started)
+            }
+            metrics.contextTokens = lastContextTokens
+            metrics.contextWindow = lastContextWindow
+            events.append(.turnFinished(text: nil, isError: false, metrics: metrics))
+        }
+
         JSONLReader.forEachRecord(at: url, limit: ReplayDefaults.scanLimit) { record in
+            // Context facts ride records the event mapping skips — Codex's `token_count`
+            // produces no row at all — so they are read before the mapping can bail.
+            if let context = contextReading(of: record, kind: kind) {
+                lastContextTokens = context.tokens
+                if let window = context.window { lastContextWindow = window }
+            }
+
             guard let event = self.event(from: record, kind: kind) else { return true }
+
+            if case .userMessage = event {
+                endOpenTurn()
+                turnIsOpen = true
+                turnStartedAt = timestamp(of: record)
+            }
+            if let stamp = timestamp(of: record) { lastEventAt = stamp }
 
             events.append(event)
 
@@ -90,9 +130,66 @@ enum TranscriptReplay {
 
             return true
         }
+        endOpenTurn()
 
         return (events, dropped > 0)
     }
+
+    /// How full the model's window was as of this record, where the record says.
+    ///
+    /// Claude writes a `usage` object on every assistant record — `input_tokens` excludes
+    /// cache reads, so the parts are summed. Codex writes `token_count` records whose
+    /// `last_token_usage.total_tokens` is the most recent request's size (the running
+    /// `total_token_usage` exceeds the window on any long session, and must not be used),
+    /// with `model_context_window` beside it.
+    private static func contextReading(
+        of record: [String: Any],
+        kind: AgentKind
+    ) -> (tokens: Int, window: Int?)? {
+        switch kind {
+        case .claude:
+            guard record["type"] as? String == "assistant",
+                  record["isSidechain"] as? Bool != true,
+                  let message = record["message"] as? [String: Any],
+                  let usage = message["usage"] as? [String: Any] else { return nil }
+            let input = (usage["input_tokens"] as? NSNumber)?.intValue
+            let cacheRead = (usage["cache_read_input_tokens"] as? NSNumber)?.intValue
+            let cacheCreation = (usage["cache_creation_input_tokens"] as? NSNumber)?.intValue
+            guard input != nil || cacheRead != nil || cacheCreation != nil else { return nil }
+            let output = (usage["output_tokens"] as? NSNumber)?.intValue
+            let tokens = (input ?? 0) + (cacheRead ?? 0) + (cacheCreation ?? 0) + (output ?? 0)
+            return (tokens, nil)
+
+        case .codex:
+            guard let payload = record["payload"] as? [String: Any],
+                  payload["type"] as? String == "token_count",
+                  let info = payload["info"] as? [String: Any],
+                  let last = info["last_token_usage"] as? [String: Any],
+                  let tokens = (last["total_tokens"] as? NSNumber)?.intValue else { return nil }
+            return (tokens, (info["model_context_window"] as? NSNumber)?.intValue)
+        }
+    }
+
+    /// When a record was written. Claude stamps records at the top level and Codex stamps its
+    /// rollout envelope the same way; both write ISO 8601, with and without fractional seconds
+    /// depending on version.
+    private static func timestamp(of record: [String: Any]) -> Date? {
+        guard let raw = record["timestamp"] as? String else { return nil }
+        return fractionalTimestampParser.date(from: raw)
+            ?? plainTimestampParser.date(from: raw)
+    }
+
+    private static let fractionalTimestampParser: ISO8601DateFormatter = {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return parser
+    }()
+
+    private static let plainTimestampParser: ISO8601DateFormatter = {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime]
+        return parser
+    }()
 
     /// Maps one transcript record to something worth drawing, or nil to skip it.
     private static func event(from record: [String: Any], kind: AgentKind) -> StreamEvent? {
@@ -127,7 +224,7 @@ enum TranscriptReplay {
             return blocks.isEmpty ? nil : .assistantMessage(blocks: blocks)
         }
 
-        return userEvent(from: message)
+        return ClaudeTranscriptUserRecord.event(from: message, scope: .parent)
     }
 
     /// Codex records dialogue as `event_msg` and tool activity as `response_item`. Response
@@ -336,8 +433,8 @@ enum TranscriptReplay {
             let text = blocks.compactMap { $0["text"] as? String }.joined()
 
             // The orchestration layer prefixes command output with its own completion and
-            // timing lines. Live `codex exec --json` exposes only `aggregated_output`, so remove
-            // that envelope to keep a replayed row identical to the one originally shown.
+            // timing lines. Live structured Codex events expose only the aggregated output, so
+            // remove that envelope to keep a replayed row identical to the one originally shown.
             if text.hasPrefix("Script completed\n"),
                let marker = text.range(of: "\nOutput:\n") {
                 return String(text[marker.upperBound...])
@@ -353,27 +450,170 @@ enum TranscriptReplay {
         return text
     }
 
-    /// A user record is either something typed or a batch of tool results, and the two are
-    /// told apart by shape: plain text for the first, `tool_result` blocks for the second.
-    private static func userEvent(from message: [String: Any]) -> StreamEvent? {
-        if let text = message["content"] as? String {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : .userMessage(trimmed)
+}
+
+// MARK: - Claude User Records
+
+/// Separates user dialogue from the XML-shaped control records Claude persists as user messages.
+///
+/// This is deliberately an allowlist at the transcript boundary, not an XML cleaner. Unknown
+/// tags remain literal user text. Known envelopes are accepted only in the complete shapes
+/// measured from Claude 2.1.220 transcripts, so code, HTML and a user-authored `<word>` cannot
+/// disappear merely because it uses angle brackets.
+enum ClaudeTranscriptUserRecord {
+
+    enum Scope {
+        case parent
+        case child
+    }
+
+    /// A user record is either something typed, a batch of tool results, or provider chrome.
+    static func event(
+        from message: [String: Any],
+        scope: Scope
+    ) -> StreamEvent? {
+        if let content = message["content"] as? [[String: Any]] {
+            let results = content.compactMap(StreamEvent.toolResult)
+            if !results.isEmpty { return .toolResults(results) }
         }
 
-        guard let content = message["content"] as? [[String: Any]] else { return nil }
+        guard let text = text(from: message) else { return nil }
+        switch presentation(of: text, scope: scope) {
+        case .user(let value):
+            return .userMessage(value)
+        case .notice(let value):
+            return .transcriptNotice(value)
+        case .suppressed:
+            return nil
+        }
+    }
 
-        let results = content.compactMap(StreamEvent.toolResult)
-        if !results.isEmpty { return .toolResults(results) }
+    /// The actual task prompt from a child's opening record, with Claude's fork instructions
+    /// removed. Used by the cheap metadata index without replaying the whole conversation.
+    static func userText(from message: [String: Any]) -> String? {
+        guard let text = text(from: message),
+              case .user(let value) = presentation(of: text, scope: .child) else {
+            return nil
+        }
+        return value
+    }
 
-        // A typed turn can also arrive as text blocks rather than a bare string.
-        let text = content
+    private enum Presentation {
+        case user(String)
+        case notice(String)
+        case suppressed
+    }
+
+    private static func text(from message: [String: Any]) -> String? {
+        if let text = message["content"] as? String {
+            return nonempty(text)
+        }
+
+        guard let content = message["content"] as? [[String: Any]] else {
+            return nil
+        }
+        return nonempty(content
             .filter { $0["type"] as? String == "text" }
             .compactMap { $0["text"] as? String }
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .joined(separator: "\n"))
+    }
 
-        return text.isEmpty ? nil : .userMessage(text)
+    private static func presentation(
+        of text: String,
+        scope: Scope
+    ) -> Presentation {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Fork children receive 928 characters of provider instructions followed by the real
+        // task in the same text block. Dropping the record loses the task; stripping any other
+        // leading tag risks deleting user content. It is child-only as well as shape-specific:
+        // a parent user is still free to discuss this literal tag.
+        if scope == .child, let fork = consumeLeadingEnvelope(
+            tag: "fork-boilerplate",
+            from: trimmed
+        ) {
+            return nonempty(fork.remainder).map(Presentation.user) ?? .suppressed
+        }
+
+        // A local slash command is one record containing these three envelopes in this order.
+        // Its name is useful history; its transport message and arguments are not another turn.
+        if let name = consumeLeadingEnvelope(tag: "command-name", from: trimmed),
+           let message = consumeLeadingEnvelope(
+               tag: "command-message",
+               from: name.remainder
+           ),
+           let arguments = consumeLeadingEnvelope(
+               tag: "command-args",
+               from: message.remainder
+           ),
+           nonempty(arguments.remainder) == nil {
+            guard let command = nonempty(name.body) else { return .user(trimmed) }
+            let invocation = nonempty(arguments.body)
+                .map { "\(command) \($0)" }
+                ?? command
+            return .notice(invocation)
+        }
+
+        // Some Claude releases persist the message/arguments half separately. It duplicates
+        // the command-name record above and has no standalone conversational meaning.
+        if let message = consumeLeadingEnvelope(tag: "command-message", from: trimmed),
+           let arguments = consumeLeadingEnvelope(
+               tag: "command-args",
+               from: message.remainder
+           ),
+           nonempty(arguments.remainder) == nil {
+            return .suppressed
+        }
+
+        // These are complete provider control records. Structured live adapters already turn
+        // task notifications into lifecycle events; command output and reminders are CLI chrome.
+        for tag in [
+            "task-notification",
+            "local-command-stdout",
+            "local-command-caveat",
+            "system-reminder"
+        ] {
+            if let envelope = consumeLeadingEnvelope(tag: tag, from: trimmed),
+               nonempty(envelope.remainder) == nil {
+                return .suppressed
+            }
+        }
+
+        return .user(trimmed)
+    }
+
+    private static func consumeLeadingEnvelope(
+        tag: String,
+        from text: String
+    ) -> (body: String, remainder: String)? {
+        let candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opening = "<\(tag)>"
+        let closing = "</\(tag)>"
+        guard candidate.hasPrefix(opening),
+              let closingRange = candidate.range(
+                  of: closing,
+                  range: candidate.index(
+                      candidate.startIndex,
+                      offsetBy: opening.count
+                  )..<candidate.endIndex
+              ) else {
+            return nil
+        }
+
+        let bodyStart = candidate.index(
+            candidate.startIndex,
+            offsetBy: opening.count
+        )
+        let body = String(candidate[bodyStart..<closingRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let remainder = String(candidate[closingRange.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (body, remainder)
+    }
+
+    private static func nonempty(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

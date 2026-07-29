@@ -173,6 +173,19 @@ final class ConversationTimelineTests: XCTestCase {
         }
     }
 
+    /// Work left running answers "has this session finished", which is the sidebar's question
+    /// and the notification's. It is not a row, and a status line claiming otherwise would be
+    /// the conversation narrating its own bookkeeping.
+    func testBackgroundWorkDrawsNothingInTheConversation() {
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        let opening = timeline.apply(.userMessage("run the tests in the background"))
+
+        let changes = timeline.apply(.backgroundWork(inFlight: ["b4vc22id4"]))
+
+        XCTAssertTrue(changes.isEmpty)
+        XCTAssertEqual(timeline.rows.count, opening.count)
+    }
+
     func testPlanCallReportsRunProgressBesideItsToolRow() {
         var timeline = ConversationTimeline(sessionID: SessionID())
         let changes = timeline.apply(.assistantMessage(blocks: [
@@ -192,6 +205,46 @@ final class ConversationTimelineTests: XCTestCase {
 
         XCTAssertEqual(changes.count, 2)
         XCTAssertEqual(changes.last, .runProgress(RunProgress(step: 2, total: 4)))
+    }
+
+    func testClaudeTaskEventsBuildProgressThroughTheOrdinaryTimeline() {
+        var timeline = ConversationTimeline(sessionID: SessionID())
+
+        let created = timeline.apply(.assistantMessage(blocks: [
+            .toolUse(
+                id: "create-1",
+                tool: .taskCreate,
+                input: ["subject": "Inspect"]
+            )
+        ]))
+        XCTAssertEqual(created.last, .runProgress(RunProgress(step: 1, total: 1)))
+
+        let bound = timeline.apply(.toolResults([
+            ToolResult(
+                toolUseID: "create-1",
+                text: "Task #1 created successfully: Inspect",
+                isError: false
+            )
+        ]))
+        XCTAssertEqual(bound.last, .runProgress(RunProgress(step: 1, total: 1)))
+
+        let completed = timeline.apply(.assistantMessage(blocks: [
+            .toolUse(
+                id: "update-1",
+                tool: .taskUpdate,
+                input: ["taskId": "1", "status": "completed"]
+            )
+        ]))
+        XCTAssertEqual(completed.last, .runProgress(RunProgress(step: 1, total: 1)))
+    }
+
+    func testExplicitEmptyPlanClearsRunProgress() {
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.apply(.runPlanUpdated([
+            RunProgress.Step(id: nil, title: "Inspect", status: .inProgress)
+        ]))
+
+        XCTAssertEqual(timeline.apply(.runPlanUpdated([])), [.runProgress(nil)])
     }
 
     func testNoToolSubjectIsRawJSON() throws {
@@ -428,6 +481,210 @@ final class ConversationTimelineTests: XCTestCase {
         XCTAssertEqual(failed.rows, [.notice("Rate limited.", kind: .error)])
     }
 
+    // MARK: - Tool Outcome
+
+    func testAShellFailureIsSniffedFromItsText() {
+        // The provider's error flag is not sufficient: a command can print `command not found`
+        // and still be reported as a success. The text itself settles the outcome.
+        for text in [
+            "zsh: command not found: skalman-build",
+            "ls: /nowhere: No such file or directory",
+            "Error: spawn ENOENT",
+            "the build step exited with code 2"
+        ] {
+            XCTAssertEqual(
+                ToolOutcome.classify(text: text, isError: false, tool: .bash), .failed,
+                "\(text) was not read as a failure"
+            )
+        }
+    }
+
+    func testTheSniffOnlyTrustsAShellsOpeningLines() {
+        // Deeper down, the same phrase is as likely quoted output — a grep through a script,
+        // a log being catted — as a report about the command itself.
+        let buried = "line1\nline2\nline3\nline4: command not found in this prose"
+        XCTAssertEqual(ToolOutcome.classify(text: buried, isError: false, tool: .bash), .succeeded)
+
+        // But an explicit exit-code report is specific enough to trust anywhere — except for
+        // code 0, which is the shell saying it worked.
+        let reported = "…40 lines of output…\nscript exited with exit code 1"
+        XCTAssertEqual(ToolOutcome.classify(text: reported, isError: false, tool: .bash), .failed)
+        XCTAssertEqual(
+            ToolOutcome.classify(text: "exited with code 0", isError: false, tool: .bash),
+            .succeeded
+        )
+    }
+
+    func testFileContentIsNeverSniffed() {
+        // A Read or Grep result is arbitrary file content; `No such file or directory` inside
+        // it proves nothing about the call that fetched it.
+        let text = "zsh: command not found: foo\nls: x: No such file or directory"
+        XCTAssertEqual(ToolOutcome.classify(text: text, isError: false, tool: .read), .succeeded)
+        XCTAssertEqual(ToolOutcome.classify(text: text, isError: false, tool: .grep), .succeeded)
+
+        // The provider's own flag still fails any tool.
+        XCTAssertEqual(ToolOutcome.classify(text: "", isError: true, tool: .read), .failed)
+    }
+
+    func testAnUnansweredCallSettlesAsStoppedWhenTheTurnEnds() {
+        // A turn can end around a call that never reported back — without a terminal state
+        // that row reads "running…" forever.
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.apply(.assistantMessage(blocks: [
+            .toolUse(id: "call-1", tool: .bash, input: ["command": "sleep 100"])
+        ]))
+        let changes = timeline.apply(.turnFinished(text: nil, isError: false, metrics: .empty))
+
+        XCTAssertTrue(changes.contains(.resultAttached(index: 0)))
+        guard case .toolCall(let call) = timeline.rows[0] else {
+            return XCTFail("The tool row went missing")
+        }
+        XCTAssertEqual(call.result?.outcome, .interrupted)
+    }
+
+    func testALateResultStillLandsOnAStoppedRow() {
+        // The interruption placeholder is a guess about a result that may yet arrive; the real
+        // one wins.
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.apply(.assistantMessage(blocks: [
+            .toolUse(id: "call-1", tool: .bash, input: ["command": "make"])
+        ]))
+        _ = timeline.apply(.turnFinished(text: nil, isError: false, metrics: .empty))
+        let changes = timeline.apply(.toolResults([
+            ToolResult(toolUseID: "call-1", text: "ok", isError: false)
+        ]))
+
+        XCTAssertEqual(changes.first, .resultAttached(index: 0))
+        guard case .toolCall(let call) = timeline.rows[0] else {
+            return XCTFail("The tool row went missing")
+        }
+        XCTAssertEqual(call.result?.outcome, .succeeded)
+        XCTAssertEqual(call.result?.text, "ok")
+    }
+
+    // MARK: - Turns
+
+    func testATurnKnowsItsExtentAndConclusion() {
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.apply(.userMessage("Fix the bug"))
+        _ = timeline.apply(.assistantMessage(blocks: [
+            .thinking("hmm"),
+            .toolUse(id: "call-1", tool: .bash, input: ["command": "ls"]),
+            .text("Considering the layout…")
+        ]))
+        _ = timeline.apply(.toolResults([
+            ToolResult(toolUseID: "call-1", text: "ok", isError: false)
+        ]))
+        _ = timeline.apply(.assistantMessage(blocks: [.text("Fixed.")]))
+        _ = timeline.apply(.userMessage("Thanks"))
+
+        let turns = timeline.turns
+        XCTAssertEqual(turns.count, 2)
+
+        // Rows: 0 user, 1 thinking, 2 tool, 3 assistant, 4 assistant, 5 user.
+        let first = turns[0]
+        XCTAssertEqual(first.rowIndex, 0)
+        XCTAssertEqual(first.endIndex, 4)
+        XCTAssertEqual(first.finalAssistantIndex, 4)
+        XCTAssertEqual(first.assistantText, "Fixed.")
+
+        // The turn in flight ends at the newest row and has no conclusion yet.
+        let second = turns[1]
+        XCTAssertEqual(second.rowIndex, 5)
+        XCTAssertEqual(second.endIndex, 5)
+        XCTAssertNil(second.finalAssistantIndex)
+    }
+
+    func testATurnRetainsItsDurationFromTheTerminalEvent() {
+        // `.turnFinished` metrics used to pass straight through to the status line and be
+        // discarded; the fold's "Worked for 42s" is why they are now retained per turn.
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.apply(.userMessage("Q"))
+        let changes = timeline.apply(.turnFinished(
+            text: nil,
+            isError: false,
+            metrics: TurnMetrics(duration: 42)
+        ))
+
+        XCTAssertEqual(timeline.turns.first?.duration, 42)
+        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, interrupted: false)))
+    }
+
+    func testAnInterruptedTurnSettlesAsInterrupted() {
+        // The view keeps an interrupted turn expanded — the user keeps their place — and the
+        // change carrying `interrupted` is what tells it to.
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.apply(.userMessage("Q"))
+        let changes = timeline.apply(.turnFinished(text: nil, isError: true, metrics: .empty))
+
+        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, interrupted: true)))
+    }
+
+    func testATurnEndWithNoOpenTurnSettlesNothing() {
+        // A replay window can open mid-turn: its first synthetic turn end has no user message
+        // to attribute to, and must not invent one.
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        let changes = timeline.apply(.turnFinished(text: nil, isError: false, metrics: .empty))
+
+        XCTAssertFalse(changes.contains {
+            if case .turnSettled = $0 { return true } else { return false }
+        })
+    }
+
+    func testReplayedTranscriptsCarryTurnEndsWithDurations() throws {
+        // Both CLIs stamp every record; replay derives each turn's length from the gap
+        // between its opening user record and its last record. Without this, every resumed
+        // conversation folds behind a bare "Worked" and unanswered calls read "running…"
+        // forever.
+        for fixture in Fixture.allCases {
+            try XCTSkipUnless(
+                FileManager.default.fileExists(atPath: fixture.url.path),
+                "Missing fixture \(fixture.rawValue). Regenerate with scripts/scrub_transcript.py."
+            )
+            let (events, _) = TranscriptReplay.read(at: fixture.url, kind: fixture.kind)
+            let durations = events.compactMap { event -> TimeInterval? in
+                guard case .turnFinished(_, _, let metrics) = event else { return nil }
+                return metrics.duration
+            }
+            XCTAssertFalse(
+                durations.isEmpty,
+                "\(fixture.rawValue) replayed no measured turn ends"
+            )
+            XCTAssertTrue(
+                durations.allSatisfy { $0 > 0 },
+                "\(fixture.rawValue) produced a non-positive turn duration"
+            )
+        }
+    }
+
+    func testReplayedTurnEndsCarryContextReadings() throws {
+        // Claude stamps a `usage` object on every assistant record; Codex writes
+        // `token_count` records with `model_context_window` beside the counts. Both feed the
+        // context meter on a resumed conversation.
+        for fixture in Fixture.allCases {
+            try XCTSkipUnless(
+                FileManager.default.fileExists(atPath: fixture.url.path),
+                "Missing fixture \(fixture.rawValue). Regenerate with scripts/scrub_transcript.py."
+            )
+            let (events, _) = TranscriptReplay.read(at: fixture.url, kind: fixture.kind)
+            let readings = events.compactMap { event -> (tokens: Int?, window: Int?)? in
+                guard case .turnFinished(_, _, let metrics) = event else { return nil }
+                return (metrics.contextTokens, metrics.contextWindow)
+            }
+
+            XCTAssertTrue(
+                readings.contains { ($0.tokens ?? 0) > 0 },
+                "\(fixture.rawValue) replayed no context readings"
+            )
+            if fixture.kind == .codex {
+                XCTAssertTrue(
+                    readings.contains { $0.window != nil },
+                    "\(fixture.rawValue) lost Codex's model_context_window"
+                )
+            }
+        }
+    }
+
     // MARK: - Session Identity
 
     func testTheCLIsOwnSessionIDIsAdopted() {
@@ -444,8 +701,8 @@ final class ConversationTimelineTests: XCTestCase {
     }
 
     func testCodexThreadRestartsDoNotOverwriteWorking() {
-        // Codex reports `thread.started` at the head of every one-shot turn. Reporting Ready
-        // there would say the turn had finished while the model was still running.
+        // A resumed transport may restate its thread while a turn is already starting.
+        // Reporting Ready there would say the turn had finished while the model was still running.
         var timeline = ConversationTimeline(sessionID: SessionID())
         let transcriptID = TranscriptID("thread-1")
         let changes = timeline.apply(.initialised(sessionID: transcriptID, model: nil))
