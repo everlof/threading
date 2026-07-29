@@ -1384,6 +1384,12 @@ final class MainWindowController: ThemedWindowController {
     // MARK: - Find
 
     func showFind() {
+        if !displayItem.isCollapsed,
+           let browser = displayPaneController.currentBrowser {
+            browser.showFind()
+            return
+        }
+
         guard let contentView = window?.contentView,
               let terminalView = currentAgentController()?.session.terminalView else { return }
 

@@ -1049,12 +1049,28 @@ files deliberately shown through the display tool still appear.
 ### The shared browser
 
 **View ▸ Browser** (Cmd+Shift+B) opens a real browser tab belonging to the current session.
-It has an address bar, history controls, persistent cookies, and the Web Inspector. The agent
-driving that session sees and acts on this same tab—it can open pages, go back or forward,
-reload, read a semantic page outline, click, hover, drag between page elements, type, and select
-form options, set checkboxes and switches to an exact state, use single, double, right, and middle
-clicks, send keyboard shortcuts with native focus and control behavior, wait for text, URL, or
-element-state updates, inspect bounded console and network diagnostics, and return screenshots.
+It has an address bar, history controls, persistent cookies, responsive viewport testing, and the
+Web Inspector. Its overflow menu includes find in page, print, visible-page screenshots, 50–200%
+zoom, recent downloads, current-site data clearing, and browser settings. The responsive toolbar
+provides editable CSS-pixel dimensions, rotation, and desktop, tablet, foldable, and phone presets;
+hiding it returns the page to the panel's natural size. These are honest viewport presets, not
+claims of touch, device-scale, browser-engine, or complete hardware emulation.
+When the browser tab is visible, Cmd+F opens its native find bar rather than the terminal's.
+
+The agent driving that session sees and acts on this same tab—it can open pages, go back or
+forward, reload, read a semantic page outline, click, hover, drag between page elements, type, and
+select form options, set checkboxes and switches to an exact state, use single, double, right, and
+middle clicks, send keyboard shortcuts with native focus and control behavior, wait for text, URL,
+or element-state updates, inspect bounded console and network diagnostics, and return screenshots.
+When exact browser or device conditions exceed the visible WebKit browser, the separate isolated
+Playwright tool can run a fresh Chromium, Firefox, or WebKit context without importing the live
+tab's cookies or credentials.
+
+Use **Annotate Page** to place numbered notes directly over what you are reviewing. Notes stay in
+Skalman's native UI rather than entering the page DOM, so the site cannot read or alter them.
+Click an existing pin while annotation mode is active to edit or delete it. The agent can read the
+notes for the currently authorized page with their document-space coordinates, clearly labelled as
+user-authored context; it cannot create or change them.
 
 Local development pages are available immediately. Before an agent can read or act on another
 website, Skalman asks whether to allow it once, always allow that origin, or deny it. Persistent

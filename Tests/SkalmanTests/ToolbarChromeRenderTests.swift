@@ -103,6 +103,15 @@ final class ToolbarChromeRenderTests: XCTestCase {
                 $0.setNavigationState(canGoBack: true, canGoForward: true, popupDepth: 0)
                 $0.setActiveTestConditionCount(4)
                 $0.setPasswordFieldFocused(true)
+            },
+            BrowserChromeStory(
+                name: "wide-annotating",
+                width: 760,
+                context: .shared
+            ) {
+                $0.addressField.stringValue = "https://example.test/review"
+                $0.setNavigationState(canGoBack: true, canGoForward: true, popupDepth: 0)
+                $0.setAnnotating(true)
             }
         ]
 
@@ -132,8 +141,52 @@ final class ToolbarChromeRenderTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(written, 20)
+        XCTAssertEqual(written, 24)
         print("Rendered browser chrome matrix to \(Render.directory.path)")
+    }
+
+    func testRendersBrowserResponsiveReviewMatrix() throws {
+        let themes: [(name: String, theme: AppTheme, appearance: NSAppearance.Name)] = [
+            ("system-light", .system, .aqua),
+            ("system-dark", .system, .darkAqua),
+            ("swiss-minimalist", AppThemeStyles.swissMinimalist, .aqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua)
+        ]
+        let widths: [(name: String, value: CGFloat)] = [
+            ("wide", 760),
+            ("compact", 430)
+        ]
+
+        let originalTheme = AppThemePalette.current
+        defer { AppThemePalette.set(originalTheme) }
+        try FileManager.default.createDirectory(
+            at: Render.directory,
+            withIntermediateDirectories: true
+        )
+
+        var written = 0
+        for theme in themes {
+            AppThemePalette.set(theme.theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: theme.appearance))
+            for width in widths {
+                let data = try XCTUnwrap(
+                    browserResponsiveReviewPNG(
+                        width: width.value,
+                        theme: theme.theme,
+                        appearance: appearance
+                    )
+                )
+                try data.write(
+                    to: Render.directory.appendingPathComponent(
+                        "browser-responsive-review-\(width.name)-\(theme.name).png"
+                    )
+                )
+                written += 1
+            }
+        }
+
+        XCTAssertEqual(written, 8)
+        print("Rendered browser responsive review matrix to \(Render.directory.path)")
     }
 
     func testBrowserChromeProtectsTheAddressAtMinimumWidth() {
@@ -438,6 +491,104 @@ final class ToolbarChromeRenderTests: XCTestCase {
 
             root.layoutSubtreeIfNeeded()
             chrome.updateResponsiveLayout()
+            root.layoutSubtreeIfNeeded()
+
+            if let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) {
+                root.cacheDisplay(in: root.bounds, to: rep)
+                data = rep.representation(using: .png, properties: [:])
+            }
+            window.close()
+        }
+        return data
+    }
+
+    private func browserResponsiveReviewPNG(
+        width: CGFloat,
+        theme: AppTheme,
+        appearance: NSAppearance
+    ) -> Data? {
+        var data: Data?
+        appearance.performAsCurrentDrawingAppearance {
+            let height: CGFloat = 420
+            let chromeHeight: CGFloat = 42
+            let toolbarHeight: CGFloat = 40
+            let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+            root.wantsLayer = true
+            root.layer?.backgroundColor = theme.resolved(
+                .ground,
+                appearance: appearance
+            ).cgColor
+            root.appearance = appearance
+
+            let page = NSView(
+                frame: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: width,
+                    height: height - chromeHeight - toolbarHeight
+                )
+            )
+            page.wantsLayer = true
+            page.layer?.backgroundColor = theme.resolved(
+                .surface,
+                appearance: appearance
+            ).cgColor
+
+            let overlay = BrowserAnnotationOverlay(frame: page.bounds)
+            overlay.markers = [
+                BrowserAnnotationMarker(id: 1, point: CGPoint(x: width * 0.35, y: 120)),
+                BrowserAnnotationMarker(id: 2, point: CGPoint(x: width * 0.68, y: 220))
+            ]
+            overlay.isAnnotating = true
+
+            let toolbar = BrowserDeviceToolbar(
+                frame: NSRect(
+                    x: 0,
+                    y: page.frame.maxY,
+                    width: width,
+                    height: toolbarHeight
+                )
+            )
+            toolbar.translatesAutoresizingMaskIntoConstraints = true
+            toolbar.setViewport(
+                CGSize(width: 390, height: 844),
+                preset: nil
+            )
+
+            let chrome = BrowserChromeBar(contextKind: .shared)
+            chrome.translatesAutoresizingMaskIntoConstraints = true
+            chrome.frame = NSRect(
+                x: 0,
+                y: toolbar.frame.maxY,
+                width: width,
+                height: chromeHeight
+            )
+            chrome.addressField.stringValue = "localhost:3000/docs"
+            chrome.setNavigationState(canGoBack: true, canGoForward: false, popupDepth: 0)
+            chrome.setAnnotating(true)
+
+            root.addSubview(page)
+            root.addSubview(overlay)
+            root.addSubview(toolbar)
+            root.addSubview(chrome)
+
+            let window = NSWindow(
+                contentRect: root.bounds,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.appearance = appearance
+            window.contentView = root
+
+            AppThemeRefresh.repaint(root)
+            toolbar.needsLayout = true
+            toolbar.layoutSubtreeIfNeeded()
+            chrome.needsLayout = true
+            chrome.updateResponsiveLayout()
+            chrome.layoutSubtreeIfNeeded()
+            overlay.needsDisplay = true
             root.layoutSubtreeIfNeeded()
 
             if let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) {

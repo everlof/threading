@@ -1,6 +1,696 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld annotations": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld anteckningar"
+          }
+        }
+      }
+    },
+    "%lld recent downloads": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld senaste hämtningar"
+          }
+        }
+      }
+    },
+    "4K": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4K"
+          }
+        }
+      }
+    },
+    "Add Annotation": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till anteckning"
+          }
+        }
+      }
+    },
+    "Add Browser Annotation": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till webbläsaranteckning"
+          }
+        }
+      }
+    },
+    "Annotate Page": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kommentera sidan"
+          }
+        }
+      }
+    },
+    "Annotating": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kommenterar"
+          }
+        }
+      }
+    },
+    "Browser Annotation Canvas": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anteckningsyta för webbläsaren"
+          }
+        }
+      }
+    },
+    "Browser Settings": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Webbläsarinställningar"
+          }
+        }
+      }
+    },
+    "Choose where to save a PNG of the visible browser page.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj var PNG-bilden av den synliga webbläsarsidan ska sparas."
+          }
+        }
+      }
+    },
+    "Clear Browsing Data": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rensa webbdata"
+          }
+        }
+      }
+    },
+    "Clear Browsing Data…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rensa webbdata…"
+          }
+        }
+      }
+    },
+    "Cleared %lld website data records for %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rensade %lld webbdataposter för %@."
+          }
+        }
+      }
+    },
+    "Cleared this tab’s private website data.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rensade den här flikens privata webbdata."
+          }
+        }
+      }
+    },
+    "Click the page to place an annotation for the agent": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klicka på sidan för att placera en anteckning åt agenten"
+          }
+        }
+      }
+    },
+    "Close Find in Page": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng sökning på sidan"
+          }
+        }
+      }
+    },
+    "Cookies, caches, and storage for the current site": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kakor, cacheminnen och lagring för den aktuella webbplatsen"
+          }
+        }
+      }
+    },
+    "Couldn’t Save Screenshot": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att spara skärmbilden"
+          }
+        }
+      }
+    },
+    "CSS pixels; press Return to apply": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CSS-pixlar; tryck på returtangenten för att använda"
+          }
+        }
+      }
+    },
+    "CSS viewport presets; no touch or device emulation": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förval för CSS-vy; ingen touch- eller enhetsemulering"
+          }
+        }
+      }
+    },
+    "Delete Annotation": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Radera anteckning"
+          }
+        }
+      }
+    },
+    "Device Toolbar": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enhetsverktygsfält"
+          }
+        }
+      }
+    },
+    "Dimensions:": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimensioner:"
+          }
+        }
+      }
+    },
+    "Downloaded File": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hämtad fil"
+          }
+        }
+      }
+    },
+    "Downloads": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hämtningar"
+          }
+        }
+      }
+    },
+    "Edit Annotation %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redigera anteckning %lld"
+          }
+        }
+      }
+    },
+    "Find in page": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök på sidan"
+          }
+        }
+      }
+    },
+    "Find in Page": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök på sidan"
+          }
+        }
+      }
+    },
+    "Hide Device Toolbar": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dölj enhetsverktygsfält"
+          }
+        }
+      }
+    },
+    "iPad Air": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPad Air"
+          }
+        }
+      }
+    },
+    "iPad Mini": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPad Mini"
+          }
+        }
+      }
+    },
+    "iPhone 15 Pro": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone 15 Pro"
+          }
+        }
+      }
+    },
+    "iPhone 15 Pro Max": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone 15 Pro Max"
+          }
+        }
+      }
+    },
+    "iPhone SE": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone SE"
+          }
+        }
+      }
+    },
+    "Laptop": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bärbar dator"
+          }
+        }
+      }
+    },
+    "Laptop L": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stor bärbar dator"
+          }
+        }
+      }
+    },
+    "Match found": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Träff hittad"
+          }
+        }
+      }
+    },
+    "Next Match": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa träff"
+          }
+        }
+      }
+    },
+    "No downloads yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga hämtningar ännu"
+          }
+        }
+      }
+    },
+    "No Downloads Yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga hämtningar ännu"
+          }
+        }
+      }
+    },
+    "No matches": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga träffar"
+          }
+        }
+      }
+    },
+    "No stored website data was found for %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga lagrade webbdata hittades för %@."
+          }
+        }
+      }
+    },
+    "Passwords and AutoFill": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lösenord och autofyll"
+          }
+        }
+      }
+    },
+    "Pixel 8": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pixel 8"
+          }
+        }
+      }
+    },
+    "Previous Match": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Föregående träff"
+          }
+        }
+      }
+    },
+    "read your annotations for": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "läsa dina anteckningar för"
+          }
+        }
+      }
+    },
+    "Reload the page to fetch its signed-out state.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ladda om sidan för att hämta dess utloggade tillstånd."
+          }
+        }
+      }
+    },
+    "Reset to 100%": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ till 100 %"
+          }
+        }
+      }
+    },
+    "Responsive": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Responsiv"
+          }
+        }
+      }
+    },
+    "Return focus to the private field for Apple Passwords or your password manager": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ fokus till det privata fältet för Apple Lösenord eller din lösenordshanterare"
+          }
+        }
+      }
+    },
+    "Rotate Viewport": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rotera vy"
+          }
+        }
+      }
+    },
+    "Samsung Galaxy S24 Ultra": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samsung Galaxy S24 Ultra"
+          }
+        }
+      }
+    },
+    "Save Annotation": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spara anteckning"
+          }
+        }
+      }
+    },
+    "Show Device Toolbar": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa enhetsverktygsfält"
+          }
+        }
+      }
+    },
+    "Stop Annotating": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sluta kommentera"
+          }
+        }
+      }
+    },
+    "Surface Duo": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Surface Duo"
+          }
+        }
+      }
+    },
+    "Surface Pro 7": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Surface Pro 7"
+          }
+        }
+      }
+    },
+    "Take a Screenshot": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta en skärmbild"
+          }
+        }
+      }
+    },
+    "The note stays in Skalman and is never exposed to the web page.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anteckningen stannar i Skalman och exponeras aldrig för webbsidan."
+          }
+        }
+      }
+    },
+    "This user-authored note stays outside the page and will be available to the agent.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här användarskrivna anteckningen stannar utanför sidan och blir tillgänglig för agenten."
+          }
+        }
+      }
+    },
+    "Viewport Height": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vyns höjd"
+          }
+        }
+      }
+    },
+    "Viewport Width": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vyns bredd"
+          }
+        }
+      }
+    },
+    "WebKit did not return an image for the visible page.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WebKit returnerade ingen bild för den synliga sidan."
+          }
+        }
+      }
+    },
+    "Website access and browser tool permissions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Webbplatsåtkomst och behörigheter för webbläsarverktyg"
+          }
+        }
+      }
+    },
+    "Website Data Cleared": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Webbdata rensade"
+          }
+        }
+      }
+    },
+    "What should the agent notice?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vad ska agenten uppmärksamma?"
+          }
+        }
+      }
+    },
+    "Zoom · %lld%%": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom · %lld %%"
+          }
+        }
+      }
+    },
+    "Zoom In": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zooma in"
+          }
+        }
+      }
+    },
+    "Zoom Out": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zooma ut"
+          }
+        }
+      }
+    },
     "Add to every new chat": {
       "localizations": {
         "sv": {

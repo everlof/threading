@@ -116,9 +116,14 @@ current request.
 `browser_resize` gives the active browser an exact per-tab CSS-pixel viewport for responsive
 testing. It does not resize Skalman's window: the fixed-size `WKWebView` sits in a pannable outer
 scroll view, so media queries, viewport units, semantic geometry, interactions, and screenshots
-all agree while the user can still inspect a desktop viewport inside a narrow panel. A visible
-aspect-ratio control resets it to the panel, omitting both tool dimensions does the same, and
-navigation and pop-ups inherit it. The override is deliberately runtime-only testing state.
+all agree while the user can still inspect a desktop viewport inside a narrow panel. The native
+device toolbar and `browser_resize` update this same state; neither keeps a second visual-only
+size. The toolbar offers editable dimensions, rotation, and named desktop, tablet, foldable, and
+phone viewport presets. It folds its label and preset picker into the browser overflow as space
+shrinks. Closing the toolbar resets the page to the panel, omitting both tool dimensions does the
+same, and navigation and pop-ups inherit the active size. Presets describe CSS viewport dimensions
+only: they do not imply touch, device scale, mobile identity, or a different browser engine. The
+override is deliberately runtime-only testing state.
 `browser_emulate` applies public per-view WebKit conditions to the active tab. `NSAppearance`
 makes `prefers-color-scheme`, matchMedia, rendered pixels, and screenshots agree without changing
 Skalman's window or global appearance; `WKWebView.customUserAgent` changes JavaScript identity and
@@ -192,6 +197,16 @@ Page text is labelled as untrusted external data in every snapshot and in the MC
 That warning comes before the page title and URL, which are themselves page-controlled; titles
 are collapsed to one bounded line and credential-shaped URL parts are redacted. Console, network,
 and CSS-query output carry the same boundary in their own results.
+
+User annotations take the opposite trust path. A themed native overlay above the active WebKit
+surface owns numbered pins and note text keyed to the page URL without its fragment. It declines
+all hit testing outside annotation mode, so visible pins cannot block the page or agent actions.
+Only a scroll-coordinate observer runs in WebKit's isolated client world; no note text is injected
+into the DOM or exposed to page JavaScript. `browser_annotations` returns the current authorized
+page's notes separately from the untrusted DOM snapshot, with explicit `user_authored` provenance
+and document-space CSS-pixel coordinates. The agent cannot create, edit, or delete them. Annotation
+mode ends on navigation, while notes remain runtime-only for a later visit to the same page URL.
+
 Password fields refuse agent typing and reveal the browser for user takeover. Form submissions,
 including Enter on a focused form control, require an app-owned confirmation whose description
 is derived from the live target rather than from agent prose. A short-lived, one-shot navigation

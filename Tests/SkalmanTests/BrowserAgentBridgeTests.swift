@@ -871,6 +871,34 @@ final class BrowserAgentBridgeTests: XCTestCase {
         XCTAssertEqual(capabilitiesInput["required"] as? [String], [])
         XCTAssertEqual((capabilitiesInput["properties"] as? [String: Any])?.count, 0)
 
+        let annotationsRequest = try JSONDecoder().decode(
+            JSONRPCRequest.self,
+            from: Data(
+                #"""
+                {
+                  "jsonrpc":"2.0","id":25,"method":"tools/call",
+                  "params":{"name":"browser_annotations","arguments":{}}
+                }
+                """#.utf8
+            )
+        )
+        guard case .toolCall(.browserAnnotations) = annotationsRequest.parameters else {
+            return XCTFail("Expected typed browser_annotations arguments")
+        }
+        let annotationsDefinition = try XCTUnwrap(
+            MCPTools.definitions.first { $0.name == MCPTools.browserAnnotations }
+        )
+        let annotationsSchema = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(annotationsDefinition)
+            ) as? [String: Any]
+        )
+        let annotationsInput = try XCTUnwrap(
+            annotationsSchema["inputSchema"] as? [String: Any]
+        )
+        XCTAssertEqual(annotationsInput["required"] as? [String], [])
+        XCTAssertEqual((annotationsInput["properties"] as? [String: Any])?.count, 0)
+
         let isolatedRequest = try JSONDecoder().decode(
             JSONRPCRequest.self,
             from: Data(
@@ -1728,6 +1756,104 @@ final class BrowserAgentBridgeTests: XCTestCase {
             DisplayPaneDefaults.maximumBrowserTabs,
             "Reaching the cap must not evict an existing live browser"
         )
+    }
+
+    @MainActor
+    func testResponsiveDeviceToolbarCatalogAndSelectionAreViewportOnly() throws {
+        XCTAssertEqual(
+            BrowserViewportPreset.catalog.map(\.identifier),
+            [
+                "4k",
+                "laptop-large",
+                "laptop",
+                "surface-pro-7",
+                "ipad-air",
+                "ipad-mini",
+                "surface-duo",
+                "iphone-15-pro-max",
+                "pixel-8",
+                "iphone-15-pro",
+                "galaxy-s24-ultra",
+                "iphone-se"
+            ]
+        )
+        XCTAssertEqual(BrowserViewportPreset.catalog.first?.size, CGSize(width: 2560, height: 1440))
+        XCTAssertEqual(BrowserViewportPreset.catalog.last?.size, CGSize(width: 375, height: 667))
+
+        let toolbar = BrowserDeviceToolbar(frame: NSRect(x: 0, y: 0, width: 900, height: 38))
+        var chosen: BrowserViewportPreset?
+        toolbar.onChoosePreset = { chosen = $0 }
+        toolbar.presetPopUp.chooseItem(at: 8)
+        XCTAssertEqual(chosen?.identifier, "iphone-15-pro-max")
+
+        toolbar.setViewport(CGSize(width: 430, height: 932), preset: chosen)
+        XCTAssertEqual(toolbar.widthField.stringValue, "430")
+        XCTAssertEqual(toolbar.heightField.stringValue, "932")
+        XCTAssertEqual(toolbar.presetPopUp.indexOfSelectedItem, 8)
+    }
+
+    @MainActor
+    func testBrowserAnnotationOverlayDoesNotInterceptPageOutsideAnnotationMode() throws {
+        let overlay = BrowserAnnotationOverlay(
+            frame: NSRect(x: 0, y: 0, width: 390, height: 844)
+        )
+        overlay.markers = [
+            BrowserAnnotationMarker(id: 1, point: CGPoint(x: 120, y: 240))
+        ]
+
+        XCTAssertNil(overlay.hitTest(CGPoint(x: 120, y: 240)))
+        overlay.isAnnotating = true
+        XCTAssertTrue(overlay.hitTest(CGPoint(x: 120, y: 240)) === overlay)
+        XCTAssertEqual(overlay.accessibilityRole(), .button)
+        XCTAssertEqual(overlay.accessibilityValue() as? String, "1 annotations")
+
+        var dismissed = false
+        overlay.onDismiss = { dismissed = true }
+        let escape = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1B}",
+            charactersIgnoringModifiers: "\u{1B}",
+            isARepeat: false,
+            keyCode: 53
+        )
+        overlay.keyDown(with: try XCTUnwrap(escape))
+        XCTAssertTrue(dismissed)
+    }
+
+    @MainActor
+    func testCurrentBrowserMeansVisibleBrowserNotHiddenAgentTarget() throws {
+        let sessionID = SessionID()
+        let pane = DisplayPaneController()
+        pane.showSession(sessionID)
+        let browser = pane.activateBrowser(for: sessionID)
+
+        XCTAssertTrue(pane.currentBrowser === browser)
+        XCTAssertTrue(pane.browser(for: sessionID) === browser)
+
+        pane.addContentTab(
+            DisplayContent(
+                body: .html("<p>Review output</p>"),
+                title: "Output",
+                subtitle: ""
+            ),
+            for: sessionID
+        )
+        XCTAssertNil(pane.currentBrowser)
+        XCTAssertTrue(
+            pane.browser(for: sessionID) === browser,
+            "A hidden browser remains the agent target but not the recipient of user Find"
+        )
+
+        let browserTab = try XCTUnwrap(
+            pane.tabs(for: sessionID).first { $0.browser === browser }
+        )
+        XCTAssertTrue(pane.activateTab(id: browserTab.id, for: sessionID))
+        XCTAssertTrue(pane.currentBrowser === browser)
     }
 
     @MainActor

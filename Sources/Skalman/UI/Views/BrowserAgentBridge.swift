@@ -1299,7 +1299,38 @@ enum BrowserAgentScripts {
           }, true);
           report();
         })();
-        """#
+    """#
+
+    /// Reports only main-frame scroll coordinates from an isolated world. Browser annotations
+    /// remain native state; this channel carries no note text and exposes nothing to the page.
+    static let annotationViewportObservation = #"""
+    (() => {
+      const handler = globalThis.webkit?.messageHandlers?.skalmanAnnotationViewport;
+      if (!handler) return;
+
+      let scheduled = false;
+      const report = () => {
+        scheduled = false;
+        handler.postMessage({
+          scroll_x: Number(globalThis.scrollX || 0),
+          scroll_y: Number(globalThis.scrollY || 0)
+        });
+      };
+      const schedule = () => {
+        if (scheduled) return;
+        scheduled = true;
+        globalThis.requestAnimationFrame(report);
+      };
+
+      globalThis.addEventListener("scroll", schedule, { passive: true });
+      globalThis.addEventListener("resize", schedule, { passive: true });
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", report, { once: true });
+      } else {
+        report();
+      }
+    })();
+    """#
 
     static let screenshotTarget = targetPrelude + #"""
         const element = resolveTarget();

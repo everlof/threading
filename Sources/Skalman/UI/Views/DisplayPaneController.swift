@@ -59,6 +59,13 @@ final class DisplayPaneController: NSViewController {
         activeTab(for: currentSessionID)?.content
     }
 
+    /// The browser actually visible in the selected session, if the active display tab is one.
+    /// This deliberately differs from the most recently targeted browser: user commands such as
+    /// Find must not act on a hidden browser behind an image or terminal tab.
+    var currentBrowser: BrowserViewController? {
+        activeTab(for: currentSessionID)?.browser
+    }
+
     /// Called when the user closes the pane's last content tab.
     var onClose: (() -> Void)?
 

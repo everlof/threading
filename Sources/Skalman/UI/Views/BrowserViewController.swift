@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import WebKit
 
 enum BrowserColorScheme: String {
@@ -80,6 +81,18 @@ struct BrowserPageIdentity: Equatable {
     let url: String
 }
 
+/// A user-authored note anchored in the active page's document coordinate system.
+///
+/// Notes remain native app state rather than page state: neither site JavaScript nor the DOM
+/// snapshot can read them. The agent receives them only through Skalman's dedicated annotation
+/// surface, where their user-authored provenance stays explicit.
+struct BrowserAnnotation: Equatable {
+    let id: Int
+    let note: String
+    let documentPoint: CGPoint
+    let url: String
+}
+
 // MARK: - Browser Chrome
 
 /// The compact, responsive strip shared by every live browser tab.
@@ -94,6 +107,7 @@ final class BrowserChromeBar: NSView {
         static let minimumAddressWidth: CGFloat = 72
         static let compactForwardThreshold: CGFloat = 320
         static let labelledConditionThreshold: CGFloat = 360
+        static let labelledAnnotationThreshold: CGFloat = 560
         static let labelledPasswordThreshold: CGFloat = 520
         static let expandedPrivateThreshold: CGFloat = 520
     }
@@ -102,6 +116,10 @@ final class BrowserChromeBar: NSView {
     let forwardButton = BrowserChromeBar.button("chevron.forward", L10n.string("Forward"))
     let reloadButton = BrowserChromeBar.button("arrow.clockwise", L10n.string("Reload"))
     let addressField = ThemedTextField()
+    let annotationButton = BrowserChromeBar.button(
+        "plus.bubble",
+        L10n.string("Annotate Page")
+    )
     let testConditionsButton = BrowserChromeBar.button(
         "slider.horizontal.3",
         L10n.string("Test Conditions")
@@ -112,6 +130,7 @@ final class BrowserChromeBar: NSView {
         "key.fill",
         L10n.string("Private Password Input")
     )
+
     private let privateIndicator = BrowserPrivateIndicator()
     private let stack: NSStackView
     private let contextKind: BrowserContextKind
@@ -120,6 +139,7 @@ final class BrowserChromeBar: NSView {
     private var popupDepth = 0
     private var isLoading = false
     private var isPasswordFieldFocused = false
+    private var isAnnotating = false
     private(set) var areTestConditionsFolded = false
     private(set) var isReloadFolded = false
 
@@ -132,6 +152,7 @@ final class BrowserChromeBar: NSView {
             privateIndicator,
             passwordInputButton,
             addressField,
+            annotationButton,
             testConditionsButton,
             closePopupButton,
             overflowButton
@@ -173,6 +194,7 @@ final class BrowserChromeBar: NSView {
             forwardButton,
             reloadButton,
             passwordInputButton,
+            annotationButton,
             testConditionsButton,
             closePopupButton,
             overflowButton
@@ -240,6 +262,22 @@ final class BrowserChromeBar: NSView {
         updateResponsiveLayout()
     }
 
+    func setAnnotating(_ annotating: Bool) {
+        isAnnotating = annotating
+        annotationButton.emphasis = annotating ? .primary : .tertiary
+        annotationButton.image = Self.image(
+            annotating ? "checkmark.bubble.fill" : "plus.bubble",
+            accessibility: annotating
+                ? L10n.string("Stop Annotating")
+                : L10n.string("Annotate Page")
+        )
+        annotationButton.toolTip = annotating
+            ? L10n.string("Stop Annotating")
+            : L10n.string("Annotate Page")
+        annotationButton.setAccessibilityLabel(annotationButton.toolTip)
+        updateResponsiveLayout()
+    }
+
     func updateResponsiveLayout() {
         let width = bounds.width
 
@@ -300,6 +338,14 @@ final class BrowserChromeBar: NSView {
             : ""
         if passwordInputButton.title != passwordTitle {
             passwordInputButton.title = passwordTitle
+        }
+
+        let annotationTitle = isAnnotating
+            && width >= Layout.labelledAnnotationThreshold
+            ? L10n.string("Annotating")
+            : ""
+        if annotationButton.title != annotationTitle {
+            annotationButton.title = annotationTitle
         }
     }
 
@@ -426,8 +472,20 @@ final class BrowserViewController: NSViewController {
     private var closePopupButton: ThemedButton { chromeBar.closePopupButton }
     private var addressField: ThemedTextField { chromeBar.addressField }
     private let progressBar = ThemedProgressBar()
+    private let annotationOverlay = BrowserAnnotationOverlay()
+    private let deviceToolbar = BrowserDeviceToolbar()
+    private let deviceToolbarSeparator = SeparatorView()
+    private var deviceToolbarHeightConstraint: NSLayoutConstraint?
+    private var deviceToolbarSeparatorHeightConstraint: NSLayoutConstraint?
+    private var isDeviceToolbarVisible = false
+    private let findBar = BrowserFindBar()
+    private let findBarSeparator = SeparatorView()
+    private var findBarHeightConstraint: NSLayoutConstraint?
+    private var findBarSeparatorHeightConstraint: NSLayoutConstraint?
+    private var isFindBarVisible = false
     private var testConditionsMenuSession: AnyObject?
     private var overflowMenuSession: AnyObject?
+    private var downloadsMenuSession: AnyObject?
 
     // MARK: - Web View
 
@@ -437,16 +495,22 @@ final class BrowserViewController: NSViewController {
     private var webViewStack: [WKWebView] = []
     private var documentSequences: [ObjectIdentifier: Int] = [:]
     private var passwordFocusedFrameTokens: [ObjectIdentifier: Set<String>] = [:]
+    private var annotationViewportOffsets: [ObjectIdentifier: CGPoint] = [:]
+    private var annotationsByPage: [String: [BrowserAnnotation]] = [:]
+    private var nextAnnotationID = 1
+    private var isAnnotating = false
     private var agentViewportSize: CGSize?
     private var agentColorScheme: BrowserColorScheme = .auto
     private var agentUserAgent: BrowserUserAgentOverride = .automatic
     private var agentMediaType: BrowserMediaType = .auto
+    private var browserPageZoom = 1.0
 
     private var observations: [NSKeyValueObservation] = []
     private var consoleMessages: [BrowserConsoleMessage] = []
     private var networkEntries: [BrowserNetworkEntry] = []
     private var scriptMessageProxy: WeakBrowserScriptMessageHandler?
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
+    private var recentDownloads: [URL] = []
     private var pendingAgentFileSelection: BrowserAgentFileSelectionRequest?
     private var pendingAgentDownload: BrowserAgentDownloadRequest?
     private var agentDownloadRequests: [ObjectIdentifier: BrowserAgentDownloadRequest] = [:]
@@ -553,6 +617,11 @@ final class BrowserViewController: NSViewController {
             contentWorld: .defaultClient,
             name: BrowserDefaults.passwordFocusMessageHandler
         )
+        contentController.add(
+            proxy,
+            contentWorld: .defaultClient,
+            name: BrowserDefaults.annotationViewportMessageHandler
+        )
         contentController.addUserScript(
             WKUserScript(
                 source: BrowserAgentScripts.navigationReadiness,
@@ -566,6 +635,14 @@ final class BrowserViewController: NSViewController {
                 source: BrowserAgentScripts.passwordFocusObservation,
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: false,
+                in: .defaultClient
+            )
+        )
+        contentController.addUserScript(
+            WKUserScript(
+                source: BrowserAgentScripts.annotationViewportObservation,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true,
                 in: .defaultClient
             )
         )
@@ -604,6 +681,40 @@ final class BrowserViewController: NSViewController {
         chromeBar.overflowButton.action = #selector(showBrowserOverflow)
         chromeBar.passwordInputButton.target = self
         chromeBar.passwordInputButton.action = #selector(resumePrivatePasswordInput)
+        chromeBar.annotationButton.target = self
+        chromeBar.annotationButton.action = #selector(toggleAnnotationMode)
+        annotationOverlay.onAdd = { [weak self] point in
+            self?.addAnnotation(atViewportPoint: point)
+        }
+        annotationOverlay.onSelect = { [weak self] identifier in
+            self?.editAnnotation(identifier: identifier)
+        }
+        annotationOverlay.onDismiss = { [weak self] in
+            self?.setAnnotationMode(false)
+        }
+        deviceToolbar.onChoosePreset = { [weak self] preset in
+            guard let self else { return }
+            if let preset {
+                self.setResponsiveViewport(width: preset.width, height: preset.height)
+            }
+        }
+        deviceToolbar.onApplyCustomSize = { [weak self] width, height in
+            guard let self,
+                  (BrowserDefaults.minimumViewportWidth...BrowserDefaults.maximumViewportWidth)
+                    .contains(width),
+                  (BrowserDefaults.minimumViewportHeight...BrowserDefaults.maximumViewportHeight)
+                    .contains(height) else { return false }
+            self.setResponsiveViewport(width: width, height: height)
+            return true
+        }
+        deviceToolbar.onRotate = { [weak self] in self?.rotateResponsiveViewport() }
+        deviceToolbar.onDismiss = { [weak self] in
+            self?.hideDeviceToolbar(resetViewport: true)
+        }
+        findBar.onFind = { [weak self] query, backwards in
+            self?.findInPage(query, backwards: backwards)
+        }
+        findBar.onDismiss = { [weak self] in self?.hideFindBar() }
 
         addressField.target = self
         addressField.action = #selector(addressEntered)
@@ -626,8 +737,27 @@ final class BrowserViewController: NSViewController {
         view.addSubview(chromeBar)
         view.addSubview(progressBar)
         view.addSubview(separator)
+        view.addSubview(deviceToolbar)
+        view.addSubview(deviceToolbarSeparator)
+        view.addSubview(findBar)
+        view.addSubview(findBarSeparator)
         view.addSubview(viewportScrollView)
         installWebView(webView)
+        webViewHost.addSubview(annotationOverlay, positioned: .above, relativeTo: nil)
+
+        deviceToolbar.isHidden = true
+        deviceToolbarSeparator.isHidden = true
+        findBar.isHidden = true
+        findBarSeparator.isHidden = true
+        let deviceToolbarHeight = deviceToolbar.heightAnchor.constraint(equalToConstant: 0)
+        let deviceToolbarSeparatorHeight = deviceToolbarSeparator.heightAnchor
+            .constraint(equalToConstant: 0)
+        let findBarHeight = findBar.heightAnchor.constraint(equalToConstant: 0)
+        let findBarSeparatorHeight = findBarSeparator.heightAnchor.constraint(equalToConstant: 0)
+        deviceToolbarHeightConstraint = deviceToolbarHeight
+        deviceToolbarSeparatorHeightConstraint = deviceToolbarSeparatorHeight
+        findBarHeightConstraint = findBarHeight
+        findBarSeparatorHeightConstraint = findBarSeparatorHeight
 
         NSLayoutConstraint.activate([
             chromeBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -642,7 +772,27 @@ final class BrowserViewController: NSViewController {
             separator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
-            viewportScrollView.topAnchor.constraint(equalTo: separator.bottomAnchor),
+            deviceToolbar.topAnchor.constraint(equalTo: separator.bottomAnchor),
+            deviceToolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            deviceToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            deviceToolbarHeight,
+
+            deviceToolbarSeparator.topAnchor.constraint(equalTo: deviceToolbar.bottomAnchor),
+            deviceToolbarSeparator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            deviceToolbarSeparator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            deviceToolbarSeparatorHeight,
+
+            findBar.topAnchor.constraint(equalTo: deviceToolbarSeparator.bottomAnchor),
+            findBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            findBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            findBarHeight,
+
+            findBarSeparator.topAnchor.constraint(equalTo: findBar.bottomAnchor),
+            findBarSeparator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            findBarSeparator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            findBarSeparatorHeight,
+
+            viewportScrollView.topAnchor.constraint(equalTo: findBarSeparator.bottomAnchor),
             viewportScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             viewportScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             viewportScrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -658,6 +808,7 @@ final class BrowserViewController: NSViewController {
             webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
                 guard let self else { return }
                 self.syncAddress()
+                self.updateAnnotationOverlay()
                 self.onPageChange?()
                 // pushState/hash/history moves do not produce a document-load callback. Their
                 // URL change is authoritative, and completing here keeps agent history actions
@@ -693,6 +844,7 @@ final class BrowserViewController: NSViewController {
         candidate.mediaType = agentMediaType.value
         candidate.appearance = agentColorScheme.appearance
         candidate.customUserAgent = agentUserAgent.value
+        candidate.pageZoom = browserPageZoom
 
         // Right-click → Inspect Element brings up the full Web Inspector — the element-pinpointing
         // tool WebKit already ships, no code of our own.
@@ -705,6 +857,9 @@ final class BrowserViewController: NSViewController {
     private func installWebView(_ candidate: WKWebView) {
         if candidate.superview == nil {
             webViewHost.addSubview(candidate)
+        }
+        if annotationOverlay.superview != nil {
+            webViewHost.addSubview(annotationOverlay, positioned: .above, relativeTo: nil)
         }
         layoutWebViews()
         webViewStack.forEach { $0.isHidden = $0 !== candidate }
@@ -735,6 +890,8 @@ final class BrowserViewController: NSViewController {
         )
         let frame = CGRect(origin: webOrigin, size: viewport)
         webViewStack.forEach { $0.frame = frame }
+        annotationOverlay.frame = frame
+        updateAnnotationOverlay()
 
         if resetScrollPosition {
             viewportScrollView.contentView.scroll(to: .zero)
@@ -752,6 +909,7 @@ final class BrowserViewController: NSViewController {
         syncAddress()
         updateNavButtons()
         updateProgress(candidate.isLoading ? candidate.estimatedProgress : 1)
+        updateAnnotationOverlay()
         onPageChange?()
     }
 
@@ -980,6 +1138,10 @@ final class BrowserViewController: NSViewController {
     var emulatedColorScheme: BrowserColorScheme { agentColorScheme }
     var emulatedUserAgent: String? { agentUserAgent.value }
     var emulatedMediaType: BrowserMediaType { agentMediaType }
+    var annotationsForActivePage: [BrowserAnnotation] {
+        guard isViewLoaded, let key = annotationPageKey(for: webView.url) else { return [] }
+        return annotationsByPage[key] ?? []
+    }
     var passwordFieldHasFocus: Bool {
         guard isViewLoaded else { return false }
         return passwordFocusedFrameTokens[ObjectIdentifier(webView)]?.isEmpty == false
@@ -993,6 +1155,7 @@ final class BrowserViewController: NSViewController {
     func setResponsiveViewport(width: Int, height: Int) {
         _ = view
         agentViewportSize = CGSize(width: CGFloat(width), height: CGFloat(height))
+        syncDeviceToolbar()
         updateTestConditionChrome()
         layoutWebViews(resetScrollPosition: true)
     }
@@ -1000,6 +1163,7 @@ final class BrowserViewController: NSViewController {
     func resetResponsiveViewportToPanel() {
         _ = view
         agentViewportSize = nil
+        syncDeviceToolbar()
         updateTestConditionChrome()
         layoutWebViews(resetScrollPosition: true)
     }
@@ -1982,8 +2146,354 @@ final class BrowserViewController: NSViewController {
         view.window?.makeFirstResponder(webView)
     }
 
+    @objc private func toggleAnnotationMode() {
+        setAnnotationMode(!isAnnotating)
+    }
+
+    private func setAnnotationMode(_ active: Bool) {
+        isAnnotating = active
+        annotationOverlay.isAnnotating = active
+        chromeBar.setAnnotating(active)
+        if !active, view.window?.firstResponder === annotationOverlay {
+            view.window?.makeFirstResponder(webView)
+        }
+    }
+
+    private func addAnnotation(atViewportPoint point: CGPoint) {
+        guard isAnnotating,
+              let key = annotationPageKey(for: webView.url) else { return }
+        let request = TextPromptRequest(
+            title: L10n.string("Add Browser Annotation"),
+            message: L10n.string(
+                "This user-authored note stays outside the page and will be available to the agent."
+            ),
+            confirmTitle: L10n.string("Add Annotation"),
+            placeholder: L10n.string("What should the agent notice?")
+        )
+        guard case .text(let note)? = TextPromptAlert.ask(request) else { return }
+
+        let offset = annotationViewportOffsets[ObjectIdentifier(webView)] ?? .zero
+        let annotation = BrowserAnnotation(
+            id: nextAnnotationID,
+            note: note,
+            documentPoint: CGPoint(x: point.x + offset.x, y: point.y + offset.y),
+            url: key
+        )
+        nextAnnotationID += 1
+        annotationsByPage[key, default: []].append(annotation)
+        updateAnnotationOverlay()
+    }
+
+    private func editAnnotation(identifier: Int) {
+        guard let key = annotationPageKey(for: webView.url),
+              let index = annotationsByPage[key]?.firstIndex(where: { $0.id == identifier }),
+              let annotation = annotationsByPage[key]?[index] else { return }
+
+        let request = TextPromptRequest(
+            title: L10n.format("Edit Annotation %lld", Int64(identifier)),
+            message: L10n.string(
+                "The note stays in Skalman and is never exposed to the web page."
+            ),
+            confirmTitle: L10n.string("Save Annotation"),
+            clearTitle: L10n.string("Delete Annotation"),
+            current: annotation.note,
+            placeholder: L10n.string("What should the agent notice?")
+        )
+        switch TextPromptAlert.ask(request) {
+        case .text(let note):
+            annotationsByPage[key]?[index] = BrowserAnnotation(
+                id: annotation.id,
+                note: note,
+                documentPoint: annotation.documentPoint,
+                url: annotation.url
+            )
+        case .cleared:
+            annotationsByPage[key]?.remove(at: index)
+        case nil:
+            return
+        }
+        updateAnnotationOverlay()
+    }
+
+    private func annotationPageKey(for url: URL?) -> String? {
+        guard let url else { return nil }
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.fragment = nil
+        return components?.url?.absoluteString ?? url.absoluteString
+    }
+
+    private func updateAnnotationOverlay() {
+        guard isViewLoaded else { return }
+        let offset = annotationViewportOffsets[ObjectIdentifier(webView)] ?? .zero
+        annotationOverlay.markers = annotationsForActivePage.map {
+            BrowserAnnotationMarker(
+                id: $0.id,
+                point: CGPoint(
+                    x: $0.documentPoint.x - offset.x,
+                    y: $0.documentPoint.y - offset.y
+                )
+            )
+        }
+    }
+
     @objc private func resetResponsiveViewport() {
         resetResponsiveViewportToPanel()
+    }
+
+    @objc private func showDeviceToolbar() {
+        if agentViewportSize == nil {
+            setResponsiveViewport(
+                width: BrowserDefaults.defaultResponsiveViewportWidth,
+                height: BrowserDefaults.defaultResponsiveViewportHeight
+            )
+        }
+        isDeviceToolbarVisible = true
+        deviceToolbar.isHidden = false
+        deviceToolbarSeparator.isHidden = false
+        deviceToolbarHeightConstraint?.constant = deviceToolbar.intrinsicContentSize.height
+        deviceToolbarSeparatorHeightConstraint?.constant = Design.Radius.border
+        syncDeviceToolbar()
+        view.needsLayout = true
+    }
+
+    private func hideDeviceToolbar(resetViewport: Bool) {
+        isDeviceToolbarVisible = false
+        deviceToolbar.isHidden = true
+        deviceToolbarSeparator.isHidden = true
+        deviceToolbarHeightConstraint?.constant = 0
+        deviceToolbarSeparatorHeightConstraint?.constant = 0
+        if resetViewport {
+            resetResponsiveViewportToPanel()
+        }
+        view.needsLayout = true
+    }
+
+    private func rotateResponsiveViewport() {
+        guard let size = agentViewportSize else { return }
+        setResponsiveViewport(width: Int(size.height), height: Int(size.width))
+    }
+
+    @objc private func showFindBar() {
+        isFindBarVisible = true
+        findBar.isHidden = false
+        findBarSeparator.isHidden = false
+        findBarHeightConstraint?.constant = findBar.intrinsicContentSize.height
+        findBarSeparatorHeightConstraint?.constant = Design.Radius.border
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+        findBar.focus()
+    }
+
+    func showFind() {
+        showFindBar()
+    }
+
+    private func hideFindBar() {
+        isFindBarVisible = false
+        findBar.isHidden = true
+        findBarSeparator.isHidden = true
+        findBarHeightConstraint?.constant = 0
+        findBarSeparatorHeightConstraint?.constant = 0
+        findBar.setMatchFound(nil)
+        clearFindInPage()
+        view.window?.makeFirstResponder(webView)
+        view.needsLayout = true
+    }
+
+    private func findInPage(_ query: String, backwards: Bool) {
+        guard !query.isEmpty else {
+            findBar.setMatchFound(nil)
+            clearFindInPage()
+            return
+        }
+        let configuration = WKFindConfiguration()
+        configuration.backwards = backwards
+        configuration.wraps = true
+        webView.find(query, configuration: configuration) { [weak self, weak webView] result in
+            guard let self, webView === self.webView else { return }
+            self.findBar.setMatchFound(result.matchFound)
+        }
+    }
+
+    private func clearFindInPage() {
+        webView.find("", configuration: WKFindConfiguration()) { _ in }
+    }
+
+    private func changePageZoom(by delta: Double) {
+        setPageZoom(browserPageZoom + delta)
+    }
+
+    private func setPageZoom(_ zoom: Double) {
+        browserPageZoom = min(
+            BrowserDefaults.maximumPageZoom,
+            max(BrowserDefaults.minimumPageZoom, zoom)
+        )
+        webViewStack.forEach { $0.pageZoom = browserPageZoom }
+    }
+
+    @objc private func printPage() {
+        let operation = webView.printOperation(with: NSPrintInfo.shared)
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        operation.run()
+    }
+
+    @objc private func saveVisiblePageScreenshot() {
+        webView.takeSnapshot(with: nil) { [weak self] image, error in
+            guard let self else { return }
+            guard let image,
+                  let data = image.tiffRepresentation,
+                  let representation = NSBitmapImageRep(data: data),
+                  let png = representation.representation(using: .png, properties: [:]) else {
+                self.showScreenshotFailure(error?.localizedDescription)
+                return
+            }
+            self.chooseScreenshotDestination { destination in
+                guard let destination else { return }
+                do {
+                    try png.write(to: destination, options: .atomic)
+                } catch {
+                    self.showScreenshotFailure(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func chooseScreenshotDestination(completion: @escaping (URL?) -> Void) {
+        let suggestedFilename = BrowserDefaults.screenshotFilename
+        let message = L10n.string(
+            "Choose where to save a PNG of the visible browser page."
+        )
+        if let savePanelProvider {
+            savePanelProvider(suggestedFilename, false, message, completion)
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedFilename
+        panel.allowedContentTypes = [.png]
+        panel.message = message
+        let decided: (NSApplication.ModalResponse) -> Void = {
+            completion($0 == .OK ? panel.url : nil)
+        }
+        if let window = view.window {
+            panel.beginSheetModal(for: window, completionHandler: decided)
+        } else {
+            decided(panel.runModal())
+        }
+    }
+
+    private func showScreenshotFailure(_ detail: String?) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L10n.string("Couldn’t Save Screenshot")
+        alert.informativeText = detail
+            ?? L10n.string("WebKit did not return an image for the visible page.")
+        alert.runModal()
+    }
+
+    @objc private func clearCurrentWebsiteData() {
+        guard let url = webView.url,
+              let origin = BrowserOrigin(url: url) else { return }
+        let message = contextKind == .private
+            ? L10n.string("""
+                This permanently clears cookies, caches, local storage, IndexedDB, service \
+                workers, and other data in this tab's unique private context. Shared signed-in \
+                browser tabs are unaffected.
+
+                The current document stays loaded until it is reloaded or navigated.
+                """)
+            : L10n.string("""
+                This permanently clears cookies, caches, local storage, IndexedDB, service \
+                workers, and other WebKit data for this site. WebKit groups subdomains under \
+                their parent site, so related subdomains may also be signed out.
+
+                The current document stays loaded until it is reloaded or navigated.
+                """)
+        let request = ConfirmationRequest(
+            prompt: .clearBrowserWebsiteData,
+            title: L10n.format("Clear Website Data for %@?", origin.displayName),
+            message: message,
+            confirmTitle: L10n.string("Clear Website Data")
+        )
+        ConfirmationAlert.ask(request, in: view.window) { [weak self] confirmed in
+            guard let self, confirmed else { return }
+            self.clearSiteData(for: origin) { [weak self] report in
+                guard let window = self?.view.window else { return }
+                let detail: String
+                if report.context == .private {
+                    detail = L10n.string("Cleared this tab’s private website data.")
+                } else if let count = report.recordsRemoved, count > 0 {
+                    detail = L10n.format(
+                        "Cleared %lld website data records for %@.",
+                        Int64(count),
+                        origin.displayName
+                    )
+                } else {
+                    detail = L10n.format(
+                        "No stored website data was found for %@.",
+                        origin.displayName
+                    )
+                }
+                let alert = NSAlert()
+                alert.messageText = L10n.string("Website Data Cleared")
+                alert.informativeText = detail + " " + L10n.string(
+                    "Reload the page to fetch its signed-out state."
+                )
+                alert.beginSheetModal(for: window)
+            }
+        }
+    }
+
+    @objc private func showRecentDownloads() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let entries: [ThemedMenuEntry]
+            if self.recentDownloads.isEmpty {
+                entries = [.item(ThemedMenuItem(
+                    title: L10n.string("No Downloads Yet"),
+                    isEnabled: false
+                ))]
+            } else {
+                entries = self.recentDownloads.reversed().map { url in
+                    .item(ThemedMenuItem(
+                        title: url.lastPathComponent,
+                        subtitle: url.deletingLastPathComponent().path,
+                        image: BrowserChromeBar.image(
+                            "doc",
+                            accessibility: L10n.string("Downloaded File")
+                        ),
+                        onChoose: {
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
+                        }
+                    ))
+                }
+            }
+            self.downloadsMenuSession = ThemedMenuPresenter.present(
+                ThemedMenuPresentation(entries: entries, minimumWidth: 320),
+                from: self.chromeBar.overflowButton,
+                selectedEntryIndex: nil,
+                onChoose: { _, item in item.onChoose?() },
+                onDismiss: { [weak self] in self?.downloadsMenuSession = nil }
+            )
+        }
+    }
+
+    @objc private func showBrowserSettings() {
+        (view.window?.windowController as? MainWindowController)?
+            .showSettingsPage(id: SettingsPages.toolsID)
+    }
+
+    private func syncDeviceToolbar() {
+        guard isViewLoaded else { return }
+        let size = agentViewportSize ?? CGSize(
+            width: BrowserDefaults.defaultResponsiveViewportWidth,
+            height: BrowserDefaults.defaultResponsiveViewportHeight
+        )
+        let preset = BrowserViewportPreset.catalog.first {
+            $0.size == size || CGSize(width: $0.height, height: $0.width) == size
+        }
+        deviceToolbar.setViewport(size, preset: preset)
     }
 
     @objc private func resetColorScheme() {
@@ -2038,6 +2548,133 @@ final class BrowserViewController: NSViewController {
             entries.append(.separator)
             entries.append(contentsOf: testConditionMenuEntries())
         }
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Find in Page"),
+            image: BrowserChromeBar.image(
+                "magnifyingglass",
+                accessibility: L10n.string("Find in Page")
+            ),
+            onChoose: { [weak self] in self?.showFindBar() }
+        )))
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Print"),
+            image: BrowserChromeBar.image(
+                "printer",
+                accessibility: L10n.string("Print")
+            ),
+            onChoose: { [weak self] in self?.printPage() }
+        )))
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Take a Screenshot"),
+            image: BrowserChromeBar.image(
+                "camera",
+                accessibility: L10n.string("Take a Screenshot")
+            ),
+            onChoose: { [weak self] in self?.saveVisiblePageScreenshot() }
+        )))
+        entries.append(.separator)
+        let zoomPercent = Int((browserPageZoom * 100).rounded())
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.format("Zoom · %lld%%", Int64(zoomPercent)),
+            subtitle: L10n.string("Reset to 100%"),
+            image: BrowserChromeBar.image(
+                "magnifyingglass",
+                accessibility: L10n.string("Zoom")
+            ),
+            isSelected: browserPageZoom != 1,
+            onChoose: { [weak self] in self?.setPageZoom(1) }
+        )))
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Zoom In"),
+            image: BrowserChromeBar.image(
+                "plus.magnifyingglass",
+                accessibility: L10n.string("Zoom In")
+            ),
+            isEnabled: browserPageZoom < BrowserDefaults.maximumPageZoom,
+            onChoose: { [weak self] in
+                self?.changePageZoom(by: BrowserDefaults.pageZoomStep)
+            }
+        )))
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Zoom Out"),
+            image: BrowserChromeBar.image(
+                "minus.magnifyingglass",
+                accessibility: L10n.string("Zoom Out")
+            ),
+            isEnabled: browserPageZoom > BrowserDefaults.minimumPageZoom,
+            onChoose: { [weak self] in
+                self?.changePageZoom(by: -BrowserDefaults.pageZoomStep)
+            }
+        )))
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: isDeviceToolbarVisible
+                ? L10n.string("Hide Device Toolbar")
+                : L10n.string("Show Device Toolbar"),
+            image: BrowserChromeBar.image(
+                "aspectratio",
+                accessibility: L10n.string("Device Toolbar")
+            ),
+            onChoose: { [weak self] in
+                guard let self else { return }
+                if self.isDeviceToolbarVisible {
+                    self.hideDeviceToolbar(resetViewport: true)
+                } else {
+                    self.showDeviceToolbar()
+                }
+            }
+        )))
+        if isDeviceToolbarVisible, deviceToolbar.isPresetFolded {
+            entries.append(contentsOf: devicePresetMenuEntries())
+        }
+        if passwordFieldHasFocus {
+            entries.append(.separator)
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Passwords and AutoFill"),
+                subtitle: L10n.string(
+                    "Return focus to the private field for Apple Passwords or your password manager"
+                ),
+                image: BrowserChromeBar.image(
+                    "key.fill",
+                    accessibility: L10n.string("Passwords and AutoFill")
+                ),
+                onChoose: { [weak self] in self?.resumePrivatePasswordInput() }
+            )))
+        }
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Downloads"),
+            subtitle: recentDownloads.isEmpty
+                ? L10n.string("No downloads yet")
+                : L10n.format("%lld recent downloads", Int64(recentDownloads.count)),
+            image: BrowserChromeBar.image(
+                "arrow.down.circle",
+                accessibility: L10n.string("Downloads")
+            ),
+            onChoose: { [weak self] in self?.showRecentDownloads() }
+        )))
+        let canClearWebsiteData = webView.url.flatMap(BrowserOrigin.init(url:)) != nil
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Clear Browsing Data…"),
+            subtitle: L10n.string("Cookies, caches, and storage for the current site"),
+            image: BrowserChromeBar.image(
+                "trash",
+                accessibility: L10n.string("Clear Browsing Data")
+            ),
+            isEnabled: canClearWebsiteData,
+            onChoose: { [weak self] in self?.clearCurrentWebsiteData() }
+        )))
+        entries.append(.separator)
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Browser Settings"),
+            subtitle: L10n.string("Website access and browser tool permissions"),
+            image: BrowserChromeBar.image(
+                "gearshape",
+                accessibility: L10n.string("Browser Settings")
+            ),
+            onChoose: { [weak self] in self?.showBrowserSettings() }
+        )))
 
         overflowMenuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: 290),
@@ -2137,6 +2774,19 @@ final class BrowserViewController: NSViewController {
             ]
         }
         return entries
+    }
+
+    private func devicePresetMenuEntries() -> [ThemedMenuEntry] {
+        BrowserViewportPreset.catalog.map { preset in
+            .item(ThemedMenuItem(
+                title: preset.title,
+                subtitle: "\(preset.width)×\(preset.height)",
+                isSelected: agentViewportSize == preset.size,
+                onChoose: { [weak self] in
+                    self?.setResponsiveViewport(width: preset.width, height: preset.height)
+                }
+            ))
+        }
     }
 
     private func updateTestConditionChrome() {
@@ -2287,7 +2937,13 @@ extension BrowserViewController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         passwordFocusedFrameTokens[ObjectIdentifier(webView)] = []
+        annotationViewportOffsets[ObjectIdentifier(webView)] = .zero
         guard webView === self.webView else { return }
+        setAnnotationMode(false)
+        if isFindBarVisible {
+            hideFindBar()
+        }
+        updateAnnotationOverlay()
         chromeBar.setPasswordFieldFocused(false)
         recordAgentNavigationTrace("start")
         consoleMessages.removeAll()
@@ -2673,6 +3329,12 @@ extension BrowserViewController: WKDownloadDelegate {
         }
         agentDownloadRequests.removeValue(forKey: identifier)?
             .finish(.success(destination))
+        recentDownloads.append(destination)
+        if recentDownloads.count > BrowserDefaults.maximumRecentDownloads {
+            recentDownloads.removeFirst(
+                recentDownloads.count - BrowserDefaults.maximumRecentDownloads
+            )
+        }
 
         let alert = NSAlert()
         alert.messageText = L10n.string("Download Complete")
@@ -2839,12 +3501,20 @@ enum BrowserDefaults {
     static let networkMessageHandler = "skalmanNetwork"
     static let navigationReadinessMessageHandler = "skalmanNavigationReadiness"
     static let passwordFocusMessageHandler = "skalmanPasswordFocus"
+    static let annotationViewportMessageHandler = "skalmanAnnotationViewport"
     static let maximumPendingNavigations = 100
     static let maximumPopupDepth = 4
     static let minimumViewportWidth = 200
     static let minimumViewportHeight = 200
-    static let maximumViewportWidth = 1_920
-    static let maximumViewportHeight = 1_200
+    static let maximumViewportWidth = 3_840
+    static let maximumViewportHeight = 2_560
+    static let defaultResponsiveViewportWidth = 390
+    static let defaultResponsiveViewportHeight = 844
+    static let minimumPageZoom = 0.5
+    static let maximumPageZoom = 2.0
+    static let pageZoomStep = 0.1
+    static let screenshotFilename = "Skalman Browser.png"
+    static let maximumRecentDownloads = 20
     static let maximumUserAgentLength = 512
     static let userAgentTooltipLength = 96
     static let maximumTraceEvents = 500
@@ -2913,6 +3583,20 @@ extension BrowserViewController: WKScriptMessageHandler {
             passwordFocusedFrameTokens[identifier] = focusedFrames
             if messageWebView === webView {
                 chromeBar.setPasswordFieldFocused(!focusedFrames.isEmpty)
+            }
+            return
+        }
+        if message.name == BrowserDefaults.annotationViewportMessageHandler {
+            guard message.frameInfo.isMainFrame,
+                  let messageWebView = message.webView,
+                  let scrollX = payload["scroll_x"] as? NSNumber,
+                  let scrollY = payload["scroll_y"] as? NSNumber else { return }
+            annotationViewportOffsets[ObjectIdentifier(messageWebView)] = CGPoint(
+                x: max(0, scrollX.doubleValue),
+                y: max(0, scrollY.doubleValue)
+            )
+            if messageWebView === webView {
+                updateAnnotationOverlay()
             }
             return
         }

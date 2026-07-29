@@ -92,6 +92,20 @@ private struct BrowserCapabilitiesPayload: Encodable {
     }
 }
 
+private struct BrowserAnnotationsPayload: Encodable {
+    struct Annotation: Encodable {
+        let id: Int
+        let note: String
+        let x: Double
+        let y: Double
+    }
+
+    let provenance: String
+    let url: String
+    let count: Int
+    let annotations: [Annotation]
+}
+
 private struct BrowserPageLease {
     let browser: BrowserViewController
     let tabID: UUID
@@ -194,6 +208,8 @@ final class AgentToolCoordinator: MCPToolHandling {
             return "\(arguments.steps?.count ?? 0) isolated Playwright steps"
         case .browserSnapshot(let arguments):
             return target(ref: arguments.ref, selector: arguments.selector, locator: nil)
+        case .browserAnnotations:
+            return "user-authored page notes"
         case .browserScreenshot(let arguments):
             if arguments.fullPage == true { return "full page" }
             return target(
@@ -375,6 +391,8 @@ final class AgentToolCoordinator: MCPToolHandling {
             browserRunIsolated(arguments, for: sessionID, completion: observed)
         case .browserSnapshot(let arguments):
             browserSnapshot(arguments, for: sessionID, completion: observed)
+        case .browserAnnotations:
+            browserAnnotations(for: sessionID, completion: observed)
         case .browserQuery(let arguments):
             browserQuery(arguments, for: sessionID, completion: observed)
         case .browserClick(let arguments):
@@ -1254,6 +1272,7 @@ final class AgentToolCoordinator: MCPToolHandling {
                 "screenshots": true,
                 "visual_compare": true,
                 "trace_metadata": true,
+                "user_annotations": true,
                 "request_interception": false,
                 "response_interception": false,
                 "browser_engine_selection": false,
@@ -1772,6 +1791,52 @@ final class AgentToolCoordinator: MCPToolHandling {
                     completion(.failure("Could not read the page: \(error.localizedDescription)"))
                 }
             }
+        }
+    }
+
+    private func browserAnnotations(
+        for sessionID: SessionID,
+        completion: @escaping (MCPToolResult) -> Void
+    ) {
+        withAuthorizedBrowser(
+            for: sessionID,
+            purpose: "read your annotations for"
+        ) { browser in
+            guard let browser,
+                  let authorizedPage = browser.agentPageIdentity else {
+                completion(.failure("No authorized page is loaded. Use browser_navigate first."))
+                return
+            }
+
+            let notes = browser.annotationsForActivePage
+            guard browser.agentPageIdentity == authorizedPage else {
+                completion(.failure(
+                    "The browser document changed while its annotations were being read; "
+                        + "retry against the current page."
+                ))
+                return
+            }
+            let payload = BrowserAnnotationsPayload(
+                provenance: "user_authored",
+                url: BrowserURLRedactor.redact(authorizedPage.url),
+                count: notes.count,
+                annotations: notes.map {
+                    BrowserAnnotationsPayload.Annotation(
+                        id: $0.id,
+                        note: $0.note,
+                        x: Double($0.documentPoint.x),
+                        y: Double($0.documentPoint.y)
+                    )
+                }
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            guard let data = try? encoder.encode(payload),
+                  let text = String(data: data, encoding: .utf8) else {
+                completion(.failure("Could not encode browser annotations."))
+                return
+            }
+            completion(.success(text))
         }
     }
 
