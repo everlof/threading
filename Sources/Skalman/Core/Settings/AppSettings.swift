@@ -70,6 +70,92 @@ final class AppSettings {
         return UserDefaults.standard.bool(forKey: Keys.harmonizesTerminalBackgrounds)
     }
 
+    /// Whether a session that wants the user posts a macOS notification — blocked on an
+    /// approval, finished off screen, or finished while the app was in the background.
+    ///
+    /// On by default; the system's own notification permission still gates delivery, and it
+    /// is requested on the first alert rather than at launch. Banners appear only while the
+    /// app is inactive — in the app, the sidebar mark and the permission card are the cues.
+    var notifiesOnAttention: Bool {
+        get { Self.notifiesOnAttention }
+        set {
+            defaults.set(newValue, forKey: Keys.notifiesOnAttention)
+            notifyChanged()
+        }
+    }
+
+    /// Read by the alert center off the settings-change event, same pattern as its neighbours.
+    nonisolated static var notifiesOnAttention: Bool {
+        _ = registerStandardDefaults
+        return UserDefaults.standard.bool(forKey: Keys.notifiesOnAttention)
+    }
+
+    /// The alert kinds switched *off*, stored that way for the same reason attachment
+    /// detection is: every kind — including one added later — starts on, with no defaults
+    /// migration and no seed per case.
+    private var disabledAttentionAlerts: Set<AttentionAlert> {
+        get {
+            Set(
+                (defaults.stringArray(forKey: Keys.disabledAttentionAlerts) ?? [])
+                    .compactMap(AttentionAlert.init(rawValue:))
+            )
+        }
+        set {
+            defaults.set(newValue.map(\.rawValue).sorted(), forKey: Keys.disabledAttentionAlerts)
+            notifyChanged()
+        }
+    }
+
+    /// Whether this kind of alert is posted at all. Under `notifiesOnAttention`, which stays
+    /// the master switch — these choose *which* of the three arrive when notifications are on.
+    func notifies(on alert: AttentionAlert) -> Bool {
+        !disabledAttentionAlerts.contains(alert)
+    }
+
+    func setNotifies(_ enabled: Bool, on alert: AttentionAlert) {
+        var disabled = disabledAttentionAlerts
+        if enabled {
+            disabled.remove(alert)
+        } else {
+            disabled.insert(alert)
+        }
+        disabledAttentionAlerts = disabled
+    }
+
+    /// Whether the one alert that sounds is heard.
+    ///
+    /// Separate from the alert itself: someone who wants to see that a turn is blocked without
+    /// being pinged has no way to say so if the sound rides along with the banner. On by
+    /// default, since the blocked alert is the one holding work up.
+    var playsAttentionAlertSound: Bool {
+        get { defaults.bool(forKey: Keys.playsAttentionAlertSound) }
+        set {
+            defaults.set(newValue, forKey: Keys.playsAttentionAlertSound)
+            notifyChanged()
+        }
+    }
+
+    /// Whether an image dropped on an agent's terminal is rewritten when the agent cannot read
+    /// the format it arrived in — a HEIC out of Finder, a scanned TIFF.
+    ///
+    /// On by default, because the alternative is a drop that looks like it worked and left a
+    /// path in the prompt. Off is for working *on* the file rather than looking at it: someone
+    /// debugging HEIC handling needs the agent to be given their HEIC, not a PNG of it. The
+    /// shell drawer never converts either way — see `TerminalDropImage`.
+    var convertsDroppedImages: Bool {
+        get { Self.convertsDroppedImages }
+        set {
+            defaults.set(newValue, forKey: Keys.convertsDroppedImages)
+            notifyChanged()
+        }
+    }
+
+    /// Read inside the drop itself, which is a view's main-thread work rather than the actor's.
+    nonisolated static var convertsDroppedImages: Bool {
+        _ = registerStandardDefaults
+        return UserDefaults.standard.bool(forKey: Keys.convertsDroppedImages)
+    }
+
     /// Whether the sidebar follows the agent's own name for the conversation — the terminal
     /// title while a PTY is attached, the transcript's title records otherwise.
     var usesAgentTitleInSidebar: Bool {
@@ -131,6 +217,23 @@ final class AppSettings {
         get { Self.groupsLoneBranches }
         set {
             defaults.set(newValue, forKey: Keys.groupsLoneBranches)
+            notifyChanged()
+        }
+    }
+
+    /// Whether a session's recorded branch follows its checkout while the session is not
+    /// running.
+    ///
+    /// On, switching the checkout's branch — from another session, the shell drawer, or a
+    /// terminal outside Skalman entirely — updates every session standing in it, because a
+    /// dormant session resumes onto whatever the checkout is on *now*
+    /// (`CheckoutBranchFollower`). Off restores the frozen record: a session keeps the
+    /// branch it last ran on until it next stops working, preserving what the conversation
+    /// actually happened on.
+    var followsCheckoutBranch: Bool {
+        get { defaults.bool(forKey: Keys.followsCheckoutBranch) }
+        set {
+            defaults.set(newValue, forKey: Keys.followsCheckoutBranch)
             notifyChanged()
         }
     }
@@ -319,6 +422,21 @@ final class AppSettings {
 
     // MARK: - Agent Hooks
 
+    /// Whether Claude sessions report turn boundaries and subagent lifecycle back to Skalman.
+    ///
+    /// On by default because Claude receives these hooks in a per-session `--settings` file;
+    /// Skalman never edits the user's Claude configuration. The switch still exists because a
+    /// hook can conflict with a CLI release or a user's setup. Turning it off removes every
+    /// observational hook on the next launch while leaving Native's required permission hook
+    /// independent.
+    var reportsClaudeLifecycleEvents: Bool {
+        get { defaults.bool(forKey: Keys.reportsClaudeLifecycleEvents) }
+        set {
+            defaults.set(newValue, forKey: Keys.reportsClaudeLifecycleEvents)
+            notifyChanged()
+        }
+    }
+
     /// Whether Skalman installs its lifecycle hooks into each Codex account's `hooks.json`.
     ///
     /// Off by default because it writes to a file the user owns and may already be using —
@@ -381,6 +499,34 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Permission Mode
+
+    /// How much a **new** session may do before it has to ask.
+    ///
+    /// Nil — the default — writes no flag at all and leaves the decision where it already is:
+    /// Claude's `permissions.defaultMode`, Codex's `config.toml`. That is the same reasoning as
+    /// `claudeRemoteControl` above, and the same reason it cannot collapse to a plain value:
+    /// picking any mode as the shipped default would silently override a config the user set
+    /// deliberately, on an axis where the wrong answer either nags them or stops asking.
+    ///
+    /// A session that has chosen for itself (`AgentSession.permissionMode`) ignores this.
+    /// An unrecognised stored value reads as nil, so a mode a future CLI drops degrades to
+    /// "leave it alone" rather than to someone else's idea of a safe default.
+    var defaultPermissionMode: AgentPermissionMode? {
+        get {
+            guard let raw = defaults.string(forKey: Keys.defaultPermissionMode) else { return nil }
+            return AgentPermissionMode(rawValue: raw)
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue.rawValue, forKey: Keys.defaultPermissionMode)
+            } else {
+                defaults.removeObject(forKey: Keys.defaultPermissionMode)
+            }
+            notifyChanged()
+        }
+    }
+
     // MARK: - Remote Access
 
     /// Whether the remote-access server runs (and, once implemented, its tunnel). Off by
@@ -433,11 +579,11 @@ final class AppSettings {
     /// sidebar's branch grouping is the one that showed it: documented as on, and off in any
     /// process that built a tree before instantiating the singleton. Registration is idempotent
     /// and cheap, so the readers do it themselves rather than depending on an order.
-    private static let registerStandardDefaults: Void = {
+    private nonisolated static let registerStandardDefaults: Void = {
         UserDefaults.standard.register(defaults: seeds)
     }()
 
-    private static var seeds: [String: Any] {
+    private nonisolated static var seeds: [String: Any] {
         [
             Keys.defaultAgentKind: AgentDefaults.defaultKind.rawValue,
             Keys.restoresLastSession: true,
@@ -445,9 +591,14 @@ final class AppSettings {
             Keys.usesTerminalTitleInSidebar: true,
             Keys.groupsSessionsByBranch: true,
             Keys.groupsLoneBranches: true,
+            Keys.followsCheckoutBranch: true,
             Keys.discoversProjectIcons: true,
             Keys.discoversAccountAvatars: true,
             Keys.harmonizesTerminalBackgrounds: true,
+            Keys.convertsDroppedImages: true,
+            Keys.notifiesOnAttention: true,
+            Keys.playsAttentionAlertSound: true,
+            Keys.reportsClaudeLifecycleEvents: true,
             Keys.workingOrbStyle: MotionPreferencesDefaults.workingOrbStyle.rawValue,
             Keys.chatNameMorphStyle: MotionPreferencesDefaults.chatNameMorphStyle.rawValue,
             Keys.appTextSize: AppTextSize.standard.rawValue
@@ -481,16 +632,23 @@ final class AppSettings {
         static let usesTerminalTitleInSidebar = "usesTerminalTitleInSidebar"
         static let groupsSessionsByBranch = "groupsSessionsByBranch"
         static let groupsLoneBranches = "groupsLoneBranches"
+        static let followsCheckoutBranch = "followsCheckoutBranch"
         static let sidebarSessionOrder = "sidebarSessionOrder"
         static let discoversProjectIcons = "discoversProjectIcons"
         static let discoversAccountAvatars = "discoversAccountAvatars"
         static let harmonizesTerminalBackgrounds = "harmonizesTerminalBackgrounds"
+        static let convertsDroppedImages = "convertsDroppedImages"
+        static let notifiesOnAttention = "notifiesOnAttention"
+        static let disabledAttentionAlerts = "disabledAttentionAlerts"
+        static let playsAttentionAlertSound = "playsAttentionAlertSound"
         static let disabledAttachmentDetectionAgentKinds = "disabledAttachmentDetectionAgentKinds"
         static let disabledToolGroupIDs = "disabledToolGroupIDs"
         static let usesContainedExtensionLauncher = "usesContainedExtensionLauncher"
+        static let reportsClaudeLifecycleEvents = "reportsClaudeLifecycleEvents"
         static let installsCodexHooks = "installsCodexHooks"
         static let bypassesCodexHookTrust = "bypassesCodexHookTrust"
         static let claudeRemoteControl = "claudeRemoteControl"
+        static let defaultPermissionMode = "defaultPermissionMode"
         static let remoteAccessEnabled = "remoteAccessEnabled"
         static let workingOrbStyle = "workingOrbStyle"
         static let chatNameMorphStyle = "chatNameMorphStyle"

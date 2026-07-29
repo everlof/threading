@@ -1,4 +1,5 @@
 import AppKit
+import SkalmanExtensionKit
 import SkalmanRemoteKit
 
 // MARK: - Shared Session Action Presentation
@@ -31,6 +32,13 @@ struct SessionSurfaceTogglePresentation: Equatable {
 enum SessionActionMenuDefaults {
     static var attachmentsTitle: String { L10n.string("Attachments") }
     static let attachmentsSymbol = "paperclip"
+
+    /// What the permission-mode submenu's first row says, given the app-wide default: the
+    /// inherited answer where there is one, and where the decision goes where there is not.
+    static func inheritedPermissionModeTitle(_ inherited: AgentPermissionMode?) -> String {
+        guard let inherited else { return L10n.string("Use Agent's Setting") }
+        return L10n.format("Use Default (%@)", inherited.displayName)
+    }
 }
 
 // MARK: - Session Row Actions
@@ -58,9 +66,9 @@ extension ProjectSidebarViewController {
         )
     }
 
-    /// The full set of a session row's actions, shared by its `⋯` hover button and its
-    /// right-click context menu so the two can never drift — a right-click that offered fewer
-    /// actions than the button beside it is exactly the kind of gap that grows silently.
+    /// The full set of session actions, shared by the row's `⋯` hover button, its right-click
+    /// context menu, and the pane header's Context button so none can drift — a second entrance
+    /// that offered fewer actions is exactly the kind of gap that grows silently.
     ///
     /// The caller sets `actionSessionID` first: every handler here reads it, and it is set as
     /// the menu opens, so whichever surface presents the menu targets the right session.
@@ -92,12 +100,18 @@ extension ProjectSidebarViewController {
         addSideChatItems(to: menu, for: session)
         addSurfaceMenu(to: menu, for: session)
         menu.addItem(makeSessionThemeItem(for: sessionID))
-        addRemoteControlItem(to: menu, for: session)
-        menu.addItem(
-            withTitle: L10n.string("Rename Session…"),
-            action: #selector(renameSessionClicked),
+        let attachments = menu.addItem(
+            withTitle: SessionActionMenuDefaults.attachmentsTitle,
+            action: #selector(attachmentsClicked),
             keyEquivalent: ""
         )
+        attachments.image = NSImage(
+            systemSymbolName: SessionActionMenuDefaults.attachmentsSymbol,
+            accessibilityDescription: SessionActionMenuDefaults.attachmentsTitle
+        )
+        addPermissionModeItem(to: menu, for: session)
+        addRemoteControlItem(to: menu, for: session)
+        addMuteItem(to: menu, for: session)
         menu.addItem(
             withTitle: L10n.string("Rename Session…"),
             action: #selector(renameSessionClicked),
@@ -132,6 +146,53 @@ extension ProjectSidebarViewController {
         )
 
         for item in menu.items { item.target = self }
+
+        // After the retarget loop: these items carry their own targets and the row's own
+        // identity, lowercased to match the sanitized snapshot IDs extensions already hold.
+        appendExtensionCommandItems(
+            to: menu,
+            placement: .sessionRow,
+            context: ExtensionCommandContext(
+                projectID: ProjectStore.shared.project(forSessionID: sessionID)?
+                    .id.uuidString.lowercased(),
+                sessionID: sessionID.uuidString.lowercased()
+            )
+        )
+    }
+
+    /// Silences one conversation, or lets it speak again.
+    ///
+    /// The title reads the *resolved* answer rather than the session's own field, so a session
+    /// inside a muted project offers Unmute — the alternative is a Mute item on something that
+    /// is already silent, which says the state is the opposite of what it is.
+    private func addMuteItem(to menu: NSMenu, for session: AgentSession) {
+        menu.addItem(
+            withTitle: AttentionAlertScope.isMuted(sessionID: session.id)
+                ? L10n.string("Unmute Notifications")
+                : L10n.string("Mute Notifications"),
+            action: #selector(toggleMutedClicked),
+            keyEquivalent: ""
+        )
+    }
+
+    @objc private func toggleMutedClicked() {
+        guard let sessionID = actionSessionID else { return }
+
+        let wanted = !AttentionAlertScope.isMuted(sessionID: sessionID)
+        let inherited = ProjectStore.shared.project(forSessionID: sessionID)?
+            .notificationsMuted ?? false
+
+        // Storing nil where the answer already matches the project keeps this session
+        // *following* it, so muting the project later still reaches here. An explicit value is
+        // written only where it actually differs — which is the whole point of the field being
+        // optional rather than a plain flag.
+        ProjectStore.shared.setNotificationsMuted(
+            wanted == inherited ? nil : wanted,
+            forSessionID: sessionID
+        )
+        // The store knows nothing about notifications, so anything already on screen for this
+        // session is still there until the alert center is asked to look again.
+        AttentionAlertCenter.shared.preferencesChanged()
     }
 
     /// Adds the side-chat items: fork this conversation into one that starts with its context
@@ -170,7 +231,10 @@ extension ProjectSidebarViewController {
 
         let submenu = NSMenu(title: L10n.string("Interface"))
         let native = NSMenuItem(
-            title: L10n.string("Native UI (Experimental)"),
+            title: SessionSurfaceTogglePresentation.title(
+                usesNativeUI: true,
+                kind: session.kind
+            ),
             action: #selector(setSurfaceClicked(_:)),
             keyEquivalent: ""
         )
@@ -180,7 +244,10 @@ extension ProjectSidebarViewController {
         submenu.addItem(native)
 
         let original = NSMenuItem(
-            title: session.kind.originalUITitle,
+            title: SessionSurfaceTogglePresentation.title(
+                usesNativeUI: false,
+                kind: session.kind
+            ),
             action: #selector(setSurfaceClicked(_:)),
             keyEquivalent: ""
         )
@@ -226,6 +293,53 @@ extension ProjectSidebarViewController {
 
         let item = NSMenuItem(
             title: L10n.string("Claude Remote Control"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        item.submenu = submenu
+        menu.addItem(item)
+    }
+
+    /// How much this conversation may do before it has to ask.
+    ///
+    /// Both agents, unlike Remote Control above: Claude names one mode and Codex reaches the
+    /// same six postures through its approval policy and sandbox, so the item means something
+    /// either way. Each mode names what it does, and where the session's agent expresses it
+    /// imperfectly the row says so rather than implying parity.
+    ///
+    /// The inherit item names the app-wide default where there is one and defers where there is
+    /// not — Skalman cannot read `permissions.defaultMode` or `config.toml`, and a row claiming
+    /// a value it guessed would be worse than one that says where the answer lives.
+    private func addPermissionModeItem(to menu: NSMenu, for session: AgentSession) {
+        let inherited = AppSettings.shared.defaultPermissionMode
+
+        let submenu = NSMenu()
+        let inheritItem = NSMenuItem(
+            title: SessionActionMenuDefaults.inheritedPermissionModeTitle(inherited),
+            action: #selector(permissionModeClicked(_:)),
+            keyEquivalent: ""
+        )
+        inheritItem.target = self
+        inheritItem.state = session.permissionMode == nil ? .on : .off
+        submenu.addItem(inheritItem)
+
+        for mode in AgentPermissionMode.allCases {
+            let item = NSMenuItem(
+                title: mode.displayName,
+                action: #selector(permissionModeClicked(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = mode
+            item.state = mode == session.permissionMode ? .on : .off
+            item.toolTip = [mode.menuDescription, mode.caveat(for: session.kind)]
+                .compactMap { $0 }
+                .joined(separator: " ")
+            submenu.addItem(item)
+        }
+
+        let item = NSMenuItem(
+            title: L10n.string("Permission Mode"),
             action: nil,
             keyEquivalent: ""
         )
@@ -286,6 +400,21 @@ extension ProjectSidebarViewController {
         ProjectStore.shared.setRemoteControl(choice.sessionValue, for: sessionID)
     }
 
+    /// Records the choice only, for the same reason Remote Control does: the mode is stated in
+    /// the flags of the process this configures at startup. A running session keeps the posture
+    /// it launched with until it is relaunched — and Claude's own Shift+Tab, which Skalman
+    /// cannot see, may already have moved it somewhere else.
+    ///
+    /// A nil `representedObject` is the inherit row, not a missing value.
+    @objc private func permissionModeClicked(_ sender: NSMenuItem) {
+        guard let sessionID = actionSessionID else { return }
+
+        ProjectStore.shared.setPermissionMode(
+            sender.representedObject as? AgentPermissionMode,
+            for: sessionID
+        )
+    }
+
     @objc private func newSideChatClicked() {
         guard let sessionID = actionSessionID else { return }
         delegate?.projectSidebar(self, createSideChatOf: sessionID, prompt: nil)
@@ -321,6 +450,11 @@ extension ProjectSidebarViewController {
         delegate?.projectSidebar(self, setUsesNativeUI: usesNativeUI, for: sessionID)
     }
 
+    @objc private func attachmentsClicked() {
+        guard let sessionID = actionSessionID else { return }
+        delegate?.projectSidebar(self, showAttachmentsFor: sessionID)
+    }
+
     @objc private func archiveClicked() {
         guard let sessionID = actionSessionID else { return }
         archiveSession(sessionID)
@@ -339,10 +473,11 @@ extension ProjectSidebarViewController {
         reload()
     }
 
+    /// Through the delegate rather than the runtime, so the row menu shares Cmd+W's
+    /// confirmation instead of skipping it.
     @objc private func closeSessionClicked() {
         guard let sessionID = actionSessionID else { return }
-        AgentRuntime.shared.discard(sessionID: sessionID)
-        reload()
+        delegate?.projectSidebar(self, closeSession: sessionID)
     }
 
     @objc private func renameSessionClicked() {

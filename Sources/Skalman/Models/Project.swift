@@ -62,7 +62,7 @@ enum AgentKind: String, Codable, CaseIterable {
 
     /// Whether Skalman may render this agent's conversation itself, instead of a terminal.
     ///
-    /// Both agents qualify: each exposes a supported headless transport — `codex exec --json`
+    /// Both agents qualify: each exposes a supported headless transport — Codex app-server
     /// and `claude -p --output-format stream-json` — that Skalman drives by spawning the
     /// user's own installed CLI, authenticated by whatever `claude auth login` / `codex login`
     /// already put on disk. No token is read, and no request is routed on the user's behalf,
@@ -205,8 +205,8 @@ struct AgentSession: Codable, Identifiable {
     /// turn off an account whose config already selected Fast.
     ///
     /// Claude applies this through its persistent print transport's control protocol. Codex
-    /// has one process per native turn, so the launcher maps it onto that next process's
-    /// `service_tier` override while preserving the same conversation id.
+    /// maps it onto the next app-server `turn/start` request's `serviceTier` while preserving
+    /// the same process and conversation id.
     var fastMode: Bool?
 
     /// A per-conversation override for Claude's Remote Control bridge — the built-in feature
@@ -223,13 +223,29 @@ struct AgentSession: Codable, Identifiable {
     /// no equivalent bridge.
     var remoteControl: Bool?
 
-    /// The branch the checkout was on when this session last ran.
+    /// How much this conversation may do before it has to ask.
     ///
-    /// A branch belongs to a checkout, not a session — but a *conversation* happened on
-    /// whatever branch was checked out at the time, and that is what this records: captured
-    /// at creation and re-read each time the session stops working, then frozen while
-    /// dormant. It drives the sidebar's optional branch grouping. Nil for non-git projects
-    /// and when no branch was available while decoding an older record.
+    /// Nil defers to `AppSettings.defaultPermissionMode`, which may itself defer to the CLI's
+    /// own configuration — Claude's `permissions.defaultMode`, Codex's `config.toml`. The third
+    /// state is what keeps an installed update from changing anyone's agent: a mode written to
+    /// mean "no opinion" would override a config the user set deliberately, exactly the trap
+    /// `remoteControl` above is shaped around.
+    ///
+    /// This records the mode the session is **launched** in, not a live mirror of the mode it is
+    /// in now. A terminal session's own Shift+Tab is invisible to Skalman, so changing this
+    /// while a session runs takes effect on its next launch.
+    var permissionMode: AgentPermissionMode?
+
+    /// The branch of the checkout this session runs in, as last observed.
+    ///
+    /// A branch belongs to a checkout, not a session. This records the checkout's branch as
+    /// this session knows it: captured at creation, re-read each time the session stops
+    /// working, and — while `AppSettings.followsCheckoutBranch` is on, the default — kept
+    /// following the checkout even while dormant (`CheckoutBranchFollower`), because a
+    /// dormant session resumes onto whatever the checkout is on *now*. With that setting
+    /// off the record freezes while dormant instead, keeping the branch the conversation
+    /// actually happened on. It drives the sidebar's optional branch grouping. Nil for
+    /// non-git projects and when no branch was available while decoding an older record.
     var branch: String?
 
     /// The session this one was forked from, for a **side chat** — a conversation started
@@ -282,6 +298,12 @@ struct AgentSession: Codable, Identifiable {
     /// later change to either. See `ThemeResolution.resolve`.
     var themeID: TerminalThemeID?
 
+    /// Whether this conversation's macOS notifications are silenced. Nil inherits the
+    /// project's answer, which inherits "not muted" — the same three scopes as the theme, and
+    /// optional for the same reason: a session inside a muted project can still say no.
+    /// See `AttentionAlertScope`.
+    var notificationsMuted: Bool?
+
     init(
         kind: AgentKind,
         title: String,
@@ -307,19 +329,22 @@ struct AgentSession: Codable, Identifiable {
         self.reasoningEffort = reasoningEffort
         self.fastMode = nil
         self.remoteControl = nil
+        self.permissionMode = nil
         self.branch = nil
         self.isArchived = false
         self.isPinned = false
         self.usesNativeUI = usesNativeUI
         self.forkedFrom = forkedFrom
         self.themeID = nil
+        self.notificationsMuted = nil
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, title, customTitle, createdAt, lastActiveAt
         case agentTitle = "terminalTitle"
         case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
-        case fastMode, remoteControl, archived, pinned, nativeUI, forkParent, themeID, themeName
+        case fastMode, remoteControl, permissionMode, archived, pinned, nativeUI, forkParent
+        case themeID, themeName, notificationsMuted
     }
 
     init(from decoder: Decoder) throws {
@@ -348,6 +373,10 @@ struct AgentSession: Codable, Identifiable {
         reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
         fastMode = try container.decodeIfPresent(Bool.self, forKey: .fastMode)
         remoteControl = try container.decodeIfPresent(Bool.self, forKey: .remoteControl)
+        permissionMode = try container.decodeIfPresent(
+            AgentPermissionMode.self,
+            forKey: .permissionMode
+        )
         branch = try container.decodeIfPresent(String.self, forKey: .branch)
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
@@ -358,6 +387,10 @@ struct AgentSession: Codable, Identifiable {
            let legacyName = try container.decodeIfPresent(String.self, forKey: .themeName) {
             themeID = .migratedFromName(legacyName)
         }
+        notificationsMuted = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .notificationsMuted
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -377,12 +410,14 @@ struct AgentSession: Codable, Identifiable {
         try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
         try container.encodeIfPresent(fastMode, forKey: .fastMode)
         try container.encodeIfPresent(remoteControl, forKey: .remoteControl)
+        try container.encodeIfPresent(permissionMode, forKey: .permissionMode)
         try container.encodeIfPresent(branch, forKey: .branch)
         try container.encode(isArchived, forKey: .archived)
         try container.encode(isPinned, forKey: .pinned)
         try container.encode(usesNativeUI, forKey: .nativeUI)
         try container.encodeIfPresent(forkedFrom, forKey: .forkParent)
         try container.encodeIfPresent(themeID, forKey: .themeID)
+        try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     }
 
     /// Whether a previous conversation exists that can be resumed.
@@ -487,6 +522,10 @@ struct Project: Codable, Identifiable {
     /// default; a session choosing its own theme overrides this.
     var themeID: TerminalThemeID?
 
+    /// Whether this checkout's sessions are silenced. Nil inherits "not muted"; a session
+    /// with an answer of its own overrides it either way. See `AttentionAlertScope`.
+    var notificationsMuted: Bool?
+
     init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
         self.id = id
         self.name = name
@@ -496,10 +535,12 @@ struct Project: Codable, Identifiable {
         self.createdAt = Date()
         self.icon = nil
         self.themeID = nil
+        self.notificationsMuted = nil
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, folderPath, sessions, isExpanded, createdAt, icon, themeID, themeName
+        case notificationsMuted
     }
 
     init(from decoder: Decoder) throws {
@@ -520,6 +561,10 @@ struct Project: Codable, Identifiable {
            let legacyName = try container.decodeIfPresent(String.self, forKey: .themeName) {
             themeID = .migratedFromName(legacyName)
         }
+        notificationsMuted = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .notificationsMuted
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -532,6 +577,7 @@ struct Project: Codable, Identifiable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(icon, forKey: .icon)
         try container.encodeIfPresent(themeID, forKey: .themeID)
+        try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     }
 
     var folderURL: URL {

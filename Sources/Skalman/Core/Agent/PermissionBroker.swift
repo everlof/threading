@@ -55,6 +55,19 @@ struct PermissionRequest {
             // Codex's `update_plan` carries the whole list. The step in progress is the one
             // worth a row; the rest is a checklist nobody reads collapsed.
             return currentPlanStep ?? "\(planSteps.count) steps"
+        case .taskCreate:
+            return input["subject"] as? String ?? subject ?? ""
+        case .taskUpdate:
+            let id = (input["taskId"] ?? input["task_id"] ?? input["id"]) as? String
+            let status = input["status"] as? String
+            return [id.map { "#\($0)" }, status]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+        case .taskList:
+            return "Task list"
+        case .taskGet:
+            let id = (input["taskId"] ?? input["task_id"] ?? input["id"]) as? String
+            return id.map { "#\($0)" } ?? subject ?? ""
         case .multiEdit, .task, .todoWrite, .todoRead, .toolSearch, .mcp, .unknown:
             // Tools without a rule of their own are the *common* case, not the exception —
             // there are always more tools than rules, and every MCP server adds more. This
@@ -96,7 +109,8 @@ struct PermissionRequest {
     /// carries any of them is better named by it than by its schema.
     private static let subjectKeys = [
         "command", "cmd", "file_path", "path", "notebook_path", "url", "query", "pattern",
-        "question", "description", "message", "prompt", "title", "name", "input"
+        "question", "description", "subject", "activeForm", "message", "prompt", "title",
+        "name", "input"
     ]
 
     private var subject: String? {
@@ -241,12 +255,33 @@ enum PermissionBroker {
             return
         }
 
+        // The session's permission mode, honoured here because the CLI does not honour it *for*
+        // us: measured against 2.1.220, `PreToolUse` fires under `bypassPermissions` and
+        // `dontAsk` exactly as it does under `manual`. Without this, a natively rendered session
+        // in Bypass would still be stopped by Skalman's own sheet — the app contradicting the
+        // mode the user picked in it.
+        if let mode = permissionMode(for: request.sessionID),
+           let standing = PermissionPolicy.standingDecision(for: request.tool, in: mode) {
+            completion(standing)
+            return
+        }
+
         guard let present else {
             completion(.deny(reason: "Skalman has no window available to ask for permission."))
             return
         }
 
         present(request, completion)
+    }
+
+    /// The mode this session is running under, resolved the same way its launch resolved it.
+    ///
+    /// Read from the store rather than remembered at launch, so a mode changed mid-session
+    /// applies to the next tool call. That is a deliberate difference from the *flags*, which
+    /// only a relaunch can restate: this layer is Skalman's own and has no such excuse.
+    private static func permissionMode(for sessionID: SessionID) -> AgentPermissionMode? {
+        guard let session = ProjectStore.shared.session(withID: sessionID) else { return nil }
+        return AgentLauncher.permissionMode(for: session)
     }
 
     /// Records that a tool should stop prompting for the rest of a session.
@@ -273,12 +308,56 @@ enum PermissionPolicy {
         isAutoAllowed(ToolIdentity(toolName))
     }
 
+    /// What the session's mode already decides, or nil to ask.
+    ///
+    /// Only the modes that *promise* something are answered here. `manual` asks by definition;
+    /// `plan` and `auto` are enforced inside the CLI — plan by refusing to act, auto by its own
+    /// classifier — and neither promises Skalman's sheet will stay down, so asking remains both
+    /// honest and the conservative side to be wrong on.
+    ///
+    /// `dontAsk` denies rather than allows. That is the mode's actual meaning in the CLI, whose
+    /// fallback table reads `dontAsk → deny`: it promises never to interrupt, and keeps the
+    /// promise by refusing and telling the model — not by waving the call through.
+    static func standingDecision(
+        for tool: ToolIdentity,
+        in mode: AgentPermissionMode
+    ) -> PermissionDecision? {
+        switch mode {
+        case .bypassPermissions:
+            return .allow(reason: "Bypass Permissions: this chat runs without permission checks.")
+
+        case .dontAsk:
+            return .deny(reason: "Don't Ask: this chat refuses anything that would need approval.")
+
+        case .acceptEdits:
+            // The edit half of the mode's name. A command is not an edit, and this is the whole
+            // distinction between Accept Edits and the modes either side of it.
+            return isFileEdit(tool)
+                ? .allow(reason: "Accept Edits: file changes are allowed without asking.")
+                : nil
+
+        case .manual, .plan, .auto:
+            return nil
+        }
+    }
+
+    /// Whether the tool changes files, as opposed to running something.
+    private static func isFileEdit(_ tool: ToolIdentity) -> Bool {
+        switch tool {
+        case .write, .edit, .multiEdit, .notebookEdit:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Deliberately exhaustive rather than a denylist: adding a known identity forces an
     /// explicit policy choice, while `.unknown` remains consequential and prompts.
     static func isAutoAllowed(_ tool: ToolIdentity) -> Bool {
         switch tool {
         case .read, .glob, .grep, .notebookRead,
-             .todoWrite, .todoRead, .task, .toolSearch:
+             .todoWrite, .todoRead, .taskCreate, .taskUpdate, .taskList, .taskGet,
+             .task, .toolSearch:
             return true
 
         case .mcp(let name):

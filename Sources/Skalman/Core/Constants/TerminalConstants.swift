@@ -35,6 +35,10 @@ enum WindowDefaults {
 enum EnvironmentKeys {
     static let term = "TERM"
     static let colorTerm = "COLORTERM"
+
+    /// `<foreground>;<background>`, as ANSI colour indices — rxvt's convention for telling a
+    /// program whether it is drawing on paper or on ink. See `TerminalTheme.colorFGBG`.
+    static let colorFGBG = "COLORFGBG"
     static let lang = "LANG"
     static let path = "PATH"
     static let home = "HOME"
@@ -99,6 +103,21 @@ enum AgentDefaults {
     /// It is passed solely when `AppSettings.bypassesCodexHookTrust` is on.
     static let codexBypassHookTrustFlag = "--dangerously-bypass-hook-trust"
 
+    /// How a launch states its permission posture. Claude names one mode; Codex splits the same
+    /// idea across when-to-ask and what-may-happen-without-asking, so it takes two flags.
+    /// `AgentPermissionMode` owns which values pair with which.
+    static let claudePermissionModeFlag = "--permission-mode"
+    static let codexApprovalFlag = "--ask-for-approval"
+    static let codexSandboxFlag = "--sandbox"
+
+    static let codexApprovalUntrusted = "untrusted"
+    static let codexApprovalOnRequest = "on-request"
+    static let codexApprovalNever = "never"
+
+    static let codexSandboxReadOnly = "read-only"
+    static let codexSandboxWorkspaceWrite = "workspace-write"
+    static let codexSandboxFullAccess = "danger-full-access"
+
     /// Model choices offered for Claude: the aliases its `--help` documents, which track the
     /// latest of each family rather than pinning a dated name.
     static let claudeModels = ["opus", "sonnet", "fable"]
@@ -140,6 +159,7 @@ enum AgentDefaults {
 
     /// Where Claude records transcripts, relative to an account's config directory.
     static let claudeProjectsSubdirectory = "projects"
+    static let claudeSubagentsSubdirectory = "subagents"
     static let transcriptExtension = "jsonl"
 
     /// Claude names a project's directory after its absolute path with separators replaced.
@@ -303,12 +323,14 @@ enum DisplayPaneDefaults {
     static let titleFontSize: CGFloat = 11
     static let captionFontSize: CGFloat = 10
 
-    /// The pane's one header row: its tabs, and the `+` beside them. There was a titled header
-    /// above the strip and a rule saying the strip appeared only once two surfaces coexisted;
-    /// together they spent two rows of a narrow pane saying the name of the tab twice, once in a
-    /// heading and once in the tab under it.
-    static let tabBarHeight: CGFloat = 36
+    /// The pane's one header row is its tabs and the `+` beside them: there was a titled header
+    /// above the strip once, and it spent two rows of a narrow pane saying the name of the tab
+    /// twice. The row's *height* is no longer stated here — `ThemedTabStripView.bandHeight`
+    /// owns the strip band, one silhouette for every pane that draws tabs.
     static let tabChipMaxWidth: CGFloat = 180
+
+    /// The "+" menu's floor, shared by every host that offers one.
+    static let newTabMenuMinimumWidth: CGFloat = 160
 
     /// Agent-created content and browser tabs are capped independently so neither repeated
     /// rendering nor tab-opening can grow an unbounded strip or retain unbounded web processes.
@@ -541,6 +563,12 @@ struct ProjectsDidChange: AppEvent {
 
 struct SessionActivityDidChange: AppEvent {
     static let name = Notification.Name("sessionActivityDidChange")
+    let sessionID: SessionID
+}
+
+/// A macOS notification about this session was clicked; the window should show it.
+struct SessionNotificationOpened: AppEvent {
+    static let name = Notification.Name("sessionNotificationOpened")
     let sessionID: SessionID
 }
 

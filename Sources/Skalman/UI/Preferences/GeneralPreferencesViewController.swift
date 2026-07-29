@@ -8,15 +8,26 @@ final class GeneralPreferencesViewController: NSViewController {
     private let defaultAgentPopUp = ThemedPopUp()
     private let terminalTitleToggle = ThemedToggle()
     private let branchGroupingToggle = ThemedToggle()
+    private let branchFollowToggle = ThemedToggle()
     private let projectIconToggle = ThemedToggle()
     private let accountAvatarToggle = ThemedToggle()
     private let claudeAttachmentToggle = ThemedToggle()
     private let codexAttachmentToggle = ThemedToggle()
     private let restoreSessionToggle = ThemedToggle()
     private let confirmCloseToggle = ThemedToggle()
+    private let attentionNotificationToggle = ThemedToggle()
+
+    /// One toggle per alert kind, built from the enum rather than declared one by one, so a
+    /// kind added later cannot arrive without a row to switch it off.
+    private let alertToggles: [AttentionAlert: ThemedToggle] = Dictionary(
+        uniqueKeysWithValues: AttentionAlert.allCases.map { ($0, ThemedToggle()) }
+    )
+    private let alertSoundToggle = ThemedToggle()
+    private let claudeHookToggle = ThemedToggle()
     private let codexHookToggle = ThemedToggle()
     private let codexHookTrustToggle = ThemedToggle()
     private let remoteControlPopUp = ThemedPopUp()
+    private let permissionModePopUp = ThemedPopUp()
     private let shellField = ThemedTextField()
 
     // MARK: - Lifecycle
@@ -45,6 +56,9 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(branchGroupingToggle,
                   isOn: AppSettings.shared.groupsSessionsByBranch,
                   action: #selector(branchGroupingChanged))
+        configure(branchFollowToggle,
+                  isOn: AppSettings.shared.followsCheckoutBranch,
+                  action: #selector(branchFollowChanged))
         configure(projectIconToggle,
                   isOn: AppSettings.shared.discoversProjectIcons,
                   action: #selector(projectIconChanged))
@@ -63,6 +77,21 @@ final class GeneralPreferencesViewController: NSViewController {
         )
         configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
         configure(confirmCloseToggle, isOn: AppSettings.shared.confirmsBeforeClosingRunningSession, action: #selector(confirmCloseChanged))
+        configure(attentionNotificationToggle,
+                  isOn: AppSettings.shared.notifiesOnAttention,
+                  action: #selector(attentionNotificationChanged))
+        for (alert, toggle) in alertToggles {
+            configure(toggle,
+                      isOn: AppSettings.shared.notifies(on: alert),
+                      action: #selector(alertKindChanged))
+        }
+        configure(alertSoundToggle,
+                  isOn: AppSettings.shared.playsAttentionAlertSound,
+                  action: #selector(alertSoundChanged))
+        updateNotificationRefinements()
+        configure(claudeHookToggle,
+                  isOn: AppSettings.shared.reportsClaudeLifecycleEvents,
+                  action: #selector(claudeHookChanged))
         configure(codexHookToggle,
                   isOn: AppSettings.shared.installsCodexHooks,
                   action: #selector(codexHookChanged))
@@ -76,6 +105,31 @@ final class GeneralPreferencesViewController: NSViewController {
                 ThemedMenuItem(title: value.settingsTitle, representedValue: value)
             )
         }
+        // The first item inherits — no flag, the agent's own configuration decides — and the
+        // six follow. Its represented value is deliberately nil, which is how the handler
+        // tells "leave it alone" from a mode.
+        permissionModePopUp.addItem(
+            ThemedMenuItem(title: L10n.string("Agent's Setting"), representedValue: nil)
+        )
+        for mode in AgentPermissionMode.allCases {
+            permissionModePopUp.addItem(
+                ThemedMenuItem(
+                    title: mode.displayName,
+                    subtitle: mode.menuDescription,
+                    representedValue: mode
+                )
+            )
+        }
+        permissionModePopUp.selectItem(
+            at: AppSettings.shared.defaultPermissionMode
+                .flatMap { AgentPermissionMode.allCases.firstIndex(of: $0).map { $0 + 1 } } ?? 0
+        )
+        permissionModePopUp.target = self
+        permissionModePopUp.action = #selector(permissionModeChanged)
+        permissionModePopUp.translatesAutoresizingMaskIntoConstraints = false
+        permissionModePopUp.widthAnchor
+            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+
         remoteControlPopUp.selectItem(
             at: ClaudeRemoteControl.allCases.firstIndex(of: AppSettings.shared.claudeRemoteControl) ?? 0
         )
@@ -113,6 +167,13 @@ final class GeneralPreferencesViewController: NSViewController {
                 control: branchGroupingToggle
             ),
             SettingsUI.row(
+                title: "Follow the checkout's branch",
+                subtitle: "A session that isn't running updates its branch whenever its "
+                    + "checkout switches — from another session or outside Skalman alike. "
+                    + "Off, it keeps the branch it last ran on.",
+                control: branchFollowToggle
+            ),
+            SettingsUI.row(
                 title: "Discover project icons",
                 subtitle: "Projects without an icon use their own favicon or app icon, "
                     + "else their GitHub avatar or homepage favicon.",
@@ -132,9 +193,12 @@ final class GeneralPreferencesViewController: NSViewController {
 
         let closing = SettingsCard(rows: [
             SettingsUI.row(title: "Ask before closing a running session",
-                           subtitle: "Closing a session ends its agent but keeps it in the sidebar so it can be resumed.",
+                           subtitle: "Closing ends the agent but keeps the session in the sidebar to resume. "
+                            + "Archiving, moving, and surface switches also stop a running agent, and ask under this setting.",
                            control: confirmCloseToggle)
         ])
+
+        let notifications = SettingsCard(rows: notificationRows())
 
         let shell = SettingsCard(rows: [
             SettingsUI.fullRow(shellRow())
@@ -146,7 +210,10 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.section("Attachments", attachmentDetectionCard()),
             SettingsUI.section("Startup", startup),
             SettingsUI.section("Closing", closing),
+            SettingsUI.section("Notifications", notifications),
+            SettingsUI.section("Permission Mode", permissionModeCard()),
             SettingsUI.section("Claude Remote Control", claudeRemoteControlCard()),
+            SettingsUI.section("Claude Hooks", claudeHooksCard()),
             SettingsUI.section("Codex Hooks", codexHooksCard()),
             SettingsUI.section("Shell", shell),
             SettingsUI.note("Shell path is used by shell sessions. Agent sessions launch through your login shell regardless.")
@@ -185,6 +252,26 @@ final class GeneralPreferencesViewController: NSViewController {
     /// different things: this one hands the conversation to claude.ai and the Claude mobile app,
     /// and it is Claude's setting that Skalman is choosing a default for rather than a switch of
     /// its own. Hence three states — the first defers instead of deciding.
+    /// How much a new session may do before it has to ask.
+    ///
+    /// Both agents, in one vocabulary: Claude states a mode directly, and Codex reaches the same
+    /// postures through its approval policy and sandbox. The default defers rather than deciding
+    /// — picking a mode here for everyone would override a `permissions.defaultMode` or
+    /// `config.toml` the user set themselves, on the one axis where being wrong either nags
+    /// them all day or stops asking when it should have.
+    private func permissionModeCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "New sessions start in",
+                subtitle: "How much a session may do before it stops to ask. "
+                    + "Following leaves it to the agent's own configuration. "
+                    + "A single chat can still be set from its ⋯ menu, "
+                    + "and the mode applies from that chat's next launch.",
+                control: permissionModePopUp
+            )
+        ])
+    }
+
     private func claudeRemoteControlCard() -> SettingsCard {
         SettingsCard(rows: [
             SettingsUI.row(
@@ -222,6 +309,57 @@ final class GeneralPreferencesViewController: NSViewController {
         ])
     }
 
+    /// The master switch, then one row per alert kind, then the sound.
+    ///
+    /// The three kinds are worth separating because they are not equally welcome: being
+    /// blocked on an approval is work stopping, while a turn ending in the background is the
+    /// chatty one — and someone who wants only the first should not have to choose between
+    /// all of it and none of it. Each row's second line is the sentence its banner would say,
+    /// so a toggle can be matched to the thing it silences without switching it off to find
+    /// out. Both strings are the alert's own (`localizes: false`, since they arrive localized).
+    private func notificationRows() -> [NSView] {
+        let master = SettingsUI.row(
+            title: "Notify when a session needs you",
+            subtitle: "A macOS notification when a session is blocked on an approval "
+                + "or finishes while you are elsewhere. Banners appear only while "
+                + "Skalman is in the background; clicking one opens the session.",
+            control: attentionNotificationToggle
+        )
+
+        let kinds = AttentionAlert.allCases.compactMap { alert -> NSView? in
+            guard let toggle = alertToggles[alert] else { return nil }
+            return SettingsUI.row(
+                title: alert.settingsTitle,
+                subtitle: L10n.format("Says “%@”.", alert.body),
+                control: toggle,
+                localizes: false
+            )
+        }
+
+        let sound = SettingsUI.row(
+            title: "Play a sound",
+            subtitle: "Only the blocked alert ever sounds — the other two are silent "
+                + "either way. Off shows it without the ping.",
+            control: alertSoundToggle
+        )
+
+        return [master] + kinds + [sound]
+    }
+
+    /// Claude's observational hooks are session-local and independent from Native permission
+    /// brokering. That distinction makes this a real off switch without breaking approval cards.
+    private func claudeHooksCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Report Claude turn and subagent activity",
+                subtitle: "Uses a session-only settings file and never edits your Claude "
+                    + "configuration. Off removes Skalman's lifecycle hooks from Terminal; "
+                    + "Native permission prompts keep working. Applies on the next start or resume.",
+                control: claudeHookToggle
+            )
+        ])
+    }
+
     /// The shell field with its Choose button, filling the row.
     private func shellRow() -> NSView {
         let label = NSTextField(labelWithString: L10n.string("Shell path"))
@@ -252,6 +390,33 @@ final class GeneralPreferencesViewController: NSViewController {
 
     @objc private func confirmCloseChanged() {
         AppSettings.shared.confirmsBeforeClosingRunningSession = confirmCloseToggle.state == .on
+    }
+
+    @objc private func attentionNotificationChanged() {
+        // The setter's own settings notification is what makes the alert center withdraw
+        // everything already delivered when this switches off.
+        AppSettings.shared.notifiesOnAttention = attentionNotificationToggle.state == .on
+        updateNotificationRefinements()
+    }
+
+    @objc private func alertKindChanged(_ sender: ThemedToggle) {
+        guard let alert = alertToggles.first(where: { $0.value === sender })?.key else { return }
+        AppSettings.shared.setNotifies(sender.state == .on, on: alert)
+        updateNotificationRefinements()
+    }
+
+    @objc private func alertSoundChanged() {
+        AppSettings.shared.playsAttentionAlertSound = alertSoundToggle.state == .on
+    }
+
+    /// The kind rows refine the master switch and the sound refines the blocked row, so each
+    /// waits on what it refines — disabled rather than hidden, the same rule the lone-branch
+    /// heading and the Codex hook-trust rows already follow: a control that vanishes explains
+    /// less than one that waits.
+    private func updateNotificationRefinements() {
+        let notifies = attentionNotificationToggle.state == .on
+        for toggle in alertToggles.values { toggle.isEnabled = notifies }
+        alertSoundToggle.isEnabled = notifies && alertToggles[.blocked]?.state == .on
     }
 
     @objc private func terminalTitleChanged() {
@@ -293,6 +458,19 @@ final class GeneralPreferencesViewController: NSViewController {
         NotificationCenter.default.post(ProjectsDidChange())
     }
 
+    @objc private func branchFollowChanged() {
+        // No extra post needed either way: the setter's own settings notification makes
+        // `CheckoutBranchFollower` reconcile, and switching on catches every checkout up,
+        // which regroups the sidebar through the store where anything actually moved.
+        AppSettings.shared.followsCheckoutBranch = branchFollowToggle.state == .on
+    }
+
+    /// A running Claude process has already loaded its settings file, so changing this is
+    /// intentionally a next-launch choice rather than pretending to detach hooks mid-turn.
+    @objc private func claudeHookChanged() {
+        AppSettings.shared.reportsClaudeLifecycleEvents = claudeHookToggle.state == .on
+    }
+
     /// Switching off also removes what was installed, rather than leaving inert entries in a
     /// file the user owns — an off switch that leaves its traces behind is not off.
     @objc private func codexHookChanged() {
@@ -316,6 +494,17 @@ final class GeneralPreferencesViewController: NSViewController {
         guard let value = remoteControlPopUp.selectedItem?.representedValue
             as? ClaudeRemoteControl else { return }
         AppSettings.shared.claudeRemoteControl = value
+    }
+
+    /// Applies to sessions started from here on, and to existing ones only where they have made
+    /// no choice of their own — and then from their next launch, since the mode is stated in the
+    /// flags of the process it configures.
+    ///
+    /// Nil is the first item rather than a missing selection: reading it as "not a mode" is what
+    /// lets the default go back to deferring after a mode has been picked.
+    @objc private func permissionModeChanged() {
+        AppSettings.shared.defaultPermissionMode = permissionModePopUp.selectedItem?
+            .representedValue as? AgentPermissionMode
     }
 
     @objc private func codexHookTrustChanged() {

@@ -93,10 +93,14 @@ appears without earning its place. **Headings for Lone Branches** turns the seco
 this rule off, returning lone branches to the project level; sessions with no recorded
 branch always stay there.
 
-Each session remembers the branch the checkout was on when it last ran: it is recorded when
-the session is created and updated each time it finishes working, then kept while the
-session is dormant. So after the checkout moves on, old conversations stay filed under the
-branch they actually happened on — which is also what the hover popover shows.
+Each session remembers the branch of the checkout it runs in: recorded when the session is
+created, updated each time it finishes working, and — by default — **kept in step while the
+session sits idle**. Switch the checkout's branch anywhere — in another session, in the
+shell drawer, in a terminal outside Skalman — and every session standing in that checkout
+follows, because that is the branch any of them would resume onto. **Settings > General >
+Follow the checkout's branch** turns this off; sessions then keep the branch they last ran
+on until they next run, filing old conversations under the branch they actually happened
+on. Either way, the hover popover shows the session's recorded branch.
 
 Branch headings collapse like projects do, showing a count of what they hide.
 
@@ -243,17 +247,37 @@ you get one.
 The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return** starts
 the session; **Shift+Return** (or Option+Return) breaks the line.
 
-**Drop or paste a file** into it and its path is inserted, which is what the agent can act on.
-An image with no file of its own — a screenshot straight from the clipboard, a picture dragged
-out of a browser — is written to a temporary file first and its path inserted, so it can be
-opened by the session you are about to start.
+**Drop or paste a file** into it. An ordinary file has its path inserted, which is what the
+agent can act on. An image instead appears as a thumbnail above the text; use the **×** on its
+corner to remove it before sending, or click the image to inspect it in macOS Quick Look. With
+keyboard focus, Space or Return opens the same preview. Right-click for Quick Look, the default
+app, Reveal in Finder, image/name/path copying, or removal. The image's path stays out of what
+you type and is added only when the prompt is submitted. An image with no file of its own — a
+screenshot straight from the clipboard, a picture dragged out of a browser — is written to a
+temporary file first, so the session can still open it.
 
 **The terminal takes a drop too**, and answers it the same way: dropping a file on a running
-session types its path where the cursor is, escaped so a name with spaces stays one path, with
+session puts its path where the cursor is, escaped so a name with spaces stays one path, with
 a space after it so a second file lands beside the first rather than glued to it. An image with
 no file of its own is written out first, exactly as in the composer. This is what every terminal
 does with a dropped file, and it is the only way to hand an agent a picture — neither CLI can be
 given pixels, only a path to them.
+
+**A dropped image becomes an image, not a path.** The drop arrives as a paste rather than as
+typing, and that is the difference an agent reads: drop a PNG, JPEG, GIF or WebP on a running
+Claude Code and it becomes `[Image #1]` in the prompt instead of a line of path. Codex does the
+same for a single PNG or JPEG.
+
+**A format the agent cannot open is converted for it.** A photo out of Finder is a HEIC and a
+scan is often a TIFF, and neither CLI takes either — so one is written out as a PNG first,
+keeping its name, and that is what the paste names. It happens per session and per agent: a GIF
+goes to Claude Code untouched and is converted for Codex, because only one of them reads GIFs.
+The file you dropped is never altered or moved. Turn it off under
+[Profiles](#profiles) when you want the agent handed the original.
+
+**The shell drawer converts nothing.** A path handed to a shell has to be the path you pointed
+at — you may be dropping that HEIC onto a half-typed `sips` command — so drops there are the
+plain path they always were.
 
 Whatever you type into the composer is kept as a **draft** for that project, saved as you
 type. Switch projects, quit, or lose the app to a crash, and the text is still there when you
@@ -266,14 +290,20 @@ Running and dormant are told apart by the text itself: a **dormant** session —
 has exited but which can be reopened — is greyed out. There is no permanent "running" marker,
 so the sidebar stays quiet until something actually wants you.
 
-Two things do get an indicator, at the trailing edge of the row:
+Three things do get an indicator, at the trailing edge of the row:
 
 | | Meaning |
 |---|---|
 | **Spinner** | The session is working |
-| **Dot** | It finished something while you were looking elsewhere |
+| **Filled dot** | It has stopped to ask you something and cannot go on until you answer |
+| **Hollow ring** | It finished something while you were looking elsewhere |
 
-The dot clears as soon as you select that session.
+The filled dot is the one worth interrupting yourself for: that session is doing nothing until
+you reply. The ring only means there is something to read.
+
+Either mark clears as soon as you select that session. Answering a question mid-turn puts the
+row back to the spinner rather than leaving it blank — the session is still working, and it says
+so.
 
 Hovering a session row swaps the indicator for two buttons, so the list stays quiet until you
 reach for it: a **⋯** holding the row's actions — Archive, Close Session, Rename, Delete — and,
@@ -281,6 +311,15 @@ outboard of it at the row's trailing edge, an **archive** button that files the 
 one press without opening the menu first. The archive button is the menu item's shortcut, not a
 second behaviour: both ask before interrupting a running agent, and both are undone the same way
 from **Settings ▸ Archived**.
+
+Close and Archive sound alike and answer different questions. **Close Session** ends the
+agent but keeps the row — greyed out, ready to be resumed. (It ships without a keyboard
+shortcut — **Cmd+W** closes tabs and pages, never an agent — but can be given one in
+**Settings ▸ Keyboard**.) **Archive** files the whole session away: the row leaves the sidebar for
+**Settings ▸ Archived**, where it can be restored or deleted for good, and a running agent
+is stopped first rather than left running with nothing listing it. Neither touches the
+conversation itself. Both ask before interrupting a running agent, under **Ask before
+closing a running session** in General settings.
 
 How it works: an idle agent writes nothing to its terminal, so sustained output means it is
 working, and output stopping means it has finished. A terminal bell counts as an explicit
@@ -290,6 +329,40 @@ it applies equally to Codex and to plain shells running a long command.
 Redraws caused by resizing the window — or by scrolling inside a program that handles its
 own scrolling, like Claude Code — are ignored, since an agent repainting itself is not the
 same as an agent working.
+
+### Notifications
+
+The same states can reach you outside the app. When a session stops to ask for an approval,
+finishes off screen, or finishes its turn while Skalman is behind another app, a macOS
+notification is posted — with sound only for the blocked case, matching the filled dot's
+urgency. Clicking it brings Skalman forward and opens that session.
+
+Banners only appear while Skalman is in the background; in the app, the sidebar marks above
+are the cue. A notification is withdrawn on its own the moment it stops being true — the
+question is answered, the session is opened, or the agent starts working again — so
+Notification Center holds only things still waiting for you.
+
+Turn it off with **Notify when a session needs you** in General settings. macOS's own
+notification permission also applies; it is requested the first time there is something to
+say. Sessions that report their own turn boundaries (Claude, and Codex with hooks enabled)
+notify on finished turns; plain shells never do.
+
+**Choosing which ones arrive.** Under that switch, each of the three has its own row, and each
+row shows the sentence its notification would say:
+
+| Setting | What it covers |
+|---|---|
+| **Blocked on an approval** | A turn has stopped on a permission request and is waiting. |
+| **Finished while you were elsewhere** | A session away from the pane finished or asked something. |
+| **Finished a turn in the background** | A turn ended while Skalman was behind another app — the chattiest of the three. |
+| **Play a sound** | Only the blocked alert ever sounds; the other two are silent either way. Off keeps the banner without the ping. |
+
+**Silencing one chat or one project.** **Mute Notifications** in a session's `⋯` menu quiets
+that conversation; the same item on a project row quiets the whole checkout, including sessions
+started in it later. A session follows its project unless you answer for it — so you can mute a
+busy project and leave one conversation audible, or the reverse. The item reads **Unmute
+Notifications** whenever the chat is currently silent, whichever level silenced it. Anything
+already showing in Notification Center is withdrawn as you mute.
 
 ### Scrolling
 When the running program handles the mouse itself (Claude Code scrolls its own transcript),
@@ -313,20 +386,25 @@ which Skalman reads back from the rollout file Codex writes on launch.
 
 ### The shell drawer
 
-**⌃`** (Control-backtick), or **View ▸ Shell**, opens a shell underneath the session you are
-reading. Drag the strip above it to resize.
+**⌃`** (Control-backtick), or **View ▸ Shell**, opens a tabbed drawer underneath the session
+you are reading. The first time it opens it holds the session's shell; the **+** at the end of
+its strip adds more — another shell, or a browser (private too). Drag the strip above it to
+resize; tabs reorder by drag or their secondary-click menu, exactly as the display panel's do,
+and **⌘⇧[ / ⌘⇧]** and **⌘1–⌘9** work here when the drawer has focus.
 
 It is not a session of its own — shells used to be, and it was the wrong shape: there was no
 conversation to resume, no transcript, and nothing to come back to. It belongs to the session
 instead, and every session has one.
 
-- It opens **where the agent currently is**, not where the session started — a terminal
+- A shell opens **where the agent currently is**, not where the session started — a terminal
   session reports its directory, so a shell opened while the agent is deep in a subpackage
   starts there. Sessions Skalman renders natively open in the project folder.
 - It uses the **session's theme and font**, so it matches the surface above it.
-- Each session keeps its own shell, and its own answer to whether the drawer is open. The
-  process stays alive while you work elsewhere, so your directory and history are still there
-  when you come back, and it is closed with the session.
+- Each session keeps its own drawer tabs, and its own answer to whether the drawer is open —
+  both survive a relaunch (a shell's *process* does not; it restarts on first reveal). The
+  processes stay alive while you work elsewhere, so your directory and history are still there
+  when you come back; closing a tab ends that tab's shell, and closing the session ends them
+  all. The drawer's height is remembered for the window.
 - It is hidden while Settings or the new-session composer is on screen — neither is a session,
   so neither has a shell — and comes back with the session when you return to it.
 
@@ -356,7 +434,8 @@ Two kinds of transcript are deliberately left out:
   never spoke in has nothing to resume either.
 
 ### Closing
-- **Cmd+W**: closes the current session's terminal, leaving it dormant and resumable
+- **Cmd+W**: closes the focused drawer/panel tab, or the page on screen — never the agent
+- Right-click > **Close Session**: ends the agent, leaving the session dormant and resumable
 - Right-click > **Delete Session**: removes it from the sidebar entirely
 
 ### Names
@@ -377,6 +456,34 @@ first-prompt names.
 
 Rename via right-click in the sidebar, or right-click inside the terminal and choose
 **Rename Session…**.
+
+### Permission mode
+How much a chat may do before it stops to ask. Both agents support it, in one set of names:
+
+| Mode | What it does |
+|---|---|
+| **Manual** | Asks before making any change. |
+| **Plan** | Reads and proposes. Changes nothing. |
+| **Accept Edits** | Edits files without asking. Commands still ask. |
+| **Auto** | Decides for itself when to ask. |
+| **Don't Ask** | Never interrupts — *refuses* anything that would need approval. |
+| **Bypass Permissions** | No permission checks at all. |
+
+Don't Ask and Bypass Permissions sound alike and are opposites: Don't Ask keeps quiet by saying
+no, Bypass keeps quiet by saying yes.
+
+Set it in three places:
+
+- The **mode chip** in the composer, beside agent, account and model, when starting a chat.
+- A single chat's **⋯** menu has a **Permission Mode** submenu, including an inherit item that
+  follows the setting below.
+- **Settings > General > Permission Mode** sets what new chats use. *Agent's Setting* is the
+  default and changes nothing — Claude's own `permissions.defaultMode` and Codex's `config.toml`
+  still decide.
+
+Codex has no plan mode of its own, so Plan there stops it writing but does not ask it to plan;
+the menu says so. Changing a running chat's mode applies the next time it launches — Claude's
+own Shift+Tab moves it in the meantime, and Skalman cannot see that.
 
 ### Claude's Remote Control
 Claude Code can hand a session to claude.ai and the Claude mobile app so you can check on it
@@ -493,6 +600,18 @@ shell alias, and **Reset Selected** clears both.
 Accounts cannot be added or removed here — they come from your config directories. Log in to a
 new one from the terminal, e.g. `CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude`.
 
+### Switching an account off
+Each row carries a **switch**. Turning it off withdraws that login from everywhere an account
+is offered — the composer's account chip, the new-session menus, the usage readings and the
+import list — without deleting anything. The config directory, its conversations and the
+sessions already running on that account are untouched, and those sessions still resume on it.
+A switched-off account stays listed here, dimmed, so you can switch it back on; **Reset**
+restores its icon and name and leaves the switch alone.
+
+If the account you switch off is the CLI's default one, new sessions start on the first login
+that is still on. Switch off every account for an agent and it stops being offered for new
+sessions altogether.
+
 ### What counts as an account
 A directory must prove it holds a real login:
 
@@ -578,11 +697,52 @@ markdown. A short instruction gets a small bubble; a long answer gets room to br
 column stops widening past a comfortable reading measure, so a wide window gives you margins
 rather than very long lines, and a rule marks where each new exchange begins.
 
+The reply box accepts images the same way as the new-session prompt: drop or paste one to see a
+removable thumbnail above your text. Click the thumbnail to open Quick Look; its right-click menu
+has the same file and clipboard actions. This follow-up composer belongs to Chat sessions; a
+terminal session continues to use the agent CLI's own image input.
+
 Tool calls appear as a single collapsed line: a glyph, the tool, what it ran, and how much it
 returned — `$ Bash · ls -la · 42 lines`. Click to expand. A directory listing is usually
 longer than everything said around it, so it stays folded until you want it. The rows sit flat
 against the background until you point at one — a busy turn is mostly tool calls, and boxing
 each of them buries what was actually said.
+
+A call that went wrong says so: its glyph becomes a red **✗** and the row reads `Edit ·
+failed`. That covers failures the provider admits to and ones it does not — shell output that
+plainly reports `command not found` or a non-zero exit code marks the row even when the CLI
+called it a success. A call still unanswered when its turn ends reads **stopped** rather than
+`running…` forever.
+
+Once a turn finishes, the work itself folds away: what remains is your message, a one-line
+**"Worked for 42s"**, and the agent's final reply. Click the line to unfold the tool calls and
+intermediate steps beneath it. A turn you stopped mid-way stays open so you keep your place —
+it folds when you send the next message, labelled "Stopped after" rather than "Worked for".
+Reopened sessions fold their past turns the same way, timed from the transcript's own clock.
+
+While the agent works, the view no longer chases the newest line. Sending a message lifts it
+toward the top and holds it there while the reply streams in below; scrolling up releases the
+view to you and nothing moves it until you scroll back near the bottom, which resumes
+following. The scrollbar and mouse wheel always win over the stream.
+
+A long message of your own — a pasted log, a briefing past a screenful — collapses to its
+first eight lines behind a fade. **Show full message** opens it in place, and **Copy**
+always copies the whole thing, collapsed or not.
+
+Beside the model chip, a quiet **context meter** says how full the conversation's context
+window is: a percentage for Codex, which states its window, and a token count for Claude,
+which does not. It turns amber past 90% — the point where compaction or a fresh session is
+worth considering. This is the conversation's own weight, distinct from the account usage
+pill's rate limits.
+
+When a turn changed files, a **changed-files card** closes it out: the files as an indented
+tree, `+/−` counts beside every file and rolled up per directory, with single-child folders
+compressed into one `src/lib` row. Small turns (up to 5 files and 200 lines) open expanded;
+bigger ones start with the folders closed so a wide sweep stays one line per area. Click a
+folder to open just it, **Collapse all**/**Expand all** for the whole tree, and **View
+diff** to open Git Review on the Last Turn scope — offered on the latest turn's card, since
+that is the turn the scope describes. The card appears for turns run live in this window;
+reopened conversations don't reconstruct old turn diffs.
 
 ### Finding your way back
 
@@ -647,10 +807,14 @@ Worth knowing:
 
 ### Switching surfaces mid-conversation
 
-A session is not stuck on the surface it was created with. The `⋯` menu on a session row
-offers **Show as Conversation** or **Show as Terminal**, and the conversation carries over —
-the agent picks up exactly where it left off, with everything that was said before still in
-its context.
+A session is not stuck on the surface it was created with. Use the interface button in the
+session header to switch directly to the other one: it shows a chat symbol in the agent's
+terminal UI and a terminal symbol in Skalman's native UI. For an explicit choice, open
+**Interface** from either the session row's `⋯` or the header's **Context** menu. The two menus
+are the same menu, including their current-surface checkmark.
+
+The conversation carries over — the agent picks up exactly where it left off, with everything
+that was said before still in its context.
 
 It works because both surfaces drive the same conversation: they resume the CLI by the
 session's own identifier and write to one transcript, so the surface is only how it is drawn.
@@ -675,12 +839,27 @@ in the thread — the command, or the diff for an edit — with Allow and Deny. 
 one at a time, so a turn that fires several tools does not stack up cards to be answered out of
 context, and an answered card stays in place as a record of what was decided. Reading, searching
 and the agent's own bookkeeping pass without interrupting you; everything else asks, including
-tools added by future Claude releases. A pending request in a session you are not looking at raises that session's
-attention dot in the sidebar.
+tools added by future Claude releases. A pending request in a session you are not looking at
+raises that session's filled attention dot in the sidebar — the turn is stopped until you answer.
 
 **Codex Chat does not ask; it is sandboxed.** It runs with `workspace-write`, so it may read and
 edit the selected project, and operations needing more than that fail rather than being silently
 approved. Use the Terminal surface when a task needs Codex's full interactive approval flow.
+
+When Claude or Codex delegates work, both Chat and Terminal show a **Subagents** summary with live working/done
+counts and, when the provider reports them, the child's current tool, elapsed time, tool count,
+and token count. Select a child to open its conversation in the display panel; child output
+stays out of the parent's transcript. Both providers show structured child text, thinking, tool
+calls, and results, including nested delegated agents.
+
+Switching between Chat and Terminal keeps the same child list and transcript links. A compact
+copy of that navigator is also restored after relaunch; any child that was still running when
+the app stopped returns as **Stopped**, not as a spinner for a process that no longer exists.
+Claude can additionally rebuild its hierarchy from its own saved child index. A child's full
+saved transcript is loaded only when you open it. The compact row shows a provider name or short
+agent id, never the transcript's filesystem path; use its folder button to reveal that source in
+Finder. Provider response envelopes such as Claude's `<analysis>` are presented as **Reasoning**
+rather than exposed as protocol markup.
 
 ### What is missing
 
@@ -741,21 +920,49 @@ it reopens the next time the agent displays something. It can also be opened by 
 panel toggle at the session header's right edge, or **View ▸ Display Panel** — so its tabs (the
 browser, Git Review, Session Info) are reachable without an agent putting content there first.
 
+The tabs are yours to arrange: drag one along the strip to reorder it, or use its
+secondary-click menu — **Close Tab**, **Close Other Tabs**, **Close Tabs to the Right**,
+then **Move Left** / **Move Right**. The order is the same one the agent sees, and it
+survives a relaunch. **⌘⇧[** and **⌘⇧]** step through the strip, and **⌘1**–**⌘9** jump to a
+tab by its place in it. The same menu, with the same commands, sits on the shell drawer's
+tabs.
+
+Shell and browser tabs can also change *pane*: drag the tab onto the other pane's tab row —
+it dims while it is over a spot that will take it — or use the same secondary-click menu,
+which offers **Move to Shell Drawer** on a panel tab and **Move to Display Panel** on a
+drawer tab. Either way the tab moves live — a shell keeps its process and scrollback, a
+browser keeps its page — and the new home survives a relaunch. Dropping needs the other pane
+to be open; the menu works regardless and opens the destination for you. The panel-only
+surfaces (Review, Info, Files, comparisons) stay where they are one of a kind.
+
 ### The session header
 
-Every session sits under a header of its own, at the top of the pane: the page tab and a **+**
-for a new session on the left, then what that session's account has left to spend, then what
-can be done to it. It belongs to the pane rather than to the window, so it moves when the
-sidebar is dragged or collapsed instead of drifting over the project list.
+Every session sits under a header of its own, at the top of the pane: the **page tab** naming
+what is on screen and a **+** for a new session on the left, then what the session's account
+has left to spend, then what can be done to it. It belongs to the pane rather than to the
+window, so it moves when the sidebar is dragged or collapsed instead of drifting over the
+project list.
 
-The window's toolbar keeps only the **sidebar toggle**, beside the traffic lights — the one
-control that acts on the window rather than on a pane.
+There is deliberately **one** page tab, not a row of them: switching a session swaps the whole
+workspace — its drawer, its panel, its sidebar selection — so the sidebar is the session
+switcher, and this chip names where you are (a session, the new-session composer, or a
+Settings page). Click it to reveal the current page's row in the sidebar; its × (or **⌘W**)
+closes the page back to the empty pane — which never stops the agent; the session stays in
+the sidebar. For hopping between recent sessions, use the **‹ ›** history pair or ⌃⌘←/→.
 
-Three buttons sit at the header's right edge:
+The window's toolbar keeps only the controls that act on the window rather than on a pane,
+beside the traffic lights: the **sidebar toggle**, and the **‹ ›** history pair — Go Back and
+Go Forward through your selection history (**⌃⌘←** / **⌃⌘→**), the way Xcode retraces
+editors. Sessions, composers and settings pages all count as places; deleted sessions fall
+out of the history.
 
-- **Context** (⋯) — a menu of what applies to the session on screen. So far: the **Theme**
-  picker (the same one as the session row's `⋯` menu), with an *Edit Themes…* door to
-  Settings, plus **Attachments** for files the agent has mentioned.
+Four buttons sit at the header's right edge:
+
+- **Context** (⋯) — the same full menu as the session row's `⋯`: pinning, archiving, side
+  chats, **Interface**, **Theme**, **Attachments**, rename, account moves, sharing, deletion,
+  and any installed extension actions that apply.
+- **Interface** — switches directly to the other renderer. Its icon points at the destination:
+  chat for Skalman's native UI, terminal for Claude Code's or Codex's own UI.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
 
@@ -894,8 +1101,14 @@ not a repository shows no card at all.
 
 While the agent is working, that card becomes a live run receipt: the branch gives way to a
 working orb, the current **Step n / total** when the agent reports a plan, and the number of
-changed files beside the live `+N −M` totals. Agents that do not report a structured plan still
-show **Working…** and the diff totals. The card returns to the branch when the turn finishes.
+changed files beside the live `+N −M` totals. If Claude is running several task-list items in
+parallel, the receipt shows **done / total · active** counts instead of pretending the work has
+one current step. Agents that do not report a structured plan still show **Working…** and the
+diff totals. The card returns to the branch when the turn finishes.
+
+Native subagent rows use the same structured progress. A selected Codex or Claude child shows
+its **Step n / total** (or parallel task counts) beside its live tool/time/token detail, and the
+label disappears when that child finishes.
 
 The chip at the top picks what is compared:
 
@@ -934,7 +1147,12 @@ Two modes offer staging, because only their diffs are measured against the index
 - In **Unstaged**, each file row carries **Stage File** and each hunk a **Stage**.
 - In **Staged**, the same controls read **Unstage**, and a composer at the top of the list
   commits what is staged — Return sends, Shift-Return breaks the line. Your message survives
-  the pane re-reading itself, so staging more while writing one does not lose it.
+  the pane re-reading itself, so staging more while writing one does not lose it. A ✨ beside
+  the composer **drafts a message for you**: one short read-only Codex run over the staged
+  diff, written to match the voice of your recent commit subjects. The draft lands in the
+  composer for editing — nothing commits until you send it. Offered when a Codex login
+  exists; the run uses your default account's usage, which is why it only ever runs when
+  clicked.
 - **Uncommitted** offers **Stage File** only: its diff is measured from the last commit, so
   it can speak about whole files but not about individual hunks.
 - **Last Turn**, **Branch** and **Commits** stay read-only.
@@ -1049,8 +1267,15 @@ process draws — a web page in the display panel — may appear blank in it.
 ### Sidebar
 - **Cmd+Ctrl+S**, or the toggle button at the left of the header: show/hide the sidebar
 
-### Font Size
-- **Cmd++** / **Cmd+-**: increase/decrease font size
+### Text and terminal size
+
+- **Settings ▸ Themes ▸ Fonts ▸ Text size** scales the app's semantic type immediately,
+  including conversations, Settings, and UI rendered by extensions. It keeps the hierarchy
+  between headings, body copy, captions, code, and aligned numbers rather than assigning one
+  point size to everything.
+- **Cmd++** / **Cmd+-** increases or decreases the active terminal's font size.
+- **Settings ▸ Profiles ▸ Font** sets a profile's terminal family and size. Terminal text stays
+  independent from app text so a dense shell and a comfortably readable interface can coexist.
 
 ### Full Screen
 - **Cmd+Ctrl+F**: toggle full screen
@@ -1110,6 +1335,7 @@ Three things deliberately never follow it:
 
 | Setting | Applies to | Falls back to |
 |---|---|---|
+| **Text size** | All semantic app and host-rendered extension text | Default scale |
 | **App font** | Every part of the app the theme's typeface would reach | The theme |
 | **Conversation font** | The thread in a natively rendered session, including its reply box | The app font, then the theme |
 
@@ -1132,6 +1358,7 @@ Configure in **Preferences > Profiles**:
 - Cursor blink toggle
 - **Keep backgrounds in tune with the theme** (default: on)
 - Scrollback buffer size (default: 10,000 lines)
+- **Convert dropped images agents can't open** (default: on)
 
 **Keep backgrounds in tune with the theme.** Some programs paint their own backgrounds in
 24-bit colour rather than using the terminal's palette — an agent's diff is the common case,
@@ -1148,6 +1375,16 @@ that use the ordinary palette were already in tune and are untouched.
 
 Turn it off to see exactly the bytes a program sent.
 
+**Convert dropped images agents can't open.** Neither CLI reads a HEIC or a TIFF, so dropping
+one on a session left a path in the prompt that looked exactly like a drop that had worked. With
+this on, such a file is written out as a PNG first — keeping its name, leaving your original
+where it is — and the agent is handed that. It follows the agent: a GIF reaches Claude Code
+untouched and is converted for Codex, because only one of them reads GIFs.
+
+Turn it off when the format is the thing you are working on — debugging HEIC handling, say,
+where the agent needs your actual file rather than a PNG of it. The shell drawer never converts
+under either setting, since a path typed at a shell has to be the path you pointed at.
+
 ## Settings
 
 **Cmd+,** opens Settings, and pressing it again closes it — unlike most Mac apps, where
@@ -1155,6 +1392,11 @@ preferences are their own window and Cmd+W closes them. Here Settings is a *page
 window*, replacing the session in the pane and the project list in the sidebar, so the chord
 that put it there is what takes it away. The **✕** on its tab, and the cogwheel at the bottom
 of the sidebar, do the same thing.
+
+Closing it returns you to exactly what it covered. If that was a **new-session composer**, it
+comes back untouched — the same agent, account, model and checkout, the same attached images,
+and the prompt still half-written — so a trip into Settings to change a default costs you
+nothing of what you were composing.
 
 While Settings is the page, the header offers no **+**: that button creates a session, and a
 preferences page is no context for one.
@@ -1175,11 +1417,16 @@ than borrowing an unrelated app translation.
 - **New sessions use** — the agent the composer opens on; any other can be picked there
 - **Name sessions after the agent's own title** — see [Names](#names)
 - **Group sessions by branch** — see [Grouping sessions by branch](#grouping-sessions-by-branch)
+- **Follow the checkout's branch** — an idle session's recorded branch tracks its checkout,
+  however the switch was made; off, it keeps the branch it last ran on — see
+  [Grouping sessions by branch](#grouping-sessions-by-branch)
 - **Discover project icons** — see [Project icons](#project-icons)
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
-- **Ask before closing a running session**
+- **Ask before closing a running session** — also asks before archiving, moving, or switching
+  the surface of a running session, since each of those stops its agent too
 - **Allow remote access** — see [Remote Access](#remote-access-beta)
+- **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)
 - **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
 - **Skip Codex hook review** — see [Codex hooks](#codex-hooks)
 - **Shell path** — used by the shell drawer (⌃`); agents always launch via your login shell
@@ -1203,12 +1450,28 @@ than borrowing an unrelated app translation.
 Animation timing is tuned by Skalman rather than exposed as another preference, and transitions
 honour macOS Reduce Motion.
 
+#### Agent hooks
+
+Claude's lifecycle reporting is **on by default**, but optional. **Report Claude turn and
+subagent activity** passes hooks through the app-managed `--settings` file made for that session;
+it never edits `~/.claude/settings.json`. Switching it off takes effect the next time a Claude
+session starts or resumes:
+
+- Terminal Claude launches without Skalman's hooks and falls back to interpreting terminal
+  output for activity. It cannot discover new terminal subagents or their completed usage.
+- Native Claude keeps only the `PreToolUse` hook required for Skalman's permission cards.
+  Structured native turn and subagent rendering continues through Claude's event stream.
+- Subagents already saved with the session remain available when switching surfaces or
+  relaunching the app.
+
+Use the off switch if a Claude release or another part of your setup conflicts with a hook. A
+running Claude process has already loaded its settings file, so it must be restarted or resumed
+before the change applies.
+
 #### Codex hooks
 
-Skalman knows when a Claude session starts and finishes a turn because Claude reports it, which
-is how a session's status dot stays accurate without guessing from terminal output. Codex can
-report the same thing, but only from entries in `~/.codex/hooks.json` — a file you own, and one
-another tool may already be using.
+Codex can report terminal turn and subagent activity too, but only from entries in
+`~/.codex/hooks.json` — a file you own, and one another tool may already be using.
 
 Both settings are **off by default** and do different jobs:
 
@@ -1375,7 +1638,8 @@ recorded about it dying — is what a crash needs explaining.
 |--------|----------|
 | New Session (opens the composer) | Cmd+N |
 | Add Existing Project | Cmd+Shift+N |
-| Close Session | Cmd+W |
+| Close Tab (the focused drawer/panel tab, else the page on screen; never stops the agent) | Cmd+W |
+| Close Session (stops the agent) | unbound by default — assign one in Settings ▸ Keyboard |
 
 ### Editing
 | Action | Shortcut |
@@ -1392,6 +1656,7 @@ recorded about it dying — is what a crash needs explaining.
 | Action | Shortcut |
 |--------|----------|
 | Toggle Sidebar | Cmd+Ctrl+S |
+| Go Back / Go Forward (selection history) | Cmd+Ctrl+Left / Cmd+Ctrl+Right |
 | Group Sessions by Branch | Cmd+Ctrl+B |
 | Headings for Lone Branches | Cmd+Option+B |
 | Terminal (display panel tab) | Cmd+T |
@@ -1400,6 +1665,8 @@ recorded about it dying — is what a crash needs explaining.
 | Git Review | Cmd+Shift+R |
 | Session Info | Cmd+Shift+I |
 | Shell drawer | Ctrl+` |
+| Previous / Next tab (in the focused tab strip — drawer or panel) | Cmd+Shift+[ / Cmd+Shift+] |
+| Tab by its place in the strip | Cmd+1 … Cmd+9 |
 | Inspect Element | Cmd+Option+I |
 | Inspect Geometry (freeflow) | Cmd+Option+Shift+I |
 | …hold while inspecting: outline every parent | Ctrl |
@@ -1419,6 +1686,10 @@ they do is up to that program. A shell, Claude Code and Codex all read them as w
 |--------|----------|
 | Move a word left / right | Option+Left / Option+Right |
 | The same, in xterm's modifier form | Ctrl+Left / Ctrl+Right |
+
+Note the near-miss: bare **Ctrl+Left/Right** is word motion *inside the terminal*, while
+**Cmd+Ctrl+Left/Right** is the app's Go Back / Go Forward. Adding ⌘ is what moves the gesture
+from the program in the terminal to the window around it.
 | Delete the word behind the caret | Option+Delete |
 
 Option is otherwise left to the keyboard layout rather than claimed as a Meta key, so

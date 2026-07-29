@@ -64,19 +64,31 @@ it always was in practice: a place to run a command *about* the conversation you
 `supportsNativeUI` collapsed to `true` — that is the measure of how much of the model existed to
 describe the absence.
 
-Three decisions worth keeping:
+The drawer is a **tab host** (`DrawerHostViewController`) on the same model as the display
+panel — `PaneTab` lists per session, a `ThemedTabStripView` along its top, a `+` for another
+tab. The shell is its *default first tab*, auto-created the first time the drawer opens for a
+session; the strip creates the kinds that are naturally many (shells, browsers), while the
+singleton surfaces (review, info, files) keep their one home in the display panel. One host
+controller serves every session and is installed in the band exactly once: a session switch
+swaps which list it shows and re-parents nothing — the per-switch detach the old code did is
+what used to separate a shell from its scrollback view. Drawer tabs and the open flag persist
+in the session's panel payload (`PersistedTab.host == "drawer"`); the height persists app-wide
+(`ShellDrawerHeight`), because a drawer height is window geometry, not a fact about a session.
+
+Three decisions worth keeping (they predate the tabs and survived them):
 
 - **It opens where the agent is**, not where the session started. A terminal session reports its
   directory over OSC 7, so `TerminalSession.effectiveWorkingDirectory` is asked at the moment the
   shell starts — an agent that has spent ten minutes inside a subpackage hands its shell that
   subpackage. The project folder is the fallback, which is also exactly right for a natively
-  rendered conversation: no PTY to ask, and the CLI was launched there anyway.
+  rendered conversation: no PTY to ask, and the CLI was launched there anyway. The container
+  injects this as the drawer host's `directoryProvider`, since only it can ask the PTY.
 - **It takes the session's resolved profile** (`ThemeAssignments.profile(for:)`) — the same call
   the agent's own terminal makes — so a themed session's drawer matches the surface above it.
-- **The process is the feature.** One shell per session, started on first reveal (a drawer never
-  opened costs nothing), kept alive across session switches, and terminated with the session. A
-  shell that forgot its directory and history on every switch would be worse than the terminal
-  beside it.
+- **The process is the feature.** A shell starts on first reveal (a drawer never opened costs
+  nothing — and "revealed" means on screen, so fixtures never spawn one), survives session
+  switches, and ends with its *tab* or its session. A shell that forgot its directory and
+  history on every switch would be worse than the terminal beside it.
 
 The pane is not a split view: the conversation fills it and the drawer is a strip taken off the
 bottom, always installed and zero-high when closed, so every session surface pins its bottom to
@@ -86,6 +98,36 @@ collapse behaviour, delegate and priorities, all of which would need arguing out
 **Existing shell sessions were dropped, not converted** — there was nothing to convert. The
 version-1 → 2 state migration strips them before decoding, which it must: a kind the model no
 longer has does not decode, and one undecodable session would otherwise fail the whole document.
+
+## Why Sessions Are Not Tabs
+
+The content pane's header names the current page with **one chip**
+(`MainWindowController.pageTabView`), not a strip of open sessions. A strip was built and
+then removed: switching a session swaps the *whole workspace* — the drawer, the display
+panel, the sidebar's selection all pivot with it — so a row of session tabs sitting above
+only the conversation claimed a narrower scope than what it actually switched, and it was a
+second session switcher duplicating the sidebar's job. The sidebar is the switcher; the chip
+names where you are (session, composer, or settings page — its identity is what lets a
+rename morph), its × returns the pane to its empty state without touching the agent, and
+quick back-and-forth is the history buttons' job (⌃⌘←/→, see `NavigationHistory`). Tabs
+remain what they always were here: the *panel's* and the *drawer's* content.
+
+**⌘W closes a tab or the page, never the session.** Stopping an agent is a bigger decision
+than a reflex chord: `Close Session` kept its menu item and lost only the default binding
+(stored overrides survive — they key on the command id). The chord runs on focus
+(`focusedTabHost()`): inside the drawer or the panel it closes that strip's active tab;
+anywhere else it closes the page on screen — settings back to what it covered, a session or
+composer page to the empty pane.
+
+**⌘, is a detour, so it ends where it started.** `MainWindowController` remembers the *page*
+Settings opened over (`preSettingsPage`), not merely a session id: remembering only sessions
+put the second ⌘, on the empty state whenever the pane held a composer, which took a
+half-written prompt off the screen with it. A composer comes back through
+`TerminalContainerViewController.restoreComposer`, which makes the existing composer visible
+again rather than re-configuring it for the project — `showComposer` resets the agent, account,
+model and checkout, and drops attachments, which are deliberately not drafts (see
+[`persistence.md`](persistence.md)). Only what the chips *derive* is re-read
+(`refreshDerivedState`), because Settings is exactly where those defaults change.
 
 ## Session Names
 
@@ -170,6 +212,79 @@ interactive `PATH`, and the agent CLIs live in `~/.local/bin` or a Node prefix.
 Claude accepts `--session-id <uuid>`, so the id is minted up front. Codex has no equivalent,
 so its id is read back from the `session_meta` record at the head of the rollout file it
 writes under `~/.codex/sessions/`.
+
+**The opening prompt is an operand, not a word.** Both CLIs take it as a trailing positional
+argument, and both reject one that begins with `-` before the session exists: Claude answers
+`error: unknown option '- Make sure all tests are green'` and exits 1, Codex answers
+`unexpected argument '- ' found` and points at the fix in its own message. A bulleted opening —
+a list of things to do, one per line — is an ordinary thing to type into the composer, and it
+killed the launch a third of a second in; the app then showed the dormant placeholder, and
+selecting the row again relaunched *without* the prompt, which is what the user saw. So
+`ShellCommand` keeps the prompt apart from the flags (`append(operand:)`) and emits it last,
+after a bare `--`. Last matters as much as the `--`: `routed` appends the MCP flags *around*
+the command, so terminating options where the prompt used to sit would have fed
+`--mcp-config` to the CLI as more prompt text.
+
+### Permission mode, per conversation
+
+How much a session may do before it stops to ask, chosen in the composer, overridable from a
+session's `⋯` menu, defaulted in Settings ▸ General. `AgentPermissionMode` owns the whole
+translation; `AgentLauncher.permissionMode(for:)` resolves session → app default → nil.
+
+**One vocabulary, Claude's**, because it is the only CLI that names a mode rather than a pair of
+axes. The six and what they mean are read out of the CLI (2.1.220) rather than assumed — its
+fallback table is one function, and it is not the one you would guess:
+
+```js
+if (mode === "auto")              return "classify";
+if (mode === "bypassPermissions") return "allow";
+if (mode === "dontAsk")           return "deny";
+                                  return "ask";
+```
+
+**`dontAsk` denies — it does not approve.** It promises never to interrupt you and keeps the
+promise by refusing the call and telling the model. Filing it with `bypassPermissions` as "the
+dangerous two" is the obvious mistake; they are opposites that share a symbol in Claude's UI.
+Note also that Claude's internal name for Manual is `default`, while the value its `--help`
+documents and the flag accepts is `manual`.
+
+| Mode | Claude `--permission-mode` | Codex `--ask-for-approval` / `--sandbox` |
+|---|---|---|
+| Manual | `manual` | `untrusted` / `read-only` — must ask to change anything |
+| Plan | `plan` | `never` / `read-only` — reads, writes nothing, never interrupts |
+| Accept Edits | `acceptEdits` | `untrusted` / `workspace-write` — edits in place, commands still gated |
+| Auto | `auto` | `on-request` / `workspace-write` — the model decides when to ask |
+| Don't Ask | `dontAsk` | `never` / `workspace-write` |
+| Bypass Permissions | `bypassPermissions` | `never` / `danger-full-access` |
+
+Six modes onto six *distinct* Codex configurations, which is what makes one shared vocabulary
+honest rather than a menu with duplicate rows. The sandbox carries most of the meaning: Manual
+and Accept Edits share an approval policy and differ only there. Codex has no plan concept, so
+Plan is only the enforceable half — the menu says so rather than implying parity.
+
+**Nil is a third state, not "off".** It emits no flag, leaving Claude's `permissions.defaultMode`
+and Codex's `config.toml` deciding — the same reasoning as `remoteControl` above, and the same
+trap: a mode written to mean "no opinion" would override a config the user set deliberately, on
+the one axis where being wrong either nags them all day or stops asking when it should not have.
+The native Codex transport is the one exception: unstated, it keeps its fixed
+`--sandbox workspace-write`, because a natively rendered session that inherited a read-only
+`config.toml` would stop being able to edit and would say so only through failing tools.
+
+**Skalman honours the mode in its own broker too, because the CLI does not honour it for us.**
+Measured: `PreToolUse` fires under `bypassPermissions` and `dontAsk` exactly as under `manual`.
+So a natively rendered session in Bypass would still have been stopped by Skalman's own sheet —
+the app contradicting the mode chosen inside it. `PermissionPolicy.standingDecision(for:in:)`
+answers for the three modes that promise something (Bypass allows, Don't Ask denies, Accept Edits
+allows file changes and still asks about commands) and returns nil for Manual, Plan and Auto,
+which are enforced inside the CLI and promise nothing about the sheet. Being wrong there costs an
+extra question rather than an unasked-for action.
+
+**The record is the launch mode, not a live mirror.** A terminal session's own Shift+Tab is
+invisible to Skalman, and changing the mode on a running session restates nothing — the flags
+belong to the process. The broker is the exception, since it is ours: it re-reads the store on
+every call. Claude does expose a `set_permission_mode` control request on the stream transport
+(present in the binary beside `set_model`), so live switching on the native surface is a clean
+follow-on rather than a rewrite.
 
 ### Claude's Remote Control, per conversation
 

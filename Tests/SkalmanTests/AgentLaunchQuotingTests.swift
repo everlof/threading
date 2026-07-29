@@ -35,7 +35,8 @@ final class AgentLaunchQuotingTests: XCTestCase {
         "${IFS}",
         "*",
         "~root",
-        "--flag=value with spaces"
+        "--flag=value with spaces",
+        "- Make sure all tests are green\n- Then build the latest version"
     ]
 
     // MARK: - Against a real shell
@@ -107,6 +108,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
             let source = try? XCTUnwrap(plan.arguments.last)
             let residue = Self.strippingQuotedSpans(source ?? "")
                 .replacingOccurrences(of: "&&", with: "")
+                .replacingOccurrences(of: "--", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
             XCTAssertTrue(
@@ -132,6 +134,86 @@ final class AgentLaunchQuotingTests: XCTestCase {
         XCTAssertEqual(plan.arguments.count, 3, "the shell was handed more than one command")
     }
 
+    // MARK: - Against the CLI's own parser
+
+    /// A prompt that begins with `-` is a prompt, not a flag.
+    ///
+    /// The composer's own opening — a bulleted list of things to do — killed a session a third
+    /// of a second after it launched: Claude's parser read `- Make sure all tests are green` as
+    /// an unknown option and exited 1, and the user was left looking at a chat that had opened
+    /// with no prompt in it. Codex fails the same way (`unexpected argument '- ' found`) and
+    /// says so in its own error: *to pass `- ` as a value, use `-- - `*.
+    ///
+    /// Checked by tokenizing the launch line with a real shell, because the property is about
+    /// the *words the CLI receives*, and the shell is what decides those.
+    func testAPromptBeginningWithADashSurvivesAsAPromptNotAFlag() throws {
+        let opening = "- Make sure all tests are green\n- Then build the latest version"
+
+        for kind in [AgentKind.claude, .codex] {
+            let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+            let session = AgentSession(kind: kind, title: "t")
+
+            let words = try Self.tokenizing(
+                XCTUnwrap(
+                    AgentLauncher.plan(
+                        for: session,
+                        in: project,
+                        initialPrompt: opening
+                    ).arguments.last
+                )
+            )
+
+            XCTAssertEqual(
+                words.suffix(2),
+                ["--", opening],
+                "\(kind) launched with the opening prompt exposed to its option parser"
+            )
+        }
+    }
+
+    /// And it is the *last* word, after every flag the launch grows on its way out.
+    ///
+    /// `routed` wraps the command and appends the MCP flags around it, so the prompt used to
+    /// sit in the middle of the line. Terminating the options where it stood would have handed
+    /// `--mcp-config` to the CLI as more prompt text — the operand has to move to the end, not
+    /// just gain a `--`.
+    func testTheOpeningPromptIsTheLastWordOnTheLine() throws {
+        let opening = "an ordinary opening"
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        let session = AgentSession(kind: .claude, title: "t")
+
+        let words = try Self.tokenizing(
+            XCTUnwrap(
+                AgentLauncher.plan(
+                    for: session,
+                    in: project,
+                    initialPrompt: opening
+                ).arguments.last
+            )
+        )
+
+        XCTAssertEqual(words.last, opening)
+        XCTAssertEqual(
+            words.firstIndex(of: opening),
+            words.count - 1,
+            "the prompt appears before the end of the line"
+        )
+    }
+
+    /// The rule holds however the command is assembled afterwards: `ShellCommand` composition
+    /// is what carries the operand to the end, so a command appended *into* another keeps it
+    /// there rather than leaving it stranded mid-line.
+    func testAComposedCommandKeepsItsOperandLast() {
+        var inner = ShellCommand(word: "claude")
+        inner.append(operand: "- do the thing")
+
+        var outer = ShellCommand(word: "env")
+        outer.append(contentsOf: inner)
+        outer.append(flag: "--mcp-config", value: "/tmp/c.json")
+
+        XCTAssertEqual(outer.source, "'env' 'claude' '--mcp-config' '/tmp/c.json' -- '- do the thing'")
+    }
+
     /// The residue check, checked.
     ///
     /// This helper was wrong on its first outing — it read the quoter's `'\''` escape as syntax
@@ -151,6 +233,44 @@ final class AgentLaunchQuotingTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// The words the CLI would receive, tokenized by a shell rather than re-derived here.
+    ///
+    /// The launch line *starts an agent*, so it is never run: the fixed `cd … && exec ` prefix
+    /// is dropped and what remains is handed to `set --`, which splits and unquotes it exactly
+    /// as the shell would have before `printf` reports the words back.
+    ///
+    /// `exec` is an ordinary quoted word in that prefix, not raw syntax — `ShellCommand` emits
+    /// only `&&` and `--` unquoted — so the marker is built from `ShellCommand` rather than
+    /// written out here. A shell runs the `exec` builtin either way, but a literal `&& exec `
+    /// never appears in the line and looking for one finds nothing.
+    private static func tokenizing(_ launchLine: String) throws -> [String] {
+        let marker = "&& \(ShellCommand(word: "exec").source) "
+        let prefix = try XCTUnwrap(
+            launchLine.range(of: marker),
+            "the launch line stopped being 'cd … && exec …'"
+        )
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c",
+            "set -- \(launchLine[prefix.upperBound...]); printf '%s\u{1}' \"$@\""
+        ]
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        return String(decoding: data, as: UTF8.self)
+            .split(separator: "\u{1}", omittingEmptySubsequences: false)
+            .dropLast()
+            .map(String.init)
+    }
 
     /// Removes everything a shell would read as part of a *word*, leaving only what it would
     /// read as syntax.

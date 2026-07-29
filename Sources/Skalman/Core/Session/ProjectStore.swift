@@ -123,6 +123,7 @@ final class ProjectStore {
         model: String? = nil,
         reasoningEffort: String? = nil,
         usesNativeUI: Bool = false,
+        permissionMode: AgentPermissionMode? = nil,
         title: String? = nil
     ) -> AgentSession? {
         guard let index = index(ofProject: projectID) else { return nil }
@@ -139,6 +140,7 @@ final class ProjectStore {
             usesNativeUI: usesNativeUI
         )
         session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
+        session.permissionMode = permissionMode
 
         projects[index].sessions.append(session)
         save()
@@ -173,6 +175,10 @@ final class ProjectStore {
             forkedFrom: parentID
         )
         session.branch = parent.branch
+        // A side chat asks a question *about* the parent's work, so it inherits the parent's
+        // posture along with its agent, account and surface — including a deliberate nil,
+        // which keeps it following the app default exactly as the parent does.
+        session.permissionMode = parent.permissionMode
 
         projects[location.projectIndex].sessions.append(session)
         save()
@@ -245,6 +251,18 @@ final class ProjectStore {
         notifyChanged()
     }
 
+    /// Records how much this conversation may do before it has to ask. Nil clears it, so the
+    /// session follows `AppSettings.defaultPermissionMode` — and the CLI's own configuration
+    /// beyond that — again.
+    ///
+    /// Applied on the session's next launch, where the flags are built. Nothing here changes the
+    /// mode of a session that is already running: Claude's own Shift+Tab does that, and the CLI
+    /// does not report the result back.
+    func setPermissionMode(_ mode: AgentPermissionMode?, for sessionID: SessionID) {
+        update(sessionID: sessionID) { $0.permissionMode = mode }
+        notifyChanged()
+    }
+
     /// Records which theme a session's terminal draws with. Nil clears the assignment, so the
     /// session inherits its project's theme — and the app default beyond that — again.
     func setThemeID(_ themeID: TerminalThemeID?, forSessionID sessionID: SessionID) {
@@ -256,6 +274,23 @@ final class ProjectStore {
     func setThemeID(_ themeID: TerminalThemeID?, forProjectID projectID: ProjectID) {
         guard let index = index(ofProject: projectID) else { return }
         projects[index].themeID = themeID
+        save()
+        notifyChanged()
+    }
+
+    /// Silences one conversation's notifications, or lets it speak. Nil returns it to
+    /// following its project — the same three scopes as the theme above, and the reason both
+    /// setters take an optional. Withdrawing anything already on screen belongs to the caller:
+    /// this store knows nothing about notifications.
+    func setNotificationsMuted(_ muted: Bool?, forSessionID sessionID: SessionID) {
+        update(sessionID: sessionID) { $0.notificationsMuted = muted }
+        notifyChanged()
+    }
+
+    /// The same for a whole checkout.
+    func setNotificationsMuted(_ muted: Bool?, forProjectID projectID: ProjectID) {
+        guard let index = index(ofProject: projectID) else { return }
+        projects[index].notificationsMuted = muted
         save()
         notifyChanged()
     }
@@ -379,9 +414,11 @@ final class ProjectStore {
     /// Re-reads the checkout's branch for a session that just stopped working.
     ///
     /// Called at that moment because it is when an agent is most likely to have switched
-    /// branches; dormant sessions keep the branch they last ran on, which is the whole
-    /// point of recording it per session. Saves and notifies only on an actual change,
-    /// since a change can regroup the sidebar.
+    /// branches. It is also the only mover of the record with Settings > General's
+    /// "Follow the checkout's branch" off — dormant sessions then keep the branch they
+    /// last ran on. With it on (the default), `CheckoutBranchFollower` additionally keeps
+    /// dormant records tracking the checkout through `refreshBranches(forCheckoutAt:)`.
+    /// Saves and notifies only on an actual change, since a change can regroup the sidebar.
     func refreshBranch(forSessionID sessionID: SessionID) {
         guard let location = locate(sessionID: sessionID) else { return }
 
@@ -392,6 +429,40 @@ final class ProjectStore {
         else { return }
 
         projects[location.projectIndex].sessions[location.sessionIndex].branch = branch
+        save()
+        notifyChanged()
+    }
+
+    /// Re-reads a checkout's branch and applies it to every session standing in that
+    /// checkout — `CheckoutBranchFollower`'s write path, and the meaning of Settings >
+    /// General's "Follow the checkout's branch".
+    ///
+    /// `refreshBranch(forSessionID:)` records what one session just ran on; this keeps the
+    /// *others* honest when the checkout moves under them — switched by a different session,
+    /// the shell drawer, or a terminal outside Skalman entirely. Sessions match by
+    /// `worktreeIdentity`, so projects added at different folders of one checkout move
+    /// together while another checkout of the same repository does not.
+    ///
+    /// A detached reading is dropped rather than applied: a rebase detaches `HEAD` for
+    /// seconds at a time, and clearing every record for that flicker would regroup the
+    /// sidebar twice per rebase. A genuine detachment still lands per session through
+    /// `refreshBranch` when that session next stops working.
+    func refreshBranches(forCheckoutAt folderPath: String) {
+        GitInfo.invalidateCache(for: folderPath)
+        guard let identity = GitInfo.worktreeIdentity(for: folderPath),
+              let branch = GitInfo.currentBranch(for: folderPath) else { return }
+
+        var changed = false
+        for projectIndex in projects.indices
+        where GitInfo.worktreeIdentity(for: projects[projectIndex].folderPath) == identity {
+            for sessionIndex in projects[projectIndex].sessions.indices
+            where projects[projectIndex].sessions[sessionIndex].branch != branch {
+                projects[projectIndex].sessions[sessionIndex].branch = branch
+                changed = true
+            }
+        }
+
+        guard changed else { return }
         save()
         notifyChanged()
     }

@@ -19,6 +19,7 @@ final class SessionComposerViewController: NSViewController {
     private let modelChip = ChipView()
     private let branchChip = ChipView()
     private let surfaceChip = ChipView()
+    private let modeChip = ChipView()
     private lazy var importButton = ThemedButton(
         symbol: ComposerDefaults.importSymbol,
         accessibility: L10n.string("Import conversation"),
@@ -51,6 +52,10 @@ final class SessionComposerViewController: NSViewController {
     private var selectedAccountHandle: AccountHandle = .standard
     private var selectedModel: String?
     private var selectedBranch: String?
+
+    /// How much the session may do before it has to ask. Nil follows
+    /// `AppSettings.defaultPermissionMode`, and the CLI's own configuration beyond that.
+    private var selectedPermissionMode: AgentPermissionMode?
 
     weak var delegate: SessionComposerViewControllerDelegate?
 
@@ -97,7 +102,7 @@ final class SessionComposerViewController: NSViewController {
         // the decision in order — which is the whole reason a session starts here rather than
         // from a menu item that picked all four defaults silently.
         let chips = NSStackView(views: [
-            agentChip, accountChip, modelChip, branchChip, surfaceChip
+            agentChip, accountChip, modelChip, modeChip, branchChip, surfaceChip
         ])
         chips.orientation = .horizontal
         chips.alignment = .centerY
@@ -105,7 +110,7 @@ final class SessionComposerViewController: NSViewController {
 
         // Chips shrink their labels to fit a tight row, which with six of them left a row of
         // bare icons naming nothing. They hold their size here and the row stays short.
-        for chip in [agentChip, accountChip, modelChip, branchChip, surfaceChip] {
+        for chip in [agentChip, accountChip, modelChip, modeChip, branchChip, surfaceChip] {
             chip.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
 
@@ -183,6 +188,7 @@ final class SessionComposerViewController: NSViewController {
     }
 
     private func wirePrompt() {
+        promptView.showsImageAttachments = true
         promptView.placeholder = ComposerDefaults.promptPlaceholder
         promptView.minimumHeight = ComposerDefaults.promptHeight
 
@@ -203,8 +209,9 @@ final class SessionComposerViewController: NSViewController {
     private func wireChips() {
         agentChip.itemsProvider = { [weak self] in self?.agentItems() ?? [] }
         agentChip.onSelect = { [weak self] item in
-            self?.selectedAgent = item.representedValue as? AgentKind ?? AgentDefaults.defaultKind
-            self?.selectedAccountHandle = .standard
+            let kind = item.representedValue as? AgentKind ?? AgentDefaults.defaultKind
+            self?.selectedAgent = kind
+            self?.selectedAccountHandle = AgentAccountDiscovery.preferredHandle(for: kind)
             self?.selectedModel = nil
             self?.refreshChips()
         }
@@ -219,6 +226,14 @@ final class SessionComposerViewController: NSViewController {
         modelChip.itemsProvider = { [weak self] in self?.modelItems() ?? [] }
         modelChip.onSelect = { [weak self] item in
             self?.selectedModel = item.representedValue as? String
+            self?.refreshChips()
+        }
+
+        modeChip.itemsProvider = { [weak self] in self?.permissionModeItems() ?? [] }
+        modeChip.onSelect = { [weak self] item in
+            // Nil is a real answer here — the first item — so this reads "not a mode" as
+            // inherit rather than falling back to one.
+            self?.selectedPermissionMode = item.representedValue as? AgentPermissionMode
             self?.refreshChips()
         }
 
@@ -261,13 +276,18 @@ final class SessionComposerViewController: NSViewController {
         updatePromptCustomization(for: projectID)
 
         selectedAgent = AppSettings.shared.defaultAgentKind
-        selectedAccountHandle = .standard
+        // The login this agent offers rather than the standard handle: the standard one may be
+        // exactly the account the user switched off, and a composer that still starts there
+        // would launch on it while naming it in the chip.
+        selectedAccountHandle = AgentAccountDiscovery.preferredHandle(for: selectedAgent)
         selectedModel = nil
         selectedBranch = nil
+        selectedPermissionMode = nil
 
         // The choices reset per project; what was typed does not. A half-written prompt is
         // the user's work, and it is restored whether it was left behind by switching
         // projects or by the app going away underneath it.
+        promptView.clearAttachments()
         promptView.stringValue = DraftStore.shared.draft(for: projectID)
 
         // Warmed as the composer appears, not as its account menu opens: a fetch started on
@@ -279,6 +299,15 @@ final class SessionComposerViewController: NSViewController {
 
         refreshChips()
         discoverImportable(for: project)
+    }
+
+    /// Re-reads everything the chips *derive* — the app-wide defaults they name, the account
+    /// they resolve, what is left of it — while leaving every choice and the prompt untouched.
+    ///
+    /// For a composer coming back into view without having been re-configured. Settings is
+    /// where those defaults are changed, so a composer restored from it must state them again.
+    func refreshDerivedState() {
+        refreshChips()
     }
 
     /// Keeps component targeting separate from project lookup so the shell can be exercised
@@ -335,6 +364,15 @@ final class SessionComposerViewController: NSViewController {
         modelChip.configure(
             symbolName: ComposerDefaults.modelSymbol,
             title: modelChipTitle(for: account)
+        )
+
+        // Names the mode that will actually apply, not only the one chosen here: with no
+        // choice of its own the chip shows the app-wide default, and falls back to naming
+        // where the decision goes when there is no default either.
+        modeChip.configure(
+            symbolName: ComposerDefaults.permissionModeSymbol,
+            title: (selectedPermissionMode ?? AppSettings.shared.defaultPermissionMode)?
+                .displayName ?? ComposerDefaults.followsCLIPermissionModeTitle
         )
 
         // Offered only for agents whose conversation Skalman may render itself — both real
@@ -463,24 +501,30 @@ final class SessionComposerViewController: NSViewController {
             "\(ModelName.display(for: $0))\(ComposerDefaults.accountDefaultSuffix)"
         } ?? ComposerDefaults.defaultModelTitle
 
-        var items: [ThemedMenuEntry] = [
-            .item(
-                ThemedMenuItem(
-                    title: defaultTitle,
-                    representedValue: nil,
-                    isSelected: selectedModel == nil
-                )
-            )
-        ]
+        // Where a scoped limit is finally actionable: a spent Fable window is escaped by
+        // picking another model, and this is the menu that does it. Each row states its own
+        // window rather than the account's, which every row would otherwise repeat.
+        var defaultItem = ThemedMenuItem(
+            title: defaultTitle,
+            representedValue: nil,
+            isSelected: selectedModel == nil
+        )
+        if let account, let configured {
+            AccountUsageMenu.decorate(&defaultItem, forModel: configured, on: account)
+        }
+
+        var items: [ThemedMenuEntry] = [.item(defaultItem)]
 
         items += AgentModels.available(for: selectedAgent, account: account).map { model in
-            .item(
-                ThemedMenuItem(
-                    title: ModelName.display(for: model),
-                    representedValue: model,
-                    isSelected: model == selectedModel
-                )
+            var item = ThemedMenuItem(
+                title: ModelName.display(for: model),
+                representedValue: model,
+                isSelected: model == selectedModel
             )
+            if let account {
+                AccountUsageMenu.decorate(&item, forModel: model, on: account)
+            }
+            return .item(item)
         }
         return items
     }
@@ -545,8 +589,45 @@ final class SessionComposerViewController: NSViewController {
             model: selectedModel,
             branch: selectedBranch,
             usesNativeUI: usesNativeUI,
+            permissionMode: selectedPermissionMode,
             prompt: prompt
         )
+    }
+
+    /// How much the session may do before it has to ask.
+    ///
+    /// The first item inherits, and names what it would inherit — the app-wide default where
+    /// there is one, and otherwise the CLI's own configuration, which Skalman cannot read.
+    /// Each mode carries what it means, and where the chosen agent expresses it imperfectly it
+    /// says so: Codex has no plan mode, and a menu that offered "Plan" without that sentence
+    /// would be promising something it cannot deliver.
+    private func permissionModeItems() -> [ThemedMenuEntry] {
+        let inherited = AppSettings.shared.defaultPermissionMode
+
+        var items: [ThemedMenuEntry] = [
+            .item(
+                ThemedMenuItem(
+                    title: ComposerDefaults.inheritedPermissionModeTitle(inherited),
+                    representedValue: nil,
+                    isSelected: selectedPermissionMode == nil
+                )
+            )
+        ]
+
+        items += AgentPermissionMode.allCases.map { mode in
+            .item(
+                ThemedMenuItem(
+                    title: mode.displayName,
+                    subtitle: [mode.menuDescription, mode.caveat(for: selectedAgent)]
+                        .compactMap { $0 }
+                        .joined(separator: " "),
+                    representedValue: mode,
+                    isSelected: mode == selectedPermissionMode
+                )
+            )
+        }
+
+        return items
     }
 
     /// The choice of surface: the agent's own terminal, or Skalman's conversation view.
@@ -655,6 +736,7 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         model: String?,
         branch: String?,
         usesNativeUI: Bool,
+        permissionMode: AgentPermissionMode?,
         prompt: String
     )
 
@@ -721,6 +803,20 @@ enum ComposerDefaults {
     /// A session is the durable object; these names describe only the UI rendering it.
     static var nativeTitle: String { L10n.string("Native (Experimental)") }
     static let surfaceSymbol = "bubble.left.and.text.bubble.right"
+    static let permissionModeSymbol = "hand.raised"
+
+    /// What the chip says when nothing here or in Settings has chosen: it names *where* the
+    /// decision is made rather than guessing what the CLI's own config says, which Skalman
+    /// cannot read and must not claim to know.
+    static var followsCLIPermissionModeTitle: String { L10n.string("Agent's Setting") }
+
+    /// The inherit item's wording, given the app-wide default. It names the inherited answer
+    /// where there is one and defers where there is not, so choosing the default explicitly
+    /// and leaving it alone are visibly the same thing.
+    static func inheritedPermissionModeTitle(_ inherited: AgentPermissionMode?) -> String {
+        guard let inherited else { return L10n.string("Use Agent's Setting") }
+        return L10n.format("Use Default (%@)", inherited.displayName)
+    }
     static var promptPlaceholder: String {
         L10n.string("Describe a task or ask a question")
     }

@@ -671,6 +671,16 @@
         }
       }
     },
+    "Accept Edits": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Godkänn ändringar"
+          }
+        }
+      }
+    },
     "Account default": {
       "localizations": {
         "sv": {
@@ -857,6 +867,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Agentverktyg"
+          }
+        }
+      }
+    },
+    "Agent's Setting": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agentens inställning"
           }
         }
       }
@@ -1311,6 +1331,16 @@
         }
       }
     },
+    "Asks before making any change.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frågar innan någon ändring görs."
+          }
+        }
+      }
+    },
     "Attachment detection for %@ is turned off in Settings › General.": {
       "localizations": {
         "sv": {
@@ -1437,6 +1467,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Pulsande markör"
+          }
+        }
+      }
+    },
+    "Blocked on an approval": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Väntar på ett godkännande"
           }
         }
       }
@@ -1667,6 +1707,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Per modell"
+          }
+        }
+      }
+    },
+    "Bypass Permissions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kringgå behörigheter"
           }
         }
       }
@@ -2181,6 +2231,16 @@
         }
       }
     },
+    "Close Other Tabs": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng övriga flikar"
+          }
+        }
+      }
+    },
     "Close Pop-up": {
       "localizations": {
         "sv": {
@@ -2197,6 +2257,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Stäng konversation"
+          }
+        }
+      }
+    },
+    "Close Tab": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng flik"
+          }
+        }
+      }
+    },
+    "Close Tabs to the Right": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng flikar till höger"
           }
         }
       }
@@ -2307,6 +2387,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Codex Hooks"
+          }
+        }
+      }
+    },
+    "Codex has no plan mode; this stops it writing, but does not ask it to plan.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex har inget planläge; detta hindrar den från att skriva, men ber den inte planera."
           }
         }
       }
@@ -3171,6 +3261,16 @@
         }
       }
     },
+    "Decides for itself when to ask.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avgör själv när den ska fråga."
+          }
+        }
+      }
+    },
     "Declared capabilities": {
       "localizations": {
         "sv": {
@@ -3501,6 +3601,16 @@
         }
       }
     },
+    "Don't Ask": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fråga inte"
+          }
+        }
+      }
+    },
     "Done": {
       "localizations": {
         "sv": {
@@ -3737,6 +3847,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Redigerbara, sökformade och inaktiverade tillstånd."
+          }
+        }
+      }
+    },
+    "Edits files without asking. Commands still ask.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redigerar filer utan att fråga. Kommandon frågar fortfarande."
           }
         }
       }
@@ -4381,6 +4501,46 @@
         }
       }
     },
+    "Finished a turn in the background": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avslutade en tur i bakgrunden"
+          }
+        }
+      }
+    },
+    "Finished and waiting for you": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klar och väntar på dig"
+          }
+        }
+      }
+    },
+    "Finished its turn": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avslutade sin tur"
+          }
+        }
+      }
+    },
+    "Finished while you were elsewhere": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blev klar medan du var någon annanstans"
+          }
+        }
+      }
+    },
     "Finished · not yet seen": {
       "localizations": {
         "sv": {
@@ -4581,12 +4741,72 @@
         }
       }
     },
+    "Go Back": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gå bakåt"
+          }
+        }
+      }
+    },
+    "Go Back (⌃⌘←)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go Back (⌃⌘←)"
+          }
+        }
+      }
+    },
+    "Go Forward": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gå framåt"
+          }
+        }
+      }
+    },
+    "Go Forward (⌃⌘→)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go Forward (⌃⌘→)"
+          }
+        }
+      }
+    },
+    "Go back": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go back"
+          }
+        }
+      }
+    },
     "Go back, close a pop-up, go forward, reload, or revalidate with chosen readiness.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Gå tillbaka, stäng en popup, gå framåt, ladda om eller revalidera med vald redo."
+          }
+        }
+      }
+    },
+    "Go forward": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go forward"
           }
         }
       }
@@ -4767,6 +4987,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hovera, tryck, inaktivera, växla och öppna både menybaserade kontroller."
+          }
+        }
+      }
+    },
+    "How much a session may do before it stops to ask. Following leaves it to the agent's own configuration. A single chat can still be set from its ⋯ menu, and the mode applies from that chat's next launch.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hur mycket en konversation får göra innan den stannar och frågar. Att följa lämnar det till agentens egen konfiguration. En enskild konversation kan fortfarande ställas in från dess ⋯-meny, och läget gäller från den konversationens nästa start."
           }
         }
       }
@@ -5581,6 +5811,16 @@
         }
       }
     },
+    "Manual": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manuell"
+          }
+        }
+      }
+    },
     "Max": {
       "localizations": {
         "sv": {
@@ -5711,6 +5951,26 @@
         }
       }
     },
+    "Move to Display Panel": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flytta till visningspanelen"
+          }
+        }
+      }
+    },
+    "Move to Shell Drawer": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flytta till skallådan"
+          }
+        }
+      }
+    },
     "Move “%@” to %@?": {
       "localizations": {
         "sv": {
@@ -5737,6 +5997,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Måste inte renderas"
+          }
+        }
+      }
+    },
+    "Mute Notifications": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tysta notifikationer"
           }
         }
       }
@@ -5851,6 +6121,26 @@
         }
       }
     },
+    "Never interrupts — refuses anything that would need approval.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avbryter aldrig — vägrar allt som skulle kräva godkännande."
+          }
+        }
+      }
+    },
+    "New Drawer Tab": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny flik i skallådan"
+          }
+        }
+      }
+    },
     "New Project": {
       "localizations": {
         "sv": {
@@ -5931,12 +6221,32 @@
         }
       }
     },
+    "New drawer tab": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny flik i skallådan"
+          }
+        }
+      }
+    },
     "New session": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Ny konversation"
+          }
+        }
+      }
+    },
+    "New sessions start in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nya konversationer startar i"
           }
         }
       }
@@ -5967,6 +6277,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nästa"
+          }
+        }
+      }
+    },
+    "Next Tab": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa flik"
           }
         }
       }
@@ -6117,6 +6437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Inget ikon hittades för detta projekt."
+          }
+        }
+      }
+    },
+    "No permission checks at all.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga behörighetskontroller alls."
           }
         }
       }
@@ -6491,6 +6821,16 @@
         }
       }
     },
+    "Only the blocked alert ever sounds — the other two are silent either way. Off shows it without the ping.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bara notisen om ett väntande godkännande låter — de andra två är tysta oavsett. Av visar den utan ljudet."
+          }
+        }
+      }
+    },
     "Open": {
       "localizations": {
         "sv": {
@@ -6761,12 +7101,42 @@
         }
       }
     },
+    "Permission Mode": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behörighetsläge"
+          }
+        }
+      }
+    },
     "Pin": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Pinn"
+          }
+        }
+      }
+    },
+    "Plan": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Planera"
+          }
+        }
+      }
+    },
+    "Play a sound": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spela upp ett ljud"
           }
         }
       }
@@ -6937,6 +7307,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Föregående"
+          }
+        }
+      }
+    },
+    "Previous Tab": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Föregående flik"
           }
         }
       }
@@ -7461,6 +7841,16 @@
         }
       }
     },
+    "Reads and proposes. Changes nothing.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser och föreslår. Ändrar ingenting."
+          }
+        }
+      }
+    },
     "Ready": {
       "localizations": {
         "sv": {
@@ -7477,6 +7867,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Klar — interagera med någon historia."
+          }
+        }
+      }
+    },
+    "Reasoning: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resonemang: %@"
           }
         }
       }
@@ -8297,6 +8697,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "SHA-256 %@"
+          }
+        }
+      }
+    },
+    "Says “%@”.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Säger ”%@”."
           }
         }
       }
@@ -11221,6 +11631,16 @@
         }
       }
     },
+    "Unmute Notifications": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slå på notifikationer"
+          }
+        }
+      }
+    },
     "Unpin": {
       "localizations": {
         "sv": {
@@ -11351,12 +11771,32 @@
         }
       }
     },
+    "Use Agent's Setting": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Använd agentens inställning"
+          }
+        }
+      }
+    },
     "Use Claude's Setting": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Använd Claudes inställning"
+          }
+        }
+      }
+    },
+    "Use Default (%@)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Använd standard (%@)"
           }
         }
       }
@@ -11631,6 +12071,16 @@
         }
       }
     },
+    "Waiting for your approval to continue": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Väntar på ditt godkännande för att fortsätta"
+          }
+        }
+      }
+    },
     "Website Access": {
       "localizations": {
         "sv": {
@@ -11887,6 +12337,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "agenter"
+          }
+        }
+      }
+    },
+    "alerts": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "aviseringar"
           }
         }
       }
@@ -12561,6 +13021,16 @@
         }
       }
     },
+    "mute": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tysta"
+          }
+        }
+      }
+    },
     "name": {
       "localizations": {
         "sv": {
@@ -12617,6 +13087,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "ingenting"
+          }
+        }
+      }
+    },
+    "notifications": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifikationer"
           }
         }
       }
@@ -13037,6 +13517,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "snabbtangentbord"
+          }
+        }
+      }
+    },
+    "sound": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ljud"
           }
         }
       }

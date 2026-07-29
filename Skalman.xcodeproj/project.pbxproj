@@ -129,13 +129,37 @@
 		A52B74E670BED3A8726FD434 /* ClaudeUsageProfileCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */; };
 		F483175C586526FED24CC27D /* TerminalBackgroundHarmonyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F99CD85F35AFCADB232985 /* TerminalBackgroundHarmonyTests.swift */; };
 		C3E6495290BBC2438F57A735 /* RemoteScreenSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */; };
+		5265C09128E23777AE07B5EF /* DiffInkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0D107F724B5FA0486504BC /* DiffInkTests.swift */; };
+		76923F9E644A80B0E1783CED /* ExtensionAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC66378A18F1F480C208B0D /* ExtensionAppearanceTests.swift */; };
+		9BD35E685E7DF35A92D834EE /* PairingCodeImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52C91CF6BFF697FB18F78857 /* PairingCodeImageTests.swift */; };
+		01E566B069873C0770B098FC /* TerminalDropPasteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F340FE6151581E60070121E5 /* TerminalDropPasteTests.swift */; };
+		1C2516D8C8C2EE3C6EA6242B /* TerminalDropImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C712C156919FD73BAAA02089 /* TerminalDropImageTests.swift */; };
+		05AAA14D0F9042DC3F5AE8C4 /* AccountEnablementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EF348024835EE000541B1A /* AccountEnablementTests.swift */; };
+		698860528183412B13610FAD /* SessionLifecycleConfirmationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0505849DF854FF2E8143EF /* SessionLifecycleConfirmationTests.swift */; };
 		FE1FE5AAECE47AF858A53848 /* ClaudeRemoteControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACCE94027387ADFE6733F36C /* ClaudeRemoteControlTests.swift */; };
 		A812E6D66B3C9E8D16E1B2E0 /* TerminalOptionWordKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */; };
 		5E1AEC819D53FD78F7A46B28 /* SidebarRowRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */; };
+		67BCDCA2851EA96EBAD3E0EA /* RowExtensionCommandMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1B599D0E00AD7B192BD542 /* RowExtensionCommandMenuTests.swift */; };
+		95FDB777AC1A24F469C12E3D /* CheckoutBranchFollowerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4741A306E772C42B81FA9379 /* CheckoutBranchFollowerTests.swift */; };
 		252FD16A0F226DBFB1451752 /* TerminalColorQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01BAEC6B5AFD8F25A42B8360 /* TerminalColorQueryTests.swift */; };
 		91A8DCA0C41308A682F62069 /* ImageCompareTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A3931499073FA9C879621E /* ImageCompareTests.swift */; };
 		F2C20C4031436016664EE00B /* ImageCompareRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 369909D9A87448DB1D0B803F /* ImageCompareRenderTests.swift */; };
 		AB2F371708D2DB348DAF1B20 /* CompareToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B032AD8F36217B58C16E5840 /* CompareToolTests.swift */; };
+		0D46C26A473218F5C205CD28 /* AttentionAlertPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5845A9C9C84B50D77F7FAEC3 /* AttentionAlertPolicyTests.swift */; };
+		B8A2AB4D98353C4979C2EF7B /* ConversationAutoScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4022A513D8ADC5D3C6B28F6D /* ConversationAutoScrollTests.swift */; };
+		97F8F9ABB223485484DFEE73 /* ChangedFilesTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32490EBD6797E8A2BB5E4AAD /* ChangedFilesTreeTests.swift */; };
+		9476C0A837C4A4573558CF9F /* CommitMessageComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1222FC7341FD1B7FB54C2AB9 /* CommitMessageComposerTests.swift */; };
+		470263D239E6D2B1EF5A6C4D /* TabListStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6096B42386D617A7ED25F5 /* TabListStateTests.swift */; };
+		1C59F46E11A6CB039DC5AEA0 /* ThemedTabStripViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD0F273E59128986CD261FA3 /* ThemedTabStripViewTests.swift */; };
+		2C960B49F4896A86A007A36A /* TabStripRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF504E0891BE6A79BFB48A66 /* TabStripRenderTests.swift */; };
+		00E827D9171BE3FCB45DE741 /* TabCyclingCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611768F3D0D848BD84DB56E3 /* TabCyclingCommandTests.swift */; };
+		990A519CB8A584B315BB7BEA /* NavigationHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8A1C77FCD608B14CAC18BEB /* NavigationHistoryTests.swift */; };
+		5A510FA1EF40BD4D122EE0D5 /* MainWindowNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E451D1E5F6705A6C110AA41 /* MainWindowNavigationTests.swift */; };
+		B831B1E41D1E268E4EBE8E15 /* DrawerHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F16160D85434B73C08FEAD /* DrawerHostTests.swift */; };
+		208A830EE914B30F789E2162 /* DisplayPaneStoreMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8BF14863B19C32B58C4E721 /* DisplayPaneStoreMigrationTests.swift */; };
+		BA4893EBDFD15D502BC2AC7A /* TabTransferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F826EBE1730EC513F7AE300 /* TabTransferTests.swift */; };
+		59417AC18995D30A3C45FFC5 /* AgentPermissionModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826ACA6437D5D86379460776 /* AgentPermissionModeTests.swift */; };
+		0DB1C6DF0284DFD8A6BDECD4 /* GeneralSettingsRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9719F5126893D76A6412F2F2 /* GeneralSettingsRenderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -310,13 +334,37 @@
 		8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeUsageProfileCacheTests.swift; sourceTree = "<group>"; };
 		66F99CD85F35AFCADB232985 /* TerminalBackgroundHarmonyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalBackgroundHarmonyTests.swift; sourceTree = "<group>"; };
 		660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteScreenSeedTests.swift; sourceTree = "<group>"; };
+		0F0D107F724B5FA0486504BC /* DiffInkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiffInkTests.swift; sourceTree = "<group>"; };
+		4DC66378A18F1F480C208B0D /* ExtensionAppearanceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionAppearanceTests.swift; sourceTree = "<group>"; };
+		52C91CF6BFF697FB18F78857 /* PairingCodeImageTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PairingCodeImageTests.swift; sourceTree = "<group>"; };
+		F340FE6151581E60070121E5 /* TerminalDropPasteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalDropPasteTests.swift; sourceTree = "<group>"; };
+		C712C156919FD73BAAA02089 /* TerminalDropImageTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalDropImageTests.swift; sourceTree = "<group>"; };
+		A3EF348024835EE000541B1A /* AccountEnablementTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountEnablementTests.swift; sourceTree = "<group>"; };
+		7A0505849DF854FF2E8143EF /* SessionLifecycleConfirmationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionLifecycleConfirmationTests.swift; sourceTree = "<group>"; };
 		ACCE94027387ADFE6733F36C /* ClaudeRemoteControlTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeRemoteControlTests.swift; sourceTree = "<group>"; };
 		F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalOptionWordKeyTests.swift; sourceTree = "<group>"; };
 		E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarRowRenderTests.swift; sourceTree = "<group>"; };
+		BA1B599D0E00AD7B192BD542 /* RowExtensionCommandMenuTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RowExtensionCommandMenuTests.swift; sourceTree = "<group>"; };
+		4741A306E772C42B81FA9379 /* CheckoutBranchFollowerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CheckoutBranchFollowerTests.swift; sourceTree = "<group>"; };
 		01BAEC6B5AFD8F25A42B8360 /* TerminalColorQueryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalColorQueryTests.swift; sourceTree = "<group>"; };
 		66A3931499073FA9C879621E /* ImageCompareTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageCompareTests.swift; sourceTree = "<group>"; };
 		369909D9A87448DB1D0B803F /* ImageCompareRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageCompareRenderTests.swift; sourceTree = "<group>"; };
 		B032AD8F36217B58C16E5840 /* CompareToolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CompareToolTests.swift; sourceTree = "<group>"; };
+		5845A9C9C84B50D77F7FAEC3 /* AttentionAlertPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AttentionAlertPolicyTests.swift; sourceTree = "<group>"; };
+		4022A513D8ADC5D3C6B28F6D /* ConversationAutoScrollTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationAutoScrollTests.swift; sourceTree = "<group>"; };
+		32490EBD6797E8A2BB5E4AAD /* ChangedFilesTreeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChangedFilesTreeTests.swift; sourceTree = "<group>"; };
+		1222FC7341FD1B7FB54C2AB9 /* CommitMessageComposerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommitMessageComposerTests.swift; sourceTree = "<group>"; };
+		8C6096B42386D617A7ED25F5 /* TabListStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TabListStateTests.swift; sourceTree = "<group>"; };
+		BD0F273E59128986CD261FA3 /* ThemedTabStripViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedTabStripViewTests.swift; sourceTree = "<group>"; };
+		DF504E0891BE6A79BFB48A66 /* TabStripRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TabStripRenderTests.swift; sourceTree = "<group>"; };
+		611768F3D0D848BD84DB56E3 /* TabCyclingCommandTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TabCyclingCommandTests.swift; sourceTree = "<group>"; };
+		A8A1C77FCD608B14CAC18BEB /* NavigationHistoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NavigationHistoryTests.swift; sourceTree = "<group>"; };
+		0E451D1E5F6705A6C110AA41 /* MainWindowNavigationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MainWindowNavigationTests.swift; sourceTree = "<group>"; };
+		C1F16160D85434B73C08FEAD /* DrawerHostTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DrawerHostTests.swift; sourceTree = "<group>"; };
+		D8BF14863B19C32B58C4E721 /* DisplayPaneStoreMigrationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DisplayPaneStoreMigrationTests.swift; sourceTree = "<group>"; };
+		1F826EBE1730EC513F7AE300 /* TabTransferTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TabTransferTests.swift; sourceTree = "<group>"; };
+		826ACA6437D5D86379460776 /* AgentPermissionModeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentPermissionModeTests.swift; sourceTree = "<group>"; };
+		9719F5126893D76A6412F2F2 /* GeneralSettingsRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GeneralSettingsRenderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -545,13 +593,37 @@
 				8460CA61A9BE60183A6BDEF4 /* ClaudeUsageProfileCacheTests.swift */,
 				66F99CD85F35AFCADB232985 /* TerminalBackgroundHarmonyTests.swift */,
 				660751DF24BB146D0C65BEAF /* RemoteScreenSeedTests.swift */,
+				0F0D107F724B5FA0486504BC /* DiffInkTests.swift */,
+				4DC66378A18F1F480C208B0D /* ExtensionAppearanceTests.swift */,
+				52C91CF6BFF697FB18F78857 /* PairingCodeImageTests.swift */,
+				F340FE6151581E60070121E5 /* TerminalDropPasteTests.swift */,
+				C712C156919FD73BAAA02089 /* TerminalDropImageTests.swift */,
+				A3EF348024835EE000541B1A /* AccountEnablementTests.swift */,
+				7A0505849DF854FF2E8143EF /* SessionLifecycleConfirmationTests.swift */,
 				ACCE94027387ADFE6733F36C /* ClaudeRemoteControlTests.swift */,
 				F76CB45F813D4B9FC2FD127F /* TerminalOptionWordKeyTests.swift */,
 				E1AD077AF32E754FAFD43858 /* SidebarRowRenderTests.swift */,
+				BA1B599D0E00AD7B192BD542 /* RowExtensionCommandMenuTests.swift */,
+				4741A306E772C42B81FA9379 /* CheckoutBranchFollowerTests.swift */,
 				01BAEC6B5AFD8F25A42B8360 /* TerminalColorQueryTests.swift */,
 				66A3931499073FA9C879621E /* ImageCompareTests.swift */,
 				369909D9A87448DB1D0B803F /* ImageCompareRenderTests.swift */,
 				B032AD8F36217B58C16E5840 /* CompareToolTests.swift */,
+				5845A9C9C84B50D77F7FAEC3 /* AttentionAlertPolicyTests.swift */,
+				4022A513D8ADC5D3C6B28F6D /* ConversationAutoScrollTests.swift */,
+				32490EBD6797E8A2BB5E4AAD /* ChangedFilesTreeTests.swift */,
+				1222FC7341FD1B7FB54C2AB9 /* CommitMessageComposerTests.swift */,
+				8C6096B42386D617A7ED25F5 /* TabListStateTests.swift */,
+				BD0F273E59128986CD261FA3 /* ThemedTabStripViewTests.swift */,
+				DF504E0891BE6A79BFB48A66 /* TabStripRenderTests.swift */,
+				611768F3D0D848BD84DB56E3 /* TabCyclingCommandTests.swift */,
+				A8A1C77FCD608B14CAC18BEB /* NavigationHistoryTests.swift */,
+				0E451D1E5F6705A6C110AA41 /* MainWindowNavigationTests.swift */,
+				C1F16160D85434B73C08FEAD /* DrawerHostTests.swift */,
+				D8BF14863B19C32B58C4E721 /* DisplayPaneStoreMigrationTests.swift */,
+				1F826EBE1730EC513F7AE300 /* TabTransferTests.swift */,
+				826ACA6437D5D86379460776 /* AgentPermissionModeTests.swift */,
+				9719F5126893D76A6412F2F2 /* GeneralSettingsRenderTests.swift */,
 			);
 			name = Tests;
 			path = Tests/SkalmanTests;
@@ -1030,13 +1102,37 @@
 				A52B74E670BED3A8726FD434 /* ClaudeUsageProfileCacheTests.swift in Sources */,
 				F483175C586526FED24CC27D /* TerminalBackgroundHarmonyTests.swift in Sources */,
 				C3E6495290BBC2438F57A735 /* RemoteScreenSeedTests.swift in Sources */,
+				5265C09128E23777AE07B5EF /* DiffInkTests.swift in Sources */,
+				76923F9E644A80B0E1783CED /* ExtensionAppearanceTests.swift in Sources */,
+				9BD35E685E7DF35A92D834EE /* PairingCodeImageTests.swift in Sources */,
+				01E566B069873C0770B098FC /* TerminalDropPasteTests.swift in Sources */,
+				1C2516D8C8C2EE3C6EA6242B /* TerminalDropImageTests.swift in Sources */,
+				05AAA14D0F9042DC3F5AE8C4 /* AccountEnablementTests.swift in Sources */,
+				698860528183412B13610FAD /* SessionLifecycleConfirmationTests.swift in Sources */,
 				FE1FE5AAECE47AF858A53848 /* ClaudeRemoteControlTests.swift in Sources */,
 				A812E6D66B3C9E8D16E1B2E0 /* TerminalOptionWordKeyTests.swift in Sources */,
 				5E1AEC819D53FD78F7A46B28 /* SidebarRowRenderTests.swift in Sources */,
+				67BCDCA2851EA96EBAD3E0EA /* RowExtensionCommandMenuTests.swift in Sources */,
+				95FDB777AC1A24F469C12E3D /* CheckoutBranchFollowerTests.swift in Sources */,
 				252FD16A0F226DBFB1451752 /* TerminalColorQueryTests.swift in Sources */,
 				91A8DCA0C41308A682F62069 /* ImageCompareTests.swift in Sources */,
 				F2C20C4031436016664EE00B /* ImageCompareRenderTests.swift in Sources */,
 				AB2F371708D2DB348DAF1B20 /* CompareToolTests.swift in Sources */,
+				0D46C26A473218F5C205CD28 /* AttentionAlertPolicyTests.swift in Sources */,
+				B8A2AB4D98353C4979C2EF7B /* ConversationAutoScrollTests.swift in Sources */,
+				97F8F9ABB223485484DFEE73 /* ChangedFilesTreeTests.swift in Sources */,
+				9476C0A837C4A4573558CF9F /* CommitMessageComposerTests.swift in Sources */,
+				470263D239E6D2B1EF5A6C4D /* TabListStateTests.swift in Sources */,
+				1C59F46E11A6CB039DC5AEA0 /* ThemedTabStripViewTests.swift in Sources */,
+				2C960B49F4896A86A007A36A /* TabStripRenderTests.swift in Sources */,
+				00E827D9171BE3FCB45DE741 /* TabCyclingCommandTests.swift in Sources */,
+				990A519CB8A584B315BB7BEA /* NavigationHistoryTests.swift in Sources */,
+				5A510FA1EF40BD4D122EE0D5 /* MainWindowNavigationTests.swift in Sources */,
+				B831B1E41D1E268E4EBE8E15 /* DrawerHostTests.swift in Sources */,
+				208A830EE914B30F789E2162 /* DisplayPaneStoreMigrationTests.swift in Sources */,
+				BA4893EBDFD15D502BC2AC7A /* TabTransferTests.swift in Sources */,
+				59417AC18995D30A3C45FFC5 /* AgentPermissionModeTests.swift in Sources */,
+				0DB1C6DF0284DFD8A6BDECD4 /* GeneralSettingsRenderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -64,11 +64,38 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     }
 
     func closeCurrentSession() {
-        guard let sessionID = container.currentSessionID,
-              confirmCloseIfRunning(sessionID: sessionID) else { return }
+        guard let sessionID = container.currentSessionID else { return }
+        closeSession(sessionID)
+    }
+
+    /// Ends a session's agent and releases its terminal, keeping the row in the sidebar to be
+    /// resumed. Cmd+W and the row's `⋯` menu both land here so they cannot drift — the menu
+    /// used to discard the process directly, skipping the confirmation Cmd+W asked for.
+    func closeSession(_ sessionID: SessionID) {
+        guard confirmCloseIfRunning(sessionID: sessionID) else { return }
 
         container.closeTerminal(for: sessionID)
         sidebar.refreshRows()
+    }
+
+    /// Files a session away, or restores it.
+    ///
+    /// Archiving implies closing: the row leaves the sidebar, and an agent nothing lists must
+    /// not keep running unseen. The remote archive route has always stopped the process first;
+    /// this is the sidebar reaching the same rule. Restoring implies nothing — a dormant
+    /// session returns to the sidebar dormant.
+    func setArchived(_ archived: Bool, for sessionID: SessionID) {
+        if archived {
+            guard confirmArchiveIfRunning(sessionID: sessionID) else { return }
+            container.closeTerminal(for: sessionID)
+        }
+
+        ProjectStore.shared.setArchived(archived, for: sessionID)
+
+        if archived, sessionID == container.currentSessionID {
+            container.show(sessionID: nil)
+        }
+        sidebar.reload()
     }
 
     func setUsesNativeUI(_ usesNative: Bool, for sessionID: SessionID) {
@@ -136,6 +163,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         model: String?,
         branch: String?,
         usesNativeUI: Bool,
+        permissionMode: AgentPermissionMode?,
         prompt: String
     ) {
         let targetProjectID = Self.targetProjectID(
@@ -152,14 +180,19 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             accountHandle: accountHandle,
             model: model,
             usesNativeUI: usesNativeUI,
+            permissionMode: permissionMode,
             title: SessionNaming.promptTitle(from: opening)
         ) else { return }
 
+        // The mode is recorded as chosen — nil included, which reads as "inherit" rather than
+        // as a mode. Reading the resolved flag back belongs to the "Launching agent" entry,
+        // which carries the whole command line.
         EventLog.shared.record(.composer, "Session started from composer", [
             "session": session.id.uuidString,
             "project": targetProjectID.uuidString,
             "agent": kind.rawValue,
             "account": accountHandle.name,
+            "permissionMode": permissionMode?.rawValue ?? "inherit",
             "prompt": opening
         ])
 
@@ -248,6 +281,24 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
               AgentRuntime.shared.isRunning(sessionID: sessionID),
               let session = ProjectStore.shared.session(withID: sessionID) else { return true }
 
+        return Self.closeConfirmationAlert(for: session).runModal() == .alertFirstButtonReturn
+    }
+
+    /// Archiving interrupts a running agent exactly as closing does, so it asks under the same
+    /// setting — with its own wording, because what happens next differs: the session leaves
+    /// the sidebar rather than staying to be resumed.
+    private func confirmArchiveIfRunning(sessionID: SessionID) -> Bool {
+        guard AppSettings.shared.confirmsBeforeClosingRunningSession,
+              AgentRuntime.shared.isRunning(sessionID: sessionID),
+              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
+
+        return Self.archiveConfirmationAlert(for: session).runModal() == .alertFirstButtonReturn
+    }
+
+    /// The two alerts are built separately from run so a test can hold their wording to what
+    /// the action actually does — the same seam the sidebar's menu builders offer. Each one
+    /// says where the session ends up, since "Close" and "Archive" alone do not.
+    static func closeConfirmationAlert(for session: AgentSession) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = L10n.format("Close “%@”?", session.displayTitle)
         alert.informativeText = session.kind.supportsResume
@@ -258,7 +309,25 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         alert.alertStyle = .warning
         alert.addButton(withTitle: L10n.string("Close Session"))
         alert.addButton(withTitle: L10n.string("Cancel"))
-        return alert.runModal() == .alertFirstButtonReturn
+        return alert
+    }
+
+    static func archiveConfirmationAlert(for session: AgentSession) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = L10n.format("Archive “%@”?", session.displayTitle)
+        alert.informativeText = session.kind.supportsResume
+            ? L10n.string(
+                "The agent will stop, and the session moves out of the sidebar into "
+                    + "Settings ▸ Archived. The conversation is kept and can be restored from there."
+            )
+            : L10n.string(
+                "The shell will stop, and the session moves out of the sidebar into "
+                    + "Settings ▸ Archived, where it can be restored."
+            )
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.string("Archive"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
+        return alert
     }
 
     /// A move interrupts a running agent exactly as a surface switch does, so it asks under the

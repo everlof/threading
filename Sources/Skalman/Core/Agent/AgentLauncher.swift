@@ -24,15 +24,32 @@ struct AgentLaunchPlan {
 struct ShellCommand: Equatable {
     enum Operator {
         case and
+        case endOfOptions
 
         fileprivate var source: String {
             switch self {
             case .and: return "&&"
+            case .endOfOptions: return "--"
             }
         }
     }
 
     private var components: [String] = []
+
+    /// The command's trailing operand — for an agent launch, the opening prompt.
+    ///
+    /// Kept apart from the flags because both CLIs reject a positional argument that begins
+    /// with `-`, and both reject it *before* the session exists: Claude's parser answers
+    /// `error: unknown option '- Make sure all tests are green'` and exits 1, Codex answers
+    /// `unexpected argument '- ' found`. A bulleted opening — a list of things to do, one per
+    /// line — is an ordinary thing to type into the composer, and it killed the launch a
+    /// third of a second after it started.
+    ///
+    /// Two rules together make it safe, and each is needed: the operand is emitted **last**,
+    /// after the MCP flags `routed` appends around the command, and it is separated by `--`,
+    /// the terminator both parsers honour. Appending `--` where the prompt used to sit would
+    /// have handed `--mcp-config` to the CLI as prompt text instead.
+    private var operand: String?
 
     init() {}
 
@@ -58,12 +75,25 @@ struct ShellCommand: Equatable {
         components.append(shellOperator.source)
     }
 
+    /// Sets the trailing operand. A command has at most one — the opening prompt.
+    mutating func append(operand value: String) {
+        precondition(operand == nil, "A command carries one trailing operand")
+        operand = value
+    }
+
+    /// Composing commands carries the operand along, so it stays last however the outer
+    /// command is built up afterwards.
     mutating func append(contentsOf command: ShellCommand) {
         components.append(contentsOf: command.components)
+        if let inner = command.operand {
+            append(operand: inner)
+        }
     }
 
     var source: String {
-        components.joined(separator: " ")
+        guard let operand else { return components.joined(separator: " ") }
+        return (components + [Operator.endOfOptions.source, Self.quote(operand)])
+            .joined(separator: " ")
     }
 
     /// Produces the fixed `cd <directory> && exec <command>` wrapper used by login-shell and
@@ -153,6 +183,39 @@ enum AgentLauncher {
         return session.remoteControl ?? AppSettings.shared.claudeRemoteControl.startupValue
     }
 
+    /// The permission posture this launch states, or nil to state none.
+    ///
+    /// The conversation's own choice first, then the app-wide default for new sessions, then
+    /// nil — which emits no flag and leaves the CLI's own configuration deciding. Nil has to
+    /// survive to the command line rather than collapsing into a "safe" mode: naming any mode
+    /// would override a `permissions.defaultMode` or `config.toml` the user set themselves.
+    static func permissionMode(for session: AgentSession) -> AgentPermissionMode? {
+        session.permissionMode ?? AppSettings.shared.defaultPermissionMode
+    }
+
+    /// Adds the flags that state the mode, in each CLI's own vocabulary.
+    ///
+    /// Codex takes two flags because it has two axes, and both must be stated together: its
+    /// approval policy and its sandbox are independently defaulted, so setting one and leaving
+    /// the other would produce a posture that is neither the mode asked for nor the CLI's own.
+    private static func appendPermissionMode(
+        for session: AgentSession,
+        to command: inout ShellCommand
+    ) {
+        guard let mode = permissionMode(for: session) else { return }
+
+        switch session.kind {
+        case .claude:
+            command.append(
+                flag: AgentDefaults.claudePermissionModeFlag,
+                value: mode.claudeFlagValue
+            )
+        case .codex:
+            command.append(flag: AgentDefaults.codexApprovalFlag, value: mode.codexApprovalPolicy)
+            command.append(flag: AgentDefaults.codexSandboxFlag, value: mode.codexSandboxMode)
+        }
+    }
+
     /// Claude keeps one bidirectional stream open for the lifetime of the conversation.
     private static func claudeStreamPlan(
         for session: AgentSession,
@@ -160,11 +223,13 @@ enum AgentLauncher {
     ) -> AgentLaunchPlan {
         var command = ShellCommand(word: AgentDefaults.claudeExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &command)
+        appendPermissionMode(for: session, to: &command)
         command.append(flag: "--print")
         command.append(flag: "--input-format", value: "stream-json")
         command.append(flag: "--output-format", value: "stream-json")
         command.append(flag: "--include-partial-messages")
         command.append(flag: "--verbose")
+        command.append(flag: "--forward-subagent-text")
 
         // Purely diagnostic, and the only view of the one failure this app cannot see: a hook
         // that never reaches the listener leaves nothing here, while the agent silently waits
@@ -192,6 +257,7 @@ enum AgentLauncher {
         if let settingsPath = MCPSessionRegistry.writeHookSettings(
             for: session.id,
             brokersPermissions: true,
+            reportsLifecycle: AppSettings.shared.reportsClaudeLifecycleEvents,
             remoteControl: remoteControlAtStartup(for: session)
         ) {
             command.append(flag: "--settings", value: settingsPath)
@@ -204,8 +270,9 @@ enum AgentLauncher {
         )
     }
 
-    /// Codex runs one JSONL-producing process per turn. The first creates a thread; later
-    /// turns resume the identifier reported by `thread.started`.
+    /// Codex app-server keeps one JSON-RPC process subscribed to the conversation and any child
+    /// threads it creates. The session wrapper performs `thread/start` or `thread/resume` over
+    /// stdin after initialization.
     private static func codexStreamPlan(
         for session: AgentSession,
         in project: Project
@@ -213,16 +280,24 @@ enum AgentLauncher {
         var command = ShellCommand(word: AgentDefaults.codexExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
         appendCodexConversationOverrides(for: session, to: &command)
-        command.append(flag: "--sandbox", value: "workspace-write")
-        appendCodexHookFlags(for: session, to: &command)
-        command.append(word: "exec")
 
-        if let existingID = session.resumeState.transcriptID {
-            command.append(word: "resume")
-            command.append(word: existingID.rawValue)
+        // A stated mode replaces the sandbox this transport otherwise fixes, rather than adding
+        // a second `--sandbox`. Unstated it stays `workspace-write`, which is not a default so
+        // much as this surface's own requirement: a natively rendered session that suddenly
+        // inherited a read-only `config.toml` would stop being able to edit anything, and would
+        // say so only through failing tools.
+        if permissionMode(for: session) != nil {
+            appendPermissionMode(for: session, to: &command)
+        } else {
+            command.append(
+                flag: AgentDefaults.codexSandboxFlag,
+                value: AgentDefaults.codexSandboxWorkspaceWrite
+            )
         }
-        command.append(flag: "--json")
-        command.append(word: "-")
+
+        appendCodexHookFlags(for: session, to: &command)
+        command.append(word: "app-server")
+        command.append(flag: "--listen", value: "stdio://")
 
         return launchPlan(
             command: routed(command, for: session, brokersPermissions: true),
@@ -250,10 +325,15 @@ enum AgentLauncher {
             string: AgentDefaults.codexResearchReasoningEffort,
             to: &command
         )
-        command.append(flag: "--sandbox", value: "read-only")
+        // Fixed, and not a permission mode: research belongs to a project rather than to any
+        // session, so there is no conversation whose posture it could follow.
+        command.append(
+            flag: AgentDefaults.codexSandboxFlag,
+            value: AgentDefaults.codexSandboxReadOnly
+        )
         command.append(word: "exec")
         command.append(flag: "--json")
-        command.append(word: prompt)
+        command.append(operand: prompt)
 
         return launchPlan(command: command, in: folder, resumeState: .unavailable)
     }
@@ -431,13 +511,16 @@ enum AgentLauncher {
     ) -> (ShellCommand, ResumeState) {
         var command = ShellCommand(word: AgentDefaults.claudeExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &command)
+        appendPermissionMode(for: session, to: &command)
 
-        // Lifecycle hooks only. A terminal session raises the CLI's own permission prompt,
-        // which the user can see and answer — intercepting it would replace a working prompt
-        // with a second one. What the terminal cannot say is when a turn begins and ends.
+        // Optional lifecycle hooks only. A terminal session raises the CLI's own permission
+        // prompt, which the user can see and answer — intercepting it would replace a working
+        // prompt with a second one. With reporting off and no Remote Control override,
+        // `writeHookSettings` returns nil and the terminal launches with no settings file.
         if let settingsPath = MCPSessionRegistry.writeHookSettings(
             for: session.id,
             brokersPermissions: false,
+            reportsLifecycle: AppSettings.shared.reportsClaudeLifecycleEvents,
             remoteControl: remoteControlAtStartup(for: session)
         ) {
             command.append(flag: "--settings", value: settingsPath)
@@ -544,12 +627,14 @@ enum AgentLauncher {
         command.append(flag: flag, value: model)
     }
 
-    /// Both CLIs take an opening prompt as a trailing positional argument.
+    /// Both CLIs take an opening prompt as a trailing positional argument — which is why it
+    /// goes in as `ShellCommand`'s operand rather than as another word: see the note there for
+    /// what a prompt beginning with `-` did to the launch.
     private static func appendPrompt(_ prompt: String?, to command: inout ShellCommand) {
         guard let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
-        command.append(word: prompt)
+        command.append(operand: prompt)
     }
 
     /// Codex assigns its own session identifier, so a fresh launch takes no flag and
@@ -561,6 +646,7 @@ enum AgentLauncher {
         var command = ShellCommand(word: AgentDefaults.codexExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
         appendCodexConversationOverrides(for: session, to: &command)
+        appendPermissionMode(for: session, to: &command)
         appendCodexHookFlags(for: session, to: &command)
 
         if let existingID = session.resumeState.transcriptID {
@@ -573,13 +659,13 @@ enum AgentLauncher {
         return (command, .awaitingIdentifier)
     }
 
-    /// Maps Skalman's per-conversation reasoning and Fast choices onto Codex's per-run
+    /// Maps Skalman's per-conversation reasoning and Fast choices onto Codex's launch
     /// configuration.
     ///
-    /// Native Codex is one `exec` process per turn, so changing this setting while idle needs
-    /// no control message and no new conversation: the next launch is already an
-    /// `exec resume <same-id>`. `default` is explicit rather than omission when the user chose
-    /// Standard, because omission would inherit an account configured for Fast.
+    /// Terminal launches consume these directly. Native app-server uses them to seed the
+    /// process, then repeats the latest model, effort and service tier on `turn/start` so idle
+    /// changes do not need a restart. `default` is explicit rather than omission when the user
+    /// chose Standard, because omission would inherit an account configured for Fast.
     private static func appendCodexConversationOverrides(
         for session: AgentSession,
         to command: inout ShellCommand
