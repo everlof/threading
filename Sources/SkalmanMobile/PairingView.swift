@@ -127,7 +127,9 @@ struct PairingView: View {
     private func pair(_ text: String) {
         guard let link = RemoteConnectionLink(string: text),
               link.baseURL.scheme?.lowercased() == "https" else {
-            errorMessage = "That isn’t a valid secure Skalman private link."
+            errorMessage = MobileL10n.string(
+                "That isn’t a valid secure Skalman private link."
+            )
             return
         }
         isConnecting = true

@@ -189,7 +189,7 @@ private struct RemoteAttachmentPreview: View {
         ContentUnavailableView(
             "No preview",
             systemImage: attachment.kind == "pdf" ? "doc.richtext" : "photo",
-            description: Text(message)
+            description: Text(MobileL10n.string(message))
         )
     }
 

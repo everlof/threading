@@ -9,6 +9,166 @@
 (function () {
   "use strict";
 
+  var translations = {
+    en: {
+      "app.title": "Skalman Remote",
+      "nav.back": "Back to sessions",
+      "status.connecting": "Connecting…",
+      "composer.placeholder": "Add feedback…",
+      "composer.message": "Message",
+      "composer.send": "Send",
+      "link.missingToken": "This link is missing its access token.",
+      "invitation.accepting": "Accepting private invitation…",
+      "invitation.invalid": "This invitation is invalid, expired, or has already been accepted.",
+      "invitation.failed": "Could not accept this invitation.",
+      "invitation.unreadable": "The Mac returned an unreadable membership.",
+      "mac.retry": "Could not reach the Mac. Tap to retry.",
+      "mac.retrying": "Could not reach the Mac. Retrying…",
+      "update.host": "Skalman on the Mac is out of date — update it to connect.",
+      "update.page": "This page is out of date. Tap to reload.",
+      "link.invalid": "This link is not valid, or has expired.",
+      "device.waitingApproval": "Waiting for approval on the Mac…",
+      "device.denied": "This device was denied access.",
+      "sessions.empty": "No sessions yet. Start Claude Code or Codex on the Mac.",
+      "sessions.connectedSecurely": "Connected securely",
+      "sessions.heading": "Sessions",
+      "sessions.otherProject": "Other",
+      "session.defaultName": "Session",
+      "session.disconnected": "Disconnected",
+      "session.working": "Working",
+      "session.needsAttention": "Needs attention",
+      "session.connected": "Connected",
+      "session.resuming": "Resuming this session on the Mac…",
+      "session.resumeFailed": "The session could not be resumed.",
+      "session.resumeTimedOut": "The Mac did not finish resuming this session.",
+      "session.socketDisconnected": "Disconnected from the Mac.",
+      "session.endedOnMac": "The session ended on the Mac.",
+      "terminal.disconnected": "— disconnected —",
+      "terminal.ended": "— session ended —",
+      "badge.connecting": "Connecting…",
+      "badge.disconnected": "Disconnected",
+      "badge.ended": "Ended",
+      "badge.interactive": "Interactive",
+      "badge.viewOnly": "View only",
+      "error.viewOnly": "This link is view only.",
+      "error.inputTooLarge": "That input is too large to send in one action.",
+      "error.remoteAction": "The remote action failed.",
+      "conversation.tool": "Tool",
+      "conversation.working": "Working…",
+      "conversation.reasoning": "Reasoning",
+      "code.defaultLanguage": "code",
+      "code.copy": "Copy",
+      "code.copied": "Copied",
+      "code.selectToCopy": "Select to copy",
+      "permission.title": "Allow {tool}?",
+      "permission.tool": "tool",
+      "permission.reviewOnMac": "Review this request on the Mac.",
+      "permission.deny": "Deny",
+      "permission.allow": "Allow",
+      "guest.browser": "browser",
+      "guest.defaultName": "Browser guest",
+      "app.code": "Code",
+      "host.defaultName": "Skalman Mac",
+      "age.now": "now"
+    },
+    sv: {
+      "app.title": "Skalman Fjärråtkomst",
+      "nav.back": "Tillbaka till sessioner",
+      "status.connecting": "Ansluter…",
+      "composer.placeholder": "Lägg till feedback…",
+      "composer.message": "Meddelande",
+      "composer.send": "Skicka",
+      "link.missingToken": "Länken saknar sin åtkomsttoken.",
+      "invitation.accepting": "Godkänner privat inbjudan…",
+      "invitation.invalid": "Inbjudan är ogiltig, har gått ut eller har redan godkänts.",
+      "invitation.failed": "Det gick inte att godkänna inbjudan.",
+      "invitation.unreadable": "Mac-datorn returnerade ett oläsbart medlemskap.",
+      "mac.retry": "Det gick inte att nå Mac-datorn. Tryck för att försöka igen.",
+      "mac.retrying": "Det gick inte att nå Mac-datorn. Försöker igen…",
+      "update.host": "Skalman på Mac-datorn är inaktuell — uppdatera appen för att ansluta.",
+      "update.page": "Sidan är inaktuell. Tryck för att läsa in den igen.",
+      "link.invalid": "Länken är ogiltig eller har gått ut.",
+      "device.waitingApproval": "Väntar på godkännande på Mac-datorn…",
+      "device.denied": "Den här enheten nekades åtkomst.",
+      "sessions.empty": "Inga sessioner ännu. Starta Claude Code eller Codex på Mac-datorn.",
+      "sessions.connectedSecurely": "Säkert ansluten",
+      "sessions.heading": "Sessioner",
+      "sessions.otherProject": "Övrigt",
+      "session.defaultName": "Session",
+      "session.disconnected": "Frånkopplad",
+      "session.working": "Arbetar",
+      "session.needsAttention": "Kräver uppmärksamhet",
+      "session.connected": "Ansluten",
+      "session.resuming": "Återupptar sessionen på Mac-datorn…",
+      "session.resumeFailed": "Det gick inte att återuppta sessionen.",
+      "session.resumeTimedOut": "Mac-datorn slutförde inte återupptagningen av sessionen.",
+      "session.socketDisconnected": "Anslutningen till Mac-datorn bröts.",
+      "session.endedOnMac": "Sessionen avslutades på Mac-datorn.",
+      "terminal.disconnected": "— frånkopplad —",
+      "terminal.ended": "— sessionen avslutades —",
+      "badge.connecting": "Ansluter…",
+      "badge.disconnected": "Frånkopplad",
+      "badge.ended": "Avslutad",
+      "badge.interactive": "Interaktiv",
+      "badge.viewOnly": "Endast visning",
+      "error.viewOnly": "Länken ger endast visningsåtkomst.",
+      "error.inputTooLarge": "Indatan är för stor för att skickas i en åtgärd.",
+      "error.remoteAction": "Fjärråtgärden misslyckades.",
+      "conversation.tool": "Verktyg",
+      "conversation.working": "Arbetar…",
+      "conversation.reasoning": "Resonemang",
+      "code.defaultLanguage": "kod",
+      "code.copy": "Kopiera",
+      "code.copied": "Kopierat",
+      "code.selectToCopy": "Markera för att kopiera",
+      "permission.title": "Tillåt {tool}?",
+      "permission.tool": "verktyget",
+      "permission.reviewOnMac": "Granska begäran på Mac-datorn.",
+      "permission.deny": "Neka",
+      "permission.allow": "Tillåt",
+      "guest.browser": "webbläsare",
+      "guest.defaultName": "Webbläsargäst",
+      "app.code": "Kod",
+      "host.defaultName": "Skalman på Mac",
+      "age.now": "nu"
+    }
+  };
+
+  function resolveLocale() {
+    var languages = navigator.languages && navigator.languages.length
+      ? navigator.languages : [navigator.language || "en"];
+    for (var index = 0; index < languages.length; index += 1) {
+      var language = String(languages[index]).toLowerCase().split("-")[0];
+      if (translations[language]) { return language; }
+    }
+    return "en";
+  }
+
+  var locale = resolveLocale();
+
+  function t(key, values) {
+    var template = translations[locale][key] || translations.en[key] || key;
+    if (!values) { return template; }
+    return template.replace(/\{([a-zA-Z0-9_]+)\}/g, function (_, name) {
+      return Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : _;
+    });
+  }
+
+  function localizeDocument() {
+    document.documentElement.lang = locale;
+    document.querySelectorAll("[data-i18n]").forEach(function (element) {
+      element.textContent = t(element.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach(function (element) {
+      element.setAttribute("placeholder", t(element.getAttribute("data-i18n-placeholder")));
+    });
+    document.querySelectorAll("[data-i18n-aria-label]").forEach(function (element) {
+      element.setAttribute("aria-label", t(element.getAttribute("data-i18n-aria-label")));
+    });
+  }
+
+  localizeDocument();
+
   var PROTOCOL = { version: 1, minimum: 1 };
   var tokenStorageKey = "skalman.capability";
   var membershipStorageKey = "skalman.membership";
@@ -216,15 +376,17 @@
 
   function acceptConnection() {
     if (!token) {
-      setStatus("This link is missing its access token.");
+      setStatus(t("link.missingToken"));
       return;
     }
-    setStatus("Accepting private invitation…");
+    setStatus(t("invitation.accepting"));
     fetch("/api/invitations/accept", {
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
       body: JSON.stringify({
-        displayName: navigator.platform ? navigator.platform + " browser" : "Browser guest",
+        displayName: navigator.platform
+          ? navigator.platform + " " + t("guest.browser")
+          : t("guest.defaultName"),
       }),
     }).then(function (res) {
       if (res.status === 426) {
@@ -233,16 +395,16 @@
         });
       }
       if (res.status === 401) {
-        setStatus("This invitation is invalid, expired, or has already been accepted.");
+        setStatus(t("invitation.invalid"));
         return;
       }
       if (!res.ok) {
-        setStatus("Could not accept this invitation.");
+        setStatus(t("invitation.failed"));
         return;
       }
       return res.json().then(function (body) {
         if (!body.accessToken) {
-          setStatus("The Mac returned an unreadable membership.");
+          setStatus(t("invitation.unreadable"));
           return;
         }
         token = body.accessToken;
@@ -258,7 +420,7 @@
         beginSessionList();
       });
     }).catch(function () {
-      setStatus("Could not reach the Mac. Tap to retry.");
+      setStatus(t("mac.retry"));
       els.status.style.cursor = "pointer";
       els.status.setAttribute("tabindex", "0");
       els.status.onclick = acceptConnection;
@@ -317,11 +479,11 @@
     if (closing) { try { closing.close(); } catch (error) {} }
   }
 
-  function showUpdateNeeded(update, message) {
+  function showUpdateNeeded(update) {
     if (update === "host") {
-      setStatus(message || "Skalman on the Mac is out of date — update it to connect.");
+      setStatus(t("update.host"));
     } else {
-      setStatus((message || "This page is out of date.") + " Tap to reload.");
+      setStatus(t("update.page"));
       els.status.style.cursor = "pointer";
       els.status.setAttribute("tabindex", "0");
       els.status.onclick = function () { location.reload(); };
@@ -335,34 +497,34 @@
 
   function loadSessions(generation) {
     if (generation !== sessionListGeneration) { return; }
-    if (!token) { setStatus("This link is missing its access token."); return; }
+    if (!token) { setStatus(t("link.missingToken")); return; }
 
     fetch("/api/me", { headers: authHeaders() }).then(function (res) {
       if (generation !== sessionListGeneration) { return; }
       if (res.status === 426) {
         return res.json().then(function (body) {
           if (generation === sessionListGeneration) {
-            showUpdateNeeded(body.update, body.message);
+            showUpdateNeeded(body.update);
           }
         });
       }
       if (res.status === 401) {
-        setStatus("This link is not valid, or has expired.");
+        setStatus(t("link.invalid"));
         return;
       }
       if (res.status === 403) {
         return res.json().then(function (body) {
           if (generation !== sessionListGeneration) { return; }
           if (body.state === "pendingApproval") {
-            setStatus("Waiting for approval on the Mac…");
+            setStatus(t("device.waitingApproval"));
             scheduleSessionLoad(generation, (body.retryAfter || 2) * 1000);
           } else {
-            setStatus("This device was denied access.");
+            setStatus(t("device.denied"));
           }
         });
       }
       if (!res.ok) {
-        setStatus("Could not reach the Mac. Retrying…");
+        setStatus(t("mac.retrying"));
         scheduleSessionLoad(generation, 3000);
         return;
       }
@@ -371,7 +533,7 @@
       });
     }).catch(function () {
       if (generation !== sessionListGeneration) { return; }
-      setStatus("Could not reach the Mac. Retrying…");
+      setStatus(t("mac.retrying"));
       scheduleSessionLoad(generation, 3000);
     });
   }
@@ -379,12 +541,12 @@
   function renderSessions(me) {
     hostTheme = me.theme || null;
     applyTheme(hostTheme, null);
-    els.title.textContent = "Code";
+    els.title.textContent = t("app.code");
     els.badge.hidden = true;
     els.sessions.innerHTML = "";
 
     if (!me.sessions || me.sessions.length === 0) {
-      setStatus("No sessions yet. Start Claude Code or Codex on the Mac.");
+      setStatus(t("sessions.empty"));
       return;
     }
 
@@ -396,10 +558,10 @@
     var deviceCopy = document.createElement("span");
     deviceCopy.className = "device-copy";
     var deviceName = document.createElement("strong");
-    deviceName.textContent = (me.host && me.host.name) || "Skalman Mac";
+    deviceName.textContent = (me.host && me.host.name) || t("host.defaultName");
     var deviceStatus = document.createElement("span");
     deviceStatus.className = "device-status";
-    deviceStatus.textContent = "Connected securely";
+    deviceStatus.textContent = t("sessions.connectedSecurely");
     deviceCopy.appendChild(deviceName);
     deviceCopy.appendChild(deviceStatus);
     device.appendChild(deviceIcon);
@@ -409,7 +571,7 @@
     var sessionHeading = document.createElement("li");
     sessionHeading.className = "section-heading";
     var sessionHeadingLabel = document.createElement("span");
-    sessionHeadingLabel.textContent = "Sessions";
+    sessionHeadingLabel.textContent = t("sessions.heading");
     var sessionCount = document.createElement("span");
     sessionCount.textContent = String(me.sessions.length);
     sessionHeading.appendChild(sessionHeadingLabel);
@@ -418,7 +580,7 @@
 
     var groups = Object.create(null);
     me.sessions.forEach(function (session) {
-      var project = session.projectName || "Other";
+      var project = session.projectName || t("sessions.otherProject");
       (groups[project] || (groups[project] = [])).push(session);
     });
 
@@ -438,7 +600,7 @@
         topLine.className = "session-top-line";
         var name = document.createElement("div");
         name.className = "name";
-        name.textContent = session.title || "Session";
+        name.textContent = session.title || t("session.defaultName");
         topLine.appendChild(name);
         if (session.lastActiveAt) {
           var age = document.createElement("time");
@@ -453,7 +615,7 @@
         dot.className = "dot " + (session.isAvailable ? (session.state || "idle") : "dormant");
         meta.appendChild(dot);
         meta.appendChild(document.createTextNode(
-          (session.isAvailable ? stateLabel(session.state) : "Disconnected") +
+          (session.isAvailable ? stateLabel(session.state) : t("session.disconnected")) +
           " · " + agentLabel(session.agentKind)
         ));
 
@@ -468,9 +630,9 @@
   }
 
   function stateLabel(state) {
-    if (state === "working") { return "Working"; }
-    if (state === "needsAttention") { return "Needs attention"; }
-    return "Connected";
+    if (state === "working") { return t("session.working"); }
+    if (state === "needsAttention") { return t("session.needsAttention"); }
+    return t("session.connected");
   }
 
   function agentLabel(kind) {
@@ -479,11 +641,12 @@
 
   function compactAge(timestamp) {
     var seconds = Math.max(0, Date.now() / 1000 - timestamp);
-    if (seconds < 60) { return "now"; }
-    if (seconds < 3600) { return Math.floor(seconds / 60) + "m"; }
-    if (seconds < 86400) { return Math.floor(seconds / 3600) + "h"; }
-    if (seconds < 604800) { return Math.floor(seconds / 86400) + "d"; }
-    return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
+    if (seconds < 60) { return t("age.now"); }
+    var relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "narrow" });
+    if (seconds < 3600) { return relative.format(-Math.floor(seconds / 60), "minute"); }
+    if (seconds < 86400) { return relative.format(-Math.floor(seconds / 3600), "hour"); }
+    if (seconds < 604800) { return relative.format(-Math.floor(seconds / 86400), "day"); }
+    return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" })
       .format(new Date(timestamp * 1000));
   }
 
@@ -495,8 +658,8 @@
 
     cancelPoll();
     var generation = ++sessionListGeneration;
-    els.title.textContent = session.title || "Session";
-    setStatus("Resuming this session on the Mac…");
+    els.title.textContent = session.title || t("session.defaultName");
+    setStatus(t("session.resuming"));
     fetch("/api/session/" + encodeURIComponent(session.id) + "/resume", {
       method: "POST",
       headers: authHeaders(),
@@ -506,7 +669,7 @@
       waitForSession(session.id, generation, 0);
     }).catch(function () {
       if (generation === sessionListGeneration) {
-        setStatus("The session could not be resumed.");
+        setStatus(t("session.resumeFailed"));
       }
     });
   }
@@ -530,7 +693,7 @@
       }, 500);
     }).catch(function () {
       if (generation === sessionListGeneration) {
-        setStatus("The Mac did not finish resuming this session.");
+        setStatus(t("session.resumeTimedOut"));
       }
     });
   }
@@ -546,7 +709,7 @@
     resetConversation();
 
     applyTheme(hostTheme, session.terminalTheme || null);
-    els.title.textContent = session.title || "Session";
+    els.title.textContent = session.title || t("session.defaultName");
     activateSurface(session.surface || "terminal");
 
     var scheme = location.protocol === "https:" ? "wss:" : "ws:";
@@ -555,7 +718,7 @@
     );
     socket = openedSocket;
     openedSocket.binaryType = "arraybuffer";
-    setBadge("Connecting…", "connecting");
+    setBadge(t("badge.connecting"), "connecting");
 
     openedSocket.onopen = function () {
       if (socket !== openedSocket) { return; }
@@ -582,11 +745,11 @@
     openedSocket.onclose = function () {
       if (socket !== openedSocket) { return; }
       socket = null;
-      setBadge("Disconnected", "disconnected");
+      setBadge(t("badge.disconnected"), "disconnected");
       if (term) {
-        term.write("\r\n\x1b[2m— disconnected —\x1b[0m\r\n");
+        term.write("\r\n\x1b[2m" + t("terminal.disconnected") + "\x1b[0m\r\n");
       } else {
-        appendNotice("Disconnected from the Mac.");
+        appendNotice(t("session.socketDisconnected"));
       }
       updateComposer();
     };
@@ -640,11 +803,11 @@
         break;
       case "error":
         if (msg.code === "forbidden") {
-          appendNotice("This link is view only.");
+          appendNotice(t("error.viewOnly"));
         } else if (msg.code === "inputTooLarge" || msg.code === "promptTooLarge") {
-          appendNotice("That input is too large to send in one action.");
+          appendNotice(t("error.inputTooLarge"));
         } else {
-          appendNotice("The remote action failed.");
+          appendNotice(t("error.remoteAction"));
         }
         break;
       case "ended":
@@ -653,11 +816,11 @@
           disposeTerminal();
           showUpdateNeeded(msg.update);
         } else {
-          setBadge("Ended", "disconnected");
+          setBadge(t("badge.ended"), "disconnected");
           if (term) {
-            term.write("\r\n\x1b[2m— session ended —\x1b[0m\r\n");
+            term.write("\r\n\x1b[2m" + t("terminal.ended") + "\x1b[0m\r\n");
           } else {
-            appendNotice("The session ended on the Mac.");
+            appendNotice(t("session.endedOnMac"));
           }
         }
         updateComposer();
@@ -678,7 +841,7 @@
       inputSubscription = null;
     }
     if (capability === "interact") {
-      setBadge("Interactive", "interact");
+      setBadge(t("badge.interactive"), "interact");
       if (term) {
         inputSubscription = term.onData(function (data) {
           if (socket === openedSocket && openedSocket.readyState === WebSocket.OPEN) {
@@ -688,7 +851,7 @@
         term.focus();
       }
     } else {
-      setBadge("View only", "");
+      setBadge(t("badge.viewOnly"), "");
     }
     updateComposer();
   }
@@ -725,10 +888,12 @@
         glyph.className = "tool-glyph";
         glyph.textContent = toolGlyph(row.toolName);
         var toolName = document.createElement("strong");
-        toolName.textContent = row.toolName || "Tool";
+        toolName.textContent = row.toolName || t("conversation.tool");
         summary.appendChild(glyph);
         summary.appendChild(toolName);
-        summary.appendChild(document.createTextNode("  " + (row.summary || "Working…")));
+        summary.appendChild(document.createTextNode(
+          "  " + (row.summary || t("conversation.working"))
+        ));
         node.appendChild(summary);
         if (row.result) {
           var result = document.createElement("pre");
@@ -740,7 +905,7 @@
         node = document.createElement("details");
         node.className = "conversation-row thinking";
         var thinkingSummary = document.createElement("summary");
-        thinkingSummary.textContent = "Reasoning";
+        thinkingSummary.textContent = t("conversation.reasoning");
         var thinkingText = document.createElement("div");
         thinkingText.textContent = row.text || "";
         node.appendChild(thinkingSummary);
@@ -826,16 +991,16 @@
       var header = document.createElement("div");
       header.className = "code-header";
       var label = document.createElement("span");
-      label.textContent = language || "code";
+      label.textContent = language || t("code.defaultLanguage");
       var copy = document.createElement("button");
       copy.type = "button";
-      copy.textContent = "Copy";
+      copy.textContent = t("code.copy");
       copy.addEventListener("click", function () {
         navigator.clipboard.writeText(codeText).then(function () {
-          copy.textContent = "Copied";
-          setTimeout(function () { copy.textContent = "Copy"; }, 1200);
+          copy.textContent = t("code.copied");
+          setTimeout(function () { copy.textContent = t("code.copy"); }, 1200);
         }).catch(function () {
-          copy.textContent = "Select to copy";
+          copy.textContent = t("code.selectToCopy");
         });
       });
       header.appendChild(label);
@@ -876,7 +1041,9 @@
     var card = document.createElement("section");
     card.className = "permission-card";
     var title = document.createElement("strong");
-    title.textContent = "Allow " + (permission.toolName || "tool") + "?";
+    title.textContent = t("permission.title", {
+      tool: permission.toolName || t("permission.tool"),
+    });
     card.appendChild(title);
 
     if (permission.summary) {
@@ -908,8 +1075,7 @@
     if (permission.canDecide === false) {
       var unavailable = document.createElement("p");
       unavailable.className = "permission-unavailable";
-      unavailable.textContent = permission.unavailableReason ||
-        "Review this request on the Mac.";
+      unavailable.textContent = t("permission.reviewOnMac");
       card.appendChild(unavailable);
       els.conversationRows.appendChild(card);
       return;
@@ -920,11 +1086,11 @@
     var deny = document.createElement("button");
     deny.type = "button";
     deny.className = "deny";
-    deny.textContent = "Deny";
+    deny.textContent = t("permission.deny");
     var allow = document.createElement("button");
     allow.type = "button";
     allow.className = "allow";
-    allow.textContent = "Allow";
+    allow.textContent = t("permission.allow");
     function decide(value) {
       if (!socket || socket.readyState !== WebSocket.OPEN) { return; }
       allow.disabled = true;

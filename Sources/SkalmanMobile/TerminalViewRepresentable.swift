@@ -24,7 +24,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         view.smartQuotesType = .no
         view.smartDashesType = .no
         Self.apply(theme, to: view)
-        view.accessibilityLabel = "Remote terminal"
+        view.accessibilityLabel = MobileL10n.string("Remote terminal")
 
         connection.onTerminalOutput = { [weak view] data in
             view?.feed(byteArray: Array(data)[...])

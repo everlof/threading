@@ -81,11 +81,18 @@ struct RemoteDiagnosticsView: View {
         NavigationStack {
             List {
                 Section("Connection") {
-                    diagnosticRow("Mac", value: model.activeHost?.name ?? "None")
+                    diagnosticRow(
+                        "Mac",
+                        value: model.activeHost?.name ?? MobileL10n.string("None")
+                    )
                     diagnosticRow("Status", value: connectionStatus)
                     diagnosticRow(
                         "Remote protocol",
-                        value: "\(RemoteProtocol.current) · accepts \(RemoteProtocol.minimumSupported)+"
+                        value: MobileL10n.string(
+                            "%lld · accepts %lld+",
+                            Int64(RemoteProtocol.current),
+                            Int64(RemoteProtocol.minimumSupported)
+                        )
                     )
                 }
 
@@ -93,7 +100,9 @@ struct RemoteDiagnosticsView: View {
                     diagnosticRow("Permission", value: authorizationStatus)
                     diagnosticRow(
                         "APNs device token",
-                        value: notifications.deviceToken == nil ? "Waiting" : "Registered"
+                        value: MobileL10n.string(
+                            notifications.deviceToken == nil ? "Waiting" : "Registered"
+                        )
                     )
                     diagnosticRow("Delivery", value: deliveryStatus)
                 }
@@ -140,7 +149,9 @@ struct RemoteDiagnosticsView: View {
                             let url = try MobileDiagnostics.supportReport()
                             sharePayload = DiagnosticsSharePayload(items: [url])
                         } catch {
-                            exportError = "The support report could not be prepared."
+                            exportError = MobileL10n.string(
+                                "The support report could not be prepared."
+                            )
                         }
                     } label: {
                         Label("Share diagnostics only", systemImage: "square.and.arrow.up")
@@ -182,7 +193,7 @@ struct RemoteDiagnosticsView: View {
 
     private func diagnosticRow(_ title: String, value: String) -> some View {
         HStack {
-            Text(title)
+            Text(MobileL10n.string(title))
             Spacer()
             Text(value)
                 .foregroundStyle(theme.secondaryLabel)
@@ -192,31 +203,31 @@ struct RemoteDiagnosticsView: View {
 
     private var connectionStatus: String {
         switch model.phase {
-        case .idle: return "Idle"
-        case .connecting: return "Connecting"
-        case .online: return "Online"
-        case .offline: return "Offline"
+        case .idle: return MobileL10n.string("Idle")
+        case .connecting: return MobileL10n.string("Connecting")
+        case .online: return MobileL10n.string("Online")
+        case .offline: return MobileL10n.string("Offline")
         }
     }
 
     private var authorizationStatus: String {
         switch notifications.authorizationStatus {
-        case .notDetermined: return "Not requested"
-        case .denied: return "Denied"
-        case .authorized: return "Allowed"
-        case .provisional: return "Provisional"
-        case .ephemeral: return "Temporary"
-        @unknown default: return "Unknown"
+        case .notDetermined: return MobileL10n.string("Not requested")
+        case .denied: return MobileL10n.string("Denied")
+        case .authorized: return MobileL10n.string("Allowed")
+        case .provisional: return MobileL10n.string("Provisional")
+        case .ephemeral: return MobileL10n.string("Temporary")
+        @unknown default: return MobileL10n.string("Unknown")
         }
     }
 
     private var deliveryStatus: String {
-        guard let host = model.activeHost else { return "No Mac" }
+        guard let host = model.activeHost else { return MobileL10n.string("No Mac") }
         switch notifications.deliveryByConnection[host.id] {
         case "push": return "APNs"
-        case "live": return "Live only"
+        case "live": return MobileL10n.string("Live only")
         case .some(let value): return value
-        case nil: return "Not registered"
+        case nil: return MobileL10n.string("Not registered")
         }
     }
 }

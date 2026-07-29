@@ -118,7 +118,7 @@ final class RemoteSessionConnection: ObservableObject {
         presence.removeAll()
         conversationStore.cancelLoadingEarlier()
         if markEnded {
-            phase = .ended("Disconnected")
+            phase = .ended(MobileL10n.string("Disconnected"))
             MobileDiagnostics.record(.socketEnded, fields: [
                 .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
                 .reason: "user",
@@ -357,15 +357,15 @@ final class RemoteSessionConnection: ObservableObject {
             stopped = true
             switch ended?.reason {
             case "sessionClosed":
-                phase = .ended("Session closed on Mac")
+                phase = .ended(MobileL10n.string("Session closed on Mac"))
             case "protocolMismatch":
                 phase = .ended(
                     ended?.update == .client
-                        ? "Update this app to reconnect"
-                        : "Update Skalman on the Mac to reconnect"
+                        ? MobileL10n.string("Update this app to reconnect")
+                        : MobileL10n.string("Update Skalman on the Mac to reconnect")
                 )
             default:
-                phase = .ended("Session ended")
+                phase = .ended(MobileL10n.string("Session ended"))
             }
             MobileDiagnostics.record(.socketEnded, fields: [
                 .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
@@ -379,7 +379,18 @@ final class RemoteSessionConnection: ObservableObject {
             // Another paired client may answer the same visible card first. Its authoritative
             // snapshot follows immediately; that benign race must not mark this socket failed.
             if error?.code != "permissionNotPending" {
-                phase = .failed(error?.code ?? "Remote action failed")
+                let message: String
+                switch error?.code {
+                case "forbidden":
+                    message = MobileL10n.string("This link is view only.")
+                case "inputTooLarge", "promptTooLarge":
+                    message = MobileL10n.string(
+                        "That input is too large to send in one action."
+                    )
+                default:
+                    message = MobileL10n.string("Remote action failed")
+                }
+                phase = .failed(message)
                 MobileDiagnostics.record(
                     .socketFailed,
                     level: .error,

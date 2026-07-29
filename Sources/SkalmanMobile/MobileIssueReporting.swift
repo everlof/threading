@@ -196,14 +196,16 @@ struct MobileIssueReportView: View {
             }
             sharePayload = DiagnosticsSharePayload(items: items)
         } catch {
-            exportError = "The report files could not be prepared."
+            exportError = MobileL10n.string("The report files could not be prepared.")
         }
         isPreparing = false
     }
 
     private static let privacyFooter =
-        "Diagnostics never include messages, prompts, paths, notification text, device names "
-        + "or credentials. Optional details contain no stable device identifier."
+        MobileL10n.string(
+            "Diagnostics never include messages, prompts, paths, notification text, device names "
+                + "or credentials. Optional details contain no stable device identifier."
+        )
 }
 
 extension MobileDiagnostics {

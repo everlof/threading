@@ -15,6 +15,7 @@ runs identically from Xcode, CI, and a package-only checkout.
 from __future__ import annotations
 
 import argparse
+import html.parser
 import json
 import pathlib
 import re
@@ -24,6 +25,14 @@ from dataclasses import dataclass
 
 APP_SOURCE_ROOTS = ("Sources/Skalman",)
 CATALOG_PATH = "Sources/Skalman/Resources/Localizable.xcstrings"
+MOBILE_SOURCE_ROOT = "Sources/SkalmanMobile"
+MOBILE_CATALOG_PATH = "Sources/SkalmanMobile/Localizable.xcstrings"
+MOBILE_INFO_CATALOG_PATH = "Sources/SkalmanMobile/SkalmanMobile-InfoPlist.xcstrings"
+REMOTE_CLIENT_ROOT = "Sources/Skalman/Resources/RemoteClient"
+REMOTE_LOCALIZATION_SOURCES = (
+    "Sources/Skalman/Core/Remote/RemoteGitReviewBridge.swift",
+    "Sources/Skalman/Core/Remote/RemoteNotificationService.swift",
+)
 
 # These helpers translate their string arguments internally. Keeping them here makes their call
 # sites as terse as AppKit's API while still requiring the source key to exist in the catalog.
@@ -393,6 +402,7 @@ def localized_expression(expression: str) -> bool:
     return (
         stripped.startswith("L10n.string(")
         or stripped.startswith("L10n.format(")
+        or stripped.startswith("MobileL10n.string(")
         or stripped.startswith("String(localized:")
         or stripped.startswith("NSLocalizedString(")
     )
@@ -479,6 +489,389 @@ def load_catalog(root: pathlib.Path) -> tuple[set[str], list[Finding]]:
     return set(strings), findings
 
 
+FORMAT_PLACEHOLDER_RE = re.compile(
+    r"%(?:[1-9][0-9]*\$)?(?:lld|ld|llu|lu|d|u|f|g|@)"
+)
+
+
+def placeholder_signature(value: str) -> list[str]:
+    result: list[str] = []
+    for match in FORMAT_PLACEHOLDER_RE.finditer(value):
+        token = match.group(0).rsplit("$", 1)[-1]
+        result.append(token.lstrip("%"))
+    return sorted(result)
+
+
+def load_translated_catalog(
+    root: pathlib.Path,
+    relative_path: str,
+    *,
+    source_keys_are_format_strings: bool = True,
+) -> tuple[set[str], list[Finding]]:
+    path = root / relative_path
+    try:
+        catalog = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return set(), [Finding(relative_path, 1, f"cannot read string catalog: {error}")]
+    strings = catalog.get("strings")
+    if not isinstance(strings, dict):
+        return set(), [Finding(relative_path, 1, 'catalog must contain a "strings" object')]
+
+    findings: list[Finding] = []
+    for key, entry in strings.items():
+        unit = (
+            entry.get("localizations", {})
+            .get("sv", {})
+            .get("stringUnit", {})
+            if isinstance(entry, dict)
+            else {}
+        )
+        value = str(unit.get("value", ""))
+        if unit.get("state") != "translated" or not value.strip():
+            findings.append(Finding(
+                relative_path,
+                1,
+                f'Swedish translation is missing for "{key}"',
+            ))
+        elif (
+            source_keys_are_format_strings
+            and placeholder_signature(key) != placeholder_signature(value)
+        ):
+            findings.append(Finding(
+                relative_path,
+                1,
+                f'placeholder mismatch in Swedish translation for "{key}"',
+            ))
+    return set(strings), findings
+
+
+MOBILE_LOCALIZING_CALLS: dict[str, tuple[str | int, ...]] = {
+    "ThemedDialogAction": (0,),
+    "ThemedDialogTextField": (0,),
+    "themedAlert": (0, "message"),
+    "themedConfirmationDialog": (0, "message"),
+    "diagnosticRow": (0,),
+    "loadingView": (0,),
+    "RemoteExpandableMessageView": ("title",),
+    "unavailable": (0,),
+}
+
+MOBILE_SWIFTUI_CALLS: dict[str, tuple[str | int, ...]] = {
+    "Text": (0,),
+    "Label": (0,),
+    "Button": (0,),
+    "Section": (0,),
+    "TextField": (0,),
+    "SecureField": (0,),
+    "Picker": (0,),
+    "Toggle": (0,),
+    "ContentUnavailableView": (0,),
+    "navigationTitle": (0,),
+    "searchable": ("prompt",),
+    "accessibilityLabel": (0,),
+    "accessibilityHint": (0,),
+}
+
+MOBILE_MACHINE_LITERALS = {
+    "addition",
+    "assistant",
+    "claude",
+    "conversation",
+    "deny",
+    "interact",
+    "pdf",
+    "terminal",
+    "tool",
+    "user",
+    "view",
+}
+
+MOBILE_DYNAMIC_LOCALIZATION_BOUNDARIES: dict[str, set[str]] = {
+    "Sources/SkalmanMobile/RemoteAttachmentsView.swift": {"message"},
+    "Sources/SkalmanMobile/RemoteConversationTimelineViewController.swift": {"title"},
+    "Sources/SkalmanMobile/RemoteDiagnostics.swift": {"title"},
+    "Sources/SkalmanMobile/RemoteGitReviewView.swift": {"label", "localization.key"},
+    "Sources/SkalmanMobile/RemoteNotifications.swift": {"localization.key"},
+    "Sources/SkalmanMobile/ThemedDialog.swift": {"title", "$0"},
+}
+
+
+def literal_values(expression: str) -> list[str]:
+    """Returns non-interpolated string tokens from a compound Swift expression."""
+    result: list[str] = []
+    index = 0
+    while index < len(expression):
+        index = skip_space_and_comments(expression, index)
+        end = string_end(expression, index)
+        if end is None:
+            index += 1
+            continue
+        value = decode_string_token(expression[index:end])
+        if value is not None:
+            result.append(value)
+        index = end
+    return result
+
+
+def mobile_assignment_findings(source: str, relative_path: str) -> list[Finding]:
+    names = (
+        "accessibilityHint|accessibilityLabel|accessibilityValue|"
+        "placeholder|subtitle|text|title"
+    )
+    findings: list[Finding] = []
+    for match in re.finditer(rf"\.\s*({names})\s*=\s*", source):
+        if ignored_on_line(source, match.start()):
+            continue
+        start = skip_space_and_comments(source, match.end())
+        line_end = source.find("\n", start)
+        sample_end = len(source) if line_end < 0 else min(len(source), line_end + 240)
+        sample = source[start:sample_end]
+        if "MobileL10n.string(" in sample or not literal_has_language(sample):
+            continue
+        findings.append(Finding(
+            relative_path,
+            line_number(source, start),
+            f'presentation property "{match.group(1)}" contains an unlocalized literal',
+        ))
+    return findings
+
+
+def remote_localization_keys(root: pathlib.Path) -> set[str]:
+    """Keys in the wire contract must also ship in the receiving iPhone's catalog."""
+    keys: set[str] = set()
+    for relative_path in REMOTE_LOCALIZATION_SOURCES:
+        source = (root / relative_path).read_text(encoding="utf-8")
+        for call in discover_calls(source):
+            for label, expression, _ in call.arguments:
+                if label not in {"key", "localizationKey"}:
+                    continue
+                key = static_string(expression)
+                if key:
+                    keys.add(key)
+    return keys
+
+
+def audit_mobile(root: pathlib.Path) -> list[Finding]:
+    catalog_keys, findings = load_translated_catalog(root, MOBILE_CATALOG_PATH)
+    _, info_findings = load_translated_catalog(
+        root,
+        MOBILE_INFO_CATALOG_PATH,
+        source_keys_are_format_strings=False,
+    )
+    findings.extend(info_findings)
+    used_keys = remote_localization_keys(root)
+
+    for path in sorted((root / MOBILE_SOURCE_ROOT).glob("*.swift")):
+        source = path.read_text(encoding="utf-8")
+        relative_path = path.relative_to(root).as_posix()
+        findings.extend(mobile_assignment_findings(source, relative_path))
+        for call in discover_calls(source):
+            terminal = terminal_call_name(call.name)
+            selectors: tuple[str | int, ...] | None = None
+            if call.name == "MobileL10n.string":
+                selectors = (0,)
+            elif terminal in MOBILE_LOCALIZING_CALLS:
+                selectors = MOBILE_LOCALIZING_CALLS[terminal]
+            elif terminal in MOBILE_SWIFTUI_CALLS:
+                selectors = MOBILE_SWIFTUI_CALLS[terminal]
+            if selectors is None:
+                continue
+
+            for expression, offset in selected_arguments(call, selectors):
+                key = static_string(expression)
+                if key is not None:
+                    if key:
+                        used_keys.add(key)
+                    continue
+                values = literal_values(expression)
+                if (
+                    call.name == "MobileL10n.string"
+                    and not values
+                    and expression.strip()
+                    not in MOBILE_DYNAMIC_LOCALIZATION_BOUNDARIES.get(relative_path, set())
+                ):
+                    findings.append(Finding(
+                        relative_path,
+                        line_number(source, offset),
+                        "dynamic MobileL10n key is not covered by an audited localization boundary",
+                    ))
+                human_values = [
+                    value for value in values
+                    if re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}", value)
+                ]
+                for value in human_values:
+                    if (
+                        value
+                        and value not in MOBILE_MACHINE_LITERALS
+                    ):
+                        used_keys.add(value)
+                if (
+                    terminal in MOBILE_SWIFTUI_CALLS
+                    and len(human_values) >= 2
+                    and "MobileL10n.string(" not in expression
+                ):
+                    findings.append(Finding(
+                        relative_path,
+                        line_number(source, offset),
+                        f'computed SwiftUI copy in "{terminal}" must resolve through MobileL10n',
+                    ))
+
+    for key in sorted(used_keys - catalog_keys):
+        findings.append(Finding(
+            MOBILE_CATALOG_PATH,
+            1,
+            f'missing source key "{key}"',
+        ))
+    return findings
+
+
+def javascript_object(source: str, name: str) -> str | None:
+    marker = re.search(rf"\n\s{{4}}{re.escape(name)}\s*:\s*\{{", source)
+    if marker is None:
+        return None
+    open_brace = source.find("{", marker.start())
+    depth = 1
+    index = open_brace + 1
+    in_string = False
+    escaped = False
+    while index < len(source):
+        character = source[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return source[open_brace + 1:index]
+        index += 1
+    return None
+
+
+def javascript_messages(source: str, language: str) -> dict[str, str] | None:
+    block = javascript_object(source, language)
+    if block is None:
+        return None
+    pairs = re.finditer(
+        r'("(?:\\.|[^"\\])*")\s*:\s*("(?:\\.|[^"\\])*")\s*,?',
+        block,
+    )
+    return {
+        json.loads(match.group(1)): json.loads(match.group(2))
+        for match in pairs
+    }
+
+
+class RemoteHTMLAudit(html.parser.HTMLParser):
+    def __init__(self, relative_path: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.relative_path = relative_path
+        self.findings: list[Finding] = []
+        self.keys: set[str] = set()
+        self.localized_stack: list[bool] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        localized = "data-i18n" in values
+        self.localized_stack.append(localized or any(self.localized_stack[-1:]))
+        for attribute, localization_attribute in (
+            ("placeholder", "data-i18n-placeholder"),
+            ("aria-label", "data-i18n-aria-label"),
+            ("title", "data-i18n-title"),
+        ):
+            value = values.get(attribute)
+            key = values.get(localization_attribute)
+            if key:
+                self.keys.add(key)
+            if value and re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}", value) and not key:
+                self.findings.append(Finding(
+                    self.relative_path,
+                    self.getpos()[0],
+                    f'HTML attribute "{attribute}" contains unlocalized copy',
+                ))
+        if values.get("data-i18n"):
+            self.keys.add(values["data-i18n"])
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.localized_stack:
+            self.localized_stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if (
+            re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}", data)
+            and not any(self.localized_stack[-1:])
+        ):
+            self.findings.append(Finding(
+                self.relative_path,
+                self.getpos()[0],
+                "HTML text contains unlocalized copy",
+            ))
+
+
+def audit_remote_client(root: pathlib.Path) -> list[Finding]:
+    app_path = root / REMOTE_CLIENT_ROOT / "app.js"
+    html_path = root / REMOTE_CLIENT_ROOT / "index.html"
+    relative_js = app_path.relative_to(root).as_posix()
+    relative_html = html_path.relative_to(root).as_posix()
+    findings: list[Finding] = []
+    try:
+        source = app_path.read_text(encoding="utf-8")
+        html_source = html_path.read_text(encoding="utf-8")
+    except OSError as error:
+        return [Finding(REMOTE_CLIENT_ROOT, 1, f"cannot read remote client: {error}")]
+
+    english = javascript_messages(source, "en")
+    swedish = javascript_messages(source, "sv")
+    if english is None or swedish is None:
+        return [Finding(relative_js, 1, "cannot parse English and Swedish message dictionaries")]
+    for key in sorted(set(english) - set(swedish)):
+        findings.append(Finding(relative_js, 1, f'missing Swedish browser message "{key}"'))
+    for key in sorted(set(swedish) - set(english)):
+        findings.append(Finding(relative_js, 1, f'Swedish browser message has no English key "{key}"'))
+    token_pattern = re.compile(r"\{([A-Za-z0-9_]+)\}")
+    for key in sorted(set(english) & set(swedish)):
+        if sorted(token_pattern.findall(english[key])) != sorted(token_pattern.findall(swedish[key])):
+            findings.append(Finding(
+                relative_js,
+                1,
+                f'placeholder mismatch in Swedish browser message "{key}"',
+            ))
+
+    used_keys = set(re.findall(r'\bt\(\s*"([^"]+)"', source))
+    html_audit = RemoteHTMLAudit(relative_html)
+    html_audit.feed(html_source)
+    findings.extend(html_audit.findings)
+    used_keys.update(html_audit.keys)
+    for key in sorted(used_keys - set(english)):
+        findings.append(Finding(relative_js, 1, f'missing browser message "{key}"'))
+
+    presentation_patterns = (
+        r'\.textContent\s*=\s*"[^"]*[A-Za-zÀ-ÖØ-öø-ÿ]{2,}',
+        r'\b(?:appendNotice|setBadge|setStatus)\(\s*"[^"]*[A-Za-zÀ-ÖØ-öø-ÿ]{2,}',
+    )
+    for pattern in presentation_patterns:
+        for match in re.finditer(pattern, source):
+            if ignored_on_line(source, match.start()):
+                continue
+            findings.append(Finding(
+                relative_js,
+                line_number(source, match.start()),
+                "browser presentation copy bypasses t()",
+            ))
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("repo_root", type=pathlib.Path)
@@ -505,6 +898,8 @@ def main() -> int:
             1,
             f'missing source key "{key}"',
         ))
+    findings.extend(audit_mobile(root))
+    findings.extend(audit_remote_client(root))
 
     for finding in sorted(set(findings)):
         print(f"{finding.path}:{finding.line}: error: {finding.message}", file=sys.stderr)

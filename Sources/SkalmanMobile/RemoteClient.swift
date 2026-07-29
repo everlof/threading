@@ -22,13 +22,17 @@ enum RemoteClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            return "The Mac returned an unreadable response."
+            return MobileL10n.string("The Mac returned an unreadable response.")
         case .unauthorized:
-            return "This invitation is expired or already used, or this membership was revoked."
-        case .upgradeRequired(let message):
-            return message
+            return MobileL10n.string(
+                "This invitation is expired or already used, or this membership was revoked."
+            )
+        case .upgradeRequired:
+            return MobileL10n.string(
+                "This version of Skalman can’t connect to this Mac. Update Skalman and try again."
+            )
         case .server(let status):
-            return "The Mac returned HTTP \(status)."
+            return MobileL10n.string("The Mac returned HTTP %lld.", status)
         }
     }
 }

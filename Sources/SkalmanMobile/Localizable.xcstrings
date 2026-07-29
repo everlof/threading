@@ -1,0 +1,2928 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    " Start the chat first to create a view-only link.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " Starta chatten först för att skapa en länk med endast visningsåtkomst."
+          }
+        }
+      }
+    },
+    "%@   Loading usage…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@   Läser in användning…"
+          }
+        }
+      }
+    },
+    "%@   Usage unavailable": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@   Användning är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "%@ UI": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@-gränssnitt"
+          }
+        }
+      }
+    },
+    "%@ are typing": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ skriver"
+          }
+        }
+      }
+    },
+    "%@ are typing…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ skriver…"
+          }
+        }
+      }
+    },
+    "%@ is typing": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ skriver"
+          }
+        }
+      }
+    },
+    "%@ is typing…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ skriver…"
+          }
+        }
+      }
+    },
+    "%@ is waiting. Open the chat to review the request.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ väntar. Öppna chatten för att granska begäran."
+          }
+        }
+      }
+    },
+    "%@ needs permission": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ behöver behörighet"
+          }
+        }
+      }
+    },
+    "%@ · %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@ · %2$@"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%@ · Shared chat": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · Delad chatt"
+          }
+        }
+      }
+    },
+    "%lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld"
+          }
+        }
+      }
+    },
+    "%lld %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld %2$@"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld %2$@"
+          }
+        }
+      }
+    },
+    "%lld changed files, %lld additions, %lld deletions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ändrade filer, %lld tillägg, %lld borttagningar"
+          }
+        }
+      }
+    },
+    "%lld · accepts %lld+": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld · accepterar %2$lld+"
+          }
+        }
+      }
+    },
+    "+%@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%@"
+          }
+        }
+      }
+    },
+    "+%lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%lld"
+          }
+        }
+      }
+    },
+    "A deterministic debug surface for visual review and future UI tests.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En deterministisk felsökningsvy för visuell granskning och framtida gränssnittstester."
+          }
+        }
+      }
+    },
+    "A screenshot can help explain visual problems, but it may contain code or chat content. You can preview and remove it before sharing.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En skärmbild kan hjälpa till att förklara visuella problem, men den kan innehålla kod eller chattinnehåll. Du kan förhandsgranska och ta bort den innan du delar."
+          }
+        }
+      }
+    },
+    "A source preview from the paired Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En källkodsförhandsvisning från den parkopplade Mac-datorn"
+          }
+        }
+      }
+    },
+    "APNs device token": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "APNs-enhetstoken"
+          }
+        }
+      }
+    },
+    "Account · Usage": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konto · Användning"
+          }
+        }
+      }
+    },
+    "Actions for %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Åtgärder för %@"
+          }
+        }
+      }
+    },
+    "Active sessions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiva sessioner"
+          }
+        }
+      }
+    },
+    "Add Connection": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till anslutning"
+          }
+        }
+      }
+    },
+    "Add a connection": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till en anslutning"
+          }
+        }
+      }
+    },
+    "Add feedback…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till feedback…"
+          }
+        }
+      }
+    },
+    "Additional device details": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ytterligare enhetsinformation"
+          }
+        }
+      }
+    },
+    "Agent": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent"
+          }
+        }
+      }
+    },
+    "Agent is responding": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenten svarar"
+          }
+        }
+      }
+    },
+    "Agent updates I request": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agentuppdateringar som jag begär"
+          }
+        }
+      }
+    },
+    "All Files": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alla filer"
+          }
+        }
+      }
+    },
+    "Allow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillåt"
+          }
+        }
+      }
+    },
+    "Allow %@?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillåt %@?"
+          }
+        }
+      }
+    },
+    "Allow collaboration": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillåt samarbete"
+          }
+        }
+      }
+    },
+    "Allow in iOS Settings": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillåt i iOS-inställningar"
+          }
+        }
+      }
+    },
+    "Allowed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillåten"
+          }
+        }
+      }
+    },
+    "Appearance": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utseende"
+          }
+        }
+      }
+    },
+    "Archive": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkivera"
+          }
+        }
+      }
+    },
+    "Archived": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkiverad"
+          }
+        }
+      }
+    },
+    "Archived sessions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkiverade sessioner"
+          }
+        }
+      }
+    },
+    "Attachments": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilagor"
+          }
+        }
+      }
+    },
+    "Available only in debug builds. Use this sandbox token with the opt-in notification end-to-end tests.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endast tillgängligt i felsökningsbyggen. Använd denna sandlådetoken med de valfria heltäckande notistesterna."
+          }
+        }
+      }
+    },
+    "Binary file": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Binär fil"
+          }
+        }
+      }
+    },
+    "Branch": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gren"
+          }
+        }
+      }
+    },
+    "Build, protocol and recent state transitions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version, protokoll och senaste statusändringar"
+          }
+        }
+      }
+    },
+    "By project": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Per projekt"
+          }
+        }
+      }
+    },
+    "Can collaborate and approve requests": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan samarbeta och godkänna begäranden"
+          }
+        }
+      }
+    },
+    "Can collaborate in this chat": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan samarbeta i den här chatten"
+          }
+        }
+      }
+    },
+    "Can view this chat": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan visa den här chatten"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avbryt"
+          }
+        }
+      }
+    },
+    "Changed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ändrad"
+          }
+        }
+      }
+    },
+    "Chat shared with you": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En chatt har delats med dig"
+          }
+        }
+      }
+    },
+    "Chats shared with me": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chattar som delas med mig"
+          }
+        }
+      }
+    },
+    "Check the final layout with the keyboard open and a longer prompt.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontrollera den slutliga layouten med tangentbordet öppet och en längre prompt."
+          }
+        }
+      }
+    },
+    "Checking…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontrollerar…"
+          }
+        }
+      }
+    },
+    "Choose Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj Mac"
+          }
+        }
+      }
+    },
+    "Choose what this person can do in this chat.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj vad den här personen kan göra i chatten."
+          }
+        }
+      }
+    },
+    "Claude Code UI": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code-gränssnitt"
+          }
+        }
+      }
+    },
+    "Close": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng"
+          }
+        }
+      }
+    },
+    "Close attachments": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng bilagor"
+          }
+        }
+      }
+    },
+    "Close review": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng granskning"
+          }
+        }
+      }
+    },
+    "Code": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kod"
+          }
+        }
+      }
+    },
+    "Codex UI": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex-gränssnitt"
+          }
+        }
+      }
+    },
+    "Collaboration + approvals": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samarbete + godkännanden"
+          }
+        }
+      }
+    },
+    "Collaborator": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samarbetspartner"
+          }
+        }
+      }
+    },
+    "Collaborator + approvals": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samarbetspartner + godkännanden"
+          }
+        }
+      }
+    },
+    "Collapsed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Infälld"
+          }
+        }
+      }
+    },
+    "Connect": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anslut"
+          }
+        }
+      }
+    },
+    "Connected": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ansluten"
+          }
+        }
+      }
+    },
+    "Connected securely": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Säkert ansluten"
+          }
+        }
+      }
+    },
+    "Connecting": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ansluter"
+          }
+        }
+      }
+    },
+    "Connecting to Mac…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ansluter till Mac…"
+          }
+        }
+      }
+    },
+    "Connecting…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ansluter…"
+          }
+        }
+      }
+    },
+    "Connection": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anslutning"
+          }
+        }
+      }
+    },
+    "Connection diagnostics": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anslutningsdiagnostik"
+          }
+        }
+      }
+    },
+    "Contents": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Innehåll"
+          }
+        }
+      }
+    },
+    "Continue without screenshot": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt utan skärmbild"
+          }
+        }
+      }
+    },
+    "Copied": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopierad"
+          }
+        }
+      }
+    },
+    "Copy APNs test token": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopiera APNs-testtoken"
+          }
+        }
+      }
+    },
+    "Copy code": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopiera kod"
+          }
+        }
+      }
+    },
+    "Copy link": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopiera länk"
+          }
+        }
+      }
+    },
+    "Couldn’t change appearance": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att ändra utseende"
+          }
+        }
+      }
+    },
+    "Couldn’t change terminal theme": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att ändra terminaltema"
+          }
+        }
+      }
+    },
+    "Couldn’t export diagnostics": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att exportera diagnostik"
+          }
+        }
+      }
+    },
+    "Couldn’t load attachments": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att läsa in bilagor"
+          }
+        }
+      }
+    },
+    "Couldn’t open attachment": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att öppna bilagan"
+          }
+        }
+      }
+    },
+    "Couldn’t open session": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att öppna sessionen"
+          }
+        }
+      }
+    },
+    "Couldn’t prepare report": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att förbereda rapporten"
+          }
+        }
+      }
+    },
+    "Couldn’t read changes.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att läsa ändringarna."
+          }
+        }
+      }
+    },
+    "Couldn’t start session": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att starta sessionen"
+          }
+        }
+      }
+    },
+    "Current screen": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktuell skärm"
+          }
+        }
+      }
+    },
+    "Default": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard"
+          }
+        }
+      }
+    },
+    "Default model": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standardmodell"
+          }
+        }
+      }
+    },
+    "Delivery": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leverans"
+          }
+        }
+      }
+    },
+    "Denied": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nekad"
+          }
+        }
+      }
+    },
+    "Deny": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neka"
+          }
+        }
+      }
+    },
+    "Description": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beskrivning"
+          }
+        }
+      }
+    },
+    "Destructive action": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destruktiv åtgärd"
+          }
+        }
+      }
+    },
+    "Development": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utveckling"
+          }
+        }
+      }
+    },
+    "Devices": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enheter"
+          }
+        }
+      }
+    },
+    "Diagnostics": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnostik"
+          }
+        }
+      }
+    },
+    "Diagnostics never include messages, prompts, paths, notification text, device names or credentials. Optional details contain no stable device identifier.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnostik innehåller aldrig meddelanden, prompter, sökvägar, notistexter, enhetsnamn eller inloggningsuppgifter. Valfria uppgifter innehåller ingen beständig enhetsidentifierare."
+          }
+        }
+      }
+    },
+    "Disconnected": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frånkopplad"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klar"
+          }
+        }
+      }
+    },
+    "Expanded": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utfälld"
+          }
+        }
+      }
+    },
+    "Find a file": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hitta en fil"
+          }
+        }
+      }
+    },
+    "Finding attachments…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Söker efter bilagor…"
+          }
+        }
+      }
+    },
+    "For your own Mac, open Skalman → Settings → Remote Access and scan the pairing code. You can also paste a one-chat link someone shared with you. Owner pairing can manage your Mac; a shared-chat link never can.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För din egen Mac öppnar du Skalman → Inställningar → Fjärråtkomst och skannar parkopplingskoden. Du kan också klistra in en länk till en enskild chatt som någon har delat med dig. En ägarparkoppling kan hantera din Mac, men en delad chattlänk kan aldrig göra det."
+          }
+        }
+      }
+    },
+    "Forget %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Glöm %@"
+          }
+        }
+      }
+    },
+    "Forget %@?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Glöm %@?"
+          }
+        }
+      }
+    },
+    "Forget Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Glöm Mac-dator"
+          }
+        }
+      }
+    },
+    "Get a quiet heads-up for permission requests, shared chats, and updates you ask an agent to send.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Få en diskret avisering om behörighetsbegäranden, delade chattar och uppdateringar som du ber en agent att skicka."
+          }
+        }
+      }
+    },
+    "Git review": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git-granskning"
+          }
+        }
+      }
+    },
+    "Idle": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inaktiv"
+          }
+        }
+      }
+    },
+    "Images and PDFs mentioned by this session will appear here.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilder och PDF:er som nämns i den här sessionen visas här."
+          }
+        }
+      }
+    },
+    "Include current screen": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inkludera aktuell skärm"
+          }
+        }
+      }
+    },
+    "Included": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingår"
+          }
+        }
+      }
+    },
+    "Inherit (%@)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ärv (%@)"
+          }
+        }
+      }
+    },
+    "Interface": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gränssnitt"
+          }
+        }
+      }
+    },
+    "Its private link will be removed from this iPhone. You can pair it again from the Mac.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den privata länken tas bort från denna iPhone. Du kan parkoppla den igen från Mac-datorn."
+          }
+        }
+      }
+    },
+    "Know when your code needs you": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Få veta när din kod behöver dig"
+          }
+        }
+      }
+    },
+    "Last Turn": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senaste turen"
+          }
+        }
+      }
+    },
+    "Link ready": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Länken är klar"
+          }
+        }
+      }
+    },
+    "Live only": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endast liveanslutning"
+          }
+        }
+      }
+    },
+    "Load earlier messages": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läs in tidigare meddelanden"
+          }
+        }
+      }
+    },
+    "Loading earlier messages…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser in tidigare meddelanden…"
+          }
+        }
+      }
+    },
+    "Loading preview…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser in förhandsvisning…"
+          }
+        }
+      }
+    },
+    "Loading sessions from your Mac…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser in sessioner från din Mac…"
+          }
+        }
+      }
+    },
+    "Loading usage…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser in användning…"
+          }
+        }
+      }
+    },
+    "Loads the previous part of this conversation": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser in den föregående delen av konversationen"
+          }
+        }
+      }
+    },
+    "Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac"
+          }
+        }
+      }
+    },
+    "Manage": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hantera"
+          }
+        }
+      }
+    },
+    "May contain code or chat content": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan innehålla kod eller chattinnehåll"
+          }
+        }
+      }
+    },
+    "Message the coding agent…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skriv till kodagenten…"
+          }
+        }
+      }
+    },
+    "Model": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modell"
+          }
+        }
+      }
+    },
+    "Model, locale, power, display and connection state": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modell, språk, ström, skärm och anslutningsstatus"
+          }
+        }
+      }
+    },
+    "Most recent": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senaste först"
+          }
+        }
+      }
+    },
+    "Native": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbyggt"
+          }
+        }
+      }
+    },
+    "Native (Experimental)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbyggt (experimentellt)"
+          }
+        }
+      }
+    },
+    "Native · Experimental": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbyggt · Experimentellt"
+          }
+        }
+      }
+    },
+    "Native, experimental": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbyggt, experimentellt"
+          }
+        }
+      }
+    },
+    "Needs attention": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kräver uppmärksamhet"
+          }
+        }
+      }
+    },
+    "New session": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny session"
+          }
+        }
+      }
+    },
+    "No Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen Mac"
+          }
+        }
+      }
+    },
+    "No archived sessions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga arkiverade sessioner"
+          }
+        }
+      }
+    },
+    "No attachments yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga bilagor ännu"
+          }
+        }
+      }
+    },
+    "No changes.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga ändringar."
+          }
+        }
+      }
+    },
+    "No preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen förhandsvisning"
+          }
+        }
+      }
+    },
+    "No sessions yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga sessioner ännu"
+          }
+        }
+      }
+    },
+    "No turn recorded yet. A baseline is captured when the agent starts working.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen tur har registrerats ännu. En baslinje sparas när agenten börjar arbeta."
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen"
+          }
+        }
+      }
+    },
+    "Not a git repository.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte ett Git-arkiv."
+          }
+        }
+      }
+    },
+    "Not connected": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte ansluten"
+          }
+        }
+      }
+    },
+    "Not now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte nu"
+          }
+        }
+      }
+    },
+    "Not registered": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte registrerad"
+          }
+        }
+      }
+    },
+    "Not requested": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte begärd"
+          }
+        }
+      }
+    },
+    "Nothing to review": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inget att granska"
+          }
+        }
+      }
+    },
+    "Notice": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meddelande"
+          }
+        }
+      }
+    },
+    "Notification status unavailable": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notisstatus är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "Notifications": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notiser"
+          }
+        }
+      }
+    },
+    "Notifications are on": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notiser är aktiverade"
+          }
+        }
+      }
+    },
+    "Notify me about": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avisera mig om"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "Offline": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frånkopplad"
+          }
+        }
+      }
+    },
+    "Online": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Online"
+          }
+        }
+      }
+    },
+    "Only the first %lld files are shown.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endast de första %lld filerna visas."
+          }
+        }
+      }
+    },
+    "Organize": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ordna"
+          }
+        }
+      }
+    },
+    "Other": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Övrigt"
+          }
+        }
+      }
+    },
+    "Pair another Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parkoppla en annan Mac"
+          }
+        }
+      }
+    },
+    "Pair your own Mac, or open a chat someone shared with you.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parkoppla din egen Mac eller öppna en chatt som någon har delat med dig."
+          }
+        }
+      }
+    },
+    "Paste": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klistra in"
+          }
+        }
+      }
+    },
+    "Paste an owner pairing link or a shared-chat link below.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klistra in en ägarparkopplingslänk eller en delad chattlänk nedan."
+          }
+        }
+      }
+    },
+    "Permission": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behörighet"
+          }
+        }
+      }
+    },
+    "Permission notifications open the exact chat for review. They never put Allow or Deny on the lock screen.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behörighetsnotiser öppnar rätt chatt för granskning. De visar aldrig Tillåt eller Neka på låsskärmen."
+          }
+        }
+      }
+    },
+    "Permission requests": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behörighetsbegäranden"
+          }
+        }
+      }
+    },
+    "Pin": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fäst"
+          }
+        }
+      }
+    },
+    "Project": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projekt"
+          }
+        }
+      }
+    },
+    "Provisional": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Provisorisk"
+          }
+        }
+      }
+    },
+    "QR scanning isn’t available on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "QR-skanning är inte tillgänglig på den här enheten."
+          }
+        }
+      }
+    },
+    "Reading changes…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser ändringar…"
+          }
+        }
+      }
+    },
+    "Reading repository…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser in kodarkivet…"
+          }
+        }
+      }
+    },
+    "Reasoning": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resonemang"
+          }
+        }
+      }
+    },
+    "Reconnect": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anslut igen"
+          }
+        }
+      }
+    },
+    "Refresh attachments": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppdatera bilagor"
+          }
+        }
+      }
+    },
+    "Refresh review": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppdatera granskning"
+          }
+        }
+      }
+    },
+    "Registered": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Registrerad"
+          }
+        }
+      }
+    },
+    "Remote access options": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alternativ för fjärråtkomst"
+          }
+        }
+      }
+    },
+    "Remote action failed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fjärråtgärden misslyckades"
+          }
+        }
+      }
+    },
+    "Remote control": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fjärrstyrning"
+          }
+        }
+      }
+    },
+    "Remote protocol": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fjärrprotokoll"
+          }
+        }
+      }
+    },
+    "Remote terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fjärrterminal"
+          }
+        }
+      }
+    },
+    "Rename": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt namn"
+          }
+        }
+      }
+    },
+    "Rename session": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt namn på session"
+          }
+        }
+      }
+    },
+    "Report a problem": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapportera ett problem"
+          }
+        }
+      }
+    },
+    "Report a problem?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapportera ett problem?"
+          }
+        }
+      }
+    },
+    "Reports contain build, protocol and connection events. They exclude messages, prompts, file paths, notification text and credentials.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapporter innehåller version, protokoll och anslutningshändelser. De utesluter meddelanden, prompter, filsökvägar, notistexter och inloggningsuppgifter."
+          }
+        }
+      }
+    },
+    "Restore": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ"
+          }
+        }
+      }
+    },
+    "Resuming on your Mac…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återupptar på din Mac…"
+          }
+        }
+      }
+    },
+    "Review comparison, %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jämförelse för granskning, %@"
+          }
+        }
+      }
+    },
+    "Review this request on the Mac.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granska begäran på Mac-datorn."
+          }
+        }
+      }
+    },
+    "Run connection checks": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kör anslutningskontroller"
+          }
+        }
+      }
+    },
+    "Runs on %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Körs på %@"
+          }
+        }
+      }
+    },
+    "Scan the code shown on your Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skanna koden som visas på din Mac"
+          }
+        }
+      }
+    },
+    "Screenshot that will be shared": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skärmbild som kommer att delas"
+          }
+        }
+      }
+    },
+    "Scroll to the end of the diff": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rulla till slutet av skillnaden"
+          }
+        }
+      }
+    },
+    "Search sessions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök sessioner"
+          }
+        }
+      }
+    },
+    "Session actions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessionsåtgärder"
+          }
+        }
+      }
+    },
+    "Session closed on Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessionen stängdes på Mac-datorn"
+          }
+        }
+      }
+    },
+    "Session ended": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessionen avslutades"
+          }
+        }
+      }
+    },
+    "Session name": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessionsnamn"
+          }
+        }
+      }
+    },
+    "Session unavailable": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessionen är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "Sessions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessioner"
+          }
+        }
+      }
+    },
+    "Sessions you archive from your Mac or iPhone appear here.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessioner som du arkiverar från din Mac eller iPhone visas här."
+          }
+        }
+      }
+    },
+    "Share chat": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela chatt"
+          }
+        }
+      }
+    },
+    "Share diagnostics only": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela endast diagnostik"
+          }
+        }
+      }
+    },
+    "Share link": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela länk"
+          }
+        }
+      }
+    },
+    "Share report": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela rapport"
+          }
+        }
+      }
+    },
+    "Share session": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela session"
+          }
+        }
+      }
+    },
+    "Share “%@”": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela “%@”"
+          }
+        }
+      }
+    },
+    "Share “Remote access review”": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela ”Granskning av fjärråtkomst”"
+          }
+        }
+      }
+    },
+    "Shared chat · %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delad chatt · %@"
+          }
+        }
+      }
+    },
+    "Show again": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa igen"
+          }
+        }
+      }
+    },
+    "Show in %@?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa i %@?"
+          }
+        }
+      }
+    },
+    "Shows tool output": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visar verktygsutdata"
+          }
+        }
+      }
+    },
+    "Skalman Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skalman på Mac"
+          }
+        }
+      }
+    },
+    "Staged": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förberedda"
+          }
+        }
+      }
+    },
+    "Start a Claude Code or Codex session on your Mac.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta en Claude Code- eller Codex-session på din Mac."
+          }
+        }
+      }
+    },
+    "Start one from this iPhone or your Mac.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta en från denna iPhone eller din Mac."
+          }
+        }
+      }
+    },
+    "Start session": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta session"
+          }
+        }
+      }
+    },
+    "Starts an agent on the selected Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startar en agent på vald Mac"
+          }
+        }
+      }
+    },
+    "Status": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status"
+          }
+        }
+      }
+    },
+    "Stop sharing": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sluta dela"
+          }
+        }
+      }
+    },
+    "Switch UI": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt gränssnitt"
+          }
+        }
+      }
+    },
+    "Switch UI?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt gränssnitt?"
+          }
+        }
+      }
+    },
+    "Switch to %@?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt till %@?"
+          }
+        }
+      }
+    },
+    "Temporary": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillfällig"
+          }
+        }
+      }
+    },
+    "Terminal theme": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminaltema"
+          }
+        }
+      }
+    },
+    "That input is too large to send in one action.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Indatan är för stor för att skickas i en åtgärd."
+          }
+        }
+      }
+    },
+    "That isn’t a valid secure Skalman private link.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det där är inte en giltig säker privat Skalman-länk."
+          }
+        }
+      }
+    },
+    "The Mac returned HTTP %lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac-datorn returnerade HTTP %lld."
+          }
+        }
+      }
+    },
+    "The Mac returned an unreadable response.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac-datorn returnerade ett oläsbart svar."
+          }
+        }
+      }
+    },
+    "The agent restarts in the other UI and resumes this same session. Work currently in progress is interrupted.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenten startar om i det andra gränssnittet och återupptar samma session. Pågående arbete avbryts."
+          }
+        }
+      }
+    },
+    "The agent restarts in the selected UI and resumes this same session. Work currently in progress is interrupted.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenten startar om i det valda gränssnittet och återupptar samma session. Pågående arbete avbryts."
+          }
+        }
+      }
+    },
+    "The current screen couldn’t be captured": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att ta en skärmbild av den aktuella skärmen"
+          }
+        }
+      }
+    },
+    "The image could not be decoded.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilden kunde inte avkodas."
+          }
+        }
+      }
+    },
+    "The invite works once. After acceptance, access lasts until you stop sharing and never extends to another chat.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbjudan fungerar en gång. Efter godkännande varar åtkomsten tills du slutar dela och omfattar aldrig någon annan chatt."
+          }
+        }
+      }
+    },
+    "The link may have expired or the Mac may be offline.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Länken kan ha gått ut eller så kan Mac-datorn vara offline."
+          }
+        }
+      }
+    },
+    "The report files could not be prepared.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att förbereda rapportfilerna."
+          }
+        }
+      }
+    },
+    "The support report could not be prepared.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att förbereda supportrapporten."
+          }
+        }
+      }
+    },
+    "Themed dialogs": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temaanpassade dialogrutor"
+          }
+        }
+      }
+    },
+    "This Mac can currently deliver while the live connection is open, but APNs provider delivery is not configured.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac-datorn kan för närvarande leverera medan liveanslutningen är öppen, men leverans via APNs-leverantör är inte konfigurerad."
+          }
+        }
+      }
+    },
+    "This file has no text preview.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filen har ingen textförhandsvisning."
+          }
+        }
+      }
+    },
+    "This invitation is expired or already used, or this membership was revoked.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbjudan har gått ut eller redan använts, eller så har medlemskapet återkallats."
+          }
+        }
+      }
+    },
+    "This link is view only.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Länken ger endast visningsåtkomst."
+          }
+        }
+      }
+    },
+    "This name is shared with the Mac.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Namnet delas med Mac-datorn."
+          }
+        }
+      }
+    },
+    "This single-use invitation opens only this chat and expires in 24 hours if unused. An accepted member stays until you stop sharing. Permission approval is a separate right for people you trust.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Engångsinbjudan öppnar endast den här chatten och går ut efter 24 timmar om den inte används. En godkänd medlem stannar tills du slutar dela. Rätten att godkänna behörigheter ges separat till personer du litar på."
+          }
+        }
+      }
+    },
+    "This version of Skalman can’t connect to this Mac. Update Skalman and try again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här versionen av Skalman kan inte ansluta till Mac-datorn. Uppdatera Skalman och försök igen."
+          }
+        }
+      }
+    },
+    "Tool": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verktyg"
+          }
+        }
+      }
+    },
+    "Tool is running": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verktyget körs"
+          }
+        }
+      }
+    },
+    "Try Again": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Försök igen"
+          }
+        }
+      }
+    },
+    "Turn on": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktivera"
+          }
+        }
+      }
+    },
+    "Turn on notifications": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktivera notiser"
+          }
+        }
+      }
+    },
+    "Turning on…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiverar…"
+          }
+        }
+      }
+    },
+    "Unknown": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okänt"
+          }
+        }
+      }
+    },
+    "Unpin": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lossa"
+          }
+        }
+      }
+    },
+    "Unstaged": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ej förberedda"
+          }
+        }
+      }
+    },
+    "Unused invite expires %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oanvänd inbjudan går ut %@"
+          }
+        }
+      }
+    },
+    "Update Skalman on the Mac to reconnect": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppdatera Skalman på Mac-datorn för att ansluta igen"
+          }
+        }
+      }
+    },
+    "Update this app to reconnect": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppdatera appen för att ansluta igen"
+          }
+        }
+      }
+    },
+    "Usage unavailable": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Användning är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "View only": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endast visning"
+          }
+        }
+      }
+    },
+    "Waiting": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Väntar"
+          }
+        }
+      }
+    },
+    "What happened, and what did you expect?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vad hände och vad förväntade du dig?"
+          }
+        }
+      }
+    },
+    "Working": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arbetar"
+          }
+        }
+      }
+    },
+    "Working…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arbetar…"
+          }
+        }
+      }
+    },
+    "Your code, within reach": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Din kod, inom räckhåll"
+          }
+        }
+      }
+    },
+    "Your description is shared exactly as written in a separate text file.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Din beskrivning delas exakt som den är skriven i en separat textfil."
+          }
+        }
+      }
+    },
+    "code": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "kod"
+          }
+        }
+      }
+    },
+    "esc": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "esc"
+          }
+        }
+      }
+    },
+    "file": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "fil"
+          }
+        }
+      }
+    },
+    "files": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "filer"
+          }
+        }
+      }
+    },
+    "https://…/#private-link": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "https://…/#privat-lank"
+          }
+        }
+      }
+    },
+    "now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "nu"
+          }
+        }
+      }
+    },
+    "or paste a private link": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "eller klistra in en privat länk"
+          }
+        }
+      }
+    },
+    "tab": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tab"
+          }
+        }
+      }
+    },
+    "this Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "den här Mac-datorn"
+          }
+        }
+      }
+    },
+    "… file preview shortened": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "… filförhandsvisningen har kortats"
+          }
+        }
+      }
+    },
+    "−%@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "−%@"
+          }
+        }
+      }
+    },
+    "−%lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "−%lld"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.2"
+}

@@ -10,9 +10,16 @@ import UIKit
 /// The shape follows the mobile review reference: a comparison picker in the title, totals,
 /// changed/all-file segments, collapsible file cards, and a stacked diff that wraps long lines.
 struct RemoteGitReviewView: View {
-    private enum Section: String, CaseIterable {
-        case changed = "Changed"
-        case allFiles = "All Files"
+    private enum Section: CaseIterable {
+        case changed
+        case allFiles
+
+        var title: String {
+            switch self {
+            case .changed: return MobileL10n.string("Changed")
+            case .allFiles: return MobileL10n.string("All Files")
+            }
+        }
     }
 
     let session: RemoteSessionSummaryDTO
@@ -39,7 +46,7 @@ struct RemoteGitReviewView: View {
         VStack(spacing: 0) {
             Picker("Contents", selection: $section) {
                 ForEach(Section.allCases, id: \.self) { section in
-                    Text(section.rawValue).tag(section)
+                    Text(section.title).tag(section)
                 }
             }
             .pickerStyle(.segmented)
@@ -140,7 +147,7 @@ struct RemoteGitReviewView: View {
         } else if let errorMessage, snapshot == nil {
             unavailableView(errorMessage)
         } else if let snapshot, snapshot.files.isEmpty {
-            unavailableView(snapshot.message ?? "No changes.")
+            unavailableView(message(for: snapshot))
         } else if let snapshot {
             RemoteDiffCollectionView(
                 document: snapshot.diffDocument,
@@ -257,7 +264,7 @@ struct RemoteGitReviewView: View {
         VStack(spacing: 12) {
             Spacer()
             ProgressView()
-            Text(label)
+            Text(MobileL10n.string(label))
                 .font(.subheadline)
                 .foregroundStyle(theme.secondaryLabel)
             Spacer()
@@ -276,6 +283,16 @@ struct RemoteGitReviewView: View {
             }
         }
         .foregroundStyle(theme.secondaryLabel)
+    }
+
+    private func message(for snapshot: RemoteGitReviewSnapshotDTO) -> String {
+        if let localization = snapshot.messageLocalization {
+            return MobileL10n.string(
+                localization.key,
+                arguments: localization.arguments
+            )
+        }
+        return snapshot.message ?? MobileL10n.string("No changes.")
     }
 
     private func reviewBottomControls(
@@ -664,7 +681,11 @@ private struct RemoteGitReviewSummaryPill: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Text("\(snapshot.files.count) \(snapshot.files.count == 1 ? "file" : "files")")
+            Text(MobileL10n.string(
+                "%lld %@",
+                snapshot.files.count,
+                MobileL10n.string(snapshot.files.count == 1 ? "file" : "files")
+            ))
                 .foregroundStyle(theme.secondaryLabel)
             Text("+\(compact(snapshot.added))")
                 .foregroundStyle(theme.positive)
@@ -683,8 +704,12 @@ private struct RemoteGitReviewSummaryPill: View {
         .shadow(color: theme.ground.opacity(0.38), radius: 12, y: 5)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "\(snapshot.files.count) changed files, "
-                + "\(snapshot.added) additions, \(snapshot.removed) deletions"
+            MobileL10n.string(
+                "%lld changed files, %lld additions, %lld deletions",
+                snapshot.files.count,
+                snapshot.added,
+                snapshot.removed
+            )
         )
     }
 
@@ -810,10 +835,10 @@ private struct RemoteRepositoryFileView: View {
 private extension RemoteGitReviewMode {
     var title: String {
         switch self {
-        case .unstaged: return "Unstaged"
-        case .staged: return "Staged"
-        case .branch: return "Branch"
-        case .lastTurn: return "Last Turn"
+        case .unstaged: return MobileL10n.string("Unstaged")
+        case .staged: return MobileL10n.string("Staged")
+        case .branch: return MobileL10n.string("Branch")
+        case .lastTurn: return MobileL10n.string("Last Turn")
         }
     }
 }

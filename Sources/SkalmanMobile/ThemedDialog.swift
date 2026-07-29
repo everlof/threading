@@ -1,6 +1,34 @@
 import SwiftUI
 import UIKit
 
+/// The explicit localization boundary for app-owned strings that must cross a `String` API.
+///
+/// SwiftUI localizes literal `LocalizedStringKey` values automatically. UIKit, shared dialog
+/// models, error descriptions, and computed labels do not, so those paths resolve through this
+/// helper instead. Human-readable English source text is the catalog key and remains the fallback
+/// when a locale or individual translation is unavailable.
+enum MobileL10n {
+    static func string(_ key: String, _ arguments: CVarArg...) -> String {
+        string(key, arguments: arguments)
+    }
+
+    static func string(_ key: String, arguments: [String]) -> String {
+        string(key, arguments: arguments.map { $0 as CVarArg })
+    }
+
+    private static func string(_ key: String, arguments: [CVarArg]) -> String {
+        let format = NSLocalizedString(
+            key,
+            tableName: "Localizable",
+            bundle: .main,
+            value: key,
+            comment: ""
+        )
+        guard !arguments.isEmpty else { return format }
+        return String(format: format, locale: Locale.current, arguments: arguments)
+    }
+}
+
 /// A semantic action shown by ``themedAlert`` or ``themedConfirmationDialog``.
 ///
 /// Add new dialog capabilities to this primitive as soon as a real use case appears. Internal
@@ -29,7 +57,7 @@ struct ThemedDialogAction: Identifiable {
         isEnabled: Bool = true,
         perform: @escaping () -> Void = {}
     ) {
-        self.title = title
+        self.title = MobileL10n.string(title)
         self.systemImage = systemImage
         self.role = role
         self.isEnabled = isEnabled
@@ -44,7 +72,7 @@ struct ThemedDialogTextField {
     let text: Binding<String>
 
     init(_ title: String, text: Binding<String>) {
-        self.title = title
+        self.title = MobileL10n.string(title)
         self.text = text
     }
 }
@@ -307,7 +335,9 @@ private struct ThemedDialogPresentation: View {
         }
         .opacity(action.isEnabled ? 1 : 0.42)
         .disabled(!action.isEnabled)
-        .accessibilityHint(action.role == .destructive ? "Destructive action" : "")
+        .accessibilityHint(
+            action.role == .destructive ? MobileL10n.string("Destructive action") : ""
+        )
     }
 
     private var titleAlignment: Alignment {
@@ -354,8 +384,8 @@ extension View {
         modifier(
             ThemedDialogModifier(
                 isPresented: isPresented,
-                title: title,
-                message: message,
+                title: MobileL10n.string(title),
+                message: message.map { MobileL10n.string($0) },
                 style: .alert,
                 textField: textField,
                 actions: actions
@@ -373,8 +403,8 @@ extension View {
         modifier(
             ThemedDialogModifier(
                 isPresented: isPresented,
-                title: title,
-                message: message,
+                title: MobileL10n.string(title),
+                message: message.map { MobileL10n.string($0) },
                 style: .confirmation,
                 textField: nil,
                 actions: actions

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
-  <title>Skalman Remote</title>
+  <title data-i18n="app.title">Skalman Remote</title>
   <!--
     Vendored, pinned: xterm.js 5.3.0 (MIT).
       xterm.js  sha256 f0aea0f75f48559013ae6643c2479dd737d26da42d5524e6d2b70915ae6523c7
@@ -16,20 +16,27 @@
 </head>
 <body>
   <header id="bar">
-    <button id="back" hidden aria-label="Back to sessions">‹</button>
-    <span id="title">Skalman Remote</span>
+    <button id="back" hidden aria-label="Back to sessions" data-i18n-aria-label="nav.back">‹</button>
+    <span id="title" data-i18n="app.title">Skalman Remote</span>
     <span id="badge" hidden></span>
   </header>
 
   <main id="content">
-    <section id="status" class="pad" role="status" aria-live="polite">Connecting…</section>
+    <section id="status" class="pad" role="status" aria-live="polite" data-i18n="status.connecting">Connecting…</section>
     <ul id="sessions" hidden></ul>
     <div id="terminal" hidden></div>
     <section id="conversation" hidden>
       <div id="conversationRows" aria-live="polite"></div>
       <form id="composer">
-        <textarea id="prompt" rows="1" placeholder="Add feedback…" aria-label="Message"></textarea>
-        <button id="send" type="submit" aria-label="Send" disabled>↑</button>
+        <textarea
+          id="prompt"
+          rows="1"
+          placeholder="Add feedback…"
+          aria-label="Message"
+          data-i18n-placeholder="composer.placeholder"
+          data-i18n-aria-label="composer.message"
+        ></textarea>
+        <button id="send" type="submit" aria-label="Send" data-i18n-aria-label="composer.send" disabled>↑</button>
       </form>
     </section>
   </main>

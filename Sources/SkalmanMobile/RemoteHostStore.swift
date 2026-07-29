@@ -20,7 +20,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
     var isOwnerDevice: Bool { scope == nil || scope == "all" }
 
     var menuTitle: String {
-        isOwnerDevice ? name : "\(name) · Shared chat"
+        isOwnerDevice ? name : MobileL10n.string("%@ · Shared chat", name)
     }
 }
 

@@ -883,13 +883,13 @@ private final class RemoteCodeBlockView: UIView {
         languageLabel.font = .preferredFont(forTextStyle: .caption1)
         languageLabel.adjustsFontForContentSizeCategory = true
         languageLabel.textColor = theme.uiSecondaryLabel
-        languageLabel.text = language.isEmpty ? "code" : language
+        languageLabel.text = language.isEmpty ? MobileL10n.string("code") : language
 
         let copy = UIButton(type: .system)
         copy.translatesAutoresizingMaskIntoConstraints = false
         copy.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
         copy.tintColor = theme.uiSecondaryLabel
-        copy.accessibilityLabel = "Copy code"
+        copy.accessibilityLabel = MobileL10n.string("Copy code")
         copy.addAction(UIAction { _ in UIPasteboard.general.string = code }, for: .touchUpInside)
 
         let scroll = UIScrollView()
@@ -982,7 +982,7 @@ private final class RemoteExpandableMessageView: UIView {
         stack.spacing = MobileDesign.Spacing.small
         let button = UIButton(type: .system)
         button.contentHorizontalAlignment = .leading
-        button.setTitle(title, for: .normal)
+        button.setTitle(MobileL10n.string(title), for: .normal)
         button.setImage(
             UIImage(systemName: isExpanded ? "chevron.down" : "chevron.right"),
             for: .normal
@@ -991,7 +991,7 @@ private final class RemoteExpandableMessageView: UIView {
         button.setTitleColor(theme.uiSecondaryLabel, for: .normal)
         button.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
         button.titleLabel?.adjustsFontForContentSizeCategory = true
-        button.accessibilityValue = isExpanded ? "Expanded" : "Collapsed"
+        button.accessibilityValue = MobileL10n.string(isExpanded ? "Expanded" : "Collapsed")
         button.addAction(UIAction { _ in toggle() }, for: .touchUpInside)
         stack.addArrangedSubview(button)
         if isExpanded {
@@ -1038,8 +1038,8 @@ private final class RemoteToolMessageView: UIView {
         stack.spacing = MobileDesign.Spacing.small
 
         var configuration = UIButton.Configuration.plain()
-        configuration.title = row.summary ?? "Working…"
-        configuration.subtitle = row.toolName ?? "Tool"
+        configuration.title = row.summary ?? MobileL10n.string("Working…")
+        configuration.subtitle = row.toolName ?? MobileL10n.string("Tool")
         configuration.image = UIImage(systemName: Self.symbol(for: row.toolName))
         configuration.imagePadding = MobileDesign.Spacing.medium
         configuration.titleAlignment = .leading
@@ -1047,8 +1047,10 @@ private final class RemoteToolMessageView: UIView {
         configuration.contentInsets = .zero
         let button = UIButton(configuration: configuration)
         button.contentHorizontalAlignment = .leading
-        button.accessibilityHint = row.result == nil ? "Tool is running" : "Shows tool output"
-        button.accessibilityValue = isExpanded ? "Expanded" : "Collapsed"
+        button.accessibilityHint = MobileL10n.string(
+            row.result == nil ? "Tool is running" : "Shows tool output"
+        )
+        button.accessibilityValue = MobileL10n.string(isExpanded ? "Expanded" : "Collapsed")
         button.addAction(UIAction { _ in toggle() }, for: .touchUpInside)
         stack.addArrangedSubview(button)
 
@@ -1124,7 +1126,7 @@ private final class RemoteNoticeMessageView: UIView {
         label.font = .preferredFont(forTextStyle: .footnote)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = row.isError ? theme.uiNegative : theme.uiSecondaryLabel
-        label.text = row.text ?? "Notice"
+        label.text = row.text ?? MobileL10n.string("Notice")
         stack.addArrangedSubview(image)
         stack.addArrangedSubview(label)
         addSubview(stack)
@@ -1155,7 +1157,7 @@ private final class RemoteStreamingMessageView: UIView {
             textView.topAnchor.constraint(equalTo: topAnchor),
             textView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        accessibilityLabel = "Agent is responding"
+        accessibilityLabel = MobileL10n.string("Agent is responding")
     }
 
     @available(*, unavailable)
@@ -1204,7 +1206,7 @@ private final class RemoteConversationPermissionCell: UICollectionViewCell {
         title.font = .preferredFont(forTextStyle: .headline)
         title.adjustsFontForContentSizeCategory = true
         title.textColor = theme.uiLabel
-        title.text = "Allow \(permission.toolName)?"
+        title.text = MobileL10n.string("Allow %@?", permission.toolName)
         stack.addArrangedSubview(title)
 
         if !permission.summary.isEmpty {
@@ -1228,14 +1230,14 @@ private final class RemoteConversationPermissionCell: UICollectionViewCell {
             buttons.distribution = .fillEqually
             buttons.spacing = MobileDesign.Spacing.medium
             buttons.addArrangedSubview(Self.actionButton(
-                title: "Deny",
+                title: MobileL10n.string("Deny"),
                 fill: theme.uiControlResting,
                 foreground: theme.uiNegative,
                 radius: theme.controlRadius,
                 action: { decide(false) }
             ))
             buttons.addArrangedSubview(Self.actionButton(
-                title: "Allow",
+                title: MobileL10n.string("Allow"),
                 fill: theme.uiAccent,
                 foreground: theme.uiGround,
                 radius: theme.controlRadius,
@@ -1248,7 +1250,7 @@ private final class RemoteConversationPermissionCell: UICollectionViewCell {
             notice.font = .preferredFont(forTextStyle: .subheadline)
             notice.adjustsFontForContentSizeCategory = true
             notice.textColor = theme.uiSecondaryLabel
-            notice.text = permission.unavailableReason ?? "Review this request on the Mac."
+            notice.text = MobileL10n.string("Review this request on the Mac.")
             stack.addArrangedSubview(notice)
         }
 
@@ -1468,14 +1470,18 @@ private final class RemoteConversationHistoryCell: UICollectionViewCell {
         load: @escaping () -> Void
     ) {
         var configuration = UIButton.Configuration.plain()
-        configuration.title = isLoading ? "Loading earlier messages…" : "Load earlier messages"
+        configuration.title = MobileL10n.string(
+            isLoading ? "Loading earlier messages…" : "Load earlier messages"
+        )
         configuration.image = UIImage(systemName: isLoading ? "clock.arrow.circlepath" : "arrow.up")
         configuration.imagePadding = MobileDesign.Spacing.small
         configuration.baseForegroundColor = theme.uiSecondaryLabel
         let button = UIButton(configuration: configuration)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isEnabled = !isLoading
-        button.accessibilityHint = "Loads the previous part of this conversation"
+        button.accessibilityHint = MobileL10n.string(
+            "Loads the previous part of this conversation"
+        )
         button.addAction(UIAction { _ in load() }, for: .touchUpInside)
         contentView.addSubview(button)
         self.button = button

@@ -372,6 +372,8 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Skalman/Resources/Info.plist,
+				SkalmanMobile/Localizable.xcstrings,
+				SkalmanMobile/SkalmanMobile-InfoPlist.xcstrings,
 				SkalmanMobile/PairingView.swift,
 				SkalmanMobile/MobileIssueReporting.swift,
 				SkalmanMobile/RemoteAppModel.swift,

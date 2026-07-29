@@ -7,8 +7,8 @@ private enum SessionOrganization: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .project: return "By project"
-        case .recent: return "Most recent"
+        case .project: return MobileL10n.string("By project")
+        case .recent: return MobileL10n.string("Most recent")
         }
     }
 
@@ -86,7 +86,7 @@ struct SessionDashboard: View {
 
     private var groupedSessions: [(String, [RemoteSessionSummaryDTO])] {
         Dictionary(grouping: sessions, by: \.projectName)
-            .map { ($0.key.isEmpty ? "Other" : $0.key, $0.value) }
+            .map { ($0.key.isEmpty ? MobileL10n.string("Other") : $0.key, $0.value) }
             .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
     }
 
@@ -107,7 +107,7 @@ struct SessionDashboard: View {
                 }
 
                 HStack {
-                    Text(showsArchived ? "Archived" : "Sessions")
+                    Text(MobileL10n.string(showsArchived ? "Archived" : "Sessions"))
                         .font(.title3.weight(.medium))
                     Spacer()
                     Text("\(sessions.count)")
@@ -206,7 +206,10 @@ struct SessionDashboard: View {
     private var dashboardDialogs: some View {
         dashboardSheets
         .themedConfirmationDialog(
-            "Forget \(model.activeHost?.name ?? "this Mac")?",
+            MobileL10n.string(
+                "Forget %@?",
+                model.activeHost?.name ?? MobileL10n.string("this Mac")
+            ),
             message:
                 "Its private link will be removed from this iPhone. "
                 + "You can pair it again from the Mac.",
@@ -225,7 +228,10 @@ struct SessionDashboard: View {
         )
         .themedConfirmationDialog(
             surfaceChangeRequest.map {
-                "Show in \(surfaceTitle($0.surface, session: $0.session))?"
+                MobileL10n.string(
+                    "Show in %@?",
+                    surfaceTitle($0.surface, session: $0.session)
+                )
             } ?? "Switch UI?",
             message:
                 "The agent restarts in the selected UI and resumes this same session. "
@@ -248,14 +254,10 @@ struct SessionDashboard: View {
             ]
         )
         .themedConfirmationDialog(
-            sharingSession.map { "Share “\($0.title)”" } ?? "Share session",
-            message:
-                "This single-use invitation opens only this chat and expires in 24 hours if "
-                + "unused. An accepted member stays until you stop sharing. Permission "
-                + "approval is a separate right for people you trust."
-                + (sharingSession?.isAvailable == false
-                    ? " Start the chat first to create a view-only link."
-                    : ""),
+            sharingSession.map {
+                MobileL10n.string("Share “%@”", $0.title)
+            } ?? "Share session",
+            message: sharingDialogMessage,
             isPresented: Binding(
                 get: { sharingSession != nil },
                 set: { if !$0 { sharingSession = nil } }
@@ -377,7 +379,9 @@ struct SessionDashboard: View {
                             showsArchived.toggle()
                         } label: {
                             Label(
-                                showsArchived ? "Active sessions" : "Archived sessions",
+                                MobileL10n.string(
+                                    showsArchived ? "Active sessions" : "Archived sessions"
+                                ),
                                 systemImage: showsArchived ? "tray" : "archivebox"
                             )
                         }
@@ -494,8 +498,24 @@ struct SessionDashboard: View {
     }
 
     private func surfaceTitle(_ surface: String, session: RemoteSessionSummaryDTO) -> String {
-        if surface == "conversation" { return "Native (Experimental)" }
-        return session.agentKind == "claude" ? "Claude Code UI" : "Codex UI"
+        if surface == "conversation" {
+            return MobileL10n.string("Native (Experimental)")
+        }
+        return MobileL10n.string(session.agentKind == "claude" ? "Claude Code UI" : "Codex UI")
+    }
+
+    private var sharingDialogMessage: String {
+        var result = MobileL10n.string(
+            "This single-use invitation opens only this chat and expires in 24 hours if unused. "
+                + "An accepted member stays until you stop sharing. Permission approval is a "
+                + "separate right for people you trust."
+        )
+        if sharingSession?.isAvailable == false {
+            result += MobileL10n.string(
+                " Start the chat first to create a view-only link."
+            )
+        }
+        return result
     }
 
     private func mutate(
@@ -539,14 +559,15 @@ struct SessionDashboard: View {
                 Image(systemName: "laptopcomputer")
                     .font(.system(size: 28, weight: .light))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(model.activeHost?.name ?? "Skalman Mac").font(.headline)
+                    Text(model.activeHost?.name ?? MobileL10n.string("Skalman Mac"))
+                        .font(.headline)
                     if model.me?.share.scope == "session" {
                         let role = model.me?.share.capability == "interact"
                             ? (model.me?.share.canApprovePermissions == true
-                                ? "Collaborator + approvals"
-                                : "Collaborator")
-                            : "View only"
-                        Text("Shared chat · \(role)")
+                                ? MobileL10n.string("Collaborator + approvals")
+                                : MobileL10n.string("Collaborator"))
+                            : MobileL10n.string("View only")
+                        Text(MobileL10n.string("Shared chat · %@", role))
                             .font(.caption)
                             .foregroundStyle(theme.accent)
                     }
@@ -581,9 +602,9 @@ struct SessionDashboard: View {
 
     private var statusText: String {
         switch model.phase {
-        case .idle: return "Not connected"
-        case .connecting: return "Connecting…"
-        case .online: return "Connected securely"
+        case .idle: return MobileL10n.string("Not connected")
+        case .connecting: return MobileL10n.string("Connecting…")
+        case .online: return MobileL10n.string("Connected securely")
         case .offline(let message): return message
         }
     }
@@ -602,14 +623,14 @@ struct SessionDashboard: View {
 
     private var emptyCard: some View {
         ContentUnavailableView(
-            showsArchived ? "No archived sessions" : "No sessions yet",
+            MobileL10n.string(showsArchived ? "No archived sessions" : "No sessions yet"),
             systemImage: showsArchived ? "archivebox" : "terminal",
             description: Text(
-                showsArchived
+                MobileL10n.string(showsArchived
                     ? "Sessions you archive from your Mac or iPhone appear here."
                     : model.canManageSessions
                         ? "Start one from this iPhone or your Mac."
-                        : "Start a Claude Code or Codex session on your Mac."
+                        : "Start a Claude Code or Codex session on your Mac.")
             )
         )
         .frame(maxWidth: .infinity)
@@ -682,7 +703,7 @@ private struct SessionListItem: View {
                         action(.pin, session)
                     } label: {
                         Label(
-                            session.isPinned ? "Unpin" : "Pin",
+                            MobileL10n.string(session.isPinned ? "Unpin" : "Pin"),
                             systemImage: session.isPinned ? "pin.slash" : "pin"
                         )
                     }
@@ -719,9 +740,9 @@ private struct SessionListItem: View {
                             action(.surface("terminal"), session)
                         } label: {
                             Label(
-                                session.agentKind == "claude"
+                                MobileL10n.string(session.agentKind == "claude"
                                     ? "Claude Code UI"
-                                    : "Codex UI",
+                                    : "Codex UI"),
                                 systemImage: session.surface == "terminal"
                                     ? "checkmark"
                                     : "terminal"
@@ -769,11 +790,11 @@ private struct SharedSessionLinkView: View {
                         .font(.title2.bold())
                     Text(link.sessionTitle)
                         .font(.headline)
-                    Text(link.capability == "interact"
+                    Text(MobileL10n.string(link.capability == "interact"
                         ? (link.canApprovePermissions
                             ? "Can collaborate and approve requests"
                             : "Can collaborate in this chat")
-                        : "Can view this chat")
+                        : "Can view this chat"))
                         .font(.subheadline)
                         .foregroundStyle(theme.secondaryLabel)
                     Text("Unused invite expires \(link.expiresAt.formatted(.relative(presentation: .named)))")
@@ -796,7 +817,7 @@ private struct SharedSessionLinkView: View {
                     UIPasteboard.general.string = link.url.absoluteString
                     copied = true
                 } label: {
-                    Label(copied ? "Copied" : "Copy link", systemImage: copied
+                    Label(MobileL10n.string(copied ? "Copied" : "Copy link"), systemImage: copied
                         ? "checkmark"
                         : "doc.on.doc")
                 }
@@ -895,28 +916,30 @@ private struct SessionRow: View {
 
     private var stateLabel: String {
         switch session.state {
-        case "working": return "Working"
-        case "needsAttention": return "Needs attention"
-        default: return "Connected"
+        case "working": return MobileL10n.string("Working")
+        case "needsAttention": return MobileL10n.string("Needs attention")
+        default: return MobileL10n.string("Connected")
         }
     }
 
     private var availabilityLabel: String {
-        if session.isArchived { return "Archived" }
-        return session.isAvailable ? stateLabel : "Disconnected"
+        if session.isArchived { return MobileL10n.string("Archived") }
+        return session.isAvailable ? stateLabel : MobileL10n.string("Disconnected")
     }
 
     private var surfaceLabel: String {
-        if session.surface == "conversation" { return "Native" }
-        return session.agentKind == "claude" ? "Claude Code UI" : "Codex UI"
+        if session.surface == "conversation" { return MobileL10n.string("Native") }
+        return MobileL10n.string(session.agentKind == "claude" ? "Claude Code UI" : "Codex UI")
     }
 
     private func compactAge(since date: Date) -> String {
         let seconds = max(0, Date().timeIntervalSince(date))
-        if seconds < 60 { return "now" }
-        if seconds < 3_600 { return "\(Int(seconds / 60))m" }
-        if seconds < 86_400 { return "\(Int(seconds / 3_600))h" }
-        if seconds < 604_800 { return "\(Int(seconds / 86_400))d" }
+        if seconds < 60 { return MobileL10n.string("now") }
+        if seconds < 604_800 {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .abbreviated
+            return formatter.localizedString(for: date, relativeTo: Date())
+        }
         return date.formatted(.dateTime.day().month(.abbreviated))
     }
 }
@@ -1106,7 +1129,7 @@ struct NewRemoteSessionView: View {
         } label: {
             CompactChoiceLabel(
                 symbol: "folder",
-                title: selectedProject?.name ?? "Project",
+                title: selectedProject?.name ?? MobileL10n.string("Project"),
                 maxWidth: .infinity
             )
         }
@@ -1185,11 +1208,16 @@ struct NewRemoteSessionView: View {
     }
 
     private var originalUISurfaceTitle: String {
-        "\(selectedAgent?.name ?? "Agent") UI"
+        MobileL10n.string(
+            "%@ UI",
+            selectedAgent?.name ?? MobileL10n.string("Agent")
+        )
     }
 
     private var selectedSurfaceTitle: String {
-        surface == "conversation" ? "Native · Experimental" : originalUISurfaceTitle
+        surface == "conversation"
+            ? MobileL10n.string("Native · Experimental")
+            : originalUISurfaceTitle
     }
 
     private var modelMenu: some View {
@@ -1260,7 +1288,7 @@ struct NewRemoteSessionView: View {
     }
 
     private var modelConfigurationTitle: String {
-        let modelName = selectedModel?.name ?? "Default model"
+        let modelName = selectedModel?.name ?? MobileL10n.string("Default model")
         guard let selectedModel,
               let reasoning = selectedModel.reasoning.first(where: { $0.id == reasoningID })
         else { return modelName }
@@ -1268,7 +1296,7 @@ struct NewRemoteSessionView: View {
     }
 
     private var selectedIdentityLabel: String {
-        guard let selectedAgent else { return "Agent" }
+        guard let selectedAgent else { return MobileL10n.string("Agent") }
         guard let selectedAccount else { return selectedAgent.name }
         return "\(selectedAgent.name) · \(selectedAccount.name)"
     }
@@ -1276,15 +1304,17 @@ struct NewRemoteSessionView: View {
     private var selectedAccountUsage: String? {
         guard let selectedAccount else { return nil }
         if let usage = selectedAccount.usageSummary { return usage }
-        if selectedAccount.usageError != nil { return "Usage unavailable" }
-        return "Loading usage…"
+        if selectedAccount.usageError != nil { return MobileL10n.string("Usage unavailable") }
+        return MobileL10n.string("Loading usage…")
     }
 
     private func accountMenuTitle(_ account: RemoteAccountChoiceDTO) -> String {
         let name = account.emoji.map { "\($0) \(account.name)" } ?? account.name
         if let usage = account.usageSummary { return "\(name)   \(usage)" }
-        if account.usageError != nil { return "\(name)   Usage unavailable" }
-        return "\(name)   Loading usage…"
+        if account.usageError != nil {
+            return MobileL10n.string("%@   Usage unavailable", name)
+        }
+        return MobileL10n.string("%@   Loading usage…", name)
     }
 
     private func projectLabel(_ project: RemoteProjectChoiceDTO) -> String {

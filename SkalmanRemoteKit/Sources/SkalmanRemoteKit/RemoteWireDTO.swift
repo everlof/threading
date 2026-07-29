@@ -711,15 +711,18 @@ public struct RemoteGitReviewSnapshotDTO: Codable, Equatable {
     public let mode: RemoteGitReviewMode
     public let files: [RemoteGitFileDiffDTO]
     public let message: String?
+    public let messageLocalization: RemoteLocalizedTextDTO?
 
     public init(
         mode: RemoteGitReviewMode,
         files: [RemoteGitFileDiffDTO],
-        message: String? = nil
+        message: String? = nil,
+        messageLocalization: RemoteLocalizedTextDTO? = nil
     ) {
         self.mode = mode
         self.files = files
         self.message = message
+        self.messageLocalization = messageLocalization
     }
 
     public var added: Int { files.reduce(0) { $0 + $1.added } }
@@ -952,6 +955,21 @@ public enum RemoteNotificationKind: String, Codable, CaseIterable {
     case agentMessage
 }
 
+/// A bundle-localized alternative to notification fallback text.
+///
+/// The fallback remains in the event for older clients and for notification kinds whose text is
+/// user-authored. APNs and current live clients use this key when it is present, so the receiving
+/// iPhone — rather than the sending Mac — chooses the display language.
+public struct RemoteLocalizedTextDTO: Codable, Equatable {
+    public let key: String
+    public let arguments: [String]
+
+    public init(key: String, arguments: [String] = []) {
+        self.key = key
+        self.arguments = arguments
+    }
+}
+
 /// The provider-neutral payload used both on the live events socket and inside an APNs push.
 /// It carries no bearer, project path, tool arguments, or diff: lock-screen content stays
 /// intentionally smaller than the authenticated session view it opens.
@@ -963,6 +981,8 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable {
     public let sessionID: String
     public let title: String
     public let body: String
+    public let titleLocalization: RemoteLocalizedTextDTO?
+    public let bodyLocalization: RemoteLocalizedTextDTO?
     public let createdAt: Double
 
     public init(
@@ -972,6 +992,8 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable {
         sessionID: String,
         title: String,
         body: String,
+        titleLocalization: RemoteLocalizedTextDTO? = nil,
+        bodyLocalization: RemoteLocalizedTextDTO? = nil,
         createdAt: Double = Date().timeIntervalSince1970
     ) {
         self.type = "notification"
@@ -981,6 +1003,8 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable {
         self.sessionID = sessionID
         self.title = title
         self.body = body
+        self.titleLocalization = titleLocalization
+        self.bodyLocalization = bodyLocalization
         self.createdAt = createdAt
     }
 }

@@ -27,7 +27,11 @@ enum RemoteGitReviewBridge {
         completion: @escaping (RemoteGitReviewSnapshotDTO) -> Void
     ) {
         guard let root = repositoryRoot(for: sessionID) else {
-            completion(snapshot(mode: mode, message: Failure.notRepository.localizedDescription))
+            completion(snapshot(
+                mode: mode,
+                message: Failure.notRepository.localizedDescription,
+                localizationKey: "Not a git repository."
+            ))
             return
         }
 
@@ -45,7 +49,9 @@ enum RemoteGitReviewBridge {
                     mode: mode,
                     message: L10n.string(
                         "No turn recorded yet. A baseline is captured when the agent starts working."
-                    )
+                    ),
+                    localizationKey:
+                        "No turn recorded yet. A baseline is captured when the agent starts working."
                 ))
                 return
             }
@@ -58,12 +64,16 @@ enum RemoteGitReviewBridge {
                 completion(RemoteGitReviewSnapshotDTO(
                     mode: mode,
                     files: files.map(project),
-                    message: files.isEmpty ? "No changes." : nil
+                    message: files.isEmpty ? "No changes." : nil,
+                    messageLocalization: files.isEmpty
+                        ? .init(key: "No changes.")
+                        : nil
                 ))
             case .failure(let failure):
                 completion(snapshot(
                     mode: mode,
-                    message: failure.errorDescription ?? "git failed."
+                    message: failure.errorDescription ?? "git failed.",
+                    localizationKey: "Couldn’t read changes."
                 ))
             }
         }
@@ -127,9 +137,15 @@ enum RemoteGitReviewBridge {
 
     private static func snapshot(
         mode: RemoteGitReviewMode,
-        message: String
+        message: String,
+        localizationKey: String
     ) -> RemoteGitReviewSnapshotDTO {
-        RemoteGitReviewSnapshotDTO(mode: mode, files: [], message: message)
+        RemoteGitReviewSnapshotDTO(
+            mode: mode,
+            files: [],
+            message: message,
+            messageLocalization: .init(key: localizationKey)
+        )
     }
 
     private static func project(_ file: GitFileDiff) -> RemoteGitFileDiffDTO {

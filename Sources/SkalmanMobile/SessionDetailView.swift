@@ -46,7 +46,9 @@ struct SessionDetailView: View {
             } else {
                 VStack(spacing: 14) {
                     ProgressView()
-                    Text(session.isAvailable ? "Connecting…" : "Resuming on your Mac…")
+                    Text(MobileL10n.string(
+                        session.isAvailable ? "Connecting…" : "Resuming on your Mac…"
+                    ))
                         .foregroundStyle(theme.secondaryLabel)
                 }
             }
@@ -81,7 +83,11 @@ struct SessionDetailView: View {
                         Button {
                             chooseTerminalTheme(nil)
                         } label: {
-                            let label = "Inherit (\(currentSession.inheritedTerminalThemeName ?? "Default"))"
+                            let label = MobileL10n.string(
+                                "Inherit (%@)",
+                                currentSession.inheritedTerminalThemeName
+                                    ?? MobileL10n.string("Default")
+                            )
                             if currentSession.terminalThemeAssignmentID == nil {
                                 Label(label, systemImage: "checkmark")
                             } else {
@@ -125,7 +131,7 @@ struct SessionDetailView: View {
                             }
                         } label: {
                             Label(
-                                currentSession.isPinned ? "Unpin" : "Pin",
+                                MobileL10n.string(currentSession.isPinned ? "Unpin" : "Pin"),
                                 systemImage: currentSession.isPinned ? "pin.slash" : "pin"
                             )
                         }
@@ -226,7 +232,7 @@ struct SessionDetailView: View {
             ]
         )
         .themedConfirmationDialog(
-            "Switch to \(surfaceTitle(pendingSurface))?",
+            MobileL10n.string("Switch to %@?", surfaceTitle(pendingSurface)),
             message:
                 "The agent restarts in the other UI and resumes this same session. "
                 + "Work currently in progress is interrupted.",
@@ -295,11 +301,15 @@ struct SessionDetailView: View {
     }
 
     private var originalUISurfaceTitle: String {
-        currentSession.agentKind == "claude" ? "Claude Code UI" : "Codex UI"
+        MobileL10n.string(
+            currentSession.agentKind == "claude" ? "Claude Code UI" : "Codex UI"
+        )
     }
 
     private func surfaceTitle(_ surface: String) -> String {
-        surface == "conversation" ? "Native (Experimental)" : originalUISurfaceTitle
+        surface == "conversation"
+            ? MobileL10n.string("Native (Experimental)")
+            : originalUISurfaceTitle
     }
 
     private func confirmSurfaceSwitch(to surface: String) {
@@ -400,9 +410,11 @@ private struct RemoteNavigationTitle: View {
 
     private var label: String {
         switch connection.phase {
-        case .connecting: return "Connecting to Mac…"
+        case .connecting: return MobileL10n.string("Connecting to Mac…")
         case .connected:
-            return connection.capability == .interact ? "Remote control" : "View only"
+            return MobileL10n.string(
+                connection.capability == .interact ? "Remote control" : "View only"
+            )
         case .ended(let reason): return reason
         case .failed(let reason): return reason
         }
@@ -449,9 +461,9 @@ private struct TerminalKeyBar: View {
     @Environment(\.remoteTheme) private var theme
 
     private let keys: [(String, String)] = [
-        ("esc", "\u{1b}"),
+        (MobileL10n.string("esc"), "\u{1b}"),
         ("⌃C", "\u{3}"),
-        ("tab", "\t"),
+        (MobileL10n.string("tab"), "\t"),
         ("↑", "\u{1b}[A"),
         ("↓", "\u{1b}[B"),
         ("←", "\u{1b}[D"),
@@ -526,7 +538,9 @@ struct ConversationRemoteView: View {
             }
             .task {
                 if initiallyFocusesComposer, draft.isEmpty {
-                    draft = "Check the final layout with the keyboard open and a longer prompt."
+                    draft = MobileL10n.string(
+                        "Check the final layout with the keyboard open and a longer prompt."
+                    )
                 }
             }
             .environment(\.remoteTheme, theme)
@@ -556,11 +570,12 @@ struct ConversationRemoteView: View {
             let names = connection.presence.values
                 .map(\.displayName)
                 .sorted()
-            Text(
-                names.count == 1
-                    ? "\(names[0]) is typing…"
-                    : "\(names.joined(separator: ", ")) are typing…"
-            )
+            Text(names.count == 1
+                ? MobileL10n.string("%@ is typing…", names[0])
+                : MobileL10n.string(
+                    "%@ are typing…",
+                    names.joined(separator: ", ")
+                ))
             .font(.caption)
             .foregroundStyle(theme.secondaryLabel)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -570,8 +585,11 @@ struct ConversationRemoteView: View {
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityLabel(
                 names.count == 1
-                    ? "\(names[0]) is typing"
-                    : "\(names.joined(separator: ", ")) are typing"
+                    ? MobileL10n.string("%@ is typing", names[0])
+                    : MobileL10n.string(
+                        "%@ are typing",
+                        names.joined(separator: ", ")
+                    )
             )
         }
     }

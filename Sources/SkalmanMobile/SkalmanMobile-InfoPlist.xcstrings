@@ -1,0 +1,60 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "CFBundleDisplayName": {
+      "comment": "Bundle display name",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Skalman"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skalman"
+          }
+        }
+      }
+    },
+    "CFBundleName": {
+      "comment": "Bundle name",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "SkalmanMobile"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SkalmanMobile"
+          }
+        }
+      }
+    },
+    "NSCameraUsageDescription": {
+      "comment": "Privacy - Camera Usage Description",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan a private Skalman pairing code shown on your Mac."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skanna en privat Skalman-parkopplingskod som visas på din Mac."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.2"
+}

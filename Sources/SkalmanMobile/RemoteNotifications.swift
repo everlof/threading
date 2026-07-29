@@ -375,8 +375,8 @@ final class RemoteNotificationManager: ObservableObject {
         }
 
         let content = UNMutableNotificationContent()
-        content.title = event.title
-        content.body = event.body
+        content.title = localizedText(event.titleLocalization, fallback: event.title)
+        content.body = localizedText(event.bodyLocalization, fallback: event.body)
         content.sound = .default
         content.threadIdentifier = event.sessionID
         content.categoryIdentifier = event.kind == .permissionRequest
@@ -395,6 +395,14 @@ final class RemoteNotificationManager: ObservableObject {
             .trace: event.id,
             .transport: "live",
         ])
+    }
+
+    private func localizedText(
+        _ localization: RemoteLocalizedTextDTO?,
+        fallback: String
+    ) -> String {
+        guard let localization else { return fallback }
+        return MobileL10n.string(localization.key, arguments: localization.arguments)
     }
 
     private func isEnabled(_ kind: RemoteNotificationKind) -> Bool {
@@ -570,7 +578,9 @@ struct NotificationSettingsView: View {
                 }
             } label: {
                 Label(
-                    isRequesting ? "Turning on…" : "Turn on notifications",
+                    MobileL10n.string(
+                        isRequesting ? "Turning on…" : "Turn on notifications"
+                    ),
                     systemImage: "bell.badge"
                 )
             }

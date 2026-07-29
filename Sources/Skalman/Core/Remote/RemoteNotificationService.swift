@@ -89,11 +89,12 @@ final class RemoteNotificationService {
                 kind: .sharedSession,
                 hostID: RemoteHostIdentity.current.id,
                 sessionID: sessionID.uuidString,
-                title: L10n.string("Chat shared with you"),
+                title: "Chat shared with you",
                 body: Self.safeText(
                     session.displayTitle,
                     bytes: RemoteAccessDefaults.maximumNotificationBodyBytes
-                )
+                ),
+                titleLocalization: .init(key: "Chat shared with you")
             )
             deliver(event) {
                 $0.authorization.shareID == authorization.shareID
@@ -122,7 +123,18 @@ final class RemoteNotificationService {
             ),
             // Tool arguments, paths and diffs belong behind authentication, not on a lock screen.
             body: "\(Self.safeText(toolName, bytes: 100)) is waiting. "
-                + "Open the chat to review the request."
+                + "Open the chat to review the request.",
+            titleLocalization: .init(
+                key: "%@ needs permission",
+                arguments: [Self.safeText(
+                    session.displayTitle,
+                    bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
+                )]
+            ),
+            bodyLocalization: .init(
+                key: "%@ is waiting. Open the chat to review the request.",
+                arguments: [Self.safeText(toolName, bytes: 100)]
+            )
         )
         deliver(event) {
             $0.authorization.canApprovePermissions
@@ -432,6 +444,18 @@ actor RemoteAPNSPushSender {
             struct Alert: Encodable {
                 let title: String
                 let body: String
+                let titleLocalizationKey: String?
+                let titleLocalizationArguments: [String]?
+                let bodyLocalizationKey: String?
+                let bodyLocalizationArguments: [String]?
+
+                private enum CodingKeys: String, CodingKey {
+                    case title, body
+                    case titleLocalizationKey = "title-loc-key"
+                    case titleLocalizationArguments = "title-loc-args"
+                    case bodyLocalizationKey = "loc-key"
+                    case bodyLocalizationArguments = "loc-args"
+                }
             }
 
             let alert: Alert
@@ -504,6 +528,8 @@ actor RemoteAPNSPushSender {
                 sessionID: event.sessionID,
                 title: event.title,
                 body: String(event.body.prefix(400)),
+                titleLocalization: event.titleLocalization,
+                bodyLocalization: event.bodyLocalization,
                 createdAt: event.createdAt
             )
             body = try? JSONEncoder().encode(envelope(for: deliveredEvent))
@@ -578,7 +604,14 @@ actor RemoteAPNSPushSender {
     private func envelope(for event: RemoteNotificationEventDTO) -> Envelope {
         Envelope(
             aps: .init(
-                alert: .init(title: event.title, body: event.body),
+                alert: .init(
+                    title: event.title,
+                    body: event.body,
+                    titleLocalizationKey: event.titleLocalization?.key,
+                    titleLocalizationArguments: event.titleLocalization?.arguments,
+                    bodyLocalizationKey: event.bodyLocalization?.key,
+                    bodyLocalizationArguments: event.bodyLocalization?.arguments
+                ),
                 sound: "default",
                 threadID: event.sessionID,
                 category: event.kind == .permissionRequest
