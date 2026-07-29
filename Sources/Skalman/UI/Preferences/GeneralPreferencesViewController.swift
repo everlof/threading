@@ -29,6 +29,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let remoteControlPopUp = ThemedPopUp()
     private let permissionModePopUp = ThemedPopUp()
     private let shellField = ThemedTextField()
+    private let newChatOpeningMessageField = ThemedTextField()
 
     // MARK: - Lifecycle
 
@@ -144,6 +145,15 @@ final class GeneralPreferencesViewController: NSViewController {
         shellField.stringValue = ProfileStorage.shared.defaultProfile.shellPath
         shellField.target = self
         shellField.action = #selector(shellPathChanged)
+
+        newChatOpeningMessageField.placeholderString = L10n.string(
+            "For example: Rename this chat to a ONE-WORD, ALL-CAPS name that represents it."
+        )
+        newChatOpeningMessageField.stringValue = AppSettings.shared.newChatOpeningMessage
+        newChatOpeningMessageField.setAccessibilityIdentifier(
+            "settings.general.new-chat-opening-message"
+        )
+        newChatOpeningMessageField.delegate = self
     }
 
     private func configure(_ toggle: ThemedToggle, isOn: Bool, action: Selector) {
@@ -207,6 +217,7 @@ final class GeneralPreferencesViewController: NSViewController {
         let page = SettingsUI.page([
             SettingsUI.heading("General"),
             SettingsUI.section("Sessions", sessions),
+            SettingsUI.section("Opening Message", openingMessageCard()),
             SettingsUI.section("Attachments", attachmentDetectionCard()),
             SettingsUI.section("Startup", startup),
             SettingsUI.section("Closing", closing),
@@ -226,6 +237,18 @@ final class GeneralPreferencesViewController: NSViewController {
             page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
+
+    /// Standing context for a new conversation. Empty is the off state.
+    private func openingMessageCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Add to every new chat",
+                subtitle: "Appended once after the task you write. "
+                    + "It is not sent again when an existing chat resumes."
+            ),
+            SettingsUI.fullRow(newChatOpeningMessageField)
         ])
     }
 
@@ -530,6 +553,13 @@ final class GeneralPreferencesViewController: NSViewController {
             self.shellField.stringValue = url.path
             self.shellPathChanged()
         }
+    }
+}
+
+extension GeneralPreferencesViewController: NSTextFieldDelegate {
+    func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSTextField === newChatOpeningMessageField else { return }
+        AppSettings.shared.newChatOpeningMessage = newChatOpeningMessageField.stringValue
     }
 }
 

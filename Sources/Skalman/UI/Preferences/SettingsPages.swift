@@ -52,7 +52,7 @@ enum SettingsPages {
             searchTerms: terms(
                 "sessions", "agent", "attachments", "startup", "closing", "shell",
                 "branch", "project icons", "account avatars", "Codex hooks",
-                "Claude Remote Control"
+                "Claude Remote Control", "opening message", "first message", "instructions"
             )
         ) { GeneralPreferencesViewController() },
         Page(

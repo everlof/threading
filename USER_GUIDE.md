@@ -253,6 +253,16 @@ a sentence. **Start session** below the box sends it, and so does **⌘Return**,
 names on its face. Beside it sits **Import _n_ conversations** when this project has
 conversations it could adopt; it is the quieter of the two on purpose.
 
+To give every new chat the same standing instruction, enter an **Opening Message** under
+**Settings ▸ General**. Skalman appends it after the task you write and sends both as the
+chat's first turn. For example:
+
+> Rename this chat to a ONE-WORD, ALL-CAPS name that represents it.
+
+It is sent once to Terminal and Native chats, including side chats. Reopening or resuming an
+existing chat does not send it again, and imported conversations receive nothing. The sidebar's
+initial name still comes from the task you typed, not from this reusable message.
+
 (A reply inside a running conversation is the other way round: Return sends it and
 Shift+Return breaks the line, because a reply is usually one line and the box says so.)
 
@@ -1459,6 +1469,8 @@ than borrowing an unrelated app translation.
 
 ### General
 - **New sessions use** — the agent the composer opens on; any other can be picked there
+- **Opening Message** — optional text appended once to every new chat's first turn; see
+  [Creating](#creating)
 - **Name sessions after the agent's own title** — see [Names](#names)
 - **Group sessions by branch** — see [Grouping sessions by branch](#grouping-sessions-by-branch)
 - **Follow the checkout's branch** — an idle session's recorded branch tracks its checkout,

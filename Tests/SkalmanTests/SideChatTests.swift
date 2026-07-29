@@ -261,6 +261,42 @@ final class SideChatTests: XCTestCase {
 @MainActor
 final class SessionCoordinatorTests: XCTestCase {
 
+    func testReusableOpeningMessageFollowsThePerChatTask() {
+        XCTAssertEqual(
+            NewChatOpeningMessage.compose(
+                prompt: "  Fix the flaky test.\n",
+                reusableMessage: "\nRename this chat to one uppercase word.  "
+            ),
+            "Fix the flaky test.\n\nRename this chat to one uppercase word."
+        )
+    }
+
+    func testReusableOpeningMessageCanOpenAnOtherwiseEmptyChat() {
+        XCTAssertEqual(
+            NewChatOpeningMessage.compose(
+                prompt: " \n ",
+                reusableMessage: "Rename this chat."
+            ),
+            "Rename this chat."
+        )
+        XCTAssertNil(
+            NewChatOpeningMessage.compose(prompt: nil, reusableMessage: " \n ")
+        )
+    }
+
+    func testNewChatOpeningMessagePersistsVerbatimAndCanBeCleared() {
+        let suite = "SessionCoordinatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let message = "Use one word.\nKEEP IT UPPERCASE."
+        AppSettings(defaults: defaults).newChatOpeningMessage = message
+        XCTAssertEqual(AppSettings(defaults: defaults).newChatOpeningMessage, message)
+
+        AppSettings(defaults: defaults).newChatOpeningMessage = ""
+        XCTAssertEqual(AppSettings(defaults: defaults).newChatOpeningMessage, "")
+    }
+
     func testBranchTargetsItsExistingCheckout() {
         let original = ProjectID()
         let checkout = ProjectID()

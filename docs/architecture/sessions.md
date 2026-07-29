@@ -225,6 +225,19 @@ after a bare `--`. Last matters as much as the `--`: `routed` appends the MCP fl
 the command, so terminating options where the prompt used to sit would have fed
 `--mcp-config` to the CLI as more prompt text.
 
+**A reusable opening message is part of the first turn, not a turn on every launch.**
+`AppSettings.newChatOpeningMessage` is optional app-wide context entered under Settings ▸
+General. `SessionCoordinator` trims it and appends it after the task with one blank line, then
+hands the combined text through the existing one-shot `pendingPrompt`: a terminal launch keeps
+one trailing operand, while a Native launch sends the same string over its stream. Ordinary
+sessions, side chats (including a plain fork with no question), and sessions started from the
+paired owner device all converge there.
+
+The session title is still derived from the **per-chat task alone**. Otherwise one reusable
+instruction would give every Codex chat the same prompt-derived title while waiting for the
+agent to rename it. Imports receive nothing because they are existing conversations, and resumes
+receive nothing because the opening was already persisted in the provider transcript.
+
 ### Permission mode, per conversation
 
 How much a session may do before it stops to ask, chosen in the composer, overridable from a

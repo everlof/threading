@@ -42,6 +42,18 @@ final class AppSettings {
         }
     }
 
+    /// Extra context appended to the first message of every new chat.
+    ///
+    /// Empty means no extra message. The value is consumed once when the chat is created;
+    /// resuming an existing chat never reads it.
+    var newChatOpeningMessage: String {
+        get { defaults.string(forKey: Keys.newChatOpeningMessage) ?? "" }
+        set {
+            setOrRemove(newValue, forKey: Keys.newChatOpeningMessage)
+            notifyChanged()
+        }
+    }
+
     /// Whether closing a session with a running agent asks for confirmation first.
     var confirmsBeforeClosingRunningSession: Bool {
         get { defaults.bool(forKey: Keys.confirmsBeforeClosingRunningSession) }
@@ -628,6 +640,7 @@ final class AppSettings {
     private enum Keys {
         static let defaultAgentKind = "defaultAgentKind"
         static let restoresLastSession = "restoresLastSession"
+        static let newChatOpeningMessage = "newChatOpeningMessage"
         static let confirmsBeforeClosingRunningSession = "confirmsBeforeClosingRunningSession"
         static let usesTerminalTitleInSidebar = "usesTerminalTitleInSidebar"
         static let groupsSessionsByBranch = "groupsSessionsByBranch"

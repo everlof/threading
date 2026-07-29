@@ -139,16 +139,20 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // composer's prompt names an ordinary session. A plain fork stays "Side Chat" until
         // its first prompt does.
         let title = prompt.flatMap(SessionNaming.promptTitle(from:))
+        let opening = NewChatOpeningMessage.compose(
+            prompt: prompt,
+            reusableMessage: AppSettings.shared.newChatOpeningMessage
+        )
         guard let session = ProjectStore.shared.addSideChat(of: sessionID, title: title)
         else { return }
 
         EventLog.shared.record(.composer, "Side chat forked", [
             "session": session.id.uuidString,
             "parent": sessionID.uuidString,
-            "prompt": prompt ?? ""
+            "prompt": opening ?? ""
         ])
 
-        pendingPrompt = prompt
+        pendingPrompt = opening
         sidebar.reload()
         sidebar.select(sessionID: session.id)
     }
@@ -172,7 +176,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             checkout: ProjectStore.shared.checkout(onBranch:inRepositoryOf:)
         )
 
-        let opening = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opening = NewChatOpeningMessage.compose(
+            prompt: task,
+            reusableMessage: AppSettings.shared.newChatOpeningMessage
+        )
 
         guard let session = ProjectStore.shared.addSession(
             to: targetProjectID,
@@ -181,7 +189,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             model: model,
             usesNativeUI: usesNativeUI,
             permissionMode: permissionMode,
-            title: SessionNaming.promptTitle(from: opening)
+            title: SessionNaming.promptTitle(from: task)
         ) else { return }
 
         // The mode is recorded as chosen — nil included, which reads as "inherit" rather than
@@ -193,7 +201,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             "agent": kind.rawValue,
             "account": accountHandle.name,
             "permissionMode": permissionMode?.rawValue ?? "inherit",
-            "prompt": opening
+            "prompt": opening ?? ""
         ])
 
         DraftStore.shared.clear(for: projectID)
@@ -216,8 +224,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         usesNativeUI: Bool,
         prompt: String
     ) -> AgentSession? {
-        let opening = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !opening.isEmpty,
+        let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opening = NewChatOpeningMessage.compose(
+            prompt: task,
+            reusableMessage: AppSettings.shared.newChatOpeningMessage
+        )
+        guard !task.isEmpty,
               let session = ProjectStore.shared.addSession(
                 to: projectID,
                 kind: kind,
@@ -225,14 +237,14 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 model: model,
                 reasoningEffort: reasoningEffort,
                 usesNativeUI: usesNativeUI,
-                title: SessionNaming.promptTitle(from: opening)
+                title: SessionNaming.promptTitle(from: task)
               ) else { return nil }
 
         EventLog.shared.record(.remote, "Session started remotely", [
             "session": session.id.uuidString,
             "project": projectID.uuidString,
             "agent": kind.rawValue,
-            "prompt": opening,
+            "prompt": opening ?? "",
         ])
 
         pendingPrompt = opening
@@ -373,5 +385,22 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         alert.addButton(withTitle: L10n.string("Switch UI"))
         alert.addButton(withTitle: L10n.string("Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
+    }
+}
+
+// MARK: - New Chat Opening Message
+
+/// Joins the per-chat task with the reusable message from Settings.
+///
+/// The task remains first, separated from the standing instruction by one blank line. Callers
+/// derive the sidebar title from the task alone so the reusable instruction does not give every
+/// new chat the same initial title.
+enum NewChatOpeningMessage {
+    static func compose(prompt: String?, reusableMessage: String) -> String? {
+        let parts = [prompt, reusableMessage]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "\n\n")
     }
 }

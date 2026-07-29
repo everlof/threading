@@ -1,6 +1,76 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Add to every new chat": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till i varje ny konversation"
+          }
+        }
+      }
+    },
+    "Appended once after the task you write. It is not sent again when an existing chat resumes.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läggs till en gång efter uppgiften du skriver. Det skickas inte igen när en befintlig konversation återupptas."
+          }
+        }
+      }
+    },
+    "For example: Rename this chat to a ONE-WORD, ALL-CAPS name that represents it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Till exempel: Byt namn på konversationen till ETT ORD MED VERSALER som representerar den."
+          }
+        }
+      }
+    },
+    "Opening Message": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppningsmeddelande"
+          }
+        }
+      }
+    },
+    "first message": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "första meddelandet"
+          }
+        }
+      }
+    },
+    "instructions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "instruktioner"
+          }
+        }
+      }
+    },
+    "opening message": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "öppningsmeddelande"
+          }
+        }
+      }
+    },
     "\n\nThe run's full output: Project Icon > Open Last Research Log.": {
       "extractionState": "stale",
       "localizations": {
