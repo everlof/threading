@@ -41,9 +41,15 @@ final class PrivacyPreferencesTests: XCTestCase {
         var notifications = 0
     }
 
+    /// Tall enough to contain the whole page. The page is a scroll view, so it has no height of
+    /// its own to be sized to — a host that is too short silently crops the bottom, and the
+    /// render test would keep passing on a picture missing its newest rows.
+    /// `testTheRenderCoversTheWholePage` is what stops that happening again.
+    private static let fixtureHeight: CGFloat = 1800
+
     private func page(
         _ reader: SystemPrivacyStatusReader,
-        height: CGFloat = 1100
+        height: CGFloat = PrivacyPreferencesTests.fixtureHeight
     ) -> PrivacyPreferencesViewController {
         let controller = PrivacyPreferencesViewController(reader: reader)
         controller.view.frame = NSRect(
@@ -257,6 +263,25 @@ final class PrivacyPreferencesTests: XCTestCase {
         XCTAssertGreaterThan(measured, 5, "too little wrapping text found to be measuring much")
     }
 
+    /// The render exists so appearance gets reviewed; a fixture shorter than the page turns it
+    /// into a review of the top two thirds. Adding a card without raising the height fails here
+    /// rather than quietly shipping an unreviewed row — which is exactly what happened when the
+    /// "Leaving This Mac" card was added and the 1100pt host cropped its last two rows.
+    func testTheRenderCoversTheWholePage() throws {
+        let controller = page(reader())
+        let cards = descendants(in: controller.view).compactMap { $0 as? SettingsCard }
+        let last = try XCTUnwrap(cards.last, "the page has no cards")
+
+        let bottom = last.convert(last.bounds, to: controller.view).maxY
+        XCTAssertLessThanOrEqual(
+            bottom,
+            Self.fixtureHeight,
+            "the page is \(Int(bottom))pt tall but the render host is "
+                + "\(Int(Self.fixtureHeight))pt — raise fixtureHeight or the bottom rows are "
+                + "never in the picture"
+        )
+    }
+
     func testThePageStaysInsideTheThemeBoundary() {
         let controller = page(reader())
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
@@ -315,7 +340,7 @@ final class PrivacyPreferencesTests: XCTestCase {
                         screenRecording: false,
                         notifications: .allowed
                     ),
-                    height: 1100
+                    height: Self.fixtureHeight
                 )
                 let host = NSView(frame: controller.view.frame)
                 controller.view.translatesAutoresizingMaskIntoConstraints = false
