@@ -1,10 +1,10 @@
 # Native Conversations
 
-Rendering a session in Skalman instead of a terminal: the transports, the permission brokering, the rendering model and the turn rail.
+Rendering a session in Threading instead of a terminal: the transports, the permission brokering, the rendering model and the turn rail.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-A session can be rendered by Skalman instead of shown as a terminal. `AgentSession.usesNativeUI`
+A session can be rendered by Threading instead of shown as a terminal. `AgentSession.usesNativeUI`
 picks the surface, chosen at creation and **switchable afterwards** from a dedicated pane-header
 button or the **Interface** submenu. The button always names and depicts the destination
 (`SessionSurfaceTogglePresentation`); the submenu offers both explicit choices and marks the
@@ -53,7 +53,7 @@ subscription OAuth for Claude Code and claude.ai — described the February 2026
 accurately and has since been overtaken. The current policy targets *routing requests through
 subscription credentials on behalf of users*: offering Claude.ai login inside your product, or
 lifting the OAuth token out of `~/.claude` and calling the API while impersonating Claude Code.
-Skalman does neither. It spawns the user's own installed `claude` binary, which authenticates
+Threading does neither. It spawns the user's own installed `claude` binary, which authenticates
 itself from whatever `claude auth login` put on disk, and Anthropic's help centre now names
 `claude -p` and third-party apps built on that transport as subscription-drawing usage.
 
@@ -149,12 +149,12 @@ selected child's JSONL is then loaded lazily through the ordinary `StreamEvent` 
 with the same rolling cap as the parent conversation. Sessions from older Claude versions that
 lack metadata still appear under their agent id as top-level children.
 
-The compact navigator is persisted per session under Application Support ▸ Skalman ▸ Subagents.
+The compact navigator is persisted per session under Application Support ▸ Threading ▸ Subagents.
 It stores descriptors, terminal states, progress, and recent activity, not duplicated child
 conversation rows; the provider JSONL remains the full-history source. On app relaunch an
 unfinished row becomes Stopped because its old process cannot still be observed. Claude can
 also rebuild its hierarchy from the provider index. Codex cannot rediscover children absent
-from Skalman's snapshot because app-server exposes no durable child index, but children observed
+from Threading's snapshot because app-server exposes no durable child index, but children observed
 by hooks or app-server are restored from the snapshot and their transcript paths still drill in.
 
 A transcript path is durable routing metadata, never a display-name fallback. Rows prefer the
@@ -185,7 +185,7 @@ That last point made the Claude mode viable rather than a choice between useless
 The hook is a bare `curl` reading stdin and writing stdout, which is exactly the command-hook
 contract — no helper script to install or keep in step with the app. It posts to the *existing*
 MCP listener, and `session_id` routing was already solved, because for Claude sessions that
-identifier is the UUID Skalman minted.
+identifier is the UUID Threading minted.
 
 For either native transport, a request is shown **inline in the conversation that raised it**,
 as a `PermissionRequestView` card (`ConversationViewController.presentPermission`),
@@ -423,7 +423,7 @@ worth protecting are invisible in a screenshot of a wide window:
   and one that ran none are one exchange each, and spacing by length would give the long one a
   stretch of rail that says nothing about how much was *said*.
 - **It vanishes rather than crowd the text.** `railWidth` returns zero when the pane is too
-  narrow for a gutter, and the view hides. Skalman is a three-pane window and the conversation
+  narrow for a gutter, and the view hides. Threading is a three-pane window and the conversation
   is routinely the narrow one, so this is the common case rather than the edge case — the same
   rule t3code encodes, arrived at for the same reason.
 - **It belongs to the pane, not to the column** (`railLeading`). Anchored to the column's
@@ -470,7 +470,7 @@ file paths, arguments are sometimes a *string* of JSON, and Codex's `exec` wrapp
 JavaScript where argument names appear as identifiers and `\n` is an escape.
 
 `ConversationRenderTests` draws whole fixture conversations through the real views and writes
-them out as PNGs, light and dark (`SKALMAN_RENDER_OUT` to redirect). **This is what makes the
+them out as PNGs, light and dark (`THREADING_RENDER_OUT` to redirect). **This is what makes the
 appearance reviewable at all** — and it immediately paid for itself: rendering a Codex rollout
 showed twenty identical `$ Bash` rows with no command beside any of them. Codex names its
 arguments differently from Claude (`cmd`, not `command`; a patch instead of `old_string`), so

@@ -1,4 +1,4 @@
-# Design note: "make Skalman do X"
+# Design note: "make Threading do X"
 
 Status: core flow implemented and dogfooded. Updated 2026-07-25.
 
@@ -6,14 +6,14 @@ Status: core flow implemented and dogfooded. Updated 2026-07-25.
 
 A user is in a session, talking to an agent about their own project, and says one of these:
 
-> Skalman should show me which of these sessions are on a dirty branch.
+> Threading should show me which of these sessions are on a dirty branch.
 > Can you make the sidebar show CI status?
 > I want a panel that lists my open PRs.
 
 The extension-authoring MCP group now connects that ask to the answer. It tells the agent that
-Skalman can be extended, scaffolds a separate self-contained project into the sidebar, exposes
+Threading can be extended, scaffolds a separate self-contained project into the sidebar, exposes
 the component catalogue and preview validator, and proposes a reviewed installation. Editing
-Skalman's own source remains the plausible wrong move: it needs the repo, a build and a relaunch,
+Threading's own source remains the plausible wrong move: it needs the repo, a build and a relaunch,
 and does nothing for a user who did not clone it.
 
 The answer is an extension. This note is how the user gets from the sentence to a running one
@@ -29,12 +29,12 @@ is the entire job of the app it is being written for. So the flow does not need 
 it needs to route into the surface that already exists.
 
 ```
-session in "sonda"  ──  "make Skalman show CI status"
+session in "sonda"  ──  "make Threading show CI status"
         │
         │  the agent recognises a customization, not a code change
         ▼
-scaffold  ~/Developer/Skalman Extensions/com.example.ci/
-        │      skalman-extension.json, Package.swift, Sources/main.swift
+scaffold  ~/Developer/Threading Extensions/com.example.ci/
+        │      threading-extension.json, Package.swift, Sources/main.swift
         ▼
 added as a project  ──  its own row in the sidebar, with a session already asking
                         the question the user asked
@@ -75,7 +75,7 @@ assumed.
 
 Not in Application Support. An extension's source is something the user will open in an editor,
 put under git, and eventually publish; a directory nobody can find is a directory nobody
-maintains. Default to something like `~/Developer/Skalman Extensions/<identifier>/`, settable,
+maintains. Default to something like `~/Developer/Threading Extensions/<identifier>/`, settable,
 and **never** inside the installed package — boundary 8 says an installed package is immutable,
 and that is exactly what makes source and package two different things.
 
@@ -110,7 +110,7 @@ the code has changed since the user approved it, so an unconditional `reload_ext
 something nobody looked at.
 
 The honest resolution is a **development install**: an extension the user has explicitly pointed
-at a source directory, which Skalman will rebuild-and-reload on request without re-approving
+at a source directory, which Threading will rebuild-and-reload on request without re-approving
 each time, and which is visibly marked as such wherever it appears. That matches
 `HANDOFF.md`'s existing line that source-only execution stays a developer workflow, and it keeps
 the ordinary install path — where the user approves a package, not a directory — unchanged.
@@ -132,7 +132,7 @@ in one and asked in the other.
 
 ## What must not happen
 
-- **Editing Skalman's own source in response to a customization ask.** If a user genuinely
+- **Editing Threading's own source in response to a customization ask.** If a user genuinely
   wants to change the app, that is a different act and the agent should say so plainly rather
   than quietly doing something that cannot work.
 - **Silently doing nothing when the ask does not fit.** If the request cannot be expressed
@@ -145,8 +145,8 @@ in one and asked in the other.
 
 ## The SDK dependency
 
-The dependency shape is decided: a scaffold receives the exact SDK snapshot Skalman ships,
-under `Vendor/SkalmanExtensionKit`, and its `Package.swift` uses that relative path. The
+The dependency shape is decided: a scaffold receives the exact SDK snapshot Threading ships,
+under `Vendor/ThreadingExtensionKit`, and its `Package.swift` uses that relative path. The
 snapshot carries `SDK_VERSION`.
 
 The matching authoring contract is scaffolded beside it at `Vendor/docs/extensions`. The
@@ -155,16 +155,16 @@ generated component catalogue. Because the packager retains the whole project un
 a later agent can understand, audit, fork, and rebuild the extension without this repository or
 a network fetch.
 
-That keeps a project under `~/Developer/…` buildable without the Skalman repository or a
+That keeps a project under `~/Developer/…` buildable without the Threading repository or a
 network fetch, and the project retained under the distributed package's `Source/` records the
 API source it actually used. An SDK upgrade is a visible source change and package update.
 
 Every app build now embeds the filtered snapshot under
-`Contents/Resources/ExtensionSDK/SkalmanExtensionKit`, and a hosted test verifies its version,
+`Contents/Resources/ExtensionSDK/ThreadingExtensionKit`, and a hosted test verifies its version,
 manifest, public source, and absence of `.build`. `extension_scaffold_project` copies it into an
 atomic project, adds that project to the sidebar, and writes a visible starter panel plus
 `Scripts/package.sh`. That script runs the selected official Swift/Wasm SDK and atomically
-assembles `Build/<identifier>.skalmanextension` with the entire editable project under `Source/`.
+assembles `Build/<identifier>.threadingextension` with the entire editable project under `Source/`.
 WebAssembly packages without rebuildable Swift source are refused.
 
 The read-only authoring tools — `extension_list_components`,

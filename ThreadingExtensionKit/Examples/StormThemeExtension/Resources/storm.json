@@ -1,0 +1,64 @@
+{
+  "id": "storm",
+  "name": "Storm",
+  "mode": "dark",
+  "summary": "Rain-blue chrome for long sessions.",
+  "variants": {
+    "dark": {
+      "roles": {
+        "ground": "#0B1016",
+        "surface": "#111823",
+        "panel": "#16202D",
+        "elevated": "#1D2A3A",
+        "border": "#2A3A4E",
+        "divider": "#1A2534",
+        "label": "#E4ECF5",
+        "accent": "#6FB2FF",
+        "statusPositive": "#63C79B",
+        "statusWarning": "#E0B054",
+        "statusNegative": "#E07A7A",
+        "syntaxKeyword": "#9C8BFF",
+        "syntaxType": "#6FB2FF",
+        "syntaxString": "#63C79B",
+        "syntaxNumber": "#E0B054"
+      },
+      "material": {
+        "panelRadius": 10,
+        "controlRadius": 8,
+        "borderWidth": 1,
+        "glow": {
+          "role": "accent",
+          "radius": 8,
+          "opacity": 0.22,
+          "offsetX": 0,
+          "offsetY": 0
+        },
+        "typeface": "default"
+      },
+      "terminalPalette": {
+        "id": "ext-storm-terminal",
+        "name": "Storm",
+        "foreground": "#E4ECF5",
+        "background": "#0B1016",
+        "cursor": "#6FB2FF",
+        "selection": "#1F3551",
+        "black": "#16202D",
+        "red": "#E07A7A",
+        "green": "#63C79B",
+        "yellow": "#E0B054",
+        "blue": "#6FB2FF",
+        "magenta": "#9C8BFF",
+        "cyan": "#68CBD0",
+        "white": "#B4C1D0",
+        "brightBlack": "#2A3A4E",
+        "brightRed": "#F09B9B",
+        "brightGreen": "#88DDB4",
+        "brightYellow": "#F0C97A",
+        "brightBlue": "#9BCBFF",
+        "brightMagenta": "#BBAEFF",
+        "brightCyan": "#96E0E4",
+        "brightWhite": "#E4ECF5"
+      }
+    }
+  }
+}

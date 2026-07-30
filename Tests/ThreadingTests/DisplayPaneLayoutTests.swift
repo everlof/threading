@@ -1,0 +1,269 @@
+import AppKit
+import XCTest
+@testable import Threading
+
+/// What the display panel lets the window do, and how the picture inside it is reached.
+///
+/// Both halves of this file are the same bug seen twice: the panel is a *panel*, and it had
+/// been quietly deciding things that belong to the window and to the user — how small the
+/// window may be, and whether the image in it can be opened properly.
+@MainActor
+final class DisplayPaneLayoutTests: XCTestCase {
+
+    // MARK: - Fixtures
+
+    /// A picture with a file behind it, since Quick Look needs one that exists.
+    private func imageOnDisk(
+        size: NSSize,
+        name: String = "shot.png"
+    ) throws -> (content: DisplayContent, url: URL) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-pane-\(UUID().uuidString)-\(name)")
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.systemTeal.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+
+        let bitmap = try XCTUnwrap(image.representations.first as? NSBitmapImageRep
+            ?? NSBitmapImageRep(data: image.tiffRepresentation ?? Data()))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
+
+        return (
+            DisplayContent(body: .image(image, url: url), title: nil, subtitle: name),
+            url
+        )
+    }
+
+    private func paneShowing(_ content: DisplayContent) -> DisplayPaneController {
+        let pane = DisplayPaneController()
+        let sessionID = SessionID()
+        pane.showSession(sessionID)
+        pane.addContentTab(content, for: sessionID)
+        pane.view.layoutSubtreeIfNeeded()
+        return pane
+    }
+
+    // MARK: - The Picture Does Not Size the Pane
+
+    /// `NSImageView` reports the picture's own dimensions as its intrinsic content size, so the
+    /// pane it sits in inherits an opinion about how wide it should be from whatever the agent
+    /// happened to screenshot. Stating no intrinsic size removes the opinion rather than
+    /// out-prioritising it — the difference being that a floored priority is still *in* the
+    /// layout, and still what `fittingSize` answers.
+    func testTheImageLendsThePaneNoWidthOfItsOwn() throws {
+        let tiny = paneShowing(try imageOnDisk(size: NSSize(width: 8, height: 8)).content)
+        let huge = paneShowing(try imageOnDisk(size: NSSize(width: 1320, height: 1100)).content)
+
+        XCTAssertEqual(
+            tiny.view.fittingSize.width,
+            huge.view.fittingSize.width,
+            "a 1320pt-wide screenshot asked the panel to be wider than an 8pt one"
+        )
+    }
+
+    func testThePreviewStatesNoIntrinsicSize() {
+        let preview = ThemedImagePreview()
+        preview.image = NSImage(size: NSSize(width: 900, height: 600))
+
+        XCTAssertEqual(preview.intrinsicContentSize.width, NSView.noIntrinsicMetric)
+        XCTAssertEqual(preview.intrinsicContentSize.height, NSView.noIntrinsicMetric)
+    }
+
+    /// Scaled down to fit, never up, centred across the width and pinned to the top.
+    func testTheImageFitsWithoutBeingBlownUp() {
+        let bounds = NSRect(x: 0, y: 0, width: 200, height: 400)
+
+        let wide = ThemedImagePreview.fittedRect(
+            for: NSSize(width: 1000, height: 500),
+            in: bounds
+        )
+        XCTAssertEqual(wide.width, 200, "a wide image should fill the width")
+        XCTAssertEqual(wide.height, 100)
+        XCTAssertEqual(wide.maxY, bounds.maxY, "the picture should hang from the top edge")
+
+        let small = ThemedImagePreview.fittedRect(for: NSSize(width: 20, height: 10), in: bounds)
+        XCTAssertEqual(small.size, NSSize(width: 20, height: 10), "a small image was blown up")
+        XCTAssertEqual(small.midX, bounds.midX, "a small image should be centred across")
+
+        XCTAssertEqual(
+            ThemedImagePreview.fittedRect(for: .zero, in: bounds),
+            .zero,
+            "an image with no size should draw nothing rather than divide by it"
+        )
+    }
+
+    // MARK: - The Panel Does Not Size the Window
+
+    /// A split item's `minimumThickness` is a **required** constraint, so a pane minimum is
+    /// also a window minimum — and `display_image` opens this panel, which meant showing a
+    /// picture quietly took 200pt off how small the window was allowed to be.
+    ///
+    /// The claim is not that opening a pane is free; it is that it costs the panel's own
+    /// chrome rather than the width it happens to open at.
+    func testOpeningThePanelDoesNotCostTheWindowTheWidthItOpensAt() throws {
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        let root = try XCTUnwrap(window.contentView)
+
+        // Opened first: the very first `fittingSize` on a window that has never been laid out
+        // answers for a tree that has not settled, and the difference is the measurement.
+        controller.setDisplayPaneVisible(true)
+        window.layoutIfNeeded()
+        let open = root.fittingSize.width
+
+        controller.setDisplayPaneVisible(false)
+        window.layoutIfNeeded()
+        let closed = root.fittingSize.width
+
+        XCTAssertGreaterThan(closed, 0, "the window never laid out, so nothing was measured")
+        XCTAssertLessThan(
+            open - closed,
+            DisplayPaneDefaults.minWidth,
+            "opening the panel put its whole opening width under the window"
+        )
+    }
+
+    // MARK: - The Compare Tab Follows the Pane
+
+    /// The compare canvas's height is a function of the width it is given, and it was read
+    /// **once** — from `view.bounds.width` while the body was being built, before the pane had
+    /// been laid out at all on a first show. The box then kept that height for the rest of its
+    /// life: dragging the divider refitted the images inside a canvas that never moved, which
+    /// is the compare tab reading as a fixed-size thing in a resizable pane.
+    func testTheCompareCanvasFollowsThePanesWidth() throws {
+        let old = try imageOnDisk(size: NSSize(width: 400, height: 200), name: "old.png")
+        let new = try imageOnDisk(size: NSSize(width: 400, height: 200), name: "new.png")
+        defer {
+            try? FileManager.default.removeItem(at: old.url)
+            try? FileManager.default.removeItem(at: new.url)
+        }
+
+        let controller = CompareViewController(
+            sessionID: SessionID(),
+            oldPath: old.url.path,
+            newPath: new.url.path,
+            oldTitle: nil,
+            newTitle: nil,
+            mode: .wipeHorizontal
+        )
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 500))
+        host.addSubview(controller.view)
+        controller.view.frame = host.bounds
+        controller.view.autoresizingMask = [.width, .height]
+
+        let loaded = expectation(description: "compare read both files")
+        controller.onLoadingChange = { isLoading in
+            if !isLoading { loaded.fulfill() }
+        }
+        controller.refresh(force: true)
+        wait(for: [loaded], timeout: 10)
+
+        controller.view.layoutSubtreeIfNeeded()
+        let wide = try XCTUnwrap(Self.compareCanvas(in: controller.view)).frame.height
+
+        host.setFrameSize(NSSize(width: 260, height: 500))
+        controller.view.layoutSubtreeIfNeeded()
+        let narrow = try XCTUnwrap(Self.compareCanvas(in: controller.view)).frame.height
+
+        XCTAssertLessThan(
+            narrow,
+            wide,
+            "the canvas kept its first height while the pane around it changed width"
+        )
+    }
+
+    private static func compareCanvas(in view: NSView) -> ImageCompareView? {
+        if let found = view as? ImageCompareView { return found }
+        for subview in view.subviews {
+            if let found = compareCanvas(in: subview) { return found }
+        }
+        return nil
+    }
+
+    // MARK: - Reaching the Picture
+
+    func testTheMenuOffersQuickLookForAFileThatIsThere() throws {
+        let (content, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let titles = paneShowing(content).makeContentMenu().items.map(\.title)
+
+        XCTAssertEqual(
+            titles.first,
+            L10n.string("Quick Look"),
+            "Quick Look should lead: it is the one action that keeps the user where they are"
+        )
+    }
+
+    /// A Quick Look of a file that has since been deleted can do nothing but beep, so it is
+    /// left out rather than offered and then refused.
+    func testTheMenuDropsQuickLookWhenTheFileIsGone() throws {
+        let (content, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
+        try FileManager.default.removeItem(at: url)
+
+        let titles = paneShowing(content).makeContentMenu().items.map(\.title)
+
+        XCTAssertFalse(titles.contains(L10n.string("Quick Look")))
+        XCTAssertTrue(titles.contains(L10n.string("Copy Image")), "the rest should still be there")
+    }
+
+    /// Focus, a key, a pointer and an accessibility action all reach the same place. Asserted
+    /// through the *refusal* path — a file that is not there — because the success path opens a
+    /// real system window, which is the one thing a test in `fast` must not do.
+    func testEveryRouteToQuickLookRefusesTogetherWhenThereIsNoFile() {
+        let preview = ThemedImagePreview()
+        preview.image = NSImage(size: NSSize(width: 40, height: 40))
+        preview.fileURL = URL(fileURLWithPath: "/nowhere/threading-missing.png")
+
+        XCTAssertFalse(preview.performPrimaryAction())
+        XCTAssertFalse(preview.accessibilityPerformPress())
+        XCTAssertFalse(
+            preview.acceptsFirstResponder,
+            "a picture with nothing to open should stay out of the key loop"
+        )
+        XCTAssertNil(preview.toolTip)
+    }
+
+    func testAPictureWithAFileIsFocusableAndSaysSo() throws {
+        let (_, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let preview = ThemedImagePreview()
+        preview.image = NSImage(size: NSSize(width: 40, height: 40))
+        preview.fileURL = url
+
+        XCTAssertTrue(preview.acceptsFirstResponder)
+        XCTAssertNotNil(preview.toolTip, "the gesture has to be advertised somewhere")
+        XCTAssertEqual(preview.accessibilityRole(), .image)
+        XCTAssertEqual(preview.accessibilityLabel(), url.lastPathComponent)
+        XCTAssertNotNil(preview.accessibilityHelp())
+    }
+
+    /// Clearing the picture clears the file with it, so a pane switched to another tab cannot
+    /// keep the previous image previewable behind an empty view.
+    func testClearingThePictureClearsTheFile() throws {
+        let (_, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let preview = ThemedImagePreview()
+        preview.image = NSImage(size: NSSize(width: 40, height: 40))
+        preview.fileURL = url
+        preview.image = nil
+
+        XCTAssertNil(preview.fileURL)
+        XCTAssertFalse(preview.performPrimaryAction())
+    }
+
+    func testCanPreviewOnlyAcceptsAFileThatExists() throws {
+        let (_, url) = try imageOnDisk(size: NSSize(width: 10, height: 10))
+
+        XCTAssertTrue(QuickLookPresenter.canPreview(url))
+        XCTAssertFalse(QuickLookPresenter.canPreview(nil))
+        XCTAssertFalse(QuickLookPresenter.canPreview(URL(string: "https://example.com/a.png")))
+
+        try FileManager.default.removeItem(at: url)
+        XCTAssertFalse(QuickLookPresenter.canPreview(url), "a deleted file is not previewable")
+    }
+}

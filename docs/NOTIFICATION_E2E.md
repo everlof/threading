@@ -1,7 +1,7 @@
 # Notification end-to-end tests
 
 Notification E2E tests deliberately live in the separate
-`SkalmanNotificationE2E` target and scheme. The standard `Skalman` scheme does not reference
+`ThreadingNotificationE2E` target and scheme. The standard `Threading` scheme does not reference
 that target, so an ordinary `xcodebuild test` cannot contact APNs, launch Claude, or spend agent
 usage.
 
@@ -10,7 +10,7 @@ usage.
 - `testAPNsAcceptsPermissionNotification` signs a real provider request, sends a permission
   notification to Apple, and requires HTTP 200 plus an `apns-id` receipt.
 - `testClaudeNotifyUserToolReachesAPNs` launches the installed Claude Code CLI for one short
-  turn, connects it to Skalman's real loopback MCP server, requires one correctly routed
+  turn, connects it to Threading's real loopback MCP server, requires one correctly routed
   `notify_user` call, forwards that call to APNs, and waits for Claude to receive the tool result
   and finish its turn.
 
@@ -20,7 +20,7 @@ check because Focus, notification summaries, and foreground state can affect pre
 
 ## One-time setup
 
-1. Install and run a Debug build of Skalman on a physical iPhone.
+1. Install and run a Debug build of Threading on a physical iPhone.
 2. Complete the notification onboarding and leave **Permission requests** and **Agent updates I
    request** enabled.
 3. Open Settings → Notifications in the debug app and tap **Copy APNs test token**.
@@ -29,7 +29,7 @@ check because Focus, notification summaries, and foreground state can affect pre
    tool group is enabled in the Mac app.
 
 Development builds use the APNs sandbox. A TestFlight/App Store token requires
-`SKALMAN_E2E_APNS_ENVIRONMENT=production`.
+`THREADING_E2E_APNS_ENVIRONMENT=production`.
 
 ## Run
 
@@ -37,12 +37,12 @@ Set the following variables in the invoking shell or through a local secret mana
 commit the `.p8` key or device token.
 
 ```sh
-export SKALMAN_APNS_KEY_ID="your-key-id"
-export SKALMAN_APNS_TEAM_ID="your-team-id"
-export SKALMAN_APNS_PRIVATE_KEY_PATH="/absolute/path/to/AuthKey.p8"
-export SKALMAN_APNS_TOPIC="se.mjukis.Skalman.mobile"
-export SKALMAN_E2E_APNS_DEVICE_TOKEN="token-copied-from-the-debug-app"
-export SKALMAN_E2E_APNS_ENVIRONMENT="sandbox"
+export THREADING_APNS_KEY_ID="your-key-id"
+export THREADING_APNS_TEAM_ID="your-team-id"
+export THREADING_APNS_PRIVATE_KEY_PATH="/absolute/path/to/AuthKey.p8"
+export THREADING_APNS_TOPIC="codes.threading.mobile"
+export THREADING_E2E_APNS_DEVICE_TOKEN="token-copied-from-the-debug-app"
+export THREADING_E2E_APNS_ENVIRONMENT="sandbox"
 ```
 
 Test the provider directly, with no model usage:
@@ -57,7 +57,7 @@ Test the complete Claude → MCP → APNs flow as well:
 bash scripts/run_notification_e2e.sh --claude
 ```
 
-`SKALMAN_E2E_CLAUDE_MODEL` can optionally name a low-cost model available to the configured
+`THREADING_E2E_CLAUDE_MODEL` can optionally name a low-cost model available to the configured
 Claude account. If omitted, Claude Code uses that account's default.
 
 Both forms are also reachable as the `e2e` level of `scripts/test.sh` — `scripts/test.sh e2e`

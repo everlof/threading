@@ -7,9 +7,9 @@ scaffold-to-runner dogfood build, and the documented v1 compatibility freeze.
 
 ## Objective
 
-Continue Skalman's extension work toward a broad but controlled extension platform that is easy
+Continue Threading's extension work toward a broad but controlled extension platform that is easy
 for an AI to author against. Safe extensions run out of process, use the Foundation-only
-`SkalmanExtensionKit`, exchange value types with the host, and ask Skalman to render semantic UI.
+`ThreadingExtensionKit`, exchange value types with the host, and ask Threading to render semantic UI.
 Do not make AppKit or SwiftUI part of the safe extension ABI.
 
 The user wants extensions to be able to customize most useful product surfaces over time, but
@@ -19,14 +19,14 @@ through documented, versioned host contracts rather than arbitrary runtime overr
 
 The experimental extension platform is usable end to end:
 
-- `.skalmanextension` directories and unpacked development directories can be inspected and
+- `.threadingextension` directories and unpacked development directories can be inspected and
   imported into app-owned storage.
 - Extensions can be enabled, disabled, reloaded, revealed, and recoverably removed from the
   Extensions settings page.
 - Enabled extensions run as supervised JSONL processes. Crashes, protocol failures, reloads,
   disable, removal, and shutdown revoke the process generation and its host publications.
 - Manifest capabilities and runtime are inspected before execution. New safe extensions are
-  Swift WebAssembly modules launched through Skalman's signed App Sandboxed interpreter, with
+  Swift WebAssembly modules launched through Threading's signed App Sandboxed interpreter, with
   no filesystem preopens, socket or subprocess surface, and only the authenticated host-broker
   import. `RuntimeSelectingLaunchPolicy` keeps the generated Seatbelt launcher only for legacy
   native format-1 packages.
@@ -77,14 +77,14 @@ Start with:
 - `docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md`
 - `docs/extensions/SANDBOX_RUNNER.md`
 - `docs/extensions/AUTHORING_FLOW.md`
-- `SkalmanExtensionKit/README.md`
+- `ThreadingExtensionKit/README.md`
 
 ## Important architecture boundaries
 
 Preserve these boundaries unless there is strong evidence to change them:
 
 1. **Safe extensions never provide native views.** They send semantic values and `ExtensionNode`
-   trees. Skalman owns rendering, theme, accessibility, focus, layout, and fallback.
+   trees. Threading owns rendering, theme, accessibility, focus, layout, and fallback.
 2. **The host authenticates extension identity.** Host APIs derive the extension ID and process
    generation from the bearer token. Never accept an extension ID supplied in a request body as
    authority.
@@ -97,7 +97,7 @@ Preserve these boundaries unless there is strong evidence to change them:
 6. **Extensions do not read each other's storage.** Cross-extension communication goes through
    declared, versioned brokered services.
 7. **Core MCP remains extension-agnostic.** The extension MCP provider is an adapter; do not
-   import `SkalmanExtensionKit` or `ExtensionManager` into the MCP core.
+   import `ThreadingExtensionKit` or `ExtensionManager` into the MCP core.
 8. **Installed packages are immutable.** Mutable state belongs in settings, KV, cache, or the
    secrets broker.
 9. **Rendering never waits for an extension process.** Disable, crash, or invalid output must
@@ -116,7 +116,7 @@ reading any launch code:
   between the app and the extension. There is no second buffer, and therefore no backpressure
   design.
 - **The host broker moves from a loopback port to an inherited socket** (`fd 3`,
-  `SKALMAN_EXTENSION_HOST_FD`). That is what lets the non-network runner variant hold no
+  `THREADING_EXTENSION_HOST_FD`). That is what lets the non-network runner variant hold no
   network entitlement at all, and it removes the guessable port.
 - **Storage stops being a filesystem grant.** App Sandbox cannot express a per-extension
   writable directory, so key-value and cache access become broker traffic and a
@@ -137,10 +137,10 @@ containment tests still test that path.
 
 Relevant files:
 
-- `Sources/Skalman/Core/Extensions/ExtensionLaunchPolicy.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionBundleLoader.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionProcessSession.swift`
-- `Tests/SkalmanTests/ExtensionBundleLoaderTests.swift`
+- `Sources/Threading/Core/Extensions/ExtensionLaunchPolicy.swift`
+- `Sources/Threading/Core/Extensions/ExtensionBundleLoader.swift`
+- `Sources/Threading/Core/Extensions/ExtensionProcessSession.swift`
+- `Tests/ThreadingTests/ExtensionBundleLoaderTests.swift`
 
 ### The descriptor-mode host broker
 
@@ -148,8 +148,8 @@ The host now answers on an inherited socket as well as on the loopback port, and
 reach `ExtensionHostService.route` — the bytes are the same HTTP/1.1 exchange, so there is one
 router, one authenticator and one set of capability checks rather than two.
 
-- `SKALMAN_EXTENSION_HOST_FD` selects it, and `ExtensionHostConnection(environment:)` **prefers
-  it over `SKALMAN_EXTENSION_HOST_URL`**, since a runner-launched extension may hold no network
+- `THREADING_EXTENSION_HOST_FD` selects it, and `ExtensionHostConnection(environment:)` **prefers
+  it over `THREADING_EXTENSION_HOST_URL`**, since a runner-launched extension may hold no network
   authority at all. A descriptor-mode authorization exports no URL.
 - `ExtensionHostService.authorize(…, transport: .descriptor)` mints the socket pair and returns
   the child's end as `ExtensionHostAuthorization.childDescriptor`, to be installed as
@@ -176,10 +176,10 @@ code that suffers from it:
 
 Relevant files:
 
-- `SkalmanExtensionKit/Sources/SkalmanExtensionKit/ExtensionHostDescriptorTransport.swift`
-- `SkalmanExtensionKit/Sources/SkalmanExtensionKit/ExtensionHostClient.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionHostDescriptorConnection.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionHostService.swift`
+- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostDescriptorTransport.swift`
+- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostClient.swift`
+- `Sources/Threading/Core/Extensions/ExtensionHostDescriptorConnection.swift`
+- `Sources/Threading/Core/Extensions/ExtensionHostService.swift`
 
 ### Brokered storage
 
@@ -213,7 +213,7 @@ Three things about it are decisions rather than details:
 - **A name is one path component**, validated by the SDK *and* independently by the host. The
   broker takes the name from a request body, so a broker that trusted its caller's path would
   be an arbitrary-write primitive rather than a cache.
-- **A miss is a 200 carrying a null value, not a 404.** Skalman may reclaim any entry at any
+- **A miss is a 200 carrying a null value, not a 404.** Threading may reclaim any entry at any
   moment, so absence is an ordinary answer; an extension forced to tell "absent" from "refused"
   by status code would get it wrong.
 - **The 100 MiB ceiling is checked per write**, not only at launch as it was. A brokered
@@ -240,7 +240,7 @@ managed to do; the results table and the three findings that came out of writing
 
 Relevant files:
 
-- `Tests/SkalmanTests/ExtensionBundleLoaderTests.swift`
+- `Tests/ThreadingTests/ExtensionBundleLoaderTests.swift`
 
 ### The runner foundation and completed product path
 
@@ -291,7 +291,7 @@ collapsed, in the note.
 
 `Helper/` is a small target of its own: `main.swift` validates and `execve`s, and it shares
 `ExtensionRunnerRequest.swift` with the app. Two Xcode command-line-tool targets build it —
-`SkalmanExtensionHelper` and `SkalmanExtensionHelperNetwork`, differing only in
+`ThreadingExtensionHelper` and `ThreadingExtensionHelperNetwork`, differing only in
 `com.apple.security.network.client` — and the app embeds both into `Contents/Helpers` with
 `CodeSignOnCopy`. `HelperLaunchPolicy` picks the variant from the manifest's capabilities and
 declares `hostTransport = .descriptor`.
@@ -352,9 +352,9 @@ work is replacing deprecated `sandbox-exec` without promoting the helper's weake
 Relevant files:
 
 - `Helper/main.swift`, `Helper/ExtensionRunnerRequest.swift`
-- `Helper/skalman-extension-helper*.entitlements`, `Helper/Info*.plist`
-- `Sources/Skalman/Core/Extensions/HelperLaunchPolicy.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionChildSpawner.swift`
+- `Helper/threading-extension-helper*.entitlements`, `Helper/Info*.plist`
+- `Sources/Threading/Core/Extensions/HelperLaunchPolicy.swift`
+- `Sources/Threading/Core/Extensions/ExtensionChildSpawner.swift`
 
 One trap worth knowing before writing a test against this: broker authentication and AppKit
 registries live on the main actor, while **KV/cache parsing and disk I/O run on
@@ -365,11 +365,11 @@ blocking-store test proves a slow extension-controlled cache operation cannot pi
 
 Relevant files:
 
-- `SkalmanExtensionKit/Sources/SkalmanExtensionKit/ExtensionKeyValueBroker.swift`
-- `SkalmanExtensionKit/Sources/SkalmanExtensionKit/ExtensionCacheBroker.swift`
-- `SkalmanExtensionKit/Sources/SkalmanExtensionKit/ExtensionStorage.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionStorageStore.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionHostService.swift`
+- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionKeyValueBroker.swift`
+- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionCacheBroker.swift`
+- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionStorage.swift`
+- `Sources/Threading/Core/Extensions/ExtensionStorageStore.swift`
+- `Sources/Threading/Core/Extensions/ExtensionHostService.swift`
 
 ### Menu placement and shortcuts
 
@@ -381,11 +381,11 @@ visible placement can still be dispatched by its assigned shortcut.
 
 Relevant files:
 
-- `SkalmanExtensionKit/Sources/SkalmanExtensionKit/ExtensionContributions.swift`
-- `Sources/Skalman/App/AppDelegate.swift`
-- `Sources/Skalman/Core/Settings/ExtensionCommandMenuLayout.swift`
-- `Sources/Skalman/Core/Settings/CommandRegistry.swift`
-- `Sources/Skalman/Core/Settings/ShortcutOverrideStore.swift`
+- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionContributions.swift`
+- `Sources/Threading/App/AppDelegate.swift`
+- `Sources/Threading/Core/Settings/ExtensionCommandMenuLayout.swift`
+- `Sources/Threading/Core/Settings/CommandRegistry.swift`
+- `Sources/Threading/Core/Settings/ShortcutOverrideStore.swift`
 
 ### Keychain-backed secrets
 
@@ -406,10 +406,10 @@ Important properties:
 
 Relevant files:
 
-- `SkalmanExtensionKit/Sources/SkalmanExtensionKit/ExtensionSecrets.swift`
-- `SkalmanExtensionKit/Sources/SkalmanExtensionKit/ExtensionHostClient.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionSecretStore.swift`
-- `Sources/Skalman/Core/Extensions/ExtensionHostService.swift`
+- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionSecrets.swift`
+- `ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostClient.swift`
+- `Sources/Threading/Core/Extensions/ExtensionSecretStore.swift`
+- `Sources/Threading/Core/Extensions/ExtensionHostService.swift`
 - `docs/extensions/schema/extension-secrets.schema.json`
 
 This work also fixed a sandbox bug: `services.consume` was accepted by host authorization but did
@@ -421,15 +421,15 @@ not receive access to the generation's exact loopback port. Both `services.consu
 The following was green after the latest changes:
 
 ```bash
-swift test --package-path SkalmanExtensionKit
+swift test --package-path ThreadingExtensionKit
 # 46 tests, 0 failures
 
-xcodebuild -project Skalman.xcodeproj -scheme Skalman \
+xcodebuild -project Threading.xcodeproj -scheme Threading \
   -destination 'platform=macOS' test
 # 1038 tests, 2 intentionally skipped, 0 failures
 
-swift run --package-path SkalmanExtensionKit \
-  SkalmanComponentCatalogGenerator --check docs/extensions/generated
+swift run --package-path ThreadingExtensionKit \
+  ThreadingComponentCatalogGenerator --check docs/extensions/generated
 # Component catalogue is up to date.
 
 git diff --check
@@ -438,8 +438,8 @@ git diff --check
 
 Ten JSON files under `docs/extensions/schema` were also decoded successfully.
 
-`Tests/SkalmanTests` is not a synchronized Xcode group. If a new test file is created, register it
-in `Skalman.xcodeproj/project.pbxproj` or use the existing `scripts/add_test_file.py` helper.
+`Tests/ThreadingTests` is not a synchronized Xcode group. If a new test file is created, register it
+in `Threading.xcodeproj/project.pbxproj` or use the existing `scripts/add_test_file.py` helper.
 Prefer adding tests to an existing registered test file when that produces a coherent suite.
 
 ## Worktree warning
@@ -517,9 +517,9 @@ v1-blocking item here is complete.
 - [x] Import, inspect, enable, reload, update, and recoverably remove packages.
 - [x] Stage, digest, approve, and atomically install the exact update candidate.
 - [x] Show added capabilities and version direction before an update.
-- [x] Assemble and validate an installable `.skalmanextension`.
+- [x] Assemble and validate an installable `.threadingextension`.
 - [x] Choose how an extension project outside this repository consumes a versioned
-  `SkalmanExtensionKit`: scaffolded projects vendor the exact app-shipped SDK snapshot and use
+  `ThreadingExtensionKit`: scaffolded projects vendor the exact app-shipped SDK snapshot and use
   a relative SwiftPM path dependency. `SDK_VERSION` versions that snapshot; no checkout path,
   floating branch, or rebuild-time network access is required.
 - [x] Require editable source in distributable WebAssembly packages while retaining a prebuilt
@@ -553,7 +553,7 @@ v1-blocking item here is complete.
   - [x] `sidebar.session-hover-card@1`: compose around the existing session identity/status
     card using session-presentation context. It reuses the same host and constraints, supports
     extension-only presentation in the generic shell, and preserves action provenance.
-  - [x] `toolbar.account-usage-popover@1`: compose account-specific details while Skalman owns
+  - [x] `toolbar.account-usage-popover@1`: compose account-specific details while Threading owns
     usage refresh, hover survival and account switching. The pointer bridge surrounds the
     composition host, so even a complete replacement cannot make the hover popover collapse.
   - [x] Define safe composer seams. `composer.session-start@1` and
@@ -580,7 +580,7 @@ v1-blocking item here is complete.
     hierarchy. Extension commands already enter host-rendered stable menu anchors and the global
     shortcut registry without receiving `NSMenuItem` or event-monitor access. Commands now add
     only `ExtensionCommandRisk`; `.destructive` gates menu and shortcut invocation through a
-    Skalman-authored warning whose copy, button roles, keyboard default and decision cannot be
+    Threading-authored warning whose copy, button roles, keyboard default and decision cannot be
     supplied by the extension. Permission-card hooks remain display-only, while safe WebAssembly
     extensions have neither AppKit nor Security.framework and reach secrets only through the
     isolated host broker.
@@ -593,7 +593,7 @@ v1-blocking item here is complete.
   - [x] Render the data already available through safe project, session, and repository
     snapshots: title, activity, project, provider/account identity, branch, surface, repository,
     revision, side-chat state, and archive state.
-  - [x] Exercise `--skalman-serve` against a capability-shaped test broker: the automatic load
+  - [x] Exercise `--threading-serve` against a capability-shaped test broker: the automatic load
     request fetched its session and project, preserved the request ID, and returned a validated
     12-row replacement panel.
   - [x] Define a narrow brokered session-runtime snapshot for agent/shell process groups, CPU,
@@ -624,7 +624,7 @@ v1-blocking item here is complete.
   MCP, panels, commands and a service); Hello Status Consumer independently proves declared
   cross-extension consumption and lifecycle loss/recovery.
 - [x] Freeze and document the safe extension API as v1 after dogfooding.
-  `SkalmanExtensionAPI`, SDK snapshot 1, and `API_V1.md` pin the supported Wasm runtime,
+  `ThreadingExtensionAPI`, SDK snapshot 1, and `API_V1.md` pin the supported Wasm runtime,
   manifest/process/host/component version domains, safe capabilities, source/wire compatibility
   promise, and explicit exclusions. Tests bind `SDK_VERSION` and all current component contract
   versions to that declaration. This is still pre-release: dogfood additions remain part of
@@ -648,7 +648,7 @@ shipped artifact is a WASI command module interpreted by WasmKit.
 - ~~Write the design note.~~ Done.
 - ~~Introduce a launch abstraction used by both `ExtensionRegistrationLoader` and
   `ExtensionProcessSession`, changing no behaviour.~~ Done: `ExtensionLaunchPolicy`.
-- ~~**Descriptor-mode host connection.** Add `SKALMAN_EXTENSION_HOST_FD` to
+- ~~**Descriptor-mode host connection.** Add `THREADING_EXTENSION_HOST_FD` to
   `ExtensionHostConnection` and serve the existing request/response protocol over a socketpair
   in `ExtensionHostService`, keeping the loopback path.~~ Done.
 - ~~**Broker storage.** Key-value and cache, so no extension needs a writable path.~~ Done.
@@ -683,10 +683,10 @@ shipped artifact is a WASI command module interpreted by WasmKit.
   entries.
 - ~~**Replace deprecated `sandbox-exec` without weakening the boundary.**~~ Done for new safe
   extensions. `RuntimeSelectingLaunchPolicy` routes `runtime: webAssembly` to the signed
-  `skalman-wasm-extension-runner` and old native manifests to the compatibility policy. The
+  `threading-wasm-extension-runner` and old native manifests to the compatibility policy. The
   app opens the already inspected module and passes it on fd 4, so the runner needs no package
   read entitlement. It provides no filesystem preopens or socket API and links only
-  `skalman.host_exchange`; registration has no broker and serve mode gets the generation-bound
+  `threading.host_exchange`; registration has no broker and serve mode gets the generation-bound
   fd 3 broker. Limits cover module bytes, guest memory, table growth, and broker frames.
   SDK tests compile both reference extensions for `wasm32-unknown-wasip1`; runtime tests execute
   no-authority and brokered fixtures; app tests execute a real WASI registration module through
@@ -790,7 +790,7 @@ are tested against a genuinely running extension.
 `formatVersion: 2` used to report "The extension manifest could not be read", which sends
 someone looking for a typo in a file that is fine. `ExtensionBundleInspector` reads the format
 version *on its own, before the manifest it describes* — a future format may carry fields
-today's decoder cannot read at all — and reports "needs a newer version of Skalman" or "this
+today's decoder cannot read at all — and reports "needs a newer version of Threading" or "this
 build no longer supports it" accordingly. A manifest with no `formatVersion` at all is still
 malformed rather than incompatible, and still reports the missing field.
 
@@ -803,12 +803,12 @@ is the same silent-failure shape as an unregistered test file.
 
 What remains of this item:
 
-- ~~build a packager which assembles and validates `.skalmanextension`;~~
+- ~~build a packager which assembles and validates `.threadingextension`;~~
 - ~~require editable source for published extensions while retaining a prebuilt executable for
   reliable installation;~~
 - ~~choose how projects outside the repository consume the SDK;~~ Vendored exact snapshot with
   `SDK_VERSION`. The app now embeds that filtered source package under
-  `Contents/Resources/ExtensionSDK`; the scaffold copies it into `Vendor/SkalmanExtensionKit`
+  `Contents/Resources/ExtensionSDK`; the scaffold copies it into `Vendor/ThreadingExtensionKit`
   and its generated script packages the compiled Wasm plus rebuildable source.
 - ~~define signing/provenance and trust presentation;~~ v1 deliberately records local/unsigned
   provenance and package integrity without inventing an author PKI. If author signing is added,
@@ -839,7 +839,7 @@ surface that resolves a real gap.
 
 ### 3a. The authoring flow — how a user ever gets here
 
-`docs/extensions/AUTHORING_FLOW.md` is the design for the moment a user says "Skalman should
+`docs/extensions/AUTHORING_FLOW.md` is the design for the moment a user says "Threading should
 show me X". That sentence now connects to an explicit MCP authoring flow: the agent can discover
 the extension tools, scaffold a standalone project with the shipped SDK, build and package it,
 and propose a reviewed disabled installation. The agent cannot approve or enable its own
@@ -886,7 +886,7 @@ library, but keeps the value-only safe boundary:
 - [x] Keep process generation/provenance on every hook and reconnect the chain on revocation.
 - [x] Add generic stack and overlay composition around `.proceed`.
 - [x] Publish `application.main-window@1` without exposing its AppKit hierarchy.
-- [x] Add capability-gated custom Metal fragment surfaces hosted entirely by Skalman.
+- [x] Add capability-gated custom Metal fragment surfaces hosted entirely by Threading.
 - [x] Add bounded semantic host signals, initially active-account usage remaining.
 - [x] Copy project `Resources/` into source-bundled packages.
 - [x] Add install-time GPU-source disclosure and public authoring documentation.
@@ -920,14 +920,14 @@ The power tier is now an **out-of-process companion superset**, not an in-proces
 Every advanced package keeps a WebAssembly core and uses the same settings, commands, menus,
 hooks, panels, MCP tools, storage, services, and host-data capabilities as a lightweight
 extension. It adds a separately identified macOS `.app` only for work which genuinely needs
-OS authority. Custom UI still enters Skalman as semantic nodes, a future bounded web surface, or
+OS authority. Custom UI still enters Threading as semantic nodes, a future bounded web surface, or
 a bounded remote surface; the companion never hands the host an `NSView`.
 
 The manifest and approval foundation is implemented:
 
 - [x] Add an optional `companions` array without changing ordinary Wasm manifests.
 - [x] Derive each companion's stable bundle identifier from extension identity and local ID.
-- [x] Keep companion OS authority separate from the Wasm core's Skalman host capabilities.
+- [x] Keep companion OS authority separate from the Wasm core's Threading host capabilities.
 - [x] Define granular initial authorities for background lifecycle, process launch, client and
   listener networking, user-selected files, screen capture, input control, Apple Events,
   notifications, clipboard access, and remote surfaces.
@@ -958,7 +958,7 @@ The manifest and approval foundation is implemented:
   normalized pointer/keyboard events out, backpressure, visibility, accessibility fallback, and
   immediate teardown on revocation.
 - [x] Broker interactive Screen Recording and Accessibility grants from the host before spawn.
-  Measurement showed that macOS attributes these TCC services to Skalman for a directly
+  Measurement showed that macOS attributes these TCC services to Threading for a directly
   supervised child even though App Sandbox entitlements remain scoped to the companion. Missing
   grants now fail closed with the correct System Settings target.
 - [x] Preserve the companion's final stderr diagnostic across the stdout-EOF/process-exit race
@@ -969,7 +969,7 @@ The manifest and approval foundation is implemented:
   standalone source project builds a real Wasm core plus a hardened, sandboxed, signed companion
   and retains its vendored SDK. The production-boundary test now launches the real package and
   reports the correct Screen Recording grant target. Verified on 2026-07-26 with a
-  development-signed Skalman granted Screen Recording and Accessibility: the test received and
+  development-signed Threading granted Screen Recording and Accessibility: the test received and
   acknowledged a non-solid 305×700 live Simulator frame, wrote its PNG, relayed normalized
   input, and observed the worker remaining healthy.
 - [ ] Then exercise the same primitives with an HTTP proxy and a Claudex-shaped background
@@ -1002,9 +1002,9 @@ separately supervised process is the crash and permission boundary this tier exi
     the official-toolchain scaffold → package → install → signed-runner test.
 11. Add only the component anchors and semantic nodes proven necessary.
 12. ~~Freeze and document the safe extension API as v1.~~ Done in `API_V1.md` and
-    `SkalmanExtensionAPI`.
+    `ThreadingExtensionAPI`.
 13. ~~Finish the live Simulator permission/frame/input pass in §4.~~ Verified with the real
-    package and a development-signed Skalman: permission brokering, frame acknowledgement,
+    package and a development-signed Threading: permission brokering, frame acknowledgement,
     normalized input, and worker health all passed. Next use the same primitives for the proxy
     and Claudex-shaped cases.
 

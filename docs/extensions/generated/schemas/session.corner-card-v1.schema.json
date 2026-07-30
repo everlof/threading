@@ -1,0 +1,120 @@
+{
+  "$id" : "https://threading.codes/schema/components/session.corner-card-v1.schema.json",
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties" : false,
+  "properties" : {
+    "id" : {
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "properties" : {
+      "items" : {
+        "properties" : {
+          "property" : {
+            "enum" : [
+
+            ]
+          },
+          "value" : {
+            "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
+          }
+        },
+        "required" : [
+          "property",
+          "value"
+        ],
+        "type" : "object"
+      },
+      "type" : "array"
+    },
+    "slots" : {
+      "items" : {
+        "oneOf" : [
+          {
+            "additionalProperties" : false,
+            "properties" : {
+              "children" : {
+                "items" : {
+                  "$ref" : "https://threading.codes/schema/extension-node.schema.json"
+                },
+                "maxItems" : 3,
+                "minItems" : 1,
+                "type" : "array",
+                "x-threading-node-constraints" : {
+                  "allowedButtonRoles" : [
+
+                  ],
+                  "allowedCustomSurfaceKinds" : [
+
+                  ],
+                  "allowedImageRoles" : [
+
+                  ],
+                  "allowedStackAxes" : [
+                    "horizontal"
+                  ],
+                  "allowedStatusRoles" : [
+                    "neutral",
+                    "positive",
+                    "warning",
+                    "negative"
+                  ],
+                  "allowedTextRoles" : [
+                    "compactBody",
+                    "compactDetail"
+                  ],
+                  "allowsDivider" : false,
+                  "allowsFixedSpacer" : true,
+                  "allowsFlexibleSpacer" : true,
+                  "allowsOverlay" : false,
+                  "allowsProceed" : false,
+                  "maximumDepth" : 1,
+                  "maximumNodes" : 8,
+                  "maximumTextLength" : 40,
+                  "requiresProceed" : false
+                }
+              },
+              "slot" : {
+                "const" : "top-trailing"
+              }
+            },
+            "required" : [
+              "slot",
+              "children"
+            ],
+            "type" : "object"
+          }
+        ]
+      },
+      "type" : "array"
+    },
+    "target" : {
+      "additionalProperties" : false,
+      "properties" : {
+        "component" : {
+          "const" : "session.corner-card"
+        },
+        "contractVersion" : {
+          "const" : 1
+        },
+        "entityID" : {
+          "minLength" : 1,
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "component",
+        "contractVersion"
+      ],
+      "type" : "object"
+    }
+  },
+  "required" : [
+    "id",
+    "target",
+    "properties",
+    "slots"
+  ],
+  "title" : "Threading session.corner-card v1 component patch",
+  "type" : "object"
+}

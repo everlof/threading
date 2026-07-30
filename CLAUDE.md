@@ -9,7 +9,7 @@ table under [Subsystems](#subsystems) says which one.
 
 ## Project Overview
 
-Skalman is a native macOS app for organizing coding-agent sessions, built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+**.
+Threading is a native macOS app for organizing coding-agent sessions, built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+**.
 
 A single window pairs a project sidebar with the selected session's terminal. Each session
 hosts a Claude Code or Codex process inside a project folder, with a shell available under it
@@ -19,30 +19,30 @@ conversation can be resumed later by its agent-assigned identifier.
 
 ## Build & Run Commands
 
-The project is **Xcode-only** — a single `Skalman.xcodeproj`, no SwiftPM manifest. (SwiftTerm
+The project is **Xcode-only** — a single `Threading.xcodeproj`, no SwiftPM manifest. (SwiftTerm
 stays a local Swift package that the Xcode project references; the app's own `Package.swift` was
 removed so there is one build system, not two.)
 
 ```bash
 # Build the app
-xcodebuild -project Skalman.xcodeproj -scheme Skalman -configuration Debug build
+xcodebuild -project Threading.xcodeproj -scheme Threading -configuration Debug build
 
 # Run the tests — see "Test levels" below for which one to pick
 scripts/test.sh          # fast: everything except the tests that put a window on screen
-scripts/test.sh all      # the whole SkalmanTests target
+scripts/test.sh all      # the whole ThreadingTests target
 
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)
-open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Skalman-*/Build/Products/Debug/Skalman.app | head -1)"
+open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Threading-*/Build/Products/Debug/Threading.app | head -1)"
 ```
 
 Resources: files under `Sources/` are members of the app target automatically (Xcode 16
 synchronized folders). The asset catalogue compiles to `Assets.car`; `Resources/Icons` is marked
 an explicit folder so its loose PNGs land under `Contents/Resources/Icons/`, loaded via
-`Bundle.main` (`AgentBrandIcon`). Unit tests `@testable import Skalman`, so the test bundle is
+`Bundle.main` (`AgentBrandIcon`). Unit tests `@testable import Threading`, so the test bundle is
 hosted in the app; `AppDelegate` skips its real startup under `XCTestCase` so tests spawn no
 agents or MCP server.
 
-**`Tests/SkalmanTests` is *not* a synchronized folder** — a new test file must be registered
+**`Tests/ThreadingTests` is *not* a synchronized folder** — a new test file must be registered
 in `project.pbxproj` by hand (PBXFileReference, PBXBuildFile, the Tests group, and the test
 target's Sources phase; follow the `A1000000…1`/`…2` id convention already there). The failure
 mode is silent: an unregistered test file builds nothing and `xcodebuild test` reports
@@ -130,7 +130,9 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |
 | Agent marks, account chips, project icons, icon discovery and research | [`icons.md`](docs/architecture/icons.md) |
 | Multiple logins per CLI, discovery and naming, migrating a conversation between accounts, usage readings | [`accounts.md`](docs/architecture/accounts.md) |
-| The SQLite store, quarantine, `EventLog`/`SkalmanLogger`, composer drafts | [`persistence.md`](docs/architecture/persistence.md) |
+| The GitHub credential chain (app connection, `gh`, credential helper), the device-flow sign-in, the `network.brokered` extension fetch and its grant rules | [`github.md`](docs/architecture/github.md) |
+| The SQLite store, quarantine, `EventLog`/`ThreadingLogger`, composer drafts | [`persistence.md`](docs/architecture/persistence.md) |
+| Entitlements, the TCC grants and who inherits them, the Privacy settings page, Info.plist usage strings | [`permissions.md`](docs/architecture/permissions.md) |
 | Reclaimable build output, the two deletion gates, `scc` code stats | [`storage-and-stats.md`](docs/architecture/storage-and-stats.md) |
 | Any UI at all: the component vocabulary, themed controls, tabs, the composer, motion previews | [`design-system.md`](docs/architecture/design-system.md) |
 | The three forked packages and the seams that are ours | [`dependencies.md`](docs/architecture/dependencies.md) |
@@ -168,10 +170,10 @@ buttons will not match anything else in the app, and will fail the build lint.
 ## Extension Authoring
 
 Safe extensions are machine-authored, out-of-process executables built against the
-Foundation-only `SkalmanExtensionKit`. Before creating or changing one, read
+Foundation-only `ThreadingExtensionKit`. Before creating or changing one, read
 `docs/extensions/AGENT_AUTHORING.md` completely and use
-`SkalmanExtensionKit/Examples/HelloStatusExtension` as the source template. Do not infer the
-extension API from application internals, remove `SkalmanExtensionPolicyPlugin`, or import
+`ThreadingExtensionKit/Examples/HelloStatusExtension` as the source template. Do not infer the
+extension API from application internals, remove `ThreadingExtensionPolicyPlugin`, or import
 AppKit/SwiftUI in a safe extension. If the semantic UI model cannot express a requested
 interface, report the missing node as an SDK requirement rather than bypassing the host
 renderer.
@@ -236,13 +238,13 @@ enum TerminalError: LocalizedError {
 ## File Organization
 
 ```
-Sources/Skalman/
+Sources/Threading/
 ├── App/                    # App entry point, AppDelegate
 ├── Core/
 │   ├── Constants/          # TerminalConstants.swift
 │   ├── Agent/              # AgentLauncher, AgentRuntime, CodexSessionDiscovery, GitInfo
 │   ├── MCP/                # MCPServer, MCPConnection, MCPSessionRegistry, MCPTools
-│   ├── Logging/            # SkalmanLogger (os_log), EventLog (durable journal)
+│   ├── Logging/            # ThreadingLogger (os_log), EventLog (durable journal)
 │   └── Session/            # TerminalSession, ProjectStore, StateManager, DraftStore
 ├── UI/
 │   ├── Design/             # Design.swift tokens, ChipView, PromptView
@@ -268,11 +270,11 @@ Three levels, one entry point — `scripts/test.sh <level>`. **Run `fast` while 
 
 | Level | Command | Covers | Cost |
 |---|---|---|---|
-| **fast** | `scripts/test.sh` | `Skalman-Fast` test plan — the whole `SkalmanTests` target minus the three tests that order a window on screen | default; nothing appears on screen |
-| **all** | `scripts/test.sh all` | `Skalman-All` test plan — the entire target | adds ~14 live-WKWebView tests that flash real windows and load real pages |
-| **e2e** | `scripts/test.sh e2e` | `SkalmanNotificationE2E` scheme — real APNs delivery; `--claude` also spawns a real Claude | needs the four `SKALMAN_APNS_*` credentials; exits 2 without them, so it never fires by accident |
+| **fast** | `scripts/test.sh` | `Threading-Fast` test plan — the whole `ThreadingTests` target minus the three tests that order a window on screen | default; nothing appears on screen |
+| **all** | `scripts/test.sh all` | `Threading-All` test plan — the entire target | adds ~14 live-WKWebView tests that flash real windows and load real pages |
+| **e2e** | `scripts/test.sh e2e` | `ThreadingNotificationE2E` scheme — real APNs delivery; `--claude` also spawns a real Claude | needs the four `THREADING_APNS_*` credentials; exits 2 without them, so it never fires by accident |
 
-The plans live in `TestPlans/` and are attached to the `Skalman` scheme, so Xcode's test-plan
+The plans live in `TestPlans/` and are attached to the `Threading` scheme, so Xcode's test-plan
 picker offers the same choice. `-only-testing:` still works through the script for a single class.
 
 **`all` is enforced on push.** `scripts/install_git_hooks.sh` installs the gate; run it once per
@@ -280,7 +282,7 @@ clone. `core.hooksPath` points at a shared `~/.git-hooks` whose `pre-commit` alr
 an optional `.git/hooks/pre-commit.local`, so the installer teaches `pre-push` the same trick
 rather than shadowing the global hooks and having to reimplement Git LFS. The shim under `.git/`
 is one line; the logic is `scripts/pre_push.sh`, which is versioned and reviewable. Deletion-only
-pushes skip the gate. Bypass deliberately with `SKALMAN_SKIP_TESTS=1 git push` — prefer it over
+pushes skip the gate. Bypass deliberately with `THREADING_SKIP_TESTS=1 git push` — prefer it over
 `--no-verify`, which also skips Git LFS.
 
 **Never run `git push` to try something out.** `submodule.recurse` is true, so a push recurses
@@ -292,7 +294,7 @@ has no remote configured. To exercise the hook, pipe fabricated ref lines into
 **Fast is defined by "orders a window on screen", not by "is UI".** Almost every UI test here —
 all the `*RenderTests`, the themed component tests, the pane header/footer tests — builds an
 *unshown* window and `cacheDisplay`s it, which draws nothing on screen and stays in `fast`. Only
-three tests genuinely need to be visible, and they are skipped by name in `Skalman-Fast.xctestplan`:
+three tests genuinely need to be visible, and they are skipped by name in `Threading-Fast.xctestplan`:
 
 - `BrowserAgentBridgeIntegrationTests` (the whole class) — WKWebView will not load or render
   offscreen, so each test calls `orderFront`. Note the sibling class in the same file,
@@ -307,7 +309,7 @@ three tests genuinely need to be visible, and they are skipped by name in `Skalm
   (its owning test host was busy with later tests) until the host exited.
 
 **Adding a test that needs a real window?** Add it to `skippedTests` in
-`TestPlans/Skalman-Fast.xctestplan` and say why here. Anything that can be asserted against an
+`TestPlans/Threading-Fast.xctestplan` and say why here. Anything that can be asserted against an
 unshown window belongs in `fast` — reach for `orderFront` only when the framework forces it.
 
 **A fixture window is built, never shown.** `AppDelegate.applicationShouldTerminateAfterLastWindowClosed`
@@ -319,9 +321,24 @@ Found by a menu test that ran the run loop for a second, which made a latent ver
 land in `SessionImportBelongingTests`. An unshown window still lays out, still draws through
 `cacheDisplay`, and still takes a first responder, which is everything these tests need.
 
+**A hosted test writes to the developer's own preferences.** The bundle is hosted in the app, so
+`UserDefaults.standard` inside a test is the real app's `UserDefaults` — a test that records a
+choice there changes what the app the developer is running launches into next. This shipped as
+"the theme selection doesn't persist between app launches": three test classes apply a theme in
+`setUp` and one put it back, so the last test to run decided. Anything that stores a **user's
+choice** goes through `PreferenceStore`, which redirects to a scratch suite under a test bundle;
+behavioural settings stay on `.standard` because tests set those deliberately and assert the app
+read them. See [`themes.md`](docs/architecture/themes.md) for the line between the two.
+
+**A component tested outside the container it ships in can pass while being unusable.** A sidebar
+row's buttons were asserted on a row held in a plain `NSView`, so two rounds of fixes landed
+against a button that no click could reach in the app — `NSOutlineView` was swallowing it (see
+[`design-system.md`](docs/architecture/design-system.md)). When a component's behaviour depends on
+its host, put the host in the fixture, and assert the host's own answer beside ours.
+
 **Rendered-state tests are how appearance is reviewed here.** `ConversationRenderTests`,
 `GitReviewRenderTests`, `ThemeSettingsRenderTests`, `CodeStatsRenderTests` and
-`ToolbarChromeRenderTests` draw real fixtures to PNGs, light and dark (`SKALMAN_RENDER_OUT`
+`ToolbarChromeRenderTests` draw real fixtures to PNGs, light and dark (`THREADING_RENDER_OUT`
 redirects the output). Several bugs in this codebase were visible in a picture and in no
 assertion anyone would have written.
 

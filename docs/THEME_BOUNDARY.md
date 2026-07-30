@@ -7,7 +7,7 @@ runtime audits, and render tests all enforce or point back to this document.
 
 Feature code must not instantiate or subclass an AppKit class that draws a control, surface,
 selection, focus treatment, or application-owned chrome. Use a component from
-`Sources/Skalman/UI/Design/`.
+`Sources/Threading/UI/Design/`.
 
 Structural AppKit types remain allowed: `NSView`, `NSStackView`, `NSGridView`, view controllers,
 layout objects, frameless `NSImageView`, table columns, delegate parameter types, and similar
@@ -90,7 +90,7 @@ documented policy exception only for genuinely system-owned chrome.
 
 `config/theme-boundary.json` is the machine-readable policy. `scripts/check_theme_boundaries.sh`
 compiles the SwiftSyntax checker shipped with the active Xcode toolchain and runs it over every
-Swift source file. The Skalman target executes it before compilation, and the test suite invokes
+Swift source file. The Threading target executes it before compilation, and the test suite invokes
 the same command rather than maintaining a second regular-expression implementation.
 
 Static checking proves that feature code entered through the right boundary. Runtime view-tree
@@ -107,6 +107,13 @@ Animation-context durations in application UI must resolve through `Design.Motio
 or feature-owned duration fails the checker, making Reduce Motion the default for new
 transitions instead of a review-time convention. A perpetual animation needs a narrow exception
 and an explicit branch that removes it when Reduce Motion is active.
+
+Reading `alertFirstButtonReturn`, `alertSecondButtonReturn` or `alertThirdButtonReturn` outside
+`confirmationGateDirectories` (`Sources/Threading/UI/Alerts`) fails the checker as
+`confirmationResponse`. An informational alert never inspects its response, so that read is the
+precise signal that an alert is asking a question — and a question must be built through
+`ConfirmationAlert`, which requires a case in `ConfirmationPrompt` stating whether the user may
+switch it off. See `docs/architecture/design-system.md` for the rules that register encodes.
 
 Direct `NSFont` system factories are rejected outside `Design.Typography` and the small set of
 documented variable-font/artwork boundaries. This keeps new screens on the same type scale

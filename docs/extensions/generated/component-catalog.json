@@ -68,7 +68,7 @@
             },
             "overlay" : {
               "surface" : {
-                "fragmentFunction" : "skalmanExtensionFragment",
+                "fragmentFunction" : "threadingExtensionFragment",
                 "inputs" : [
 
                 ],
@@ -98,13 +98,13 @@
         "summary" : "Composable visual hooks around the complete main-window content."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/application.main-window-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/application.main-window-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard",
                 "primary",
@@ -160,7 +160,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -202,7 +202,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman application.main-window v1 component patch",
+        "title" : "Threading application.main-window v1 component patch",
         "type" : "object"
       }
     },
@@ -298,13 +298,13 @@
         "summary" : "Compact accessories before or after the protected new-session prompt."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/composer.session-start-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/composer.session-start-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard"
               ],
@@ -353,7 +353,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -395,7 +395,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman composer.session-start v1 component patch",
+        "title" : "Threading composer.session-start v1 component patch",
         "type" : "object"
       }
     },
@@ -492,13 +492,13 @@
         "summary" : "Compact accessories before or after the protected conversation reply prompt."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/composer.conversation-reply-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/composer.conversation-reply-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard"
               ],
@@ -547,7 +547,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -589,7 +589,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman composer.conversation-reply v1 component patch",
+        "title" : "Threading composer.conversation-reply v1 component patch",
         "type" : "object"
       }
     },
@@ -683,13 +683,13 @@
         "summary" : "Display or action annotations around an intact user-message row."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/conversation.user-message-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/conversation.user-message-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard"
               ],
@@ -739,7 +739,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -781,7 +781,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman conversation.user-message v1 component patch",
+        "title" : "Threading conversation.user-message v1 component patch",
         "type" : "object"
       }
     },
@@ -877,13 +877,13 @@
         "summary" : "Display or action annotations around an intact assistant-message row."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/conversation.assistant-message-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/conversation.assistant-message-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard"
               ],
@@ -933,7 +933,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -975,7 +975,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman conversation.assistant-message v1 component patch",
+        "title" : "Threading conversation.assistant-message v1 component patch",
         "type" : "object"
       }
     },
@@ -1069,13 +1069,13 @@
         "summary" : "Display or action annotations around an intact collapsible tool-call row."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/conversation.tool-call-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/conversation.tool-call-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard"
               ],
@@ -1125,7 +1125,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -1167,7 +1167,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman conversation.tool-call v1 component patch",
+        "title" : "Threading conversation.tool-call v1 component patch",
         "type" : "object"
       }
     },
@@ -1263,13 +1263,13 @@
         "summary" : "Display-only annotations around an intact host-owned permission card."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/conversation.permission-card-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/conversation.permission-card-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
 
               ],
@@ -1319,7 +1319,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -1361,7 +1361,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman conversation.permission-card v1 component patch",
+        "title" : "Threading conversation.permission-card v1 component patch",
         "type" : "object"
       }
     },
@@ -1467,13 +1467,13 @@
         "summary" : "Compact commands or status in the host-owned display-pane header."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/display.pane-header-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/display.pane-header-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard"
               ],
@@ -1522,7 +1522,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -1564,7 +1564,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman display.pane-header v1 component patch",
+        "title" : "Threading display.pane-header v1 component patch",
         "type" : "object"
       }
     },
@@ -1655,7 +1655,7 @@
         "summary" : "One compact status annotation after each intact native display-tab title."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/display.tab-header-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/display.tab-header-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
@@ -1672,7 +1672,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -1691,12 +1691,12 @@
                   "properties" : {
                     "children" : {
                       "items" : {
-                        "$ref" : "https://skalman.invalid/schema/extension-node.schema.json"
+                        "$ref" : "https://threading.codes/schema/extension-node.schema.json"
                       },
                       "maxItems" : 1,
                       "minItems" : 1,
                       "type" : "array",
-                      "x-skalman-node-constraints" : {
+                      "x-threading-node-constraints" : {
                         "allowedButtonRoles" : [
 
                         ],
@@ -1770,7 +1770,226 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman display.tab-header v1 component patch",
+        "title" : "Threading display.tab-header v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
+          "context" : "session-presentation",
+          "hostOwnedBehavior" : [
+            "card-navigation",
+            "activity-state",
+            "data-refresh",
+            "accessibility-container"
+          ],
+          "id" : "session.corner-card",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+            {
+              "contentConstraints" : {
+                "allowedButtonRoles" : [
+
+                ],
+                "allowedCustomSurfaceKinds" : [
+
+                ],
+                "allowedImageRoles" : [
+
+                ],
+                "allowedStackAxes" : [
+                  "horizontal"
+                ],
+                "allowedStatusRoles" : [
+                  "neutral",
+                  "positive",
+                  "warning",
+                  "negative"
+                ],
+                "allowedTextRoles" : [
+                  "compactBody",
+                  "compactDetail"
+                ],
+                "allowsDivider" : false,
+                "allowsFixedSpacer" : true,
+                "allowsFlexibleSpacer" : true,
+                "allowsOverlay" : false,
+                "allowsProceed" : false,
+                "maximumDepth" : 1,
+                "maximumNodes" : 8,
+                "maximumTextLength" : 40,
+                "requiresProceed" : false
+              },
+              "id" : "top-trailing",
+              "maximumInlineItems" : 3
+            }
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "id" : "ci-card-row",
+          "properties" : [
+
+          ],
+          "slots" : [
+            {
+              "children" : [
+                {
+                  "axis" : "horizontal",
+                  "children" : [
+                    {
+                      "role" : "compactDetail",
+                      "text" : "Checks",
+                      "type" : "text"
+                    },
+                    {
+                      "type" : "flexibleSpacer"
+                    },
+                    {
+                      "role" : "positive",
+                      "text" : "Successful",
+                      "type" : "status"
+                    }
+                  ],
+                  "spacing" : "small",
+                  "type" : "stack"
+                }
+              ],
+              "slot" : "top-trailing"
+            }
+          ],
+          "target" : {
+            "component" : "session.corner-card",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "Compact display rows appended to the floating corner card over the session's pane. The slot ID names the corner: top-trailing is the only card today; top-leading is reserved for a future leading card. The card's click-through, visibility, and activity presentation stay host-owned."
+      },
+      "patchSchema" : {
+        "$id" : "https://threading.codes/schema/components/session.corner-card-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : {
+              "oneOf" : [
+                {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "children" : {
+                      "items" : {
+                        "$ref" : "https://threading.codes/schema/extension-node.schema.json"
+                      },
+                      "maxItems" : 3,
+                      "minItems" : 1,
+                      "type" : "array",
+                      "x-threading-node-constraints" : {
+                        "allowedButtonRoles" : [
+
+                        ],
+                        "allowedCustomSurfaceKinds" : [
+
+                        ],
+                        "allowedImageRoles" : [
+
+                        ],
+                        "allowedStackAxes" : [
+                          "horizontal"
+                        ],
+                        "allowedStatusRoles" : [
+                          "neutral",
+                          "positive",
+                          "warning",
+                          "negative"
+                        ],
+                        "allowedTextRoles" : [
+                          "compactBody",
+                          "compactDetail"
+                        ],
+                        "allowsDivider" : false,
+                        "allowsFixedSpacer" : true,
+                        "allowsFlexibleSpacer" : true,
+                        "allowsOverlay" : false,
+                        "allowsProceed" : false,
+                        "maximumDepth" : 1,
+                        "maximumNodes" : 8,
+                        "maximumTextLength" : 40,
+                        "requiresProceed" : false
+                      }
+                    },
+                    "slot" : {
+                      "const" : "top-trailing"
+                    }
+                  },
+                  "required" : [
+                    "slot",
+                    "children"
+                  ],
+                  "type" : "object"
+                }
+              ]
+            },
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "session.corner-card"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Threading session.corner-card v1 component patch",
         "type" : "object"
       }
     },
@@ -1868,7 +2087,7 @@
         "summary" : "Provider/account identity at the leading edge of a session row."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/sidebar.session-identity-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/sidebar.session-identity-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
@@ -1885,7 +2104,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -1897,8 +2116,8 @@
             "type" : "array"
           },
           "replacement" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
 
               ],
@@ -1962,7 +2181,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman sidebar.session-identity v1 component patch",
+        "title" : "Threading sidebar.session-identity v1 component patch",
         "type" : "object"
       }
     },
@@ -2117,7 +2336,7 @@
         "summary" : "The replaceable visual content and after-title slot of a session row."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/sidebar.session-row-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/sidebar.session-row-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
@@ -2136,7 +2355,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -2148,8 +2367,8 @@
             "type" : "array"
           },
           "replacement" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard"
               ],
@@ -2194,12 +2413,12 @@
                   "properties" : {
                     "children" : {
                       "items" : {
-                        "$ref" : "https://skalman.invalid/schema/extension-node.schema.json"
+                        "$ref" : "https://threading.codes/schema/extension-node.schema.json"
                       },
                       "maxItems" : 2,
                       "minItems" : 1,
                       "type" : "array",
-                      "x-skalman-node-constraints" : {
+                      "x-threading-node-constraints" : {
                         "allowedButtonRoles" : [
 
                         ],
@@ -2273,7 +2492,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman sidebar.session-row v1 component patch",
+        "title" : "Threading sidebar.session-row v1 component patch",
         "type" : "object"
       }
     },
@@ -2418,13 +2637,13 @@
         "summary" : "Composable content inside the hover card presented from a session row."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/sidebar.session-hover-card-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/sidebar.session-hover-card-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard",
                 "primary",
@@ -2480,7 +2699,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -2492,8 +2711,8 @@
             "type" : "array"
           },
           "replacement" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard",
                 "primary",
@@ -2567,7 +2786,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman sidebar.session-hover-card v1 component patch",
+        "title" : "Threading sidebar.session-hover-card v1 component patch",
         "type" : "object"
       }
     },
@@ -2715,13 +2934,13 @@
         "summary" : "Composable detail content in the toolbar's active-account usage popover."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/toolbar.account-usage-popover-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/toolbar.account-usage-popover-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard",
                 "primary",
@@ -2777,7 +2996,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -2789,8 +3008,8 @@
             "type" : "array"
           },
           "replacement" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard",
                 "primary",
@@ -2864,7 +3083,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman toolbar.account-usage-popover v1 component patch",
+        "title" : "Threading toolbar.account-usage-popover v1 component patch",
         "type" : "object"
       }
     },
@@ -2994,7 +3213,7 @@
         "summary" : "The replaceable visual content and after-title slot of a project row."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/sidebar.project-row-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/sidebar.project-row-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
@@ -3013,7 +3232,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -3025,8 +3244,8 @@
             "type" : "array"
           },
           "replacement" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard"
               ],
@@ -3071,12 +3290,12 @@
                   "properties" : {
                     "children" : {
                       "items" : {
-                        "$ref" : "https://skalman.invalid/schema/extension-node.schema.json"
+                        "$ref" : "https://threading.codes/schema/extension-node.schema.json"
                       },
                       "maxItems" : 2,
                       "minItems" : 1,
                       "type" : "array",
-                      "x-skalman-node-constraints" : {
+                      "x-threading-node-constraints" : {
                         "allowedButtonRoles" : [
 
                         ],
@@ -3150,7 +3369,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman sidebar.project-row v1 component patch",
+        "title" : "Threading sidebar.project-row v1 component patch",
         "type" : "object"
       }
     },
@@ -3295,13 +3514,13 @@
         "summary" : "Composable content inside the hover card presented from a project row."
       },
       "patchSchema" : {
-        "$id" : "https://skalman.invalid/schema/components/sidebar.project-hover-card-v1.schema.json",
+        "$id" : "https://threading.codes/schema/components/sidebar.project-hover-card-v1.schema.json",
         "$schema" : "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties" : false,
         "properties" : {
           "hook" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard",
                 "primary",
@@ -3357,7 +3576,7 @@
                   ]
                 },
                 "value" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
                 }
               },
               "required" : [
@@ -3369,8 +3588,8 @@
             "type" : "array"
           },
           "replacement" : {
-            "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-            "x-skalman-node-constraints" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
               "allowedButtonRoles" : [
                 "standard",
                 "primary",
@@ -3444,7 +3663,7 @@
           "properties",
           "slots"
         ],
-        "title" : "Skalman sidebar.project-hover-card v1 component patch",
+        "title" : "Threading sidebar.project-hover-card v1 component patch",
         "type" : "object"
       }
     }

@@ -1,4 +1,4 @@
-Run the test suite for Skalman.
+Run the test suite for Threading.
 
 ```bash
 swift test 2>&1

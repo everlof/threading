@@ -1,13 +1,13 @@
-# Skalman Extensions
+# Threading Extensions
 
-Skalman extensions are intended to be authored by coding agents from a documented contract,
+Threading extensions are intended to be authored by coding agents from a documented contract,
 not by copying application internals. The default extension kind is therefore:
 
-- a Swift WebAssembly command module interpreted outside Skalman rather than code loaded into it;
-- described by a manifest Skalman can inspect before executing it;
-- compiled against the Foundation-only `SkalmanExtensionKit`;
+- a Swift WebAssembly command module interpreted outside Threading rather than code loaded into it;
+- described by a manifest Threading can inspect before executing it;
+- compiled against the Foundation-only `ThreadingExtensionKit`;
 - allowed to return semantic UI values, never AppKit or SwiftUI views;
-- rendered by Skalman through the same theme boundary as built-in UI.
+- rendered by Threading through the same theme boundary as built-in UI.
 
 This keeps ordinary extensions isolated and lets the host retain control of themes,
 accessibility, focus, motion, component state, and future visual changes.
@@ -16,12 +16,12 @@ accessibility, focus, motion, component state, and future visual changes.
 
 The first vertical slice exists:
 
-- [`SkalmanExtensionKit`](../../SkalmanExtensionKit) defines manifests, capabilities,
+- [`ThreadingExtensionKit`](../../ThreadingExtensionKit) defines manifests, capabilities,
   contributions, and the initial declarative UI nodes.
-- [`SkalmanExtensionPolicyPlugin`](../../SkalmanExtensionKit/Plugins/SkalmanExtensionPolicyPlugin)
+- [`ThreadingExtensionPolicyPlugin`](../../ThreadingExtensionKit/Plugins/ThreadingExtensionPolicyPlugin)
   fails the supported safe-extension build when source imports AppKit or SwiftUI.
-- [`HelloStatusExtension`](../../SkalmanExtensionKit/Examples/HelloStatusExtension) is the
-  compiling provider reference; [`HelloStatusConsumerExtension`](../../SkalmanExtensionKit/Examples/HelloStatusConsumerExtension)
+- [`HelloStatusExtension`](../../ThreadingExtensionKit/Examples/HelloStatusExtension) is the
+  compiling provider reference; [`HelloStatusConsumerExtension`](../../ThreadingExtensionKit/Examples/HelloStatusConsumerExtension)
   is the matching service consumer.
 - [`extension-manifest.schema.json`](schema/extension-manifest.schema.json) is the
   machine-readable manifest schema.
@@ -46,10 +46,10 @@ The first vertical slice exists:
   private storage on its behalf.
 - [`generated/component-catalog.json`](generated/component-catalog.json) and the per-component
   schemas under [`generated/schemas`](generated/schemas) are generated directly from the same
-  SDK catalogue Skalman's runtime registers.
+  SDK catalogue Threading's runtime registers.
 - [`API_V1.md`](API_V1.md) freezes the supported safe API, its version domains, capability
   set, and compatibility promise.
-- Skalman links the SDK and renders `ExtensionNode` trees into its own themed AppKit controls.
+- Threading links the SDK and renders `ExtensionNode` trees into its own themed AppKit controls.
 - The Component Gallery remains a direct development harness: it can choose an extension
   directory, inspect its manifest, supervise a persistent process, validate every JSONL value,
   route button actions, and re-render returned panel state.
@@ -57,32 +57,32 @@ The first vertical slice exists:
   enablement, starts and stops supervised processes, reports runtime state, reloads and reveals
   packages, and moves removed packages into recoverable storage.
 - Enabled extensions can contribute complete Settings pages and append sections to stable
-  built-in pages. Skalman renders toggle, text, choice, and integer fields through its design
+  built-in pages. Threading renders toggle, text, choice, and integer fields through its design
   system, owns their durable values, supplies them at launch, and synchronizes accepted changes
   with the running process.
-- Enabled command contributions join the same registry as built-in commands. Skalman renders
+- Enabled command contributions join the same registry as built-in commands. Threading renders
   them at stable top-level Extensions, Project, and View anchors, lists and rebinds them on the
   existing Keyboard settings page, enforces application/project/session scope, and routes
   invocations over the supervised JSONL process. Default shortcuts are suggestions and become
   unbound on a conflict.
-- Enabled panel contributions appear beside Skalman's built-in Terminal, Browser, Files, Review,
+- Enabled panel contributions appear beside Threading's built-in Terminal, Browser, Files, Review,
   and Info surfaces in the display pane's `+` menu. Each opens as a normal per-session tab,
   receives opaque project/session context on actions, persists by stable extension/panel ID, and
   shows a recoverable unavailable state across disable, reload, crash, or startup ordering.
-- New safe extensions run as WebAssembly in Skalman's signed, App Sandboxed interpreter.
-  Skalman opens the validated module and passes that one file descriptor to the runner; the
+- New safe extensions run as WebAssembly in Threading's signed, App Sandboxed interpreter.
+  Threading opens the validated module and passes that one file descriptor to the runner; the
   guest receives no filesystem preopens, socket API, subprocess authority, or Keychain API.
-  Its only Skalman-specific import is the authenticated host broker. Legacy native format-1
+  Its only Threading-specific import is the authenticated host broker. Legacy native format-1
   packages remain readable through the deprecated Seatbelt compatibility launcher.
 - A manifest can declare namespaced MCP tool metadata. The running process registers the matching
-  definitions, Skalman routes calls over the existing JSONL process, and each extension appears
+  definitions, Threading routes calls over the existing JSONL process, and each extension appears
   as its own group beside built-in tools in Tools settings.
 - Providers can declare versioned JSON services and consumers can request exact provider,
-  service, and version dependencies. Skalman's generation-bound host token authenticates the
+  service, and version dependencies. Threading's generation-bound host token authenticates the
   caller, the broker routes only declared dependencies to a matching running registration, and
   Extensions settings reports provided services plus required/optional availability.
 - Extensions declaring `storage.secrets` can store bounded opaque values through the
-  generation-bound host broker. Skalman scopes them by authenticated extension identity and
+  generation-bound host broker. Threading scopes them by authenticated extension identity and
   stores them in Keychain; values never enter package files, KV JSON, settings, cache directories,
   or sandbox grants.
 - The real sidebar session and project rows now have versioned customization contracts with
@@ -95,7 +95,7 @@ The first vertical slice exists:
   chain around the existing view through exactly one `.proceed` node, so an extension can place
   host-rendered content beside or over the original without receiving an `NSView`. A separate
   `ui.rendering.metal` capability admits bounded extension shader source in those declared
-  positions; Skalman still owns the renderer and input lifecycle.
+  positions; Threading still owns the renderer and input lifecycle.
 - A process declaring any implemented host capability receives a per-generation loopback URL
   and bearer token. `ExtensionHostClient` publishes complete patch sets atomically and reads
   separately gated project/session snapshots and cursor events; the host derives source
@@ -129,7 +129,7 @@ capabilities, so a small extension can grow without changing package format:
 | Command extension | `commands` | `ExtensionCommand` | User-triggered actions |
 | Panel extension | `panels` | `ExtensionPanel` with semantic `ExtensionNode` UI | Host-rendered custom UI |
 | Agent-tool extension | `mcp.tools` | Statically declared and runtime-registered MCP tools | Claude and Codex |
-| Settings extension | `settings` | Complete pages and sections appended to stable host pages | Skalman Settings |
+| Settings extension | `settings` | Complete pages and sections appended to stable host pages | Threading Settings |
 | Service extension | `services.provide` | Versioned JSON service contracts | Other declared extensions |
 | Component extension | `ui.components` | Properties, slots, and constrained content replacement | Documented host components |
 | Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal |
@@ -145,7 +145,7 @@ requested behavior, and use a hybrid only when the contributions genuinely share
 or state model.
 
 **Appearance contributions are data, not code.** `themes` entries name package-relative JSON
-documents written in the host's own app-theme vocabulary — the same document Skalman stores for
+documents written in the host's own app-theme vocabulary — the same document Threading stores for
 a custom theme — and `fonts` entries name `.otf`/`.ttf`/`.ttc` files. Both are read, bounded,
 and validated by the inspector before any extension code runs: a theme faces the same contrast
 and material gates a custom theme faces, its library id is namespaced by the host
@@ -160,7 +160,7 @@ and the install disclosure names every theme and font family before anything is 
 
 **Localization is package-owned presentation data.** A manifest's `localizations` entries pair
 a BCP-47 language tag with a bounded package-relative JSON file. Each file is a flat mapping
-from readable base-language strings to translated strings. Skalman negotiates the closest
+from readable base-language strings to translated strings. Threading negotiates the closest
 catalogue from the app's preferred language list, then applies it to the extension name,
 commands, panels and every semantic node, Settings pages/sections/fields/options/placeholders,
 services and MCP metadata, companion operations and remote-surface accessibility labels, and
@@ -188,40 +188,40 @@ These are separate authorities rather than one shared writable directory:
 1. **Private KV storage — implemented.** Declare `storage.kv` and use
    `ExtensionKeyValueStore`. Mutations are atomic, capped at 2,048 keys and 1 MiB, and retained
    across disable, reload, and app launches. How the state reaches disk depends on the launcher
-   and the API does not: under the experimental `sandbox-exec` launcher Skalman allocates a
+   and the API does not: under the experimental `sandbox-exec` launcher Threading allocates a
    per-extension directory outside the package and the extension writes it; under the supported
    runner the extension has no writable path and the host writes it on the extension's behalf,
-   enforcing the same limits. Use `init(environment:)` and the difference stays Skalman's.
+   enforcing the same limits. Use `init(environment:)` and the difference stays Threading's.
 2. **Private cache storage — implemented.** Declare `storage.cache` and use
    `ExtensionCacheStore`: `data(forName:)`, `setData(_:forName:)`, `removeData(forName:)`,
-   `names()`. Skalman may clear any entry at any time, so a miss is an ordinary answer rather
+   `names()`. Threading may clear any entry at any time, so a miss is an ordinary answer rather
    than an error. Entries are capped at 4 MiB each and 100 MiB in total, and a name is one path
    component — no separators, no `..`, no control characters. Downloaded assets and serialized
    indexes belong here, never in the installed package. `ExtensionCache.directoryURL()` still
    returns the raw directory under the experimental launcher and reports `unavailable` under
    the runner, which grants no writable path; `ExtensionCacheStore` works under both.
 3. **User settings — implemented.** Declare `settings` and a static form in the manifest.
-   Skalman owns and validates the values separately from extension KV, supplies effective values
+   Threading owns and validates the values separately from extension KV, supplies effective values
    at launch, and sends correlated updates to a running process. The process cannot open the
    host-owned settings file.
 4. **Secrets — implemented.** Declare `storage.secrets` and use
    `ExtensionHostClient.secret(forKey:)`, `setSecret(_:forKey:)`, or the opaque-data variants.
-   Skalman stores at most 256 names per extension and 64 KiB per value in Keychain. Listing
+   Threading stores at most 256 names per extension and 64 KiB per value in Keychain. Listing
    returns sorted names only; values are fetched individually.
 5. **Host data APIs — implemented for projects, sessions, session runtime, providers, and
    account presentation.** `host.projects.read`, `host.sessions.read`,
    `host.sessions.runtime.read`, `host.repositories.read`, `host.providers.read`,
    `host.accounts.presentation.read`, and `host.events` gate versioned snapshots and a bounded
    cursor feed. The runtime broker accepts an exact stable session ID and returns only
-   Skalman-attributed agent/shell process groups and listening-port metadata; it is not a raw
+   Threading-attributed agent/shell process groups and listening-port metadata; it is not a raw
    process-table or arbitrary-PID API. One reading is capped at 256 processes and 128 ports.
    Extensions receive stable values, not paths to
    `projects.json`, transcripts, account configs, checkout directories, complete remote URLs,
    login email, internal databases, process arguments, environments, or open files.
 6. **Extension services — implemented.** Exact provider/service/version dependencies are
-   declared in the consumer manifest and namespaced calls are brokered by Skalman. One
+   declared in the consumer manifest and namespaced calls are brokered by Threading. One
    extension never reads another extension's KV or cache directly; the provider chooses what its
-   public service returns and Skalman can display and revoke the relationship.
+   public service returns and Threading can display and revoke the relationship.
 
 Disable leaves private data and user settings intact. Removal moves durable values, settings,
 and cache data into a `.storage` recovery directory beside the recoverable package.
@@ -253,17 +253,22 @@ ExtensionCommand(
 )
 ```
 
-Skalman qualifies the local ID under the owning extension, registers it beside built-in
+Threading qualifies the local ID under the owning extension, registers it beside built-in
 commands, and removes it atomically when the extension stops. `.application` commands are
 always available; `.project` and `.session` commands enable only when that context exists.
-The stable menu contracts are `.extensions` for the top-level Extensions menu and `.project`
-or `.view` for a host-owned Extensions group at the end of those existing menus. Extensions
+The stable menu contracts are `.extensions` for the top-level Extensions menu, `.project`
+or `.view` for a host-owned Extensions group at the end of those existing menus, and
+`.sessionRow` or `.projectRow` for a host-owned Extensions group in a sidebar row's `⋯` and
+right-click menus — there the invocation context carries the row's own identity rather than
+the selection, and the row's native actions stay host-owned. Extensions
 never receive or construct an `NSMenu`, never name indexes, and cannot splice items between
-built-in commands. A command may appear in several placements; its first declared placement is
-canonical and is the only copy that displays and dispatches the shortcut. An empty placement
+built-in commands. A command may appear in several placements; its first declared *menu-bar*
+placement is canonical and is the only copy that displays and dispatches the shortcut — row
+menus never display key equivalents, and a row-only command dispatches a user-bound shortcut
+through a hidden menu-bar carrier. An empty placement
 array leaves the command available only through a user-bound shortcut.
 
-The default shortcut is a suggestion. Skalman validates it, resolves it through the same
+The default shortcut is a suggestion. Threading validates it, resolves it through the same
 `ShortcutOverrideStore` as built-ins, and suppresses it when another active command owns the
 chord. Keyboard settings lists extension commands under Extensions and stores overrides by the
 fully qualified ID, so disable/re-enable does not forget the user's choice.
@@ -281,8 +286,8 @@ ExtensionCommand(
 )
 ```
 
-Skalman then asks for confirmation before sending the command request, whether invocation came
-from a menu or a shortcut. The extension supplies only the semantic risk classification. Skalman
+Threading then asks for confirmation before sending the command request, whether invocation came
+from a menu or a shortcut. The extension supplies only the semantic risk classification. Threading
 owns the alert, warning copy, button roles, keyboard defaults, and final decision; the command
 description and response message never become confirmation wording.
 
@@ -295,13 +300,13 @@ command communicates by publishing component state.
 ## Extension-contributed panels
 
 Declare `panels`, then register one or more `ExtensionPanel` values. A panel is a stable local ID,
-a user-facing title, an `ExtensionNode` root, and optionally a `loadActionID`. Skalman owns the
+a user-facing title, an `ExtensionNode` root, and optionally a `loadActionID`. Threading owns the
 tab, scrolling, layout, controls, theme, accessibility, focus, and action routing. Registration
 accepts at most 32 panels; each tree is capped at 24 levels, 500 nodes, and 10,000 characters per
 text value. Button and load-action IDs use the same contribution-identifier rules as commands
 and actions.
 
-Running panels are listed after Skalman's built-in surfaces in the selected session's display
+Running panels are listed after Threading's built-in surfaces in the selected session's display
 pane `+` menu. Opening one creates at most one tab for that extension/panel pair in the session.
 The persisted tab stores only the owning extension ID, panel ID, and last title—not a process,
 view, or trusted copy of runtime state. It can therefore restore before extension startup and
@@ -310,7 +315,7 @@ runtime registration replaces the content with a host-owned unavailable state; i
 stale interactive UI behind.
 
 When `loadActionID` is present, the registered root is rendered immediately as loading/fallback
-content and Skalman invokes that action once when the tab connects to each running process
+content and Threading invokes that action once when the tab connects to each running process
 generation. The request includes the tab's project/session context. Return a replacement panel
 to render context-dependent initial content. A replacement may retain the same `loadActionID`;
 it does not recursively load. Disable/re-enable, reload, or crash recovery creates a new process
@@ -336,7 +341,7 @@ Declare the `settings` capability and a static `settings` contribution in the ma
 declaration is inspectable before code runs and may contain:
 
 - up to eight complete pages in the Settings sidebar; and
-- sections appended after Skalman's own content on a stable built-in page.
+- sections appended after Threading's own content on a stable built-in page.
 
 The stable built-in IDs are `general`, `accounts`, `profiles`, `themes`, `motion`, `extensions`,
 `tools`, `keyboard`, `usage`, `storage`, and `archived`. Target these IDs through
@@ -344,16 +349,16 @@ The stable built-in IDs are `general`, `accounts`, `profiles`, `themes`, `motion
 The first contract is deliberately append-only.
 
 Fields use globally unique local IDs across the extension and one of four semantic controls:
-`toggle`, bounded `text`, enumerated `choice`, or stepped `integer`. Skalman renders the controls
+`toggle`, bounded `text`, enumerated `choice`, or stepped `integer`. Threading renders the controls
 through its current theme, accessibility, focus, and validation behavior. Extensions do not
 create Settings views.
 
-Skalman stores only valid overrides in host-owned storage. Defaults remain in the manifest.
+Threading stores only valid overrides in host-owned storage. Defaults remain in the manifest.
 Before registration, the extension can decode the effective values with
 `ExtensionSettingsEnvironment.values()`. While it is running, a user change arrives as an
 `ExtensionSettingsUpdateRequest`; validate it against the declared contribution, apply the
 complete `values` patch, and return an `ExtensionSettingsUpdateResponse` with the same
-`requestID` and sorted `settingIDs`. If the process rejects or fails the update, Skalman restores
+`requestID` and sorted `settingIDs`. If the process rejects or fails the update, Threading restores
 the previous value. A disabled extension receives its latest effective values the next time it
 starts.
 
@@ -383,7 +388,7 @@ let value = try await ExtensionHostClient().callService(
 ```
 
 Caller identity comes from the generation's bearer token and cannot be spoofed in the call.
-Skalman rejects undeclared dependencies and self-calls, caps the body at 1 MiB, and returns
+Threading rejects undeclared dependencies and self-calls, caps the body at 1 MiB, and returns
 unavailable as soon as the provider is disabled, reloaded, crashes, or stops registering the
 contract. The provider receives `ExtensionServiceRequest` on its existing JSONL stream and
 returns one matching `ExtensionServiceResponse`. It sees the verified caller extension ID, but
@@ -395,8 +400,8 @@ responsible for semantic validation of arguments and consumers for decoding the 
 
 ## Extension-contributed MCP tools
 
-Tool metadata is declared in `skalman-extension.json` under `mcpTools` with the `mcp.tools`
-capability. This lets Skalman inspect the name, description, and JSON input schema without
+Tool metadata is declared in `threading-extension.json` under `mcpTools` with the `mcp.tools`
+capability. This lets Threading inspect the name, description, and JSON input schema without
 executing code. Global MCP names are generated as
 `ext__<reverse-DNS namespace>__<local tool id>`, with dots encoded as double underscores.
 
@@ -408,11 +413,11 @@ while the process has registered the matching definition.
 
 Calls arrive as `ExtensionMCPToolRequest` values carrying opaque `sessionID`, local `toolID`, and
 JSON-object `arguments`. The extension returns one correlated `ExtensionMCPToolResponse`.
-Results are plain text in the first protocol version, matching Skalman's built-in tools.
+Results are plain text in the first protocol version, matching Threading's built-in tools.
 
 ### Host separation
 
-The MCP server does not import `SkalmanExtensionKit` or know about `ExtensionManager`. Its only
+The MCP server does not import `ThreadingExtensionKit` or know about `ExtensionManager`. Its only
 optional integration point is the host-owned `MCPExternalToolProvider`, installed at the app
 composition root. That provider supplies groups, schemas, availability, and invocation using
 MCP-owned values. `ExtensionMCPToolProvider` is the adapter that translates those values to the
@@ -421,23 +426,23 @@ extension SDK and process manager.
 With no provider installed, the same MCP catalogue, wire decoder, dispatcher, and Tools settings
 page continue to operate with built-in tools only. Removing the extension experiment therefore
 means removing its adapter and composition-root installation rather than unwinding extension
-types from the MCP core. A boundary test rejects direct `SkalmanExtensionKit`,
+types from the MCP core. A boundary test rejects direct `ThreadingExtensionKit`,
 `ExtensionManager`, or `ExtensionJSONValue` references under `Core/MCP`.
 
 ## Package and installation lifecycle
 
-An installed package is a directory with the `.skalmanextension` suffix. Skalman also accepts an
+An installed package is a directory with the `.threadingextension` suffix. Threading also accepts an
 unpacked development directory through the import panel.
 
 ```text
-BuildWatch.skalmanextension/
-├── skalman-extension.json
+BuildWatch.threadingextension/
+├── threading-extension.json
 ├── bin/
 │   └── build-watch.wasm
 ├── Source/                      # expected for distributable packages
 │   ├── Package.swift
 │   ├── Sources/
-│   └── Vendor/SkalmanExtensionKit/
+│   └── Vendor/ThreadingExtensionKit/
 ├── Resources/
 ├── Web/                         # reserved for a future custom web panel
 ├── README.md
@@ -455,11 +460,11 @@ and excludes local `.build`, `.git`, `.swiftpm`, `DerivedData`, and `.DS_Store` 
 Source-only packages remain a developer workflow: normal installation never depends on a
 compatible Swift toolchain.
 
-An outside project consumes a **vendored, versioned snapshot** of `SkalmanExtensionKit` through
-`.package(path: "Vendor/SkalmanExtensionKit")`. `SkalmanExtensionKit/SDK_VERSION` identifies the
-snapshot. This avoids an absolute path into the Skalman checkout, a floating dependency, and a
+An outside project consumes a **vendored, versioned snapshot** of `ThreadingExtensionKit` through
+`.package(path: "Vendor/ThreadingExtensionKit")`. `ThreadingExtensionKit/SDK_VERSION` identifies the
+snapshot. This avoids an absolute path into the Threading checkout, a floating dependency, and a
 network fetch during rebuild. Every app build embeds the filtered snapshot at
-`Contents/Resources/ExtensionSDK/SkalmanExtensionKit` and the matching public authoring contract
+`Contents/Resources/ExtensionSDK/ThreadingExtensionKit` and the matching public authoring contract
 at `Contents/Resources/ExtensionSDK/docs/extensions`. The scaffold flow preserves that sibling
 layout under `Vendor/`, making the SDK README links valid and retaining the complete docs,
 schemas, generated component catalogue, and checklist inside packaged `Source/`. Local `.build`
@@ -475,11 +480,11 @@ Import follows a strict sequence:
 4. copy into a staging sibling under Application Support;
 5. inspect the copied package again;
 6. atomically move the complete package into
-   `~/Library/Application Support/Skalman/Extensions/Packages/`;
+   `~/Library/Application Support/Threading/Extensions/Packages/`;
 7. leave it disabled until the user explicitly enables it.
 
 Enablement is stored separately in `Extensions/state.json`. This keeps packages immutable and
-lets Skalman discover them without trusting their contents to remember whether they should run.
+lets Threading discover them without trusting their contents to remember whether they should run.
 Removing an extension stops its process, clears enablement, and moves the package under
 `Extensions/Removed/` rather than destroying it. Settings, KV, cache, committed `dataVersion`,
 and host-authored provenance move into matching recovery files. Keychain secrets deliberately
@@ -488,11 +493,11 @@ states this, and an extension should delete secrets before removal when retentio
 A reinstall does not silently restore filesystem state from `Removed/`.
 
 An identifier collision never overwrites an installed package. Updating is a separate,
-version-aware operation: Skalman stages the candidate, shows its capability delta, binds
+version-aware operation: Threading stages the candidate, shows its capability delta, binds
 approval to the staged content digest, stops the running generation and atomically swaps the
 approved tree into place.
 
-`dataVersion` is a monotonic extension-owned storage schema. Skalman passes the previously
+`dataVersion` is a monotonic extension-owned storage schema. Threading passes the previously
 committed and target versions to the process, commits the target only after successful
 registration, and retries an interrupted migration on the next launch. Updates and launches
 which would decrease it are refused.
@@ -506,15 +511,15 @@ and therefore no “trust anyway” escape hatch.
 
 ### Safe extensions
 
-The default. They compile to WebAssembly, run in Skalman's signed interpreter process, and use
-`SkalmanExtensionKit`. Their UI is an `ExtensionNode` tree rendered by the host. The extension
+The default. They compile to WebAssembly, run in Threading's signed interpreter process, and use
+`ThreadingExtensionKit`. Their UI is an `ExtensionNode` tree rendered by the host. The extension
 cannot inject an `NSView`, inspect the hierarchy, or call AppKit. It can wrap a documented
 component when that contract exposes an around-hook seam: `.proceed` stands for the next
 host-owned view, while stacks, overlays, and capability-gated custom surfaces remain
 host-instantiated.
 
 `sidebar.project-hover-card@1` applies the same composition to the card currently populated by
-SCC. Skalman retains hover timing, popover placement, dismissal, width, insets, theme and
+SCC. Threading retains hover timing, popover placement, dismissal, width, insets, theme and
 accessibility. A hook can place extension content before or after `.proceed`; a replacement can
 own the entire visual body. The card opens when either native SCC content or an accepted
 extension contribution exists, so an extension may introduce project hover information before
@@ -526,7 +531,7 @@ layout vocabulary, provenance routing, extension-only fallback and host-owned po
 are the same. Hello Status uses both contracts, which keeps these APIs exercised by one ordinary
 extension rather than by host-only fixtures.
 
-`toolbar.account-usage-popover@1` is the same mechanism with account context. Skalman keeps
+`toolbar.account-usage-popover@1` is the same mechanism with account context. Threading keeps
 usage refresh, active-account selection, popover chrome and the pointer-tracking bridge that
 keeps the hover presentation alive. Those behaviors remain intact even when an extension
 replaces the complete visual body.
@@ -563,9 +568,9 @@ active state, pane visibility, or the `+` menu.
 The build plugin is correctness enforcement for generated source, not a security boundary.
 Running out of process contains crashes and the value-only protocol prevents view injection.
 `WasmLaunchPolicy` passes the inspected module on descriptor 4 to
-`Contents/Helpers/skalman-wasm-extension-runner`. That runner has only the App Sandbox
+`Contents/Helpers/threading-wasm-extension-runner`. That runner has only the App Sandbox
 entitlement and needs no package path: the guest receives WASI stdio, no filesystem preopens,
-and the one `skalman.host_exchange` import. Serve mode forwards that import to the
+and the one `threading.host_exchange` import. Serve mode forwards that import to the
 generation-bound broker on descriptor 3; registration mode deliberately has no broker.
 Guest memory, table growth, module size, and each broker request/response are bounded.
 
@@ -601,18 +606,18 @@ checklist in `HANDOFF.md`.
 
 The nested signature is the companion's App Sandbox boundary. Screen Recording and
 Accessibility have an additional macOS rule: a directly supervised child is attributed to its
-responsible parent, Skalman. Before spawning a companion that declared `screen.capture` or
-`input.control`, Skalman therefore performs the corresponding host-owned preflight/prompt and
+responsible parent, Threading. Before spawning a companion that declared `screen.capture` or
+`input.control`, Threading therefore performs the corresponding host-owned preflight/prompt and
 fails the companion status closed if the user has not granted it. This does not give the worker
-any Skalman host-data authority.
+any Threading host-data authority.
 
 ## Design rules
 
-1. A contribution describes meaning. Skalman chooses pixels.
+1. A contribution describes meaning. Threading chooses pixels.
 2. Capabilities are declared before the extension runs.
 3. Manifests and wire values remain inspectable when they contain a capability newer than the
    host.
-4. Stable extension API is smaller than Skalman's internal design system.
+4. Stable extension API is smaller than Threading's internal design system.
 5. The reference example and schemas are normative. Prose explains them but does not override
    them.
 6. New UI vocabulary is added only for a real extension that cannot express its interface with
@@ -621,14 +626,14 @@ any Skalman host-data authority.
 ## Repository layout
 
 ```text
-SkalmanExtensionKit/
+ThreadingExtensionKit/
 ├── Package.swift
-├── Sources/SkalmanExtensionKit/
-├── Plugins/SkalmanExtensionPolicyPlugin/
+├── Sources/ThreadingExtensionKit/
+├── Plugins/ThreadingExtensionPolicyPlugin/
 ├── Examples/HelloStatusExtension/
 ├── Examples/HelloStatusConsumerExtension/
 ├── Examples/SimulatorRelayExtension/
-└── Tests/SkalmanExtensionKitTests/
+└── Tests/ThreadingExtensionKitTests/
 
 docs/extensions/
 ├── README.md
@@ -661,18 +666,18 @@ docs/extensions/
 From the repository root:
 
 ```bash
-swift build --package-path SkalmanExtensionKit
-swift test --package-path SkalmanExtensionKit
-swift run --package-path SkalmanExtensionKit HelloStatusExtensionExample --skalman-register
-swift run --package-path SkalmanExtensionKit HelloStatusConsumerExtensionExample --skalman-register
-swift run --package-path SkalmanExtensionKit SessionInfoExtensionExample --skalman-register
-swift run --package-path SkalmanExtensionKit SkalmanComponentCatalogGenerator \
+swift build --package-path ThreadingExtensionKit
+swift test --package-path ThreadingExtensionKit
+swift run --package-path ThreadingExtensionKit HelloStatusExtensionExample --threading-register
+swift run --package-path ThreadingExtensionKit HelloStatusConsumerExtensionExample --threading-register
+swift run --package-path ThreadingExtensionKit SessionInfoExtensionExample --threading-register
+swift run --package-path ThreadingExtensionKit ThreadingComponentCatalogGenerator \
   docs/extensions/generated
 ```
 
 The example target uses the same policy plugin generated extensions must use.
 Run the catalogue generator with `--check` in verification to detect stale committed docs.
-`--skalman-register` is a finite diagnostic handshake. Skalman uses `--skalman-serve` to keep
+`--threading-register` is a finite diagnostic handshake. Threading uses `--threading-serve` to keep
 the process alive and exchange action messages.
 
 ## Try the real host path
@@ -685,7 +690,7 @@ the same language version. Verify that the selected Swift.org binary can see an 
 SWIFT_ORG=/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin/swift
 "$SWIFT_ORG" sdk list
 "$SWIFT_ORG" build --disable-sandbox \
-  --package-path SkalmanExtensionKit \
+  --package-path ThreadingExtensionKit \
   --swift-sdk swift-6.3.2-RELEASE_wasm \
   --product HelloStatusExtensionExample
 ```
@@ -694,19 +699,19 @@ Use the exact SDK identifier printed by `sdk list`; it is intentionally not infe
 assemble the directory the manifest describes:
 
 ```bash
-WASM_BIN=SkalmanExtensionKit/.build/wasm32-unknown-wasip1/debug
+WASM_BIN=ThreadingExtensionKit/.build/wasm32-unknown-wasip1/debug
 mkdir -p /tmp/HelloStatusExtension/bin
-cp SkalmanExtensionKit/Examples/HelloStatusExtension/skalman-extension.json \
+cp ThreadingExtensionKit/Examples/HelloStatusExtension/threading-extension.json \
   /tmp/HelloStatusExtension/
 cp "$WASM_BIN/HelloStatusExtensionExample.wasm" \
   /tmp/HelloStatusExtension/bin/hello-status.wasm
 mkdir -p /tmp/HelloStatusExtension/Source
 rsync -a --exclude .build --exclude .git --exclude .swiftpm \
-  SkalmanExtensionKit/ /tmp/HelloStatusExtension/Source/
+  ThreadingExtensionKit/ /tmp/HelloStatusExtension/Source/
 ```
 
 For a direct development run, open **Component Gallery**, find **Extension rendering**, choose
-**Load Extension Directory…**, and select `/tmp/HelloStatusExtension`. Skalman runs the
+**Load Extension Directory…**, and select `/tmp/HelloStatusExtension`. Threading runs the
 manifest → persistent process → validation → native-rendering harness without installing it.
 Press **Refresh**: the extension returns a new semantic panel and the status advances from
 “Ready” to “Refreshed 1 time”.

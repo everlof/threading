@@ -1,4 +1,4 @@
-Build the Skalman project.
+Build the Threading project.
 
 ```bash
 swift build 2>&1

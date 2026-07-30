@@ -2,7 +2,7 @@
 
 Analysis written 2026-07-25, alongside the t3code research (see
 [T3CODE_FINDINGS.md](T3CODE_FINDINGS.md)). The questions it answers, in order: can t3code
-make money; what do they do right that preserves the ability to; and what Skalman must
+make money; what do they do right that preserves the ability to; and what Threading must
 decide *before* opening any source, given the working assumption that source availability
 is a trust requirement in this category — so revenue has to come from somewhere other than
 the code.
@@ -42,8 +42,8 @@ Their real monetisation surfaces, all visible in the code:
   classic open-core seam, kept warm.
 - **The honest reading: t3code may never need direct revenue.** It is audience
   infrastructure for a media business; 14.8k stars in five months *is* the return. Their
-  $0 is subsidized by an asset (audience) that Skalman does not have — which changes what
-  Skalman can safely copy.
+  $0 is subsidized by an asset (audience) that Threading does not have — which changes what
+  Threading can safely copy.
 
 Shared exposure worth naming: **platform risk**. Anthropic's (paused) move to meter
 third-party harnesses would, in Theo's words, have cut subscription-backed usage "by 25×".
@@ -107,7 +107,7 @@ under a source-available license too. That distinction is where the money surviv
 **Sequencing is the real constraint: you can always open more later; you can never
 un-open.** Default to FSL first, loosen if strategy demands.
 
-## 6. What Skalman must decide before opening — the checklist
+## 6. What Threading must decide before opening — the checklist
 
 1. **Pick the money seam first.** Whatever will be charged for must either stay out of the
    public repo or be covered by a license that prevents freeloading. Relicensing after the
@@ -115,9 +115,9 @@ un-open.** Default to FSL first, loosen if strategy demands.
 2. **Keep sole copyright** — contributions closed (t3code's move), or CLA/DCO from day
    one. This keeps decision #1 reversible.
 3. **Register and withhold the trademark** — name, icon, domain. License code, never
-   brand. A fork may exist; it may not be called Skalman, sit in the App Store under that
+   brand. A fork may exist; it may not be called Threading, sit in the App Store under that
    name, or receive the signed update stream.
-4. **Choose the revenue models** (ranked for Skalman's shape):
+4. **Choose the revenue models** (ranked for Threading's shape):
    - **Paid signed binaries, source available — the Aseprite model.** Free if you compile
      it yourself; pay for the notarized, auto-updating build and/or App Store listing.
      Works *unusually well* for a native Mac app: "build it yourself" means Xcode and
@@ -136,7 +136,7 @@ un-open.** Default to FSL first, loosen if strategy demands.
    - **Anti-models**: reselling inference (contradicts the BYO identity; opencode runs
      Zen at zero markup as strategic break-even — not an indie business), and any paid
      tier whose economics a lab can meter away (see §2 platform risk).
-5. **Make "nothing leaves your machine" the loudly stated brand promise.** Skalman's
+5. **Make "nothing leaves your machine" the loudly stated brand promise.** Threading's
    current truth: no account, no telemetry, the only network egress is opt-in avatar
    probes and icon discovery the project itself points at. That is the differentiator
    t3code fumbled — state it on the landing page, in the README, and keep it testable.

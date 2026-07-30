@@ -23,15 +23,15 @@ import sys
 from dataclasses import dataclass
 
 
-APP_SOURCE_ROOTS = ("Sources/Skalman",)
-CATALOG_PATH = "Sources/Skalman/Resources/Localizable.xcstrings"
-MOBILE_SOURCE_ROOT = "Sources/SkalmanMobile"
-MOBILE_CATALOG_PATH = "Sources/SkalmanMobile/Localizable.xcstrings"
-MOBILE_INFO_CATALOG_PATH = "Sources/SkalmanMobile/SkalmanMobile-InfoPlist.xcstrings"
-REMOTE_CLIENT_ROOT = "Sources/Skalman/Resources/RemoteClient"
+APP_SOURCE_ROOTS = ("Sources/Threading",)
+CATALOG_PATH = "Sources/Threading/Resources/Localizable.xcstrings"
+MOBILE_SOURCE_ROOT = "Sources/ThreadingMobile"
+MOBILE_CATALOG_PATH = "Sources/ThreadingMobile/Localizable.xcstrings"
+MOBILE_INFO_CATALOG_PATH = "Sources/ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings"
+REMOTE_CLIENT_ROOT = "Sources/Threading/Resources/RemoteClient"
 REMOTE_LOCALIZATION_SOURCES = (
-    "Sources/Skalman/Core/Remote/RemoteGitReviewBridge.swift",
-    "Sources/Skalman/Core/Remote/RemoteNotificationService.swift",
+    "Sources/Threading/Core/Remote/RemoteGitReviewBridge.swift",
+    "Sources/Threading/Core/Remote/RemoteNotificationService.swift",
 )
 
 # These helpers translate their string arguments internally. Keeping them here makes their call
@@ -49,29 +49,27 @@ LOCALIZING_CALLS: dict[str, tuple[str | int, ...]] = {
     "SettingsUI.section": (0,),
     "SettingsUI.button": (0,),
     "SettingsUI.row": ("title", "subtitle"),
+    "SettingsUI.detailRow": ("title", "detail"),
 }
 
 # Component Gallery is developer-facing UI, but still ships in the app. Its local helpers apply
 # L10n at the rendering boundary.
 LOCAL_FILE_HELPERS: dict[str, dict[str, tuple[str | int, ...]]] = {
-    "Sources/Skalman/UI/Preferences/RemoteAccessPreferencesViewController.swift": {
-        "securityRow": ("title", "detail"),
-    },
-    "Sources/Skalman/UI/Preferences/SettingsPages.swift": {
+    "Sources/Threading/UI/Preferences/SettingsPages.swift": {
         "terms": tuple(range(32)),
     },
-    "Sources/Skalman/UI/Preferences/ThemeColorEditor.swift": {
+    "Sources/Threading/UI/Preferences/ThemeColorEditor.swift": {
         "group": (0,),
     },
-    "Sources/Skalman/UI/Windows/MainWindowMCPTools.swift": {
+    "Sources/Threading/UI/Windows/MainWindowMCPTools.swift": {
         "authorizeBrowserAccess": ("purpose",),
         "withAuthorizedBrowser": ("purpose",),
         "confirmSensitiveBrowserAction": (0,),
     },
-    "Sources/Skalman/UI/Extensions/ComponentCustomizationGalleryFixture.swift": {
+    "Sources/Threading/UI/Extensions/ComponentCustomizationGalleryFixture.swift": {
         "Story": ("title", "detail"),
     },
-    "Sources/Skalman/UI/Windows/ComponentGalleryWindowController.swift": {
+    "Sources/Threading/UI/Windows/ComponentGalleryWindowController.swift": {
         "section": (0, "note"),
         "story": (0, 1),
         "galleryToolbarButton": ("label",),
@@ -100,6 +98,10 @@ PRESENTATION_CALL_ARGUMENTS: dict[str, tuple[str | int, ...]] = {
     "setAccessibilityTitle": (0,),
     "setAccessibilityValue": (0,),
     "ConversationRowView.notice": (0,),
+    # Spell the type at the call site — `.init(…)` carries no call name to match on.
+    "ConfirmationRequest": ("title", "message", "confirmTitle", "cancelTitle"),
+    "ChoiceRequest": ("title", "message", "cancelTitle"),
+    "ConfirmationOption": ("title",),
     "presentAlert": (0, 1, "title", "message"),
     "showReceipt": (0,),
 }
@@ -587,12 +589,12 @@ MOBILE_MACHINE_LITERALS = {
 }
 
 MOBILE_DYNAMIC_LOCALIZATION_BOUNDARIES: dict[str, set[str]] = {
-    "Sources/SkalmanMobile/RemoteAttachmentsView.swift": {"message"},
-    "Sources/SkalmanMobile/RemoteConversationTimelineViewController.swift": {"title"},
-    "Sources/SkalmanMobile/RemoteDiagnostics.swift": {"title"},
-    "Sources/SkalmanMobile/RemoteGitReviewView.swift": {"label", "localization.key"},
-    "Sources/SkalmanMobile/RemoteNotifications.swift": {"localization.key"},
-    "Sources/SkalmanMobile/ThemedDialog.swift": {"title", "$0"},
+    "Sources/ThreadingMobile/RemoteAttachmentsView.swift": {"message"},
+    "Sources/ThreadingMobile/RemoteConversationTimelineViewController.swift": {"title"},
+    "Sources/ThreadingMobile/RemoteDiagnostics.swift": {"title"},
+    "Sources/ThreadingMobile/RemoteGitReviewView.swift": {"label", "localization.key"},
+    "Sources/ThreadingMobile/RemoteNotifications.swift": {"localization.key"},
+    "Sources/ThreadingMobile/ThemedDialog.swift": {"title", "$0"},
 }
 
 

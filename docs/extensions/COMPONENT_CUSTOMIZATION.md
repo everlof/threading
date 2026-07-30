@@ -1,6 +1,6 @@
 # Component customization implementation plan
 
-This document plans a controlled runtime-override system for Skalman's public components. It
+This document plans a controlled runtime-override system for Threading's public components. It
 builds on [`HOST_SURFACES.md`](HOST_SURFACES.md).
 
 Phases 1 through 12 are implemented in code: the Foundation-only SDK values, compact semantic
@@ -12,7 +12,7 @@ loopback host service now accepts atomic process publications, and semantic repl
 route back to their contributing process. The complete main-window content now exposes a
 composable semantic around-hook seam with an extension-defined, host-owned Metal surface as its
 first real dogfood case. Project hover, session hover and account usage presentations expose the
-same add/wrap/replace model while Skalman retains each temporary presentation's behavior. The
+same add/wrap/replace model while Threading retains each temporary presentation's behavior. The
 session-start and conversation-reply composers expose protected horizontal accessory hooks
 around their existing native prompts. Native conversation rows expose four separate protected
 annotation contracts without publishing transcript content as component context.
@@ -43,7 +43,7 @@ ExtensionComponentPatch(
 )
 ```
 
-The extension has effectively replaced the content with an HStack. Skalman still owns the table
+The extension has effectively replaced the content with an HStack. Threading still owns the table
 cell, row selection, disclosure, indentation, drag and drop, hover tracking, contextual menus,
 keyboard behavior, accessibility container, reuse, and action routing.
 
@@ -102,7 +102,7 @@ ExtensionComponentPatch(
 )
 ```
 
-Here `.proceed` is Skalman's SCC card, or the next extension wrapper. If SCC has no reading, it
+Here `.proceed` is Threading's SCC card, or the next extension wrapper. If SCC has no reading, it
 is an empty native body and the extension content still gives the host a reason to present the
 card. A full `replacement` suppresses SCC visually, but not hover timing, placement, popover
 chrome, dismissal, accessibility or extension invalidation.
@@ -121,13 +121,13 @@ the popover open while the pointer crosses into it.
 machinery with stricter constraints. A hook must be a horizontal stack, must contain exactly one
 `.proceed`, and may contain only compact status, text, image, fixed spacer and standard button
 nodes. There is no replacement or overlay. `.proceed` remains the exact existing `PromptView`;
-Skalman owns text input, submission, keyboard routing, drafts, stream availability, permission
+Threading owns text input, submission, keyboard routing, drafts, stream availability, permission
 state and accessibility. The two IDs remain separate because one has project context and
 pre-session draft state, while the other has session context and a live stream.
 
 ## Why one base class is the wrong boundary
 
-Skalman's components do not share one viable superclass:
+Threading's components do not share one viable superclass:
 
 - sidebar rows inherit `NSTableCellView`;
 - ordinary components inherit `NSView`;
@@ -244,7 +244,7 @@ The renderer continues to choose fonts, theme colors, symbol sizing, focus treat
 accessibility. A compact component contract may reject nodes that are legal in a panel; for
 example, `sidebar.session-row` should not accept a multiline heading or a large primary button.
 
-Those limits are values in the contract, not prose known only to Skalman.
+Those limits are values in the contract, not prose known only to Threading.
 `ExtensionComponentNodeConstraints` describes maximum depth, node count and text length, the
 required root axis, allowed stack axes and semantic roles, and whether dividers or fixed/flexible
 spacers are available. An extension can therefore validate generated content with the same
@@ -260,7 +260,7 @@ spacers. Its `after-title` slot is narrower still: one status node, at most 24 c
 AppKit can reconfigure sidebar rows many times per second. It must never synchronously call an
 extension process from `configure`, layout, drawing, or accessibility methods.
 
-Extensions publish patches through `ExtensionHostService`. Skalman validates them and stores
+Extensions publish patches through `ExtensionHostService`. Threading validates them and stores
 accepted values in a main-actor `ComponentCustomizationRegistry`, keyed by:
 
 ```text
@@ -376,9 +376,9 @@ deterministic; production composition no longer writes fake patches.
 - [x] Generate component documentation and schemas from the contract registry.
 - [x] Expose MCP tools to list, describe, validate, and preview component patches.
 
-`SkalmanComponentCatalog` now lives in the Foundation-only SDK and is the one declaration used
+`ThreadingComponentCatalog` now lives in the Foundation-only SDK and is the one declaration used
 by app registration, runtime validation, generated JSON/Markdown, per-component schemas and the
-authoring tools. `SkalmanComponentCatalogGenerator --check` catches stale committed output.
+authoring tools. `ThreadingComponentCatalogGenerator --check` catches stale committed output.
 
 The built-in MCP names are `extension_list_components`, `extension_describe_component`,
 `extension_validate_component_patch`, and `extension_preview_component_patch`. Patch arguments
@@ -490,7 +490,7 @@ the durable extension surface.
 - [x] Keep internal tab UUIDs out of the public target model; a session patch applies to all of
   that session's tab headers.
 - [x] Retain tab identity, selection, close, order, active state, overflow, persistence, pane
-  visibility, accessibility and the native `+` menu in Skalman.
+  visibility, accessibility and the native `+` menu in Threading.
 - [x] Preserve component-action provenance for pane-header buttons.
 - [x] Dogfood both surfaces and a real component action in Hello Status.
 - [x] Exercise selection, close, action routing and extension-removal fallback in the real

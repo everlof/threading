@@ -152,7 +152,7 @@ public class LocalProcess {
 
     /// Queues output for bounded main-thread delivery.
     ///
-    /// The terminal view and Skalman's output hooks are main-thread objects, but making the PTY
+    /// The terminal view and Threading's output hooks are main-thread objects, but making the PTY
     /// reader wait synchronously on that thread makes fast output feel chunky. An unbounded
     /// asynchronous hop has the opposite failure: memory grows for as long as the producer
     /// outruns AppKit. Stop reading at the high-water mark and let the kernel's PTY buffer apply

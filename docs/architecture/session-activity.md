@@ -254,7 +254,7 @@ hooks, and the payload is Claude's apart from the spelling — `session_id`, `tu
   `MCPDefaults.hookMarker`, and removes only those on uninstall. This machine's own
   `~/.codex/hooks.json` was written by another tool, which is why that is a rule and not a
   nicety.
-- **The command guards on the token** (`[ -n "$SKALMAN_SESSION_TOKEN" ]`), because the file is
+- **The command guards on the token** (`[ -n "$THREADING_SESSION_TOKEN" ]`), because the file is
   read by every Codex run under that account, including the ones the user starts themselves.
 
 Both halves are opt-in and separate (`AppSettings.installsCodexHooks`,
@@ -266,7 +266,7 @@ approval in the Codex TUI, which the stable-text rule is what makes viable.
 `SessionStart` also **replaces `CodexSessionDiscovery`'s job**: it hands over `session_id`
 already attributed by the token in the URL, where discovery watches the rollout directory and
 matches on a launch timestamp. `AgentRuntime.adoptReportedIdentifier` only updates a session
-still `awaitingIdentifier`, so Claude's own report — of an id Skalman minted — is a no-op.
+still `awaitingIdentifier`, so Claude's own report — of an id Threading minted — is a no-op.
 
 **Codex brokers permissions on the same hook, and honours the answer.** Measured on 0.144.6: a
 `PreToolUse` reply of `permissionDecision: deny` stops the tool outright — the run logs
@@ -334,7 +334,7 @@ until an environment variable appears is how one shared file serves two surfaces
 **A hook is invisible by construction**, which is the same problem `ProjectIconResearch` has and
 is answered the same way: every run leaves a record. `EventLog.Category.hooks` is the durable
 half, and it is deliberately *not* fed per turn — the boundaries themselves go to
-`SkalmanLogger` at `.debug`, which is the live `log stream` view, while the journal keeps only
+`ThreadingLogger` at `.debug`, which is the live `log stream` view, while the journal keeps only
 what a report weeks later would need:
 
 - **The one transition that matters** — a session going from inferring its state to being told
@@ -358,6 +358,6 @@ testable, and a *missing* `outcome` counts as a failure — the schema belongs t
 renamed field should make the journal noisy rather than quietly stop reporting.
 
 One bug worth keeping: every command reads stdin **before** its guard
-(`skalman_payload=$(cat)`). A guard that returns without reading leaves Codex writing the event
+(`threading_payload=$(cat)`). A guard that returns without reading leaves Codex writing the event
 into a pipe nobody drains, and it is the *unrouted* runs — the user's own terminal sessions —
 that would pay for it. Found by a probe whose hook posted an empty body, and pinned by a test.

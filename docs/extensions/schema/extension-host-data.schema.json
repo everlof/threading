@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skalman.invalid/schema/extension-host-data.schema.json",
-  "title": "Skalman extension host snapshot and event responses",
+  "$id": "https://threading.codes/schema/extension-host-data.schema.json",
+  "title": "Threading extension host snapshot and event responses",
   "oneOf": [
     { "$ref": "#/$defs/projectPage" },
     { "$ref": "#/$defs/projectResult" },

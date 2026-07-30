@@ -52,12 +52,12 @@ enum ExtensionRunnerRefusal: Equatable, LocalizedError {
 enum ExtensionRunnerValidator {
     /// The only argument vectors the runner will start. Without this it is a general-purpose
     /// exec service that happens to be used for extensions.
-    static let entryModes: Set<String> = ["--skalman-register", "--skalman-serve"]
+    static let entryModes: Set<String> = ["--threading-register", "--threading-serve"]
 
     /// Spelled out rather than read from `ExtensionPackageStore`, because this file is compiled
     /// into the helper as well as into the app and the helper has none of the app's types.
     /// `ExtensionPackageStoreTests` pins the two to the same value.
-    static let packageExtension = "skalmanextension"
+    static let packageExtension = "threadingextension"
 
     /// Where installed packages live, resolved without trusting the caller *or* the
     /// environment.
@@ -70,7 +70,7 @@ enum ExtensionRunnerValidator {
             return nil
         }
         return String(cString: directory)
-            + "/Library/Application Support/Skalman/Extensions/Packages"
+            + "/Library/Application Support/Threading/Extensions/Packages"
     }
 
     /// Environment names the runner will not forward, whatever the caller says.

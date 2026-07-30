@@ -1,15 +1,15 @@
 # Remote access
 
-Remote access mirrors Skalman sessions to a browser or to the native `SkalmanMobile` iOS app.
+Remote access mirrors Threading sessions to a browser or to the native `ThreadingMobile` iOS app.
 It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac
 and turn on **Remote Access**. The page follows the local listener and secure relay live, then
 shows the iPhone pairing code in place once the connection is ready.
 
 ## Pair an iPhone
 
-1. Keep Skalman running on the Mac.
+1. Keep Threading running on the Mac.
 2. Wait for the Remote Access status to say the secure relay is ready.
-3. In Skalman on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
+3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
 The iOS app stores the paired host and bearer token in the Keychain. It shows all unarchived
 sessions grouped by project or ordered by recent activity, including dormant sessions. Pinned sessions
@@ -20,7 +20,7 @@ scrollback and accept keyboard input; Native sessions render user messages, assi
 activity natively, expose a composer when the agent can accept another prompt, and present
 one-shot allow/deny cards (including edit diffs) when a headless agent requests permission.
 If a diff is too large to send as one bounded remote snapshot, the card stays visible but must
-be reviewed and decided on the Mac; Skalman never offers an approval against a partial diff.
+be reviewed and decided on the Mac; Threading never offers an approval against a partial diff.
 
 The Native conversation is a deliberate hybrid. SwiftUI still owns navigation, banners and the
 composer, while a UIKit `UICollectionView` with a diffable data source owns the potentially long
@@ -33,7 +33,7 @@ and cached by source.
 
 An owner can start a session from the iPhone and choose the Mac checkout, agent account, model,
 reasoning effort and UI surface. The stable default is the agent's own Claude Code or Codex UI;
-Skalman's Native UI remains an explicit experimental choice. Account choices include the Mac's
+Threading's Native UI remains an explicit experimental choice. Account choices include the Mac's
 latest normalized rate-limit usage, while credentials and config paths stay on the Mac. The
 session is created through the same Mac launch path as a local session and appears on both
 devices immediately. Owners can also rename, pin, archive, restore and switch a session between
@@ -42,10 +42,17 @@ the same provider conversation identifier on the other surface. The session row'
 submenu shows both choices with the active one checked on Mac and iPhone, and catalogue changes
 are pushed immediately so another open device follows the switch without waiting for polling.
 
-A session's iPhone **…** menu also opens **Attachments**: a read-only list of images and PDFs
-the agent mentioned. Metadata is fetched first and the selected file body is fetched on demand.
-This surface is owner-only, bounded to 24 MB per file, and accepts only real supported files
-whose symlink-resolved path remains inside that session's checkout.
+A session's iPhone **Workspace** gathers **Browser**, **Review**, the read-only repository
+**Files** browser, and **Attachments** under one route so companion surfaces do not accumulate as
+toolbar buttons. When an agent opens or navigates a browser tab, the phone never changes screens:
+the Workspace button receives one quiet pulse and an unread dot. Opening **Browser** follows the
+Mac-owned tab through bounded, read-only snapshots; clicks, scrolling, and form entry continue to
+run only on the Mac and merely refresh an already visible follow view. Routine browser mutations
+do not repeatedly animate the badge. Private tabs remain generic in the list and never send
+pixels to the phone. Browser state, checkout reads, and attachment previews are owner-only.
+Attachment metadata is fetched first and the selected image or PDF body is fetched on demand.
+Attachments are bounded to 24 MB per file and accept only real supported files whose
+symlink-resolved path remains inside that session's checkout.
 
 When an interactive iPhone opens a Claude Code UI or Codex UI terminal, the phone's visible
 SwiftTerm grid temporarily owns the shared PTY size. The Mac sends the ordinary terminal
@@ -98,7 +105,7 @@ notifications**. Notification settings keep three choices independent:
 Opening a notification deep-links to the relevant chat. Permission notifications intentionally
 contain no command, path, tool arguments or diff on the lock screen, and do not offer lock-screen
 Allow/Deny actions; the authenticated chat remains the place to review the evidence. Claude/Codex
-permission prompts drawn inside their terminal UI are not parsed, so only Skalman's structured
+permission prompts drawn inside their terminal UI are not parsed, so only Threading's structured
 Native permission cards currently produce this notification.
 
 When remote access is enabled, sessions also receive the `notify_user` MCP tool. It is for an
@@ -123,10 +130,10 @@ lock-screen delivery uses APNs. Development/self-hosted builds can enable the Ma
 with:
 
 ```sh
-SKALMAN_APNS_KEY_ID=...
-SKALMAN_APNS_TEAM_ID=...
-SKALMAN_APNS_PRIVATE_KEY_PATH=/path/to/AuthKey_....p8
-SKALMAN_APNS_TOPIC=se.mjukis.Skalman.mobile
+THREADING_APNS_KEY_ID=...
+THREADING_APNS_TEAM_ID=...
+THREADING_APNS_PRIVATE_KEY_PATH=/path/to/AuthKey_....p8
+THREADING_APNS_TOPIC=codes.threading.mobile
 ```
 
 The topic is optional and defaults to the iOS bundle identifier above. Without provider
@@ -157,28 +164,45 @@ feature lock.
 
 ## Security model
 
-- The remote server listens only on `127.0.0.1` and is separate from Skalman's MCP and extension
+- The remote server listens only on `127.0.0.1` and is separate from Threading's MCP and extension
   servers.
 - `cloudflared` opens an outbound tunnel to that one loopback listener. No router port or inbound
   firewall rule is opened. Remote session traffic passes through Cloudflare's relay, where TLS
   is terminated, so use this beta only for work you are comfortable sending through that service.
-- Every launch mints a random 256-bit owner-device bearer token, and every chat invite mints an
+- Every launch mints a random 128-bit owner-device bearer token, and every chat invite mints an
   independent random 256-bit single-use token scoped to one session. It arrives in the URL
   fragment, so the browser does not include it in its initial HTTP request or referrer. On
   acceptance the host replaces it with a fresh device-bound membership bearer. iOS stores that
   bearer in Keychain; the browser stores accepted guest membership for that origin while keeping
   owner pairing tab-scoped. The fragment is removed from the address bar and history.
+- The owner token is base32 and 128-bit rather than base64url and 256-bit *because it has to be
+  photographed*. Its whole payload is a QR code, and QR's alphanumeric mode — 5.5 bits per
+  character against byte mode's 8 — has no lower case, so a mixed-case token forces the densest
+  possible symbol. Written as base32, alongside an upper-cased scheme and host
+  (`RemoteConnectionLink.scannablePayload`), a median relay host encodes in 37 modules instead of
+  41. 128 bits remains an unguessable online-only bearer held behind a secret relay hostname,
+  in memory, revoked when Remote Access stops. Invitation and device bearers are unchanged at
+  256-bit base64url: they travel by copied link, never by camera, so they buy nothing from it.
+- **The 128-bit choice is forced by the host, not by the token, and should be revisited when the
+  relay moves to a short custom domain.** A 52-character `trycloudflare.com` hostname is most of
+  the payload, which is what leaves the token paying for the last version. Measured at level M
+  against a `k7m2qx.threading.app`-shaped origin: 33 modules with a *256-bit* base32 token — still
+  better than the 41 this shipped with — and 29 with the current 128-bit one. So once the host
+  shortens, full 256-bit entropy costs one version rather than four, and going back to it is the
+  cheaper side of the trade. Upper-casing the origin keeps earning either way (a bare
+  `threading.app` with the old base64url token is 37 lower-case against 33 upper-case).
 - API and WebSocket access require the accepted bearer and matching device id. Only a paired
   interactive all-sessions owner may
   create, rename, pin, archive or restore sessions, or select the shared app appearance and a
-  session's visual terminal theme. Checkout reads, including Git Review, repository files, and
-  detected image/PDF attachments, also require that owner scope. View-only and guest links cannot
-  change host state or read checkout files. Permanent deletion remains a Mac-only action.
+  session's visual terminal theme. Workspace browser metadata and bounded visible-tab snapshots,
+  plus checkout reads including Git Review, repository files, and detected image/PDF attachments,
+  also require that owner scope. View-only and guest links cannot change host state, read checkout
+  files, or receive browser pixels. Permanent deletion remains a Mac-only action.
   Archiving a live session immediately disconnects any remote viewer already attached to it.
 - Authentication failures are rate-limited globally and per device, and slow WebSocket consumers
   are dropped instead of being allowed to back-pressure an agent's terminal.
 - Unused invitations expire after 24 hours; accepted memberships do not. Stopping a share,
-  turning Remote Access off, or quitting Skalman revokes the relevant membership tokens and
+  turning Remote Access off, or quitting Threading revokes the relevant membership tokens and
   disconnects already-open sockets immediately.
 
 Treat the owner QR code and every copied share URL like passwords. The owner code is intentionally
@@ -187,20 +211,21 @@ much stronger than a guest URL; only show it to devices you control.
 ## Beta limitations
 
 The automatic relay uses a Cloudflare Quick Tunnel. Quick Tunnels are intended for development
-and testing, have no uptime guarantee, and receive a new public hostname whenever Skalman starts.
+and testing, have no uptime guarantee, and receive a new public hostname whenever Threading starts.
 The iPhone therefore needs to be paired again after the Mac app restarts. A production release
 should replace this with an account-backed stable relay or a rendezvous service, named-device
-approval/revocation, and account-backed invitations. Without recipient accounts Skalman cannot
+approval/revocation, and account-backed invitations. Without recipient accounts Threading cannot
 push to a friend *before* they accept a share link; their messaging app carries the invitation,
-then Skalman registers that accepted capability and can notify the device from then on.
+then Threading registers that accepted capability and can notify the device from then on.
 
 Remote access cannot wake a sleeping or offline Mac. A remotely resumed session starts in the
-background and does not activate or bring Skalman's Mac window to the front.
+background and does not activate or bring Threading's Mac window to the front.
 
 Remote session creation intentionally exposes only checkouts the Mac already knows. Git Review,
-the read-only repository browser, and detected image/PDF previews have separate owner-only,
-path-containment, and size boundaries. Phone-to-Mac attachment uploads and arbitrary filesystem
-access are not exposed.
+the read-only repository browser, detected image/PDF previews, and browser follow snapshots have
+separate owner-only and size boundaries; file surfaces additionally enforce path containment.
+Phone-to-Mac attachment uploads, arbitrary filesystem access, browser control from the phone, and
+private browser pixels are not exposed.
 
 If `cloudflared` is not installed, local browser mirroring still works. Install it with:
 
@@ -210,11 +235,11 @@ brew install cloudflared
 
 ## Implementation map
 
-- `Sources/Skalman/Core/Remote`: loopback HTTP/WebSocket server, authentication, relay lifecycle,
+- `Sources/Threading/Core/Remote`: loopback HTTP/WebSocket server, authentication, relay lifecycle,
   routing and live session mirrors.
-- `Sources/Skalman/Resources/RemoteClient`: dependency-free browser client.
-- `SkalmanRemoteKit`: versioned wire DTOs and pairing-link parsing shared by macOS and iOS.
-- `Sources/SkalmanMobile`: SwiftUI iOS shell, UIKit Native-conversation timeline and SwiftTerm
+- `Sources/Threading/Resources/RemoteClient`: dependency-free browser client.
+- `ThreadingRemoteKit`: versioned wire DTOs and pairing-link parsing shared by macOS and iOS.
+- `Sources/ThreadingMobile`: SwiftUI iOS shell, UIKit Native-conversation timeline and SwiftTerm
   terminal surface.
 - `docs/NOTIFICATION_E2E.md`: opt-in real APNs and Claude → MCP → APNs verification.
 - `docs/REMOTE_DIAGNOSTICS.md`: privacy boundary, cross-device tracing and support workflow.

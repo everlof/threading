@@ -6,7 +6,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index. The boundary *policy* — what f
 construct, and what a new component owes — is [`docs/THEME_BOUNDARY.md`](../THEME_BOUNDARY.md);
 this file is the vocabulary and the reasoning behind it.
 
-**New UI is built from `Sources/Skalman/UI/Design/`, not from stock AppKit controls.** This is
+**New UI is built from `Sources/Threading/UI/Design/`, not from stock AppKit controls.** This is
 the default, not a preference: a screen assembled from `NSPopUpButton`, `NSBox` and bezelled
 buttons will not match anything else in the app.
 
@@ -38,7 +38,7 @@ resolves through `L10n` and `Localizable.xcstrings`; shared `SettingsUI` builder
 built-in titles and descriptions by default. Extension Settings renderers explicitly disable
 that lookup because their strings have already passed through
 `ExtensionLocalizationResolver`. That separation prevents an extension base string such as
-“General” from accidentally borrowing Skalman's translation. Stable page IDs, setting IDs,
+“General” from accidentally borrowing Threading's translation. Stable page IDs, setting IDs,
 command IDs, values, and schemas are never localized.
 
 Four consequences worth knowing before adding UI:
@@ -86,7 +86,7 @@ Components so far:
 | `ToolbarButtonGroupView` | Related toolbar actions as one item, so their spacing is ours rather than `NSToolbar`'s. |
 | `WorkingOrbView` | The dotted "working" orb, tinted with the accent — the theme boundary for the `ThinkingOrbs` view. |
 | `ThemedTabItemView` | **Every** tab: the display pane's strip, the settings sidebar, and the toolbar's active page. |
-| `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its `bandHeight` is `PaneHeaderView.bandHeight`, so every strip's hairline lands on the panes' shared line. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. |
+| `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its `bandHeight` is `PaneHeaderView.bandHeight`, so every strip's hairline lands on the panes' shared line. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut`/`onDragEnded` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land, the receiving strip washing as a drop target (`isDropTarget`), and the slot named by the same midpoint rule as the reorder (`insertionIndex(forWindowPoint:)`) — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. |
 | `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. |
 | `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
 | `PaneHeaderView` | The footer's mirror at a pane's top. Its height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it), so the two panes' hairlines land on one line. |
@@ -234,7 +234,7 @@ Four rules, and each is about legibility rather than cost:
   (`highlightChanged`) and says nothing about what that should mean.
 - **A demonstration holds the row's own name first** (`Design.Motion.demonstrationHold`). The
   highlight is also where it lands when the menu *opens*, and a list whose selected row read
-  "Skalman" the moment it appeared had answered a question nobody asked with the one name the
+  "Threading" the moment it appeared had answered a question nobody asked with the one name the
   user came to read. It doubles as the dwell that lets a pointer cross the list.
 - **Only the row that owns a demonstration may end it.** The menu keeps its rows in a
   dictionary, so a highlight moving from one row to the next reports in no defined order, and an
@@ -337,6 +337,16 @@ The vocabulary these encode, which new work should follow:
   curve actually is — measured for the sidebar's band: 16pt at the window corner, zero at
   the divider. `PaneFooterView` is the reference for both. Equal frame margins are not
   equal visual margins.
+
+  The rule reaches the sidebar's trailing slot too, and the bug it fixes is worth stating
+  because the slot holds *both* kinds of thing: a session count and a status dot, whose frames
+  are their ink, beside a `⋯`/gear/archive, whose frames are click targets with a glyph
+  floating inside. Pinned alike, they landed 5pt apart — so a project row's edge visibly
+  stepped inboard the moment the pointer arrived and the count crossfaded into the `⋯`.
+  `SessionRowView` and `ProjectRowView` widen the slot itself by
+  `ThemedIconButton.opticalHorizontalInset` and pull the count back in by the same amount,
+  which keeps the buttons inside the slot they are sized into.
+  `SidebarRowRenderTests.testEveryTrailingMarkLandsOnOneOpticalLine` asserts the one line.
 
 **One silhouette per strip.** `TabAppearance` states a tab's geometry and type scale in one
 place, because the app draws tabs in two views that cannot share a class: the pane's strip reads
@@ -529,3 +539,41 @@ it (which is how a pull-down like the themes gear works, and only unclaimed item
 the control), and an out-of-range `selectItem(at:)` leaves the control unselected rather than
 trapping, since the index usually comes from looking a stored preference up in a list that may
 have moved on.
+
+## 2026-07-30 — a row's control has to be allowed to take its own click
+
+Three reports, one cause: a session row's archive box "did nothing at all", its `⋯` "worked
+sometimes", and the sidebar's selection was "sometimes gray sometimes blue".
+
+`NSTableView` decides in **`validateProposedFirstResponder(_:for:)`** whether a click inside a
+cell reaches the view it landed on or is taken by the table to select the row, and its answer for
+anything in a row that is **not already selected** is no. That is the right gesture for a text
+field — click to select the row, click again to edit — and the wrong one for a button, which is
+why AppKit exempts its own `NSButton`s. Nothing about it was visible here until this app started
+building row buttons out of `ThemedControl`, which AppKit has never heard of.
+
+So the button drew its hover fill, took a press that went nowhere, and the click was spent
+selecting the row underneath — which also switched the session on screen and moved the sidebar's
+focus. The "sometimes" was the row happening to be selected already. `ThemedTableView` and
+`ThemedOutlineView` both override it now, through one shared rule (`RowControls.takesItsOwnClick`)
+stated as *a control that acts on its own click*: every `ThemedControl` in the app is one — button,
+toggle, chip, pop-up, recorder, no text editor among them — plus `NSButton` for AppKit's own,
+including the disclosure triangle. A label, an image and the row's ground are none of these, so
+clicking a row anywhere else still selects it.
+
+**The row's own tests could not see any of this**, and that is the more useful lesson.
+`SessionRowActionsTests` presses the button on a row held in a plain `NSView`, where no table sits
+between the click and the button — so it passed against a button that was unreachable in the app,
+through two rounds of fixing the *wrong* half (hit testing, then the lost mouse-up).
+`SidebarRowClickRoutingTests` puts the row in a real `ThemedOutlineView` and asserts the decision
+against a **stock** `NSOutlineView` in the same fixture, so the test says what AppKit does rather
+than only what we want: if a future macOS starts exempting custom controls, that assertion is what
+reports it.
+
+Second, smaller half of the same report: `ThemedIconButton.mouseDown` used to call
+`makeFirstResponder(self)`. In a sidebar row that is visible — the outline view resigns, its
+selected row drops from emphasized to unemphasized, and under the **System** theme that is the
+difference between the accent blue and a flat grey. Pressing one row's `⋯` recoloured the
+selection of a different row, which is what made the selection read as random. A press no longer
+takes the keyboard focus, which is what every AppKit button does; Tab still reaches the button and
+still draws the ring.

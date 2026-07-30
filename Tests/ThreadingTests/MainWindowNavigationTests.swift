@@ -1,0 +1,148 @@
+import AppKit
+import XCTest
+@testable import Threading
+
+/// The window controller's use of `NavigationHistory`: presenting a page records a visit,
+/// Back and Forward re-present without re-pushing, and the toolbar pair reflects where the
+/// window can still go.
+///
+/// Driven through the settings pages, deliberately — their presentation is synchronous and
+/// touches no project store, so the replay-guard logic (`pendingHistoryTarget`) is exercised
+/// without pumping the run loop. The window is built, never shown.
+///
+/// Plus what ⌘, restores on the way out, which is the same question asked of the pane rather
+/// than of the history: a detour must end where it started.
+@MainActor
+final class MainWindowNavigationTests: XCTestCase {
+
+    private var controller: MainWindowController?
+
+    override func tearDown() {
+        controller = nil
+        super.tearDown()
+    }
+
+    private func makeController() -> MainWindowController {
+        let controller = MainWindowController()
+        self.controller = controller
+        return controller
+    }
+
+    func testVisitingTwoPagesEnablesBackAndRetracesThem() {
+        let controller = makeController()
+
+        controller.showSettingsPage(id: SettingsPages.generalID)
+        XCTAssertFalse(controller.canGoBack, "The first page has nothing behind it")
+
+        controller.showSettingsPage(id: SettingsPages.themesID)
+        XCTAssertTrue(controller.canGoBack)
+        XCTAssertFalse(controller.canGoForward)
+
+        controller.goBack()
+        XCTAssertFalse(controller.canGoBack)
+        XCTAssertTrue(controller.canGoForward)
+
+        controller.goForward()
+        XCTAssertTrue(controller.canGoBack)
+        XCTAssertFalse(controller.canGoForward)
+    }
+
+    func testReplayDoesNotPushAFreshVisit() {
+        let controller = makeController()
+        controller.showSettingsPage(id: SettingsPages.generalID)
+        controller.showSettingsPage(id: SettingsPages.themesID)
+        controller.showSettingsPage(id: SettingsPages.keyboardID)
+
+        controller.goBack()
+        controller.goBack()
+        XCTAssertFalse(controller.canGoBack, "Two steps back from three pages is the beginning")
+
+        controller.goForward()
+        controller.goForward()
+        XCTAssertFalse(
+            controller.canGoForward,
+            "If replays pushed visits, forward steps would have manufactured history"
+        )
+    }
+
+    func testRevisitingTheCurrentPageIsNotAStep() {
+        let controller = makeController()
+        controller.showSettingsPage(id: SettingsPages.generalID)
+        controller.showSettingsPage(id: SettingsPages.generalID)
+
+        XCTAssertFalse(controller.canGoBack)
+    }
+
+    func testTheToolbarPairReflectsTheHistory() throws {
+        let controller = makeController()
+        let back = try XCTUnwrap(controller.navBackToolbarButton)
+        let forward = try XCTUnwrap(controller.navForwardToolbarButton)
+
+        XCTAssertFalse(back.isEnabled)
+        XCTAssertFalse(forward.isEnabled)
+
+        controller.showSettingsPage(id: SettingsPages.generalID)
+        controller.showSettingsPage(id: SettingsPages.themesID)
+        XCTAssertTrue(back.isEnabled)
+        XCTAssertFalse(forward.isEnabled)
+
+        controller.goBack()
+        XCTAssertFalse(back.isEnabled)
+        XCTAssertTrue(forward.isEnabled)
+    }
+
+    // MARK: - The settings detour
+
+    /// ⌘, is a *detour*: it opens Settings over whatever the pane was showing and puts that back
+    /// when it closes. A project's composer is one of those things.
+    ///
+    /// It used to remember only a session, so leaving Settings from a composer landed on "No
+    /// Session Selected" — taking the half-written prompt in it off the screen, which is how the
+    /// bug was reported.
+    func testLeavingSettingsPutsAProjectsComposerBack() {
+        let controller = makeController()
+        let store = ProjectStore.shared
+
+        // A folder of its own, for the reason `AgentPermissionModeTests` states: `addProject`
+        // returns the existing project for a folder it already knows, and the teardown here
+        // deletes whatever it was handed.
+        let project = store.addProject(
+            folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("threading-settings-detour-\(UUID().uuidString)")
+        )
+        defer { store.removeProject(id: project.id) }
+
+        // The sidebar's own delegate call, which is what selecting a project row makes. A
+        // stand-in list is enough: the callback only touches the sidebar to refresh the row of
+        // a session leaving the pane, and no session is on screen here.
+        controller.projectSidebar(ProjectSidebarViewController(), didSelectProject: project.id)
+        XCTAssertEqual(controller.currentProjectID, project.id, "The composer opens on selection")
+
+        controller.toggleSettings()
+        XCTAssertNil(controller.currentProjectID, "Settings carries no project context")
+
+        controller.toggleSettings()
+        XCTAssertEqual(
+            controller.currentProjectID,
+            project.id,
+            "Closing Settings must return to the composer it opened over"
+        )
+        XCTAssertNil(controller.currentSessionID)
+    }
+
+    func testTheNavigationCommandsAreListedOnXcodesChords() throws {
+        let backCommand = try XCTUnwrap(AppCommands.command(id: AppCommands.ID.navigateBack))
+        let forwardCommand = try XCTUnwrap(
+            AppCommands.command(id: AppCommands.ID.navigateForward)
+        )
+
+        XCTAssertEqual(
+            backCommand.defaultShortcut,
+            KeyboardShortcut(key: "\u{F702}", modifiers: [.command, .control])
+        )
+        XCTAssertEqual(
+            forwardCommand.defaultShortcut,
+            KeyboardShortcut(key: "\u{F703}", modifiers: [.command, .control])
+        )
+    }
+}

@@ -1,7 +1,7 @@
-Build and run Skalman.
+Build and run Threading.
 
 ```bash
-swift build && .build/debug/Skalman
+swift build && .build/debug/Threading
 ```
 
 If the app fails to launch, check Console.app for crash logs.

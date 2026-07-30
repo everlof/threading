@@ -55,7 +55,7 @@ custom_rules:
 
   stock_appkit_field:
     name: "Stock AppKit text field"
-    regex: 'NSTextField\(\s*(?!labelWithString|wrappingLabelWithString|labelWithAttributedString)'
+    regex: 'NSTextField\s*\((?!\s*(?:labelWithString|wrappingLabelWithString|labelWithAttributedString)\s*:)'
     message: "An editable field is ThemedTextField. Labels are fine — NSTextField(labelWithString:) draws no bezel, and the bezel is what this rule exists to stop."
     match_kinds:
       - identifier

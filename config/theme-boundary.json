@@ -44,7 +44,7 @@
     "NSTextView.scrollablePlainTextView": "ThemedTextView.scrolling()"
   },
   "interactiveComponentDirectories": [
-    "Sources/Skalman/UI/Design"
+    "Sources/Threading/UI/Design"
   ],
   "interactiveBaseTypes": [
     "BackdropThemedControl",
@@ -57,7 +57,7 @@
     "systemFont"
   ],
   "systemChromeContractDirectories": [
-    "Sources/Skalman/UI/Design"
+    "Sources/Threading/UI/Design"
   ],
   "systemChromeContractTypes": [
     "NSAlert",
@@ -71,7 +71,7 @@
     "NSToolbar"
   ],
   "implementationBanDirectories": [
-    "Sources/Skalman/UI/Design"
+    "Sources/Threading/UI/Design"
   ],
   "implementationBannedTypes": {
     "NSMenu": "ThemedMenuPresenter",
@@ -79,11 +79,11 @@
     "NSPopover": "ThemedMenuPresenter"
   },
   "windowControllerDirectories": [
-    "Sources/Skalman/UI/Windows"
+    "Sources/Threading/UI/Windows"
   ],
   "windowControllerBaseType": "ThemedWindowController",
   "motionDirectories": [
-    "Sources/Skalman/UI"
+    "Sources/Threading/UI"
   ],
   "motionDurationNamespace": "Design.Motion.",
   "systemColors": [
@@ -124,138 +124,152 @@
     "unemphasizedSelectedContentBackgroundColor",
     "windowBackgroundColor"
   ],
+  "confirmationResponses": [
+    "alertFirstButtonReturn",
+    "alertSecondButtonReturn",
+    "alertThirdButtonReturn"
+  ],
+  "confirmationGateDirectories": [
+    "Sources/Threading/UI/Alerts"
+  ],
   "exceptions": [
     {
-      "path": "Sources/Skalman/UI/Design/ThemedScrollView.swift",
+      "path": "Sources/Threading/UI/Design/ThemedScrollView.swift",
       "kind": "inherit",
       "symbol": "NSClipView",
       "reason": "The themed boundary has to subclass the AppKit surface it contains."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemedScrollView.swift",
+      "path": "Sources/Threading/UI/Design/ThemedScrollView.swift",
       "kind": "inherit",
       "symbol": "NSScrollView",
       "reason": "The themed boundary has to subclass the AppKit surface it contains."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemedTables.swift",
+      "path": "Sources/Threading/UI/Design/ThemedTables.swift",
       "kind": "inherit",
       "symbol": "NSTableHeaderView",
       "reason": "The themed boundary has to subclass the AppKit surface it contains."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemedTables.swift",
+      "path": "Sources/Threading/UI/Design/ThemedTables.swift",
       "kind": "inherit",
       "symbol": "NSTableView",
       "reason": "The themed boundary has to subclass the AppKit surface it contains."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemedTables.swift",
+      "path": "Sources/Threading/UI/Design/ThemedTables.swift",
       "kind": "inherit",
       "symbol": "NSOutlineView",
       "reason": "The themed boundary has to subclass the AppKit surface it contains."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemedTextField.swift",
+      "path": "Sources/Threading/UI/Design/ThemedTextField.swift",
       "kind": "inherit",
       "symbol": "NSTextField",
       "reason": "The themed boundary preserves AppKit's field editor while replacing its chrome."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemedTextView.swift",
+      "path": "Sources/Threading/UI/Design/ThemedTextView.swift",
       "kind": "inherit",
       "symbol": "NSTextView",
       "reason": "The themed boundary preserves AppKit's text system while replacing its surface."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemeSwatchView.swift",
+      "path": "Sources/Threading/UI/Design/ThemeSwatchView.swift",
       "kind": "construct",
       "symbol": "NSColorWell",
       "reason": "The invisible well is the narrow boundary to the system colour panel."
     },
     {
-      "path": "Sources/Skalman/UI/Design/SidebarBackdropView.swift",
+      "path": "Sources/Threading/UI/Design/SidebarBackdropView.swift",
       "kind": "construct",
       "symbol": "NSVisualEffectView",
       "reason": "The contained material is the identity theme's sidebar ground; styles cover it."
     },
     {
-      "path": "Sources/Skalman/Core/Theme/AppThemeRole.swift",
+      "path": "Sources/Threading/Core/Theme/AppThemeRole.swift",
       "kind": "systemColor",
       "symbol": "*",
       "reason": "This is the single mapping from system colours into semantic app-theme roles."
     },
     {
-      "path": "Sources/Skalman/UI/Design/Design.swift",
+      "path": "Sources/Threading/UI/Design/Design.swift",
       "kind": "fontFactory",
       "symbol": "*",
       "reason": "Design is the single mapping from semantic typography roles to AppKit fonts."
     },
     {
-      "path": "Sources/Skalman/Models/TerminalProfile.swift",
+      "path": "Sources/Threading/Models/TerminalProfile.swift",
       "kind": "fontFactory",
       "symbol": "*",
       "reason": "The terminal font and size are explicitly user-selected profile data."
     },
     {
-      "path": "Sources/Skalman/Core/Session/TerminalSession.swift",
+      "path": "Sources/Threading/Core/Session/TerminalSession.swift",
       "kind": "fontFactory",
       "symbol": "*",
       "reason": "The terminal renderer applies the user's profile font size rather than app typography."
     },
     {
-      "path": "Sources/Skalman/UI/Preferences/ProfilePreferencesViewController.swift",
+      "path": "Sources/Threading/UI/Preferences/ProfilePreferencesViewController.swift",
       "kind": "fontFactory",
       "symbol": "*",
       "reason": "The profile editor previews and converts the user's selected terminal font."
     },
     {
-      "path": "Sources/Skalman/UI/GeneratedProjectIcon.swift",
+      "path": "Sources/Threading/UI/GeneratedProjectIcon.swift",
       "kind": "fontFactory",
       "symbol": "*",
       "reason": "The font draws generated icon artwork rather than application text."
     },
     {
-      "path": "Sources/Skalman/UI/AccountBadge.swift",
+      "path": "Sources/Threading/UI/AccountBadge.swift",
       "kind": "fontFactory",
       "symbol": "*",
       "reason": "The font draws tiny generated badge artwork rather than application text."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemeSwatchImage.swift",
+      "path": "Sources/Threading/UI/Design/ThemeSwatchImage.swift",
       "kind": "fontFactory",
       "symbol": "*",
       "reason": "The font draws a scaled theme-preview image rather than application text."
     },
     {
-      "path": "Sources/Skalman/UI/Design/Design.swift",
+      "path": "Sources/Threading/UI/Design/Design.swift",
       "kind": "systemColor",
       "symbol": "*",
       "reason": "Design owns the documented categorical palette and contrast-derived ink."
     },
     {
-      "path": "Sources/Skalman/Core/Theme/AppThemeRefresh.swift",
+      "path": "Sources/Threading/Core/Theme/AppThemeRefresh.swift",
       "kind": "frozenLayerColor",
       "symbol": "*",
       "reason": "This file is the refresh-aware implementation behind layer-colour helpers."
     },
     {
-      "path": "Sources/Skalman/UI/Design/Design.swift",
+      "path": "Sources/Threading/UI/Design/Design.swift",
       "kind": "frozenLayerColor",
       "symbol": "*",
       "reason": "applySurface records and refreshes every CGColor it assigns."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemedIndicators.swift",
+      "path": "Sources/Threading/UI/Design/ThemedIndicators.swift",
       "kind": "frozenLayerColor",
       "symbol": "strokeColor",
       "reason": "The spinner reapplies its shape-layer stroke from draw(_:) on every theme refresh."
     },
     {
-      "path": "Sources/Skalman/UI/Design/ThemedIndicators.swift",
+      "path": "Sources/Threading/UI/Design/ThemedIndicators.swift",
       "kind": "motionDuration",
       "symbol": "duration",
       "reason": "The spinner stops before constructing its perpetual animation when Reduce Motion is enabled."
+    },
+    {
+      "path": "Sources/Threading/UI/Views/BrowserViewController.swift",
+      "kind": "confirmationResponse",
+      "symbol": "alertFirstButtonReturn",
+      "reason": "The web page dictates these buttons, not Threading: WKUIDelegate's JavaScript alert, confirm and prompt panels, plus the download-complete offer. None is a decision the app could register or remember, and this file holds no confirmation of its own."
     }
   ]
 }

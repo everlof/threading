@@ -1,0 +1,124 @@
+import AppKit
+import ThreadingExtensionKit
+import XCTest
+@testable import Threading
+
+/// The host-owned Extensions group at the end of a sidebar row's menu.
+///
+/// Same technique as `SidebarArrangementMenuTests`: a popped menu is modal and unreachable
+/// from a script, so the built menu is asserted directly — its shape, and the row identity
+/// each item carries as its invocation context.
+@MainActor
+final class RowExtensionCommandMenuTests: XCTestCase {
+
+    private let extensionIdentifier = "com.example.rowmenu"
+
+    override func tearDown() {
+        CommandRegistry.shared.replaceExtensionCommands(
+            extensionIdentifier: extensionIdentifier,
+            extensionName: "Row Menu",
+            commands: []
+        )
+        super.tearDown()
+    }
+
+    func testSessionRowMenuCarriesTheRowsOwnContext() throws {
+        CommandRegistry.shared.replaceExtensionCommands(
+            extensionIdentifier: extensionIdentifier,
+            extensionName: "Row Menu",
+            commands: [
+                .init(
+                    id: "inspect",
+                    title: "Inspect Session",
+                    scope: .session,
+                    menuPlacements: [.sessionRow]
+                ),
+                .init(
+                    id: "elsewhere",
+                    title: "Elsewhere",
+                    menuPlacements: [.extensions]
+                )
+            ]
+        )
+
+        let sidebar = ProjectSidebarViewController()
+        let session = AgentSession(kind: .claude, title: "Fixture")
+        let menu = NSMenu()
+        sidebar.populateSessionActions(menu, for: session)
+
+        let extensionsItem = try XCTUnwrap(menu.items.last)
+        XCTAssertEqual(extensionsItem.title, "Extensions")
+        let group = try XCTUnwrap(extensionsItem.submenu?.items.first)
+        XCTAssertEqual(group.title, "Row Menu")
+        XCTAssertEqual(
+            group.submenu?.items.map(\.title),
+            ["Inspect Session"],
+            "a menu-bar-only command stays out of the row"
+        )
+
+        let command = try XCTUnwrap(group.submenu?.items.first)
+        XCTAssertEqual(command.keyEquivalent, "", "row menus never display key equivalents")
+        let reference = try XCTUnwrap(
+            command.representedObject
+                as? ProjectSidebarViewController.RowExtensionCommandReference
+        )
+        XCTAssertEqual(reference.commandID, "extension.com.example.rowmenu.inspect")
+        XCTAssertEqual(
+            reference.context.sessionID,
+            session.id.uuidString.lowercased(),
+            "the context names the row, not the selection"
+        )
+    }
+
+    func testNoEnabledCommandsMeansNoGroupAtAll() {
+        let sidebar = ProjectSidebarViewController()
+        let session = AgentSession(kind: .claude, title: "Fixture")
+        let menu = NSMenu()
+        sidebar.populateSessionActions(menu, for: session)
+
+        XCTAssertEqual(
+            menu.items.last?.title,
+            "Delete Session",
+            "an empty Extensions group would be noise on every row"
+        )
+    }
+
+    func testProjectRowOmitsCommandsItsContextCannotSatisfy() throws {
+        let registry = CommandRegistry(builtInCommands: [])
+        registry.replaceExtensionCommands(
+            extensionIdentifier: extensionIdentifier,
+            extensionName: "Row Menu",
+            commands: [
+                .init(
+                    id: "audit",
+                    title: "Audit Project",
+                    scope: .project,
+                    menuPlacements: [.projectRow]
+                ),
+                .init(
+                    id: "inspect",
+                    title: "Inspect Session",
+                    scope: .session,
+                    menuPlacements: [.sessionRow]
+                )
+            ]
+        )
+
+        let sidebar = ProjectSidebarViewController()
+        let menu = NSMenu()
+        sidebar.appendExtensionCommandItems(
+            to: menu,
+            placement: .projectRow,
+            context: ExtensionCommandContext(projectID: "p-1"),
+            commands: registry.extensionCommands
+        )
+
+        let extensionsItem = try XCTUnwrap(menu.items.last)
+        let group = try XCTUnwrap(extensionsItem.submenu?.items.first)
+        XCTAssertEqual(
+            group.submenu?.items.map(\.title),
+            ["Audit Project"],
+            "a project row never names a session, so a session command has nothing to say"
+        )
+    }
+}

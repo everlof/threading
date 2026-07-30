@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skalman.invalid/schema/extension-storage.schema.json",
-  "title": "Skalman extension brokered storage values",
+  "$id": "https://threading.codes/schema/extension-storage.schema.json",
+  "title": "Threading extension brokered storage values",
   "description": "The wire values exchanged on /v1/storage when the host writes an extension's private storage on its behalf. This is what the supported runner uses; the experimental sandbox-exec launcher grants directories instead and these values never appear.",
   "$defs": {
     "jsonValue": {
@@ -67,7 +67,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["protocolVersion"],
-      "description": "The body of GET /v1/storage/cache/{name}. A null value is a cache miss, which is an ordinary answer rather than an error: Skalman may reclaim any entry at any moment.",
+      "description": "The body of GET /v1/storage/cache/{name}. A null value is a cache miss, which is an ordinary answer rather than an error: Threading may reclaim any entry at any moment.",
       "properties": {
         "protocolVersion": { "const": 1 },
         "value": {

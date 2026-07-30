@@ -1,0 +1,28 @@
+{
+  "configurations" : [
+    {
+      "id" : "920C049A-A385-4A1C-B1AC-E42E1C23B1D1",
+      "name" : "All",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Threading.xcodeproj",
+      "identifier" : "F6000001000000000000001",
+      "name" : "Threading"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:Threading.xcodeproj",
+        "identifier" : "20A00C033DC1347FA758CD10",
+        "name" : "ThreadingTests"
+      }
+    }
+  ],
+  "version" : 1
+}

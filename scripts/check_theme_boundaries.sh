@@ -10,7 +10,7 @@ swiftc_path="$(xcrun --find swiftc)"
 toolchain_root="${swiftc_path%/usr/bin/swiftc}"
 host_libs="$toolchain_root/usr/lib/swift/host"
 
-cache_root="${DERIVED_FILE_DIR:-${TMPDIR:-/tmp}/skalman-theme-boundary-${UID}}"
+cache_root="${DERIVED_FILE_DIR:-${TMPDIR:-/tmp}/threading-theme-boundary-${UID}}"
 mkdir -p "$cache_root"
 binary="$cache_root/theme-boundary-lint"
 

@@ -1,0 +1,34 @@
+{
+  "configurations" : [
+    {
+      "id" : "E6DDC603-183B-4426-BFB4-EE5F408174E0",
+      "name" : "Fast",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Threading.xcodeproj",
+      "identifier" : "F6000001000000000000001",
+      "name" : "Threading"
+    }
+  },
+  "testTargets" : [
+    {
+      "skippedTests" : [
+        "BrowserAgentBridgeIntegrationTests",
+        "PromptInputTests\/testImagePreviewOpensTheSystemQuickLookPanel()",
+        "ThemedControlTests\/testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()",
+        "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()"
+      ],
+      "target" : {
+        "containerPath" : "container:Threading.xcodeproj",
+        "identifier" : "20A00C033DC1347FA758CD10",
+        "name" : "ThreadingTests"
+      }
+    }
+  ],
+  "version" : 1
+}

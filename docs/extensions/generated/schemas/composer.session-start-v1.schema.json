@@ -1,11 +1,11 @@
 {
-  "$id" : "https://skalman.invalid/schema/components/composer.session-start-v1.schema.json",
+  "$id" : "https://threading.codes/schema/components/composer.session-start-v1.schema.json",
   "$schema" : "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties" : false,
   "properties" : {
     "hook" : {
-      "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-      "x-skalman-node-constraints" : {
+      "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+      "x-threading-node-constraints" : {
         "allowedButtonRoles" : [
           "standard"
         ],
@@ -54,7 +54,7 @@
             ]
           },
           "value" : {
-            "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+            "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
           }
         },
         "required" : [
@@ -96,6 +96,6 @@
     "properties",
     "slots"
   ],
-  "title" : "Skalman composer.session-start v1 component patch",
+  "title" : "Threading composer.session-start v1 component patch",
   "type" : "object"
 }

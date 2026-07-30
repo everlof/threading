@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skalman.invalid/schema/extension-manifest.schema.json",
-  "title": "Skalman extension manifest",
+  "$id": "https://threading.codes/schema/extension-manifest.schema.json",
+  "title": "Threading extension manifest",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -52,7 +52,7 @@
     "capabilities": {
       "type": "array",
       "uniqueItems": true,
-      "description": "Safe WebAssembly v1 values include commands, panels, mcp.tools, settings, services.provide, services.consume, companions.invoke, ui.components, ui.rendering.metal, appearance.provider-icons, appearance.account-icons, appearance.session-identity, appearance.themes, appearance.fonts, host.projects.read, host.sessions.read, host.sessions.runtime.read, host.repositories.read, host.providers.read, host.accounts.presentation.read, host.events, storage.kv, storage.cache, and storage.secrets. appearance.themes and appearance.fonts are data-plane: the host reads the declared documents and font files itself, and the running extension gains no new broker operation from either. companions.invoke addresses only operations declared by the same extension's companion. ui.rendering.metal permits constrained host-owned custom surfaces only; it does not grant Metal objects to the extension process. host.sessions.runtime.read returns only host-attributed process and listening-port rows for an exact session ID; it does not grant process-table access. network.client is reserved for deprecated native compatibility and is rejected for WebAssembly. Unknown values remain inspectable but are rejected by hosts that do not support them.",
+      "description": "Safe WebAssembly v1 values include commands, panels, mcp.tools, settings, services.provide, services.consume, companions.invoke, ui.components, ui.rendering.metal, appearance.provider-icons, appearance.account-icons, appearance.session-identity, appearance.themes, appearance.fonts, host.projects.read, host.sessions.read, host.sessions.runtime.read, host.repositories.read, host.providers.read, host.accounts.presentation.read, host.events, storage.kv, storage.cache, storage.secrets, and network.brokered (paired with explicit networkGrants). appearance.themes and appearance.fonts are data-plane: the host reads the declared documents and font files itself, and the running extension gains no new broker operation from either. companions.invoke addresses only operations declared by the same extension's companion. ui.rendering.metal permits constrained host-owned custom surfaces only; it does not grant Metal objects to the extension process. host.sessions.runtime.read returns only host-attributed process and listening-port rows for an exact session ID; it does not grant process-table access. network.client is reserved for deprecated native compatibility and is rejected for WebAssembly; brokered fetches through networkGrants replace it. Unknown values remain inspectable but are rejected by hosts that do not support them.",
       "items": {
         "type": "string",
         "minLength": 1
@@ -98,11 +98,44 @@
         "$ref": "#/$defs/companion"
       }
     },
+    "networkGrants": {
+      "type": "array",
+      "maxItems": 8,
+      "default": [],
+      "description": "Origins the network.brokered capability may fetch from, shown verbatim in the install dialog. Every fetch runs host-side; the guest gains no socket. v1 grants are https-only exact DNS hosts with GET/HEAD. A grant naming a credential provider (v1: github) is served with the user's best connected credential — app connection, gh CLI, git credential helper, anonymous — and the response reports which tier answered; tokens never reach the extension. A credentialed grant is refused when the manifest also declares a companion holding network.client.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["host", "methods"],
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "description": "Exact lowercase DNS name — no scheme, wildcard, port, or path."
+          },
+          "methods": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": ["GET", "HEAD"]
+            }
+          },
+          "credential": {
+            "type": "string",
+            "enum": ["github"],
+            "description": "A host-known credential provider whose connected credential the broker attaches."
+          }
+        }
+      }
+    },
     "themes": {
       "type": "array",
       "maxItems": 16,
       "default": [],
-      "description": "App-theme documents offered to the host's theme library while the extension is enabled. Requires the appearance.themes capability. Each resource is a package-relative JSON file in the host's app-theme vocabulary (the document Skalman stores for a custom theme); the host reads, validates, and namespaces it (ext.<extension>.<id>) at inspection time, before any extension code runs.",
+      "description": "App-theme documents offered to the host's theme library while the extension is enabled. Requires the appearance.themes capability. Each resource is a package-relative JSON file in the host's app-theme vocabulary (the document Threading stores for a custom theme); the host reads, validates, and namespaces it (ext.<extension>.<id>) at inspection time, before any extension code runs.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -121,7 +154,7 @@
       "type": "array",
       "maxItems": 16,
       "default": [],
-      "description": "Font files (.otf, .ttf, .ttc) registered process-scoped for Skalman's own chrome while the extension is enabled. Requires the appearance.fonts capability. Family names come from the files themselves; the host parses each file at inspection time and names every family in the install disclosure. Licensing of a bundled font is the package author's responsibility.",
+      "description": "Font files (.otf, .ttf, .ttc) registered process-scoped for Threading's own chrome while the extension is enabled. Requires the appearance.fonts capability. Family names come from the files themselves; the host parses each file at inspection time and names every family in the install disclosure. Licensing of a bundled font is the package author's responsibility.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -206,7 +239,7 @@
           "type": "array",
           "maxItems": 32,
           "uniqueItems": true,
-          "description": "OS-facing companion authority, independently approved from the WebAssembly core's Skalman host capabilities. SDK v1 values are background.service, process.spawn, network.client, network.listen, filesystem.user-selected.read, filesystem.user-selected.write, screen.capture, input.control, automation.apple-events, notifications.post, clipboard.read, clipboard.write, and ui.remote-surfaces.",
+          "description": "OS-facing companion authority, independently approved from the WebAssembly core's Threading host capabilities. SDK v1 values are background.service, process.spawn, network.client, network.listen, filesystem.user-selected.read, filesystem.user-selected.write, screen.capture, input.control, automation.apple-events, notifications.post, clipboard.read, clipboard.write, and ui.remote-surfaces.",
           "items": {
             "type": "string",
             "minLength": 1
@@ -216,7 +249,7 @@
           "type": "array",
           "maxItems": 64,
           "default": [],
-          "description": "Named, schema-described operations the WebAssembly core may invoke through Skalman's host broker. Declaring any operation requires the core capability companions.invoke.",
+          "description": "Named, schema-described operations the WebAssembly core may invoke through Threading's host broker. Declaring any operation requires the core capability companions.invoke.",
           "items": {
             "$ref": "#/$defs/companionOperation"
           }

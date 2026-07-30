@@ -8,7 +8,7 @@
 #   scripts/test.sh e2e          # real APNs + optionally a real Claude; needs credentials
 #
 # Extra arguments are forwarded to xcodebuild, so this still works:
-#   scripts/test.sh fast -only-testing:SkalmanTests/GitDiffParserTests
+#   scripts/test.sh fast -only-testing:ThreadingTests/GitDiffParserTests
 #
 set -euo pipefail
 
@@ -27,13 +27,13 @@ if [[ "${level}" == "e2e" ]]; then
 fi
 
 case "${level}" in
-  fast) test_plan="Skalman-Fast" ;;
-  all)  test_plan="Skalman-All" ;;
+  fast) test_plan="Threading-Fast" ;;
+  all)  test_plan="Threading-All" ;;
 esac
 
 exec xcodebuild \
-  -project "${repository_directory}/Skalman.xcodeproj" \
-  -scheme Skalman \
+  -project "${repository_directory}/Threading.xcodeproj" \
+  -scheme Threading \
   -testPlan "${test_plan}" \
   -destination "platform=macOS" \
   test \

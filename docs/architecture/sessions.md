@@ -21,7 +21,7 @@ than inferred:
   like any other Claude session and never has to be discovered.
 - It records **no lineage**. The fork's copied records have their `sessionId` rewritten to the
   child's; the only trace of the ancestor was a stale snake-case `session_id` left on a single
-  record. So `AgentSession.forkedFrom` is Skalman's own bookkeeping, not something read back.
+  record. So `AgentSession.forkedFrom` is Threading's own bookkeeping, not something read back.
 
 Claude only (`AgentKind.supportsForking`): `codex exec resume` takes an id and a prompt and
 offers nothing else. Forging a Codex fork by copying its rollout is plausible — `SessionMigration`
@@ -235,7 +235,8 @@ and sessions started from the paired owner device all converge there.
 
 The session title is still derived from the **per-chat task alone**. Otherwise one reusable
 instruction would give every Codex chat the same prompt-derived title while waiting for the
-agent to rename it. Imports receive nothing because they are existing conversations, and resumes
+agent to rename it — the opposite of what an instruction such as “give this chat a one-word
+name” is for. Imports receive nothing because they are existing conversations, and resumes
 receive nothing because the opening was already persisted in the provider transcript.
 
 ### Permission mode, per conversation
@@ -283,9 +284,9 @@ The native Codex transport is the one exception: unstated, it keeps its fixed
 `--sandbox workspace-write`, because a natively rendered session that inherited a read-only
 `config.toml` would stop being able to edit and would say so only through failing tools.
 
-**Skalman honours the mode in its own broker too, because the CLI does not honour it for us.**
+**Threading honours the mode in its own broker too, because the CLI does not honour it for us.**
 Measured: `PreToolUse` fires under `bypassPermissions` and `dontAsk` exactly as under `manual`.
-So a natively rendered session in Bypass would still have been stopped by Skalman's own sheet —
+So a natively rendered session in Bypass would still have been stopped by Threading's own sheet —
 the app contradicting the mode chosen inside it. `PermissionPolicy.standingDecision(for:in:)`
 answers for the three modes that promise something (Bypass allows, Don't Ask denies, Accept Edits
 allows file changes and still asks about commands) and returns nil for Manual, Plan and Auto,
@@ -293,7 +294,7 @@ which are enforced inside the CLI and promise nothing about the sheet. Being wro
 extra question rather than an unasked-for action.
 
 **The record is the launch mode, not a live mirror.** A terminal session's own Shift+Tab is
-invisible to Skalman, and changing the mode on a running session restates nothing — the flags
+invisible to Threading, and changing the mode on a running session restates nothing — the flags
 belong to the process. The broker is the exception, since it is ours: it re-reads the store on
 every call. Claude does expose a `set_permission_mode` control request on the stream transport
 (present in the binary beside `set_model`), so live switching on the native surface is a clean
@@ -301,9 +302,9 @@ follow-on rather than a rewrite.
 
 ### Claude's Remote Control, per conversation
 
-Claude Code has its own bridge to claude.ai and the Claude mobile app — unrelated to Skalman's
+Claude Code has its own bridge to claude.ai and the Claude mobile app — unrelated to Threading's
 Remote Access, which is this app's own server. It is normally an account-wide switch
-(`/config` ▸ "Enable Remote Control for all sessions"), and Skalman narrows it to one
+(`/config` ▸ "Enable Remote Control for all sessions"), and Threading narrows it to one
 conversation.
 
 **Through the settings file, not a flag.** There is no `--no-remote-control`: the CLI offers
@@ -316,7 +317,7 @@ global config:
 function i3o(){ return TI()?.settings.remoteControlAtStartup ?? Rt().remoteControlAtStartup }
 ```
 
-So the value joins the per-session settings file Skalman already writes and already passes as
+So the value joins the per-session settings file Threading already writes and already passes as
 `--settings` (`MCPSessionRegistry.writeHookSettings`). Nothing else had to change in the
 command line, and because both Claude launch paths rewrite that file, the choice re-applies on
 every **resume** rather than only on the launch that made it — which a `--settings` argument
@@ -335,7 +336,7 @@ no port. Losing the hooks costs accurate activity reporting, but dropping the ke
 connect a conversation the user had switched off, and that must not depend on whether an
 unrelated listener came up.
 
-Skalman cannot display what "follow" resolves to — the value lives in the account's own config
+Threading cannot display what "follow" resolves to — the value lives in the account's own config
 and an unset one resolves server-side — so the inherit menu item says *Use Claude's Setting*
 rather than naming a value it would be guessing.
 
@@ -352,27 +353,56 @@ this rule closed: the sidebar's Archive once flipped the flag and left the agent
 invisibly, while the remote archive route had discarded the process from the start. Both
 routes now stop the agent first. Restoring implies nothing; a session comes back dormant.
 
-Every action that interrupts a running agent — close, archive, move to another account, continue
-with another provider, and the surface switch — confirms under the single
-`confirmsBeforeClosingRunningSession` setting
-rather than growing a setting each, but each alert states its own consequence, because
-"where does the session go" is exactly what the verbs fail to say. All of this lives in
-`SessionCoordinator`: the row menu once discarded the process itself, skipping the
-confirmation the same action asked for as Cmd+W, which is why the sidebar delegates
-lifecycle decisions instead of touching `AgentRuntime` directly. The alerts are built
-separately from run so tests can hold their wording to what the action does
-(`SessionLifecycleConfirmationTests`).
+Every action that interrupts a running agent — close, archive, move to another account,
+continue with another provider, and the surface switch — confirms, and each states its own
+consequence, because "where does the session go" is exactly what the verbs fail to say. Each is
+a registered `ConfirmationPrompt` with a switch of its own. The original four were one setting,
+`confirmsBeforeClosingRunningSession`, and that setting was wrong for exactly the reason their
+alerts exist separately: someone tired of being asked about archiving had to stop being asked
+about closing too. `AppSettings` carries a stored `false` from the old switch over to those four
+on first launch; cross-provider continuation arrived later and has no legacy value to migrate
+— see [design-system.md](design-system.md) for the register itself.
+
+Applicability stays here rather than in the register: all five also require
+`AgentRuntime.isRunning`, because a dormant session has nothing to interrupt, which is a fact
+about the session and not a preference about the prompt.
 
 **Continuation lineage is not provider lineage.** A side chat's `forkedFrom` points at a
 provider-native child that can resume the same transcript semantics. A cross-provider session's
-`continuedFrom` instead records which Skalman row supplied a frozen handoff, with
+`continuedFrom` instead records which Threading row supplied a frozen handoff, with
 `continuationSourceKind` retaining the decoder even if the source row is later deleted. The
 snapshot belongs to the destination row and is removed with it (or its project), so a future
 launch can regenerate the same bootstrap without depending on a mutable source transcript.
 
+**Deleting asks whatever the session is doing**, which is what separates it from the four
+above: they keep the session, and this one is the row itself going. It shipped for a long time
+with no confirmation at all, beside a Close that had one — which read as Delete being the
+lesser of the two. Its sheet says what survives, because "Delete" reads as the conversation
+going with the row and it does not: the CLI's own transcript stays on disk and can be imported
+again. Removing a *project* does not route through `removeSession`; it discards its sessions
+itself under its own single confirmation, so nothing asks twice.
+
+**Quitting with agents running asks too, and that prompt is suppressible**, because a session
+outliving its terminal is the premise of the whole app: the conversations are kept and resume
+on the next launch, so quitting is nearer to closing a session than to deleting one, and only
+the turn in flight is lost. Two guards matter. It stays quiet when nothing is running — a
+confirmation on every quit would be asking about nothing most of the time, which is how a
+prompt teaches people to dismiss it. And it stays quiet when the *system* started the quit:
+`applicationShouldTerminate` is the same entry point for Cmd+Q and for a logout, restart or
+shutdown, and a modal on the second path is what makes macOS report "Threading prevented
+logout". `AppDelegate` reads `NSWorkspace.willPowerOffNotification` for that rather than the
+quit Apple Event's reason — one documented name, where a subtly wrong descriptor keyword fails
+silently in the direction of blocking a shutdown.
+
+All of this lives in `SessionCoordinator`: the row menu once discarded the process itself,
+skipping the confirmation the same action asked for as Cmd+W, which is why the sidebar
+delegates lifecycle decisions instead of touching `AgentRuntime` directly. The requests are
+built separately from being asked so tests can hold their wording to what the action does
+(`SessionLifecycleConfirmationTests`).
+
 ## Session Import
 
-`SessionImporter` discovers conversations started outside Skalman by reading the transcripts
+`SessionImporter` discovers conversations started outside Threading by reading the transcripts
 the CLIs already keep, so a session can be adopted into a project and resumed by id.
 
 Reading these files has two traps, both of which cost real coverage before they were fixed:

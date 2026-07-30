@@ -25,6 +25,8 @@ struct Policy: Decodable {
     let motionDirectories: [String]
     let motionDurationNamespace: String
     let systemColors: Set<String>
+    let confirmationResponses: Set<String>
+    let confirmationGateDirectories: [String]
     let exceptions: [Exception]
 
     func permits(path: String, kind: String, symbol: String) -> Bool {
@@ -197,6 +199,27 @@ final class BoundaryVisitor: SyntaxVisitor {
 
     override func visit(_ node: MemberAccessExprSyntax) -> SyntaxVisitorContinueKind {
         let member = node.declName.baseName.text
+
+        // An informational alert never inspects its response — only a decision reads one. That
+        // makes this the precise signal for "a confirmation was built here", where banning
+        // `NSAlert` itself would need an exception per OK-only alert in the app. Must run
+        // before the system-colour guard below, which returns early.
+        if policy.confirmationResponses.contains(member), !isConfirmationGate {
+            let responseBase = node.base?.trimmedDescription
+            if responseBase == nil
+                || responseBase == "NSApplication.ModalResponse"
+                || responseBase == "AppKit.NSApplication.ModalResponse" {
+                report(
+                    node: node,
+                    kind: "confirmationResponse",
+                    symbol: member,
+                    message: "reading \(member) means an alert is asking a question; build it "
+                        + "through ConfirmationAlert so the prompt is registered in "
+                        + "ConfirmationPrompt and states whether it may be switched off"
+                )
+            }
+        }
+
         guard policy.systemColors.contains(member) else { return .visitChildren }
 
         let base = node.base?.trimmedDescription
@@ -365,6 +388,12 @@ final class BoundaryVisitor: SyntaxVisitor {
         }
     }
 
+    private var isConfirmationGate: Bool {
+        policy.confirmationGateDirectories.contains {
+            relativePath == $0 || relativePath.hasPrefix("\($0)/")
+        }
+    }
+
     private func isPrivate(_ modifiers: DeclModifierListSyntax) -> Bool {
         modifiers.contains {
             $0.name.text == "private" || $0.name.text == "fileprivate"
@@ -495,7 +524,14 @@ func verifyChecker(_ policy: Policy) {
         ("let value = NSColor.placeholderTextColor", "systemColor"),
         ("let value = NSFont.systemFont(ofSize: 13)", "fontFactory"),
         ("label.font = .monospacedSystemFont(ofSize: 11, weight: .regular)", "fontFactory"),
-        ("view.layer?.backgroundColor = Design.Surface.panel.cgColor", "frozenLayerColor")
+        ("view.layer?.backgroundColor = Design.Surface.panel.cgColor", "frozenLayerColor"),
+        ("guard alert.runModal() == .alertFirstButtonReturn else { return }", "confirmationResponse"),
+        ("let ok = response == NSApplication.ModalResponse.alertSecondButtonReturn",
+         "confirmationResponse"),
+        // `Parser.parse` wraps a case pattern in `ExpressionPatternSyntax`, so this pins that
+        // the visitor still reaches the member access inside one.
+        ("switch response { case .alertThirdButtonReturn: break; default: break }",
+         "confirmationResponse")
     ]
 
     for (source, expectedKind) in violations {
@@ -508,7 +544,9 @@ func verifyChecker(_ policy: Policy) {
     let allowed = [
         #"let label = NSTextField(labelWithString: "Title")"#,
         "let button = ThemedButton()",
-        "let container = NSView()"
+        "let container = NSView()",
+        // An OK-only alert states something; it asks nothing, so it is not a confirmation.
+        "let finished = response == .OK"
     ]
     for source in allowed {
         let found = lint(source: source, path: path, policy: policy)
@@ -517,7 +555,7 @@ func verifyChecker(_ policy: Policy) {
         }
     }
 
-    let interactivePath = "Sources/Skalman/UI/Design/CheckerFixture.swift"
+    let interactivePath = "Sources/Threading/UI/Design/CheckerFixture.swift"
     let rawInteractive = """
         final class MouseOnlyControl: NSView {
             override func mouseDown(with event: NSEvent) {}
@@ -585,7 +623,7 @@ func verifyChecker(_ policy: Policy) {
         fail("checker self-test missed private system dropdown chrome inside a design component")
     }
 
-    let windowPath = "Sources/Skalman/UI/Windows/CheckerFixture.swift"
+    let windowPath = "Sources/Threading/UI/Windows/CheckerFixture.swift"
     let rawWindow = "final class UncheckedWindow: NSWindowController {}"
     if !lint(source: rawWindow, path: windowPath, policy: policy)
         .contains(where: { $0.kind == "windowController" }) {

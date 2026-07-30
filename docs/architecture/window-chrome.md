@@ -5,7 +5,7 @@ The toolbar, the pane headers, and why the sidebar is a plain split item.
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 The window uses `.fullSizeContentView` with a transparent, hidden title bar, so the sidebar
-runs the full height and the traffic lights float over it. The window title stays `Skalman`,
+runs the full height and the traffic lights float over it. The window title stays `Threading`,
 since it is only surfaced where macOS names the window (Mission Control, the Window menu).
 
 **The toolbar holds only controls that act on the window itself, and everything else belongs

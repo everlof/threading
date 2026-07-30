@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skalman.invalid/schema/extension-process.schema.json",
-  "title": "Skalman persistent extension process message",
+  "$id": "https://threading.codes/schema/extension-process.schema.json",
+  "title": "Threading persistent extension process message",
   "oneOf": [
     {
       "$ref": "#/$defs/actionRequest"

@@ -11,13 +11,13 @@
 #   <local ref> <local sha> <remote ref> <remote sha>
 #
 # Escape hatches, in order of preference:
-#   SKALMAN_SKIP_TESTS=1 git push     # documented, greppable
+#   THREADING_SKIP_TESTS=1 git push     # documented, greppable
 #   git push --no-verify              # skips every hook, including Git LFS
 #
 set -euo pipefail
 
-if [[ "${SKALMAN_SKIP_TESTS:-}" == "1" ]]; then
-  echo "pre-push: SKALMAN_SKIP_TESTS=1 — skipping the test gate." >&2
+if [[ "${THREADING_SKIP_TESTS:-}" == "1" ]]; then
+  echo "pre-push: THREADING_SKIP_TESTS=1 — skipping the test gate." >&2
   exit 0
 fi
 
@@ -47,7 +47,7 @@ if ! "${script_directory}/test.sh" all; then
 pre-push: the full test level failed, so nothing was pushed.
 
 Fix the failures, or bypass deliberately:
-  SKALMAN_SKIP_TESTS=1 git push
+  THREADING_SKIP_TESTS=1 git push
 
 MESSAGE
   exit 1

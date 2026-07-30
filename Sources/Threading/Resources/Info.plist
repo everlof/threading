@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Threading</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconFile</key>
+	<string></string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSMainNibFile</key>
+	<string></string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<!--
+		A project folder is chosen by the user, but the agent Threading launches in it is a child
+		process, and TCC attributes a child's file access to the responsible parent. So the
+		prompt for these locations says "Threading" no matter which agent actually reads the file.
+		These strings are the only chance to say why before the user decides.
+	-->
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Threading needs access so the agent you run in a project on your Desktop can read and edit its files.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Threading needs access so the agent you run in a project in your Documents folder can read and edit its files.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Threading needs access so the agent you run in a project in your Downloads folder can read and edit its files.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Threading needs access so the agent you run in a project on this volume can read and edit its files.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Threading needs access so the agent you run in a project on this network volume can read and edit its files.</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Threading Window Configuration</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>codes.threading.window</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Threading Window Configuration</string>
+			<key>UTTypeIconFile</key>
+			<string></string>
+			<key>UTTypeIdentifier</key>
+			<string>codes.threading.window</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>threading</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skalman.invalid/schema/extension-settings.schema.json",
-  "title": "Skalman extension settings contribution",
+  "$id": "https://threading.codes/schema/extension-settings.schema.json",
+  "title": "Threading extension settings contribution",
   "type": "object",
   "additionalProperties": false,
   "required": ["pages", "sections"],

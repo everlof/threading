@@ -57,7 +57,7 @@ branch it would never run on again. `CheckoutBranchFollower` is the following: o
 branch-scoped `GitCheckoutWatcher` per unique checkout (keyed by `worktreeIdentity`, watching
 only the worktree's own `HEAD`, so builds and agent edits never wake it), applying a switch to
 every session standing in that checkout via `ProjectStore.refreshBranches(forCheckoutAt:)` —
-whether the mover was another session, the shell drawer, or a terminal outside Skalman.
+whether the mover was another session, the shell drawer, or a terminal outside Threading.
 A detached reading is never applied on this path: a rebase detaches `HEAD` for seconds at a
 time, and clearing every record for the flicker would regroup the sidebar twice per rebase; a
 genuine detachment still lands per session at its own stopped-working moment. **Settings >

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skalman.invalid/schema/extension-node.schema.json",
-  "title": "Skalman extension UI node",
+  "$id": "https://threading.codes/schema/extension-node.schema.json",
+  "title": "Threading extension UI node",
   "$ref": "#/$defs/node",
   "$defs": {
     "node": {

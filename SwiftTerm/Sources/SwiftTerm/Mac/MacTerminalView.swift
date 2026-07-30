@@ -929,7 +929,21 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         let text = clipboard.string(forType: .string)
         insertText(text ?? "", replacementRange: NSRange(location: 0, length: 0), isPaste: true)
     }
-    
+
+    /// Sends `text` the way `paste` sends the clipboard: wrapped in the bracketed-paste markers
+    /// when the program has asked for them.
+    ///
+    /// Ours, and the reason is a drop. A file dragged onto a terminal is a paste that never
+    /// went through the clipboard, and the program reading the PTY tells the two apart: with
+    /// bracketed paste on, one arriving string is a paste, and the same bytes without the
+    /// markers are a burst of typing. The distinction is load-bearing for the agent CLIs — a
+    /// pasted image path becomes an attached image, a typed one stays text — and an embedder
+    /// had no way to reach it without first writing over the user's clipboard.
+    public func pasteText(_ text: String)
+    {
+        insertText(text, replacementRange: NSRange(location: 0, length: 0), isPaste: true)
+    }
+
     @objc
     open func copy(_ sender: Any)
     {

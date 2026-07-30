@@ -19,6 +19,14 @@ extension UIColor {
         return Color(red: UInt16 (clamp (red)*65535), green: UInt16(clamp (green)*65535), blue: UInt16(clamp (blue)*65535))
     }
 
+    /// `NSColor`'s spelling for the alpha channel, so code in `Apple/` — compiled for both
+    /// platforms — can ask for it without a `#if`.
+    ///
+    /// The SGR 2 (faint) handling in `AppleTerminalView` is the case that needed it: written
+    /// against AppKit, it built for macOS and broke the iOS target, because this extension
+    /// already mirrors `inverseColor` and `make` across the two but had no alpha accessor.
+    var alphaComponent: CGFloat { cgColor.alpha }
+
     func inverseColor() -> UIColor {
         var red: CGFloat = 0.0, green: CGFloat = 0.0, blue: CGFloat = 0.0, alpha: CGFloat = 1.0
         self.getRed(&red, green: &green, blue: &blue, alpha: &alpha)

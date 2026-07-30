@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skalman.invalid/schema/extension-identity-resolutions.schema.json",
-  "title": "Skalman primitive identity resolver publication",
+  "$id": "https://threading.codes/schema/extension-identity-resolutions.schema.json",
+  "title": "Threading primitive identity resolver publication",
   "type": "object",
   "additionalProperties": false,
   "required": ["protocolVersion", "providerIcons", "accountIcons"],

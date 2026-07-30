@@ -9,7 +9,7 @@ session identity renderer are implemented.
 incremental AppKit implementation plan, including full semantic HStack replacement.
 
 The goal is to let extensions add useful state and change presentation without receiving an
-`NSView`, importing Skalman's models, reading its databases, or competing for undocumented
+`NSView`, importing Threading's models, reading its databases, or competing for undocumented
 pixels in the view hierarchy.
 
 ## Two different kinds of contribution
@@ -22,7 +22,7 @@ An accessory adds information to a host-owned row without replacing its identity
 - a CI light on a session;
 - a small unread, warning, deployment, or review marker.
 
-Skalman owns the size, spacing, hover behavior, accessibility, theme colors, and overflow.
+Threading owns the size, spacing, hover behavior, accessibility, theme colors, and overflow.
 An extension supplies semantic state:
 
 ```swift
@@ -37,11 +37,11 @@ ExtensionAccessory(
 
 The initial stable slots should be:
 
-- `sidebar.project.accessories`, between the project title and Skalman's count/actions slot;
-- `sidebar.session.accessories`, between the session title and Skalman's activity/actions slot.
+- `sidebar.project.accessories`, between the project title and Threading's count/actions slot;
+- `sidebar.session.accessories`, between the session title and Threading's activity/actions slot.
 
 The built-in activity indicator and row actions are never replaceable accessories. They retain
-their fixed trailing slot. Skalman shows at most two extension accessories inline and places
+their fixed trailing slot. Threading shows at most two extension accessories inline and places
 additional values behind one host-rendered overflow affordance. Sorting is stable by the user's
 extension order, then contribution identifier.
 
@@ -68,7 +68,7 @@ Three contributions cover the useful levels:
 3. `sessionIdentityRenderer` receives the resolved provider and account images plus session
    state, and returns the final host-rendered composition.
 
-The full renderer is deliberately last. It can use the primitive images supplied by Skalman,
+The full renderer is deliberately last. It can use the primitive images supplied by Threading,
 including images resolved by the first two contributions, without querying private stores or
 knowing how those images were discovered.
 
@@ -105,10 +105,10 @@ boundary.
 
 Primitive images resolve in this order:
 
-- provider: selected provider resolver, then Skalman's built-in provider mark;
+- provider: selected provider resolver, then Threading's built-in provider mark;
 - account: the user's explicit per-account emoji/image, selected account resolver, discovered
   avatar, generated initial;
-- project: the user's explicit project icon, Skalman's current discovery, generated project
+- project: the user's explicit project icon, Threading's current discovery, generated project
   tile.
 
 A selected session identity renderer then decides how the already-resolved provider and account
@@ -125,7 +125,7 @@ layers without image bytes or paths crossing the process boundary. One renderer 
 automatically; conflicts wait for the user's persistent choice in Extensions settings.
 
 The catalogue for this surface and every other public component is generated from
-`SkalmanComponentCatalog`. Agents can discover it at runtime through the Extension authoring MCP
+`ThreadingComponentCatalog`. Agents can discover it at runtime through the Extension authoring MCP
 group, validate a complete patch with the same SDK function used by the publication registry,
 and request a native preview that has no effect on installed extensions.
 
@@ -204,11 +204,11 @@ Future contribution/presentation authorities include `sidebar.accessories` and
 Network and future filesystem access are independent authorities. Declaring component UI
 does not imply project paths, account configuration, transcripts, network, or credentials.
 `storage.secrets` is an independent implemented authority: values travel through the exact
-generation-bound loopback broker and are persisted by Skalman in an extension-scoped Keychain
+generation-bound loopback broker and are persisted by Threading in an extension-scoped Keychain
 namespace. It grants neither direct Keychain access nor a writable filesystem path.
 
 `host.sessions.runtime.read` is separate from the ordinary session snapshot. It accepts one
-stable session ID and returns only the process groups and listening ports Skalman attributes to
+stable session ID and returns only the process groups and listening ports Threading attributes to
 that session's agent and shell roots. The result contains command name, PID, CPU, memory, port,
 bind address, IP family, interface classification, and localhost reachability. It does not
 expose the process table, parent traversal, arguments, environment, open files, paths, sockets,
@@ -236,12 +236,12 @@ relevant appearance contribution and presentation snapshot/asset authorities.
 
 The host API does not share the extension's stdin/stdout request stream.
 
-Today that stream is sequential: Skalman sends an action or MCP request and waits for the
+Today that stream is sequential: Threading sends an action or MCP request and waits for the
 correlated response. If the extension sends a host query while handling that request and waits
 for an answer on the same stream, another already queued host request can arrive first and the
 protocol can deadlock.
 
-Skalman now exposes a separate `ExtensionHostService` over loopback HTTP. Each
+Threading now exposes a separate `ExtensionHostService` over loopback HTTP. Each
 process declaring any implemented host capability receives a short-lived URL and bearer token
 in its environment. The
 token identifies the extension, its launch generation, stable extension order, and granted
@@ -252,7 +252,7 @@ return independently gated snapshots and cursor events.
 The service is extension-core, not an MCP endpoint. It currently reuses only the generic
 loopback HTTP connection primitive; Core/MCP does not import extension types.
 
-On disable, reload, crash, uninstall, or shutdown, Skalman revokes the token and removes that
+On disable, reload, crash, uninstall, or shutdown, Threading revokes the token and removes that
 process generation's published patches. Cached extension state survives in its private KV
 store, but stale UI contributions cannot.
 
@@ -282,7 +282,7 @@ green light as current forever.
 ## Implementation order
 
 1. ~~Add project/session snapshot values and component patch values to
-   `SkalmanExtensionKit`.~~
+   `ThreadingExtensionKit`.~~
 2. ~~Introduce `ExtensionHostService` and per-process capability tokens, independently of MCP.~~
 3. ~~Implement project/session component slots, entity patches, snapshots, and cursor events.~~
 4. ~~Add provider/account snapshot values and primitive resolvers.~~

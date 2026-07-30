@@ -82,4 +82,4 @@ SHIM
 chmod +x "${shim}"
 
 echo "Installed ${shim}"
-echo "Push now runs 'scripts/test.sh all'. Bypass with SKALMAN_SKIP_TESTS=1 git push."
+echo "Push now runs 'scripts/test.sh all'. Bypass with THREADING_SKIP_TESTS=1 git push."

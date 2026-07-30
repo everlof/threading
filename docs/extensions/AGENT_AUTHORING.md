@@ -1,7 +1,7 @@
-# Agent Contract: Authoring a Safe Skalman Extension
+# Agent Contract: Authoring a Safe Threading Extension
 
-This document is written for an AI creating or changing a Skalman extension. Follow it
-literally. Do not infer APIs from Skalman's application source.
+This document is written for an AI creating or changing a Threading extension. Follow it
+literally. Do not infer APIs from Threading's application source.
 
 ## Before writing code
 
@@ -19,26 +19,26 @@ literally. Do not infer APIs from Skalman's application source.
 8. Read [`schema/extension-host-data.schema.json`](schema/extension-host-data.schema.json) when
    reading host snapshots or events.
 9. Use
-   [`SkalmanExtensionKit/Examples/HelloStatusExtension`](../../SkalmanExtensionKit/Examples/HelloStatusExtension)
+   [`ThreadingExtensionKit/Examples/HelloStatusExtension`](../../ThreadingExtensionKit/Examples/HelloStatusExtension)
    as the provider template and
-   [`HelloStatusConsumerExtension`](../../SkalmanExtensionKit/Examples/HelloStatusConsumerExtension)
+   [`HelloStatusConsumerExtension`](../../ThreadingExtensionKit/Examples/HelloStatusConsumerExtension)
    as the consumer template.
-10. Do not copy types from `Sources/Skalman`.
+10. Do not copy types from `Sources/Threading`.
 
 ## Development and installed layouts
 
 ```text
 MyExtension/                         # editable development project
 ├── Package.swift
-├── skalman-extension.json
+├── threading-extension.json
 ├── Sources/MyExtension/main.swift
 ├── Scripts/package.sh
-├── Vendor/SkalmanExtensionKit/      # exact SDK snapshot; see SDK_VERSION
+├── Vendor/ThreadingExtensionKit/      # exact SDK snapshot; see SDK_VERSION
 ├── Vendor/docs/extensions/          # exact offline authoring contract + schemas
 └── Resources/
 
-MyExtension.skalmanextension/        # importable package
-├── skalman-extension.json
+MyExtension.threadingextension/        # importable package
+├── threading-extension.json
 ├── bin/my-extension.wasm
 ├── Source/                          # complete project, including Vendor/
 ├── Resources/
@@ -48,26 +48,26 @@ MyExtension.skalmanextension/        # importable package
 
 Do not place SwiftPM's whole build directory in the package. The importable directory contains
 the prebuilt `.wasm` module named by the manifest plus the source and resources required to
-understand, fork, and rebuild it. Skalman copies imports into its own Application Support
+understand, fork, and rebuild it. Threading copies imports into its own Application Support
 directory and leaves them disabled; never write mutable state back into the installed package.
 
-The supported dependency shape is a **vendored SDK snapshot**, not a path into Skalman's source
+The supported dependency shape is a **vendored SDK snapshot**, not a path into Threading's source
 checkout and not a floating remote branch:
 
 ```swift
 dependencies: [
-    .package(path: "Vendor/SkalmanExtensionKit")
+    .package(path: "Vendor/ThreadingExtensionKit")
 ]
 ```
 
-Copy the complete `SkalmanExtensionKit` package at one known `SDK_VERSION`, excluding its local
-`.build` directory, into `Vendor/SkalmanExtensionKit`. Keep that snapshot unchanged while
-developing a release. This makes an extension project outside the Skalman repository buildable
+Copy the complete `ThreadingExtensionKit` package at one known `SDK_VERSION`, excluding its local
+`.build` directory, into `Vendor/ThreadingExtensionKit`. Keep that snapshot unchanged while
+developing a release. This makes an extension project outside the Threading repository buildable
 offline and makes the retained `Source/` tree state exactly which SDK it used. Updating the SDK
 is an explicit source and package update, not something SwiftPM does behind the user's back.
 The scaffold also copies the matching public contract to `Vendor/docs/extensions`; keep it with
 the SDK so a future agent can discover the API, schemas, examples, and completion checklist from
-the project or packaged `Source/` without needing the Skalman repository or network access.
+the project or packaged `Source/` without needing the Threading repository or network access.
 
 The manifest is read before the executable starts:
 
@@ -151,14 +151,15 @@ Rules:
 - `executable` is relative to the installed extension directory.
 - A WebAssembly executable ends in `.wasm` and does not need a POSIX executable bit.
 - `executable` must not contain `.` or `..` path components.
-- Do not request `network.client` for WebAssembly yet. Direct sockets are absent; a future
-  network API will be host-brokered.
-- A distributable WebAssembly package must retain a rebuildable Swift project. Skalman checks
+- Do not request `network.client` for WebAssembly. Direct sockets are absent; outbound HTTPS
+  goes through the host broker instead: declare `network.brokered` plus explicit
+  `networkGrants`, and call `ExtensionHostClient.brokeredFetch`.
+- A distributable WebAssembly package must retain a rebuildable Swift project. Threading checks
   for `Package.swift` and at least one `.swift` file under `Sources/` without compiling it.
 - The packager copies that project under `Source/` and omits `.build`, `.git`, `.swiftpm`,
   `DerivedData`, and `.DS_Store`. Do not put required source in those locations.
 - Localization resources are flat JSON objects mapping the readable base-language string to
-  its translation. Skalman negotiates `localizations` against the user's preferred languages,
+  its translation. Threading negotiates `localizations` against the user's preferred languages,
   applies the selected table to host-rendered manifest Settings and runtime contributions, and
   passes that same table to the process. Missing keys fall back to the base string. Translations
   must preserve every printf placeholder (`%@`, `%lld`, and so on) in the same order as the key;
@@ -181,7 +182,7 @@ presentation context.
 
 Use a companion only when the extension genuinely needs macOS work that the WebAssembly core
 cannot perform. The companion is a separately signed, sandboxed `.app`; it does not replace the
-core and does not receive the core's Skalman host-data authority.
+core and does not receive the core's Threading host-data authority.
 
 ```json
 {
@@ -246,7 +247,7 @@ Rules:
   rejected.
 - Treat App Sandbox authority and interactive macOS privacy grants as separate layers. The
   signed companion owns its sandbox entitlements, but macOS attributes Screen Recording and
-  Accessibility to Skalman while Skalman directly supervises it. Skalman's capability-gated
+  Accessibility to Threading while Threading directly supervises it. Threading's capability-gated
   permission broker requests those grants before spawn. The companion should still preflight
   the grant and fail with an actionable diagnostic if it disappears; it should not attempt to
   manufacture its own prompt.
@@ -261,7 +262,7 @@ Rules:
   `ExtensionHostClient.callCompanion`; never invent a socket, shared token, or arbitrary command
   relay.
 - On launch, write one `ExtensionCompanionHello` JSON value followed by a newline to stdout.
-  Copy the companion ID and generation from `ExtensionCompanionEnvironment`; Skalman refuses a
+  Copy the companion ID and generation from `ExtensionCompanionEnvironment`; Threading refuses a
   mismatched or stale generation.
 - Keep stdout reserved for the versioned control protocol. Read newline-delimited
   `ExtensionCompanionOperationRequest` values from stdin and answer each with exactly one
@@ -273,7 +274,7 @@ Rules:
 
 ### Companion remote surfaces
 
-A remote surface is pixels from a companion inside a Skalman-owned view, not an AppKit object
+A remote surface is pixels from a companion inside a Threading-owned view, not an AppKit object
 owned by the extension. Declare it in `companions[].surfaces`, request `ui.remote-surfaces` on
 that companion, and let the WebAssembly core reference it from an ordinary panel registration:
 
@@ -286,11 +287,11 @@ ExtensionPanel(
 )
 ```
 
-`root` is required. Skalman uses it immediately while loading and as the accessible/unavailable
+`root` is required. Threading uses it immediately while loading and as the accessible/unavailable
 fallback if the companion cannot supply pixels.
 
 When a declared surface is needed, the companion receives
-`SKALMAN_COMPANION_SURFACE_FD`. Interpret its value as an inherited full-duplex file descriptor
+`THREADING_COMPANION_SURFACE_FD`. Interpret its value as an inherited full-duplex file descriptor
 and use `ExtensionRemoteSurfaceWire.read`/`write` with a `FileHandle`. The host sends:
 
 - `.open` once per presentation, with a host-generated presentation ID, the declared surface ID,
@@ -311,7 +312,7 @@ The socket is the authority and is inherited only by that supervised generation.
 reload, update, core failure, companion failure, and panel close tear it down. Never pass view,
 layer, Metal, IOSurface, accessibility, or system-event objects across this boundary.
 
-See `SkalmanExtensionKit/Examples/SimulatorRelayExtension` for a complete source-bundled
+See `ThreadingExtensionKit/Examples/SimulatorRelayExtension` for a complete source-bundled
 reference. It uses no Simulator-specific host API: the core declares a panel and the companion
 composes generic process launch, window capture, normalized input, and remote frames.
 
@@ -337,18 +338,18 @@ if migration.isRequired {
 }
 ```
 
-Run migration before writing the registration line. Skalman records `targetVersion` only after
+Run migration before writing the registration line. Threading records `targetVersion` only after
 registration succeeds. A crash, timeout, invalid registration, or rejected startup leaves the
 old committed value and the transition is presented again on the next launch. Migrations must
 therefore be idempotent. The host refuses a package or stored-state launch that would decrease
 `dataVersion`.
 
 Settings, KV, cache, and secrets keep their existing public APIs; `dataVersion` says how your
-extension interprets them, not how Skalman's own files are encoded.
+extension interprets them, not how Threading's own files are encoded.
 
 ## Provenance and removal
 
-Skalman records local import provenance outside the immutable package: source filename, package
+Threading records local import provenance outside the immutable package: source filename, package
 SHA-256, SDK version when present, and install/update timestamps. It is shown as **local import,
 unsigned**. This is identity/integrity information only; it never grants capabilities or
 weakens the WebAssembly boundary.
@@ -384,8 +385,15 @@ items.
 - Declare `storage.kv` before constructing `ExtensionKeyValueStore`.
 - Declare `storage.cache` before using `ExtensionCacheStore`.
 - Declare `storage.secrets` before using any `ExtensionHostClient` secret method.
+- Declare `network.brokered` **and** a `networkGrants` entry for every origin before calling
+  `ExtensionHostClient.brokeredFetch`. Grants are exact https hosts with `GET`/`HEAD` only;
+  the install dialog shows the user that exact list. A grant may name a credential provider
+  the host knows (`"github"`), in which case Threading attaches the user's best connected
+  credential itself and the response reports which tier answered — the extension never
+  receives a token. Do not combine a credentialed grant with a companion holding
+  `network.client`; inspection refuses the pairing.
 - Do not declare `network.client` for a safe WebAssembly v1 extension. It is reserved in the
-  legacy native vocabulary and no safe network broker exists yet.
+  legacy native vocabulary; brokered fetches replace it.
 - Unknown capabilities are not permission.
 - Use contribution identifiers beginning with a lowercase letter and containing only lowercase
   letters, digits, `-`, or `.`.
@@ -395,14 +403,14 @@ items.
 There is no manifest `type` field. Select capabilities by the surfaces the extension contributes:
 
 - `commands` for user-triggered actions;
-- `panels` for semantic UI rendered by Skalman;
+- `panels` for semantic UI rendered by Threading;
 - `mcp.tools` for tools callable by Claude or Codex;
 - `settings` for complete Settings pages or sections appended to built-in pages;
 - `services.provide` for versioned JSON APIs consumed by other extensions;
 - `ui.components` for safe property, slot, or content patches to documented host components;
 - any combination for a hybrid sharing one process and state model.
 
-Skalman derives `ExtensionManifest.profile` and `contributionKinds` from that set. Do not add an
+Threading derives `ExtensionManifest.profile` and `contributionKinds` from that set. Do not add an
 extra type discriminator to generated manifests, and do not request a capability merely because
 another example does. An MCP-only extension should not register an empty panel; a panel-only
 extension should not declare `mcp.tools`.
@@ -413,7 +421,7 @@ Use valid contribution identifiers for every button so its returned action can p
 wire validation.
 
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
-fallback state. Skalman sends that action once when the tab connects to each extension process
+fallback state. Threading sends that action once when the tab connects to each extension process
 generation, using the same opaque project/session context as a button. Return a replacement
 panel with the same panel ID. Keep `loadActionID` on replacement values for clarity; the host
 tracks the generation and will not recursively invoke it. Make the load action idempotent
@@ -421,7 +429,7 @@ because reload and crash recovery intentionally run it again.
 
 ## Required package policy
 
-The executable target must use `SkalmanExtensionPolicyPlugin`. Do not remove it to make a build
+The executable target must use `ThreadingExtensionPolicyPlugin`. Do not remove it to make a build
 pass.
 
 ```swift
@@ -429,14 +437,14 @@ pass.
     name: "MyExtension",
     dependencies: [
         .product(
-            name: "SkalmanExtensionKit",
-            package: "SkalmanExtensionKit"
+            name: "ThreadingExtensionKit",
+            package: "ThreadingExtensionKit"
         )
     ],
     plugins: [
         .plugin(
-            name: "SkalmanExtensionPolicyPlugin",
-            package: "SkalmanExtensionKit"
+            name: "ThreadingExtensionPolicyPlugin",
+            package: "ThreadingExtensionKit"
         )
     ]
 )
@@ -449,7 +457,7 @@ Do not:
 - import AppKit;
 - import SwiftUI;
 - construct `NSView`, `NSViewController`, `View`, or platform controls;
-- access Skalman application internals;
+- access Threading application internals;
 - assume a theme colour, font, size, radius, or animation duration in *node UI* — panels and
   component patches describe meaning and the host chooses pixels. Stating appearance is done
   through the sanctioned data plane instead: an `appearance.themes` document or an
@@ -460,6 +468,43 @@ Do not:
 
 If a requested interface cannot be expressed, report the missing semantic component. That is
 an SDK design input, not permission to bypass the host renderer.
+
+## Giving a theme its own app icon
+
+A theme declared under `appearance.themes` may name an `iconMark` beside its `resource`:
+
+```json
+"themes": [
+  { "id": "storm", "resource": "themes/storm.json", "iconMark": "icons/storm.png" }
+]
+```
+
+While that theme is the selected app theme, Threading's Dock icon and its ⌘-Tab entry wear that
+mark. Four rules, and the first is the one that decides the shape of your asset:
+
+- **Ship a mark, not an icon.** The host draws the plate from your theme's own `ground` role and
+  composites your artwork on top, so one asset serves both light and dark. A PNG whose edges are
+  opaque is a *tile*, and the package is **refused at inspection** — before it can be enabled,
+  with an error naming the file. This is not a style preference: the plate stays the host's so
+  that no extension can make Threading's icon look like a different application's.
+- **Transparent background, square canvas, up to 1024².** Anything larger is downsampled rather
+  than refused. Aspect ratio is preserved and the mark is inset from the plate's edge, so do not
+  add your own margin on top.
+- **Your mark keeps its own colours.** The host does not tint it. You authored the theme and the
+  mark together, so the pairing is yours to get right — check it against your theme's `ground`
+  in both variants if your theme is adaptive.
+- **It is optional, and the fallback is good.** A theme with no `iconMark` gets Threading's own
+  chevron drawn in your theme's `accent` on your `ground`, with your `material.glow` behind it —
+  the same treatment every built-in style gets. Declare a mark only when your theme's identity is
+  genuinely a *different glyph*, not merely different colours.
+
+`Examples/StormThemeExtension` is a complete, minimal package doing exactly this — manifest,
+theme document, and a mark drawn by a committed script so the asset is reviewable rather than an
+opaque binary. It is also the smallest possible `appearance.themes` extension: its executable
+does nothing, because themes and marks are data the host reads at inspection.
+
+macOS only. iOS cannot generate or supply an app icon at runtime, so the phone app is unaffected
+by any theme, contributed or built in.
 
 ## Registering commands
 
@@ -483,18 +528,23 @@ let registration = ExtensionRegistration(commands: [command])
 ```
 
 Choose `.application`, `.project`, or `.session` from the minimum context the command needs.
-The stable placements are `.extensions` for Skalman's top-level Extensions menu and `.project`
-or `.view` for a host-owned Extensions group at the end of those existing menus. A command may
-name several placements. The first declared placement is canonical and owns the displayed key
-equivalent; the other copies invoke the same command without duplicating shortcut dispatch. An
-empty placement array makes a command shortcut-only after the user binds it in Keyboard settings.
+The stable placements are `.extensions` for Threading's top-level Extensions menu, `.project`
+or `.view` for a host-owned Extensions group at the end of those existing menus, and
+`.sessionRow` or `.projectRow` for a host-owned Extensions group in a sidebar row's actions
+and context menus. A command may name several placements. The first declared placement is
+canonical and owns the displayed key equivalent among the menu-bar placements; row menus never
+display key equivalents, and a row invocation's context carries *that row's* session or
+project rather than the current selection. A session-scoped command cannot declare
+`.projectRow` — a project row names no session to supply. The other copies invoke the same
+command without duplicating shortcut dispatch. An empty placement array makes a command
+shortcut-only after the user binds it in Keyboard settings.
 
-The default shortcut is only a suggestion. It needs command, control, or option; Skalman
+The default shortcut is only a suggestion. It needs command, control, or option; Threading
 suppresses it on a conflict and lets the user resolve bindings globally. Never listen for keys
 inside the extension.
 
 Commands default to `risk: .ordinary`. Mark a command `risk: .destructive` if it can make a
-change that is difficult or impossible to undo. Skalman will present its own confirmation before
+change that is difficult or impossible to undo. Threading will present its own confirmation before
 the request reaches the extension, for both menu and shortcut invocation. Do not try to encode
 confirmation instructions in `description`: extensions cannot choose alert copy, buttons,
 keyboard defaults, or the user's decision.
@@ -559,7 +609,7 @@ Page and section IDs must also be stable: changing one creates a different contr
 
 Use only `ExtensionHostSettingsPage` values when appending to a built-in page. The stable IDs
 are `general`, `accounts`, `profiles`, `themes`, `motion`, `extensions`, `tools`, `keyboard`,
-`usage`, `storage`, and `archived`. Skalman appends contributed sections after native sections.
+`usage`, `storage`, and `archived`. Threading appends contributed sections after native sections.
 Do not depend on order among different extensions.
 
 At process start:
@@ -573,7 +623,7 @@ var values = settings.effectiveValues(
 Decode `ExtensionSettingsUpdateRequest` before other requests in the serve loop, validate it
 with `validate(against:)`, merge its `values`, apply the new behavior, and return exactly one
 `ExtensionSettingsUpdateResponse` echoing the `requestID` and sorted changed `settingIDs`.
-Skalman rolls the UI and persisted value back when the process returns an error or the request
+Threading rolls the UI and persisted value back when the process returns an error or the request
 fails. Settings values belong to the user and remain inaccessible as files; use `storage.kv`
 for extension-owned state instead.
 
@@ -598,7 +648,7 @@ let root = ExtensionNode.stack(
 )
 ```
 
-Skalman decides how heading text, positive status, primary actions, spacing, focus,
+Threading decides how heading text, positive status, primary actions, spacing, focus,
 accessibility, and live theme changes render.
 
 ## Providing and consuming services
@@ -627,7 +677,7 @@ let registration = ExtensionRegistration(services: [statusService])
 
 Decode `ExtensionServiceRequest` before general action requests. Validate it, dispatch by both
 `serviceID` and `serviceVersion`, and return one `ExtensionServiceResponse` echoing all three
-correlation fields. The `callerExtensionIdentifier` was derived from Skalman's bearer token and
+correlation fields. The `callerExtensionIdentifier` was derived from Threading's bearer token and
 is safe to use for provider policy; do not accept a caller ID through service arguments.
 
 Consumers declare an exact dependency:
@@ -654,39 +704,39 @@ another extension's package or storage, and never create a second loopback proto
 
 ## Process protocol
 
-Skalman supports two executable modes:
+Threading supports two executable modes:
 
-- `--skalman-register` writes one JSON-encoded `ExtensionRegistration` line and exits. Keep
+- `--threading-register` writes one JSON-encoded `ExtensionRegistration` line and exits. Keep
   this mode for validation and diagnostics.
-- `--skalman-serve` writes the same registration as its first line, stays alive, reads
+- `--threading-serve` writes the same registration as its first line, stays alive, reads
   `ExtensionSettingsUpdateRequest`, `ExtensionServiceRequest`, `ExtensionCommandRequest`,
   `ExtensionActionRequest`, `ExtensionComponentActionRequest`, or `ExtensionMCPToolRequest`
   lines from stdin, and writes the corresponding correlated response to stdout.
 
 The persistent sequence is:
 
-1. Skalman reads and validates `skalman-extension.json` without running code.
-2. Skalman starts the declared executable with `--skalman-serve`.
+1. Threading reads and validates `threading-extension.json` without running code.
+2. Threading starts the declared executable with `--threading-serve`.
 3. The extension writes one compact `ExtensionRegistration` JSON line.
-4. For a selected menu item or resolved shortcut, Skalman writes an
+4. For a selected menu item or resolved shortcut, Threading writes an
    `ExtensionCommandRequest`. The extension returns one `ExtensionCommandResponse` echoing its
    `requestID` and `commandID`.
-5. When a registered panel has `loadActionID`, Skalman writes one
+5. When a registered panel has `loadActionID`, Threading writes one
    `ExtensionActionRequest` as the tab connects to each process generation. A rendered button
    uses the same request type.
 6. The extension copies its `requestID` into exactly one `ExtensionActionResponse`.
-7. A returned panel must have the same ID as the panel that raised the action. Skalman validates
+7. A returned panel must have the same ID as the panel that raised the action. Threading validates
    the value and renders it through its own controls.
-8. For a contributed MCP tool, Skalman writes an `ExtensionMCPToolRequest`; the extension copies
+8. For a contributed MCP tool, Threading writes an `ExtensionMCPToolRequest`; the extension copies
    its `requestID` into one `ExtensionMCPToolResponse`.
-9. For a user settings change, Skalman writes an `ExtensionSettingsUpdateRequest`; the extension
+9. For a user settings change, Threading writes an `ExtensionSettingsUpdateRequest`; the extension
    applies it and returns one `ExtensionSettingsUpdateResponse` with the same `requestID`.
-10. For a brokered call, Skalman writes an `ExtensionServiceRequest` to the declared provider;
+10. For a brokered call, Threading writes an `ExtensionServiceRequest` to the declared provider;
     it returns one `ExtensionServiceResponse` matching request ID, service ID, and version.
 
 Component state does not share that sequential stream. A process with `ui.components` receives
-`SKALMAN_EXTENSION_HOST_TOKEN` plus **either** `SKALMAN_EXTENSION_HOST_FD` (an inherited socket)
-or `SKALMAN_EXTENSION_HOST_URL` (a loopback port), and can construct:
+`THREADING_EXTENSION_HOST_TOKEN` plus **either** `THREADING_EXTENSION_HOST_FD` (an inherited socket)
+or `THREADING_EXTENSION_HOST_URL` (a loopback port), and can construct:
 
 ```swift
 let host = try ExtensionHostClient()
@@ -709,9 +759,39 @@ try await host.publishComponentPatches([
 ```
 
 Each call is a complete atomic publication. It replaces every patch from the current process
-generation; pass an empty array to clear them. Skalman validates the entire publication before
+generation; pass an empty array to clear them. Threading validates the entire publication before
 changing visible state. Do not cache or share the host token. It is revoked on disable, reload,
 crash, uninstall, and app shutdown.
+
+### Brokered network fetches
+
+Declare the capability and every origin, then fetch through the client:
+
+```json
+"capabilities": ["network.brokered"],
+"networkGrants": [
+  { "host": "api.github.com", "methods": ["GET"], "credential": "github" }
+]
+```
+
+```swift
+let response = try await ExtensionHostClient().brokeredFetch(
+    ExtensionBrokeredFetchRequest(
+        method: "GET",
+        url: "https://api.github.com/repos/owner/name/commits/abc/check-runs",
+        headers: ["Accept": "application/vnd.github+json"]
+    )
+)
+// response.status is GitHub's own answer — a 404 is data, not an error.
+// response.credentialTier says which credential served it; hint "connect GitHub in
+// Threading's Settings" only when it is .anonymous.
+```
+
+A completed HTTP exchange always returns, whatever its status; interpreting statuses is the
+extension's business. `ExtensionBrokeredFetchFailure` is thrown only for transport failure,
+and `ExtensionHostClientError.rejected` means the request fell outside the declared grants.
+Responses are capped at 4 MiB; `Authorization`, `Cookie`, and `Host` request headers belong
+to the broker and are refused.
 
 ### Reading host snapshots and events
 
@@ -788,7 +868,7 @@ An image may be a host asset returned in the snapshot, a safe package-relative r
 system symbol. Raw paths and `NSImage` never cross the process boundary. Publications replace
 the generation's previous primitive results atomically and are revoked with its token.
 
-Skalman applies provider resolver → built-in provider mark. Account precedence is stricter:
+Threading applies provider resolver → built-in provider mark. Account precedence is stricter:
 the user's explicit emoji, then the selected resolver, then the discovered/generated built-in
 chip. Side-chat lineage remains host-owned. Invalid, missing, or undecodable images fall back
 without leaving an empty icon.
@@ -831,9 +911,9 @@ try await host.publishComponentPatches(patches)
 ```
 
 The contextual assets are already resolved. The provider image includes the selected primitive
-resolver or native fallback, and becomes Skalman's fork mark for a side chat. The account image
+resolver or native fallback, and becomes Threading's fork mark for a side chat. The account image
 preserves explicit user-image precedence above primitive resolvers and native fallback. The
-identity contract accepts only a compact horizontal tree of images and fixed spacing. Skalman
+identity contract accepts only a compact horizontal tree of images and fixed spacing. Threading
 retains the title, status, actions, selection, accessibility shell, dormant opacity, conflict
 selection, and atomic native fallback.
 
@@ -857,28 +937,28 @@ let hook = ExtensionComponentPatch(
         ]
     )
 )
-try SkalmanComponentCatalog.applicationMainWindow.validate(hook)
+try ThreadingComponentCatalog.applicationMainWindow.validate(hook)
 try await ExtensionHostClient().publishComponentPatches([hook])
 ```
 
-`.proceed` is the next enabled hook and ultimately Skalman's existing view. Do not assume which
+`.proceed` is the next enabled hook and ultimately Threading's existing view. Do not assume which
 extension is next. The host orders hooks, constructs the chain in memory, and reconnects it when
 a process generation disappears. A missing resource or failed renderer skips that hook
 atomically.
 
 For a Metal-backed custom surface, also declare `ui.rendering.metal`. Put the `.metal` file under
 the development project's `Resources/`; packaging copies it to the immutable package's top-level
-`Resources/`. Skalman displays a specific GPU-source warning during install. The extension
+`Resources/`. Threading displays a specific GPU-source warning during install. The extension
 supplies this function:
 
 ```metal
-float4 skalmanExtensionFragment(
+float4 threadingExtensionFragment(
     float2 uv,
-    constant SkalmanSurfaceUniforms &uniforms
+    constant ThreadingSurfaceUniforms &uniforms
 );
 ```
 
-The host supplies `SkalmanSurfaceUniforms` with `float2 size`, `float time`, one padding float,
+The host supplies `ThreadingSurfaceUniforms` with `float2 size`, `float time`, one padding float,
 and `float values[8]`. Values use the declaration order in `ExtensionMetalSurface.inputs`;
 binding names are documentation and stable source identifiers, not shader reflection. The only
 v1 live signal is `active-account.usage-remaining`, a `0...1` fraction with the binding's
@@ -886,7 +966,7 @@ fallback used when no active account reading exists. The host owns the `MTKView`
 wrapper, command queue, fullscreen geometry, transparency, hit testing, frame cadence and
 reduced-motion behavior. Shader source is limited to 256 KiB and frame rate to 60 fps.
 
-Use `SkalmanExtensionKit/Examples/RainWindowExtension` as the complete hook/surface example.
+Use `ThreadingExtensionKit/Examples/RainWindowExtension` as the complete hook/surface example.
 Never import Metal, MetalKit, AppKit or SwiftUI in extension Swift source.
 
 Buttons in a selected full-content replacement arrive as
@@ -921,19 +1001,23 @@ must match exactly. Use `ExtensionJSONValue` for schemas and arguments. Tool IDs
 construct the qualified `ext__...` name yourself. MCP responses are plain text and set `isError`
 when the tool ran but could not fulfil the request.
 
-The host supplies `SKALMAN_EXTENSION_PROTOCOL=1` and a minimal environment.
-`SKALMAN_EXTENSION_SETTINGS_JSON` contains the effective declared settings before registration.
+The host supplies `THREADING_EXTENSION_PROTOCOL=1` and a minimal environment.
+`THREADING_EXTENSION_SETTINGS_JSON` contains the effective declared settings before registration.
+`THREADING_EXTENSION_LOCALE`, `THREADING_EXTENSION_PREFERRED_LANGUAGES_JSON`,
+`THREADING_EXTENSION_LANGUAGE`, and `THREADING_EXTENSION_LOCALIZED_STRINGS_JSON` carry the
+negotiated presentation context; use `ExtensionLocalizer` rather than decoding them by hand.
 The two extension host variables exist when any implemented host capability was granted. Do not
-depend on Skalman's own environment variables or inherited credentials.
+depend on Threading's own environment variables or inherited credentials.
 
 The process is sandboxed. It may read its installed package but cannot modify it. Under the
 experimental launcher it may write only the private directories granted by `storage.kv` and
 `storage.cache`; under the supported runner it has **no writable path at all** and both are
 brokered by the host. Write through `ExtensionKeyValueStore` and `ExtensionCacheStore` and the
-difference stays Skalman's. Host API traffic is restricted to the exact loopback port supplied
-by Skalman, or to an inherited socket under the runner. Safe WebAssembly v1 has no arbitrary
-outbound HTTP/DNS access: do not declare `network.client`. A future network API must be a
-bounded host broker with its own reviewed contract. Child-process execution is not part of the
+difference stays Threading's. Host API traffic is restricted to the exact loopback port supplied
+by Threading, or to an inherited socket under the runner. Safe WebAssembly v1 has no arbitrary
+outbound HTTP/DNS access: do not declare `network.client`. Outbound HTTPS is the bounded
+`network.brokered` broker — declared origins, read-only methods, host-attached credentials,
+described above. Child-process execution is not part of the
 safe-extension contract, so implement work in the extension process or use the host snapshots
 instead of launching `git`, shells, or helper binaries.
 
@@ -983,13 +1067,13 @@ try cache.setData(rebuiltIndex, forName: "index.json")
 
 A name is one path component: 1–255 UTF-8 bytes, no `/`, no `.` or `..`, no control
 characters. Entries are capped at 4 MiB each and 100 MiB per extension. **A miss is an ordinary
-answer, not an error** — treat every entry as disposable, because Skalman may reclaim it at any
+answer, not an error** — treat every entry as disposable, because Threading may reclaim it at any
 moment. Do not ask for `ExtensionCache.directoryURL()`: it exists only under the experimental
 launcher and reports `unavailable` under the supported runner, which grants an extension no
 writable path at all.
 
 Disable and reload retain both kinds of storage; uninstall moves them beside the recoverable
-package. Never persist mutable data inside the installed `.skalmanextension`.
+package. Never persist mutable data inside the installed `.threadingextension`.
 
 User-facing extension settings are a separate, host-owned store described above. They do not
 require `storage.kv`, and the settings file is never granted to the extension process.
@@ -1009,7 +1093,7 @@ Opaque-data variants are available for non-UTF-8 values. One extension may own a
 names; each value is capped at 64 KiB. The bearer token supplies the namespace, so never place
 an extension ID in the key and never send a secret through settings, KV, logs, command responses,
 panels, or extension services. A durable large-file directory remains a future capability. Do
-not read Skalman's internal databases or another extension's directory as a substitute.
+not read Threading's internal databases or another extension's directory as a substitute.
 
 ## Completion checklist
 
@@ -1022,10 +1106,10 @@ Before reporting an extension complete:
 4. Run `swift test` when the extension has tests.
 5. Confirm the policy plugin ran.
 6. Confirm every registered contribution has its required capability.
-7. Exercise every button through `--skalman-serve` and confirm each request receives one
+7. Exercise every button through `--threading-serve` and confirm each request receives one
    response with the matching `requestID`.
 8. Report any SDK node the requested interface still needs.
-9. Exercise each MCP tool through `--skalman-serve`, including an error response.
+9. Exercise each MCP tool through `--threading-serve`, including an error response.
 10. For `ui.components`, call `extension_list_components`, describe the chosen contract, validate
     every complete patch with `extension_validate_component_patch`, preview visual replacements,
     publish an empty array once, and exercise every replacement button as a component action.
@@ -1048,9 +1132,12 @@ Before reporting an extension complete:
     compile it on a Metal-capable Mac, verify controls below it remain clickable, and verify
     reduced motion freezes animation.
 
-Skalman's Component Gallery remains the direct panel-rendering development harness. The
+Threading's Component Gallery remains the direct panel-rendering development harness. The
 Extensions page in Settings and `extension_propose_install` are the product installation paths.
 Both inspect first, show local/unsigned origin, runtime, and requested capabilities, ask the
 user, and copy an approved package in the disabled state. Settings then lets the user enable,
-reload, reveal, update, or remove it. Enabled panel contributions appear in the display pane's
+reload, reveal, update, or remove it. Proposing a package whose identifier is already
+installed becomes an *update* proposal through either door: the user approves the capability
+delta, the running generation stops before the swap, and enablement is preserved — so the
+build → propose → approve loop also serves iteration, not only first installs. Enabled panel contributions appear in the display pane's
 `+` menu for a selected session.

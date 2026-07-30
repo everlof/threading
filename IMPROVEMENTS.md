@@ -56,7 +56,7 @@ pattern: `AccountPreferencesStore.swift:92-103`, `ProfileStorage` (`TerminalProf
 
 ### 1.2 MCP: fix the session-registry data race
 - [x] `MCPSessionRegistry`'s `static var` dictionaries are written on main (token minting at
-      launch; `retainOnly` on session deletion) and read on the `com.skalman.mcp` queue
+      launch; `retainOnly` on session deletion) and read on the `codes.threading.mcp` queue
       (`MCPServer.route`/`routePermission`) with no synchronization — UB on a Swift
       `Dictionary`. Either resolve token→session **after** the existing hop to main (keeps
       the app's single-threaded model), or guard the registry with `OSAllocatedUnfairLock`
@@ -274,7 +274,7 @@ these need no UI harness:
       `TerminalSession` the child PID synchronously and gives the child its controlling terminal.
       The old before/after `ProcessUtility` scan, retry window, arbitrary PID ordering and
       cross-session claim registry are gone; concurrent sessions cannot adopt one another's
-      child or one of Skalman's short-lived helper processes.
+      child or one of Threading's short-lived helper processes.
 - [x] `ProcessUtility` silent truncation: `liveProcessIdentifiers()` sizes the buffer from the
       kernel's own count and grows when the reply comes back full, so a short list means "that is
       all of them" rather than "the buffer ran out"; three copies of the fixed-4096 walk share it.
@@ -288,7 +288,7 @@ these need no UI harness:
       on a body-bearing method, an unparseable head, and `Transfer-Encoding` (unimplemented) each
       answer 400/411/413/501 and close. The negative case additionally *trapped* on the body
       slice. Both callers — the loopback listener and the extension host channel — share it.
-- [x] `HistoryManager` logs through `SkalmanLogger.session` rather than `print`.
+- [x] `HistoryManager` logs through `ThreadingLogger.session` rather than `print`.
 - [x] `propose_storage_cleanup`'s "only paths the scanner already found" gate is now
       `StorageCleanupGate`, a pure function with tests — it was inline in a handler needing a
       window, a store and a modal sheet, so the security boundary of the storage feature was the

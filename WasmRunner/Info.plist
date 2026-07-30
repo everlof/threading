@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>se.mjukis.Skalman.wasm-extension-runner</string>
+	<string>codes.threading.wasm-extension-runner</string>
 	<key>CFBundleName</key>
-	<string>Skalman WebAssembly Extension Runner</string>
+	<string>Threading WebAssembly Extension Runner</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 </dict>

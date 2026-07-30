@@ -4,7 +4,7 @@ SQLite, quarantine, the durable journal and the composer draft.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-Projects and sessions live in **SQLite** (`skalman.db`), not in `projects.json`. The system
+Projects and sessions live in **SQLite** (`threading.db`), not in `projects.json`. The system
 `libsqlite3` — macOS ships 3.51 with FTS5 — so `import SQLite3` keeps the one-dependency rule
 intact, and there is no ORM: a dozen queries are fewer lines than a query builder.
 
@@ -70,12 +70,12 @@ depends on instantiation order is not an invariant.
 
 Both exist because of one crash (22 July 2026), and each answers a different half of it.
 
-`SkalmanLogger` is `os.Logger` and is the *live* view — `log stream` while a bug reproduces.
+`ThreadingLogger` is `os.Logger` and is the *live* view — `log stream` while a bug reproduces.
 It is useless afterwards: `os_log` keeps `.debug` and `.info` in a memory ring buffer, and
 only `.error`/`.fault` reach disk. Measured after that crash, `log show --predicate
-'subsystem == "com.skalman"'` returned **not one line** for the minute the app died in.
+'subsystem == "codes.threading"'` returned **not one line** for the minute the app died in.
 
-`EventLog` is the durable half: JSONL under `Logs/skalman-<date>.jsonl` in Application
+`EventLog` is the durable half: JSONL under `Logs/threading-<date>.jsonl` in Application
 Support, a file per day, pruned at two weeks, surfaced by Help ▸ Reveal Diagnostics Log.
 Appends are **synchronous and unbuffered**, because the record that matters most is always
 the one written immediately before the process died — which is exactly what an async

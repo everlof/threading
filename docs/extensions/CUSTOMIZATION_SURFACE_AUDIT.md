@@ -1,6 +1,6 @@
 # Customization surface audit
 
-Skalman should be deeply customizable without turning its AppKit hierarchy into an API. The
+Threading should be deeply customizable without turning its AppKit hierarchy into an API. The
 reusable mechanism is semantic component composition:
 
 - a stable, versioned component ID;
@@ -40,7 +40,7 @@ The SCC hover proved the complete presentation pattern:
 
 ```text
 ProjectRowView hover shell
-└── NSPopover owned by Skalman
+└── NSPopover owned by Threading
     └── fixed-width/inset composition host
         └── extension hook A
             └── extension hook B

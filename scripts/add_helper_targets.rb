@@ -1,25 +1,25 @@
 #!/usr/bin/env ruby
-# Adds the two signed extension-helper targets to Skalman.xcodeproj.
+# Adds the two signed extension-helper targets to Threading.xcodeproj.
 #
 # Written as a script rather than as hand edits so the object graph is produced by a library
 # that knows the format. Idempotent: re-running removes what it previously added first.
 require 'xcodeproj'
 
-PROJECT = 'Skalman.xcodeproj'
+PROJECT = 'Threading.xcodeproj'
 HELPERS = [
   {
-    name: 'SkalmanExtensionHelper',
-    product: 'skalman-extension-helper',
+    name: 'ThreadingExtensionHelper',
+    product: 'threading-extension-helper',
     plist: 'Helper/Info.plist',
-    entitlements: 'Helper/skalman-extension-helper.entitlements',
-    bundle_id: 'se.mjukis.Skalman.extension-helper'
+    entitlements: 'Helper/threading-extension-helper.entitlements',
+    bundle_id: 'codes.threading.extension-helper'
   },
   {
-    name: 'SkalmanExtensionHelperNetwork',
-    product: 'skalman-extension-helper-network',
+    name: 'ThreadingExtensionHelperNetwork',
+    product: 'threading-extension-helper-network',
     plist: 'Helper/Info-network.plist',
-    entitlements: 'Helper/skalman-extension-helper-network.entitlements',
-    bundle_id: 'se.mjukis.Skalman.extension-helper-network'
+    entitlements: 'Helper/threading-extension-helper-network.entitlements',
+    bundle_id: 'codes.threading.extension-helper-network'
   }
 ]
 SHARED_SOURCE = 'Helper/ExtensionRunnerRequest.swift'
@@ -27,7 +27,7 @@ HELPER_MAIN = 'Helper/main.swift'
 EMBED_PHASE_NAME = 'Embed Extension Helpers'
 
 project = Xcodeproj::Project.open(PROJECT)
-app = project.targets.find { |t| t.name == 'Skalman' } or abort 'no Skalman target'
+app = project.targets.find { |t| t.name == 'Threading' } or abort 'no Threading target'
 
 # --- Idempotence: undo any previous run -------------------------------------------------
 HELPERS.each do |helper|

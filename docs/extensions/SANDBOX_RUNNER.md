@@ -31,11 +31,11 @@ one pre-connected host-broker socket. The helper validates what it was asked to 
 a supervisor, not even a second process: after the exec they are one pid.
 
 ```
-Skalman.app (unsandboxed)
+Threading.app (unsandboxed)
   │  inspect package, authorize token, create pipes + socketpair
   │  posix_spawn with fds 0/1/2/3 installed
   ▼
-skalman-extension-helper  (App Sandboxed, signed, no network)
+threading-extension-helper  (App Sandboxed, signed, no network)
   │  sandbox already applied at its own launch; validate; execve in place
   ▼
 extension executable  (same pid, same fds, still sandboxed)
@@ -54,11 +54,11 @@ superseded by this section.
 The alternative is:
 
 ```
-Skalman.app (unsandboxed)
+Threading.app (unsandboxed)
   │  inspect package, authorize token, create pipes + socketpair
   │  posix_spawn the helper with fds 0/1/2/3 already in place
   ▼
-skalman-extension-helper  (signed with App Sandbox entitlements)
+threading-extension-helper  (signed with App Sandbox entitlements)
   │  sandbox applies at its own launch; validate the request; execve in place
   ▼
 extension executable  (same pid, same fds, still sandboxed)
@@ -110,7 +110,7 @@ Three findings worth carrying:
 - **The exception is what grants the exec**, proven by the negative case rather than assumed:
   the same binary signed without it failed `execve` with `EPERM`.
 - **App Sandbox rewrites `$HOME` to the container.** An extension's idea of home is a directory
-  Skalman does not use and should not start using; storage is brokered precisely so nothing
+  Threading does not use and should not start using; storage is brokered precisely so nothing
   depends on it.
 
 ## Decisions
@@ -156,13 +156,13 @@ follows from that:
 
 ### 2. Helper and child entitlements
 
-Two signed helper executables ship inside `Skalman.app/Contents/Helpers/`, differing in exactly
+Two signed helper executables ship inside `Threading.app/Contents/Helpers/`, differing in exactly
 one entitlement:
 
 | Executable | Entitlements |
 |---|---|
-| `skalman-extension-helper` | `com.apple.security.app-sandbox`, read-only home-relative exception for `Library/Application Support/Skalman/Extensions/Packages/` |
-| `skalman-extension-helper-network` | the same, plus `com.apple.security.network.client` |
+| `threading-extension-helper` | `com.apple.security.app-sandbox`, read-only home-relative exception for `Library/Application Support/Threading/Extensions/Packages/` |
+| `threading-extension-helper-network` | the same, plus `com.apple.security.network.client` |
 
 Each **must carry an embedded `Info.plist` with a `CFBundleIdentifier`** — measured: without one
 the sandbox cannot resolve a container and the process traps at launch before `main` runs.
@@ -196,13 +196,13 @@ one that escapes the package root, and refuses a package containing symbolic lin
 caller's paths is a convenience, not a boundary:
 
 - the package root must be a directory directly inside the app-owned `Packages/` directory,
-  with the `.skalmanextension` extension and no path traversal after standardization — and
+  with the `.threadingextension` extension and no path traversal after standardization — and
   *directly* inside, since a package nested in another package's directory would inherit that
   package's read grant;
 - the executable must resolve, after symlink resolution, to a runnable regular file inside that
   root, so a symlink within the package cannot launder a path outside it;
-- the argument vector must be exactly one known entry mode (`--skalman-register` or
-  `--skalman-serve`), so the helper is not a general-purpose exec service;
+- the argument vector must be exactly one known entry mode (`--threading-register` or
+  `--threading-serve`), so the helper is not a general-purpose exec service;
 - no `DYLD_*` environment name is forwarded — an injected library runs with the extension's
   authority and would make the containment irrelevant to what actually executes.
 
@@ -212,7 +212,7 @@ helper's `main`, and it does so even under Developer ID signing with hardened ru
 (`flags=0x10000(runtime)`). The helper still refuses to launch the extension, so nothing reaches
 the extension — but code did run in the helper first. The check therefore protects the
 **extension** from a poisoned environment, not the helper from its parent. That is acceptable
-because the only process that can set the helper's environment is Skalman itself, which is
+because the only process that can set the helper's environment is Threading itself, which is
 unsandboxed and already fully privileged; a compromise there is not a compromise this boundary
 was ever meant to contain.
 
@@ -280,7 +280,7 @@ framing on the same socket, which is exactly the "two request readers" hazard §
 avoid. Cache is instead a **bounded byte API keyed by name**, like KV: entries are capped at
 4 MiB so one still fits a single request after base64 has inflated it by a third. An extension
 that genuinely needs to stream gigabytes needs the durable large-file surface `HANDOFF.md`
-lists as a possible addition, not a cache Skalman is free to delete at any moment.
+lists as a possible addition, not a cache Threading is free to delete at any moment.
 
 ### 6. Exact host-broker connectivity
 
@@ -288,8 +288,8 @@ The child talks to the host over an **inherited socket, not a port**.
 
 The app creates a `socketpair(AF_UNIX, SOCK_STREAM)`, keeps one end, and passes the other to
 the runner, which installs it as the child's fd 3. `ExtensionHostConnection` gains a descriptor
-mode: when `SKALMAN_EXTENSION_HOST_FD` is present it speaks the same request/response protocol
-over that descriptor; when only `SKALMAN_EXTENSION_HOST_URL` is present it uses loopback HTTP
+mode: when `THREADING_EXTENSION_HOST_FD` is present it speaks the same request/response protocol
+over that descriptor; when only `THREADING_EXTENSION_HOST_URL` is present it uses loopback HTTP
 as it does today. The bearer token, the extension identity derived from it, the generation
 binding, and every capability check are unchanged.
 
@@ -354,7 +354,7 @@ They are the same spawn request with different arguments and different descripto
 
 | | registration probe | persistent session |
 |---|---|---|
-| arguments | `--skalman-register` | `--skalman-serve` |
+| arguments | `--threading-register` | `--threading-serve` |
 | stdin | `/dev/null` | pipe |
 | host fd | none | socketpair |
 | lifetime | bounded by the caller's timeout | until revoked |
@@ -404,7 +404,7 @@ Three findings came out of writing it, each of which cost a run:
 
 ### The compiled probe, under the helper
 
-`SkalmanExtensionKit/Examples/DenialProbeExtension` reaches what a shell cannot: the Keychain,
+`ThreadingExtensionKit/Examples/DenialProbeExtension` reaches what a shell cannot: the Keychain,
 inbound listeners, and whether a spawned child inherits the containment. It reports on **stderr**
 and emits an ordinary registration on stdout, so it is a real extension the launcher starts
 rather than a special mode the launcher would have to allow — widening the entry-mode list to
@@ -420,11 +420,11 @@ Debug look contained when it was not.
 |---|---|
 | Read its own package | **allowed** — the positive control |
 | Read the user's home | denied |
-| Read `Skalman/skalman.db` | denied |
-| Read `Skalman/Extensions/` (every other extension's storage) | denied |
+| Read `Threading/threading.db` | denied |
+| Read `Threading/Extensions/` (every other extension's storage) | denied |
 | Write its own package, or `/tmp` | denied |
 | Listen on a TCP port | denied |
-| Read Skalman's extension secrets without interaction | denied |
+| Read Threading's extension secrets without interaction | denied |
 | Raise a legacy login-Keychain ACL prompt | **allowed — blocks helper promotion** |
 | Spawn another program | denied by the inherited hard process limit |
 | A spawned child escaping the sandbox | denied (the spawn itself is refused) |
@@ -461,7 +461,7 @@ rather than by reading a profile:
   limitation**: an extension can learn *which* services the user holds credentials for.
   Verified identically under ad-hoc and Developer ID + hardened runtime signing.
 - **App Sandbox does not suppress legacy-Keychain authorization UI.** The first exact-data
-  probe displayed a real dialog asking whether the extension should receive Skalman's seeded
+  probe displayed a real dialog asking whether the extension should receive Threading's seeded
   secret. Moving the cooperative no-UI switch before every probe query prevents test UI but
   cannot constrain malicious code. The product's generated Seatbelt profile now explicitly
   denies `com.apple.securityd.xpc`, `com.apple.securityd.general`, and
@@ -485,7 +485,7 @@ separate process group remains a second termination boundary for future capabili
    abstraction describes a *spawned child* rather than a `Process`, and latches the exit status
    so an observer installed after the child died still receives it — under the runner the app
    cannot `waitpid` a child it did not fork, so the exit arrives as a message.
-2. ~~**Descriptor-mode host connection.** Add `SKALMAN_EXTENSION_HOST_FD` to
+2. ~~**Descriptor-mode host connection.** Add `THREADING_EXTENSION_HOST_FD` to
    `ExtensionHostConnection` and serve the same protocol over a socketpair in
    `ExtensionHostService`. Keep the loopback path.~~ Done. Revocation shuts the socket down
    synchronously; `ExtensionLaunchRequest.extraDescriptors` carries the child's end, and
@@ -493,8 +493,8 @@ separate process group remains a second termination boundary for future capabili
 3. ~~**Broker storage.** Move key-value and cache onto the broker and stop exporting storage
    directories in descriptor mode.~~ Done. `ExtensionLaunchPolicy` declares its `hostTransport`,
    so the day the runner lands the descriptor path goes live with no other change.
-4. ~~**The helper targets.**~~ Done. `SkalmanExtensionHelper` and
-   `SkalmanExtensionHelperNetwork` are command-line-tool targets embedded into
+4. ~~**The helper targets.**~~ Done. `ThreadingExtensionHelper` and
+   `ThreadingExtensionHelperNetwork` are command-line-tool targets embedded into
    `Contents/Helpers` with `CodeSignOnCopy`, each carrying its entitlements and an embedded
    `Info.plist`. `HelperLaunchPolicy` selects the variant from
    `ExtensionCapability.networkClient` and declares `hostTransport = .descriptor`. None of the
@@ -512,11 +512,11 @@ separate process group remains a second termination boundary for future capabili
 ## 11. Resolution: interpret Swift WebAssembly, do not execute native package code
 
 The long-term product boundary is now `WasmLaunchPolicy` plus the signed
-`skalman-wasm-extension-runner`. New safe manifests declare `runtime: webAssembly`; omission
+`threading-wasm-extension-runner`. New safe manifests declare `runtime: webAssembly`; omission
 means the legacy native compatibility path.
 
 This changes the trusted question. We no longer ask macOS to confine an arbitrary native
-executable closely enough. Skalman interprets a module and links only the capabilities it may
+executable closely enough. Threading interprets a module and links only the capabilities it may
 have:
 
 - WASI stdin, stdout, and stderr;
@@ -524,7 +524,7 @@ have:
 - no socket-opening API;
 - no subprocess host function;
 - no Security.framework or Objective-C runtime;
-- one custom import, `skalman.host_exchange`.
+- one custom import, `threading.host_exchange`.
 
 The app opens the validated `.wasm` module read-only and installs it as descriptor 4. The
 runner therefore needs no package-directory entitlement. In serve mode descriptor 3 is the
@@ -544,12 +544,12 @@ arrive as a narrow authenticated host-broker service rather than a socket entitl
 
 Verification covers three layers:
 
-1. `SkalmanExtensionKit` contract tests and WebAssembly compilation of both reference
+1. `ThreadingExtensionKit` contract tests and WebAssembly compilation of both reference
    extensions;
-2. `SkalmanWasmRuntime` fixtures proving no-authority execution, fail-closed registration, and
+2. `ThreadingWasmRuntime` fixtures proving no-authority execution, fail-closed registration, and
    the sole broker import;
 3. an app-hosted test which executes a real WASI registration module through the exact signed,
-   App Sandboxed helper embedded in `Skalman.app`.
+   App Sandboxed helper embedded in `Threading.app`.
 
 Steps 1–3 change no containment and can land independently. Step 4 is the only one that needs a
 signing identity to test end to end.

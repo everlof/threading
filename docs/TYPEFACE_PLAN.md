@@ -19,11 +19,11 @@ Neo Brutalism, Claymorphism, Industrial are `sans-serif`.
 - **No bundled fonts.** macOS system designs via `NSFontDescriptor.SystemDesign`: `.default`
   (SF Sans), `.serif` (New York), `.rounded` (SF Rounded), `.monospaced` (SF Mono). No
   licensing, correct rendering, every weight.
-- **The spec lives in `AppTheme.Material`** (`Sources/Skalman/Core/Theme/AppTheme.swift`):
+- **The spec lives in `AppTheme.Material`** (`Sources/Threading/Core/Theme/AppTheme.swift`):
   `var typeface: Typeface = .standard`, `enum Typeface: String, Codable` with raw values
   `"default" | "serif" | "rounded" | "monospaced"` (case names `standard, serif, rounded,
   monospaced` — `default` is a keyword).
-- **The interpreter is `Design.Typography`** (`Sources/Skalman/UI/Design/Design.swift`) — the
+- **The interpreter is `Design.Typography`** (`Sources/Threading/UI/Design/Design.swift`) — the
   app's single font factory, enforced by the fontFactory boundary. One private transform; no
   feature code changes. Feature code never `if`s on a theme.
 - **Four layers, nearest first** (settled in Tier 3): the surface's own override
@@ -59,8 +59,8 @@ Neo Brutalism, Claymorphism, Industrial are `sans-serif`.
 3. **Ambient appearance is not involved here** (fonts are appearance-independent) — but the
    attribute cache in SwiftTerm and `NSAttributedString` builders that captured a font at
    build time will keep it; same rebuild story as Tier 2.
-4. **Concurrent agent:** `AppThemeStyles+Christmas.swift` and `Sources/SkalmanMobile/*` are
-   another live session's files. Do not edit them. `Tests/SkalmanTests` files are shared —
+4. **Concurrent agent:** `AppThemeStyles+Christmas.swift` and `Sources/ThreadingMobile/*` are
+   another live session's files. Do not edit them. `Tests/ThreadingTests` files are shared —
    anchor Edits on stable text.
 5. **New test files need manual `project.pbxproj` registration** (silent 0-test failure mode) —
    extend existing files: `AppThemeTests.swift`, `ThemeToolTests.swift`.
@@ -101,8 +101,8 @@ Neo Brutalism, Claymorphism, Industrial are `sans-serif`.
 ## Tier 2 — live switch moves the whole window
 
 **The tag does not exist and cannot.** The plan assumed `Design.Typography` could stamp each
-font with a `skalmanFontRole` descriptor attribute and let the sweep read it back. Measured on
-macOS 26 (`Tests/SkalmanTests/AppThemeTests.swift`, `testAFontCannotBeMadeToCarryItsOwnRole`):
+font with a `threadingFontRole` descriptor attribute and let the sweep read it back. Measured on
+macOS 26 (`Tests/ThreadingTests/AppThemeTests.swift`, `testAFontCannotBeMadeToCarryItsOwnRole`):
 
 - **`NSFont` strips unknown descriptor attributes.** Every read after
   `NSFont(descriptor:size:)` came back `nil` — before *and* after `withDesign`, and through an
@@ -118,7 +118,7 @@ macOS 26 (`Tests/SkalmanTests/AppThemeTests.swift`, `testAFontCannotBeMadeToCarr
 So the role is recorded **on the view**, which is what `RecordedSurface` already does for the
 `CGColor` freeze — same bug, same answer. Cost: the assignment changes at the call site.
 
-- [x] `Design.FontRole` (`Sources/Skalman/UI/Design/FontRole.swift`): the *recipe*, not a
+- [x] `Design.FontRole` (`Sources/Threading/UI/Design/FontRole.swift`): the *recipe*, not a
       category — `.detail(weight: .medium)` has to come back medium. `resolved()` routes every
       branch through `Design.Typography`, so it names calls rather than making fonts and the
       fontFactory boundary is untouched. `followsTheme` marks prose.
@@ -217,7 +217,7 @@ family with no italic face is a reason to lose the slant rather than the family.
       *authoring* time — a theme that merely arrives naming an absent family still degrades.
 - [x] `RemoteThemeBridge` + `RemoteWireDTO`: `typeface` and `fontFamily` optional in both
       directions, so an older client ignores them and a newer one still decodes an older Mac's
-      payload. Mobile consumes when ready; `Sources/SkalmanMobile` untouched.
+      payload. Mobile consumes when ready; `Sources/ThreadingMobile` untouched.
 - [x] `USER_GUIDE.md` (Themes ▸ Fonts), `docs/architecture/themes.md` (a theme states a
       typeface, the four layers, what never follows), `docs/architecture/design-system.md`
       (the `.conversation` surface alongside the `applyFont` rule).
@@ -240,13 +240,13 @@ automation, and it reproduces in a run containing only those two suites. So the 
 verify a change is:
 
 ```bash
-xcodebuild … test -skip-testing:SkalmanTests/BrowserAgentBridgeIntegrationTests \
-                  -skip-testing:SkalmanTests/ExtensionBundleLoaderTests
+xcodebuild … test -skip-testing:ThreadingTests/BrowserAgentBridgeIntegrationTests \
+                  -skip-testing:ThreadingTests/ExtensionBundleLoaderTests
 ```
 
 which is **1158 tests, 0 failures, exit 0**. Do not read a bare `** TEST FAILED **` with 0 case
 failures as a regression without checking which suites restarted — and do not read it as "fine"
-either. Worth noting for whoever picks this up: a Skalman instance was *running* during these
+either. Worth noting for whoever picks this up: a Threading instance was *running* during these
 runs, which is a plausible cause (a live app holding WebKit processes and the shared website
 data store) and is untested — quitting it before a full run is the first thing to try.
 

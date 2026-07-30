@@ -79,7 +79,7 @@ The third and fourth font assumptions in this codebase that were wrong until mea
       contributed themes by extension name; MCP `list_app_themes`/`get_app_theme` report
       origin `extension “<name>”`; MCP `font_family` authoring gate and the Settings font
       pickers enumerate via `Design.Typography.availableFamilies`.
-- [x] Tests: `Tests/SkalmanTests/ExtensionAppearanceTests.swift` — inspection (namespace,
+- [x] Tests: `Tests/ThreadingTests/ExtensionAppearanceTests.swift` — inspection (namespace,
       capability pairing, editing gates, symlink escape, font parse + families), library tier,
       the full selection-lifecycle arc, font bookkeeping with the seam, MCP origin, proposal
       disclosure. New file: the Tests group is filesystem-synchronized (see the obsolete-trap

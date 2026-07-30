@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skalman.invalid/schema/extension-host.schema.json",
-  "title": "Skalman extension host component publication",
+  "$id": "https://threading.codes/schema/extension-host.schema.json",
+  "title": "Threading extension host component publication",
   "type": "object",
   "additionalProperties": false,
   "required": ["protocolVersion", "patches"],

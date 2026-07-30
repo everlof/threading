@@ -6,7 +6,7 @@ and press. File paths below are relative to their repo root. t3code is MIT and i
 page says "Steal our code (legally)" — everything here is ideas and measurements, but the
 codebase itself is TypeScript/React/Electron, so nothing ports literally to AppKit.
 
-Skalman has borrowed from t3code twice before this pass (the `MessagesTimeline` minimap and
+Threading has borrowed from t3code twice before this pass (the `MessagesTimeline` minimap and
 its logic/view split — both credited in CLAUDE.md). This document is the third mining trip.
 
 ---
@@ -18,7 +18,7 @@ its logic/view split — both credited in CLAUDE.md). This document is the third
 releases several times a day. Growth came from Theo's YouTube/X audience, not HN (launch
 threads got 6, 4, 2 and 1 points).
 
-Structurally the opposite of Skalman: a Node **server** (`t3` on npm, `npx t3code`) is the
+Structurally the opposite of Threading: a Node **server** (`t3` on npm, `npx t3code`) is the
 only execution boundary, with five thin clients over it:
 
 | Piece | Path | Role |
@@ -35,14 +35,14 @@ only execution boundary, with five thin clients over it:
 OpenCode via its SDK against a spawned `opencode serve`. All normalized into one canonical
 ~46-event `ProviderRuntimeEvent` union (`packages/contracts/src/providerRuntime.ts`) with a
 written doctrine forbidding `if provider === "codex"` in shared code — the same idea as
-Skalman's `ToolIdentity` / `TranscriptReplay.normalised`, at larger scale. **Provider
+Threading's `ToolIdentity` / `TranscriptReplay.normalised`, at larger scale. **Provider
 *instances*, not kinds**: "Codex Work" and "Codex Personal" side by side with separate
 homes, env vars, model lists, accent colors.
 
 **Persistence** is a real event store, not aspirational: append-only `orchestration_events`
 (global sequence, stream version, command idempotency) + projection tables rebuilt by a pure
 decider/projector split; 34 migrations (`apps/server/src/persistence/`). Thin rows + JSON
-payloads — the same opencode-derived shape as Skalman's `skalman.db`.
+payloads — the same opencode-derived shape as Threading's `threading.db`.
 
 **Multi-device is not cloud sync.** Sessions live in SQLite on the machine running `t3`;
 other devices connect to that server (QR pairing, Tailscale, SSH, or the optional hosted
@@ -147,7 +147,7 @@ settles, everything except the **final** assistant message collapses behind a on
   `37s` → `3m 12s`.
 
 This is the finished form of a problem CLAUDE.md already names: "twenty filled slabs read as
-the conversation's content." Skalman quieted the tool rows; t3code folds the settled turn.
+the conversation's content." Threading quieted the tool rows; t3code folds the settled turn.
 
 ### 3.2 Auto-scroll — a three-mode state machine
 
@@ -251,15 +251,15 @@ Collapse past 8 lines / 600 chars behind a real CSS gradient mask (not an overla
   the composer → serialized as a `<review_comment filePath= rangeLabel=>` XML block with
   the captured hunk → re-rendered as a card in the transcript → re-anchored back into the
   diff by flat line index on re-parse. The same machinery serves plain-file comments.
-- No staging. Refresh is polling (5 s stale time), no FS watcher — Skalman's
+- No staging. Refresh is polling (5 s stale time), no FS watcher — Threading's
   `GitCheckoutWatcher` + `--no-optional-locks` design is ahead here.
 
-### 3.8 Minimap (current state vs what Skalman took)
+### 3.8 Minimap (current state vs what Threading took)
 
-Still one mark per user turn, evenly spaced (8 px; Skalman deliberately chose 20), fisheye
+Still one mark per user turn, evenly spaced (8 px; Threading deliberately chose 20), fisheye
 taper by distance from the hovered mark, hidden when the gutter < 48 px, never rendered on
 touch. New since the original borrow: a **hover preview card** showing the question plus
-the turn's final assistant reply (Skalman's `ConversationTurnPreview` already does this),
+the turn's final assistant reply (Threading's `ConversationTurnPreview` already does this),
 selectable text in the preview (events targeting it don't jump), and in-view highlighting
 written **directly to DOM nodes** from the scroll handler — zero React commits per frame
 (spiritually what AppKit drawing does anyway). No marker kinds for errors/permissions, no
@@ -309,7 +309,7 @@ Then:
 - Steer/queue follow-ups while working — #231, **47**
 - Notifications for completed/approval-needed turns — #780, **42** (still unbuilt)
 - Slash commands / skills in the composer — #2491, 33 (shipped)
-- **Usage/quota visibility per account — #228, 27** → validates Skalman's usage pill
+- **Usage/quota visibility per account — #228, 27** → validates Threading's usage pill
 - Subagents as nested threads — #538, 25
 - Themes — #418, 22
 - **Import existing CLI sessions — #330, 20** → validates SessionImporter
@@ -322,16 +322,16 @@ Then:
   MAKE MONEY ON T3 CODE RN" and rework the landing page (see docs/OPEN_SOURCE.md).
 - **Platform risk hit them directly**: Anthropic's (paused) move to meter third-party
   harnesses would have cut subscription usage "by 25×" in Theo's words. Any harness on
-  `claude -p` economics shares this exposure — Skalman's CLAUDE.md already records the
+  `claude -p` economics shares this exposure — Threading's CLAUDE.md already records the
   same June 2026 pause.
 - Their conceded weaknesses map to openings: worktree UX, session durability, quota
   visibility, notification hygiene, reading ergonomics.
 
 ---
 
-## 5. What this validates in Skalman
+## 5. What this validates in Threading
 
-| Skalman feature | Their state | Evidence |
+| Threading feature | Their state | Evidence |
 |---|---|---|
 | Usage pill (`AccountUsageItemView`) | Requested, 27 votes; event plumbing exists, no UI | #228, #673, #880 |
 | `SessionImporter` | Requested, 20 votes | #330, #207, #2206 |
@@ -345,20 +345,20 @@ Then:
 ## 6. Lessons — what not to do
 
 1. **Never default-on telemetry.** State the no-bytes-leave-the-machine posture loudly and
-   user-facing (only opt-in avatar probes leave Skalman's machine).
+   user-facing (only opt-in avatar probes leave Threading's machine).
 2. **The wrapper is judged against the raw CLI's speed.** Keep the native surface at zero
    overhead; being free doesn't excuse a tax.
 3. **Session durability is the product.** Their own design docs warn "resumeCursor must
    never be synthesized" — the class of bug transcript-file grounding avoids.
 4. **The connection/server layer generated most of their bugs** — don't rush multi-device.
-5. **God components** (ChatView.tsx is 6,053 lines) — Skalman's model/view split
+5. **God components** (ChatView.tsx is 6,053 lines) — Threading's model/view split
    discipline is the countermeasure; keep it.
 
 ---
 
 ## 7. Borrowables — full ranked list, then the shortlist
 
-Ranked by leverage for Skalman's shape (native conversation surface + Git Review + sidebar).
+Ranked by leverage for Threading's shape (native conversation surface + Git Review + sidebar).
 **Kept as a working checklist**, IMPROVEMENTS.md-style: adopted items are marked with where
 their decisions now live, and stay listed so the ranking's reasoning survives.
 
@@ -371,7 +371,7 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
    (`AttentionAlertPolicy` / `AttentionAlertCenter`). As cheap as predicted, with one design
    decision the doc records: `.finished` is gated on `reportsOwnTurns`, so shells going
    quiet never notify.
-3. **Diff-comment → composer round trip** — §3.7. Connects two systems Skalman already has
+3. **Diff-comment → composer round trip** — §3.7. Connects two systems Threading already has
    (Git Review's `DiffView` + the composer) into "tell the agent what to fix, anchored to
    the lines it wrote." *Open — the next big pass.* Scouted 2026-07-28: needs line-selection
    API in `NativeDiffKit` first (its rows are inert text fields), then `PromptView`'s
@@ -386,7 +386,7 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
    sniffing is shell-output-only, and generic phrases are trusted only in the opening lines.
    Success stays quiet per the design language — the ✗ override is the only new per-row ink.
 6. **Settle/snooze + the recede rule** — §3.6. The biggest *idea* here, but it deserves its
-   own design pass: Skalman's grouping (repo → checkout → branch → session) carries
+   own design pass: Threading's grouping (repo → checkout → branch → session) carries
    information their flat inbox discards; the semantics (derived settling, raising a hand,
    PR-merge + 1 h idle) could layer onto the tree without flattening it. *Open.* Note the
    sidebar has since gained **Archive** (row button + ⋯ menu); a design pass must reconcile
@@ -425,9 +425,9 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
 14. **Scope-keyed ephemeral state** — §3.7; a pattern, not a feature: state carries its
     scope key and reads as empty on mismatch. No cleanup, no staleness. *Standing guidance.*
 15. ~~**Subagents as nested rows**~~ — their 25-vote gap. **Overtaken by events**: the
-    "we skip `isSidechain` entirely" claim is stale — Skalman now has the subagent
+    "we skip `isSidechain` entirely" claim is stale — Threading now has the subagent
     navigator, per-child timelines, the durable history index, and `SubagentSessionState`
-    surviving surface switches. Skalman is ahead here; nothing left to borrow.
+    surviving surface switches. Threading is ahead here; nothing left to borrow.
 16. Snooze preset arithmetic (evening-suppression, DST-safe `setDate`, ceil'd minutes so a
     snooze never reads "0m") — if #6 happens, take these rules verbatim. *Travels with #6.*
 

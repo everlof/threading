@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-source_directory="${SRCROOT}/SkalmanExtensionKit"
-destination_directory="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExtensionSDK/SkalmanExtensionKit"
+source_directory="${SRCROOT}/ThreadingExtensionKit"
+destination_directory="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExtensionSDK/ThreadingExtensionKit"
 documentation_source_directory="${SRCROOT}/docs/extensions"
 documentation_destination_directory="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExtensionSDK/docs/extensions"
 

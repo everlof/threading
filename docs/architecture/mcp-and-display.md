@@ -4,7 +4,7 @@ How an agent reaches the GUI it runs inside, and the panel it draws into.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-Skalman hosts an MCP server and registers it with each Claude or Codex session it launches,
+Threading hosts an MCP server and registers it with each Claude or Codex session it launches,
 which is how an agent reaches the GUI it is running inside. The terminal stays the input
 surface; the display panel becomes the output surface for anything the terminal renders badly.
 
@@ -32,12 +32,12 @@ receive its context.
 
 Three deliberate choices in the launch line:
 
-- **The display tool is pre-approved** with `--allowedTools mcp__skalman__*` for Claude and a
+- **The display tool is pre-approved** with `--allowedTools mcp__threading__*` for Claude and a
   tool-specific `approval_mode="approve"` override for Codex, or every image raises a
   permission prompt and the feature costs more attention than it saves. Other tools are
   unaffected.
 - **No `--strict-mcp-config`**, which would suppress the user's own MCP servers for every
-  session Skalman launches — a far larger change than adding one.
+  session Threading launches — a far larger change than adding one.
 - **The `instructions` field of the `initialize` response** carries the "you have a panel,
   prefer it over describing a file" guidance. Capability alone does not change behaviour: an
   agent in a terminal has no reason to believe anything it emits can be seen as an image.
@@ -165,9 +165,14 @@ keep working wherever the browser lives — `DisplayPaneController.browser(for:)
 the drawer host (`browserFallback`) when the panel holds none.
 
 Two entrances, one move: the chip's **"Move to …"** menu items, and **dragging the chip onto
-the other strip's band** — the strip asks the window (`externalDropTarget`, window
-coordinates), dims the traveller while a drop would land (`Design.Opacity.dragAway`), and
-reports the drop (`onDropOut`); the window resolves both entrances through the same
-`dragDestination`/`moveTab` path. A drop needs a *visible* band — a closed drawer or
-collapsed panel is reached by the menu, which opens the destination on landing. The menu
-remains the gesture's pointerless twin, per the design system's rule.
+the other strip's band**. The strip asks the window on every pointer sample
+(`externalDropTarget`, window coordinates), dims the traveller while a drop would land
+(`Design.Opacity.dragAway`), and reports the drop (`onDropOut`) and then the drag's end
+(`onDragEnded`); the window resolves both entrances through the same
+`dragDestination`/`moveTab` path, with the drop's slot named by the destination strip's own
+midpoint rule (`insertionIndex(forWindowPoint:)`). A *closed* destination **springs open**
+the moment a movable chip leaves its home band (`springDestinationOpen` — springing on
+leaving, not on grabbing, is what keeps a plain reorder from flinging the other pane open),
+the destination strip washes as a drop target (`isDropTarget`), and a drag that settles
+without its drop puts everything back (`dragDidSettle`). The menu remains the gesture's
+pointerless twin, per the design system's rule.

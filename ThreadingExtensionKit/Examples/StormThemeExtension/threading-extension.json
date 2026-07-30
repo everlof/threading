@@ -1,0 +1,18 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.examples.storm",
+  "name": "Storm",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/storm.wasm",
+  "capabilities": [
+    "appearance.themes"
+  ],
+  "themes": [
+    {
+      "id": "storm",
+      "resource": "Resources/storm.json",
+      "iconMark": "Resources/storm-mark.png"
+    }
+  ]
+}

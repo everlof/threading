@@ -38,7 +38,7 @@ routing, provider credentials, Apple delivery, or presentation policy.
 
 ## Diagnostic contract
 
-`SkalmanRemoteKit` owns a versioned, append-only event schema used on every native surface.
+`ThreadingRemoteKit` owns a versioned, append-only event schema used on every native surface.
 Events describe state transitions; they do not contain user content.
 
 Every record has:
@@ -81,7 +81,7 @@ The protocol needs operation ids rather than relying on stable personal identifi
 | Flow | Correlation |
 |---|---|
 | Notification | Existing notification event id → APNs `apns-id` → opened event |
-| REST request | Add `X-Skalman-Trace` request/response header |
+| REST request | Add `X-Threading-Trace` request/response header |
 | WebSocket | Add optional connection trace to `hello`; reuse it for end/failure |
 | Permission | Existing permission request id plus WebSocket connection trace |
 | Invitation acceptance | Request trace becomes the first membership trace |
@@ -139,7 +139,7 @@ its report code. A guest can export its own report but cannot inspect another pa
 - Durable Mac remote journal and one-click share-safe support report.
 - Mac listener, relay, auth, registration, socket, permission and APNs transitions.
 - Mac APNs acceptance/refusal records with notification trace and `apns-id`.
-- Opt-in real APNs and Claude → MCP → APNs tests in `SkalmanNotificationE2E`.
+- Opt-in real APNs and Claude → MCP → APNs tests in `ThreadingNotificationE2E`.
 
 ### Phase 1 — cross-device traces
 

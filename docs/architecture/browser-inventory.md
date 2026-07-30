@@ -1,6 +1,6 @@
 # Browser inventory
 
-This is the implementation inventory for Skalman's visible browser and its agent surface. It
+This is the implementation inventory for Threading's visible browser and its agent surface. It
 records the product boundary behind each browser-like control so future work does not accidentally
 promise Chrome parity where WebKit or the trust model differs.
 
@@ -18,7 +18,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index and the
 | Visual inspection | Visible-page screenshot save | Viewport/full-page/element screenshot and visual compare | Complete; native annotation pins remain a separate trusted layer rather than being baked into page pixels |
 | Print and zoom | Native print panel; 50–200% per-tab zoom | Page state and screenshot reflect zoom | Complete |
 | Diagnostics | Web Inspector | Console, network metadata, performance, trace, accessibility audit | Complete; no bodies, headers, cookies, or credentials |
-| Authentication | WebKit/macOS passkeys and AutoFill when offered; private-field refocus | Password field triggers user takeover | Complete safe boundary; Skalman never reads a vault or password |
+| Authentication | WebKit/macOS passkeys and AutoFill when offered; private-field refocus | Password field triggers user takeover | Complete safe boundary; Threading never reads a vault or password |
 | Uploads | Native open panel | Agent may suggest existing paths, user approves | Complete |
 | Downloads | Native save panel and current-runtime recent download list | One action bound to a user-approved destination | Complete for active runtime; this is not a persistent browser-wide download manager |
 | Website data | Clear current site's data with native destructive confirmation | `browser_storage clear_site_data` | Complete at the safe per-site boundary; no global time-range cleaner |

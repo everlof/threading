@@ -6,7 +6,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 The live browser and the rendered-document web view are deliberately separate. Each live
 `BrowserViewController` uses the persistent website data store and can carry authenticated state;
-agent access therefore goes through an app-level origin grant even though Skalman's MCP server
+agent access therefore goes through an app-level origin grant even though Threading's MCP server
 itself is pre-approved. Localhost is admitted for development, other origins offer once,
 persistent-host, or deny choices. After an action navigates, the new origin is checked before
 any resulting page state is returned.
@@ -105,6 +105,16 @@ evicted at the cap. Listing tabs never prompts and withholds a browser's page-co
 URL until that origin has already been allowed; the generic panel-tab list applies the same
 boundary. The panel's `+` menu creates shared and private browser tabs at the same cap, so control is
 symmetric for the user and agent.
+Remote Access treats the Mac browser as the sole navigation and interaction owner. A successful
+agent `browser_navigate`, history move, or new-tab action emits an owner-only Workspace activity
+with a stable id; the paired iPhone records whether that id has been seen on that device and shows
+one ambient Workspace badge instead of navigating. Lower-level interaction mutations emit an
+invalidation without a new activity id, so a visible read-only follow view refreshes without
+animating the badge for every click or scroll. The follow route fetches bounded metadata and a PNG
+of only the currently visible shared tab on demand. It does not construct a second `WKWebView`,
+send input back to WebKit, or run a continuous pixel stream. Page titles are bounded, URLs use the
+same redactor as other remote diagnostics, and private tabs expose only a generic placeholder
+with no preview. Both REST reads and WebSocket activity require paired owner scope.
 `browser_storage clear_site_data` removes the active site's WebKit-owned cookies, caches, storage,
 IndexedDB, and service-worker data only after a separate app-owned confirmation. An origin grant,
 including an "always allow" grant, never implies permission to delete signed-in state. The
@@ -114,7 +124,7 @@ to the active host or the parent record WebKit grouped it under, and tells the u
 subdomains may therefore be signed out. Clearing does not implicitly reload or reconstruct the
 current request.
 `browser_resize` gives the active browser an exact per-tab CSS-pixel viewport for responsive
-testing. It does not resize Skalman's window: the fixed-size `WKWebView` sits in a pannable outer
+testing. It does not resize Threading's window: the fixed-size `WKWebView` sits in a pannable outer
 scroll view, so media queries, viewport units, semantic geometry, interactions, and screenshots
 all agree while the user can still inspect a desktop viewport inside a narrow panel. The native
 device toolbar and `browser_resize` update this same state; neither keeps a second visual-only
@@ -126,7 +136,7 @@ only: they do not imply touch, device scale, mobile identity, or a different bro
 override is deliberately runtime-only testing state.
 `browser_emulate` applies public per-view WebKit conditions to the active tab. `NSAppearance`
 makes `prefers-color-scheme`, matchMedia, rendered pixels, and screenshots agree without changing
-Skalman's window or global appearance; `WKWebView.customUserAgent` changes JavaScript identity and
+Threading's window or global appearance; `WKWebView.customUserAgent` changes JavaScript identity and
 future HTTP requests without rewriting request headers in app code; and `WKWebView.mediaType`
 switches CSS, matchMedia, rendered pixels, and screenshots between screen and print. Dark, light,
 screen, print, auto, and the bounded custom User-Agent are per-tab runtime-only conditions;
@@ -214,7 +224,7 @@ guard also enforces that boundary in `WKNavigationDelegate`; target inspection a
 because an ordinary button, change handler, or drop target can call `requestSubmit()` indirectly.
 
 The takeover is an exact-field handoff, not a credential API. When an agent reaches a password
-target, Skalman reveals the browser, scrolls that field into view, focuses it in WebKit's isolated
+target, Threading reveals the browser, scrolls that field into view, focuses it in WebKit's isolated
 client world, and shows a themed **Private Input** affordance while a password field has focus.
 A user can then accept WebKit/macOS AutoFill when the current site and platform offer it, use a
 third-party password manager's macOS integration, copy from Apple Passwords, or type privately.
@@ -224,7 +234,7 @@ frame tokens so a late message from an unrelated iframe cannot hide the active h
 
 This distinction is load-bearing. Public Authentication Services password requests return an
 `ASPasswordCredential` containing plaintext user and password strings to the app, while the
-AutoFill-assisted request API is unavailable on macOS. Skalman therefore does not call a password
+AutoFill-assisted request API is unavailable on macOS. Threading therefore does not call a password
 provider, read a vault, or inject credentials. Any system Password AutoFill that WebKit offers,
 plus WebAuthn and passkey challenges, remains WebKit- and system-owned. Ordinary password values
 remain redacted from snapshots, unavailable to browser actions and waits, omitted from traces

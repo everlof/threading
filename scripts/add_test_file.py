@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add a test source file to the SkalmanTests target.
+"""Add a test source file to the ThreadingTests target.
 
 The app target uses an Xcode 16 synchronized folder, so anything dropped under `Sources/`
 joins the build automatically. **The test target does not** — it carries an explicit file
@@ -15,13 +15,13 @@ import re
 import sys
 from pathlib import Path
 
-PROJECT = Path(__file__).resolve().parent.parent / "Skalman.xcodeproj" / "project.pbxproj"
+PROJECT = Path(__file__).resolve().parent.parent / "Threading.xcodeproj" / "project.pbxproj"
 
 # The four places a test file has to appear, discovered by diffing the file against itself
 # after adding one through Xcode.
 GROUP_ID = "20A00C033DC1347FA758CD10"        # unused; kept for orientation
-SOURCES_PHASE = "2B94BD9027B7FD53BB982AFA"   # PBXSourcesBuildPhase of SkalmanTests
-TESTS_GROUP_PATH = "path = Tests/SkalmanTests;"
+SOURCES_PHASE = "2B94BD9027B7FD53BB982AFA"   # PBXSourcesBuildPhase of ThreadingTests
+TESTS_GROUP_PATH = "path = Tests/ThreadingTests;"
 
 
 def object_id(seed):
@@ -74,7 +74,7 @@ def add(text, filename):
         re.DOTALL,
     )
     if not phase:
-        sys.exit(f"Could not find the SkalmanTests sources phase ({SOURCES_PHASE})")
+        sys.exit(f"Could not find the ThreadingTests sources phase ({SOURCES_PHASE})")
 
     text = (
         text[: phase.end(1)]

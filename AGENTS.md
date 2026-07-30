@@ -16,10 +16,10 @@ Three rules that are cheapest to learn before you start:
 - **Before changing any UI, read [`docs/THEME_BOUNDARY.md`](docs/THEME_BOUNDARY.md) and
   [`docs/architecture/design-system.md`](docs/architecture/design-system.md).** Feature code
   never constructs or subclasses an AppKit control or chrome-drawing surface; new UI is built
-  from `Sources/Skalman/UI/Design/`. `scripts/check_theme_boundaries.sh` fails the build
+  from `Sources/Threading/UI/Design/`. `scripts/check_theme_boundaries.sh` fails the build
   otherwise.
 - **A new test file must be registered in `project.pbxproj` by hand**
-  (`scripts/add_test_file.py` does it). `Tests/SkalmanTests` is not a synchronized folder, and
+  (`scripts/add_test_file.py` does it). `Tests/ThreadingTests` is not a synchronized folder, and
   an unregistered file fails silently — it builds nothing and reports "Executed 0 tests".
 - **Before creating or changing an extension**, read `docs/extensions/AGENT_AUTHORING.md`
   completely rather than inferring the API from application internals.

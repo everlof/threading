@@ -106,7 +106,7 @@ our read of its answer is not.
 child's stdout and stderr — merged into one pipe, so a single reader can never deadlock
 and the record holds the whole story — land in `IconResearch/<projectID>.jsonl` under
 Application Support, written *before* the verdict so failed runs are exactly the ones
-whose record survives. Stages log through `SkalmanLogger.agent`, and the sidebar exposes
+whose record survives. Stages log through `ThreadingLogger.agent`, and the sidebar exposes
 the record as "Open Last Research Log". This observability exists because the first real
 run failed silently and nothing could say where.
 
@@ -127,3 +127,110 @@ leave the machine.
 Coverage is honestly thin — of five logins on this machine only one resolved, so the hashed
 initial is the chip's working case rather than its fallback. The chip's cache key carries
 `hasAvatar`, so one landing later replaces a drawn initial instead of being ignored.
+
+## The app's own icon
+
+Three icons for one app, and they answer three different questions.
+
+**The bundle icon** is `Sources/Threading/AppIcon.icon` — an Icon Composer document, layered, with
+the glass and depth treatment the platform draws for a real app icon. It is what Finder,
+Spotlight, Launchpad and the Dock-while-not-running show, and it is what the **System theme**
+asks for. (`Resources/Assets.xcassets/AppIcon.appiconset` is empty and vestigial: both are named
+`AppIcon`, `actool` resolves to the `.icon`, and the appiconset should be deleted.)
+
+**The Dock icon follows the app theme** (`GeneratedAppIcon`, installed by `AppIconPresenter`).
+Ground plate from `.ground`, chevron from `.accent`, and the theme's own `material.glow` behind
+the mark — which is not a recolour, because that glow is a soft halo for Cyberpunk and a hard
+offset printed shadow for Bauhaus and Neo Brutalism. Without it a beige Bauhaus tile and a beige
+Newsprint tile are the same picture.
+
+Four decisions carry it:
+
+- **`applicationIconImage` only.** macOS offers three tiers of runtime icon. This is the first:
+  Dock tile, ⌘-Tab switcher and About panel, for the lifetime of the process, at no cost. The
+  tier that persists past quit — `NSWorkspace.setIcon(_:forFile:)` on our own bundle, plus an
+  `NSDockTilePlugin` loaded into the Dock's process, plus a private call to drop the Dock's icon
+  cache — buys a themed Finder icon in exchange for writing into a bundle built with
+  `ENABLE_HARDENED_RUNTIME`, which invalidates its signature. The premise does not survive that
+  trade: the icon matches the chrome the user is looking at, and there is no chrome to match when
+  the app is not running. `dockTile.contentView` is the other half of tier one and is not used
+  with this — set both and the tile flickers between them.
+- **The plate and its shadow are drawn, not inherited.** The Dock draws a runtime bitmap
+  unmasked: none of the rounding, and on macOS 26 none of the squircle, a bundle icon gets free.
+  Hence Apple's own grid in `Layout` — an 824pt body on a 1024 canvas, leaving the 100pt margin
+  the platform reserves for the shadow it is not adding here.
+- **The silhouette never changes.** Only ground, ink and shadow follow the theme; the chevron's
+  geometry is fixed. An icon's first job is to be found in ⌘-Tab by its shape, and a mark that
+  redrew itself per theme would trade the whole point of an icon for a colour match. The only
+  geometry a theme moves is the stroke's cap and join, from `material.controlRadius` — a small
+  element follows the radius the theme gives its small elements.
+- **The cache is keyed by the colours drawn, not by the theme's id.** A custom theme keeps its
+  identity across an edit, so an id-keyed cache serves the palette the user just changed away
+  from. `Recipe.cacheKey` is the resolved ground, ink, corner and shadow.
+
+Two things about that shadow were measured rather than reasoned, and both were wrong first.
+Its **scale is matched to the weight of the mark, not to the canvas** — the chevron's stroke
+against a chrome control's ink, about 4×. Scaling by canvas size instead (an 824pt plate against
+a ~96pt element, 8.6×) put Bauhaus's 4pt printed offset at 34pt behind a 115pt stroke, which
+stops reading as a lift and becomes a second chevron; all four zero-radius styles failed the same
+way. And its **vertical offset is negated**: a theme states its shadow for `CALayer.shadowOffset`,
+which `Design.applyThemeGlow` passes through in the layer's y-up space, so `offsetY: -4` casts
+*downward* — and `NSShadow` in this drawing context resolves the same number the other way. The
+first render put every printed style's lift above its mark instead of below it.
+
+The accent is floored through `NSColor.legible(on:)` rather than trusted: a theme whose accent
+sits near its own ground would draw an invisible chevron. No stock theme is touched by it —
+`AppIconRenderTests` checks the floor against the pixels actually drawn, not the colour asked
+for, alongside a 16pt rendition where a mark stops being a mark.
+
+**A contributed theme may ship its own mark** — `ExtensionThemeContribution.iconMark`, a
+package-relative PNG beside the theme document. It replaces the chevron; it never replaces the
+plate, which stays the theme's own `ground` drawn by `GeneratedAppIcon`.
+
+That split is the whole design, and it is enforced where it cannot be argued with:
+`ExtensionBundleLoader.inspectThemeIconMark` refuses a mark that **fills its own bounds**,
+reusing `ProjectIconStore.fillsItsBounds` — the same measurement that tells a favicon tile from
+a loose wordmark in the sidebar. An opaque rectangle is a package trying to supply the entire
+icon, which is the shape you would use to make Threading's Dock tile look like some other
+application's. The refusal happens at **inspection**, before the package can be enabled and
+before any of its code exists as a process, and it fails the whole package rather than dropping
+the artwork quietly: a theme whose icon the host will not draw is a disagreement its author has
+to see. The bytes go through `ProjectIconStore.normalizedPNGData` first — the same ImageIO gate
+every untrusted image passes — which is why that function grew a `maxPixelSize` parameter rather
+than a second copy at icon scale.
+
+`ThreadingExtensionKit/Examples/StormThemeExtension` is the worked example, and
+`ExtensionAppearanceTests.testTheShippedStormExampleIsValid` pins it: the manifest validates, the
+theme document decodes and passes `AppThemeEditing.validate`, and the mark clears both gates
+`inspectThemeIconMark` applies. It cannot be inspected as a package — the examples ship source
+with no built `bin/` — so the test checks everything that could actually be wrong instead. A
+broken example is worse than none, because it is copied before it is read.
+
+The install disclosure names it. `ExtensionInstallProposal` counts the themes that carry a
+mark and says what can change and what cannot — the glyph moves, the plate stays Threading's — so
+the reader approving an unsigned local import is told about the one contribution that changes how
+the app looks *outside its own window*, and is not left to assume either the worst or the best.
+
+The mark is held as **bytes** on the contribution, not as an image: the appearance registry
+diffs contributions wholesale to converge install, enable, disable, update and uninstall through
+one idempotent path, and `NSImage` is not `Equatable`. Decoding is memoized in the registry and
+dropped on every replace, because an update that keeps a theme's identity and changes its artwork
+is exactly what an id-keyed cache serves stale. The same diff posts `AppThemeDidChange`, since
+new artwork under an unchanged theme id is invisible to the id comparison the registry already
+made.
+
+**The phone cannot do any of this.** iOS has no API that accepts an image: `setAlternateIconName`
+selects from icons compiled into the bundle at build time, and nothing else changes an app icon.
+So `ThreadingMobile` gets one icon, drawn by `scripts/generate_mobile_app_icon.swift` — full-bleed
+and unrounded, because iOS masks the icon itself, which is the exact opposite of what the Dock
+needs. `AppIconRenderTests.testThePhoneIconRestatesTheSameChevron` pins the script's geometry
+against `GeneratedAppIcon.Layout`, since the script is not part of the app target and restates it.
+
+Per-theme alternates on the phone were considered and are **not** worth it as an auto-follow.
+`RemoteThemeDTO` already carries the theme's id and resolved mode, so the trigger exists — but
+every `setAlternateIconName` call shows a system alert that no public API suppresses, and the
+old present-a-view-controller workaround stopped working in iOS 26.1. A phone tracking its Mac's
+theme would nag on every change. Two further limits, if it is ever revisited: only the stock
+library could be covered, because the wire carries arbitrary resolved colours including
+user-authored themes, and iOS 18's dark and tinted variants are a separate axis driven by the
+user's Home Screen setting, so each alternate is three assets rather than one.

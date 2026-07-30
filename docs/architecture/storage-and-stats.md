@@ -64,7 +64,7 @@ The page groups **by checkout, not by project**, because six of one project's ch
 none of them. Each heading is `<project> · <worktree or branch> · <size>`; rows are relative to
 their checkout. Rows state the rebuild command and the age, and a directory written in the last
 fifteen minutes reads as **in use** — the first real scan found the largest directory on the
-page had been written two minutes earlier, in a worktree with no Skalman session to warn about.
+page had been written two minutes earlier, in a worktree with no Threading session to warn about.
 That is the second of two independent in-flight checks, the other being a running session in
 the project.
 

@@ -1,5 +1,5 @@
 {
-  "$id" : "https://skalman.invalid/schema/components/sidebar.project-row-v1.schema.json",
+  "$id" : "https://threading.codes/schema/components/sidebar.project-row-v1.schema.json",
   "$schema" : "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties" : false,
   "properties" : {
@@ -18,7 +18,7 @@
             ]
           },
           "value" : {
-            "$ref" : "https://skalman.invalid/schema/extension-host.schema.json#/$defs/propertyValue"
+            "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
           }
         },
         "required" : [
@@ -30,8 +30,8 @@
       "type" : "array"
     },
     "replacement" : {
-      "$ref" : "https://skalman.invalid/schema/extension-node.schema.json",
-      "x-skalman-node-constraints" : {
+      "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+      "x-threading-node-constraints" : {
         "allowedButtonRoles" : [
           "standard"
         ],
@@ -76,12 +76,12 @@
             "properties" : {
               "children" : {
                 "items" : {
-                  "$ref" : "https://skalman.invalid/schema/extension-node.schema.json"
+                  "$ref" : "https://threading.codes/schema/extension-node.schema.json"
                 },
                 "maxItems" : 2,
                 "minItems" : 1,
                 "type" : "array",
-                "x-skalman-node-constraints" : {
+                "x-threading-node-constraints" : {
                   "allowedButtonRoles" : [
 
                   ],
@@ -155,6 +155,6 @@
     "properties",
     "slots"
   ],
-  "title" : "Skalman sidebar.project-row v1 component patch",
+  "title" : "Threading sidebar.project-row v1 component patch",
   "type" : "object"
 }

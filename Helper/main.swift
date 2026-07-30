@@ -4,14 +4,14 @@ import Foundation
 /// The contained launcher an extension is executed out of.
 ///
 /// It is App Sandboxed by its own entitlements, which the kernel applies before this code runs,
-/// and it `execve`s the extension **in place** — so the pid Skalman spawned is the pid the
+/// and it `execve`s the extension **in place** — so the pid Threading spawned is the pid the
 /// extension runs as, with the descriptors it was spawned with, still sandboxed. Measured: an
 /// App Sandbox survives `execve` into a binary carrying no entitlements of its own, and the
 /// home-relative read-only exception is what permits the exec at all.
 ///
 /// Nothing here is trusted from the caller except *which* package to run, and that claim is
 /// re-checked from scratch before it is acted on. See `docs/extensions/SANDBOX_RUNNER.md`.
-enum SkalmanExtensionHelper {
+enum ThreadingExtensionHelper {
     /// Exit codes distinct from anything an extension can return, so a failure to launch is
     /// never mistaken for the extension's own answer.
     enum ExitCode {
@@ -56,7 +56,7 @@ enum SkalmanExtensionHelper {
         }
 
         // App Sandbox contains subprocesses but does not tie their lifetime to this pid. Until
-        // Skalman has an explicit process-spawning capability with its own descendant broker,
+        // Threading has an explicit process-spawning capability with its own descendant broker,
         // an extension must therefore be unable to create one. Lowering both the soft and hard
         // per-user process limit to one is inherited across exec and cannot be raised again by
         // the extension; because the logged-in user already has more than one process, fork and
@@ -80,20 +80,20 @@ enum SkalmanExtensionHelper {
         execve(request.executablePath, &argv, &envp)
 
         // Only reachable if the exec failed. There is nothing to clean up: the descriptors this
-        // process holds are the ones Skalman gave it, and closing them is what tells Skalman.
+        // process holds are the ones Threading gave it, and closing them is what tells Threading.
         fail(
             "execve failed: \(String(cString: strerror(errno)))",
             code: ExitCode.execFailed
         )
     }
 
-    /// Diagnostics go to stderr, which Skalman is already draining into the launch failure it
+    /// Diagnostics go to stderr, which Threading is already draining into the launch failure it
     /// shows the user. A helper that failed silently would be indistinguishable from an
     /// extension that exited on its own.
     private static func fail(_ message: String, code: Int32) -> Never {
-        FileHandle.standardError.write(Data("skalman-extension-helper: \(message)\n".utf8))
+        FileHandle.standardError.write(Data("threading-extension-helper: \(message)\n".utf8))
         exit(code)
     }
 }
 
-SkalmanExtensionHelper.main()
+ThreadingExtensionHelper.main()

@@ -1,4 +1,4 @@
-# Skalman User Guide
+# Threading User Guide
 
 A native macOS app for organizing coding-agent sessions. Projects live in a sidebar on the
 left; the selected session's terminal fills the pane on the right.
@@ -32,7 +32,7 @@ when creating a session. See [Accounts](#accounts).
 
 ### Adding
 - **Add Project** button at the bottom of the sidebar — offers **Start from Scratch…**
-  (name a new folder and Skalman creates it) and **Use an Existing Folder…**
+  (name a new folder and Threading creates it) and **Use an Existing Folder…**
 - **Project > New Project…** — create the folder from scratch
 - **Project > Add Existing Project…** (Cmd+Shift+N) — choose a folder that already exists
 - Drag a folder onto the sidebar, or onto the app icon
@@ -99,7 +99,7 @@ branch always stay there.
 Each session remembers the branch of the checkout it runs in: recorded when the session is
 created, updated each time it finishes working, and — by default — **kept in step while the
 session sits idle**. Switch the checkout's branch anywhere — in another session, in the
-shell drawer, in a terminal outside Skalman — and every session standing in that checkout
+shell drawer, in a terminal outside Threading — and every session standing in that checkout
 follows, because that is the branch any of them would resume onto. **Settings > General >
 Follow the checkout's branch** turns this off; sessions then keep the branch they last ran
 on until they next run, filing old conversations under the branch they actually happened
@@ -134,7 +134,7 @@ any sort. Sorting rearranges branch groups too: a group sits where its first ses
 ### Project icons
 Every project row carries an icon: the project's own mark when one is known, a **generated
 tile** — the project's initial on a colour hashed from its name — until then, so projects
-tell apart at a glance from the moment they are added. Skalman finds the real mark itself —
+tell apart at a glance from the moment they are added. Threading finds the real mark itself —
 no agent involved, no usage spent — by looking, in order, at:
 
 1. **The checkout's own files** — `favicon.*`, `apple-touch-icon*`, `icon.png`, `logo.png`
@@ -169,9 +169,9 @@ The **Project Icon** submenu (right-click a project, or its hover buttons) offer
 
 **Understanding a research run.** Every run writes its complete output — the JSONL event
 stream plus the CLI's own diagnostics — to
-`~/Library/Application Support/Skalman/IconResearch/<project>.jsonl`, openable from the menu
+`~/Library/Application Support/Threading/IconResearch/<project>.jsonl`, openable from the menu
 above. Each stage also logs live, viewable with
-`log stream --predicate 'subsystem == "com.skalman" AND category == "agent"'`. Codex itself
+`log stream --predicate 'subsystem == "codes.threading" AND category == "agent"'`. Codex itself
 keeps its usual rollout under `~/.codex/sessions/`, like any other run.
 
 Agents can also set the icon from inside a session through the `set_project_icon` MCP tool
@@ -228,7 +228,7 @@ The chips choose the agent, account, model and, in a git repository, **which che
 in**. Beneath them, the chosen account's rate limits are drawn in full — see
 [Usage when picking an account](#usage-when-picking-an-account).
 
-Every chip's dropdown is Skalman's own menu, and it tracks like a menu should: click to open
+Every chip's dropdown is Threading's own menu, and it tracks like a menu should: click to open
 and browse, or **press, drag onto a row, and release** to choose in one motion. Arrow keys
 move the highlight, **Return** chooses, **Escape** lets the menu go. **Typing while it is
 open filters it** — what you type echoes across the menu's top, rows that match keep their
@@ -254,14 +254,15 @@ names on its face. Beside it sits **Import _n_ conversations** when this project
 conversations it could adopt; it is the quieter of the two on purpose.
 
 To give every new chat the same standing instruction, enter an **Opening Message** under
-**Settings ▸ General**. Skalman appends it after the task you write and sends both as the
+**Settings ▸ General**. Threading appends it after the task you write and sends both as the
 chat's first turn. For example:
 
 > Rename this chat to a ONE-WORD, ALL-CAPS name that represents it.
 
-It is sent once to Terminal and Native chats, including side chats. Reopening or resuming an
-existing chat does not send it again, and imported conversations receive nothing. The sidebar's
-initial name still comes from the task you typed, not from this reusable message.
+It is sent once to Terminal and Native chats, including side chats and cross-provider
+continuations. Reopening or resuming an existing chat does not send it again, and imported
+conversations receive nothing. The sidebar's initial name still comes from the task you typed,
+not from this reusable message.
 
 (A reply inside a running conversation is the other way round: Return sends it and
 Shift+Return breaks the line, because a reply is usually one line and the box says so.)
@@ -337,8 +338,8 @@ shortcut — **Cmd+W** closes tabs and pages, never an agent — but can be give
 **Settings ▸ Keyboard**.) **Archive** files the whole session away: the row leaves the sidebar for
 **Settings ▸ Archived**, where it can be restored or deleted for good, and a running agent
 is stopped first rather than left running with nothing listing it. Neither touches the
-conversation itself. Both ask before interrupting a running agent, under **Ask before
-closing a running session** in General settings.
+conversation itself. Both ask before interrupting a running agent, and each is switched off
+separately — see [Confirmations](#confirmations).
 
 How it works: an idle agent writes nothing to its terminal, so sustained output means it is
 working, and output stopping means it has finished. A terminal bell counts as an explicit
@@ -362,11 +363,11 @@ finish and notify as usual while it keeps running.
 ### Notifications
 
 The same states can reach you outside the app. When a session stops to ask for an approval,
-finishes off screen, or finishes its turn while Skalman is behind another app, a macOS
+finishes off screen, or finishes its turn while Threading is behind another app, a macOS
 notification is posted — with sound only for the blocked case, matching the filled dot's
-urgency. Clicking it brings Skalman forward and opens that session.
+urgency. Clicking it brings Threading forward and opens that session.
 
-Banners only appear while Skalman is in the background; in the app, the sidebar marks above
+Banners only appear while Threading is in the background; in the app, the sidebar marks above
 are the cue. A notification is withdrawn on its own the moment it stops being true — the
 question is answered, the session is opened, or the agent starts working again — so
 Notification Center holds only things still waiting for you.
@@ -383,7 +384,7 @@ row shows the sentence its notification would say:
 |---|---|
 | **Blocked on an approval** | A turn has stopped on a permission request and is waiting. |
 | **Finished while you were elsewhere** | A session away from the pane finished or asked something. |
-| **Finished a turn in the background** | A turn ended while Skalman was behind another app — the chattiest of the three. |
+| **Finished a turn in the background** | A turn ended while Threading was behind another app — the chattiest of the three. |
 | **Play a sound** | Only the blocked alert ever sounds; the other two are silent either way. Off keeps the banner without the ping. |
 
 **Silencing one chat or one project.** **Mute Notifications** in a session's `⋯` menu quiets
@@ -410,8 +411,8 @@ Resuming works by session id:
 | Claude Code | `claude --session-id <uuid> --name <title>` | `claude --resume <uuid>` |
 | Codex | `codex` (id discovered after launch) | `codex resume <uuid>` |
 
-Claude Code accepts an id chosen up front, so Skalman assigns one. Codex assigns its own,
-which Skalman reads back from the rollout file Codex writes on launch.
+Claude Code accepts an id chosen up front, so Threading assigns one. Codex assigns its own,
+which Threading reads back from the rollout file Codex writes on launch.
 
 ### The shell drawer
 
@@ -427,7 +428,7 @@ instead, and every session has one.
 
 - A shell opens **where the agent currently is**, not where the session started — a terminal
   session reports its directory, so a shell opened while the agent is deep in a subpackage
-  starts there. Sessions Skalman renders natively open in the project folder.
+  starts there. Sessions Threading renders natively open in the project folder.
 - It uses the **session's theme and font**, so it matches the surface above it.
 - Each session keeps its own drawer tabs, and its own answer to whether the drawer is open —
   both survive a relaunch (a shell's *process* does not; it restarts on first reveal). The
@@ -442,7 +443,7 @@ nothing — no conversation, no transcript, and no saved scrollback — and ever
 shell of its own in exchange.
 
 ### Importing
-Conversations you started outside Skalman — in a plain terminal, say — can be adopted into a
+Conversations you started outside Threading — in a plain terminal, say — can be adopted into a
 project and then resumed like any other session.
 
 Select a project and the composer shows an **Import _n_ conversations** chip once it has
@@ -450,7 +451,7 @@ finished looking. Opening it lists what was found, newest first, searchable by t
 one adds it to the project already resumable; it is not launched, so selecting it in the
 sidebar is what reopens the conversation.
 
-Skalman finds these by reading the transcripts both CLIs already keep — Claude under
+Threading finds these by reading the transcripts both CLIs already keep — Claude under
 `<config>/projects/`, Codex under `<codex home>/sessions/` — across every account it knows
 about. Titles come from Claude's own conversation title where there is one, otherwise from the
 first thing you typed.
@@ -465,7 +466,39 @@ Two kinds of transcript are deliberately left out:
 ### Closing
 - **Cmd+W**: closes the focused drawer/panel tab, or the page on screen — never the agent
 - Right-click > **Close Session**: ends the agent, leaving the session dormant and resumable
-- Right-click > **Delete Session**: removes it from the sidebar entirely
+- Right-click > **Delete Session**: removes it from the sidebar entirely, after asking — the
+  agent's own transcript stays on disk and can be imported again, which is what the sheet says
+
+### Confirmations
+Some actions stop and ask first. The ones you can safely undo carry a **Don't ask again**
+checkbox, and it is remembered **for that one prompt only** — ticking it on the archive sheet
+does not stop the close sheet asking. It is also only remembered **when you go ahead**: tick
+the box and then press Cancel and nothing is stored, because the next attempt would otherwise
+sail past an action you had just declined.
+
+Everything you switch off this way has a row in **Settings ▸ General ▸ Confirmations**, so
+there is always a way back:
+
+- Closing a running session
+- Archiving a running session
+- Moving a running chat to another account
+- Switching a running chat's interface
+- Quitting with agents running
+- Removing an extension
+- Revoking all website access
+
+Quitting only asks when an agent is actually running, and never when the Mac is logging out,
+restarting or shutting down — a dialog there would stall the system rather than help. The
+conversations are kept either way and resume on the next launch; only the turn in flight is
+lost.
+
+Nothing else offers the checkbox. Anything that deletes for good — removing a project,
+**deleting a session**, deleting an archived session or a theme, reclaiming build directories,
+clearing website data, running an extension command marked destructive — asks every time, and
+puts **Return** on Cancel rather than on the action. So does anything that grants access outside Threading: a
+website for the browser, a tool call, an unreviewed extension, or a shared chat link. Those
+prompts have their own narrower memory instead — "Always Allow This Host" is one host,
+"Allow for This Session" is one tool in one chat, and both are revocable in Settings.
 
 ### Names
 A session is named after its conversation, never after its agent or account — the row's icon
@@ -476,7 +509,7 @@ the work develops: the terminal title for terminal sessions, and the title Claud
 its transcript for natively rendered ones (including a `/rename` typed into the CLI). Until
 the agent has named it, a session is named after its first prompt.
 
-Renaming a session in Skalman pins your own name instead, and it stops following the agent.
+Renaming a session in Threading pins your own name instead, and it stops following the agent.
 The rename sheet's **Use Agent's Name** button hands it back — it appears only when you have
 given the session a name of your own, since that is the only time there is anything to undo.
 Turn the follow behaviour off entirely under
@@ -512,14 +545,14 @@ Set it in three places:
 
 Codex has no plan mode of its own, so Plan there stops it writing but does not ask it to plan;
 the menu says so. Changing a running chat's mode applies the next time it launches — Claude's
-own Shift+Tab moves it in the meantime, and Skalman cannot see that.
+own Shift+Tab moves it in the meantime, and Threading cannot see that.
 
 ### Claude's Remote Control
 Claude Code can hand a session to claude.ai and the Claude mobile app so you can check on it
-or reply from your phone. That is Claude's own feature, not Skalman's Remote Access below —
+or reply from your phone. That is Claude's own feature, not Threading's Remote Access below —
 the two are separate, and a session can use either, both, or neither.
 
-Claude normally decides this account-wide, in its own `/config`. Skalman lets you set it per
+Claude normally decides this account-wide, in its own `/config`. Threading lets you set it per
 chat instead:
 
 - **Settings > General > Claude Remote Control** sets what new Claude sessions do. *Follow
@@ -541,7 +574,7 @@ account hits its usage limit and you want to carry on under another.
 
 It works because a conversation is just a transcript on disk that the agent replays each turn,
 so moving it is copying that file into the other account and pointing the session at it —
-Skalman never touches your login. The original is left untouched, so you can move back the same
+Threading never touches your login. The original is left untouched, so you can move back the same
 way. A running session is stopped first, then moved.
 
 Same agent only: a Claude conversation moves between Claude accounts, a Codex one between Codex
@@ -550,13 +583,13 @@ histories aren't interchangeable — and isn't offered here.
 
 One thing to keep in mind: moving to another account to keep working past a limit is fine when
 the accounts are genuinely separate (your personal and your work login, say). Rotating through
-accounts purely to dodge usage limits is the pattern Anthropic's terms discourage — Skalman
+accounts purely to dodge usage limits is the pattern Anthropic's terms discourage — Threading
 leaves the choice, and the timing, to you rather than doing it automatically.
 
 ## Accounts
 
 Both CLIs support multiple logins by pointing an environment variable at an alternate config
-directory. Skalman finds these automatically and offers each one when you create a session.
+directory. Threading finds these automatically and offers each one when you create a session.
 
 | Agent | Default | Alternates | Redirected by |
 |-------|---------|-----------|---------------|
@@ -585,7 +618,7 @@ The percentages are still written out beside it; the ring is there so three acco
 compared at a glance instead of by reading six numbers.
 
 ### Naming
-If you have a shell alias pointing at an account, Skalman uses your name for it. Given:
+If you have a shell alias pointing at an account, Threading uses your name for it. Given:
 
 ```bash
 alias claudedb='CLAUDE_CONFIG_DIR="$HOME/.claude-dblock" claude'
@@ -697,21 +730,21 @@ Where the numbers come from, per agent:
 - **Codex** — fetched from the account's own API login (`auth.json`), refreshed every few
   minutes and after the session finishes working.
 - **Claude** — fetched with the account's `.credentials.json` when one exists. On most Macs
-  Claude Code keeps its token in the Keychain instead; there Skalman reads the usage feed
+  Claude Code keeps its token in the Keychain instead; there Threading reads the usage feed
   Claude Code itself publishes through its status line when [Claudex](~/repo/claudex) manages
   it. No usage source means no pill.
 
-Skalman never stores or refreshes a login itself — it reads what the official CLI keeps, and
+Threading never stores or refreshes a login itself — it reads what the official CLI keeps, and
 if a token has expired the tooltip says so and the CLI is the place to sign in again.
 
 ## Chat Sessions (experimental)
 
-Normally a session shows the agent's own terminal. A **Chat** session instead lets Skalman
+Normally a session shows the agent's own terminal. A **Chat** session instead lets Threading
 draw the conversation itself — messages, tool calls and replies as native views rather than
 text painted by the CLI.
 
 Chat is available for **Codex and Claude Code sessions** — not for shells. Choose
-**Chat (experimental)** from the surface chip when creating one. For Codex, Skalman runs
+**Chat (experimental)** from the surface chip when creating one. For Codex, Threading runs
 `codex exec --json` for each turn and resumes the same thread for the next. For Claude, it
 keeps one `claude --print` process open for the whole conversation. Either way it uses the
 account and model selected for the session, running the same CLI you already signed into.
@@ -838,7 +871,7 @@ Worth knowing:
 
 A session is not stuck on the surface it was created with. Use the interface button in the
 session header to switch directly to the other one: it shows a chat symbol in the agent's
-terminal UI and a terminal symbol in Skalman's native UI. For an explicit choice, open
+terminal UI and a terminal symbol in Threading's native UI. For an explicit choice, open
 **Interface** from either the session row's `⋯` or the header's **Context** menu. The two menus
 are the same menu, including their current-surface checkmark.
 
@@ -851,8 +884,8 @@ Ask Claude something in the terminal, switch to Chat, and it can quote you back 
 
 What the switch does cost is the running process — the agent stops and starts again on the
 new surface — so a session in the middle of something asks first (unless you have turned off
-**Ask before closing a running session**). Switching a session you are not looking at just
-changes where it will open next time.
+**Ask before switching a running chat's interface** — see [Confirmations](#confirmations)).
+Switching a session you are not looking at just changes where it will open next time.
 
 Two things to expect after switching **into** Chat: the terminal's scrollback is not
 transferred (Chat redraws the conversation from the transcript instead, so tool output and
@@ -898,8 +931,8 @@ read like a conversation; use the terminal when you need the complete agent inte
 
 ## Remote Access (beta)
 
-Turn on **Settings > General > Remote Access > Allow remote access** to mirror Skalman from a
-browser or the Skalman iPhone app. **Open Locally** tests the browser client on the Mac,
+Turn on **Settings > General > Remote Access > Allow remote access** to mirror Threading from a
+browser or the Threading iPhone app. **Open Locally** tests the browser client on the Mac,
 and **Pair iPhone…** shows an owner-device QR code for the native app. Pairing is for your own
 trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded
 Native permission requests. To involve somebody else, use a session's **… > Share Chat…** and
@@ -916,10 +949,13 @@ the top or choose **Load earlier messages** to fetch older pages without losing 
 position. A permission whose edit diff is too large for a bounded remote snapshot must be
 reviewed on the Mac, so a remote device can never approve from a partial preview.
 
-On iPhone, open a chat's **… > Attachments** to see images and PDFs that session has
-mentioned. The list is available only to a paired owner device, not to one-chat guest links.
-The Mac sends a file only when you choose its preview, and only if the referenced file still
-exists inside that session's checkout.
+On iPhone, use the toolbar's **Workspace** button for **Browser**, **Review**, **Files**, and
+**Attachments**. If an agent opens a page, Threading does not pull you away from the chat. The
+Workspace icon gives one subtle pulse and keeps a small dot until you open Browser. Browser is a
+read-only follow view of the Mac tab: the Mac still owns navigation and interaction, and private
+tabs never send a preview. The Workspace is available only to a paired owner device, not one-chat
+guest links. Attachment files are still fetched only when you choose one, and only if the file
+remains inside that session's checkout.
 
 The iPhone explains notifications in the dashboard before asking iOS for permission. They cover
 accepted shared chats, Native permission cards, and updates you explicitly ask an agent to send
@@ -932,7 +968,7 @@ or a named member. Open Native chats also show live **Name is typing…** presen
 anyone out of the composer.
 
 Every link is a password, but an owner pairing code is much more powerful than a one-chat guest
-link. Each Skalman launch creates a fresh owner link. Turning Remote Access off, or quitting the
+link. Each Threading launch creates a fresh owner link. Turning Remote Access off, or quitting the
 app, closes the local listener and secure relay and revokes the links immediately. Remote
 traffic uses a temporary Cloudflare HTTPS relay; without `cloudflared`, **Open Locally** still
 works but access from another device does not. See [Remote access](docs/REMOTE_ACCESS.md) for
@@ -969,13 +1005,15 @@ to put a floor under how narrow the window could be made. It no longer does: dra
 edge in and the panel is squeezed with everything else. Its own width is still yours — drag the
 divider to set it, and it opens there next time.
 
-Shell and browser tabs can also change *pane*: drag the tab onto the other pane's tab row —
-it dims while it is over a spot that will take it — or use the same secondary-click menu,
-which offers **Move to Shell Drawer** on a panel tab and **Move to Display Panel** on a
-drawer tab. Either way the tab moves live — a shell keeps its process and scrollback, a
-browser keeps its page — and the new home survives a relaunch. Dropping needs the other pane
-to be open; the menu works regardless and opens the destination for you. The panel-only
-surfaces (Review, Info, Files, comparisons) stay where they are one of a kind.
+Shell and browser tabs can also change *pane*: drag the tab off its row and the other pane
+opens on its own to take it — a closed drawer or panel springs open the moment the drag
+leaves its home row, the receiving tab row shows a quiet wash while the drop would land, and
+the tab dims to say it is on its way out. Drop it at the spot you want; it lands in exactly
+that slot. Let go anywhere else and everything springs back. The same move is in the tab's
+secondary-click menu — **Move to Shell Drawer** on a panel tab, **Move to Display Panel** on
+a drawer tab. Either way the tab moves live — a shell keeps its process and scrollback, a
+browser keeps its page — and the new home survives a relaunch. The panel-only surfaces
+(Review, Info, Files, comparisons) stay where they are one of a kind.
 
 ### The session header
 
@@ -1004,7 +1042,7 @@ Four buttons sit at the header's right edge:
   chats, **Interface**, **Theme**, **Attachments**, rename, account moves, sharing, deletion,
   and any installed extension actions that apply.
 - **Interface** — switches directly to the other renderer. Its icon points at the destination:
-  chat for Skalman's native UI, terminal for Claude Code's or Codex's own UI.
+  chat for Threading's native UI, terminal for Claude Code's or Codex's own UI.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
 
@@ -1027,14 +1065,14 @@ Three kinds of content:
 ### Attachments
 
 When Claude or Codex prints a path to an existing PNG, JPEG, GIF, WebP, HEIC, TIFF, BMP, or
-PDF, Skalman adds it to that session's **Attachments** tab. The same detection runs over native
+PDF, Threading adds it to that session's **Attachments** tab. The same detection runs over native
 Chat replies, and an image deliberately shown through the display tool is added too. Code files
 are ignored because Git Review already covers them.
 
 Open **Attachments** from the session header's **⋯** menu or the panel's **+** menu. The list
 sits above an inline image/PDF preview; **Open**, **Finder**, and **Copy Path** act on the
 selected file. A new reference to the same path moves it to the top and refreshes the preview,
-so the project file remains the source of truth rather than being copied into Skalman.
+so the project file remains the source of truth rather than being copied into Threading.
 
 Only real files inside the session's checkout are accepted. Missing paths, unsupported file
 types, directories, and symlinks escaping the checkout are ignored. Terminal discovery happens
@@ -1067,27 +1105,27 @@ Playwright tool can run a fresh Chromium, Firefox, or WebKit context without imp
 tab's cookies or credentials.
 
 Use **Annotate Page** to place numbered notes directly over what you are reviewing. Notes stay in
-Skalman's native UI rather than entering the page DOM, so the site cannot read or alter them.
+Threading's native UI rather than entering the page DOM, so the site cannot read or alter them.
 Click an existing pin while annotation mode is active to edit or delete it. The agent can read the
 notes for the currently authorized page with their document-space coordinates, clearly labelled as
 user-authored context; it cannot create or change them.
 
 Local development pages are available immediately. Before an agent can read or act on another
-website, Skalman asks whether to allow it once, always allow that origin, or deny it. Persistent
+website, Threading asks whether to allow it once, always allow that origin, or deny it. Persistent
 grants are listed under **Settings ▸ Tools ▸ Website Access**, where they can be revoked. Redirects
 are checked again before the destination page is returned to the agent.
 
-Passwords, file selection, download destinations, and form submissions stay with you. Skalman
+Passwords, file selection, download destinations, and form submissions stay with you. Threading
 reveals the browser or opens a native sheet for those boundaries instead of passing their secrets
 or decisions through the conversation. Console, network, CSS-query, and page-snapshot results are
 explicitly marked as untrusted page data; request bodies, response bodies, headers, and cookies
 are never captured for the agent.
 
-When an agent reaches a password field, Skalman reveals the browser and focuses that exact field.
+When an agent reaches a password field, Threading reveals the browser and focuses that exact field.
 A key-shaped **Private Input** control remains visible while it has focus; click it to return
 keyboard focus to the page after using the browser chrome. If WebKit/macOS offers an AutoFill
 suggestion for the site, select it; otherwise use your password manager's macOS integration,
-copy from Apple Passwords, or type privately. Skalman never asks a vault for the credential, and
+copy from Apple Passwords, or type privately. Threading never asks a vault for the credential, and
 the field's value is unavailable to the agent, snapshots, waits, traces, and diagnostic logs.
 Passkey and WebAuthentication prompts remain WebKit/macOS system UI. Filling a password does not
 approve submission — the usual confirmation still applies.
@@ -1108,7 +1146,7 @@ Available in every session, since every session is an agent conversation.
 
 ### How it works
 
-Skalman runs a small MCP server on a loopback port and registers it with each Claude or Codex
+Threading runs a small MCP server on a loopback port and registers it with each Claude or Codex
 session it launches, giving that session a private endpoint. The agent gets three tools —
 `display_image`, `display_html` and `display_compare_files` — and is told the panel exists so
 it reaches for them instead of printing a file path or an ASCII table.
@@ -1188,7 +1226,7 @@ Each changed file is a collapsible row — its path, what happened to it (`+` ad
 deleted, `±` modified, `→` renamed), and its `+/−` counts. Small files open expanded; click
 a row to open or close it. Untracked files appear as all-added diffs, binary files as a
 `binary` note. The `+N −M` beside the chip totals the whole diff. Diffs are **syntax
-highlighted** for the languages Skalman recognises by file extension; a file it does not
+highlighted** for the languages Threading recognises by file extension; a file it does not
 recognise renders plain rather than guessed at.
 
 **A changed image opens too.** A row whose binary file is a raster image (PNG, JPEG, GIF,
@@ -1316,7 +1354,7 @@ its file path (saved under the temporary directory), because a path is the one f
 image the agent CLIs can act on — so the pasted report lets an agent read the hierarchy *and*
 open the picture.
 
-The screenshot is taken from Skalman's own view tree, so it needs no Screen Recording
+The screenshot is taken from Threading's own view tree, so it needs no Screen Recording
 permission and can never include another app's window. The one honest gap: content another
 process draws — a web page in the display panel — may appear blank in it.
 
@@ -1369,7 +1407,7 @@ Deleting a theme leaves anything using it inheriting again. Renaming one keeps t
 Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
 a theme sets only the backdrop behind them.
 
-**The Dock icon follows the app theme.** Choosing anything other than System redraws Skalman's
+**The Dock icon follows the app theme.** Choosing anything other than System redraws Threading's
 icon in that theme's ground and accent — Cyberpunk's neon green on near-black, Bauhaus's red
 with its hard printed shadow — and the ⌘-Tab switcher shows the same. The chevron itself never
 changes shape, so the app stays findable by silhouette. This lasts while the app runs: Finder,
@@ -1378,7 +1416,7 @@ immediately. The iPhone app has one fixed icon; iOS does not allow an app to dra
 
 An extension's theme can bring its own icon *mark* — its glyph replaces the chevron, but the
 tile behind it is still drawn from the theme's own background, so an extension can never make
-Skalman's icon look like a different app. A contributed theme without a mark gets the same
+Threading's icon look like a different app. A contributed theme without a mark gets the same
 generated icon every built-in style does.
 
 An installed extension can offer app themes of its own. They appear in the picker labelled by
@@ -1477,7 +1515,7 @@ case; every word must match. Extension-provided pages and sections participate w
 localized titles, descriptions, choices, and placeholders, and the query stays in place when
 an extension is enabled or disabled.
 
-Skalman follows the language macOS selects for the app, with English as the per-string fallback.
+Threading follows the language macOS selects for the app, with English as the per-string fallback.
 Menus, built-in Settings navigation, commands, and Settings components use the app string
 catalog. Extensions carry their own translations and choose the closest language the app
 requests; a missing extension translation falls back to that extension's base string rather
@@ -1495,8 +1533,7 @@ than borrowing an unrelated app translation.
 - **Discover project icons** — see [Project icons](#project-icons)
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
-- **Ask before closing a running session** — also asks before archiving, moving, or switching
-  the surface of a running session, since each of those stops its agent too
+- **Confirmations** — one switch per prompt; see [Confirmations](#confirmations)
 - **Allow remote access** — see [Remote Access](#remote-access-beta)
 - **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)
 - **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
@@ -1519,7 +1556,7 @@ than borrowing an unrelated app translation.
   a checkout switching branch. A row being filled in for the first time, or scrolled back
   into view, simply shows its name.
 
-Animation timing is tuned by Skalman rather than exposed as another preference, and transitions
+Animation timing is tuned by Threading rather than exposed as another preference, and transitions
 honour macOS Reduce Motion.
 
 #### Agent hooks
@@ -1529,9 +1566,9 @@ subagent activity** passes hooks through the app-managed `--settings` file made 
 it never edits `~/.claude/settings.json`. Switching it off takes effect the next time a Claude
 session starts or resumes:
 
-- Terminal Claude launches without Skalman's hooks and falls back to interpreting terminal
+- Terminal Claude launches without Threading's hooks and falls back to interpreting terminal
   output for activity. It cannot discover new terminal subagents or their completed usage.
-- Native Claude keeps only the `PreToolUse` hook required for Skalman's permission cards.
+- Native Claude keeps only the `PreToolUse` hook required for Threading's permission cards.
   Structured native turn and subagent rendering continues through Claude's event stream.
 - Subagents already saved with the session remain available when switching surfaces or
   relaunching the app.
@@ -1547,28 +1584,93 @@ Codex can report terminal turn and subagent activity too, but only from entries 
 
 Both settings are **off by default** and do different jobs:
 
-- **Report Codex turn boundaries** adds Skalman's entries to each Codex account's `hooks.json`.
-  Anything already in that file is kept, and switching the setting off removes only what Skalman
+- **Report Codex turn boundaries** adds Threading's entries to each Codex account's `hooks.json`.
+  Anything already in that file is kept, and switching the setting off removes only what Threading
   put there.
 - **Skip Codex hook review** decides how those entries get permission to run. Codex refuses to
   run any hook until its exact text has been approved once, and that approval happens in the
-  Codex terminal app — which a session Skalman launches never shows.
+  Codex terminal app — which a session Threading launches never shows.
 
 Leaving the second setting **off** is recommended. Open `codex` in a terminal once, approve the
-hooks when it asks, and they work from then on: Skalman's entries are written so their text never
+hooks when it asks, and they work from then on: Threading's entries are written so their text never
 changes between launches, so one approval holds.
 
-Switching it **on** means Skalman passes `--dangerously-bypass-hook-trust`, which runs *every*
-hook in that config folder without review — not only Skalman's. Since an agent can write to
+Switching it **on** means Threading passes `--dangerously-bypass-hook-trust`, which runs *every*
+hook in that config folder without review — not only Threading's. Since an agent can write to
 `hooks.json` itself, that would let an agent arrange for its own code to run unreviewed on the
 next launch.
+
+### Privacy
+
+Every grant Threading can hold from macOS, what each is for, and whether you have given it. The
+page is an inventory rather than a checklist — two of the four are expected to read **Not
+allowed** on a machine that has never installed an extension companion, and nothing on the page
+treats that as a fault. Opening it asks macOS for nothing; it reads the grants that can be read
+and says so plainly for the one that cannot.
+
+| Grant | What it covers | How it is asked for |
+|---|---|---|
+| **Files & Folders** | Reading and editing the files in a project | macOS asks the first time a project in Desktop, Documents or Downloads — or on an external or network volume — is read. A project anywhere else needs no grant at all. |
+| **Notifications** | Turn-finished and needs-you alerts | Threading asks the first time a session has something to say. Off in General settings means it is never used. |
+| **Accessibility** | An extension companion that drives the pointer or keyboard | You allow Threading in System Settings, then reload the extension. Threading itself never asks. |
+| **Screen Recording** | An extension companion that captures the screen | The same. Inspect Mode draws from Threading's own view tree and needs nothing. |
+
+Each row has an **Open Settings** button that goes to that exact pane rather than to the top of
+System Settings.
+
+**The part worth knowing: agents inherit what you grant Threading.** macOS attributes a directly
+launched child process to the app that launched it, and Claude and Codex are launched by
+Threading. So the files an agent reads are approved against *Threading's* grant, and the prompt you
+answer says "Threading" whichever agent actually asked. Allowing the Documents folder once is
+allowing it for every agent you subsequently run in a project there. This is how a terminal has
+always worked — `Terminal.app` behaves the same for anything you type into it — but it is worth
+saying out loud, because the name on the prompt is not the name of the thing reading the file.
+
+Extensions are the exception, and deliberately so. A safe extension is sandboxed and
+Foundation-only. A companion executable declares each capability it wants at install time, and
+Threading requests only the grants its reviewed capabilities actually cover — so a companion that
+never asked for `inputControl` cannot cause an Accessibility prompt.
+
+**What is never asked for.** Threading has no analytics and sends nothing about your projects
+anywhere. It requests no camera, microphone, contacts, calendar, location or Full Disk Access.
+Remote Access does not need the Local Network permission either: the listener binds to
+`127.0.0.1` and your iPhone reaches it through an outbound encrypted relay, so nothing is
+published on the network you are attached to.
+
+**Stored credentials** live in your login keychain, never in Threading's own database — the GitHub
+connection, any model API keys you enter, and secrets an extension stores. Agent logins are not
+among them: Threading reads *which* accounts exist under `~/.claude` and `~/.codex` so it can
+route a session to one, and never reads or copies their credentials.
+
+Threading runs without the App Sandbox. A terminal that cannot open a pseudo-terminal or launch
+your shell is not a terminal, and that is the trade the app makes.
 
 ### Accounts
 Per-account icons and names. See [Accounts](#accounts).
 
+### GitHub
+
+How Threading reads from GitHub on behalf of extensions — the Checks card, for one. Extensions
+never receive a credential: they ask Threading, and Threading fetches with the best credential it
+holds, trying each tier in turn:
+
+1. **The app connection** — sign in to your own GitHub App with a device code. Paste the
+   app's **Client ID** (from GitHub ▸ Settings ▸ Developer settings; enable *Device flow* on
+   the app), press **Connect GitHub…**, and enter the shown code on the GitHub page it opens.
+   You choose which repositories the app can see when you install it on GitHub, and you can
+   revoke it there at any time. Tokens live in the Keychain and renew themselves.
+2. **The `gh` CLI** — if you are signed into `gh`, Threading borrows its token for reads.
+   Nothing to configure; the page shows whether it was found.
+3. **Your git credential helper** — whatever `git credential fill` holds for github.com.
+4. **Anonymously** — public repositories only.
+
+Reads report which credential answered, so a private repository that fails names the fix
+("connect GitHub in Settings") instead of failing namelessly. Which origins an extension may
+ask about at all is part of that extension's install approval.
+
 ### Will it last?
 The usage panel above the composer, and the header's pill popover, say how much of each
-window is spent. When Skalman has watched a window long enough to see a *rate*, it also says
+window is spent. When Threading has watched a window long enough to see a *rate*, it also says
 where that rate leads:
 
 ```
@@ -1581,9 +1683,9 @@ The line appears only when the projection matters — when the window will run o
 resets. A window that will comfortably outlast its own reset says nothing, because being told
 you are fine is noise.
 
-For Codex this works immediately: it records rate limits into its own transcripts, so Skalman
+For Codex this works immediately: it records rate limits into its own transcripts, so Threading
 recovers the past week from disk the first time it looks. Claude records none, so its
-projection appears after Skalman has watched the window for a while.
+projection appears after Threading has watched the window for a while.
 
 ### Usage
 Where your tokens went, read from the agents' own transcripts — the question the header's
@@ -1658,7 +1760,7 @@ which almost always means a build is running in it right now.
 Remove one row, everything in one checkout, or everything found. Removals ask first, and say so
 if a session is running in the project or if anything about to go was written moments ago.
 
-**The page never makes you wait.** Skalman surveys the disk quietly in the background — at low
+**The page never makes you wait.** Threading surveys the disk quietly in the background — at low
 priority, and never while a session in that project is working — and remembers what it found
 between launches. Opening Storage shows what is already known, with a line saying when it was
 measured, and refreshes anything stale behind you. **Rescan** re-reads everything now.
@@ -1686,11 +1788,11 @@ Terminal font and cursor, colour schemes, and AI provider configuration.
 
 ## Diagnostics
 
-**Help > Reveal Diagnostics Log** opens the folder holding Skalman's own journal, one file per
+**Help > Reveal Diagnostics Log** opens the folder holding Threading's own journal, one file per
 day, kept for two weeks:
 
 ```
-~/Library/Application Support/Skalman/Logs/skalman-<date>.jsonl
+~/Library/Application Support/Threading/Logs/threading-<date>.jsonl
 ```
 
 Each line is one event — the app launching and quitting, a session being started from the
@@ -1700,7 +1802,7 @@ before an unexpected quit is on disk.
 
 A launch that never reaches its quit leaves its marker behind, and the next launch records
 `Previous launch did not quit cleanly`, pointing at the macOS crash report from that run in
-`~/Library/Logs/DiagnosticReports/`. That pair — what Skalman was doing, and what macOS
+`~/Library/Logs/DiagnosticReports/`. That pair — what Threading was doing, and what macOS
 recorded about it dying — is what a crash needs explaining.
 
 ## Keyboard Shortcuts
@@ -1774,14 +1876,14 @@ Option is otherwise left to the keyboard layout rather than claimed as a Meta ke
 press the combination you want; Escape cancels and Delete removes the shortcut entirely. A
 change takes effect immediately — the menu bar is updated in place rather than at next launch.
 
-Skalman's own commands can be rebound. The system ones (Quit, Cut, Copy, Paste, Full Screen and
+Threading's own commands can be rebound. The system ones (Quit, Cut, Copy, Paste, Full Screen and
 the like) are listed but fixed, so the page can answer "what already owns this key" without
 letting a rebinding leave you unable to quit or paste. A combination already in use is refused
 rather than taken from its current owner, and **Reset All** puts everything back.
 
 ## Data Storage
 
-Stored in `~/Library/Application Support/Skalman/`:
+Stored in `~/Library/Application Support/Threading/`:
 - `projects.json` — projects, sessions, and their resumable agent session ids
 - `history/` — per-session command history
 - `mcp/` — one file per session pointing Claude at that session's display panel
@@ -1791,9 +1893,9 @@ it, and nothing about what was displayed survives a restart.
 
 Settings, including per-account icons and names, live in the app's user defaults.
 
-Conversations themselves are owned by the agents, not Skalman, and live under the config
+Conversations themselves are owned by the agents, not Threading, and live under the config
 directory of the account that created them:
 - Claude Code: `<config-dir>/projects/<folder>/<session-id>.jsonl`
 - Codex: `<codex-home>/sessions/YYYY/MM/DD/rollout-<timestamp>-<id>.jsonl`
 
-Removing a project or deleting a session in Skalman never deletes these files.
+Removing a project or deleting a session in Threading never deletes these files.

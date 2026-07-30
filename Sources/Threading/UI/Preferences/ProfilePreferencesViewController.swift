@@ -1,0 +1,254 @@
+import AppKit
+
+/// Profile preferences: font, cursor, scrollback, and a live terminal preview, built from the
+/// settings UI kit (`SettingsUI`, `SettingsCard`) so the page matches the rest of the app.
+final class ProfilePreferencesViewController: NSViewController {
+
+    // MARK: - Constants
+
+    private enum Layout {
+        static let previewHeight: CGFloat = 100
+    }
+
+    // MARK: - Properties
+
+    private var currentProfile: TerminalProfile {
+        didSet {
+            updateUI()
+            saveProfile()
+        }
+    }
+
+    private var fontButtonTitle: String {
+        "\(currentProfile.fontName) \(Int(currentProfile.fontSize))"
+    }
+
+    // MARK: - Controls
+
+    private lazy var fontButton: ThemedButton =
+        SettingsUI.button(fontButtonTitle, target: self, action: #selector(showFontPanel))
+
+    private lazy var cursorStylePopup: ThemedPopUp = {
+        let popup = SettingsUI.popUp(target: self, action: #selector(cursorStyleChanged))
+        for style in TerminalProfile.CursorStyle.allCases {
+            popup.addItem(withTitle: style.displayName)
+        }
+        return popup
+    }()
+
+    private lazy var cursorBlinkToggle: ThemedToggle =
+        SettingsUI.toggle(isOn: currentProfile.cursorBlink, target: self, action: #selector(cursorBlinkChanged))
+
+    private lazy var backgroundHarmonyToggle: ThemedToggle = SettingsUI.toggle(
+        isOn: AppSettings.shared.harmonizesTerminalBackgrounds,
+        target: self,
+        action: #selector(backgroundHarmonyChanged)
+    )
+
+    private lazy var droppedImageToggle: ThemedToggle = SettingsUI.toggle(
+        isOn: AppSettings.shared.convertsDroppedImages,
+        target: self,
+        action: #selector(droppedImageConversionChanged)
+    )
+
+    private lazy var scrollbackField: NSTextField = {
+        let field = SettingsUI.textField(target: self, action: #selector(scrollbackChanged))
+        field.placeholderString = "10000"
+        field.formatter = NumberFormatter()
+        return field
+    }()
+
+    private lazy var previewView: NSView = {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.cornerCurve = .continuous
+        view.layer?.cornerRadius = Design.Radius.control
+        return view
+    }()
+
+    private lazy var previewLabel: NSTextField = {
+        // localization-ignore: Representative shell prompt, not natural-language UI copy.
+        let label = NSTextField(labelWithString: "user@mac ~ % ls -la")
+        label.isBezeled = false
+        label.drawsBackground = false
+        label.isEditable = false
+        label.isSelectable = false
+        return label
+    }()
+
+    // MARK: - Initialization
+
+    init() {
+        self.currentProfile = ProfileStorage.shared.defaultProfile
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // MARK: - Lifecycle
+
+    override func loadView() {
+        view = NSView()
+        setupLayout()
+        updateUI()
+    }
+
+    // MARK: - Setup
+
+    private func setupLayout() {
+        let text = SettingsCard(rows: [
+            SettingsUI.row(title: "Font", control: fontButton)
+        ])
+
+        let cursor = SettingsCard(rows: [
+            SettingsUI.row(title: "Style", control: cursorStylePopup),
+            SettingsUI.row(title: "Blinking cursor", control: cursorBlinkToggle)
+        ])
+
+        let scrollback = SettingsCard(rows: [
+            SettingsUI.row(title: "Lines kept",
+                           subtitle: "Number of output lines retained above the visible screen.",
+                           control: scrollbackField)
+        ])
+
+        let colour = SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Keep backgrounds in tune with the theme",
+                subtitle: "Programs that paint their own 24-bit backgrounds — an agent's diff, "
+                    + "for one — pick colours for a generic terminal. This eases them toward "
+                    + "the palette without changing how light they are, so their text stays "
+                    + "exactly as readable.",
+                control: backgroundHarmonyToggle
+            )
+        ])
+
+        let drops = SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Convert dropped images agents can't open",
+                subtitle: "A photo out of Finder is a HEIC and a scan is often a TIFF, and "
+                    + "neither agent reads either — so one is written out as a PNG first, "
+                    + "keeping its name, and the agent is handed that. Turn this off to give "
+                    + "the agent the file itself, which is what you want when the format is "
+                    + "the thing you are working on. The shell drawer never converts.",
+                control: droppedImageToggle
+            )
+        ])
+
+        let preview = SettingsCard(rows: [
+            SettingsUI.fullRow(previewContent())
+        ])
+
+        let page = SettingsUI.page([
+            SettingsUI.heading("Profiles"),
+            SettingsUI.section("Text", text),
+            SettingsUI.section("Cursor", cursor),
+            SettingsUI.section("Colour", colour),
+            SettingsUI.section("Scrollback", scrollback),
+            SettingsUI.section("Dropped files", drops),
+            SettingsUI.section("Preview", preview)
+        ], hostPage: .profiles)
+
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
+
+    /// The terminal preview: a rounded panel painted in the theme's background, holding a
+    /// monospaced sample line in the theme's foreground.
+    private func previewContent() -> NSView {
+        previewView.translatesAutoresizingMaskIntoConstraints = false
+        previewLabel.translatesAutoresizingMaskIntoConstraints = false
+        previewView.addSubview(previewLabel)
+
+        NSLayoutConstraint.activate([
+            previewView.heightAnchor.constraint(equalToConstant: Layout.previewHeight),
+            previewLabel.leadingAnchor.constraint(equalTo: previewView.leadingAnchor, constant: Design.Spacing.medium),
+            previewLabel.topAnchor.constraint(equalTo: previewView.topAnchor, constant: Design.Spacing.medium)
+        ])
+
+        return previewView
+    }
+
+    // MARK: - Update UI
+
+    private func updateUI() {
+        fontButton.title = fontButtonTitle
+
+        if let index = TerminalProfile.CursorStyle.allCases.firstIndex(of: currentProfile.cursorStyle) {
+            cursorStylePopup.selectItem(at: index)
+        }
+
+        cursorBlinkToggle.state = currentProfile.cursorBlink ? .on : .off
+        scrollbackField.integerValue = currentProfile.scrollbackLines
+
+        updatePreview()
+    }
+
+    private func updatePreview() {
+        previewView.applyLayerBackground(currentProfile.theme.background)
+        previewLabel.textColor = currentProfile.theme.foreground
+        previewLabel.font = NSFont.monospacedSystemFont(ofSize: currentProfile.fontSize, weight: .regular)
+    }
+
+    private func saveProfile() {
+        ProfileStorage.shared.defaultProfile = currentProfile
+        ProfileStorage.shared.save(currentProfile)
+    }
+
+    // MARK: - Actions
+
+    @objc private func showFontPanel() {
+        let fontManager = NSFontManager.shared
+        fontManager.target = self
+        fontManager.action = #selector(fontChanged(_:))
+
+        let font = NSFont.monospacedSystemFont(ofSize: currentProfile.fontSize, weight: .regular)
+        fontManager.setSelectedFont(font, isMultiple: false)
+
+        let panel = fontManager.fontPanel(true)
+        panel?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func fontChanged(_ sender: NSFontManager) {
+        let newFont = sender.convert(NSFont.systemFont(ofSize: currentProfile.fontSize))
+        currentProfile.fontName = newFont.fontName
+        currentProfile.fontSize = newFont.pointSize
+    }
+
+    @objc private func cursorStyleChanged() {
+        let index = cursorStylePopup.indexOfSelectedItem
+        guard index >= 0, index < TerminalProfile.CursorStyle.allCases.count else { return }
+        currentProfile.cursorStyle = TerminalProfile.CursorStyle.allCases[index]
+    }
+
+    @objc private func cursorBlinkChanged() {
+        currentProfile.cursorBlink = cursorBlinkToggle.state == .on
+    }
+
+    @objc private func scrollbackChanged() {
+        currentProfile.scrollbackLines = max(100, scrollbackField.integerValue)
+    }
+
+    /// Re-posts `ProfileDidChange` rather than relying on the setting's own notification.
+    ///
+    /// The transform is installed in `TerminalSession.applyProfile`, and the terminals listen
+    /// for `ProfileDidChange` — nothing observes `AppSettingsDidChange` on their behalf. Without
+    /// this the toggle would appear to do nothing until the next theme or font change.
+    @objc private func backgroundHarmonyChanged() {
+        AppSettings.shared.harmonizesTerminalBackgrounds = backgroundHarmonyToggle.state == .on
+        NotificationCenter.default.post(ProfileDidChange(profile: currentProfile))
+    }
+
+    /// No re-post needed, unlike the harmony toggle above: nothing is installed on the terminal
+    /// from this. The drop reads the setting as it happens, so the next drop already obeys it.
+    @objc private func droppedImageConversionChanged() {
+        AppSettings.shared.convertsDroppedImages = droppedImageToggle.state == .on
+    }
+}

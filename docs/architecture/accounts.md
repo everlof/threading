@@ -33,6 +33,26 @@ directly. It costs a subprocess, so the answer is cached in `UserDefaults` and t
 at most once per account per install — an address does not change while a login does not. Only
 Claude: Codex's `id_token` already carries its `email` claim.
 
+**An account can be switched off** (`AccountPreference.isDisabled`), which is the only kind of
+"remove" this app can honestly offer: the account *is* a config directory, and deleting one is
+the CLI's business, not a settings pane's. So the switch changes what is **offered**, nothing
+else — `AgentAccountDiscovery.accounts(for:)` returns the enabled logins and `allAccounts(for:)`
+returns everything found. The filter lives at that seam rather than at the thirty call sites
+that list accounts, because the other arrangement fails silently: one menu keeps offering the
+login the user turned off and nothing says which menu was missed.
+
+Two places deliberately see a disabled account anyway. `account(for:handle:)` searches
+everything, because a session records the account it started on and a resume must route back to
+it — the account sticks to the session, switch or no switch. And the accounts pane lists
+everything, since it is where a login is switched back on. `AccountName` also resolves against
+every sibling: a disabled login still owns the address that would make another one ambiguous.
+
+The composer starts on the standard handle, so a disabled *default* is the case that bites —
+without `preferredAccount`, the login the user just switched off is still what a fresh session
+launches on, while the chip names it as though it had been chosen. `preferredAccount` is the
+standard login while it is on, else the first that is; `preferred(among:)` is the same rule as a
+pure function, so it can be tested without a home directory to scan.
+
 Two invariants matter:
 
 - **The account sticks to the session.** Conversations are stored per account, so a resume
@@ -54,7 +74,7 @@ account's directory and re-point `accountHandle`. The destination is the source 
 **account-directory prefix swapped** — the layout under a config dir (`projects/<slug>/` for
 Claude, dated `sessions/` for Codex) is identical between accounts, so one prefix swap serves
 both agents. It is **non-destructive** (the original stays, so a move reverses), stops any live
-process first (it belongs to the old account and is still writing the file), and Skalman never
+process first (it belongs to the old account and is still writing the file), and Threading never
 touches a token — the official CLI authenticates under whichever account, so this is
 portability, not credential reuse.
 
@@ -66,8 +86,8 @@ provider-native sibling session. The source session and its transcript stay inta
 resumable; the destination records `continuedFrom` and `continuationSourceKind`, but has a new
 provider conversation identifier.
 
-The destination's deterministic first turn asks Skalman's scoped `conversation_history` MCP
-tool for every page of the frozen snapshot. Skalman parses that snapshot through
+The destination's deterministic first turn asks Threading's scoped `conversation_history` MCP
+tool for every page of the frozen snapshot. Threading parses that snapshot through
 `TranscriptReplay` into `[StreamEvent]` and exposes visible user/assistant messages plus bounded
 tool calls and results. Private thinking, provider-only state, model selection and tool-call
 identity do not cross the boundary. That makes the operation deliberately lossy, but symmetric
@@ -79,8 +99,8 @@ the surface switch and for the same reason: the migration stops the live process
 reload alone left the pane holding a discarded controller — blank until the session was selected
 again, which read as the move having done nothing. The coordinator reopens it
 (`reopenIfShowing`), which resumes the transcript under the new account, and asks first when the
-agent is running, under `confirmsBeforeClosingRunningSession` — the same setting, because it is
-the same interruption.
+agent is running, under the `.moveRunningSessionToAccount` confirmation prompt — its own switch,
+alongside the three other interruptions it is a sibling of.
 
 Nothing is injected into the conversation to announce the move. The transcript *is* the context,
 and it arrives whole; the account is who pays for the next turn, not something the agent needs
@@ -156,10 +176,32 @@ rather than looked up, because the pill follows a session and the session is wha
 
 The account menu is read against the model that *would* run if that login were picked, resolved
 per account (the configured default is an account's own setting). Its line is
-`Max · 5h 7% · 7d 56% · Fable 89% · Fable resets in 15h` — plan, every window metering that
-model, and when the tight one comes back. The reset names its window rather than trailing the
-list bare: the binding window is not always the last one written, and an unattributed countdown
-is read as belonging to whichever is.
+`Max · 5h 7% · 7d 56% · Fable 89% · Fable resets in 15h` — plan, every window, and when the tight
+one comes back. The reset names its window rather than trailing the list bare: the binding window
+is not always the last one written, and an unattributed countdown is read as belonging to
+whichever is.
+
+**In that one menu the text is wider than the model** (`compactSummary(… scoped: .all)`), and the
+ring is not. The account is picked *before* the model, so narrowing the text to the account's
+configured default withheld exactly the number the choice needed: a login whose Fable window sat
+at 89% read identically to one at 12% for as long as its `settings.json` said `opus[1m]`, and the
+89% only appeared after the account was already chosen and the model switched. So the line names
+every scoped window the login has. The **ring** stays metered by the resolved model, because it
+answers the narrower question — what stops the session that would start now — and a model this
+session is not running must not tint it. The two disagreeing is the point, not a slip.
+
+Everywhere else the reading stays narrow (`.metering`, the default): a session already running a
+model, and the mobile mirror of one, are subject to that model's windows and to no others.
+
+The **model** menu carries the other half, since it is the only surface where a scoped limit is
+actionable — a spent Fable window is escaped by picking something else. Each row states its own
+scoped window and nothing more (`AccountUsageMenu.modelSummary`): `7d 89% · resets in 1h 1m`,
+named by the window's *length* rather than by the model, which the row's title already says —
+`UsageDefaults.windowID(forDuration:)` recovers `7d` from it, since a scoped window is named
+after its model and its length is the only thing left that identifies the window. Rows the plan
+meters no differently stay bare: their pressure is the account's, which every row would repeat
+and none would distinguish. It reads the cache without asking for a refresh — the composer has
+already prefetched, and a model list is not a new reason to spend a round trip per row.
 
 A window whose `resets_at` has passed keeps its identity but not its percentage — the stale
 value describes the *previous* window, so it renders as `—`, never as pressure. The pill

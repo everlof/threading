@@ -1,7 +1,7 @@
 # iOS themed dialogs
 
-Application-owned alerts and confirmation dialogs in `SkalmanMobile` are presented through
-`Sources/SkalmanMobile/ThemedDialog.swift`. The component consumes `RemoteThemePalette`, so an
+Application-owned alerts and confirmation dialogs in `ThreadingMobile` are presented through
+`Sources/ThreadingMobile/ThemedDialog.swift`. The component consumes `RemoteThemePalette`, so an
 open dialog follows the same live Mac/iPhone appearance update as the view behind it.
 
 Use:
@@ -70,11 +70,11 @@ dialogs whose handler needs to read the selected session before dismissal.
 Debug builds expose deterministic launch modes:
 
 ```bash
-SKALMAN_MOBILE_DEMO=themed-dialog-alert
-SKALMAN_MOBILE_DEMO=themed-dialog-confirmation
+THREADING_MOBILE_DEMO=themed-dialog-alert
+THREADING_MOBILE_DEMO=themed-dialog-confirmation
 ```
 
-Use these modes as the initial fixtures for the future `SkalmanMobileUITests` screenshot target.
+Use these modes as the initial fixtures for the future `ThreadingMobileUITests` screenshot target.
 When the primitive gains a materially different control or layout state, add a fixture at the
 same time. Review at least a compact iPhone, a large iPhone, an accessibility Dynamic Type size,
 and a deliberately different remote theme.
