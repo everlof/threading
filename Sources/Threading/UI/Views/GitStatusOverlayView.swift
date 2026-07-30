@@ -4,6 +4,8 @@ import ThreadingExtensionKit
 // MARK: - Defaults
 
 enum GitStatusOverlayDefaults {
+    /// One line of the card, and the whole card when the checkout is clean and the session has
+    /// no children. Every further fact adds a row beneath it rather than words beside it.
     static let height: CGFloat = 26
     static let fontSize: CGFloat = 11
     static let maxWidth: CGFloat = 360
@@ -13,6 +15,13 @@ enum GitStatusOverlayDefaults {
     /// the fill, and a fill that thins over a conversation is a card with the agent's own text
     /// running through it.
     static let restingContentAlpha: CGFloat = 0.85
+
+    /// Every row leads with a mark, and the marks share one column, so a stack of readings
+    /// reads as a list rather than as three sentences that happen to start at the same margin.
+    /// The column is the one a titled `ThemedButton` already draws its symbol in, because one
+    /// of the rows *is* one — the children line.
+    static let markSlot = ThemedButton.markSlotWidth
+    static let markGap = ThemedButton.markTitleGap
 }
 
 // MARK: - View
@@ -23,6 +32,12 @@ enum GitStatusOverlayDefaults {
 /// The pane's surfaces answer "what is the agent saying"; this answers what changed in the
 /// checkout and whether delegated agents are active. It stays a summary because both full
 /// answers already have surfaces: Git Review and the Subagents display-pane tab.
+///
+/// **One row per fact.** The card is pinned to the pane's trailing edge and capped at 360
+/// points, so every fact added to the line took its width from the branch name — the one thing
+/// that says which checkout this is, and the one truncated first. Stacked, each fact keeps the
+/// full width and the card grows into the direction it has room in, the same way its extension
+/// slot already does.
 final class GitStatusOverlayView: BackdropOverlay {
 
     // MARK: - Properties
@@ -32,11 +47,22 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// The child-agent segment is a distinct destination inside the same status card.
     var onOpenSubagents: (() -> Void)?
 
-    private let stack = NSStackView()
+    /// The card's rows, top down: the summary line, the counters line, the children line.
+    private let content = NSStackView()
+    /// The first row — the mark and whichever sentence leads: branch, plan position, or, on a
+    /// detached head, the counters themselves.
+    private let summaryRow = NSStackView()
+    /// The counters line: how many files, and the two totals held to the trailing edge.
+    private let countersRow = NSStackView()
     private let glyph = NSImageView()
-    private let orb = WorkingOrbView()
+    private let countersMark = NSImageView()
     private let subagentsButton: ThemedButton
-    private var textLabel: NSTextField?
+    private var summaryLabel: NSTextField?
+    private var filesLabel: NSTextField?
+    private var countersGap: NSView?
+    private var countersLabel: NSTextField?
+    /// Whether there is a Git sentence to click through to Git Review with.
+    private var hasGitReceipt = false
 
     /// The `session.corner-card@1` `top-trailing` slot: extension rows under the summary line.
     ///
@@ -50,6 +76,9 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var customizationHost: ComponentCustomizationHost?
     private var collapsedBottomConstraint: NSLayoutConstraint?
     private var expandedBottomConstraint: NSLayoutConstraint?
+    private var slotTopConstraint: NSLayoutConstraint?
+    private var summaryRowHeightConstraint: NSLayoutConstraint?
+    private var countersRowHeightConstraint: NSLayoutConstraint?
     private var slotRowWidthConstraints: [NSLayoutConstraint] = []
 
     /// Held so a backdrop change can rebuild the label, which carries its colours inside an
@@ -65,7 +94,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         didSet {
             guard isHovered != oldValue else { return }
             let alpha = isHovered ? 1 : GitStatusOverlayDefaults.restingContentAlpha
-            stack.alphaValue = alpha
+            content.alphaValue = alpha
             extensionSlotStack.alphaValue = alpha
         }
     }
@@ -92,24 +121,40 @@ final class GitStatusOverlayView: BackdropOverlay {
         wantsLayer = true
         layer?.cornerCurve = .continuous
 
-        glyph.image = NSImage(
-            systemSymbolName: "arrow.triangle.branch",
-            accessibilityDescription: L10n.string("Branch")
-        )
-        glyph.symbolConfiguration = .init(
-            pointSize: GitStatusOverlayDefaults.fontSize,
-            weight: .medium
-        )
+        // The summary row's mark says what the row is: the checkout while the card is a branch
+        // card, the plan while a run replaces that line. There is deliberately **no spinner
+        // here**. A terminal session's CLI draws its own a few lines below, and a native
+        // conversation has one beside its status (`ConversationViewController.orbView`), so a
+        // third one in the corner was the same sentence three times — and the only one of the
+        // three sitting on the terminal's own palette, where an accent it never chose reads as
+        // a stray colour rather than as a state.
+        configureMark(glyph, symbol: "arrow.triangle.branch", description: L10n.string("Branch"))
+        configureMark(countersMark, symbol: "plusminus", description: L10n.string("Changes"))
 
-        stack.orientation = .horizontal
-        // Tighter than the gap the sentence itself carries between branch and counters, so the
-        // mark reads as belonging to the name beside it rather than as a third thing in the row.
-        stack.spacing = Design.Spacing.tight
-        stack.alphaValue = GitStatusOverlayDefaults.restingContentAlpha
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        orb.isHidden = true
-        stack.addArrangedSubview(orb)
-        stack.addArrangedSubview(glyph)
+        summaryRow.orientation = .horizontal
+        summaryRow.alignment = .centerY
+        summaryRow.spacing = GitStatusOverlayDefaults.markGap
+        summaryRow.translatesAutoresizingMaskIntoConstraints = false
+        summaryRow.addArrangedSubview(glyph)
+
+        countersRow.orientation = .horizontal
+        countersRow.alignment = .centerY
+        countersRow.spacing = GitStatusOverlayDefaults.markGap
+        countersRow.translatesAutoresizingMaskIntoConstraints = false
+        countersRow.isHidden = true
+        countersRow.addArrangedSubview(countersMark)
+
+        // No spacing between rows: the summary band and the children button are each a
+        // 26-point band with their own text centred in it, so the padding is already there.
+        // A spacing token here would be counted twice and the lines would drift apart.
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 0
+        content.alphaValue = GitStatusOverlayDefaults.restingContentAlpha
+        content.translatesAutoresizingMaskIntoConstraints = false
+        content.addArrangedSubview(summaryRow)
+        content.addArrangedSubview(countersRow)
+
         subagentsButton.target = self
         subagentsButton.action = #selector(openSubagents)
         subagentsButton.emphasis = .tertiary
@@ -120,8 +165,8 @@ final class GitStatusOverlayView: BackdropOverlay {
         subagentsButton.setContentHuggingPriority(.required, for: .horizontal)
         subagentsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         subagentsButton.isHidden = true
-        stack.addArrangedSubview(subagentsButton)
-        addSubview(stack)
+        content.addArrangedSubview(subagentsButton)
+        addSubview(content)
 
         extensionSlotStack.orientation = .vertical
         extensionSlotStack.alignment = .leading
@@ -133,23 +178,52 @@ final class GitStatusOverlayView: BackdropOverlay {
         addSubview(extensionSlotStack)
 
         // The summary keeps its exact 26-point band — top-pinned now instead of centred, so
-        // the card can grow downward under extension rows without moving a pixel of the line
-        // the render tests measure. With the slot empty the collapsed bottom reproduces the
-        // original fixed height.
-        let collapsedBottom = bottomAnchor.constraint(equalTo: stack.bottomAnchor)
+        // the card can grow downward under further rows without moving a pixel of the line
+        // the render tests measure. With one row and an empty slot the collapsed bottom
+        // reproduces the original fixed height.
+        //
+        // The two constants are the padding a *bare* last row does not carry itself, set in
+        // `rebuild()`: a band-shaped row (the summary line, the children button) already ends
+        // in its own half-band, while the counters line is a label and would otherwise sit on
+        // the card's edge.
+        let collapsedBottom = bottomAnchor.constraint(equalTo: content.bottomAnchor)
         let expandedBottom = bottomAnchor.constraint(
             equalTo: extensionSlotStack.bottomAnchor,
             constant: Design.Spacing.small
         )
+        let slotTop = extensionSlotStack.topAnchor.constraint(equalTo: content.bottomAnchor)
+        let summaryRowHeight = summaryRow.heightAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.height
+        )
+
+        // The children row is a button, and a button carries its own padding around the mark it
+        // draws. Insetting the text rows by exactly that much is what puts all three marks in
+        // one column — and doing it with the stack's own `edgeInsets` rather than a constraint
+        // keeps every row's *frame* at the content edge, so the button never has to hang
+        // outside its parent to line up, which would leave its leading edge unclickable.
+        let markInset = subagentsButton.opticalHorizontalInset
+        for row in [summaryRow, countersRow] {
+            row.edgeInsets = NSEdgeInsets(top: 0, left: markInset, bottom: 0, right: markInset)
+        }
+        let countersRowHeight = countersRow.heightAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.height
+        )
+        countersRowHeight.isActive = false
         collapsedBottomConstraint = collapsedBottom
         expandedBottomConstraint = expandedBottom
+        slotTopConstraint = slotTop
+        summaryRowHeightConstraint = summaryRowHeight
+        countersRowHeightConstraint = countersRowHeight
 
         NSLayoutConstraint.activate([
             widthAnchor.constraint(lessThanOrEqualToConstant: GitStatusOverlayDefaults.maxWidth),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.medium),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.medium),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.heightAnchor.constraint(equalToConstant: GitStatusOverlayDefaults.height),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.medium),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.medium),
+            content.topAnchor.constraint(equalTo: topAnchor),
+            summaryRowHeight,
+            // Full width, so the totals sit at the card's trailing edge rather than trailing the
+            // file count — the two columns a list of readings is made of.
+            countersRow.widthAnchor.constraint(equalTo: content.widthAnchor),
             extensionSlotStack.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: Design.Spacing.medium
@@ -158,7 +232,7 @@ final class GitStatusOverlayView: BackdropOverlay {
                 equalTo: trailingAnchor,
                 constant: -Design.Spacing.medium
             ),
-            extensionSlotStack.topAnchor.constraint(equalTo: stack.bottomAnchor),
+            slotTop,
             collapsedBottom
         ])
 
@@ -203,6 +277,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         layer?.borderWidth = Design.Radius.border
         applyLayerBorder(ink.border.composited(over: surface))
         glyph.contentTintColor = ink.secondary
+        countersMark.contentTintColor = ink.tertiary
         subagentsButton.contentTintColor = ink.secondary
         subagentsButton.hoverFill = ink.surfaceHover
         rebuild()
@@ -218,12 +293,9 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// Promotes the ordinary branch card into the live run receipt shown in the same place.
     ///
     /// The checkout monitor continues feeding `update(with:)`, so file and line totals move
-    /// independently of plan updates. A rising edge prepares one orb variant; repeated plan or
-    /// diff readings do not restart its animation.
+    /// independently of plan updates. There is no spinner in this promotion: the plan position
+    /// *is* the receipt, and whichever surface the session actually uses already animates one.
     func updateRunState(isActive: Bool, progress: RunProgress?) {
-        if isActive, !isRunActive {
-            orb.prepareForWorking(style: AppSettings.shared.workingOrbStyle)
-        }
         isRunActive = isActive
         runProgress = isActive ? progress : nil
         rebuild()
@@ -246,8 +318,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         isRunActive = false
         runProgress = nil
         subagentCounts = (working: 0, done: 0)
-        orb.isHidden = true
-        glyph.isHidden = false
+        hasGitReceipt = false
         subagentsButton.isHidden = true
         isHidden = true
     }
@@ -294,15 +365,17 @@ final class GitStatusOverlayView: BackdropOverlay {
     // MARK: - Private Methods
 
     private func rebuild() {
-        let text = Self.attributedText(
+        // The counters sit on the card, not on the backdrop the card floats over.
+        let diff = Design.Diff.on(WindowBackdrop.opaque(ink.surface))
+        let head = Self.headText(
             for: lastReading,
             isRunActive: isRunActive,
             progress: runProgress,
-            ink: ink,
-            // The counters sit on the card, not on the backdrop the card floats over.
-            diff: Design.Diff.on(WindowBackdrop.opaque(ink.surface))
+            ink: ink
         )
-        let hasGitReceipt = text.length > 0
+        let counters = Self.countersText(for: lastReading, ink: ink, diff: diff)
+
+        hasGitReceipt = head != nil || counters != nil
         let hasSubagents = subagentCounts.working + subagentCounts.done > 0
         guard hasGitReceipt || hasSubagents else {
             isHidden = true
@@ -311,19 +384,64 @@ final class GitStatusOverlayView: BackdropOverlay {
 
         // Rebuilt rather than reassigned: a label measures itself at creation, and the helper
         // exists precisely because assigning attributed text afterwards does not re-measure.
-        textLabel?.removeFromSuperview()
-        if hasGitReceipt {
-            let label = NSTextField.label(attributed: text)
+        for view in [summaryLabel, filesLabel, countersLabel, countersGap] {
+            view?.removeFromSuperview()
+        }
+        summaryLabel = nil
+        filesLabel = nil
+        countersGap = nil
+        countersLabel = nil
+
+        if let head {
+            let label = NSTextField.label(attributed: head)
             label.cell?.lineBreakMode = .byTruncatingMiddle
-            textLabel = label
-            stack.insertArrangedSubview(label, at: 2)
-        } else {
-            textLabel = nil
+            summaryLabel = label
+            summaryRow.addArrangedSubview(label)
+            glyph.image = NSImage(
+                systemSymbolName: isRunActive ? "checklist" : "arrow.triangle.branch",
+                accessibilityDescription: isRunActive
+                    ? L10n.string("Plan")
+                    : L10n.string("Branch")
+            )
+        }
+        if let counters {
+            let files = NSTextField.label(attributed: counters.files)
+            files.cell?.lineBreakMode = .byTruncatingTail
+            filesLabel = files
+            countersRow.addArrangedSubview(files)
+
+            // Held apart, so the totals land on the card's trailing edge rather than trailing
+            // the file count: two columns, which is what makes a stack of readings a list.
+            let gap = NSView()
+            gap.translatesAutoresizingMaskIntoConstraints = false
+            gap.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            gap.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            countersGap = gap
+            countersRow.addArrangedSubview(gap)
+
+            let totals = NSTextField.label(attributed: counters.totals)
+            totals.setContentHuggingPriority(.required, for: .horizontal)
+            totals.setContentCompressionResistancePriority(.required, for: .horizontal)
+            countersLabel = totals
+            countersRow.addArrangedSubview(totals)
         }
 
-        orb.isHidden = !isRunActive || !hasGitReceipt
-        glyph.isHidden = isRunActive || !hasGitReceipt
+        summaryRow.isHidden = head == nil
+        countersRow.isHidden = counters == nil
+        summaryRowHeightConstraint?.isActive = head != nil
+        // Whichever row leads carries the card's top padding, and only a band does. On a
+        // detached head the counters lead, so the band moves to them.
+        countersRowHeightConstraint?.isActive = head == nil && counters != nil
         subagentsButton.isHidden = !hasSubagents
+
+        // Only a bare label needs the card to end below it; the bands end below themselves.
+        let endsOnBareLabel = counters != nil
+            && !hasSubagents
+            && countersRowHeightConstraint?.isActive != true
+        let bottomInset = endsOnBareLabel ? Design.Spacing.small : 0
+        collapsedBottomConstraint?.constant = bottomInset
+        slotTopConstraint?.constant = bottomInset
+
         if hasSubagents {
             let working = subagentCounts.working
             let done = subagentCounts.done
@@ -336,7 +454,11 @@ final class GitStatusOverlayView: BackdropOverlay {
         }
         if hasGitReceipt {
             setAccessibilityRole(.button)
-            setAccessibilityLabel(text.string)
+            setAccessibilityLabel(Self.spokenText(
+                for: lastReading,
+                isRunActive: isRunActive,
+                progress: runProgress
+            ))
             toolTip = L10n.string("Open Git Review (⇧⌘R)")
         } else {
             setAccessibilityRole(.group)
@@ -348,67 +470,107 @@ final class GitStatusOverlayView: BackdropOverlay {
         isHidden = false
     }
 
-    /// The card's whole sentence. Idle, it is the branch and counters it has always shown.
-    /// During a run, the plan position replaces the branch and the changed-file count joins the
-    /// live line totals, matching the unit of work the orb describes.
-    /// A clean checkout shows the branch alone; a detached head shows the counters alone;
-    /// both absent is nothing to say, and the caller hides the card.
-    private static func attributedText(
+    /// One mark, sized and centred in the column every row's mark shares.
+    private func configureMark(_ view: NSImageView, symbol: String, description: String) {
+        view.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
+        view.symbolConfiguration = .init(
+            pointSize: GitStatusOverlayDefaults.fontSize,
+            weight: .medium
+        )
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.setContentHuggingPriority(.required, for: .horizontal)
+        view.widthAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.markSlot
+        ).isActive = true
+    }
+
+    /// The card's leading line: the plan position while a run is in flight, the branch otherwise.
+    ///
+    /// Nil for a detached head with no run, which leaves the counters row — which has a mark of
+    /// its own — to lead, and nil with nothing at all, which is the caller's cue to hide the card.
+    private static func headText(
         for reading: GitChangeMonitor.Reading?,
         isRunActive: Bool,
         progress: RunProgress?,
+        ink: Design.Ink
+    ) -> NSAttributedString? {
+        let font = Design.Typography.numericDetail(weight: .medium)
+        if isRunActive {
+            return NSAttributedString(
+                string: progress?.label ?? "Working…",
+                attributes: [.font: font, .foregroundColor: ink.label]
+            )
+        }
+        guard let branch = reading?.branch else { return nil }
+        return NSAttributedString(
+            string: branch,
+            attributes: [.font: font, .foregroundColor: ink.secondary]
+        )
+    }
+
+    /// The counters line, in the two columns a list of readings is made of: how many files at
+    /// the leading edge, `+N −M` held to the trailing one.
+    ///
+    /// The file count is no longer a run-only extra. It is the label the row wants beside its
+    /// totals, and one presentation is one thing to learn — the card used to say it during a run
+    /// and drop it the moment the turn ended, which is the sort of mode nobody asked for.
+    ///
+    /// **The totals are abbreviated** — `+4.2K` — in the notation the reader's locale uses.
+    /// The card is a glance surface under a 360-point ceiling floating over the pane's own
+    /// content, and the exact figure is one click away in Git Review, whose changed-files pill
+    /// abbreviates the same diff the same way. `spokenText` keeps the exact counts: an
+    /// abbreviation read aloud is a number lost rather than a number shortened.
+    private static func countersText(
+        for reading: GitChangeMonitor.Reading?,
         ink: Design.Ink,
         diff: Design.DiffInk
-    ) -> NSAttributedString {
+    ) -> (files: NSAttributedString, totals: NSAttributedString)? {
+        guard let reading, !reading.summary.isClean else { return nil }
         let font = Design.Typography.numericDetail(weight: .medium)
-        let text = NSMutableAttributedString()
 
+        let files = NSAttributedString(
+            string: Self.fileCount(reading.summary.files),
+            attributes: [.font: font, .foregroundColor: ink.secondary]
+        )
+        let totals = NSMutableAttributedString()
+        totals.append(NSAttributedString(string: "+\(compact(reading.summary.added))", attributes: [
+            .font: font,
+            .foregroundColor: diff.added
+        ]))
+        totals.append(NSAttributedString(string: " −\(compact(reading.summary.removed))", attributes: [
+            .font: font,
+            .foregroundColor: diff.removed
+        ]))
+        return (files, totals)
+    }
+
+    /// Every row the card is showing, as one sentence, for the reader who hears it rather than
+    /// sees it: exact counts, and a separator where the eye sees a line break.
+    private static func spokenText(
+        for reading: GitChangeMonitor.Reading?,
+        isRunActive: Bool,
+        progress: RunProgress?
+    ) -> String {
+        var parts: [String] = []
         if isRunActive {
-            text.append(NSAttributedString(
-                string: progress?.label ?? "Working…",
-                attributes: [
-                    .font: font,
-                    .foregroundColor: ink.label
-                ]
-            ))
+            parts.append(progress?.label ?? "Working…")
         } else if let branch = reading?.branch {
-            text.append(NSAttributedString(string: branch, attributes: [
-                .font: font,
-                .foregroundColor: ink.secondary
-            ]))
+            parts.append(branch)
         }
 
         if let reading, !reading.summary.isClean {
-            if text.length > 0 {
-                text.append(NSAttributedString(
-                    string: isRunActive ? "  ·  " : "  ",
-                    attributes: [
-                        .font: font,
-                        .foregroundColor: ink.tertiary
-                    ]
-                ))
-            }
-            if isRunActive {
-                let noun = reading.summary.files == 1 ? "file" : "files"
-                text.append(NSAttributedString(
-                    string: "\(formatted(reading.summary.files)) \(noun) changed ",
-                    attributes: [
-                        .font: font,
-                        .foregroundColor: ink.secondary
-                    ]
-                ))
-            }
-            text.append(NSAttributedString(string: "+\(formatted(reading.summary.added))", attributes: [
-                .font: font,
-                .foregroundColor: diff.added
-            ]))
-            text.append(NSAttributedString(string: " −\(formatted(reading.summary.removed))", attributes: [
-                .font: font,
-                .foregroundColor: diff.removed
-            ]))
+            parts.append(
+                fileCount(reading.summary.files)
+                    + " +\(formatted(reading.summary.added))"
+                    + " −\(formatted(reading.summary.removed))"
+            )
         }
 
-        return text
+        return parts.joined(separator: "  ·  ")
+    }
+
+    private static func fileCount(_ files: Int) -> String {
+        files == 1 ? L10n.string("1 file") : L10n.format("%lld files", Int64(files))
     }
 
     /// Counts follow the user's locale: `8,349`, `8 349`, and their equivalents are the same
@@ -417,10 +579,16 @@ final class GitStatusOverlayView: BackdropOverlay {
         count.formatted(.number.grouping(.automatic))
     }
 
+    /// The same number at a glance, in the reader's own notation: `4.2K` in English, `4,2 tn`
+    /// in Swedish. Below a thousand this is the exact count, so short diffs are untouched.
+    private static func compact(_ count: Int) -> String {
+        count.formatted(.number.notation(.compactName))
+    }
+
     // MARK: - Interaction
 
     override func mouseDown(with event: NSEvent) {
-        if textLabel != nil { onOpen?() }
+        if hasGitReceipt { onOpen?() }
     }
 
     @objc private func openSubagents() {

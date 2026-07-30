@@ -200,26 +200,71 @@ index, the watcher would see it, and the pane would re-read itself forever.
 The selected session's **floating status card** is fed by `GitChangeMonitor`, a smaller
 read-side coordinator over that same watcher. It serializes summary reads and remembers one
 trailing refresh when a new write lands mid-read, so a burst always ends on a reading taken
-after its last write. Idle, the card says branch and `+N −M`. While a **native conversation's**
-turn is active it keeps that exact monitor alive but changes the presentation to a working orb,
-structured plan position when available, changed-file count and `+N −M`. The totals are still the
-checkout's uncommitted totals — not a count inferred from Edit tools — and clicking either
-Git presentation opens Git Review. When the session has children, a separately clickable
-working/done segment joins the same line and opens the Subagents display-pane tab. It remains
-visible even when there is no Git sentence to show, making the surface a session status card
-rather than forcing child navigation back into the conversation.
+after its last write. Idle, the card says branch, changed files and `+N −M`. While a **native
+conversation's** turn is active it keeps that exact monitor alive and promotes the first line to
+the structured plan position when one is available. The totals are still the checkout's
+uncommitted totals — not a count inferred from Edit tools — and clicking either Git presentation
+opens Git Review. When the session has children, a separately clickable working/done segment
+joins the card and opens the Subagents display-pane tab. It remains visible even when there is
+no Git sentence to show, making the surface a session status card rather than forcing child
+navigation back into the conversation.
+
+**The card draws no spinner.** It used to promote its first line with a working orb, and that
+orb was the third one on screen: a terminal session's CLI draws its own a few lines below, and
+a native conversation animates one beside its status. It was also the only one sitting on the
+*terminal's* palette rather than the app's, so its accent was a colour the theme never chose —
+which reads as a stray mark rather than as a state. The plan position is the promotion now, and
+the row's mark changes with it (`checklist` for a plan, the branch mark otherwise), which is the
+job the orb was doing badly. `AppSettings.workingOrbStyle` still drives the conversation's orb.
+
+**Every row leads with a mark, and the marks share one column.** Three readings stacked at the
+same left margin read as three sentences; the same three with `⑂`, `±` and the children mark in
+one column read as a list. The column is the slot a titled `ThemedButton` draws its own symbol
+in (`ThemedButton.markSlotWidth`), because one of the rows *is* one — the children line — so the
+text rows carry that button's `opticalHorizontalInset` as a stack edge inset rather than as a
+constraint. Insetting the frames instead of pulling the button outward is deliberate: a control
+hanging outside its parent's bounds is unclickable along the overhang, which would have made the
+children row's own mark a dead strip. The counters line is the two columns a list wants — the
+file count at the leading edge, the totals held to the trailing one by a flexible gap.
+
+The **file count is no longer run-only**. It used to appear as "N files changed" during a turn
+and vanish when the turn ended; it is now the label the counters row wants beside its totals in
+both states, which is one presentation to learn instead of two.
+
+**One row per fact**, stacked. The card is pinned to the pane's trailing edge under a
+360-point ceiling, and every fact that joined the line took its width from the branch name —
+which truncates in the middle, so a busy run ate the one thing that says which checkout this
+is. Each fact now keeps the full width and the card grows downward instead, the direction it
+has room in and the one its extension slot already grew in. The summary line keeps its exact
+26-point band, which is what reproduces the original single-line pill for a clean checkout with
+no children — and what keeps the render tests measuring the line they were written against.
+Vertical padding comes from the bands themselves: the summary line and the children button are
+each a 26-point band with their text centred, so only a bare counters line at the bottom needs
+the card to end below it. On a **detached head** there is no first line to draw, so the band
+moves to the counters row, which leads with its own mark — the reason each row owning a mark is
+worth the column it costs.
+
+**Drawn counts are abbreviated**, `+4.2K`, in the reader's own notation — the same
+`.compactName` the Git Review changed-files pill uses for the same diff, so the two surfaces
+agree. The accessibility label keeps the exact counts, joined by the separator the eye
+sees as a line break: an abbreviation read aloud is a number lost rather than a number
+shortened. The file count itself stays exact in both places; it is small enough to read at a
+glance and it carries the plural of the noun beside it.
 
 The mark sits closer to the branch name than the sentence's own gap between name and counters,
 so it reads as belonging to the name rather than as a third item in the row — and it sits on the
 same optical line, which took a fix in the label helper rather than in the card (see
-`design-system.md`).
+`design-system.md`). The test that pins that pair measures the ink inside the summary band held
+clear of the card's border: at eight samples per point the border's antialiased skirt is ink
+too, and the band it used to measure ran to the card's own edges — so both ranges were pinned
+to the border and the assertion compared the card's edges with themselves.
 
 The card is also an **extension surface**: `session.corner-card@1` exposes one display-only
 slot whose ID is the placement — `top-trailing` today, `top-leading` reserved for a future
 leading card — deliberately named after the corner rather than after git, since the card may
-carry more than the checkout's reading one day. Extension rows render below the summary line
-and the card grows downward; with the slot empty the collapsed constraint reproduces the
-original single-line geometry exactly, which is what keeps the render tests honest. Rows ride
+carry more than the checkout's reading one day. Extension rows render below the card's own
+rows and it grows downward for them too; with the slot empty the collapsed constraint
+reproduces the native geometry exactly, which is what keeps the render tests honest. Rows ride
 the card's own visibility, share the contents' resting alpha and hover lift, and stay
 display-only. Built-in Git and Subagents segments may have distinct destinations, but an
 extension row still cannot add a competing control. The contract's reasoning lives with the

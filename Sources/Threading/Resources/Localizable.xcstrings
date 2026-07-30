@@ -3001,6 +3001,16 @@
         }
       }
     },
+    "Changes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ändringar"
+          }
+        }
+      }
+    },
     "Changed": {
       "extractionState": "stale",
       "localizations": {

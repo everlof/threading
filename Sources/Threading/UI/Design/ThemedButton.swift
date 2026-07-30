@@ -48,6 +48,15 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         static let shortcutAlpha: CGFloat = 0.7
     }
 
+    /// Where a plain symbol button's *title* starts, for a sibling row that carries no symbol
+    /// and still has to line its words up with the rows that do. Published rather than
+    /// re-derived at the call site: the arithmetic belongs beside the drawing that uses it.
+    ///
+    /// Composed from the two below rather than from `Layout` again, so the word column and the
+    /// mark column cannot drift apart — they are the same three numbers read twice.
+    static let plainTitleLeadingInset: CGFloat =
+        Layout.plainInset + markSlotWidth + markTitleGap
+
     // MARK: - Emphasis
 
     /// How loudly this button asks to be pressed — the three tiers the design system has, named.
@@ -568,6 +577,16 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     var opticalHorizontalInset: CGFloat {
         isBordered ? Layout.titleInset : Layout.plainInset
     }
+
+    /// The slot this button draws its symbol in, and the gap after it.
+    ///
+    /// `PaneFooterView` aligns controls by *edge*, which is what a row of them needs. A
+    /// **column** of rows needs the other alignment: marks in one vertical line and words in
+    /// another, so a stack of readings reads as a list rather than as sentences that happen to
+    /// share a left margin. When one of those rows is a titled button, every other row has to
+    /// match the geometry it already has — so it is stated here rather than guessed there.
+    static let markSlotWidth: CGFloat = Layout.imageSize
+    static let markTitleGap: CGFloat = Layout.imageTitleGap
 
     private var foreground: NSColor {
         if let contentTintColor { return dimmed(contentTintColor) }

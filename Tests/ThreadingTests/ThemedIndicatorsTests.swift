@@ -33,6 +33,10 @@ final class ThemedIndicatorsTests: XCTestCase {
         return try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
     }
 
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
     /// A bar drawn at a known fraction, to sample reference colours from.
     private func bar(at fraction: Double) -> ThemedProgressBar {
         let bar = ThemedProgressBar(frame: NSRect(x: 0, y: 0, width: 100, height: 4))
@@ -462,7 +466,8 @@ final class ThemedIndicatorsTests: XCTestCase {
             summary: GitChangeSummary(files: 2, added: 35, removed: 1)
         ))
 
-        XCTAssertEqual(card.accessibilityLabel(), "feature/progress  +35 −1")
+        // Spoken as the rows are stacked, with the exact counts the drawn card abbreviates.
+        XCTAssertEqual(card.accessibilityLabel(), "feature/progress  ·  2 files +35 −1")
 
         card.updateRunState(
             isActive: true,
@@ -471,7 +476,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertFalse(card.isHidden)
         XCTAssertEqual(
             card.accessibilityLabel(),
-            "Step 2 / 4  ·  2 files changed +35 −1"
+            "Step 2 / 4  ·  2 files +35 −1"
         )
 
         card.updateRunState(
@@ -480,7 +485,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
         XCTAssertEqual(
             card.accessibilityLabel(),
-            "1 / 4 done · 2 active  ·  2 files changed +35 −1"
+            "1 / 4 done · 2 active  ·  2 files +35 −1"
         )
 
         card.updateRunState(
@@ -496,15 +501,73 @@ final class ThemedIndicatorsTests: XCTestCase {
         ))
         XCTAssertEqual(
             card.accessibilityLabel(),
-            "Step 2 / 4  ·  \(1_234.formatted()) files changed "
+            "Step 2 / 4  ·  \(1_234.formatted()) files "
                 + "+\(8_349.formatted()) −\(4_742.formatted())"
         )
 
         card.updateRunState(isActive: false, progress: nil)
         XCTAssertEqual(
             card.accessibilityLabel(),
-            "feature/progress  +\(8_349.formatted()) −\(4_742.formatted())"
+            "feature/progress  ·  \(1_234.formatted()) files "
+                + "+\(8_349.formatted()) −\(4_742.formatted())"
         )
+    }
+
+    /// A run promotes the card's first line; it does not put a *third* spinner on screen.
+    ///
+    /// A terminal session's CLI draws its own a few lines below the card, and a native
+    /// conversation animates one beside its status. The card's copy was the only one sitting on
+    /// the terminal's palette, where an accent the theme never chose reads as a stray colour
+    /// rather than as a state.
+    func testTheRunReceiptCarriesNoSpinnerOfItsOwn() {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "feature/progress",
+            summary: GitChangeSummary(files: 2, added: 35, removed: 1)
+        ))
+        card.updateRunState(isActive: true, progress: RunProgress(step: 2, total: 4))
+        card.applyInk(WindowBackdrop.ink)
+
+        let everything = descendants(of: card)
+        XCTAssertTrue(
+            everything.compactMap { $0 as? WorkingOrbView }.isEmpty,
+            "the corner card animated a spinner two other surfaces already draw"
+        )
+        // The mark is still there — it says which kind of line this is, which is the job the
+        // spinner was doing badly.
+        let marks = everything.compactMap { ($0 as? NSImageView)?.image?.accessibilityDescription }
+        XCTAssertTrue(marks.contains("Plan"), "the promoted line lost its mark with the spinner")
+    }
+
+    /// Marks share one column, so the rows read as a list. The children row is a titled button
+    /// with padding of its own, so the text rows are inset by exactly that much — asserted on
+    /// the drawn frames, since this is the alignment a constraint cannot state directly.
+    func testEveryRowsMarkSitsInOneColumn() throws {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "feature/progress",
+            summary: GitChangeSummary(files: 12, added: 4_203, removed: 250)
+        ))
+        card.updateSubagents(workingCount: 0, doneCount: 9)
+        card.applyInk(WindowBackdrop.ink)
+        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+        card.layoutSubtreeIfNeeded()
+
+        let marks = descendants(of: card)
+            .compactMap { $0 as? NSImageView }
+            .map { card.convert($0.bounds, from: $0).minX }
+        XCTAssertEqual(marks.count, 2, "the branch and counters marks should both be drawn")
+
+        let button = try XCTUnwrap(
+            descendants(of: card).compactMap { $0 as? ThemedButton }.first
+        )
+        let buttonMark = card.convert(button.bounds, from: button).minX
+            + button.opticalHorizontalInset
+
+        for mark in marks {
+            XCTAssertEqual(mark, buttonMark, accuracy: 0.5,
+                           "a row's mark sits outside the column the others share")
+        }
     }
 
     func testGitStatusCardCarriesASeparateSubagentDestination() throws {
@@ -542,12 +605,6 @@ final class ThemedIndicatorsTests: XCTestCase {
             WindowBackdrop.set(.chrome)
 
             let card = GitStatusOverlayView()
-            card.frame = NSRect(
-                x: 0,
-                y: 0,
-                width: GitStatusOverlayDefaults.maxWidth,
-                height: GitStatusOverlayDefaults.height
-            )
             card.update(with: GitChangeMonitor.Reading(
                 branch: "feature/progress",
                 summary: GitChangeSummary(files: 2, added: 35, removed: 1)
@@ -557,6 +614,8 @@ final class ThemedIndicatorsTests: XCTestCase {
                 progress: RunProgress(step: 2, total: 4)
             )
             card.applyInk(WindowBackdrop.ink)
+            // Sized by what it holds: the card is as tall as the rows it stacked.
+            card.frame = NSRect(origin: .zero, size: card.fittingSize)
             card.layoutSubtreeIfNeeded()
 
             let rep = try XCTUnwrap(card.bitmapImageRepForCachingDisplay(in: card.bounds))
@@ -632,36 +691,122 @@ final class ThemedIndicatorsTests: XCTestCase {
         card.applyInk(WindowBackdrop.ink)
         host.layoutSubtreeIfNeeded()
 
-        let stack = try XCTUnwrap(card.subviews.compactMap { $0 as? NSStackView }.first)
-        let mark = try XCTUnwrap(stack.arrangedSubviews.compactMap { $0 as? NSImageView }.first)
-        let words = try XCTUnwrap(stack.arrangedSubviews.compactMap { $0 as? NSTextField }.first)
+        // The card stacks one fact per row, so the pair being measured is the top row's — the
+        // counters are a line of their own below it.
+        let content = try XCTUnwrap(card.subviews.compactMap { $0 as? NSStackView }.first)
+        let summary = try XCTUnwrap(content.arrangedSubviews.compactMap { $0 as? NSStackView }.first)
+        let mark = try XCTUnwrap(summary.arrangedSubviews.compactMap { $0 as? NSImageView }.first)
+        let words = try XCTUnwrap(summary.arrangedSubviews.compactMap { $0 as? NSTextField }.first)
+        let markFrame = card.convert(mark.bounds, from: mark)
+        let wordsFrame = card.convert(words.bounds, from: words)
 
         let ink = try RenderedInk(of: card, scale: 8)
         let fill = try XCTUnwrap(card.layer?.backgroundColor.flatMap(NSColor.init(cgColor:)))
-        // Only the band between the pill's ends, so neither border nor corner counts as ink.
-        let band = Design.Radius.border * 2 ... card.bounds.height - Design.Radius.border * 2
+        // The summary band, measured from the top of the card, so neither the counters line
+        // below nor the card's own edge counts as ink. It clears the border by more than the
+        // border's width: at eight samples per point its antialiased skirt is ink too, and a
+        // band that starts at the card's edge measures the edge instead of the words — which
+        // is exactly what this test used to do, both ranges pinned to the band's own ends.
+        let band = Design.Spacing.tight
+            ... GitStatusOverlayDefaults.height - Design.Spacing.tight
 
         let markInk = try XCTUnwrap(
-            ink.rows(from: mark.frame.minX, to: mark.frame.maxX, within: band, unlike: fill),
+            ink.rows(from: markFrame.minX, to: markFrame.maxX, within: band, unlike: fill),
             "the branch mark drew nothing"
         )
-        // The leading half of the label, which is the branch name rather than the counters.
         let wordsInk = try XCTUnwrap(
-            ink.rows(
-                from: words.frame.minX,
-                to: words.frame.minX + words.frame.width / 2,
-                within: band,
-                unlike: fill
-            ),
+            ink.rows(from: wordsFrame.minX, to: wordsFrame.maxX, within: band, unlike: fill),
             "the branch name drew nothing"
         )
 
         XCTAssertEqual(markInk.middle, wordsInk.middle, accuracy: 0.75,
                        "the mark and the name are drawn on different lines")
         for (name, drawn) in [("mark", markInk), ("name", wordsInk)] {
-            XCTAssertEqual(drawn.middle, card.bounds.height / 2, accuracy: 0.75,
-                           "the \(name) sits off the centre of the pill it is in")
+            XCTAssertEqual(drawn.middle, GitStatusOverlayDefaults.height / 2, accuracy: 0.75,
+                           "the \(name) sits off the centre of the band it is in")
         }
+    }
+
+    /// Draws the card in the states that add and remove a row, light and dark.
+    ///
+    /// One row per fact is a decision a picture settles and an assertion cannot: whether four
+    /// facts at the corner of a pane still read as a card rather than as a panel, and whether
+    /// the two marks and the counters line hold a column at the leading edge.
+    func testRendersTheGitCardStorybook() throws {
+        let directory: URL = {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+                return URL(fileURLWithPath: override)
+            }
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        }()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let dirty = GitChangeSummary(files: 12, added: 4_203, removed: 250)
+        let states: [@MainActor (GitStatusOverlayView) -> Void] = [
+            { $0.update(with: .init(branch: "master", summary: .clean)) },
+            { $0.update(with: .init(branch: "test-levels-and-sidebar-archive", summary: dirty)) },
+            {
+                $0.update(with: .init(branch: "test-levels-and-sidebar-archive", summary: dirty))
+                $0.updateSubagents(workingCount: 2, doneCount: 9)
+            },
+            {
+                $0.update(with: .init(
+                    branch: "test-levels-and-sidebar-archive",
+                    summary: GitChangeSummary(files: 1_234, added: 8_349, removed: 4_742)
+                ))
+                $0.updateRunState(isActive: true, progress: RunProgress(step: 2, total: 4))
+                $0.updateSubagents(workingCount: 0, doneCount: 9)
+            }
+        ]
+
+        Design.Motion.reduceMotionOverrideForTesting = true
+        var written = 0
+        for (appearanceName, appearanceID) in [("light", NSAppearance.Name.aqua),
+                                               ("dark", NSAppearance.Name.darkAqua)] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceID))
+            var data: Data?
+
+            appearance.performAsCurrentDrawingAppearance {
+                MainActor.assumeIsolated {
+                    let host = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+                    host.appearance = appearance
+                    host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+
+                    // Laid out from the top down, the way the pane's corner stacks them.
+                    var top = Design.Spacing.inset
+                    for state in states {
+                        let card = GitStatusOverlayView()
+                        state(card)
+                        card.applyInk(WindowBackdrop.ink)
+                        let size = card.fittingSize
+                        card.frame = NSRect(
+                            x: host.bounds.width - size.width - Design.Spacing.inset,
+                            y: host.bounds.height - top - size.height,
+                            width: size.width,
+                            height: size.height
+                        )
+                        host.addSubview(card)
+                        top += size.height + Design.Spacing.large
+                    }
+
+                    host.layoutSubtreeIfNeeded()
+                    guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                        return
+                    }
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    data = rep.representation(using: .png, properties: [:])
+                }
+            }
+
+            try XCTUnwrap(data).write(
+                to: directory.appendingPathComponent("git-card-\(appearanceName).png")
+            )
+            written += 1
+        }
+
+        XCTAssertEqual(written, 2)
+        print("Rendered the git card storybook to \(directory.path)")
     }
 
     /// Hover lifts what the card *says*, not the card. The distinction is the whole fix: an
