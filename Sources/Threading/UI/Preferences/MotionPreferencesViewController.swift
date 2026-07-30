@@ -139,7 +139,6 @@ final class MotionPreferencesViewController: NSViewController {
         let label = MorphingTitleLabel()
         // The row's own title role, so a demonstrating row and a plain one set type alike.
         label.applyFont(.control)
-        label.alignment = .left
         label.morphStyleOverride = style
         label.setStringValue(style.displayName, animated: false)
         nameRowPreviews[style] = label

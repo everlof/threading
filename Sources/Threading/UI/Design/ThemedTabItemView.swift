@@ -98,6 +98,26 @@ final class ThemedTabItemView: BackdropThemedControl {
         }
     }
 
+    /// Widest this tab may grow before its title truncates, stated as a number the tab **owns**
+    /// rather than only as a constraint on it.
+    ///
+    /// A tab that is merely capped still reports the whole title's width as its intrinsic size,
+    /// so it settles at exactly the cap — and then holds a slot its label cannot fill. Tail
+    /// truncation lands on a character boundary, so the drawn line falls up to one character
+    /// short of the room it was handed, and that remainder sits as dead air between the title
+    /// and the ×, moving with the length of the name. Told its cap, the tab asks the label what
+    /// it will really draw (`MorphingTitleLabel.width(fitting:)`) and sizes to that instead, so
+    /// the gap after the title is the one the tokens state whether or not the title truncated.
+    ///
+    /// A host that also constrains the width should keep doing so: this makes the tab's own
+    /// answer fit inside the cap, it does not enforce it.
+    var maxWidth: CGFloat? {
+        didSet {
+            guard maxWidth != oldValue else { return }
+            invalidateIntrinsicContentSize()
+        }
+    }
+
     private let placement: Placement
     private let iconView = NSImageView()
     private let titleLabel = MorphingTitleLabel()
@@ -105,6 +125,10 @@ final class ThemedTabItemView: BackdropThemedControl {
     /// Public component content rendered after the title but still inside this native control.
     /// Keeping the slot here means selection, hover, focus and close remain one host-owned tab.
     let extensionAccessoryStack = NSStackView()
+    private lazy var content = NSStackView(
+        views: [iconView, titleLabel, extensionAccessoryStack, closeButton]
+    )
+    private var contentTrailing: NSLayoutConstraint?
     private var isPressed = false { didSet { needsDisplay = true } }
 
     /// What the current title names, so a *rename* can be told from a tab being reused for
@@ -161,19 +185,22 @@ final class ThemedTabItemView: BackdropThemedControl {
         extensionAccessoryStack.setContentHuggingPriority(.required, for: .horizontal)
         extensionAccessoryStack.isHidden = true
 
-        let content = NSStackView(
-            views: [iconView, titleLabel, extensionAccessoryStack, closeButton]
-        )
         content.orientation = .horizontal
         content.alignment = .centerY
         content.spacing = Design.Spacing.small
-        // The close button stands a step further off than the strip's own rhythm: at the strip
-        // spacing it crowded the title on one side and the tab's edge on the other, since its
-        // target already hugs the trailing inset. Matched in `intrinsicContentSize`.
-        content.setCustomSpacing(Design.Spacing.medium, after: titleLabel)
-        content.setCustomSpacing(Design.Spacing.medium, after: extensionAccessoryStack)
+        // **The title takes any room the tab has spare, so the × keeps the trailing inset.**
+        // A tab is not always free to be as wide as its content: the toolbar holds the page tab
+        // to `SessionTitleDefaults.minWidth` so the window's chrome does not resize itself around
+        // every session name. Under the stack's default `.gravityAreas` that extra width went
+        // *after* the last view — a short name left the × sitting 43pt inboard of a tab whose
+        // fill ran to the edge, which reads as a tab with its contents shoved left. Filling puts
+        // the slack in the one view that can absorb it without moving anything: the title, whose
+        // line is drawn from its leading edge either way.
+        content.distribution = .fill
+        titleLabel.setContentHuggingPriority(.init(1), for: .horizontal)
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
+        applyCloseSpacing()
 
         // Breakable, alone among these. A tab strip that collapses to nothing — the display pane
         // hides its own until two surfaces coexist — otherwise leaves every tab inside it stating
@@ -182,19 +209,65 @@ final class ThemedTabItemView: BackdropThemedControl {
         let height = heightAnchor.constraint(equalToConstant: placement.height)
         height.priority = .required - 1
 
+        let trailing = content.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -trailingContentInset
+        )
+        contentTrailing = trailing
+
         NSLayoutConstraint.activate([
             height,
             content.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: placement.horizontalInset
             ),
-            content.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -placement.horizontalInset
-            ),
+            trailing,
             content.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: Design.Size.tabIconSlot)
         ])
+    }
+
+    // MARK: - Close Button Geometry
+
+    /// The padding `ThemedIconButton` holds around the × — click target, not ink.
+    ///
+    /// Spacing that ignores it puts the visible glyph that much further out on **both** sides:
+    /// with a 20pt target around a 12pt glyph, the stated "10pt after the title" reads as 14 and
+    /// the "12pt from the tab's edge" as 16, while the leading icon — a 14pt symbol in a 16pt
+    /// slot — sits on the 12 it was given. That is the difference the eye reads as a tab whose
+    /// contents are shoved left. Every other container that places one of these already
+    /// subtracts it — `PaneHeaderView`, `PaneFooterView`, both sidebar rows — via
+    /// `OpticalInsetProviding`; the tab was the one that did not, and it shows it most, having a
+    /// control at one end of a short row and a title at the other.
+    private var closeOpticalInset: CGFloat {
+        closeButton.isHidden ? 0 : closeButton.opticalHorizontalInset
+    }
+
+    /// The trailing inset applied to the content, measured so that whatever ends the row lands
+    /// its *ink* on `placement.horizontalInset`.
+    private var trailingContentInset: CGFloat {
+        placement.horizontalInset - closeOpticalInset
+    }
+
+    /// The gap before the close button: `Design.Spacing.medium` to its glyph.
+    ///
+    /// The close button stands a step further off than the strip's own rhythm — at the strip
+    /// spacing it crowded the title on one side and the tab's edge on the other — and that step
+    /// is now stated where it is seen. Matched in `intrinsicContentSize`.
+    private var spacingBeforeClose: CGFloat {
+        Design.Spacing.medium - closeOpticalInset
+    }
+
+    /// Restates the spacing that depends on which of the trailing views are showing. The stack
+    /// gives a hidden arranged view no room, so the gap "after the title" is the gap to the
+    /// accessory slot or to the × depending on what survives.
+    private func applyCloseSpacing() {
+        content.setCustomSpacing(
+            extensionAccessoryStack.isHidden ? spacingBeforeClose : Design.Spacing.medium,
+            after: titleLabel
+        )
+        content.setCustomSpacing(spacingBeforeClose, after: extensionAccessoryStack)
+        contentTrailing?.constant = -trailingContentInset
     }
 
     // MARK: - Content
@@ -222,6 +295,9 @@ final class ThemedTabItemView: BackdropThemedControl {
         closeButton.isHidden = !showsClose
         closeButton.setAccessibilityTitle(L10n.format("Close %@", title))
 
+        // A tab that gained or lost its × changed where the row ends, and the compensation for
+        // the button's own padding goes with it.
+        applyCloseSpacing()
         invalidateIntrinsicContentSize()
         needsDisplay = true
     }
@@ -237,19 +313,35 @@ final class ThemedTabItemView: BackdropThemedControl {
     // MARK: - Layout
 
     override var intrinsicContentSize: NSSize {
+        let width = everythingButTheTitle + ceil(titleWidth)
+        return NSSize(
+            width: maxWidth.map { min(width, $0) } ?? width,
+            height: placement.height
+        )
+    }
+
+    /// Every fixed part of the row, in the order it is laid out: the two insets, the icon slot
+    /// and its gap, the accessory slot and its gap, the × and its gap.
+    private var everythingButTheTitle: CGFloat {
         let closeWidth = closeButton.isHidden
             ? 0
-            : Design.Spacing.medium + Design.Size.inlineButtonTarget
+            : spacingBeforeClose + Design.Size.inlineButtonTarget
         let accessoryWidth = extensionAccessoryStack.isHidden
             ? 0
             : Design.Spacing.medium + ceil(extensionAccessoryStack.fittingSize.width)
-        let width = placement.horizontalInset * 2
+        return placement.horizontalInset
+            + trailingContentInset
             + Design.Size.tabIconSlot
             + Design.Spacing.small
-            + ceil(titleLabel.intrinsicContentSize.width)
             + accessoryWidth
             + closeWidth
-        return NSSize(width: width, height: placement.height)
+    }
+
+    /// What the title contributes: the width it *wants* where the tab is free to grow, and the
+    /// width it will actually **draw** where the tab is capped — see `maxWidth`.
+    private var titleWidth: CGFloat {
+        guard let maxWidth else { return titleLabel.intrinsicContentSize.width }
+        return titleLabel.width(fitting: max(0, maxWidth - everythingButTheTitle))
     }
 
     // MARK: - Drawing

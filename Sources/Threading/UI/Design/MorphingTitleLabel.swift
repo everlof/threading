@@ -80,6 +80,18 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
         // carry. Without this the clip above cuts the line dead mid-glyph, with nothing to
         // say it was shortened — the one way this reads worse than the label it replaces.
         label.truncation = .tail
+
+        // **From the leading edge, not centred in whatever slot the host gave us.** The package
+        // defaults to `.center`, which suits the one large title its showcase demonstrates and
+        // nothing here: every title this wraps is a name that follows an icon, and a name is read
+        // from where it begins. Slots are wider than their line more often than they look — the
+        // toolbar's page tab is held to a minimum width, a settings row stretches whichever view
+        // hugs least, and a *truncated* line lands on a character boundary and so falls up to one
+        // character short of the room it was offered. Centred, half of all that became a leading
+        // indent that moved with the length of the name, and the other half a gap before whatever
+        // followed the title: the tab strip's × stood 19pt off a title it was told to stand 10
+        // from, and by a different amount on each tab.
+        label.alignment = .left
         addSubview(label)
 
         // The wrapper yields where an `NSTextField` label would, so a caller can drop it
@@ -105,6 +117,17 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
 
     override var intrinsicContentSize: NSSize {
         label.intrinsicContentSize
+    }
+
+    /// How wide the line will be **once drawn** in a slot `available` points wide: the whole
+    /// title, or the ellipsized head it truncates to.
+    ///
+    /// `intrinsicContentSize` answers what the title wants, which is the right answer for a host
+    /// that grows to fit one. A host with a *cap* needs this one instead: truncation lands on a
+    /// character boundary, so the line that arrives is up to a character narrower than the slot,
+    /// and a host that sizes to the slot holds that difference as space it never chose.
+    func width(fitting available: CGFloat) -> CGFloat {
+        label.width(fitting: available)
     }
 
     override func viewDidChangeEffectiveAppearance() {

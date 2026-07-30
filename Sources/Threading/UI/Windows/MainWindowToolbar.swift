@@ -129,6 +129,10 @@ extension MainWindowController: NSToolbarDelegate {
         header.alignment = .centerY
         header.spacing = Design.Spacing.small
 
+        // The cap as the tab's own number as well as a constraint on it, so a long session name
+        // shortens to a tab that ends where its title does — see `ThemedTabItemView.maxWidth`.
+        pageTabView.maxWidth = SessionTitleDefaults.maxWidth
+
         NSLayoutConstraint.activate([
             pageTabView.widthAnchor.constraint(
                 greaterThanOrEqualToConstant: SessionTitleDefaults.minWidth

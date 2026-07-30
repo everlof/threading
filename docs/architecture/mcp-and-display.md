@@ -95,6 +95,14 @@ Four things were measured rather than assumed, each having first been wrong:
   now holds only `DisplayPaneDefaults.slimmestWidth` — the pane's own chrome, which the window
   was paying for anyway. The 200pt is still where the panel *opens* (applied as a width on
   reveal, and the floor a stored width is clamped to); it is no longer where the window stops.
+
+  The caption and the placeholder were floored to `.fittingSizeCompression - 1` for the same
+  reason, and the **tab strip** was the last thing in the pane still charging it: a strip that
+  scrolls rather than shrinks is not a measurement of anything, but at compression resistance
+  240 it answered `fittingSize` — which resolves at 50 — with the full width of its tabs. The
+  pane's fitting width was therefore its widest tab plus its chrome (228pt with one tab open,
+  against a 48pt floor), so the panel's real minimum moved with the *name* of the page open in
+  it. `ThemedTabStripView` now yields below the fitting threshold like the two labels beside it.
 - **A height computed from a width has to be recomputed when the width changes.** The compare
   tab's canvas took `preferredHeight(forWidth:)` once, as a constant, from `view.bounds.width`
   while the body was being built — before the pane had laid out at all on a first show. The box

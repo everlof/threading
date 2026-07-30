@@ -30,8 +30,14 @@ final class ThemedTabStripViewTests: XCTestCase {
         }
     }
 
-    private func makeStrip(items: [TabStripItem]) -> ThemedTabStripView {
+    /// `chipMaxWidth` is read as each chip is made, so a test about a *capped* chip has to state
+    /// it here rather than after the update — the same order the hosts use at setup.
+    private func makeStrip(
+        items: [TabStripItem],
+        chipMaxWidth: CGFloat? = nil
+    ) -> ThemedTabStripView {
         let strip = ThemedTabStripView(inkSource: .chrome)
+        strip.chipMaxWidth = chipMaxWidth
         strip.update(items: items)
 
         let window = NSWindow(
@@ -282,5 +288,108 @@ final class ThemedTabStripViewTests: XCTestCase {
 
     func testTheStripBandMatchesThePaneHeaderBand() {
         XCTAssertEqual(ThemedTabStripView.bandHeight, PaneHeaderView.bandHeight)
+    }
+
+    /// A chip whose title had to be shortened must end where the shortened title ends.
+    ///
+    /// Capped, it used to settle at exactly the cap and hand its label a slot the label could
+    /// not fill: tail truncation lands on a character boundary, so the line that arrives is up
+    /// to one character narrower than the room offered — measured between 0.1 and 8.1pt for one
+    /// title across the widths a cap can fall on — and that remainder sat as air between the
+    /// title and the ×, moving from tab to tab with the name.
+    func testACappedChipEndsWhereItsShortenedTitleEnds() throws {
+        let items = items([("skalman.app vs Threading", true)])
+        let strip = makeStrip(items: items, chipMaxWidth: DisplayPaneDefaults.tabChipMaxWidth)
+        let tab = try XCTUnwrap(strip.chipView(for: items[0].id))
+        let title = try XCTUnwrap(
+            descendants(in: tab).compactMap { $0 as? MorphingTitleLabel }.first
+        )
+
+        let drawn = title.width(fitting: title.bounds.width)
+        XCTAssertLessThan(
+            drawn,
+            title.intrinsicContentSize.width,
+            "fixture title fits — nothing here is about truncation"
+        )
+        XCTAssertEqual(
+            title.bounds.width,
+            drawn,
+            accuracy: 1,
+            "the title's slot is wider than the line in it: dead space inside the tab"
+        )
+        XCTAssertLessThan(
+            tab.bounds.width,
+            DisplayPaneDefaults.tabChipMaxWidth,
+            "the chip is holding the whole cap rather than the width of what it draws"
+        )
+    }
+
+    /// The × is a 12pt glyph inside a 20pt click target, so spacing measured to its *frame*
+    /// lands the visible glyph 4pt further out at both ends — and the eye measures the glyph.
+    /// Every other container that places one of these subtracts that padding
+    /// (`OpticalInsetProviding`); this asserts the tab does too, in the same terms
+    /// `PaneFooterTests` uses.
+    func testTheCloseGlyphSitsOnTheStatedSpacingAndInset() throws {
+        let items = items([("skalman.app vs Threading", true)])
+        let strip = makeStrip(items: items, chipMaxWidth: DisplayPaneDefaults.tabChipMaxWidth)
+        let tab = try XCTUnwrap(strip.chipView(for: items[0].id))
+        let title = try XCTUnwrap(
+            descendants(in: tab).compactMap { $0 as? MorphingTitleLabel }.first
+        )
+        let close = try XCTUnwrap(
+            descendants(in: tab).compactMap { $0 as? ThemedIconButton }.first
+        )
+
+        let lineEnd = title.convert(
+            NSPoint(x: title.width(fitting: title.bounds.width), y: 0),
+            to: tab
+        ).x
+        let glyph = close.convert(
+            close.bounds.insetBy(dx: close.opticalHorizontalInset, dy: 0),
+            to: tab
+        )
+
+        XCTAssertEqual(
+            glyph.minX - lineEnd,
+            Design.Spacing.medium,
+            accuracy: 0.5,
+            "the gap between the title and the × is not the one the tokens state"
+        )
+        XCTAssertEqual(
+            tab.bounds.maxX - glyph.maxX,
+            Design.Spacing.inset,
+            accuracy: 0.5,
+            "the × is inset by its click target rather than by its ink"
+        )
+    }
+
+    /// A strip that scrolls rather than shrinks is not a measurement of its host.
+    ///
+    /// `fittingSize` resolves at `.fittingSizeCompression` (50), so a strip resisting compression
+    /// above that answers it with the whole width of its tabs however narrow the host really is.
+    /// That is how the display panel's *minimum* width came to be its widest tab plus its chrome
+    /// — and so to move with the name of the page open in it — while the pane's own caption and
+    /// placeholder had already been floored below the threshold for exactly this. See
+    /// `docs/architecture/mcp-and-display.md`.
+    func testAStripIsNotItsHostsMeasurement() throws {
+        let strip = makeStrip(
+            items: items([("A tab title long enough to be shortened", true)]),
+            chipMaxWidth: DisplayPaneDefaults.tabChipMaxWidth
+        )
+        let host = try XCTUnwrap(strip.superview)
+
+        XCTAssertLessThan(
+            strip.contentCompressionResistancePriority(for: .horizontal).rawValue,
+            NSLayoutConstraint.Priority.fittingSizeCompression.rawValue
+        )
+        XCTAssertLessThan(
+            host.fittingSize.width,
+            DisplayPaneDefaults.tabChipMaxWidth,
+            "the strip charged its host the width of tabs it would have scrolled"
+        )
+    }
+
+    private func descendants(in root: NSView) -> [NSView] {
+        root.subviews.flatMap { [$0] + descendants(in: $0) }
     }
 }

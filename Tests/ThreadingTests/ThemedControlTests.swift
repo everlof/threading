@@ -1740,6 +1740,75 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertTrue(close.isHidden, "a non-closable destination kept the × visible")
     }
 
+    /// The toolbar holds the page tab to a minimum width, so the window's chrome does not resize
+    /// itself around every session name — which means a short name leaves the tab with room to
+    /// spare. That room belongs to the title. Under the stack's default gravity it landed *after*
+    /// the last view instead, leaving the × 43pt inboard of a tab whose fill ran to the edge.
+    ///
+    /// The title's line still starts where it did, because it is drawn from the label's leading
+    /// edge rather than centred in it. Asserted as the same start at both widths: a glyph's layer
+    /// frame is padded for ink that overhangs its box and snapped to device pixels, and that
+    /// constant cancels between two measurements rather than being restated here.
+    func testAPageTabSpendsSpareWidthOnItsTitleRatherThanAfterItsClose() throws {
+        let tab = ThemedTabItemView(
+            title: "Fix",
+            symbolName: "folder",
+            placement: .horizontal,
+            showsClose: true,
+            inkSource: .backdrop
+        )
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+        tab.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(tab)
+        let width = tab.widthAnchor.constraint(
+            equalToConstant: tab.intrinsicContentSize.width
+        )
+        NSLayoutConstraint.activate([
+            tab.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            tab.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            width
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let title = try XCTUnwrap(
+            descendants(in: tab).compactMap { $0 as? MorphingTitleLabel }.first
+        )
+        let close = try XCTUnwrap(
+            descendants(in: tab).compactMap { $0 as? ThemedIconButton }.first
+        )
+        func lineStart() throws -> CGFloat {
+            let glyphs = title.subviews.flatMap { $0.layer?.sublayers ?? [] }
+            XCTAssertFalse(glyphs.isEmpty, "the title drew nothing")
+            return try XCTUnwrap(glyphs.map { title.convert($0.frame, to: tab).minX }.min())
+        }
+        let snug = try lineStart()
+
+        width.constant = SessionTitleDefaults.minWidth
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(
+            tab.bounds.width,
+            tab.intrinsicContentSize.width + Design.Spacing.large,
+            "the fixture is not holding the tab wider than it wants to be"
+        )
+
+        let glyph = close.convert(
+            close.bounds.insetBy(dx: close.opticalHorizontalInset, dy: 0),
+            to: tab
+        )
+        XCTAssertEqual(
+            tab.bounds.maxX - glyph.maxX,
+            Design.Spacing.inset,
+            accuracy: 0.5,
+            "the spare width landed after the × instead of in the title"
+        )
+        XCTAssertEqual(
+            try lineStart(),
+            snug,
+            accuracy: 1,
+            "the title's first glyph moved with the room around it instead of staying put"
+        )
+    }
+
     func testDisplayPaneHasNoDetachedHeaderCloseButton() {
         let controller = DisplayPaneController()
         controller.loadView()

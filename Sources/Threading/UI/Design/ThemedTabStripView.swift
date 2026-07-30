@@ -149,7 +149,19 @@ final class ThemedTabStripView: NSView {
     private func setup() {
         translatesAutoresizingMaskIntoConstraints = false
         setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        setContentCompressionResistancePriority(.init(240), for: .horizontal)
+        // **Below `.fittingSizeCompression`, not merely below the default.** A strip squeezed for
+        // room scrolls, so it must never be read as a measurement of its host — and 240 said that
+        // only to *layout*. `fittingSize` resolves at priority 50, so at 240 the strip still
+        // charged whoever asked the full width of its tabs: the display panel's fitting width was
+        // its widest tab plus its own chrome, which is the window's minimum
+        // (`DisplayPaneDefaults.slimmestWidth`). That is the same mistake the panel's caption and
+        // placeholder were already fixed for — see `DisplayPaneController.setupContent` — and the
+        // strip is the last thing in that pane still making it. It shows as a panel whose smallest
+        // width moves with the name of the page open in it.
+        setContentCompressionResistancePriority(
+            .init(NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1),
+            for: .horizontal
+        )
 
         stack.orientation = .horizontal
         stack.alignment = .centerY
@@ -288,6 +300,10 @@ final class ThemedTabStripView: NSView {
             self?.handleDrag(of: id, phase: phase, event: event)
         }
         if let chipMaxWidth {
+            // Both: the constraint is the guarantee, and telling the tab its own cap is what
+            // lets it size to the title it will *draw* rather than to the room the cap allows
+            // — see `ThemedTabItemView.maxWidth`.
+            tab.maxWidth = chipMaxWidth
             tab.widthAnchor.constraint(lessThanOrEqualToConstant: chipMaxWidth).isActive = true
         }
 

@@ -354,6 +354,23 @@ The vocabulary these encode, which new work should follow:
   which keeps the buttons inside the slot they are sized into.
   `SidebarRowRenderTests.testEveryTrailingMarkLandsOnOneOpticalLine` asserts the one line.
 
+  `ThemedTabItemView` is the same rule at the other end of a much shorter row, and was the last
+  container not following it: a 12pt × inside a 20pt target put the "10pt after the title" at 14
+  and the "12pt from the tab's edge" at 16, while the leading icon — a 14pt symbol in a 16pt slot
+  — sat on the 12 it was given. A tab is four things in 180 points, so 4pt at one end is the
+  difference between a row that reads as spaced and one that reads as shoved left.
+
+- **A slot is not the line drawn in it.** `MorphingTitleLabel` draws from its leading edge
+  (LabelMorph centres by default, which suits the one large title its showcase demonstrates),
+  and a host that *caps* its own width sizes to `width(fitting:)` rather than to the cap.
+  Tail truncation lands on a character boundary, so the ellipsized head is up to one character
+  narrower than the room it was offered — measured between 0.1 and 8.1pt for one tab title
+  across the widths a cap can fall on. Sized to the cap, that remainder sat between the title
+  and the ×, moving from tab to tab with the name; centred, half of it also became a leading
+  indent. Where the room is genuinely the host's — the toolbar holds the page tab to
+  `SessionTitleDefaults.minWidth` — the title is the view that absorbs it (`.fill` distribution,
+  lowest hugging), so the × keeps the trailing inset instead of the slack landing after it.
+
 **One silhouette per strip.** `TabAppearance` states a tab's geometry and type scale in one
 place, because the app draws tabs in two views that cannot share a class: the pane's strip reads
 the chrome's roles, while the toolbar's active-page tab sits on the terminal backdrop and inks
