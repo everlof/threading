@@ -21,19 +21,22 @@ is the Debug configuration's, and differs by exactly one key.
 
 Both configurations pointed at one entitlements file, so the shipped set requested
 `get-task-allow` — the entitlement that lets any process attach a debugger to an app holding
-GitHub tokens and model API keys in the Keychain. Splitting the file fixes that.
+GitHub tokens and model API keys in the Keychain. Splitting the file removes the *request*.
 
-What the split does *not* do is change a locally built Release. Xcode injects `get-task-allow`
-into the generated `.xcent` whenever the signing identity is an **Apple Development**
-certificate, and the Release configuration sets
-`CODE_SIGN_IDENTITY[sdk=macosx*] = "Apple Development"`. Verified by inspecting
-`Build/Intermediates.noindex/Threading.build/Release/Threading.build/Threading.app.xcent`: the key is
-present there even though the entitlements file no longer contains it.
+That is only half of it. Xcode also **injects** `get-task-allow` whenever it signs with an
+Apple Development certificate, which is what automatic signing picks for a `build` action.
+Verified by inspecting
+`Build/Intermediates.noindex/Threading.build/Release/Threading.build/Threading.app.xcent` — the
+key is present there even though the entitlements file no longer contains it.
 
-Re-signing the same Release bundle with `Developer ID Application` and the shipped entitlements
-file produces a binary without the key. So the file is what decides for a distributed build —
-which is the build that matters, and the one notarization would have rejected while the key was
-still requested. Do not "fix" the local Release build by putting the key back.
+So a locally built `-configuration Release` is development-signed and still carries the key. It
+is not a shipping artefact. The distributable comes from `scripts/release.sh`, which archives
+and exports with `Developer ID Application`; that export has the hardened runtime, a secure
+timestamp, and no `get-task-allow`, and the script fails rather than hand a bundle to
+`notarytool` that lacks any of the three. See
+[`releasing.md`](releasing.md) for why distribution signing cannot live in the build settings.
+
+Do not "fix" a local Release build by putting the key back in the entitlements file.
 
 ## TCC attributes a child process to the responsible parent
 

@@ -150,6 +150,60 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertGreaterThan(wide, narrow)
     }
 
+    // MARK: - The Explanatory Row
+
+    /// `detailRow` had the same fault as `row`, twice over, because two pages each grew their own
+    /// copy before it was a component. A horizontal stack left on `.gravityAreas` never assigns
+    /// its leftover width, so whether the detail line filled the card came down to whether that
+    /// particular string happened to be long enough to claim it. Short copy collapsed into a
+    /// third of the width with the rest of the row empty beside it.
+    ///
+    /// Short copy is therefore the fixture: the long strings passed by accident.
+    private func detailRow(width: CGFloat, detail: String) -> NSView {
+        let built = SettingsUI.detailRow(
+            symbol: "lock.shield",
+            title: "Your own devices",
+            detail: detail,
+            localizes: false
+        )
+        built.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 400))
+        container.addSubview(built)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: width),
+            built.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            built.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            built.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+        return built
+    }
+
+    func testAShortDetailStillUsesTheRowsWidth() throws {
+        let short = "Owner access."
+        let built = detailRow(width: 620, detail: short)
+        let field = try subtitle(in: built, text: short)
+
+        XCTAssertGreaterThan(
+            field.frame.width,
+            620 * 0.6,
+            "the detail line collapsed to \(field.frame.width)pt of a 620pt row"
+        )
+    }
+
+    func testADetailUsesTheExtraWidthAWiderRowGivesIt() throws {
+        let detail = "The QR code is owner access. A paired device can see and manage your "
+            + "chats, send prompts, and review permission requests."
+
+        let narrow = try subtitle(in: detailRow(width: 420, detail: detail), text: detail)
+            .frame.width
+        let wide = try subtitle(in: detailRow(width: 620, detail: detail), text: detail)
+            .frame.width
+
+        XCTAssertGreaterThan(wide, narrow, "the detail wrapped identically at both widths")
+    }
+
     func testSettingsSearchMatchesAllTokensAcrossTitlesAndExplicitMetadata() {
         let sidebar = SettingsSidebar(items: [
             .init(
