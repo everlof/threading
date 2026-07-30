@@ -31,6 +31,21 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<!--
+		Sparkle. The public half of the EdDSA keypair shared with claudex, whose private half
+		lives in the login keychain under account `mjukis-claudex`. See
+		docs/architecture/releasing.md — losing that key means no installed copy of either app
+		can ever be updated again.
+
+		SUEnableAutomaticChecks is the *shipped default*; the user's choice overrides it through
+		`AppSettings.automaticUpdateChecksEnabled`, which is what Settings ▸ General writes.
+	-->
+	<key>SUFeedURL</key>
+	<string>https://github.com/everlof/threading/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>1oYHD7FlQLUy7qQc9NISuCUFzscHMjMnk5Sm6d3/noM=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<!--
 		A project folder is chosen by the user, but the agent Threading launches in it is a child
 		process, and TCC attributes a child's file access to the responsible parent. So the
 		prompt for these locations says "Threading" no matter which agent actually reads the file.

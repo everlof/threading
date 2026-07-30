@@ -116,6 +116,7 @@ public enum RemoteDiagnosticExtraField: String, Sendable {
     case extensionCompanionCount
     case agentAccountSummary
     case previousLaunchClean
+    case automaticUpdateChecks
 }
 
 public struct RemoteDiagnosticRecord: Codable, Equatable, Sendable {

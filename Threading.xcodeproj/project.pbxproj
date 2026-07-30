@@ -75,6 +75,7 @@
 		D12026070000000000000002 /* MCPSessionRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000001 /* MCPSessionRegistryTests.swift */; };
 		D12026070000000000000004 /* PermissionRequestViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000003 /* PermissionRequestViewTests.swift */; };
 		D12026070000000000000006 /* StreamSessionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12026070000000000000005 /* StreamSessionLifecycleTests.swift */; };
+		5AAA00010000000000000011 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5AAA00010000000000000001 /* Sparkle */; };
 		D1FF00010000000000000011 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000001 /* NativeDiffCore */; };
 		D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000002 /* NativeDiffAppKit */; };
 		D1FF00010000000000000013 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000003 /* NativeDiffCore */; };
@@ -173,6 +174,7 @@
 		8178333D2C32D47D3E1E2179 /* SidebarRowClickRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05772B04BCD057501E3D142C /* SidebarRowClickRoutingTests.swift */; };
 		ADD0254BF2C9A50A74A91CB5 /* PreferenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */; };
 		E21DDDA58293E78DC2749CF8 /* MacSupportReportDetailsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */; };
+		91F7FB49655C7751385F2AAA /* AppUpdaterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774B14EC55BC365EBED24EB7 /* AppUpdaterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -391,6 +393,7 @@
 		05772B04BCD057501E3D142C /* SidebarRowClickRoutingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarRowClickRoutingTests.swift; sourceTree = "<group>"; };
 		7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PreferenceStoreTests.swift; sourceTree = "<group>"; };
 		0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSupportReportDetailsTests.swift; sourceTree = "<group>"; };
+		774B14EC55BC365EBED24EB7 /* AppUpdaterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppUpdaterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -484,6 +487,7 @@
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
 				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
+				5AAA00010000000000000011 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -668,6 +672,7 @@
 				05772B04BCD057501E3D142C /* SidebarRowClickRoutingTests.swift */,
 				7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */,
 				0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */,
+				774B14EC55BC365EBED24EB7 /* AppUpdaterTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -860,6 +865,7 @@
 				F4000001000000000000009 /* ThreadingRemoteKit */,
 				D1FF00010000000000000001 /* NativeDiffCore */,
 				D1FF00010000000000000002 /* NativeDiffAppKit */,
+				5AAA00010000000000000001 /* Sparkle */,
 			);
 			productName = Threading;
 			productReference = F2000001000000000000038 /* Threading.app */;
@@ -929,6 +935,7 @@
 				F4000001000000000000008 /* XCLocalSwiftPackageReference "ThreadingExtensionKit" */,
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "ThreadingRemoteKit" */,
 				D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */,
+				5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				7A0000010000000000000090 /* XCLocalSwiftPackageReference "ThreadingWasmRuntime" */,
 			);
 			productRefGroup = F5000001000000000000020 /* Products */;
@@ -1190,6 +1197,7 @@
 				8178333D2C32D47D3E1E2179 /* SidebarRowClickRoutingTests.swift in Sources */,
 				ADD0254BF2C9A50A74A91CB5 /* PreferenceStoreTests.swift in Sources */,
 				E21DDDA58293E78DC2749CF8 /* MacSupportReportDetailsTests.swift in Sources */,
+				91F7FB49655C7751385F2AAA /* AppUpdaterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1937,6 +1945,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 2.9.4;
+			};
+		};
 		D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/everlof/NativeDiffKit.git";
@@ -1948,6 +1964,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		5AAA00010000000000000001 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		F4000001000000000000001 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftTerm;

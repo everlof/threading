@@ -23,6 +23,7 @@ struct MacSupportReportDetails {
 
     private let privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus]
     private let remoteAccessEnabled: Bool
+    private let automaticUpdateChecksEnabled: Bool
     private let appThemeID: String
     private let projectCount: Int
     private let sessionCount: Int
@@ -34,6 +35,7 @@ struct MacSupportReportDetails {
     init(
         privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus],
         remoteAccessEnabled: Bool,
+        automaticUpdateChecksEnabled: Bool,
         appThemeID: String,
         projectCount: Int,
         sessionCount: Int,
@@ -44,6 +46,7 @@ struct MacSupportReportDetails {
     ) {
         self.privacyStatuses = privacyStatuses
         self.remoteAccessEnabled = remoteAccessEnabled
+        self.automaticUpdateChecksEnabled = automaticUpdateChecksEnabled
         self.appThemeID = appThemeID
         self.projectCount = projectCount
         self.sessionCount = sessionCount
@@ -58,6 +61,7 @@ struct MacSupportReportDetails {
     var fields: [RemoteDiagnosticExtraField: String] {
         var fields: [RemoteDiagnosticExtraField: String] = [
             .remoteAccessEnabled: Self.flag(remoteAccessEnabled),
+            .automaticUpdateChecks: Self.flag(automaticUpdateChecksEnabled),
             .appThemeID: appThemeID,
             .projectCount: String(projectCount),
             .sessionCount: String(sessionCount),

@@ -11,6 +11,7 @@ final class MacSupportReportDetailsTests: XCTestCase {
     private func details(
         privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus] = [:],
         remoteAccessEnabled: Bool = false,
+        automaticUpdateChecksEnabled: Bool = true,
         appThemeID: String = "system",
         projectCount: Int = 0,
         sessionCount: Int = 0,
@@ -22,6 +23,7 @@ final class MacSupportReportDetailsTests: XCTestCase {
         MacSupportReportDetails(
             privacyStatuses: privacyStatuses,
             remoteAccessEnabled: remoteAccessEnabled,
+            automaticUpdateChecksEnabled: automaticUpdateChecksEnabled,
             appThemeID: appThemeID,
             projectCount: projectCount,
             sessionCount: sessionCount,
@@ -83,6 +85,7 @@ final class MacSupportReportDetailsTests: XCTestCase {
         )
 
         XCTAssertEqual(fields[.remoteAccessEnabled], "yes")
+        XCTAssertEqual(fields[.automaticUpdateChecks], "yes")
         XCTAssertEqual(fields[.projectCount], "12")
         XCTAssertEqual(fields[.sessionCount], "340")
         XCTAssertEqual(fields[.extensionCount], "3")

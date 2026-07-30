@@ -811,6 +811,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         menu.addItem(.separator())
 
+        // Under Help rather than the app menu, beside the support report: both are "something is
+        // wrong, or might be" errands, and neither is a preference.
+        let updateItem = NSMenuItem(
+            title: L10n.string("Check for Updates…"),
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        menu.addItem(updateItem)
+
         let reportItem = NSMenuItem(
             title: L10n.string("Create Remote Support Report…"),
             action: #selector(createRemoteSupportReport),
@@ -954,6 +964,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Creates the share-safe report, not a copy of the owner-local journal. The latter may
     /// contain prompts, commands and paths and remains available separately for local diagnosis.
+    @MainActor @objc private func checkForUpdates() {
+        AppUpdater.shared.checkForUpdates()
+    }
+
     /// The grants are read first because two of them arrive through a callback, and a report
     /// missing the notification row is missing the answer to the most common question about it.
     @MainActor @objc private func createRemoteSupportReport() {
@@ -975,6 +989,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let details = MacSupportReportDetails(
             privacyStatuses: privacyStatuses,
             remoteAccessEnabled: AppSettings.shared.remoteAccessEnabled,
+            automaticUpdateChecksEnabled: AppUpdater.shared.automaticChecksEnabled,
             appThemeID: AppThemeLibrary.current.id.rawValue,
             projectCount: projects.count,
             sessionCount: projects.reduce(0) { $0 + $1.sessions.count },

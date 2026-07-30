@@ -8533,6 +8533,26 @@
         }
       }
     },
+    "No transcript recorded.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen transkription registrerad."
+          }
+        }
+      }
+    },
+    "No transcript was recorded for this child.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen transkription registrerades för denna underagent."
+          }
+        }
+      }
+    },
     "No turn recorded yet. A baseline is captured when the agent starts working.": {
       "extractionState": "stale",
       "localizations": {
@@ -12045,6 +12065,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Visa en paketets körningstid och förmågor, sedan installera den inaktiverad om godkänd."
+          }
+        }
+      }
+    },
+    "Show details": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa detaljer"
           }
         }
       }
@@ -17448,6 +17478,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hjälp ▸ Skapa fjärrsupportrapport… skriver en fil med versioner, antal och behörighetsstatus – inga namn, sökvägar eller prompter – och visar den i Finder. Threading laddar aldrig upp den; du bestämmer om den skickas."
+          }
+        }
+      }
+    },
+    "Check for Updates…": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök efter uppdateringar…"
+          }
+        }
+      }
+    },
+    "Check for updates automatically": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök efter uppdateringar automatiskt"
+          }
+        }
+      }
+    },
+    "Software Updates": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Programuppdateringar"
+          }
+        }
+      }
+    },
+    "Update checks reach GitHub": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppdateringskontroller når GitHub"
+          }
+        }
+      }
+    },
+    "Once a day, Threading asks its release feed on GitHub whether a newer version exists. Updates are installed by Sparkle, and only after you agree to each one. Off, nothing is asked — Help ▸ Check for Updates… still works.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En gång om dagen frågar Threading sitt utgivningsflöde på GitHub om det finns en nyare version. Uppdateringar installeras av Sparkle, och bara efter att du godkänt varje enskild. Avstängt frågas ingenting – Hjälp ▸ Sök efter uppdateringar… fungerar ändå."
+          }
+        }
+      }
+    },
+    "Threading uses Sparkle to check a release feed on GitHub once a day. The request carries the version you are on and your macOS version, the way any download does — no identifier, and nothing about your projects. Turn it off in General settings and nothing is asked.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading använder Sparkle för att kontrollera ett utgivningsflöde på GitHub en gång om dagen. Förfrågan bär vilken version du kör och din macOS-version, precis som vilken hämtning som helst – ingen identifierare och ingenting om dina projekt. Stäng av det under Allmänt så frågas ingenting."
           }
         }
       }

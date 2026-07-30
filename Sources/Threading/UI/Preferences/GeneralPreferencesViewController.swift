@@ -15,6 +15,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let codexAttachmentToggle = ThemedToggle()
     private let restoreSessionToggle = ThemedToggle()
     private let attentionNotificationToggle = ThemedToggle()
+    private let automaticUpdateToggle = ThemedToggle()
 
     /// One toggle per suppressible prompt, built from the register rather than declared one by
     /// one, so a prompt that can be switched off cannot arrive without the switch that turns it
@@ -92,6 +93,9 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(attentionNotificationToggle,
                   isOn: AppSettings.shared.notifiesOnAttention,
                   action: #selector(attentionNotificationChanged))
+        configure(automaticUpdateToggle,
+                  isOn: AppSettings.shared.automaticUpdateChecksEnabled,
+                  action: #selector(automaticUpdateChecksChanged))
         for (alert, toggle) in alertToggles {
             configure(toggle,
                       isOn: AppSettings.shared.notifies(on: alert),
@@ -235,6 +239,7 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.section("Claude Remote Control", claudeRemoteControlCard()),
             SettingsUI.section("Claude Hooks", claudeHooksCard()),
             SettingsUI.section("Codex Hooks", codexHooksCard()),
+            SettingsUI.section("Software Updates", updatesCard()),
             SettingsUI.section("Shell", shell),
             SettingsUI.note("Shell path is used by shell sessions. Agent sessions launch through your login shell regardless.")
         ], hostPage: .general)
@@ -400,6 +405,22 @@ final class GeneralPreferencesViewController: NSViewController {
 
     /// Claude's observational hooks are session-local and independent from Native permission
     /// brokering. That distinction makes this a real off switch without breaking approval cards.
+    /// Named rather than described vaguely: Sparkle is the framework doing the checking, and an
+    /// app that talks to a release feed should say who it talks through. What the check reveals
+    /// is on the Privacy page; this row is the switch.
+    private func updatesCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Check for updates automatically",
+                subtitle: "Once a day, Threading asks its release feed on GitHub whether a "
+                    + "newer version exists. Updates are installed by Sparkle, and only after "
+                    + "you agree to each one. Off, nothing is asked — Help ▸ Check for "
+                    + "Updates… still works.",
+                control: automaticUpdateToggle
+            )
+        ])
+    }
+
     private func claudeHooksCard() -> SettingsCard {
         SettingsCard(rows: [
             SettingsUI.row(
@@ -443,6 +464,12 @@ final class GeneralPreferencesViewController: NSViewController {
     @objc private func confirmationChanged(_ sender: ThemedToggle) {
         guard let prompt = confirmationToggles.first(where: { $0.value === sender })?.key else { return }
         AppSettings.shared.setAsks(sender.state == .on, before: prompt)
+    }
+
+    @objc private func automaticUpdateChecksChanged() {
+        // The setter posts the settings notification `AppUpdater` observes, which is what stops
+        // the scheduled check rather than anything here reaching into Sparkle.
+        AppSettings.shared.automaticUpdateChecksEnabled = automaticUpdateToggle.state == .on
     }
 
     @objc private func attentionNotificationChanged() {

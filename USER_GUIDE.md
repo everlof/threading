@@ -1631,8 +1631,20 @@ Foundation-only. A companion executable declares each capability it wants at ins
 Threading requests only the grants its reviewed capabilities actually cover — so a companion that
 never asked for `inputControl` cannot cause an Accessibility prompt.
 
-**What is never asked for.** Threading has no analytics and sends nothing about your projects
-anywhere. It requests no camera, microphone, contacts, calendar, location or Full Disk Access.
+**Software updates.** Threading checks a release feed on GitHub once a day and installs updates
+through **Sparkle**, only after you agree to each one. The request carries the version you are on
+and your macOS version, the way any download does — no identifier, and nothing about your
+projects. Switch it off under **Settings ▸ General ▸ Software Updates**; **Help ▸ Check for
+Updates…** still works when it is off, so turning off background traffic never means losing the
+ability to look.
+
+**Getting help.** **Help ▸ Create Remote Support Report…** writes a file and reveals it in the
+Finder. It holds versions, counts, and which OS grants Threading has — no project or session
+names, no paths, and no prompts, by construction rather than by scrubbing. Threading never
+uploads it; sending it is your decision.
+
+**What is never asked for.** Threading has no analytics and no identifier for your install. It
+requests no camera, microphone, contacts, calendar, location or Full Disk Access.
 Remote Access does not need the Local Network permission either: the listener binds to
 `127.0.0.1` and your iPhone reaches it through an outbound encrypted relay, so nothing is
 published on the network you are attached to.

@@ -1,7 +1,9 @@
 # Releasing & Automatic Updates
 
-How a distributable Threading.app is produced today, and the plan for shipping updates to it
-with Sparkle.
+How a distributable Threading.app is produced, and how Sparkle updates it. Sparkle is wired in:
+`AppUpdater` is the only file that imports it, the switch is Settings ▸ General ▸ Software
+Updates, and what an update check reveals is on the Privacy page. What remains planned rather
+than done is the custom `SPUUserDriver` — see [The UI is ours](#the-ui-is-ours-with-one-documented-exception).
 
 ## Distribution signing is not a build setting
 
@@ -98,10 +100,9 @@ server rejection into an immediate failure naming the binary:
 | `Timestamp=` | a secure timestamp is required, and is *not* added by a plain `codesign` |
 | no `get-task-allow` | notarization rejects a debuggable binary outright |
 
-Four binaries pass today: `Threading`, `threading-extension-helper`,
-`threading-extension-helper-network`, `threading-wasm-extension-runner`. The loop is a `find`
-over the bundle rather than a list, so an embedded framework's own executables and XPC services
-are covered automatically — which matters as soon as Sparkle is added.
+Nine binaries pass today: `Threading`, its three helpers, and Sparkle's five — `Sparkle`,
+`Autoupdate`, `Updater`, `Downloader` and `Installer`. The loop is a `find` over the bundle
+rather than a list, which is why adding Sparkle needed no change to it.
 
 Packaging uses `ditto -c -k --keepParent --sequesterRsrc`, not `zip`. Sparkle unpacks with the
 same tool, and only `ditto` preserves the symlinks and extended attributes inside a signed
@@ -118,7 +119,7 @@ xcrun notarytool store-credentials threading-notary \
 After stapling, the zip is rebuilt from the stapled app — the ticket lives inside the bundle, so
 serving the pre-staple zip would ship an unstapled app that Gatekeeper still questions offline.
 
-## Sparkle — the plan
+## Sparkle
 
 Sparkle 2.9.4 (July 2026). `2.x` requires macOS 12+, and this app targets 13+, so the current
 line is available with no floor to raise.
@@ -147,12 +148,22 @@ hurting at the third.
 
 `SwiftTerm`, `ThinkingOrbs` and `LabelMorph` are submodule forks because each has a seam that is
 ours (see [`dependencies.md`](dependencies.md)). Sparkle has no such seam: everything worth
-customising is reachable through its public API. It should be an
-`XCRemoteSwiftPackageReference` pinned to an exact version — the project's first remote package —
-rather than a fourth submodule nobody will ever edit.
+customising is reachable through its public API, so it is an `XCRemoteSwiftPackageReference` —
+`upToNextMinorVersion` from 2.9.4, matching the existing `NativeDiffKit` reference rather than
+pinning exactly, so security patches arrive without a project edit.
+
+(An earlier draft of this file called it "the project's first remote package". It is not —
+`NativeDiffKit` was already one, and its wiring is the pattern the Sparkle entries copy.)
 
 `disable-library-validation` is already granted, so the embedded framework loads without further
-entitlement work.
+entitlement work. SPM embeds `Sparkle.framework` automatically from the link; no Embed Frameworks
+phase was needed.
+
+**It brings five nested executables**, all of which notarization inspects:
+`Autoupdate`, `Sparkle`, `Updater.app/Contents/MacOS/Updater`, and the `Downloader.xpc` and
+`Installer.xpc` services. `scripts/release.sh` verifies them without modification, because its
+check is a `find` over the bundle rather than a list of known binaries — the export signs all
+nine (four app-side, five Sparkle) as Developer ID, hardened and timestamped.
 
 ### The UI is ours, with one documented exception
 

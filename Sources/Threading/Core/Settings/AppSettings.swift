@@ -605,6 +605,20 @@ final class AppSettings {
         }
     }
 
+    /// Whether Threading may ask its release feed whether a newer version exists.
+    ///
+    /// Defaults to **on**, and `defaults.bool` cannot express that — an unset key reads `false`,
+    /// which would ship the feature switched off for everyone who never opened Settings. The
+    /// registered default is `true` and this reads through it, so "never touched" and
+    /// "deliberately off" stay distinguishable in the stored domain.
+    var automaticUpdateChecksEnabled: Bool {
+        get { defaults.bool(forKey: Keys.automaticUpdateChecksEnabled) }
+        set {
+            defaults.set(newValue, forKey: Keys.automaticUpdateChecksEnabled)
+            notifyChanged()
+        }
+    }
+
     // MARK: - MCP Tool Groups
 
     /// The tool groups the user has switched *off* on the Tools page. Stored as the disabled set,
@@ -690,6 +704,7 @@ final class AppSettings {
             Keys.harmonizesTerminalBackgrounds: true,
             Keys.convertsDroppedImages: true,
             Keys.notifiesOnAttention: true,
+            Keys.automaticUpdateChecksEnabled: true,
             Keys.playsAttentionAlertSound: true,
             Keys.reportsClaudeLifecycleEvents: true,
             Keys.workingOrbStyle: MotionPreferencesDefaults.workingOrbStyle.rawValue,
@@ -746,6 +761,7 @@ final class AppSettings {
         static let claudeRemoteControl = "claudeRemoteControl"
         static let defaultPermissionMode = "defaultPermissionMode"
         static let remoteAccessEnabled = "remoteAccessEnabled"
+        static let automaticUpdateChecksEnabled = "automaticUpdateChecksEnabled"
         static let githubAppClientID = "githubAppClientID"
         static let workingOrbStyle = "workingOrbStyle"
         static let chatNameMorphStyle = "chatNameMorphStyle"

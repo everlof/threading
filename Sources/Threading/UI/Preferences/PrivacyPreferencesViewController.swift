@@ -246,6 +246,14 @@ final class PrivacyPreferencesViewController: NSViewController {
                     + "happens only while Remote Access is on."
             ),
             SettingsUI.detailRow(
+                symbol: "arrow.down.circle",
+                title: "Update checks reach GitHub",
+                detail: "Threading uses Sparkle to check a release feed on GitHub once a day. "
+                    + "The request carries the version you are on and your macOS version, the "
+                    + "way any download does — no identifier, and nothing about your projects. "
+                    + "Turn it off in General settings and nothing is asked."
+            ),
+            SettingsUI.detailRow(
                 symbol: "lifepreserver",
                 title: "Support reports are yours to send",
                 detail: "Help ▸ Create Remote Support Report… writes a file of versions, "
