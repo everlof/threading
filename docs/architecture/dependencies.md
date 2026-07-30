@@ -106,6 +106,39 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `alignment` all guard on equality). Each rebuilds or repaints every glyph layer, and a
     sidebar row restates all three on every configure — which happens continuously while an
     agent works.
+  - **Glyph rasterisation is ours** (`GlyphRaster`, `GlyphLayer`). The stock label draws each
+    character with a `CATextLayer`, which is invisible at 2x and measurably worse at 1x —
+    an external monitor at its native resolution, where one point is one pixel. Against
+    AppKit's own rasterisation of the same line at 13pt (ink = mean coverage, edge = mean
+    absolute horizontal gradient), a `CATextLayer` line measures ink 0.1187 / edge 27.73
+    where AppKit measures 0.1397 / 34.21. Two causes, and a trap under each:
+    - *Font smoothing does not run in a transparent context.* Smoothing is the
+      stem-darkening pass macOS applies below 2x, and a `CATextLayer` owns a transparent
+      backing store, so it never gets it. The fix is to draw the glyph against an **opaque**
+      ground — but the tiles cannot then be used as they are, because glyphs overlap by
+      their side bearings and each opaque tile paints its ground over its neighbour's
+      overhang. That version measured 0.0984, *lighter* than the `CATextLayer` it replaced.
+      So the smoothed pixels are inverted back into a coverage mask, which keeps the
+      dilation and restores transparency. Only the ground's **polarity** matters: coverage
+      measures identical against white and any other light colour, and likewise on the dark
+      side, which is why `MorphingTitleLabel` states one structural role rather than each
+      row's exact fill.
+    - *A fractional layer origin is resampled by the compositor.* The tile is snapped to
+      whole device pixels and the remainder baked into the raster. The bake size is not a
+      free choice: Core Graphics quantises horizontal glyph positions to **thirds** of a
+      device pixel, so sweeping a glyph across one pixel yields exactly three distinct
+      rasters. Three phases reproduce AppKit exactly; four looks entirely reasonable and
+      lands a third of the glyphs in the wrong bucket.
+  - **A glyph layer's frame is a raster tile, not the glyph's metrics.** It is padded for
+    ink that overhangs the advance and snapped to the pixel grid, so it always overruns the
+    text it draws. `CharacterSlot.inkFrame` (exposed as `MorphingLabel.glyphInkFrames`) is
+    the box Core Text laid the glyph out in — that is what a caller asking whether a line
+    fits, or aligning to its last character, means. Two tests asserted "no glyph runs past
+    the label" against the layer frame and started failing on the padding.
+  - **Backing-scale changes re-lay out rather than repaint.** A `CATextLayer` re-renders
+    itself when `contentsScale` moves, so the old code only had to retag it. A bitmap does
+    not, and the slots are scale-dependent besides — they are snapped to a specific pixel
+    grid — so dragging a window between a Retina screen and a 1x one rebuilds the line.
 
 - **NativeDiffKit** (remote, ours): the diff *rendering* — line layout, syntax highlighting,
   wrapping, sizing — shared between this app's AppKit views and a UIKit sibling.

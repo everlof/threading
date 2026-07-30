@@ -1,4 +1,5 @@
 import AppKit
+import LabelMorph
 import XCTest
 @testable import Threading
 
@@ -151,9 +152,14 @@ final class SidebarTitleMorphTests: XCTestCase {
             .compactMap { $0 as? CATextLayer }
 
         XCTAssertFalse(drawn.isEmpty, "the title drew nothing")
-        for glyph in drawn {
+        // Asked of the ink rather than the layers: a glyph layer is a raster tile,
+        // padded past the glyph's metrics so overhanging ink is not clipped, so it
+        // overruns the label by that margin whether or not the text fits.
+        let ink = try innerLabel(of: title).glyphInkFrames
+        XCTAssertEqual(ink.count, drawn.count)
+        for box in ink {
             XCTAssertLessThanOrEqual(
-                glyph.frame.maxX,
+                box.maxX,
                 title.bounds.maxX + 0.5,
                 "a glyph overruns the label and is clipped rather than truncated"
             )
@@ -258,5 +264,61 @@ final class SidebarTitleMorphTests: XCTestCase {
             if let found = morphingLabel(in: child) { return found }
         }
         return nil
+    }
+
+    // MARK: - Rasterisation
+
+    /// The package rasterises each glyph against a ground so macOS's font smoothing
+    /// can run — the stem-darkening pass that, below 2x, is most of what separates
+    /// legible text from grey text. Only the *polarity* of that ground against the
+    /// ink is load-bearing, and getting it backwards is silent: the text renders at
+    /// visibly the wrong weight on an external display and at no weight at all on
+    /// the Retina one the mistake is usually made on.
+    func testASidebarRowSmoothsItsNameAgainstAGroundThatContrastsTheInk() throws {
+        let row = sessionRow()
+        row.configure(with: AgentSession(kind: .claude, title: "Land the fix"), activity: .idle)
+
+        let inner = try innerLabel(of: try label("sidebar.session.title", in: row))
+        let ground = try XCTUnwrap(inner.rasterizationBackground,
+                                   "a row on a known surface should state it")
+
+        let inkLuminance = try luminance(of: inner.textColor)
+        let groundLuminance = try luminance(of: ground)
+        XCTAssertGreaterThan(
+            abs(inkLuminance - groundLuminance), 0.25,
+            "ink and ground should sit on opposite sides of the contrast, not beside each other"
+        )
+    }
+
+    /// Guards the swap itself: a `CATextLayer` would draw its own text and leave
+    /// `contents` empty, and nothing else in the suite would notice — the
+    /// characters, metrics and truncation would all still be right.
+    func testASidebarRowsGlyphsAreRasterisedTilesRatherThanSelfDrawnText() throws {
+        let row = sessionRow()
+        row.configure(with: AgentSession(kind: .claude, title: "Land the fix"), activity: .idle)
+        row.layoutSubtreeIfNeeded()
+
+        let inner = try innerLabel(of: try label("sidebar.session.title", in: row))
+        let glyphs = try XCTUnwrap(inner.layer?.sublayers, "the name should have laid out")
+        XCTAssertFalse(glyphs.isEmpty)
+
+        for glyph in glyphs {
+            glyph.displayIfNeeded()
+            XCTAssertNotNil(glyph.contents,
+                            "every glyph should carry a rasterised tile of its own")
+        }
+    }
+
+    /// The package's label, reached through the app's wrapper — the ground and ink
+    /// are set on it, and only the wrapper knows how to resolve them.
+    private func innerLabel(of title: MorphingTitleLabel) throws -> MorphingLabel {
+        try XCTUnwrap(title.subviews.compactMap { $0 as? MorphingLabel }.first)
+    }
+
+    private func luminance(of color: NSColor) throws -> CGFloat {
+        let resolved = try XCTUnwrap(color.usingColorSpace(.sRGB))
+        return 0.2126 * resolved.redComponent
+            + 0.7152 * resolved.greenComponent
+            + 0.0722 * resolved.blueComponent
     }
 }

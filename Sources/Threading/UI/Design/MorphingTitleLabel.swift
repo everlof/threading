@@ -23,6 +23,18 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     /// (selection, dormancy) all resolve through one path.
     private var inkProvider: () -> NSColor = { Design.Text.label }
 
+    /// The surface the glyphs are smoothed against, stated the same way and for
+    /// the same reason as the ink.
+    ///
+    /// Only its *polarity* against the ink is load-bearing, which is why this is
+    /// one structural role rather than each row's exact fill: font smoothing's
+    /// coverage measures identical against white and against any other light
+    /// ground, and likewise on the dark side. What it must not get wrong is which
+    /// side of the contrast the label sits on — dark ink on a light ground is
+    /// dilated, light ink on a dark one is thinned, and applying the wrong one
+    /// leaves the text visibly the wrong weight on a 1x display.
+    private var groundProvider: () -> NSColor = { Design.Surface.background }
+
     /// `nil` follows the app setting. Previews can pin a style without changing
     /// the global preference before their selector action has committed it.
     var morphStyleOverride: ChatNameMorphStyle? {
@@ -185,10 +197,18 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
         setTextColor { Design.Text.label }
     }
 
-    /// Re-asks the ink provider, for a caller whose own state has just moved.
+    /// States the surface behind the glyphs, for a caller whose ground is not the
+    /// app's structural one — a label over a filled banner or a coloured chip.
+    func setRasterizationGround(_ provider: @escaping () -> NSColor) {
+        groundProvider = provider
+        refreshTextColor()
+    }
+
+    /// Re-asks both providers, for a caller whose own state has just moved.
     func refreshTextColor() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             label.textColor = inkProvider()
+            label.rasterizationBackground = groundProvider()
         }
     }
 
