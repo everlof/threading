@@ -58,6 +58,24 @@ class ThemedTextView: NSTextView, ThemedComponent {
         textColor = Design.Text.label
         insertionPointColor = Design.Surface.accent
         themeRedraw = ThemeRedraw(self)
+
+        // **`isVerticallyResizable` alone does not let a text view grow.** `minSize` and `maxSize`
+        // default to the *initializer's* frame — `.zero` for every view built here — and the
+        // scroll view then hands the document view the clip's size, which becomes the cap. The
+        // frame therefore stops at exactly the visible height while layout runs on past it:
+        // `documentRect` equals the clip, so the scroll view has no range, the wheel is
+        // constrained to zero, the scroller never appears, and `scrollRangeToVisible` cannot
+        // reach the caret. Measured on the session composer at 480pt of text in a 154pt box.
+        //
+        // The symptom is not "the box won't grow" — a box measuring its own text through the
+        // layout manager grows correctly, which is what hid this. It is that everything past the
+        // growth cap is drawn where nothing can scroll to it: text kept arriving under the
+        // bottom edge and the person typing could not read their own prompt.
+        minSize = .zero
+        maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
     }
 
     /// The themed replacement for `NSTextView.scrollableTextView()`: a transparent scroll

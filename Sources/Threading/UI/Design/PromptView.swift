@@ -528,12 +528,19 @@ final class PromptView: NSView, ThemedComponent {
 
         let fitted = textFitted + attachmentHeight
 
+        // Past the cap the box stops growing, so the scroller has to take over. Decided before
+        // the height guard below, because the box is already at its cap by the time the text
+        // that overflows it arrives — gated behind that guard, the run of edits that actually
+        // needs a scroller is the one run that never reaches this line. Still compared before
+        // assigning: `hasVerticalScroller` re-tiles the scroll view, and `layout()` calls
+        // through here, so an unconditional write is a layout loop.
+        let needsScroller = textFitted >= max(Design.Size.inputMaxHeight, minimumHeight)
+        if scrollView.hasVerticalScroller != needsScroller {
+            scrollView.hasVerticalScroller = needsScroller
+        }
+
         guard heightConstraint?.constant != fitted else { return }
         heightConstraint?.constant = fitted
-
-        // Past the cap the box stops growing, so the scroller has to take over.
-        scrollView.hasVerticalScroller =
-            textFitted >= max(Design.Size.inputMaxHeight, minimumHeight)
     }
 }
 

@@ -256,7 +256,11 @@ string every install has.
 `PromptView` is an `NSTextView`, not an `NSTextField`, for two things a single-line field
 cannot do: a task worth describing runs past one line, and what is dropped on a composer is
 as often an image as it is text. It grows with its content to `Design.Size.inputMaxHeight`
-and scrolls past it.
+and scrolls past it — two separate mechanisms, the box's own height constraint and the text
+view's frame inside its clip, and a prompt that grows without scrolling hides what is typed
+into it (see the `maxSize` rule under [Themed Controls](#themed-controls)). Which
+is why the scroller is decided *before* the height guard in `updateHeight`: by the time text
+overflows, the box is already at its cap and the constant has stopped moving.
 
 **What Return does follows where the send control is** (`PromptView.SubmitPlacement`), because
 the two answer the same question and must not disagree:
@@ -498,6 +502,19 @@ Nine bugs are worth keeping, because each is a trap the next drawn control will 
   released the moment the initializer returns. Pinned by `PromptInputTests`, which types into the
   prompt through the responder chain rather than asserting about its appearance: nothing visible
   distinguishes a dead text view from a live empty one, which is why nothing caught this.
+- **`isVerticallyResizable` is capped by `maxSize`, and `maxSize` defaults to the initializer's
+  frame** — `.zero` for every text view built here, after which the scroll view hands the document
+  view the clip's size and *that* becomes the cap. The frame then stops at exactly the visible
+  height while layout runs on past it, so `documentRect` equals the clip: a scroll view AppKit
+  believes already fits. No range, wheel constrained to zero, no scroller, and
+  `scrollRangeToVisible` unable to reach the caret. Measured at 480pt of text in a 154pt box.
+  Reported as "the text area has no scroll — when I write it just protrudes and I can't read it":
+  the session composer accepted a long brief and then hid everything past `inputMaxHeight` under
+  its own bottom edge. **Growing and scrolling are two mechanisms, and only one of them was
+  wired.** `PromptView` measures its own text through the layout manager, so the box grew
+  correctly and the cap looked deliberate — which is exactly what hid this for as long as it did.
+  `ThemedTextView` now states an unbounded `maxSize` and a zero `minSize` in `setup()`, so the
+  correct state is the starting state for `PromptView` and `ThemedTextView.scrolling()` alike.
 - **A tracking area reports crossings the *pointer* makes, and none that the *view* makes.**
   Closing the display panel widens the content pane, which slides its header — and the pane
   toggles at its trailing edge — a few hundred points sideways, out from under a pointer that

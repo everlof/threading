@@ -567,6 +567,69 @@ final class PromptInputTests: XCTestCase {
         XCTAssertGreaterThan(prompt.fittingSize.height, single)
     }
 
+    /// Growing to `inputMaxHeight` is only half of it: everything past that cap has to be
+    /// reachable, and it was not. `isVerticallyResizable` is capped by `maxSize`, which defaults
+    /// to the initializer's frame and then to the clip's size — so the document view stopped at
+    /// exactly the visible height while text kept laying out below it. `documentRect` equalled
+    /// the clip, which is a scroll view with no range: the wheel was pinned at zero, no scroller
+    /// appeared, and typing could not pull the caret back into view. The prompt kept accepting
+    /// text the person writing it could no longer read.
+    ///
+    /// Asserted against the clip view's own answers rather than ours, because every one of those
+    /// failures is AppKit declining to scroll a document it believes already fits.
+    func testTextPastTheGrowthCapCanBeScrolledBackTo() throws {
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+        let clip = try XCTUnwrap(textView.enclosingScrollView?.contentView)
+
+        prompt.stringValue = Array(repeating: "en rad text", count: 40).joined(separator: "\n")
+        prompt.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            prompt.frame.height,
+            Design.Size.inputMaxHeight,
+            accuracy: 1,
+            "The box has to stop at its cap, or nothing below is being scrolled to"
+        )
+        XCTAssertGreaterThan(
+            clip.documentRect.height,
+            clip.bounds.height,
+            "The text has to be taller than the box for there to be anything to scroll"
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(textView.enclosingScrollView).hasVerticalScroller,
+            "Past the cap the scroller takes over from the growth"
+        )
+
+        // The wheel's own path. AppKit constrains every scroll — gesture, momentum and
+        // `scrollRangeToVisible` alike — through this method, so it answers "can the user
+        // actually get there" without synthesising a trackpad.
+        var proposed = clip.bounds
+        proposed.origin.y = (clip.documentRect.height - clip.bounds.height) / 2
+        XCTAssertEqual(
+            clip.constrainBoundsRect(proposed).origin.y,
+            proposed.origin.y,
+            accuracy: 1,
+            "A scroll into the overflow must not be constrained back to the top"
+        )
+
+        // And what the person typing experiences: the caret stays visible as the text passes
+        // the bottom edge.
+        XCTAssertTrue(window.makeFirstResponder(textView), "The prompt has to take focus")
+        textView.setSelectedRange(
+            NSRange(location: (textView.string as NSString).length, length: 0)
+        )
+        type("x", in: window)
+        prompt.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(
+            clip.documentVisibleRect.origin.y,
+            0,
+            "Typing at the end has to scroll the caret into view rather than under the box"
+        )
+    }
+
     func testComposerPromptAcceptsTypedCharacters() throws {
         let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
         _ = composer.view
