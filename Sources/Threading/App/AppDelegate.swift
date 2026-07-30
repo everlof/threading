@@ -48,6 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         ownsSingleInstanceLock = true
 
+        // Immediately after the lock and before any store is opened: the app was renamed, and
+        // with it its Application Support directory, so the first launch after that came up on
+        // an empty store with everything still in the old one. Runs once, and only while the
+        // new store has no projects in it.
+        let adoption = LegacyApplicationSupportMigration.runIfNeeded()
+
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willPowerOffNotification,
             object: nil,
@@ -59,6 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // After the lock, so only the instance that owns the state writes the journal — and
         // early, because the first thing it reports is how the *previous* launch ended.
         EventLog.shared.beginLaunch()
+        // Recorded after the journal opens rather than inside the migration, so the one launch
+        // that adopted the old directory says so in the same place every other launch fact goes.
+        if adoption.didAdoptAnything {
+            EventLog.shared.record(.app, "Adopted the pre-rename Application Support directory", [
+                "files": String(adoption.adoptedFileCount),
+                "database": adoption.adoptedDatabase ? "yes" : "no"
+            ])
+        }
         MacRemoteDiagnostics.record(.appLaunched, fields: [
             .protocolVersion: String(RemoteProtocol.current),
             .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),

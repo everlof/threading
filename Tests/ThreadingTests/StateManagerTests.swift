@@ -448,4 +448,160 @@ final class StateManagerTests: XCTestCase {
             now: { Date(timeIntervalSince1970: 1_750_000_000) }
         )
     }
+
+    // MARK: - Pre-Rename Application Support
+
+    /// The whole point: the rename left the user's projects in the old directory and the app came
+    /// up on an empty store beside it.
+    func testAdoptingThePreRenameDirectoryBringsTheDatabaseAcross() throws {
+        let legacy = try makeLegacyDirectory(projectNamed: "Real work")
+        let current = testDirectory.appendingPathComponent("Threading", isDirectory: true)
+
+        let outcome = LegacyApplicationSupportMigration.runIfNeeded(
+            applicationSupport: testDirectory
+        )
+
+        XCTAssertTrue(outcome.adoptedDatabase)
+        let adopted = try ProjectDatabase(
+            url: current.appendingPathComponent(SQLiteDefaults.databaseName)
+        )
+        XCTAssertEqual(try adopted.load().projects.map(\.name), ["Real work"])
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: legacy.path),
+            "The old directory is copied, never moved — a bad adoption must not be the only copy"
+        )
+    }
+
+    func testAdoptionCarriesTheDirectoriesBesideTheDatabase() throws {
+        _ = try makeLegacyDirectory(projectNamed: "Real work", extraFiles: [
+            "settings/A1.json": "{}",
+            "panels/one.json": "{}",
+            "usage-history.json": "[1,2,3]"
+        ])
+        let current = testDirectory.appendingPathComponent("Threading", isDirectory: true)
+
+        let outcome = LegacyApplicationSupportMigration.runIfNeeded(
+            applicationSupport: testDirectory
+        )
+
+        XCTAssertEqual(outcome.adoptedFileCount, 3)
+        for relative in ["settings/A1.json", "panels/one.json", "usage-history.json"] {
+            XCTAssertTrue(
+                FileManager.default.fileExists(
+                    atPath: current.appendingPathComponent(relative).path
+                ),
+                "\(relative) should have come across"
+            )
+        }
+    }
+
+    /// A store with work in it is never written over, however much sits in the old directory.
+    func testAStoreWithProjectsIsLeftAlone() throws {
+        _ = try makeLegacyDirectory(projectNamed: "Old work")
+        let current = testDirectory.appendingPathComponent("Threading", isDirectory: true)
+        try FileManager.default.createDirectory(at: current, withIntermediateDirectories: true)
+        let database = try ProjectDatabase(
+            url: current.appendingPathComponent(SQLiteDefaults.databaseName)
+        )
+        try database.save(ProjectsState(
+            projects: [Project(name: "Current work", folderURL: URL(fileURLWithPath: "/tmp/c"))],
+            selectedSessionID: nil
+        ))
+
+        let outcome = LegacyApplicationSupportMigration.runIfNeeded(
+            applicationSupport: testDirectory
+        )
+
+        XCTAssertEqual(outcome, .init())
+        let reopened = try ProjectDatabase(
+            url: current.appendingPathComponent(SQLiteDefaults.databaseName)
+        )
+        XCTAssertEqual(try reopened.load().projects.map(\.name), ["Current work"])
+    }
+
+    /// A user who deliberately started over must not be handed the old state back every launch.
+    func testAdoptionRunsOnlyOnce() throws {
+        _ = try makeLegacyDirectory(projectNamed: "Real work")
+
+        XCTAssertTrue(
+            LegacyApplicationSupportMigration.runIfNeeded(applicationSupport: testDirectory)
+                .adoptedDatabase
+        )
+
+        let current = testDirectory.appendingPathComponent("Threading", isDirectory: true)
+        try FileManager.default.removeItem(
+            at: current.appendingPathComponent(SQLiteDefaults.databaseName)
+        )
+
+        XCTAssertEqual(
+            LegacyApplicationSupportMigration.runIfNeeded(applicationSupport: testDirectory),
+            .init(),
+            "The marker should stop a second adoption even with the store gone again"
+        )
+    }
+
+    func testNothingHappensWithoutAnOldDirectory() {
+        XCTAssertEqual(
+            LegacyApplicationSupportMigration.runIfNeeded(applicationSupport: testDirectory),
+            .init()
+        )
+    }
+
+    /// The lock belongs to whichever process holds it, and a `.migrated` file was already retired
+    /// by an earlier migration — neither should be re-littered into the new directory.
+    func testTheLockAndAlreadyRetiredFilesStayBehind() throws {
+        _ = try makeLegacyDirectory(projectNamed: "Real work", extraFiles: [
+            LegacyApplicationSupportDefaults.lockFileName: "",
+            "projects.json.migrated": "{}",
+            "drafts.json": "{}"
+        ])
+        let current = testDirectory.appendingPathComponent("Threading", isDirectory: true)
+
+        let outcome = LegacyApplicationSupportMigration.runIfNeeded(
+            applicationSupport: testDirectory
+        )
+
+        XCTAssertEqual(outcome.adoptedFileCount, 1)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: current.appendingPathComponent("drafts.json").path
+        ))
+        for skipped in [LegacyApplicationSupportDefaults.lockFileName, "projects.json.migrated"] {
+            XCTAssertFalse(
+                FileManager.default.fileExists(
+                    atPath: current.appendingPathComponent(skipped).path
+                ),
+                "\(skipped) should not have come across"
+            )
+        }
+    }
+
+    @discardableResult
+    private func makeLegacyDirectory(
+        projectNamed name: String,
+        extraFiles: [String: String] = [:]
+    ) throws -> URL {
+        let legacy = testDirectory.appendingPathComponent(
+            LegacyApplicationSupportDefaults.directoryName,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+
+        let database = try ProjectDatabase(
+            url: legacy.appendingPathComponent(LegacyApplicationSupportDefaults.databaseName)
+        )
+        try database.save(ProjectsState(
+            projects: [Project(name: name, folderURL: URL(fileURLWithPath: "/tmp/legacy"))],
+            selectedSessionID: nil
+        ))
+
+        for (relative, contents) in extraFiles {
+            let file = legacy.appendingPathComponent(relative)
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data(contents.utf8).write(to: file)
+        }
+        return legacy
+    }
 }

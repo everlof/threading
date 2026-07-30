@@ -66,6 +66,48 @@ unregistered key, and `bool(forKey:)` answers `false`, which for every seeded se
 are registered by the readers themselves now; registration is idempotent, and an invariant that
 depends on instantiation order is not an invariant.
 
+## The Pre-Rename Directory
+
+The rename to Threading moved the Application Support directory with the app —
+`Skalman/skalman.db` became `Threading/threading.db` — and nothing carried the old one across.
+The first launch afterwards came up on an **empty store**, with the projects, sessions, panels,
+per-session settings, installed extensions and usage history all still in the old directory. It
+does not read as data loss, which is what made it dangerous: the app looks new rather than
+broken, and the next actions write over the top of an empty store while the real one goes stale
+beside it. Measured on the machine that hit it: 5 projects in `skalman.db`, 0 in `threading.db`.
+
+`LegacyApplicationSupportMigration.runIfNeeded` runs from `applicationDidFinishLaunching`,
+immediately after the single-instance lock and before any store is opened.
+
+- **The gate is that the new store has no projects.** That is the one signal saying the new
+  location has never really been used, and it is what makes adopting the old one safe: there is
+  nothing here to lose. A store with projects is left alone entirely — an old directory must
+  never reappear over work someone has already done in the new one. The database is *opened* to
+  ask, not measured by size: the build that created this file wrote a 4MB journal without ever
+  storing a project.
+- **Inside the gate the legacy copy wins each conflict**, because anything in the new directory
+  came from a build that had already lost its state. Files that exist only in the new directory
+  survive, so a genuinely new install sitting beside an old one keeps what it has.
+- **Copied, never moved.** A bad adoption costs a directory of disk rather than the only copy of
+  anything, and a pre-rename build still running from someone's Xcode keeps its open files.
+  `FileManager.copyItem` clones on APFS — the 143MB extension tree copies in 0.15s and shares
+  its blocks — so the cost of not moving is close to nothing.
+- **The database is copied with its `-wal` and `-shm`**, then read back. A database copied
+  without its journal loses every committed transaction still in it, and a hot copy of one
+  another process is writing can arrive torn. There is nothing to restore if it does, since the
+  gate established the store here was empty, so a failed adoption removes the copy and the app
+  starts fresh exactly as it would have.
+- **The marker (`.adopted-from-skalman`) is what makes it one-shot**, so someone who
+  deliberately started over is not handed the old state back on the next launch. It is withheld
+  when a legacy database was present but did not arrive, so a full disk gets another attempt
+  rather than being recorded as a migration that happened.
+- The old lock file and any `.migrated` file an earlier migration already retired stay behind.
+
+**The `UserDefaults` domain is a separate orphan and is not touched here.** The bundle id went
+`se.mjukis.Skalman` → `codes.threading`, so the theme choice, custom palettes, terminal profiles
+and account preferences are still in the old domain. Overwriting live preferences is a different
+risk from adopting an unused directory, and it needs its own decision.
+
 ## Diagnostics and Drafts
 
 Both exist because of one crash (22 July 2026), and each answers a different half of it.
