@@ -53,11 +53,43 @@ class ThemedTableView: NSTableView, ThemedComponent {
 /// `ThemedControl` in this app is one (button, toggle, chip, pop-up, recorder — no text editor
 /// among them), and `NSButton` covers AppKit's own, including the disclosure triangle an outline
 /// view inserts. A label, an image or the row's ground is none of these, so clicking a row
-/// anywhere else still selects it.
+/// anywhere else still selects it — "anywhere else" meaning outside every such control, the glyphs
+/// and labels *inside* one included, for the reason `takesItsOwnClick` states.
 enum RowControls {
 
+    /// Whether the click that landed on `responder` belongs to a control rather than to the row.
+    ///
+    /// **AppKit asks about the deepest view under the pointer**, and that is the whole subtlety:
+    /// what it hit is not what the user aimed at. `ThemedIconButton` draws its glyph in an
+    /// `NSImageView` child, so the proposed responder over an archive box is that image view — an
+    /// `NSControl` subclass AppKit does not exempt — and the table went on vetoing the click in the
+    /// middle of a button it had just been taught to allow. What survived was the four-point
+    /// padding ring around the glyph, which is why this was reported twice and differently: the `⋯`
+    /// "worked, but nowhere near always" because an ellipsis is 9 points tall in a 20-point target
+    /// and leaves live bands above and below it, while the archive box was "basically impossible"
+    /// because `archivebox` is 12×16 and fills nearly all of the same target. Both are one glyph
+    /// in the way, measured as a 16-point-wide dead centre.
+    ///
+    /// So the question is not *is this a control* but *is it inside one*: a control's glyph, label
+    /// or chip is part of the target it draws, and a click landing on one is a click on the
+    /// control. Letting it through is enough — the press then reaches the control the way it
+    /// already does outside a list, an `NSImageView` with no action of its own forwarding it up the
+    /// responder chain.
     static func takesItsOwnClick(_ responder: NSResponder) -> Bool {
-        responder is ThemedControl || responder is NSButton
+        guard let view = responder as? NSView else { return false }
+        return owner(of: view) != nil
+    }
+
+    /// The nearest control at or above `view` that acts on its own click.
+    ///
+    /// The walk stops at the row, so nothing the list is nested *inside* can claim a click that
+    /// landed within it — the rule answers about one row's contents and no further.
+    private static func owner(of view: NSView) -> NSView? {
+        for node in sequence(first: view, next: { $0.superview }) {
+            if node is ThemedControl || node is NSButton { return node }
+            if node is NSTableRowView || node is NSTableView { return nil }
+        }
+        return nil
     }
 }
 

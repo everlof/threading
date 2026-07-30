@@ -587,6 +587,34 @@ against a **stock** `NSOutlineView` in the same fixture, so the test says what A
 than only what we want: if a future macOS starts exempting custom controls, that assertion is what
 reports it.
 
+**That rule was right and asked the wrong question**, which is why the report came back the same
+day: the archive box "still basically impossible to press", the `⋯` "a bit more reliable, nowhere
+near 100%". AppKit proposes the **deepest view under the pointer**, and a `ThemedIconButton` draws
+its glyph in an `NSImageView` child — so the responder the table was asked about was that image
+view, another `NSControl` AppKit does not exempt, vetoed in the middle of a button that had just
+been allowed. What was left of each target was the four-point padding ring around its glyph.
+
+The two reports were the same bug at two glyph sizes, and the numbers are worth keeping because
+they are what made it read as flakiness rather than as geometry: swept a point at a time over a
+20×20 target, `archivebox` (12×16) leaves **192 of 400 points dead**, dead centre where the eye
+aims; `ellipsis` (12.5×9) leaves **108**, with live bands above and below that a slightly high or
+low click lands in. Hence "impossible" and "sometimes" for one cause.
+
+So `RowControls.takesItsOwnClick` asks whether the click landed *inside* a control that acts on its
+own click, walking up from the proposed responder to the row and no further. A control's glyph,
+label or chip is part of the target it draws. Letting it through is the whole fix — the press then
+reaches the control the way it already does outside a list, an `NSImageView` with no action of its
+own forwarding it up the responder chain, which is why none of this ever showed in the toolbar or
+on a tab's `×`. A plain image that is *not* inside a control — the row's agent mark — still gives
+its click to the row.
+
+**A test that presses the middle of a button, and a test that presses its edge, both pass on a
+button with a dead centre.** `testEveryPointOfARowsTrailingButtonsReachesThemRatherThanTheList`
+sweeps the whole target and reports the dead count, because "does the button answer" is not a
+question about one point. The older assertion shape — `hit === button || hit.isDescendant(of:
+button)` in a plain `NSView` host — is what hid this twice: in a plain host the glyph is a
+descendant *and* forwards, so the answer is yes and means nothing.
+
 Second, smaller half of the same report: `ThemedIconButton.mouseDown` used to call
 `makeFirstResponder(self)`. In a sidebar row that is visible — the outline view resigns, its
 selected row drops from emphasized to unemphasized, and under the **System** theme that is the
