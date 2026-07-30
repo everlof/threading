@@ -14,19 +14,28 @@ final class ProjectSidebarViewController: NSViewController {
     private var emptyStateView: NSView!
     private let appEvents = AppEventObservations()
 
-    /// Footer controls, retained so settings mode can hide Add Project and mark the cogwheel.
-    private var addButton: ThemedButton!
+    /// The footer's one control, retained so settings mode can mark it as the open page.
     private var settingsButton: ThemedButton!
     /// The band the footer controls live in; the list and the settings sidebar both end at
     /// its top rather than restating its height.
     private var footer: PaneFooterView!
 
-    /// The band above the list, holding the arrangement control; the list starts at its
-    /// bottom. Hidden with the list in settings mode — it acts on the list alone.
+    /// The band above the list: the brand row at its leading edge, the list's own controls
+    /// at its trailing one. The list starts at its bottom. In settings mode the *controls*
+    /// hide — they act on the list, which is not on screen — while the band and the brand
+    /// stay, because the brand is the window's, not the list's.
     private var header: PaneHeaderView!
+    /// The Threading mark and wordmark — or whatever the current chrome's sidebar brand says.
+    private var brand: SidebarBrandView!
+    /// Adds a project — the `+` at the sidebar's top.
+    private var addButton: ThemedIconButton!
     /// Opens the grouping and sorting menu — the sidebar's own view options, kept beside
     /// the list they arrange rather than in Settings.
     private var arrangeButton: ThemedIconButton!
+
+    /// The launch flourish plays once per app run, not once per window or per settings
+    /// round-trip.
+    private static var hasPlayedLaunchAnimation = false
 
     /// The settings section list, shown in place of the projects when settings is open — so
     /// the window never grows a second sidebar.
@@ -113,6 +122,18 @@ final class ProjectSidebarViewController: NSViewController {
         // truncate while empty space remained beside them.
         outlineView.sizeLastColumnToFit()
 
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+
+        // The launch flourish: the mark stitches itself in the first time the sidebar is on
+        // screen this run. Once per run, not per appearance — a settings round-trip or a
+        // window re-open replaying it would turn a greeting into a tic.
+        if !Self.hasPlayedLaunchAnimation {
+            Self.hasPlayedLaunchAnimation = true
+            brand.playLaunchAnimation()
+        }
     }
 
 }
@@ -216,36 +237,24 @@ private extension ProjectSidebarViewController {
         ])
     }
 
-    /// Footer holding the add-project control and the settings cogwheel. Add sits at the
-    /// leading edge; settings mirrors it at the trailing one. The band itself — the hairline,
-    /// the height, the corner-aware insets — is `PaneFooterView`'s to state.
+    /// Footer holding Settings at the leading edge — icon *and* word, because the footer's
+    /// one remaining control names the destination the sidebar can reach rather than an
+    /// action on the list. The band itself — the hairline, the height, the corner-aware
+    /// insets — is `PaneFooterView`'s to state.
     private func setupFooter() {
-        addButton = ThemedButton()
-        addButton.title = L10n.string("Add Project")
-        addButton.image = NSImage(
-            systemSymbolName: "plus",
-            accessibilityDescription: L10n.string("Add Project")
-        )?
-            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
-        addButton.isBordered = false
-        addButton.applyFont(.controlRegular)
-        addButton.target = self
-        addButton.action = #selector(addProjectClicked)
-
-        // A quiet icon-only twin of Add Project, so settings is reachable without leaving the
-        // window. It carries no title, so the row reads as "add on the left, settings opposite".
         settingsButton = ThemedButton()
+        settingsButton.title = L10n.string("Settings")
         settingsButton.image = NSImage(
             systemSymbolName: "gearshape",
             accessibilityDescription: L10n.string("Settings")
         )?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         settingsButton.isBordered = false
-        settingsButton.toolTip = L10n.string("Settings")
+        settingsButton.applyFont(.controlRegular)
         settingsButton.target = self
         settingsButton.action = #selector(settingsClicked)
 
-        footer = PaneFooterView(leading: [addButton], trailing: [settingsButton])
+        footer = PaneFooterView(leading: [settingsButton])
         view.addSubview(footer)
 
         NSLayoutConstraint.activate([
@@ -255,10 +264,30 @@ private extension ProjectSidebarViewController {
         ])
     }
 
-    /// Header holding the arrangement control at the trailing edge — the sidebar's own view
-    /// options, kept beside the list they arrange. The band itself — the hairline, the
-    /// height, the corner-aware insets — is `PaneHeaderView`'s to state.
+    /// Header holding the brand row at the leading edge and the list's two controls — add,
+    /// then arrangement — at the trailing one. The band itself — the hairline, the height,
+    /// the corner-aware insets — is `PaneHeaderView`'s to state.
+    ///
+    /// The brand went here rather than staying absent (the band long said "no app-name label")
+    /// because the top-left of the sidebar is now a *themed* surface: a chrome may restate the
+    /// logo, the name and the face, so the row earns its place as the one thing a chrome can
+    /// sign. Adding a project moved up with it — a `+` beside the list it adds to, in the slot
+    /// every source-list app puts it.
     private func setupHeader() {
+        brand = SidebarBrandView()
+
+        addButton = ThemedIconButton(
+            symbolName: "plus",
+            accessibility: L10n.string("Add Project"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        addButton.toolTip = L10n.string("Add Project")
+        // The `+` opens its two ways in — existing folder or new — on the press, which is the
+        // platform's menu gesture.
+        addButton.presentsMenu = true
+        addButton.onPress = { [weak self] in self?.presentAddProjectMenu() }
+
         arrangeButton = ThemedIconButton(
             symbolName: SidebarDefaults.arrangementSymbol,
             accessibility: SidebarStrings.arrangementOptions,
@@ -269,7 +298,7 @@ private extension ProjectSidebarViewController {
         arrangeButton.presentsMenu = true
         arrangeButton.onPress = { [weak self] in self?.showArrangementOptions() }
 
-        header = PaneHeaderView(trailing: [arrangeButton])
+        header = PaneHeaderView(leading: [brand], trailing: [addButton, arrangeButton])
         view.addSubview(header)
 
         NSLayoutConstraint.activate([
@@ -768,17 +797,19 @@ extension ProjectSidebarViewController {
             sidebar.select(id: SettingsPages.generalID)
             scrollView.isHidden = true
             emptyStateView.isHidden = true
+            // The list's controls go with the list: they add to and arrange the projects,
+            // which are not on screen. The band and the brand stay — the brand is the
+            // window's signature, not a list control, and a header that vanished took the
+            // logo with it.
             addButton.isHidden = true
-            // The header goes with the list: its control arranges the projects, which are
-            // not on screen to arrange.
-            header.isHidden = true
+            arrangeButton.isHidden = true
             settingsButton.contentTintColor = Design.Text.label
         } else {
             settingsSidebar?.isHidden = true
             scrollView.isHidden = false
             emptyStateView.isHidden = !rootNodes.isEmpty
             addButton.isHidden = false
-            header.isHidden = false
+            arrangeButton.isHidden = false
             settingsButton.contentTintColor = Design.Text.secondary
         }
     }
@@ -792,8 +823,10 @@ extension ProjectSidebarViewController {
         view.addSubview(sidebar)
 
         NSLayoutConstraint.activate([
+            // Below the header band, which stays on screen in settings mode carrying the
+            // brand row.
             sidebar.topAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.topAnchor,
+                equalTo: header.bottomAnchor,
                 constant: SidebarDefaults.contentTopInset + Design.Spacing.small
             ),
             sidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.medium),
@@ -826,7 +859,7 @@ extension ProjectSidebarViewController {
 private extension ProjectSidebarViewController {
 
     /// The `+` button offers both ways in: a folder that exists, or one made on the spot.
-    @objc private func addProjectClicked() {
+    private func presentAddProjectMenu() {
         let menu = NSMenu()
 
         let scratch = NSMenuItem(
@@ -849,7 +882,7 @@ private extension ProjectSidebarViewController {
 
         menu.popUp(
             positioning: nil,
-            at: NSPoint(x: 0, y: addButton.bounds.maxY),
+            at: NSPoint(x: 0, y: addButton.bounds.maxY + Design.Spacing.tight),
             in: addButton
         )
     }

@@ -427,6 +427,82 @@ final class ExtensionAppearanceTests: XCTestCase {
 
     // MARK: - The Library's Third Tier
 
+    // MARK: - Live reload
+
+    /// The half of live reload nothing else exercises: a contributed theme keeps its identity
+    /// and changes its answers, and the active chrome follows. `current` is a value copy, so
+    /// before the registry diffed *values* this repainted nothing until the next manual
+    /// switch — the bug an extension chrome that follows the weather would sit on all day.
+    func testAValueChangeInTheActiveContributedThemeReappliesItLive() throws {
+        let registry = ExtensionAppearanceRegistry.shared
+        defer {
+            registry.replace(contributions: [])
+            AppThemeLibrary.apply(.system)
+        }
+
+        let original = contributedTheme()
+        registry.replace(contributions: [contribution(themes: [original])])
+        AppThemeLibrary.apply(original)
+        XCTAssertEqual(AppThemeLibrary.current, original)
+
+        let kind = try XCTUnwrap(original.availableVariants.first)
+        let variant = try XCTUnwrap(original.variant(kind))
+        var roles = variant.roles
+        roles[.accent] = NSColor(hex: "#AA77FF")
+        var variants = original.variants
+        variants[kind] = AppTheme.Variant(
+            roles: roles,
+            terminalPalette: variant.terminalPalette,
+            material: variant.material,
+            sidebar: variant.sidebar
+        )
+        let edited = AppTheme(
+            id: original.id,
+            name: original.name,
+            mode: original.mode,
+            summary: original.summary,
+            variants: variants
+        )
+
+        registry.replace(contributions: [contribution(themes: [edited])])
+
+        XCTAssertEqual(
+            AppThemeLibrary.current.variant(kind)?.roles[.accent]?.hexString,
+            "#AA77FF",
+            "the active theme kept the old value after its contribution changed"
+        )
+    }
+
+    /// The watcher is deliberately dumb — any write under the package, one coalesced report
+    /// after the quiet — so this asserts exactly that: a burst of writes lands as one change.
+    func testTheThemeWatcherCoalescesABurstOfWritesIntoOneReport() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingThemeWatch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let reported = expectation(description: "one coalesced change")
+        var reports = 0
+        let watcher = ExtensionThemeWatcher(root: root) {
+            reports += 1
+            if reports == 1 { reported.fulfill() }
+        }
+        watcher.start()
+        defer { watcher.stop() }
+
+        for index in 0..<3 {
+            try Data("{\"edit\": \(index)}".utf8).write(
+                to: root.appendingPathComponent("storm.json")
+            )
+        }
+
+        wait(for: [reported], timeout: 5)
+        // The trailing edge already fired; a second report would have to arrive inside the
+        // same coalesce window it just closed.
+        RunLoop.main.run(until: Date().addingTimeInterval(ExtensionThemeWatchDefaults.coalesce))
+        XCTAssertEqual(reports, 1, "three writes in one burst reported more than once")
+    }
+
     func testAContributedThemeJoinsTheLibraryAndLeavesWithItsExtension() {
         let theme = contributedTheme()
         ExtensionAppearanceRegistry.shared.replace(

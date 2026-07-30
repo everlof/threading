@@ -118,6 +118,21 @@ the safe area already, so AppKit was insetting it a second time for the same tit
 macOS 26 that also installs a scroll-edge-effect `NSVisualEffectView` *inside* the scroll view,
 which `ThemeBoundaryAudit` correctly refuses. One pane, one answer about its own insets.
 
+**The sidebar's top band carries the brand; its bottom band carries Settings.** The header
+band (`PaneHeaderView`, pinned to the safe area under the transparent titlebar) holds
+`SidebarBrandView` at its leading edge — the Threading mark, drawn live and stitched in once
+per launch, beside the app's name in a `MorphingTitleLabel`, or whatever the current theme's
+`SidebarStyle.Brand` states instead (see [`themes.md`](themes.md)) — and the list's two
+controls at its trailing edge: the `+` that adds a project (its two-way menu on the press,
+the platform's menu gesture) and the arrangement control. The band long held *no* app-name
+label on the argument that it should carry only controls that act on the list; the brand
+earned the slot when the sidebar's top-left became a themed surface — it is the one thing a
+chrome can sign. Adding a project moved up from the footer with it, into the slot every
+source-list app puts its `+`. The footer now holds one control: **Settings**, icon *and*
+word, at the leading margin. In settings mode the list's controls hide with the list they
+act on, but the band and the brand stay — a header that vanished took the logo with it —
+and the settings section list starts below the band rather than at the safe area.
+
 Sidebar rows deliberately leave `NSTableCellView.textField` unset. Assigning it lets the table
 restyle the label on selection, which tints an unemphasized source-list row with the accent
 colour; the filled selection shape is the only cue wanted. Each row view's `applyTextColors`

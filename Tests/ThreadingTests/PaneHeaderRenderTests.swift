@@ -66,13 +66,22 @@ final class PaneHeaderRenderTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// The sidebar header's exact shape: the band at the pane's top on the pane's own ground,
-    /// the arrangement control alone at the trailing edge.
+    /// The sidebar header's exact shape: the brand row at the leading edge, the add and
+    /// arrangement controls at the trailing one.
     private func headerImage(appearance name: NSAppearance.Name) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
         let render: @MainActor () -> Void = {
+            let brand = SidebarBrandView()
+
+            let add = ThemedIconButton(
+                symbolName: "plus",
+                accessibility: "Add Project",
+                target: .inline,
+                inkSource: .chrome
+            )
+
             let arrange = ThemedIconButton(
                 symbolName: SidebarDefaults.arrangementSymbol,
                 accessibility: SidebarStrings.arrangementOptions,
@@ -80,7 +89,7 @@ final class PaneHeaderRenderTests: XCTestCase {
                 inkSource: .chrome
             )
 
-            let header = PaneHeaderView(trailing: [arrange])
+            let header = PaneHeaderView(leading: [brand], trailing: [add, arrange])
 
             let host = ThemedSurfaceView()
             host.frame = NSRect(

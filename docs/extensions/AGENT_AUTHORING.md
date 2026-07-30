@@ -506,6 +506,59 @@ does nothing, because themes and marks are data the host reads at inspection.
 macOS only. iOS cannot generate or supply an app icon at runtime, so the phone app is unaffected
 by any theme, contributed or built in.
 
+## Dressing the sidebar from a theme
+
+A theme document may give any variant a `sidebar` block — a gradient and/or image behind the
+project list, a custom logo in place of the Threading mark, and the wordmark's text, family,
+size and weight. Nothing new appears in the manifest: the block is part of the same app-theme
+vocabulary your `resource` document already speaks, so it travels with the theme.
+
+```json
+"variants": {
+  "dark": {
+    "roles": { "...": "..." },
+    "sidebar": {
+      "background": {
+        "gradient": { "angleDegrees": 165, "stops": [
+          { "color": "#0B1020", "position": 0 },
+          { "color": "#1A2340", "position": 1 }
+        ]},
+        "image": { "asset": "art/rain.png", "mode": "tile", "opacity": 0.35 }
+      },
+      "brand": {
+        "logo": { "asset": "art/storm-logo.png" },
+        "title": { "text": "Storm", "fontFamily": "Avenir Next", "weight": "semibold" }
+      }
+    }
+  }
+}
+```
+
+Asset values are package-relative paths; the host reads and normalises every referenced image
+at inspection, before your code runs, and a missing or unreadable file fails the whole package
+so you see it. Gradient stops must keep the theme's `label` readable at 3:1 — the sidebar is
+where the user finds every session. Image legibility is yours: check a background against your
+rows in both variants, and wash photographs well below 0.4 opacity. Everything is optional;
+state only what your theme's identity actually claims.
+
+## Theme data reloads live
+
+While your extension is enabled, the host watches its package and re-reads your theme
+documents (and the images they reference) whenever they change on disk — through the same
+validation as install. Two things this makes possible:
+
+- **Iterating.** Edit your theme JSON with Threading open and wearing it; the window follows
+  each save. A half-saved or invalid document is skipped and the last good version stays in
+  force, so a broken save never costs you your theme — check the host log if an edit refuses
+  to land.
+- **A chrome that follows something.** Your executable may rewrite the theme documents in its
+  own package — a palette tracking the weather, the time of day, a build's state. Write the
+  whole document atomically (write-then-rename), keep every variant valid, and change it at a
+  human pace: each accepted write repaints the app, and nobody wants their window strobing.
+
+Only theme *data* reloads this way. A manifest change — new capabilities, new contributions —
+is still an update, with the re-disclosure an update owes.
+
 ## Registering commands
 
 Register user-triggered work as an `ExtensionCommand`, not as a menu item or a keyboard event

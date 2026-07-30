@@ -17557,6 +17557,94 @@
           }
         }
       }
+    },
+    "Drop a folder here, or click + above.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Släpp en mapp här, eller klicka + ovanför."
+          }
+        }
+      }
+    },
+    "Mark draw-in replayed.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Märkets ritanimation spelades upp igen."
+          }
+        }
+      }
+    },
+    "Replay": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spela upp igen"
+          }
+        }
+      }
+    },
+    "SidebarBrandView": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SidebarBrandView"
+          }
+        }
+      }
+    },
+    "The Threading mark drawn live: brand threads under System, the theme's accent under a style. Click it to replay the launch stitch.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading-märket ritat live: varumärkets trådar under System, temats accent under en stil. Klicka för att spela upp startanimationen igen."
+          }
+        }
+      }
+    },
+    "The sidebar's brand row: the mark beside the app's name — or the logo, wordmark and face the current chrome's sidebar brand states instead.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sidofältets varumärkesrad: märket bredvid appens namn — eller den logotyp, ordbild och typsnitt som det aktuella temats sidofältsvarumärke anger i stället."
+          }
+        }
+      }
+    },
+    "The sidebar's ground: the platform's material under System, the theme's own opaque surface under a style — plus whatever gradient or image the style's sidebar block states. Switch the theme above to watch it trade one for the other.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sidofältets grund: plattformens material under System, temats egen täckande yta under en stil — plus den gradient eller bild som stilens sidofältsblock anger. Byt tema ovanför för att se den växla mellan dem."
+          }
+        }
+      }
+    },
+    "ThreadingMarkView": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ThreadingMarkView"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

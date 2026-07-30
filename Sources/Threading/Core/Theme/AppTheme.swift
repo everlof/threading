@@ -117,19 +117,26 @@ struct AppTheme: Codable, Equatable {
         let terminalPalette: TerminalTheme
         let material: Material
 
+        /// The sidebar's dressing — background layers and the brand row. Optional and variant-
+        /// owned like the material, because a gradient authored for a dark ground is wrong on a
+        /// pale one. Absent means the sidebar as it always was.
+        let sidebar: SidebarStyle?
+
         private enum CodingKeys: String, CodingKey {
             case roles, terminalPalette
-            case material
+            case material, sidebar
         }
 
         init(
             roles: [AppThemeRole: NSColor],
             terminalPalette: TerminalTheme,
-            material: Material
+            material: Material,
+            sidebar: SidebarStyle? = nil
         ) {
             self.roles = roles
             self.terminalPalette = terminalPalette
             self.material = material
+            self.sidebar = sidebar
         }
 
         init(from decoder: Decoder) throws {
@@ -144,6 +151,7 @@ struct AppTheme: Codable, Equatable {
             roles = parsed
             material = try container.decodeIfPresent(Material.self, forKey: .material) ?? .system
             terminalPalette = try container.decode(TerminalTheme.self, forKey: .terminalPalette)
+            sidebar = try container.decodeIfPresent(SidebarStyle.self, forKey: .sidebar)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -154,6 +162,7 @@ struct AppTheme: Codable, Equatable {
             )
             try container.encode(material, forKey: .material)
             try container.encode(terminalPalette, forKey: .terminalPalette)
+            try container.encodeIfPresent(sidebar, forKey: .sidebar)
         }
     }
 

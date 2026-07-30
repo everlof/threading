@@ -449,7 +449,7 @@ enum SidebarDefaults {
 enum SidebarStrings {
     static var emptyTitle: String { L10n.string("No Projects") }
     static var emptySubtitle: String {
-        L10n.string("Drop a folder here, or click Add Project below.")
+        L10n.string("Drop a folder here, or click + above.")
     }
     static var arrangementOptions: String { L10n.string("Grouping and Sorting") }
 }

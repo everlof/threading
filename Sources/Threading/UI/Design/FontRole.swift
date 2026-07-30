@@ -43,6 +43,9 @@ extension Design {
         case caption
         case detail(weight: NSFont.Weight = .regular)
         case markdownHeading(base: CGFloat)
+        /// The sidebar's wordmark, carrying whatever the theme's sidebar brand stated — the
+        /// payload is the recipe, so the sweep re-resolves a custom face exactly as authored.
+        case wordmark(family: String? = nil, size: CGFloat? = nil, weight: NSFont.Weight = .semibold)
 
         // Code — monospaced under every typeface.
         case code(weight: NSFont.Weight = .regular)
@@ -80,6 +83,8 @@ extension Design {
             case .detail(let weight): return Typography.detail(weight: weight, surface: surface)
             case .markdownHeading(let base):
                 return Typography.markdownHeading(fromPointSize: base, surface: surface)
+            case .wordmark(let family, let size, let weight):
+                return Typography.wordmark(family: family, size: size, weight: weight)
             case .code(let weight): return Typography.code(weight: weight)
             case .inlineCode: return Typography.inlineCode()
             case .previewCode: return Typography.previewCode()
@@ -101,7 +106,7 @@ extension Design {
         var followsTheme: Bool {
             switch self {
             case .heading, .placeholderTitle, .subheading, .body, .emphasizedBody, .strongBody,
-                 .control, .controlRegular, .caption, .detail, .markdownHeading:
+                 .control, .controlRegular, .caption, .detail, .markdownHeading, .wordmark:
                 return true
             case .code, .inlineCode, .previewCode, .compactCode, .compactToolName,
                  .numericBody, .numericControl, .numericDetail, .accountEmoji, .emojiPickerCell:

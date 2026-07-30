@@ -68,6 +68,10 @@ extension AgentToolCoordinator {
             base = AppThemeLibrary.current
         }
 
+        // Minted before the variants are built: a sidebar patch may carry image bytes, and
+        // the store files them under the theme's id. A failure anywhere below removes the
+        // folder again, so a refused create leaves nothing behind.
+        let newID = AppThemeLibrary.makeCustomID()
         do {
             let patches = try appThemeVariantPatches(arguments.variants)
             let usesLegacyPatch = hasLegacyVariantPatch(
@@ -112,6 +116,7 @@ extension AgentToolCoordinator {
                     named: rawName,
                     base: base,
                     kind: kind,
+                    themeID: newID,
                     patch: patch,
                     legacyRoles: receivesLegacy ? arguments.roles : nil,
                     legacyMaterial: receivesLegacy ? arguments.material : nil,
@@ -119,7 +124,7 @@ extension AgentToolCoordinator {
                 )
             }
             let theme = try AppThemeEditing.assemble(
-                id: AppThemeLibrary.makeCustomID(),
+                id: newID,
                 name: rawName,
                 mode: mode,
                 summary: summary,
@@ -136,6 +141,7 @@ extension AgentToolCoordinator {
                 "Created \(theme.name) (\(theme.id.rawValue)) without applying it."
             )
         } catch {
+            ThemeAssetStore.removeAll(for: newID)
             return .failure(error.localizedDescription)
         }
     }
@@ -147,12 +153,7 @@ extension AgentToolCoordinator {
 
         do {
             let name = cleaned(arguments.name) ?? AppThemeLibrary.uniqueCopyName(of: source)
-            let copy = try AppThemeEditing.duplicate(
-                source,
-                id: AppThemeLibrary.makeCustomID(),
-                name: name
-            )
-            try AppThemeLibrary.create(copy)
+            let copy = try AppThemeLibrary.duplicate(source, name: name)
             if arguments.apply ?? false {
                 AppThemeLibrary.apply(copy)
                 return .success(
@@ -178,6 +179,24 @@ extension AgentToolCoordinator {
             )
         }
 
+        // A sidebar image patch overwrites a slot file in place before validation can refuse
+        // the document that references it, so the slots about to be replaced are snapshotted
+        // first and put back on any failure — otherwise the standing document would show the
+        // new image under the old everything-else.
+        var replacedAssets: [(name: String, data: Data)] = []
+        for (rawKind, patch) in arguments.variants ?? [:] {
+            guard let sidebar = patch.sidebar,
+                  let kind = AppTheme.VariantKind(rawValue: rawKind.lowercased()) else { continue }
+            var slots: [SidebarAssetSlot] = []
+            if sidebar.image?.source != nil { slots.append(.background) }
+            if case .image = sidebar.logo { slots.append(.logo) }
+            for slot in slots {
+                let fileName = slot.fileName(for: kind)
+                if let existing = ThemeAssetStore.pngData(named: fileName, for: source.id) {
+                    replacedAssets.append((fileName, existing))
+                }
+            }
+        }
         do {
             let name = cleaned(arguments.name) ?? source.name
             let patches = try appThemeVariantPatches(arguments.variants)
@@ -228,6 +247,7 @@ extension AgentToolCoordinator {
                     named: name,
                     base: source,
                     kind: kind,
+                    themeID: source.id,
                     patch: patch,
                     legacyRoles: receivesLegacy ? arguments.roles : nil,
                     legacyMaterial: receivesLegacy ? arguments.material : nil,
@@ -253,6 +273,9 @@ extension AgentToolCoordinator {
                 : " It remains inactive; call set_app_theme to inspect it live."
             return .success("Updated \(updated.name) (\(updated.id.rawValue)).\(state)")
         } catch {
+            for (fileName, data) in replacedAssets {
+                ThemeAssetStore.restore(pngData: data, named: fileName, for: source.id)
+            }
             return .failure(error.localizedDescription)
         }
     }
@@ -334,6 +357,7 @@ extension AgentToolCoordinator {
         named name: String,
         base: AppTheme,
         kind: AppTheme.VariantKind,
+        themeID: AppThemeID,
         patch: AppThemeVariantArguments?,
         legacyRoles: [String: String]?,
         legacyMaterial: AppThemeMaterialArguments?,
@@ -349,14 +373,212 @@ extension AgentToolCoordinator {
         let material = try appThemeMaterial(materialPatch, base: baseMaterial)
         let baseTerminal = source?.terminalPalette ?? base.terminalPalette
         let terminal = try appTerminalPalette(terminalPatch, base: baseTerminal)
+        let sidebar = try appThemeSidebar(
+            patch?.sidebar,
+            base: source?.sidebar,
+            themeID: themeID,
+            kind: kind
+        )
         return AppThemeEditing.makeVariant(
             named: name,
             from: base,
             kind: kind,
             roles: roles,
             material: material,
-            terminalPalette: terminal
+            terminalPalette: terminal,
+            sidebar: sidebar
         )
+    }
+
+    // MARK: Sidebar Parsing
+
+    /// Turns a sidebar patch into the change `makeVariant` applies. Image bytes are stored
+    /// under the theme's id as a side effect — the callers own cleanup on failure, which is
+    /// why create removes the fresh folder and update restores the slots it replaced.
+    private func appThemeSidebar(
+        _ patch: AppThemeSidebarArguments?,
+        base: SidebarStyle?,
+        themeID: AppThemeID,
+        kind: AppTheme.VariantKind
+    ) throws -> AppThemeEditing.SidebarChange {
+        guard let patch else { return .inherit }
+        if patch.remove == true {
+            let statesAnything = patch.gradient != nil || patch.image != nil
+                || patch.logo != nil || patch.title != nil
+            guard !statesAnything else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar cannot set fields and remove in the same patch."
+                )
+            }
+            return .remove
+        }
+        guard patch.gradient == nil || patch.removeGradient != true else {
+            throw AppThemeEditingError.invalid(
+                "sidebar cannot set gradient and remove_gradient in the same patch."
+            )
+        }
+        guard patch.image == nil || patch.removeImage != true else {
+            throw AppThemeEditingError.invalid(
+                "sidebar cannot set image and remove_image in the same patch."
+            )
+        }
+        guard patch.title == nil || patch.removeTitle != true else {
+            throw AppThemeEditingError.invalid(
+                "sidebar cannot set title and remove_title in the same patch."
+            )
+        }
+
+        var style = base ?? SidebarStyle()
+        var background = style.background ?? SidebarStyle.Background()
+
+        if patch.removeGradient == true {
+            background.gradient = nil
+        } else if let gradient = patch.gradient {
+            background.gradient = try sidebarGradient(gradient)
+        }
+
+        if patch.removeImage == true {
+            background.image = nil
+        } else if let image = patch.image {
+            guard let source = image.source else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.image needs a source: {path} or {base64}."
+                )
+            }
+            let data = try imageBytes(source, describing: "sidebar.image.source")
+            guard let stored = ThemeAssetStore.store(
+                imageData: data,
+                for: themeID,
+                slot: .background,
+                variant: kind
+            ) else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.image.source is not a readable image (or exceeds "
+                        + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB)."
+                )
+            }
+            let mode: SidebarStyle.ImageLayer.Mode
+            if let rawMode = cleaned(image.mode) {
+                guard let parsed = SidebarStyle.ImageLayer.Mode(rawValue: rawMode) else {
+                    throw AppThemeEditingError.invalid(
+                        "sidebar.image.mode must be \"tile\", \"fill\" or \"fit\"."
+                    )
+                }
+                mode = parsed
+            } else {
+                mode = .fill
+            }
+            background.image = SidebarStyle.ImageLayer(
+                asset: stored,
+                mode: mode,
+                opacity: image.opacity ?? 1
+            )
+        }
+
+        var brand = style.brand ?? SidebarStyle.Brand()
+        if let logo = patch.logo {
+            switch logo {
+            case .mark:
+                brand.logo = .mark
+            case .hidden:
+                brand.logo = .hidden
+            case .image(let source):
+                let data = try imageBytes(source, describing: "sidebar.logo")
+                guard let stored = ThemeAssetStore.store(
+                    imageData: data,
+                    for: themeID,
+                    slot: .logo,
+                    variant: kind
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "sidebar.logo is not a readable image."
+                    )
+                }
+                brand.logo = .asset(stored)
+            }
+        }
+
+        if patch.removeTitle == true {
+            brand.title = nil
+        } else if let title = patch.title {
+            let weight: SidebarStyle.Brand.Title.Weight?
+            if let rawWeight = cleaned(title.weight) {
+                guard let parsed = SidebarStyle.Brand.Title.Weight(rawValue: rawWeight) else {
+                    throw AppThemeEditingError.invalid(
+                        "title.weight must be \"regular\", \"medium\", \"semibold\" or \"bold\"."
+                    )
+                }
+                weight = parsed
+            } else {
+                weight = nil
+            }
+            let parsed = SidebarStyle.Brand.Title(
+                text: cleaned(title.text),
+                fontFamily: cleaned(title.fontFamily),
+                fontSize: title.fontSize,
+                weight: weight,
+                hidden: title.hidden ?? false
+            )
+            brand.title = parsed.isEmpty ? nil : parsed
+        }
+
+        style.background = background.isEmpty ? nil : background
+        style.brand = brand.isEmpty ? nil : brand
+        return .set(style)
+    }
+
+    private func sidebarGradient(
+        _ arguments: AppThemeGradientArguments
+    ) throws -> SidebarStyle.Gradient {
+        let stops = try (arguments.stops ?? []).map { stop -> SidebarStyle.Gradient.Stop in
+            guard let hex = cleaned(stop.color), let color = NSColor(hex: hex) else {
+                throw AppThemeEditingError.invalid(
+                    "A gradient stop's color must be #RRGGBB or #RRGGBBAA."
+                )
+            }
+            guard let position = stop.position else {
+                throw AppThemeEditingError.invalid(
+                    "A gradient stop needs a position between 0 and 1."
+                )
+            }
+            return SidebarStyle.Gradient.Stop(color: color, position: position)
+        }
+        return SidebarStyle.Gradient(
+            stops: stops,
+            angleDegrees: arguments.angleDegrees ?? 180
+        )
+    }
+
+    private func imageBytes(
+        _ source: AppThemeImageArguments,
+        describing field: String
+    ) throws -> Data {
+        if let rawPath = cleaned(source.path) {
+            let path = (rawPath as NSString).expandingTildeInPath
+            guard let data = FileManager.default.contents(atPath: path) else {
+                throw AppThemeEditingError.invalid("\(field): no readable file at \(path).")
+            }
+            guard data.count <= SidebarStyleLimits.maximumImageBytes else {
+                throw AppThemeEditingError.invalid(
+                    "\(field): file exceeds "
+                        + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB."
+                )
+            }
+            return data
+        }
+        if let base64 = cleaned(source.base64) {
+            guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
+                throw AppThemeEditingError.invalid("\(field): base64 did not decode.")
+            }
+            guard data.count <= SidebarStyleLimits.maximumImageBytes else {
+                throw AppThemeEditingError.invalid(
+                    "\(field): image exceeds "
+                        + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB."
+                )
+            }
+            return data
+        }
+        throw AppThemeEditingError.invalid("\(field): provide {path} or {base64}.")
     }
 
     private func appThemeRoles(
@@ -538,7 +760,7 @@ extension AgentToolCoordinator {
         })
         let material = variant?.material ?? .system
         let terminal = variant?.terminalPalette ?? theme.terminalPalette
-        return [
+        var document: [String: Any] = [
             // `roles`, `material`, and `terminal_colors` can be copied directly into the
             // corresponding create/update variant patch. `resolved_roles` is inspection-only.
             "roles": explicit,
@@ -547,6 +769,47 @@ extension AgentToolCoordinator {
             "terminal_palette_id": terminal.id.rawValue,
             "terminal_colors": terminalColorDocument(terminal)
         ]
+        if let sidebar = variant?.sidebar {
+            document["sidebar"] = appThemeSidebarDocument(sidebar)
+        }
+        return document
+    }
+
+    /// The sidebar block as create/update speak it, with asset names in place of bytes — an
+    /// agent re-supplying an image sends a new {path}/{base64}; everything else round-trips.
+    private func appThemeSidebarDocument(_ sidebar: SidebarStyle) -> [String: Any] {
+        var document: [String: Any] = [:]
+        if let gradient = sidebar.background?.gradient {
+            document["gradient"] = [
+                "angle_degrees": gradient.angleDegrees,
+                "stops": gradient.stops.map {
+                    ["color": $0.color.hexString, "position": $0.position]
+                }
+            ] as [String: Any]
+        }
+        if let image = sidebar.background?.image {
+            document["image"] = [
+                "asset": image.asset,
+                "mode": image.mode.rawValue,
+                "opacity": image.opacity
+            ] as [String: Any]
+        }
+        if let brand = sidebar.brand {
+            switch brand.logo {
+            case .mark: document["logo"] = "mark"
+            case .hidden: document["logo"] = "hidden"
+            case .asset(let name): document["logo"] = ["asset": name]
+            }
+            if let title = brand.title {
+                var titleDocument: [String: Any] = ["hidden": title.hidden]
+                if let text = title.text { titleDocument["text"] = text }
+                if let family = title.fontFamily { titleDocument["font_family"] = family }
+                if let size = title.fontSize { titleDocument["font_size"] = size }
+                if let weight = title.weight { titleDocument["weight"] = weight.rawValue }
+                document["title"] = titleDocument
+            }
+        }
+        return document
     }
 
     private func appThemeMaterialDocument(_ material: AppTheme.Material) -> [String: Any] {

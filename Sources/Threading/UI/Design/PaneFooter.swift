@@ -135,6 +135,15 @@ final class PaneFooterView: NSView {
                 constant: Layout.itemSpacing
             ).isActive = true
         }
+
+        // The two runs must not meet — the header's rule, mirrored, so a band that grows a
+        // wide leading view compresses it instead of drawing it under the trailing controls.
+        if let lastLeading = leading.last, let firstTrailing = trailing.first {
+            lastLeading.trailingAnchor.constraint(
+                lessThanOrEqualTo: firstTrailing.leadingAnchor,
+                constant: -Layout.itemSpacing
+            ).isActive = true
+        }
     }
 
     private func opticalInset(of view: NSView) -> CGFloat {

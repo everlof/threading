@@ -602,6 +602,13 @@ enum MCPToolCatalog {
             creation and updates merge only the supplied values onto their base. A custom theme \
             may have a light variant, a dark variant, or both; `appearance: "adaptive"` uses \
             both and follows macOS.
+
+            A variant's `sidebar` block dresses the project sidebar: a gradient or image \
+            behind the list (images arrive as {path} or {base64} and are stored with the \
+            theme), a custom logo in place of the Threading mark, and the wordmark's text, \
+            face, size and weight. Gradient stops must keep the theme's label readable; image \
+            legibility is yours — wash a photograph well below 0.4 opacity. Absent means the \
+            default sidebar, and each remove_* field takes one choice back.
             """
     )
 

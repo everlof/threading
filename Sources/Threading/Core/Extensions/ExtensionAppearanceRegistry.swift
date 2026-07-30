@@ -33,18 +33,26 @@ final class ExtensionAppearanceRegistry {
         /// wholesale diff below still recognises an unchanged package.
         let iconMarks: [AppThemeID: Data]
 
+        /// PNG bytes per theme for the sidebar's logo and background, keyed by the asset name
+        /// the theme document references — the package-relative path as written. The same
+        /// bytes-not-images reasoning as `iconMarks`, and read at the same moment: inspection,
+        /// before any extension code runs.
+        let sidebarAssets: [AppThemeID: [String: Data]]
+
         init(
             extensionIdentifier: String,
             extensionName: String,
             themes: [AppTheme],
             fontURLs: [URL],
-            iconMarks: [AppThemeID: Data] = [:]
+            iconMarks: [AppThemeID: Data] = [:],
+            sidebarAssets: [AppThemeID: [String: Data]] = [:]
         ) {
             self.extensionIdentifier = extensionIdentifier
             self.extensionName = extensionName
             self.themes = themes
             self.fontURLs = fontURLs
             self.iconMarks = iconMarks
+            self.sidebarAssets = sidebarAssets
         }
     }
 
@@ -63,6 +71,7 @@ final class ExtensionAppearanceRegistry {
     private(set) var contributions: [Contribution] = []
     private(set) var activeFontURLs: Set<URL> = []
     private var decodedMarks: [AppThemeID: NSImage] = [:]
+    private var decodedSidebarAssets: [AppThemeID: [String: NSImage]] = [:]
 
     var themes: [AppTheme] { contributions.flatMap(\.themes) }
 
@@ -85,8 +94,32 @@ final class ExtensionAppearanceRegistry {
         return image
     }
 
+    /// A sidebar asset a contributed theme's document references, by the name it wrote.
+    ///
+    /// Memoized like `iconMark`, and for the same reason: the sidebar redraws on every theme
+    /// change, and decoding a background PNG per redraw is work the diff already proved
+    /// unnecessary. Nil for a name the package never shipped — the caller degrades to the
+    /// default treatment, never to an error.
+    func sidebarAsset(named name: String, forThemeID id: AppThemeID) -> NSImage? {
+        if let cached = decodedSidebarAssets[id]?[name] { return cached }
+        guard let data = sidebarAssetData(named: name, forThemeID: id),
+              let image = NSImage(data: data) else { return nil }
+        decodedSidebarAssets[id, default: [:]][name] = image
+        return image
+    }
+
+    /// The raw bytes behind a sidebar asset, for duplicating a contributed theme into the
+    /// custom tier — the copy has to own its assets, or disabling the extension would strip
+    /// the sidebar off a theme the user now owns.
+    func sidebarAssetData(named name: String, forThemeID id: AppThemeID) -> Data? {
+        contributions.compactMap({ $0.sidebarAssets[id]?[name] }).first
+    }
+
     func replace(contributions newContributions: [Contribution]) {
-        let previousThemeIDs = themes.map(\.id)
+        // Values, not ids: a live-reloaded or updated package keeps a theme's identity while
+        // changing what it says, and a diff that only watched ids left the app wearing the
+        // old colours until the next manual theme switch.
+        let previousThemes = themes
         let previousFonts = activeFontURLs
 
         let desiredFonts = Set(newContributions.flatMap(\.fontURLs))
@@ -99,19 +132,22 @@ final class ExtensionAppearanceRegistry {
         }
 
         let previousMarks = contributions.map(\.iconMarks)
+        let previousSidebarAssets = contributions.map(\.sidebarAssets)
         contributions = newContributions
         decodedMarks = [:]
+        decodedSidebarAssets = [:]
 
         // A package can change a theme's artwork without changing its identity — an update is
-        // the ordinary way that happens — so the icon has to be redrawn on a diff the theme-id
-        // comparison below cannot see.
-        if contributions.map(\.iconMarks) != previousMarks {
+        // the ordinary way that happens — so the icon (and the sidebar wearing its assets) has
+        // to be redrawn on a diff the theme-id comparison below cannot see.
+        if contributions.map(\.iconMarks) != previousMarks
+            || contributions.map(\.sidebarAssets) != previousSidebarAssets {
             NotificationCenter.default.post(
                 AppThemeDidChange(themeID: AppThemeLibrary.current.id)
             )
         }
 
-        if themes.map(\.id) != previousThemeIDs {
+        if themes != previousThemes {
             AppThemeLibrary.contributedThemesDidChange()
         }
         if activeFontURLs != previousFonts {

@@ -270,6 +270,30 @@
       "kind": "confirmationResponse",
       "symbol": "alertFirstButtonReturn",
       "reason": "The web page dictates these buttons, not Threading: WKUIDelegate's JavaScript alert, confirm and prompt panels, plus the download-complete offer. None is a decision the app could register or remember, and this file holds no confirmation of its own."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/ThreadingMarkView.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "strokeColor",
+      "reason": "The mark reapplies its shape-layer strokes from draw(_:) on every theme refresh, the same discipline as the spinner."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/ThreadingMarkView.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "fillColor",
+      "reason": "The mark's core fill is reapplied from draw(_:) on every theme refresh beside its strokes."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/ThreadingMarkView.swift",
+      "kind": "motionDuration",
+      "symbol": "duration",
+      "reason": "The draw-in threads Design.Motion tokens through one stroke builder, and playDrawIn returns before constructing any animation under Reduce Motion."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/SidebarBackdropView.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "backgroundColor",
+      "reason": "The tiled sidebar pattern is a CGColor by Core Animation's own contract; apply() restates it on every theme change and appearance flip."
     }
   ]
 }

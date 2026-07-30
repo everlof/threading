@@ -363,6 +363,108 @@ A registered family changes what recorded roles resolve to, so the registry answ
 change the way `startObservingFontOverrides` answers an override change: `repaintEverything()`
 plus `AppThemeDidChange` — one event, the consumers it already has.
 
+## 2026-07-30 — the sidebar belongs to the theme
+
+`SidebarStyle` is the one place a theme reaches past colours-and-material into a *region* of
+the window: background layers under the project list (a gradient, then an image — tiled,
+fitted or filled, at stated opacity) and the brand row at the top (the logo slot, the
+wordmark's text, family, size and weight). It is **variant-owned**, like the material and for
+the same reason: a wash authored for a dark ground is wrong on a pale one. Everything is
+optional, and absent means the sidebar exactly as it was — a document written before the
+block existed decodes to a variant without one.
+
+The sidebar and not the panes, deliberately. The sidebar's content is entirely ours (rows of
+names), so a background can sit under it without any feature view knowing; the content pane's
+ground is the terminal's or the conversation's, and painting behind another program's output
+is not a theme, it is vandalism with a schema.
+
+**Bytes never enter the document.** A theme document lives in `PreferenceStore` as JSON and
+stays hand-writable, so the block references assets by name and the bytes live where the
+theme's tier keeps them: a custom theme's in `ThemeAssetStore` (one folder per theme under
+Application Support, fixed slot names — `light-logo.png`, `dark-background.png` — so
+replacing overwrites and deleting the theme is one folder removal), a contributed theme's in
+its package, read at **inspection time** by `ExtensionBundleLoader.inspectSidebarAssets` and
+held in `ExtensionAppearanceRegistry` beside the icon marks. Nothing changed in the manifest:
+the theme document *is* the contribution, so a package states sidebar images the way it
+states any other part of the vocabulary, and old packages keep validating. Every image passes
+the same `ProjectIconStore.normalizedPNGData` gate as every untrusted image in the app; the
+`fillsItsBounds` anti-impersonation rule deliberately does **not** apply, because a sidebar
+background is an opaque rectangle by design. A name that resolves to nothing degrades to the
+default treatment — the dangling-reference rule everything here follows.
+
+Four rules that were decisions rather than defaults:
+
+- **The gradient faces the terminal palette's gate.** The sidebar is where every session is
+  *found*, so a wash that swallows its labels locks the user out of the app as surely as an
+  unreadable terminal. Each stop is composited over the variant's surface and must keep the
+  label at the same 3:1 floor. An image is not gated — its pixels are arbitrary, so its gates
+  are bounds (bytes, opacity) and legibility stays the author's to check by looking; the tool
+  description says a photograph usually wants opacity well below 0.4.
+- **An update says what happens to the block, not merely a new value.**
+  `AppThemeEditing.SidebarChange` is inherit/remove/set, because a plain optional cannot tell
+  "leave it alone" from "take it away" — and losing that difference means an update that
+  changed one colour silently strips a theme's brand. The companion trap: `assemble` rebuilds
+  every variant for its rename pass, and a `sidebar` dropped there vanishes on every create
+  while looking untouched in the patch. `SidebarStyleTests` pins both.
+- **The brand's stated family outranks the user's font override** — the one deliberate
+  exception to "the user outranks the theme". The wordmark is identity, not prose: a chrome
+  that ships its own name in its own face should not read in Iowan because body text does.
+  It still degrades like every family (absent from the machine → the theme's typeface), and
+  it rides the ordinary sweep because the recipe is a `FontRole` payload
+  (`.wordmark(family:size:weight:)`) recorded on the label.
+- **A duplicate owns its images.** `AppThemeLibrary.duplicate` (now the one duplicate path
+  for the settings page and the MCP tool alike) copies a custom source's asset folder and
+  *materialises* a contributed source's bytes out of the registry into the store, rewriting
+  the document's names to slot names — otherwise disabling the extension would strip the
+  sidebar off a theme the user now owns.
+
+Resolution is `SidebarAppearance` — stated style in, drawable values out (decoded images,
+sorted gradient stops, the wordmark's text and font recipe) — so the two consuming views
+never touch stores or registries. `SidebarBackdropView` draws the layers (and restates every
+frozen `CGColor` on each apply); `SidebarBrandView` wears the brand. Both re-resolve on
+`AppThemeDidChange` *and* on `viewDidChangeEffectiveAppearance`, because an adaptive theme's
+light/dark flip is a variant change no theme notification fires for.
+
+Over MCP the block rides the existing app-theme tools as `variants.<kind>.sidebar` — same
+snake-case vocabulary in `create_app_theme`/`update_app_theme` and back out of
+`get_app_theme` (asset names, never bytes). Images arrive as `{path}` or `{base64}`;
+`remove_gradient`/`remove_image`/`remove_title`/`remove` take stated halves back, refusing a
+patch that sets and removes the same thing. The create path mints its id before building
+variants so assets have somewhere to land, and removes the folder on any failure; the update
+path snapshots the slot files it is about to overwrite and puts them back if validation
+refuses the document that references them.
+
+## 2026-07-30 — a contributed theme is a living document
+
+An enabled extension's theme data now reloads **live**: `ExtensionThemeWatcher` (FSEvents,
+one stream per enabled theme-contributing package, the `GitCheckoutWatcher` idiom) reports a
+coalesced change, and `ExtensionManager.refreshContributedThemes` re-runs
+`ExtensionBundleLoader.inspectThemes` — the same decode, the same validation, the same asset
+gates as install — and replaces the registry contribution wholesale. This is what lets a
+chrome *follow* something: an extension that rewrites its own theme document with the
+weather, the hour, or a build's state, and an author iterating on a style with the app open,
+both land as a repaint moments after the write.
+
+Three decisions carry it:
+
+- **Only theme data reloads.** The watcher feeds nothing but `inspectThemes`; a manifest
+  edit still requires the update flow, because capabilities changed is a question the user
+  answers, not a file event. Everything code-bearing keeps the values install validated
+  (`ThreadingExtensionBundle.replacingThemes` replaces the one field).
+- **A failed re-inspection keeps the last good version.** A watcher fires mid-write by
+  design — a torn JSON is the ordinary case, not an attack — so runtime refusal logs and
+  waits where install-time refusal fails the package loudly. A persistently broken edit is
+  discoverable in the log rather than punished with a vanished theme.
+- **The registry diffs values, not ids.** `replace` used to compare theme *ids*, so a theme
+  that kept its identity and changed its answers repainted nothing — the active chrome held
+  a stale value copy until the next manual switch, and a package *update* had the same
+  latent bug. `contributedThemesDidChange` now re-applies the current theme when its
+  resolvable value changed, which is the one line the whole feature hangs off.
+
+The watchers reconcile in `syncAppearanceRegistry` — the same wholesale pass as the
+registries, keyed by identifier *and root*, because an update swaps the package directory
+aside and a stream on the old path reports nothing about the new one.
+
 ## 2026-07-30 — the standing choice is written where a hosted test cannot reach it
 
 Reported as **"theme selection doesn't persist between app launches."** Nothing in the restore

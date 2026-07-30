@@ -69,25 +69,20 @@ final class PaneFooterRenderTests: XCTestCase {
     // MARK: - Helpers
 
     /// The sidebar footer's exact shape: the band at the pane's bottom on the pane's own
-    /// ground, a titled plain button leading and an icon-only twin trailing.
+    /// ground, the titled Settings button alone at the leading margin.
     private func footerImage(appearance name: NSAppearance.Name) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
         let render: @MainActor () -> Void = {
-            let add = ThemedButton()
-            add.title = "Add Project"
-            add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Project")?
-                .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
-            add.isBordered = false
-            add.font = Design.Typography.controlRegular()
-
             let gear = ThemedButton()
+            gear.title = "Settings"
             gear.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
                 .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
             gear.isBordered = false
+            gear.font = Design.Typography.controlRegular()
 
-            let footer = PaneFooterView(leading: [add], trailing: [gear])
+            let footer = PaneFooterView(leading: [gear])
 
             let host = ThemedSurfaceView()
             host.frame = NSRect(

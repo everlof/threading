@@ -412,6 +412,258 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(updated.variant(.light)?.roles[.ground]?.hexString, "#FFFFFF")
     }
 
+    // MARK: - Sidebar
+
+    func testUpdateAppThemeDecodesASidebarPatch() throws {
+        let call = try call("""
+            {
+              "name": "update_app_theme",
+              "arguments": {
+                "theme_id": "custom-x",
+                "variants": {
+                  "dark": {
+                    "sidebar": {
+                      "gradient": {
+                        "angle_degrees": 135,
+                        "stops": [
+                          {"color": "#101020", "position": 0},
+                          {"color": "#202040", "position": 1}
+                        ]
+                      },
+                      "logo": "hidden",
+                      "title": {"text": "Atelier", "weight": "bold", "font_size": 15}
+                    }
+                  }
+                }
+              }
+            }
+            """)
+
+        guard case .updateAppTheme(let arguments) = call else {
+            return XCTFail("decoded as \(call.name)")
+        }
+        let sidebar = try XCTUnwrap(arguments.variants?["dark"]?.sidebar)
+        XCTAssertEqual(sidebar.gradient?.angleDegrees, 135)
+        XCTAssertEqual(sidebar.gradient?.stops?.count, 2)
+        guard case .hidden = try XCTUnwrap(sidebar.logo) else {
+            return XCTFail("logo did not decode as the bare word")
+        }
+        XCTAssertEqual(sidebar.title?.text, "Atelier")
+        XCTAssertEqual(sidebar.title?.fontSize, 15)
+    }
+
+    func testTheLogoArgumentAlsoDecodesAsAnImageObject() throws {
+        let call = try call("""
+            {
+              "name": "create_app_theme",
+              "arguments": {
+                "name": "X",
+                "variants": {"dark": {"sidebar": {"logo": {"base64": "AAAA"}}}}
+              }
+            }
+            """)
+        guard case .createAppTheme(let arguments) = call else {
+            return XCTFail("decoded as \(call.name)")
+        }
+        guard case .image(let image) = try XCTUnwrap(arguments.variants?["dark"]?.sidebar?.logo) else {
+            return XCTFail("logo object did not decode as an image source")
+        }
+        XCTAssertEqual(image.base64, "AAAA")
+    }
+
+    /// The whole loop an agent actually runs: create a theme whose sidebar carries a gradient,
+    /// an image (stored from bytes), and a brand; read it back in the same vocabulary; take
+    /// the block away again. The asset dies with the theme.
+    func testAgentCanDressReadAndUndressTheSidebar() throws {
+        let name = "Sidebar Tool Theme \(UUID().uuidString)"
+        let kind = AppThemeStyles.cyberpunk.availableVariants[0]
+        let surface = AppThemeStyles.cyberpunk.resolved(
+            .surface,
+            appearance: kind.appearance ?? NSAppearance.currentDrawing()
+        ).hexString
+
+        let pixel = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+            NSColor.systemTeal.setFill()
+            rect.fill()
+            return true
+        }
+        let png = try XCTUnwrap(
+            NSBitmapImageRep(data: try XCTUnwrap(pixel.tiffRepresentation))?
+                .representation(using: .png, properties: [:])
+        )
+
+        let create = CreateAppThemeArguments(
+            name: name,
+            baseID: AppThemeStyles.cyberpunk.id.rawValue,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [
+                kind.rawValue: AppThemeVariantArguments(
+                    sidebar: AppThemeSidebarArguments(
+                        gradient: AppThemeGradientArguments(
+                            angleDegrees: 160,
+                            stops: [
+                                AppThemeGradientStopArguments(color: surface, position: 0),
+                                AppThemeGradientStopArguments(color: surface, position: 1)
+                            ]
+                        ),
+                        removeGradient: nil,
+                        image: AppThemeSidebarImageArguments(
+                            source: AppThemeImageArguments(
+                                path: nil,
+                                base64: png.base64EncodedString()
+                            ),
+                            mode: "tile",
+                            opacity: 0.3
+                        ),
+                        removeImage: nil,
+                        logo: nil,
+                        title: AppThemeSidebarTitleArguments(
+                            text: "Atelier",
+                            fontFamily: nil,
+                            fontSize: nil,
+                            weight: "semibold",
+                            hidden: nil
+                        ),
+                        removeTitle: nil,
+                        remove: nil
+                    )
+                )
+            ],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        )
+        let created = coordinator().createAppTheme(create)
+        XCTAssertFalse(created.isError, created.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+
+        let stored = try XCTUnwrap(theme.variant(kind)?.sidebar)
+        let assetName = try XCTUnwrap(stored.background?.image?.asset)
+        XCTAssertNotNil(
+            ThemeAssetStore.image(named: assetName, for: theme.id),
+            "the supplied bytes should be stored under the theme"
+        )
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let variantDocument = try XCTUnwrap(variants[kind.rawValue] as? [String: Any])
+        let sidebar = try XCTUnwrap(variantDocument["sidebar"] as? [String: Any])
+        let gradient = try XCTUnwrap(sidebar["gradient"] as? [String: Any])
+        XCTAssertEqual(gradient["angle_degrees"] as? Double, 160)
+        let image = try XCTUnwrap(sidebar["image"] as? [String: Any])
+        XCTAssertEqual(image["asset"] as? String, assetName)
+        XCTAssertEqual(image["mode"] as? String, "tile")
+        let title = try XCTUnwrap(sidebar["title"] as? [String: Any])
+        XCTAssertEqual(title["text"] as? String, "Atelier")
+
+        let undress = UpdateAppThemeArguments(
+            themeID: theme.id.rawValue,
+            name: nil,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [
+                kind.rawValue: AppThemeVariantArguments(
+                    sidebar: AppThemeSidebarArguments(
+                        gradient: nil, removeGradient: nil,
+                        image: nil, removeImage: nil,
+                        logo: nil, title: nil, removeTitle: nil,
+                        remove: true
+                    )
+                )
+            ],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        )
+        let undressed = coordinator().updateAppTheme(undress)
+        XCTAssertFalse(undressed.isError, undressed.text)
+        let bare = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
+        XCTAssertNil(bare.variant(kind)?.sidebar)
+
+        _ = AppThemeLibrary.delete(bare)
+        XCTAssertNil(
+            ThemeAssetStore.image(named: assetName, for: theme.id),
+            "deleting the theme should take its asset folder with it"
+        )
+    }
+
+    /// The gate travels the tool path too: a wash the label cannot be read on is refused with
+    /// the reason, and nothing is created — including the asset folder.
+    func testAnUnreadableGradientIsRefusedThroughTheTool() throws {
+        let name = "Unreadable Sidebar \(UUID().uuidString)"
+        let kind = AppThemeStyles.cyberpunk.availableVariants[0]
+        let label = AppThemeStyles.cyberpunk.resolved(
+            .label,
+            appearance: kind.appearance ?? NSAppearance.currentDrawing()
+        ).hexString
+
+        let create = CreateAppThemeArguments(
+            name: name,
+            baseID: AppThemeStyles.cyberpunk.id.rawValue,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [
+                kind.rawValue: AppThemeVariantArguments(
+                    sidebar: AppThemeSidebarArguments(
+                        gradient: AppThemeGradientArguments(
+                            angleDegrees: nil,
+                            stops: [
+                                AppThemeGradientStopArguments(color: label, position: 0),
+                                AppThemeGradientStopArguments(color: label, position: 1)
+                            ]
+                        ),
+                        removeGradient: nil,
+                        image: nil, removeImage: nil,
+                        logo: nil, title: nil, removeTitle: nil, remove: nil
+                    )
+                )
+            ],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        )
+        let result = coordinator().createAppTheme(create)
+        XCTAssertTrue(result.isError, "a gradient in the label's own colour was accepted")
+        XCTAssertTrue(result.text.contains("contrast"), result.text)
+        XCTAssertNil(AppThemeLibrary.all.first { $0.name == name })
+    }
+
+    func testTheVariantSchemaDescribesTheSidebarBlock() throws {
+        let schema = try schema(for: MCPTools.createAppTheme)
+        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
+        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
+        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
+        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
+        let dark = try XCTUnwrap(variantProperties["dark"] as? [String: Any])
+        let darkProperties = try XCTUnwrap(dark["properties"] as? [String: Any])
+        let sidebar = try XCTUnwrap(
+            darkProperties["sidebar"] as? [String: Any],
+            "the variant schema does not describe the sidebar block"
+        )
+        let sidebarProperties = try XCTUnwrap(sidebar["properties"] as? [String: Any])
+        for field in ["gradient", "image", "logo", "title", "remove"] {
+            XCTAssertNotNil(sidebarProperties[field], "sidebar schema lost \(field)")
+        }
+    }
+
     // MARK: - Schema
 
     private func authoredRoles(of theme: AppTheme) -> [String: String] {

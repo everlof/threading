@@ -116,6 +116,17 @@ final class PaneHeaderView: NSView {
                 constant: Layout.itemSpacing
             ).isActive = true
         }
+
+        // The two runs must not meet: without this nothing relates them, and a leading view
+        // wide enough — the brand row's wordmark in a narrow sidebar — draws under the
+        // trailing controls rather than compressing. Went unwritten while no band carried
+        // content on both sides.
+        if let lastLeading = leading.last, let firstTrailing = trailing.first {
+            lastLeading.trailingAnchor.constraint(
+                lessThanOrEqualTo: firstTrailing.leadingAnchor,
+                constant: -Layout.itemSpacing
+            ).isActive = true
+        }
     }
 
     private func opticalInset(of view: NSView) -> CGFloat {

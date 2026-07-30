@@ -175,6 +175,8 @@
 		ADD0254BF2C9A50A74A91CB5 /* PreferenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */; };
 		E21DDDA58293E78DC2749CF8 /* MacSupportReportDetailsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */; };
 		91F7FB49655C7751385F2AAA /* AppUpdaterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774B14EC55BC365EBED24EB7 /* AppUpdaterTests.swift */; };
+		9DCD807006BD21A0C5CFEA03 /* SidebarStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72FC6ECDA03C49B7923B0767 /* SidebarStyleTests.swift */; };
+		2B1E9E11721DFB1810662162 /* SidebarBrandViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28F2040BEAFBFE46160DF5A /* SidebarBrandViewTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -394,6 +396,8 @@
 		7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PreferenceStoreTests.swift; sourceTree = "<group>"; };
 		0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSupportReportDetailsTests.swift; sourceTree = "<group>"; };
 		774B14EC55BC365EBED24EB7 /* AppUpdaterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppUpdaterTests.swift; sourceTree = "<group>"; };
+		72FC6ECDA03C49B7923B0767 /* SidebarStyleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarStyleTests.swift; sourceTree = "<group>"; };
+		E28F2040BEAFBFE46160DF5A /* SidebarBrandViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarBrandViewTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -673,6 +677,8 @@
 				7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */,
 				0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */,
 				774B14EC55BC365EBED24EB7 /* AppUpdaterTests.swift */,
+				72FC6ECDA03C49B7923B0767 /* SidebarStyleTests.swift */,
+				E28F2040BEAFBFE46160DF5A /* SidebarBrandViewTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1198,6 +1204,8 @@
 				ADD0254BF2C9A50A74A91CB5 /* PreferenceStoreTests.swift in Sources */,
 				E21DDDA58293E78DC2749CF8 /* MacSupportReportDetailsTests.swift in Sources */,
 				91F7FB49655C7751385F2AAA /* AppUpdaterTests.swift in Sources */,
+				9DCD807006BD21A0C5CFEA03 /* SidebarStyleTests.swift in Sources */,
+				2B1E9E11721DFB1810662162 /* SidebarBrandViewTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

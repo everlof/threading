@@ -334,6 +334,26 @@ enum Design {
             prose(.systemFont(ofSize: scaled(11), weight: weight), surface: surface)
         }
 
+        /// The sidebar's wordmark — the app's name, or whatever a theme's sidebar brand says
+        /// instead.
+        ///
+        /// A brand-stated family is the one place a *theme* outranks the user's font override:
+        /// the wordmark is identity rather than prose, and a chrome that ships its own name in
+        /// its own face should not read in Iowan because the user set body text there. It
+        /// still degrades like every family — absent from this machine means the recipe falls
+        /// through to `prose`, whose layers answer as they always do.
+        static func wordmark(
+            family: String? = nil,
+            size: CGFloat? = nil,
+            weight: NSFont.Weight = .semibold
+        ) -> NSFont {
+            let base = NSFont.systemFont(ofSize: scaled(size ?? 13), weight: weight)
+            if let family, !family.isEmpty, let resolved = inFamily(family, like: base) {
+                return resolved
+            }
+            return prose(base)
+        }
+
         /// Tool subjects, paths, diffs, and other code-shaped content.
         static func code(weight: NSFont.Weight = .regular) -> NSFont {
             .monospacedSystemFont(ofSize: scaled(11), weight: weight)
@@ -789,6 +809,19 @@ enum Design {
         /// faster demonstration, it is a flicker, and the honest reduced form is to hold the
         /// name still.
         static var demonstrationHold: TimeInterval { reducesMotion ? 0 : 0.9 }
+
+        // MARK: Brand mark
+
+        /// The Threading mark stitching itself in on launch: the shield outline draws first,
+        /// the six strands follow, the core lands last. One-shot — a launch flourish is not a
+        /// perpetual animation — and all four collapse to the finished mark under Reduce
+        /// Motion, so the reduced launch is simply the logo being there.
+        static var brandOutlineDraw: TimeInterval { reducesMotion ? 0 : 0.5 }
+        static var brandStrandDraw: TimeInterval { reducesMotion ? 0 : 0.38 }
+        /// The beat between one strand starting and the next; six strands land inside the
+        /// outline's own draw.
+        static var brandStrandStagger: TimeInterval { reducesMotion ? 0 : 0.06 }
+        static var brandCorePop: TimeInterval { reducesMotion ? 0 : 0.18 }
     }
 
     // MARK: - Opacity

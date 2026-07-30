@@ -67,13 +67,31 @@ enum AppThemeEditing {
     /// If the base has no matching variant, its available appearance is used as the design
     /// starting point. System is resolved under the requested appearance. Validation later
     /// catches a new opposite variant whose inherited colours were not changed enough to read.
+    /// How a caller states what should happen to the sidebar block, distinctly from saying
+    /// nothing. A plain optional cannot tell "leave it alone" from "take it away", and losing
+    /// that distinction is how an update that changed one colour would strip a theme's brand.
+    enum SidebarChange {
+        case inherit
+        case remove
+        case set(SidebarStyle)
+
+        func applied(to source: SidebarStyle?) -> SidebarStyle? {
+            switch self {
+            case .inherit: return source
+            case .remove: return nil
+            case .set(let style): return style.isEmpty ? nil : style
+            }
+        }
+    }
+
     static func makeVariant(
         named name: String,
         from base: AppTheme,
         kind: AppTheme.VariantKind,
         roles overrides: [AppThemeRole: NSColor] = [:],
         material: AppTheme.Material? = nil,
-        terminalPalette: TerminalTheme? = nil
+        terminalPalette: TerminalTheme? = nil,
+        sidebar: SidebarChange = .inherit
     ) -> AppTheme.Variant {
         let appearance = kind.appearance ?? NSAppearance.currentDrawing()
         let source = base.variant(kind)
@@ -93,7 +111,8 @@ enum AppThemeEditing {
             terminalPalette: (terminalPalette
                 ?? source?.terminalPalette
                 ?? base.terminalPalette).renamed(name),
-            material: material ?? source?.material ?? base.material
+            material: material ?? source?.material ?? base.material,
+            sidebar: sidebar.applied(to: source?.sidebar)
         )
     }
 
@@ -112,7 +131,8 @@ enum AppThemeEditing {
             AppTheme.Variant(
                 roles: variant.roles,
                 terminalPalette: variant.terminalPalette.renamed(cleanName),
-                material: variant.material
+                material: variant.material,
+                sidebar: variant.sidebar
             )
         }
         let theme = AppTheme(
@@ -343,6 +363,94 @@ enum AppThemeEditing {
                     "glow radius plus offset exceeds the \(Int(Design.Size.glowGutter))-point "
                         + "panel-shadow gutter."
                 )
+            }
+        }
+
+        if let sidebar = variant.sidebar {
+            try validate(sidebar, kind: kind, resolved: resolved, appearance: appearance)
+        }
+    }
+
+    /// The sidebar block's own gates. The gradient gets the same treatment the terminal
+    /// palette does — the sidebar is where every session is *found*, so a wash that swallows
+    /// its labels locks the user out of the rest of the app as surely as an unreadable
+    /// terminal would. An image cannot be measured this way (its pixels are arbitrary), so its
+    /// gates are bounds, and legibility stays the author's to check by looking.
+    private static func validate(
+        _ sidebar: SidebarStyle,
+        kind: AppTheme.VariantKind,
+        resolved: AppTheme,
+        appearance: NSAppearance
+    ) throws {
+        if let gradient = sidebar.background?.gradient {
+            guard (2...SidebarStyleLimits.maximumGradientStops).contains(gradient.stops.count) else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.gradient needs 2 to \(SidebarStyleLimits.maximumGradientStops) stops."
+                )
+            }
+            guard gradient.stops.allSatisfy({ (0...1).contains($0.position) }) else {
+                throw AppThemeEditingError.invalid(
+                    "sidebar.gradient stop positions must be between 0 and 1."
+                )
+            }
+            let label = resolved.resolved(.label, appearance: appearance)
+            let surface = resolved.resolved(.surface, appearance: appearance)
+            for stop in gradient.stops {
+                // A stop may be translucent; what the label actually sits on is the stop
+                // composited over the themed surface, so that is what gets measured.
+                let ground = surface.composited(under: stop.color)
+                let ink = ground.composited(under: label)
+                let ratio = ThemeContrast.ratio(ink, ground)
+                guard ratio >= ThemeContrast.minimumRatio else {
+                    throw AppThemeEditingError.invalid(
+                        "\(kind.rawValue) sidebar text on the gradient stop "
+                            + "\(stop.color.hexString) has \(formatted(ratio)):1 contrast; "
+                            + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
+                    )
+                }
+            }
+        }
+
+        if let image = sidebar.background?.image {
+            guard (0...1).contains(image.opacity) else {
+                throw AppThemeEditingError.invalid("sidebar.image.opacity must be between 0 and 1.")
+            }
+            guard !image.asset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AppThemeEditingError.invalid("sidebar.image names no asset.")
+            }
+        }
+
+        if let brand = sidebar.brand {
+            if case .asset(let name) = brand.logo,
+               name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw AppThemeEditingError.invalid("sidebar.brand.logo names no asset.")
+            }
+            if let title = brand.title {
+                if brand.logo == .hidden, title.hidden {
+                    throw AppThemeEditingError.invalid(
+                        "sidebar.brand cannot hide both the logo and the title — remove the "
+                            + "brand block instead to fall back to the default."
+                    )
+                }
+                if let text = title.text {
+                    let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !clean.isEmpty,
+                          clean.count <= SidebarStyleLimits.maximumTitleLength else {
+                        throw AppThemeEditingError.invalid(
+                            "sidebar.brand.title.text must be 1 to "
+                                + "\(SidebarStyleLimits.maximumTitleLength) characters."
+                        )
+                    }
+                }
+                if let size = title.fontSize {
+                    guard SidebarStyleLimits.titleSizeRange.contains(size) else {
+                        throw AppThemeEditingError.invalid(
+                            "sidebar.brand.title.font_size must be between "
+                                + "\(Int(SidebarStyleLimits.titleSizeRange.lowerBound)) and "
+                                + "\(Int(SidebarStyleLimits.titleSizeRange.upperBound)) points."
+                        )
+                    }
+                }
             }
         }
     }

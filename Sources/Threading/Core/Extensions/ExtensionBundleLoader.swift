@@ -35,6 +35,22 @@ struct ThreadingExtensionBundle: Equatable {
         self.fonts = fonts
         self.localizations = localizations
     }
+
+    /// The same bundle carrying freshly re-inspected theme documents — the one field live
+    /// reload may replace. Everything code-bearing (executable, companions, their signatures)
+    /// deliberately keeps the values install validated.
+    func replacingThemes(_ themes: [ThreadingExtensionThemeDocument]) -> ThreadingExtensionBundle {
+        ThreadingExtensionBundle(
+            rootURL: rootURL,
+            executableURL: executableURL,
+            sourceURL: sourceURL,
+            manifest: manifest,
+            companions: companions,
+            themes: themes,
+            fonts: fonts,
+            localizations: localizations
+        )
+    }
 }
 
 /// One font file confirmed parseable at inspection time, with the families it carries — read
@@ -67,12 +83,23 @@ struct ThreadingExtensionThemeDocument: Equatable {
     /// compare equal, and image objects do not.
     let iconMark: Data?
 
+    /// The sidebar images the theme document's own `sidebar` blocks reference, keyed by the
+    /// package-relative name as written, decode-gated and re-encoded like the mark. Empty for
+    /// the many themes that state no sidebar dressing.
+    let sidebarAssets: [String: Data]
+
     /// Defaulted, so the many fixtures that care only about a theme document do not each have
     /// to say they ship no artwork.
-    init(contributionID: String, theme: AppTheme, iconMark: Data? = nil) {
+    init(
+        contributionID: String,
+        theme: AppTheme,
+        iconMark: Data? = nil,
+        sidebarAssets: [String: Data] = [:]
+    ) {
         self.contributionID = contributionID
         self.theme = theme
         self.iconMark = iconMark
+        self.sidebarAssets = sidebarAssets
     }
 }
 
@@ -337,7 +364,15 @@ enum ExtensionBundleInspector {
     /// id, and hold it to the same gates a custom theme faces — a contributed theme with
     /// unreadable labels or a missing role is refused at the door, not discovered as a broken
     /// window after enabling.
-    private static func inspectThemes(
+    ///
+    /// Internal rather than private because the **live reload** path re-runs exactly this and
+    /// nothing else: `ExtensionManager.refreshContributedThemes` calls it when a watched
+    /// package's theme data changes on disk, so an enabled extension can rewrite its own
+    /// document — a chrome following the weather, the hour, a build's state — and the host
+    /// follows through the same decode, the same validation, the same asset gates as at
+    /// install. Only theme *data* reloads this way; a manifest change is an update, with the
+    /// re-disclosure an update owes.
+    static func inspectThemes(
         _ declarations: [ExtensionThemeContribution],
         extensionIdentifier: String,
         root: URL
@@ -382,9 +417,67 @@ enum ExtensionBundleInspector {
             return ThreadingExtensionThemeDocument(
                 contributionID: declaration.id,
                 theme: theme,
-                iconMark: try inspectThemeIconMark(declaration, root: root)
+                iconMark: try inspectThemeIconMark(declaration, root: root),
+                sidebarAssets: try inspectSidebarAssets(
+                    of: theme,
+                    declaredAt: declaration.resource,
+                    root: root
+                )
             )
         }
+    }
+
+    /// Reads every image the theme document's own `sidebar` blocks reference.
+    ///
+    /// The document names package-relative paths; nothing new appears in the manifest, because
+    /// the sidebar block is part of the same app-theme vocabulary the contribution already
+    /// ships — the host grows a field and old packages keep validating. The gates match the
+    /// icon mark's: safe relative path, byte cap, the shared ImageIO decode-and-re-encode. A
+    /// referenced file that is missing or not an image fails the whole package at inspection,
+    /// because a theme shipping a background the host will not draw is a disagreement its
+    /// author needs to see — the same stance `inspectThemeIconMark` states.
+    ///
+    /// The one gate deliberately *not* applied is `fillsItsBounds`: that rule exists so a
+    /// package cannot re-plate the Dock icon, and a sidebar background is an opaque rectangle
+    /// by design.
+    private static func inspectSidebarAssets(
+        of theme: AppTheme,
+        declaredAt declarationPath: String,
+        root: URL
+    ) throws -> [String: Data] {
+        var slots: [String: SidebarAssetSlot] = [:]
+        for variant in theme.variants.values {
+            if let name = variant.sidebar?.background?.image?.asset {
+                slots[name] = .background
+            }
+            if case .asset(let name) = variant.sidebar?.brand.map(\.logo) {
+                // A name used for both slots keeps the background's larger pixel budget.
+                if slots[name] == nil { slots[name] = .logo }
+            }
+        }
+
+        var assets: [String: Data] = [:]
+        for (name, slot) in slots {
+            let url = try resolveResource(
+                name,
+                root: root,
+                maximumBytes: SidebarStyleLimits.maximumImageBytes,
+                failure: { ExtensionBundleError.themeResourceInvalid(path: name, message: $0) }
+            )
+            guard let data = try? Data(contentsOf: url),
+                  let normalized = ProjectIconStore.normalizedPNGData(
+                      from: data,
+                      maxPixelSize: ThemeAssetDefaults.storedPixelSize(for: slot)
+                  ) else {
+                throw ExtensionBundleError.themeResourceInvalid(
+                    path: name,
+                    message: "referenced by \(declarationPath)'s sidebar block "
+                        + "but not a readable image"
+                )
+            }
+            assets[name] = normalized
+        }
+        return assets
     }
 
     /// Reads a theme's declared app-icon mark, and refuses anything that is not one.

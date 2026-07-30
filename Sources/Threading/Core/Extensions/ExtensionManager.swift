@@ -223,6 +223,10 @@ final class ExtensionManager:
     private var companionSupervisors: [
         CompanionKey: ExtensionCompanionSupervisor
     ] = [:]
+    /// One live-reload watcher per enabled theme-contributing package, keyed by identifier
+    /// and remembered with the root it watches — an update swaps the package directory
+    /// aside, and a stream on the old path reports nothing about the new one.
+    private var themeWatchers: [String: (root: URL, watcher: ExtensionThemeWatcher)] = [:]
     private var companionStatuses: [CompanionKey: InstalledCompanionStatus] = [:]
     private final class RemotePresentation {
         let id: String
@@ -1730,10 +1734,77 @@ final class ExtensionManager:
                     iconMarks: bundle.themes.reduce(into: [:]) { marks, document in
                         guard let mark = document.iconMark else { return }
                         marks[document.theme.id] = mark
+                    },
+                    sidebarAssets: bundle.themes.reduce(into: [:]) { assets, document in
+                        guard !document.sidebarAssets.isEmpty else { return }
+                        assets[document.theme.id] = document.sidebarAssets
                     }
                 )
             }
         )
+        reconcileThemeWatchers()
+    }
+
+    /// Keeps one live-reload watcher per enabled theme-contributing package — started,
+    /// restarted on a moved root, and stopped through the same wholesale reconcile the
+    /// registries use, so no edge (enable, disable, update, uninstall) needs its own wiring.
+    private func reconcileThemeWatchers() {
+        var desired: [String: URL] = [:]
+        for identifier in enabledIdentifiers {
+            guard let bundle = packages[identifier]?.bundle,
+                  !bundle.themes.isEmpty else { continue }
+            desired[identifier] = bundle.rootURL
+        }
+
+        for (identifier, entry) in themeWatchers
+        where desired[identifier] == nil || desired[identifier] != entry.root {
+            entry.watcher.stop()
+            themeWatchers[identifier] = nil
+        }
+
+        for (identifier, root) in desired where themeWatchers[identifier] == nil {
+            let watcher = ExtensionThemeWatcher(root: root) { [weak self] in
+                self?.refreshContributedThemes(for: identifier)
+            }
+            watcher.start()
+            themeWatchers[identifier] = (root, watcher)
+        }
+    }
+
+    /// Re-inspects one package's theme data after its files changed on disk, through exactly
+    /// the gates install ran — decode, validation, namespacing, asset normalisation.
+    ///
+    /// A failed re-inspection keeps the last good contribution rather than failing the
+    /// package: a watcher fires mid-write by design, and tearing an extension down over a
+    /// half-saved JSON would punish the author for the moment this feature exists for. The
+    /// refusal is logged so a *persistently* broken edit is discoverable rather than silent.
+    private func refreshContributedThemes(for identifier: String) {
+        guard enabledIdentifiers.contains(identifier),
+              let package = packages[identifier],
+              let bundle = package.bundle,
+              !bundle.manifest.themes.isEmpty else { return }
+
+        do {
+            let themes = try ExtensionBundleInspector.inspectThemes(
+                bundle.manifest.themes,
+                extensionIdentifier: identifier,
+                root: bundle.rootURL
+            )
+            guard themes != bundle.themes else { return }
+            packages[identifier] = InstalledExtensionPackage(
+                packageURL: package.packageURL,
+                bundle: bundle.replacingThemes(themes),
+                provenance: package.provenance,
+                problem: package.problem
+            )
+            syncAppearanceRegistry()
+        } catch {
+            let reason = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            ThreadingLogger.extensions.error(
+                "Live theme reload for \(identifier, privacy: .public) refused: \(reason, privacy: .public). Keeping the last good version."
+            )
+        }
     }
 
     private func syncSettingsRegistry(postChange: Bool = true) {

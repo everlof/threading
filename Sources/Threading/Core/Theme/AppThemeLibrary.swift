@@ -102,6 +102,12 @@ enum AppThemeLibrary {
                   stored != current.id.rawValue,
                   let standing = theme(withID: AppThemeID(stored)) {
             apply(standing)
+        } else if let refreshed = theme(withID: current.id), refreshed != current {
+            // The active theme kept its identity and changed its answers — a live-reloaded
+            // document, or a package update. `current` is a value copy, so without this the
+            // window keeps wearing the old colours while every list already shows the new
+            // ones; re-applying is what lets a chrome follow the weather or the hour.
+            apply(refreshed)
         }
         NotificationCenter.default.post(AppThemeLibraryDidChange())
     }
@@ -119,6 +125,77 @@ enum AppThemeLibrary {
 
     static func makeCustomID() -> AppThemeID {
         AppThemeID("custom-\(UUID().uuidString.lowercased())")
+    }
+
+    /// Duplicates any theme into the custom tier, **assets included** — the one step
+    /// `AppThemeEditing.duplicate` (a pure value copy) cannot take. A custom source's asset
+    /// folder is copied under the new id; a contributed source's bytes are lifted out of its
+    /// package registry and materialised into the store, with the document's asset names
+    /// rewritten to the store's slot names — the copy has to own its images, or disabling
+    /// the extension would strip the sidebar off a theme the user now owns.
+    static func duplicate(_ source: AppTheme, name: String) throws -> AppTheme {
+        var copy = try AppThemeEditing.duplicate(
+            source,
+            id: makeCustomID(),
+            name: name
+        )
+        if isContributed(source) {
+            copy = materializeContributedSidebarAssets(of: copy, from: source)
+        }
+        do {
+            try create(copy)
+        } catch {
+            ThemeAssetStore.removeAll(for: copy.id)
+            throw error
+        }
+        if !isContributed(source) {
+            ThemeAssetStore.copyAssets(from: source.id, to: copy.id)
+        }
+        return copy
+    }
+
+    private static func materializeContributedSidebarAssets(
+        of copy: AppTheme,
+        from source: AppTheme
+    ) -> AppTheme {
+        var variants = copy.variants
+        for (kind, variant) in variants {
+            guard var sidebar = variant.sidebar else { continue }
+
+            if let layer = sidebar.background?.image,
+               let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
+                   named: layer.asset, forThemeID: source.id
+               ),
+               let stored = ThemeAssetStore.store(
+                   imageData: data, for: copy.id, slot: .background, variant: kind
+               ) {
+                sidebar.background?.image?.asset = stored
+            }
+
+            if case .asset(let name) = sidebar.brand?.logo,
+               let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
+                   named: name, forThemeID: source.id
+               ),
+               let stored = ThemeAssetStore.store(
+                   imageData: data, for: copy.id, slot: .logo, variant: kind
+               ) {
+                sidebar.brand?.logo = .asset(stored)
+            }
+
+            variants[kind] = AppTheme.Variant(
+                roles: variant.roles,
+                terminalPalette: variant.terminalPalette,
+                material: variant.material,
+                sidebar: sidebar
+            )
+        }
+        return AppTheme(
+            id: copy.id,
+            name: copy.name,
+            mode: copy.mode,
+            summary: copy.summary,
+            variants: variants
+        )
     }
 
     static func create(_ theme: AppTheme) throws {
@@ -168,6 +245,9 @@ enum AppThemeLibrary {
     @discardableResult
     static func delete(_ theme: AppTheme) -> Bool {
         guard isCustom(theme), AppThemeStore.shared.remove(id: theme.id) else { return false }
+        // The document owned files too: sidebar assets die with the theme that referenced
+        // them, or Application Support accumulates folders no document can reach.
+        ThemeAssetStore.removeAll(for: theme.id)
         if current.id == theme.id {
             apply(.system)
         }

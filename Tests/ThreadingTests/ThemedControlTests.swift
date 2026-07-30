@@ -1605,8 +1605,8 @@ final class ThemedControlTests: XCTestCase {
         let cog = try XCTUnwrap(
             descendants(in: sidebar.view)
                 .compactMap { $0 as? ThemedButton }
-                .first { $0.title.isEmpty && $0.image != nil },
-            "the sidebar footer has no icon-only button to be the cogwheel"
+                .first { $0.title == L10n.string("Settings") && $0.image != nil },
+            "the sidebar footer has no Settings button to be the cogwheel"
         )
 
         sidebar.setSettingsMode(true)
@@ -2462,7 +2462,9 @@ final class ThemedControlTests: XCTestCase {
                 "SeparatorView",
                 "ShortcutRecorderView",
                 "SidebarBackdropView",
+                "SidebarBrandView",
                 "SubagentSummaryView",
+                "ThreadingMarkView",
                 "ThemeSwatchImage",
                 "ThemeSwatchView",
                 "ThemedButton",

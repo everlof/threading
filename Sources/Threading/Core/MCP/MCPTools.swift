@@ -543,14 +543,119 @@ struct AppThemeMaterialArguments: Decodable {
     }
 }
 
+/// An image handed to a theme tool: a file path the host reads, or the bytes inline.
+struct AppThemeImageArguments: Decodable {
+    let path: String?
+    let base64: String?
+}
+
+struct AppThemeGradientStopArguments: Decodable {
+    let color: String?
+    let position: Double?
+}
+
+struct AppThemeGradientArguments: Decodable {
+    let angleDegrees: Double?
+    let stops: [AppThemeGradientStopArguments]?
+
+    private enum CodingKeys: String, CodingKey {
+        case angleDegrees = "angle_degrees"
+        case stops
+    }
+}
+
+struct AppThemeSidebarImageArguments: Decodable {
+    let source: AppThemeImageArguments?
+    let mode: String?
+    let opacity: Double?
+}
+
+struct AppThemeSidebarTitleArguments: Decodable {
+    let text: String?
+    let fontFamily: String?
+    let fontSize: Double?
+    let weight: String?
+    let hidden: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case fontFamily = "font_family"
+        case fontSize = "font_size"
+        case weight, hidden
+    }
+}
+
+/// The sidebar block of a variant patch. `logo` is `"mark"`, `"hidden"`, or an image object;
+/// each `remove_*` takes one stated half back to its default, and `remove` clears the block.
+struct AppThemeSidebarArguments: Decodable {
+    let gradient: AppThemeGradientArguments?
+    let removeGradient: Bool?
+    let image: AppThemeSidebarImageArguments?
+    let removeImage: Bool?
+    let logo: AppThemeSidebarLogoArguments?
+    let title: AppThemeSidebarTitleArguments?
+    let removeTitle: Bool?
+    let remove: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case gradient
+        case removeGradient = "remove_gradient"
+        case image
+        case removeImage = "remove_image"
+        case logo, title
+        case removeTitle = "remove_title"
+        case remove
+    }
+}
+
+/// `"mark"`, `"hidden"`, or `{path|base64}` — mirroring the document's own logo spelling.
+enum AppThemeSidebarLogoArguments: Decodable {
+    case mark
+    case hidden
+    case image(AppThemeImageArguments)
+
+    init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(),
+           let word = try? single.decode(String.self) {
+            switch word {
+            case "mark": self = .mark
+            case "hidden": self = .hidden
+            default:
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "logo is \"mark\", \"hidden\", or {\"path\"|\"base64\"}."
+                ))
+            }
+            return
+        }
+        self = .image(try AppThemeImageArguments(from: decoder))
+    }
+}
+
 struct AppThemeVariantArguments: Decodable {
     let roles: [String: String]?
     let material: AppThemeMaterialArguments?
     let terminalColors: [String: String]?
+    let sidebar: AppThemeSidebarArguments?
+
+    /// Defaulted so the call sites (and tests) written before `sidebar` existed keep reading
+    /// as they did.
+    init(
+        roles: [String: String]? = nil,
+        material: AppThemeMaterialArguments? = nil,
+        terminalColors: [String: String]? = nil,
+        sidebar: AppThemeSidebarArguments? = nil
+    ) {
+        self.roles = roles
+        self.material = material
+        self.terminalColors = terminalColors
+        self.sidebar = sidebar
+    }
 
     private enum CodingKeys: String, CodingKey {
         case roles, material
         case terminalColors = "terminal_colors"
+        case sidebar
     }
 }
 
@@ -3209,8 +3314,9 @@ enum MCPTools {
             description: """
                 Read one complete app-chrome theme document in the same snake-case vocabulary \
                 accepted by create_app_theme and update_app_theme. Each available light/dark \
-                variant includes its authored and resolved roles, material, and complete paired \
-                terminal palette.
+                variant includes its authored and resolved roles, material, complete paired \
+                terminal palette, and — where stated — its sidebar dressing (gradient, image, \
+                brand). Image assets are reported by stored name, never as bytes.
                 """,
             inputSchema: MCPInputSchema(
                 properties: [
@@ -3249,7 +3355,10 @@ enum MCPTools {
                 added later with update_app_theme. Each variant inherits omitted roles, material, \
                 and terminal colours from the matching base variant (or the base's available \
                 variant when no match exists). The base defaults to the active app theme. The new \
-                theme is applied by default.
+                theme is applied by default. A variant's optional `sidebar` block dresses the \
+                project sidebar: a gradient or image behind the list, a custom logo, and the \
+                wordmark's text and face — supplied images arrive as a file path or base64 and \
+                are stored with the theme.
                 """,
             inputSchema: MCPInputSchema(
                 properties: [
@@ -3560,6 +3669,148 @@ enum MCPTools {
                     Omitted colours inherit from the base variant.
                     """,
                 properties: paletteSchema
+            ),
+            "sidebar": MCPPropertySchema(
+                type: .object,
+                description: """
+                    The sidebar's dressing for this appearance: a background gradient and/or \
+                    image under the project list, and the brand row at the top (logo and \
+                    wordmark). Everything is optional; an omitted half keeps the base \
+                    variant's, and an absent block is the plain themed sidebar with the \
+                    Threading mark beside the app's name.
+                    """,
+                properties: appSidebarSchema
+            )
+        ]
+    }
+
+    private static var appSidebarSchema: [String: MCPPropertySchema] {
+        let imageSource: [String: MCPPropertySchema] = [
+            "path": MCPPropertySchema(
+                type: .string,
+                description: "Absolute path to an image file on this machine; the host reads, "
+                    + "normalises to PNG and stores a copy, so the file need not persist."
+            ),
+            "base64": MCPPropertySchema(
+                type: .string,
+                description: "The image bytes, base64-encoded, when no file exists on disk."
+            )
+        ]
+        return [
+            "gradient": MCPPropertySchema(
+                type: .object,
+                description: """
+                    A linear wash under the list, drawn over the theme's surface colour. Every \
+                    stop must keep the theme's label at 3:1 — the sidebar is where sessions are \
+                    found, and a wash that swallows its names is refused like an unreadable \
+                    terminal.
+                    """,
+                properties: [
+                    "angle_degrees": MCPPropertySchema(
+                        type: .number,
+                        description: "CSS convention: the direction the gradient flows toward, "
+                            + "degrees clockwise from straight up. 0 flows toward the top, 180 "
+                            + "toward the bottom. Default 180."
+                    ),
+                    "stops": MCPPropertySchema(
+                        type: .array,
+                        description: "2–8 stops, each a colour at a position along the run.",
+                        items: MCPArrayItemSchema(
+                            type: .object,
+                            properties: [
+                                "color": MCPPropertySchema(
+                                    type: .string,
+                                    description: "#RRGGBB or #RRGGBBAA."
+                                ),
+                                "position": MCPPropertySchema(
+                                    type: .number,
+                                    description: "0 at the start of the run, 1 at its end."
+                                )
+                            ],
+                            required: ["color", "position"]
+                        )
+                    )
+                ]
+            ),
+            "remove_gradient": MCPPropertySchema(
+                type: .boolean,
+                description: "True removes the base variant's gradient."
+            ),
+            "image": MCPPropertySchema(
+                type: .object,
+                description: """
+                    An image over the gradient (or the plain surface): mode "tile" repeats it \
+                    at its own size (patterns), "fill" covers the column cropping overflow, \
+                    "fit" letterboxes. Legibility is yours to keep here — a photograph under \
+                    the list usually wants opacity well below 0.4, while a drawn pattern can \
+                    carry 1.
+                    """,
+                properties: [
+                    "source": MCPPropertySchema(
+                        type: .object,
+                        description: "The image: {path} or {base64}.",
+                        properties: imageSource
+                    ),
+                    "mode": MCPPropertySchema(
+                        type: .string,
+                        description: "\"tile\", \"fill\" or \"fit\". Default \"fill\"."
+                    ),
+                    "opacity": MCPPropertySchema(
+                        type: .number,
+                        description: "0–1 over what lies beneath. Default 1."
+                    )
+                ]
+            ),
+            "remove_image": MCPPropertySchema(
+                type: .boolean,
+                description: "True removes the base variant's background image."
+            ),
+            "logo": MCPPropertySchema(
+                type: .string,
+                description: """
+                    What sits in the brand slot: "mark" (the Threading mark, drawn in the \
+                    theme's ink), "hidden" (wordmark alone), or an object {path} or {base64} \
+                    supplying the theme's own logo image.
+                    """
+            ),
+            "title": MCPPropertySchema(
+                type: .object,
+                description: """
+                    The wordmark beside the logo. Absent means the app's own name in the \
+                    theme's typeface.
+                    """,
+                properties: [
+                    "text": MCPPropertySchema(
+                        type: .string,
+                        description: "Replacement text, 1–40 characters. Omit for the app's name."
+                    ),
+                    "font_family": MCPPropertySchema(
+                        type: .string,
+                        description: "An installed family for the wordmark alone; degrades to "
+                            + "the theme's typeface when absent from the machine."
+                    ),
+                    "font_size": MCPPropertySchema(
+                        type: .number,
+                        description: "10–22 points. Omit for the default."
+                    ),
+                    "weight": MCPPropertySchema(
+                        type: .string,
+                        description: "\"regular\", \"medium\", \"semibold\" or \"bold\"."
+                    ),
+                    "hidden": MCPPropertySchema(
+                        type: .boolean,
+                        description: "True shows the logo alone. Refused when the logo is "
+                            + "also hidden."
+                    )
+                ]
+            ),
+            "remove_title": MCPPropertySchema(
+                type: .boolean,
+                description: "True returns the wordmark to the app's own name in the default style."
+            ),
+            "remove": MCPPropertySchema(
+                type: .boolean,
+                description: "True clears the whole sidebar block: plain surface, default brand."
             )
         ]
     }

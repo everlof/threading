@@ -92,7 +92,9 @@ final class ComponentGalleryViewController: NSViewController {
         "SeparatorView",
         "ShortcutRecorderView",
         "SidebarBackdropView",
+        "SidebarBrandView",
         "SubagentSummaryView",
+        "ThreadingMarkView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
         "ThemedButton",
@@ -123,6 +125,8 @@ final class ComponentGalleryViewController: NSViewController {
     ]
 
     private let themePopUp = ThemedPopUp()
+    /// The mark stories' views, retained so the replay control can reach them.
+    private var markSamples: [ThreadingMarkView] = []
     private let appearanceToggle = ThemedToggle()
     private let receiptLabel = NSTextField(
         labelWithString: L10n.string("Ready — interact with any story.")
@@ -932,9 +936,22 @@ final class ComponentGalleryViewController: NSViewController {
                 story(
                     "SidebarBackdropView",
                     "The sidebar's ground: the platform's material under System, the theme's "
-                        + "own opaque surface under a style. Switch the theme above to watch it "
+                        + "own opaque surface under a style — plus whatever gradient or image "
+                        + "the style's sidebar block states. Switch the theme above to watch it "
                         + "trade one for the other.",
                     makeSidebarBackdropSample()
+                ),
+                story(
+                    "ThreadingMarkView",
+                    "The Threading mark drawn live: brand threads under System, the theme's "
+                        + "accent under a style. Click it to replay the launch stitch.",
+                    makeThreadingMarkSample()
+                ),
+                story(
+                    "SidebarBrandView",
+                    "The sidebar's brand row: the mark beside the app's name — or the logo, "
+                        + "wordmark and face the current chrome's sidebar brand states instead.",
+                    makeSidebarBrandSample()
                 ),
                 story(
                     "PaneFooterView",
@@ -1109,33 +1126,22 @@ final class ComponentGalleryViewController: NSViewController {
 
     /// The sidebar's own ground, at gallery scale — and beside it the plain view it replaced, so
     /// the appearance toggle above shows the difference rather than describing it.
-    /// The sidebar footer's shape at the sidebar's width: a titled plain button at the leading
-    /// margin, an icon-only twin at the trailing one, both landing their ink on the same inset.
+    /// The sidebar footer's shape at the sidebar's width: the titled Settings button alone at
+    /// the leading margin, its ink landing on the stated inset.
     private func makePaneFooterSample() -> NSView {
-        let add = ThemedButton()
-        add.title = L10n.string("Add Project")
-        add.image = NSImage(
-            systemSymbolName: "plus",
-            accessibilityDescription: L10n.string("Add Project")
-        )?
-            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
-        add.isBordered = false
-        add.applyFont(.controlRegular)
-        add.target = self
-        add.action = #selector(buttonPressed(_:))
-
         let gear = ThemedButton()
+        gear.title = L10n.string("Settings")
         gear.image = NSImage(
             systemSymbolName: "gearshape",
             accessibilityDescription: L10n.string("Settings")
         )?
             .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
         gear.isBordered = false
-        gear.toolTip = L10n.string("Settings")
+        gear.applyFont(.controlRegular)
         gear.target = self
         gear.action = #selector(buttonPressed(_:))
 
-        let footer = PaneFooterView(leading: [add], trailing: [gear])
+        let footer = PaneFooterView(leading: [gear])
 
         let pane = ThemedSurfaceView()
         pane.applySurface(fill: Design.Surface.background, radius: .control)
@@ -1162,6 +1168,60 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         return backdrop
+    }
+
+    /// The mark at several sizes, so the stroke ratios can be judged where they will be used
+    /// (the 20pt brand slot) and where they can be inspected (64pt).
+    private func makeThreadingMarkSample() -> NSView {
+        let small = ThreadingMarkView()
+        let large = ThreadingMarkView()
+
+        NSLayoutConstraint.activate([
+            small.widthAnchor.constraint(equalToConstant: 20),
+            small.heightAnchor.constraint(equalToConstant: 20),
+            large.widthAnchor.constraint(equalToConstant: 64),
+            large.heightAnchor.constraint(equalToConstant: 64)
+        ])
+
+        let replay = ThemedButton()
+        replay.title = L10n.string("Replay")
+        replay.isBordered = false
+        replay.applyFont(.controlRegular)
+        replay.target = self
+        replay.action = #selector(replayMarkDrawIn(_:))
+        markSamples = [small, large]
+
+        let row = NSStackView(views: [small, large, replay])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.medium
+        return row
+    }
+
+    @objc private func replayMarkDrawIn(_ sender: Any?) {
+        markSamples.forEach { $0.playDrawIn() }
+        showReceipt(L10n.string("Mark draw-in replayed."))
+    }
+
+    private func makeSidebarBrandSample() -> NSView {
+        let brand = SidebarBrandView()
+
+        let pane = ThemedSurfaceView()
+        pane.applySurface(fill: Design.Surface.background, radius: .control)
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(brand)
+
+        NSLayoutConstraint.activate([
+            pane.widthAnchor.constraint(equalToConstant: SidebarDefaults.defaultWidth),
+            pane.heightAnchor.constraint(equalToConstant: PaneHeaderView.bandHeight),
+            brand.leadingAnchor.constraint(
+                equalTo: pane.leadingAnchor,
+                constant: Design.Spacing.inset
+            ),
+            brand.centerYAnchor.constraint(equalTo: pane.centerYAnchor)
+        ])
+
+        return pane
     }
 
     private func makeSurfaceViewSample() -> NSView {

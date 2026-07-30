@@ -31,8 +31,8 @@ when creating a session. See [Accounts](#accounts).
 ## Projects
 
 ### Adding
-- **Add Project** button at the bottom of the sidebar — offers **Start from Scratch…**
-  (name a new folder and Threading creates it) and **Use an Existing Folder…**
+- The **+** at the top of the sidebar, beside the arrangement control — offers **Start from
+  Scratch…** (name a new folder and Threading creates it) and **Use an Existing Folder…**
 - **Project > New Project…** — create the folder from scratch
 - **Project > Add Existing Project…** (Cmd+Shift+N) — choose a folder that already exists
 - Drag a folder onto the sidebar, or onto the app icon
@@ -119,8 +119,16 @@ The grouping can be toggled from wherever you notice it, not only from Settings:
   menu, with checkmarks showing the current state
 - **Settings > General > Group sessions by branch** — the persistent home of the setting
 
+### The sidebar's top and bottom
+The band at the top of the sidebar carries the app's brand at its left — the Threading mark,
+which stitches itself in when the app launches (skipped under Reduce Motion), beside the
+app's name — and two quiet controls at its right: **+** to add a project, and the
+arrangement control described below. A theme can restyle the whole row — its own logo, its
+own wordmark, even a gradient or image behind the list — see
+[Themes](#themes). **Settings** sits at the sidebar's bottom-left, icon and word.
+
 ### Arranging the sidebar
-The band at the top of the sidebar holds one quiet control, opening the sidebar's view
+The arrangement control at the sidebar's top opens the sidebar's view
 options in one menu: how sessions group (**Group Sessions by Branch**, **Headings for Lone
 Branches** — disabled while grouping is off), then how they sort:
 
@@ -1425,6 +1433,29 @@ it; if the one you were using goes away, the app falls back to System and record
 choice. An extension theme cannot be edited in place: duplicate it to make an editable copy,
 or update the extension that ships it.
 
+**An extension's theme follows its files.** While the extension is enabled, Threading watches
+its theme documents and reloads them the moment they change — so a theme can *live*: an
+extension may rewrite its own palette to follow the weather or the hour, and an author editing
+a theme sees the window follow each save. An edit that does not validate is skipped and the
+last good version stays.
+
+#### The sidebar belongs to the theme
+
+A theme can dress the **sidebar** beyond its colours: a gradient or an image behind the
+project list (tiled as a pattern, or fitted/filled as a picture, at any opacity), its own
+logo in place of the Threading mark, and its own wordmark — different text, an installed
+font, a size and weight. Every part is optional; a theme that states nothing keeps the plain
+themed column with the Threading mark beside the app's name, and under **System** the
+sidebar stays the platform's frosted material untouched.
+
+Extension themes ship these in their package (the theme document references image files
+beside it), and an agent can author them live through the app-theme tools — asking for "a
+starfield behind my projects" or "put our team's logo in the sidebar" is a one-tool-call
+change. A gradient that would swallow the sidebar's labels is refused the way an unreadable
+terminal palette is; image legibility is left to the author's eye. Duplicating a theme
+copies its sidebar images with it, so the copy survives the original's extension being
+disabled.
+
 #### Fonts
 
 An app theme states a **typeface** as well as a palette, because the styles these themes are
@@ -1498,8 +1529,8 @@ under either setting, since a path typed at a shell has to be the path you point
 **Cmd+,** opens Settings, and pressing it again closes it — unlike most Mac apps, where
 preferences are their own window and Cmd+W closes them. Here Settings is a *page in this
 window*, replacing the session in the pane and the project list in the sidebar, so the chord
-that put it there is what takes it away. The **✕** on its tab, and the cogwheel at the bottom
-of the sidebar, do the same thing.
+that put it there is what takes it away. The **✕** on its tab, and the **Settings** button at
+the sidebar's bottom-left, do the same thing.
 
 Closing it returns you to exactly what it covered. If that was a **new-session composer**, it
 comes back untouched — the same agent, account, model and checkout, the same attached images,

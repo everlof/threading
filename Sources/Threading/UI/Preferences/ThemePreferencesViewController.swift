@@ -424,12 +424,10 @@ final class ThemePreferencesViewController: NSViewController {
     @objc private func duplicateAppTheme() {
         let source = AppThemeLibrary.current
         do {
-            let copy = try AppThemeEditing.duplicate(
+            let copy = try AppThemeLibrary.duplicate(
                 source,
-                id: AppThemeLibrary.makeCustomID(),
                 name: AppThemeLibrary.uniqueCopyName(of: source)
             )
-            try AppThemeLibrary.create(copy)
             AppThemeLibrary.apply(copy)
         } catch {
             presentAlert(
