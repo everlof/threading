@@ -166,10 +166,27 @@ final class AgentRuntime {
         }
 
         let state = subagentState(for: report.sessionID)
+
+        // Not every subagent hook is about a subagent: Claude reports the root agent's own turn
+        // through the same events. See `describesChildAgent` for the shape and the measurements.
+        guard report.describesChildAgent(
+            isAlreadyTracked: state.timeline.contains(threadID: childID)
+        ) else {
+            ThreadingLogger.agent.debug(
+                """
+                Ignored a \(report.event.rawValue, privacy: .public) naming no child agent for \
+                \(report.sessionID.uuidString, privacy: .public)
+                """
+            )
+            return
+        }
+
         state.apply(.discovered(SubagentDescriptor(
             threadID: childID,
             parentThreadID: report.agentSessionID,
-            role: report.subagentType,
+            // An empty type is the parent reporting itself, never a child's role. Storing it
+            // would put `""` on the descriptor and leave `displayName` guessing.
+            role: report.subagentType.flatMap { $0.isEmpty ? nil : $0 },
             path: report.subagentTranscriptPath
         )))
 

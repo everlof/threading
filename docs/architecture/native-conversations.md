@@ -111,6 +111,16 @@ their chronological position but start behind one `N tool calls` disclosure; ope
 the ordinary individually-expandable tool rows. New events update that controller only while
 its tab exists; closing the tab is respected and later activity does not reopen it.
 
+A navigator row only carries a chevron when opening it reaches a transcript — rows already
+replayed, a provider file on disk, or a child still running, which is the one case where "has
+not arrived yet" is the truth rather than a permanent state. `SubagentSummaryItem` carries the
+answer as `canOpenTranscript` because the component cannot work it out: a live child streams
+rows it has no file for, and a finished one may name a path the provider never wrote. A row that
+leads nowhere keeps its place in the list and says so, indented to the chevron rows' ink via
+`ThemedButton.plainTitleLeadingInset` so a mixed list is not ragged. The same distinction picks
+the detail pane's notice, so a finished child stops claiming a file is on its way. See
+[`session-activity.md`](session-activity.md) for the hook reports that made empty rows possible.
+
 Codex app-server reports child `thread/started`, `thread/status/changed`,
 `collabAgentToolCall`, and `subAgentActivity` events with real thread ids.
 `CodexSubagentEvent` translates those into `SubagentEvent`, including the child's complete

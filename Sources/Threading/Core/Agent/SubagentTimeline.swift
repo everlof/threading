@@ -184,6 +184,55 @@ struct SubagentDescriptor: Codable, Equatable {
     }
 }
 
+// MARK: - Child Admission
+
+/// Whether a provider is naming a delegated child, or talking about the parent itself.
+///
+/// Claude reports the **root** agent's own turn through the subagent hooks as well as its
+/// children's: the root's `agent_id`, an *empty* `agent_type`, an `agent_transcript_path` under
+/// `<session>/subagents/` that the CLI never writes, and the parent's own
+/// `last_assistant_message`. Threading accepted them, so the navigator filled with rows that
+/// opened onto nothing and could not be dismissed — nothing retracts a discovered child.
+///
+/// Measured across five sessions' persisted navigators: 17 of 20 recorded children had this
+/// shape, every one with no transcript on disk and the parent's own prompt or turn summary as
+/// its message, while all three real children named their type (`Explore`, `Plan`) and had
+/// their transcripts.
+///
+/// `ClaudeSubagentEvent` already refuses the same shape natively — "an explicit non-agent type
+/// must never become a child row" — so this keeps the adapters agreeing on what a child is. An
+/// unnamed type is admitted only when a transcript proves there is one behind it, which is the
+/// terminal analogue of native's "accepted only when its tool-use id is already known", and
+/// holds for Codex too: Start supplies the type and Stop supplies a path that a real child has
+/// written. A report satisfying neither describes something that could not be opened anyway.
+enum SubagentChildAdmission {
+
+    static func namesAChild(
+        role: String?,
+        path: String?,
+        transcriptExists: (String) -> Bool = {
+            FileManager.default.fileExists(atPath: $0)
+        }
+    ) -> Bool {
+        if let role, !role.isEmpty { return true }
+        guard let path, !path.isEmpty else { return false }
+        return transcriptExists(path)
+    }
+
+    static func namesAChild(
+        _ descriptor: SubagentDescriptor,
+        transcriptExists: (String) -> Bool = {
+            FileManager.default.fileExists(atPath: $0)
+        }
+    ) -> Bool {
+        namesAChild(
+            role: descriptor.role,
+            path: descriptor.path,
+            transcriptExists: transcriptExists
+        )
+    }
+}
+
 /// One child-agent fact emitted by a provider adapter.
 enum SubagentEvent {
     case discovered(SubagentDescriptor)
@@ -303,6 +352,14 @@ struct SubagentTimeline {
 
     var doneCount: Int {
         agents.lazy.filter { $0.status.isDone }.count
+    }
+
+    /// Whether a child is already tracked under this identity or one of its aliases.
+    ///
+    /// Lets an adapter admit a later event for a child it has already accepted without
+    /// re-deciding whether the provider's identifier describes a real one.
+    func contains(threadID: String) -> Bool {
+        canonicalID(for: threadID) != nil
     }
 
     var snapshot: Snapshot {
@@ -687,11 +744,39 @@ final class SubagentStateStore {
             guard snapshot.version == SubagentDefaults.snapshotVersion else {
                 throw SubagentStateStoreError.unsupportedVersion(snapshot.version)
             }
-            return snapshot
+            return sweepingNonChildren(snapshot, sessionID: sessionID)
         } catch {
             quarantine(file, sessionID: sessionID, error: error)
             return nil
         }
+    }
+
+    /// Drops rows written before the adapters agreed on what a child is.
+    ///
+    /// Every navigator persisted until then also recorded the parent's own turn as a child —
+    /// see `SubagentChildAdmission`. Refusing them at the hook stops new ones, but a snapshot
+    /// keeps its rows across relaunches, so without this the sessions that already have them
+    /// keep showing them forever. Swept on read rather than by a version bump: the shape of the
+    /// file did not change, only which rows belong in it, and the next save writes the result.
+    ///
+    /// A real child whose transcript has since been deleted is swept too. It could not be
+    /// opened either, and a name with nothing behind it is the thing being removed.
+    private func sweepingNonChildren(
+        _ snapshot: SubagentTimeline.Snapshot,
+        sessionID: SessionID
+    ) -> SubagentTimeline.Snapshot {
+        let kept = snapshot.agents.filter {
+            SubagentChildAdmission.namesAChild($0.descriptor)
+        }
+        guard kept.count != snapshot.agents.count else { return snapshot }
+
+        ThreadingLogger.agent.info(
+            """
+            Dropped \(snapshot.agents.count - kept.count, privacy: .public) stored row(s) naming \
+            no child agent for \(sessionID.uuidString, privacy: .public)
+            """
+        )
+        return SubagentTimeline.Snapshot(version: snapshot.version, agents: kept)
     }
 
     func save(_ snapshot: SubagentTimeline.Snapshot, sessionID: SessionID) {

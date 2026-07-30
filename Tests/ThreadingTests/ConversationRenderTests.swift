@@ -1080,6 +1080,155 @@ final class SubagentSummaryViewTests: XCTestCase {
         XCTAssertTrue(pane.tabs(for: sessionID).isEmpty)
     }
 
+    // MARK: - Rows That Lead Nowhere
+
+    /// A chevron is a promise. A finished child with no transcript — no rows replayed and no
+    /// file on disk — has nothing behind it, and offering the same affordance as a child that
+    /// opens leaves the user clicking a control that cannot answer.
+    func testAFinishedChildWithNoTranscriptOffersNoWayIn() throws {
+        let view = SubagentSummaryView()
+        view.selectionStyle = .navigation
+        view.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "opens",
+                    title: "Parser audit",
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: nil,
+                    detailLines: ["Finished"],
+                    transcriptURL: URL(fileURLWithPath: "/tmp/agent-opens.jsonl"),
+                    canOpenTranscript: true
+                ),
+                SubagentSummaryItem(
+                    id: "empty",
+                    title: "Render check",
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: nil,
+                    detailLines: [],
+                    canOpenTranscript: false
+                )
+            ],
+            workingCount: 0,
+            doneCount: 2
+        )
+        _ = laidOut(view)
+
+        let buttonTitles = descendants(of: view)
+            .compactMap { $0 as? ThemedButton }
+            .map(\.title)
+        XCTAssertEqual(
+            buttonTitles,
+            ["Parser audit"],
+            "Only the child with a transcript should be a control"
+        )
+
+        let labels = descendants(of: view)
+            .compactMap { $0 as? NSTextField }
+            .map(\.stringValue)
+        XCTAssertTrue(
+            labels.contains("Render check"),
+            "The child is still listed — it just does not pretend to open"
+        )
+        XCTAssertTrue(
+            labels.contains("No transcript recorded."),
+            "A row that leads nowhere has to say why, or it reads as a broken control"
+        )
+    }
+
+    /// A child still running has no transcript *yet*, which is the one case where waiting is the
+    /// truth. It keeps its chevron so the user can watch it fill.
+    func testARunningChildKeepsItsWayInBeforeAnyTranscriptExists() throws {
+        var timeline = SubagentTimeline(sessionID: SessionID())
+        timeline.apply(.discovered(SubagentDescriptor(threadID: "live", role: "Explore")))
+        timeline.apply(.state(threadID: "live", status: .working, message: nil))
+
+        let controller = SubagentTranscriptViewController()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 480)
+        controller.update(timeline, selectedThreadID: "live")
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            descendants(of: controller.view).compactMap { $0 as? ThemedButton }.count,
+            1
+        )
+        XCTAssertTrue(
+            descendants(of: controller.view)
+                .compactMap { $0 as? NSTextField }
+                .contains { $0.stringValue.contains("has not arrived yet") }
+        )
+    }
+
+    /// The same pane, once the child has finished without one: the notice has to stop claiming
+    /// a file is on its way, because nothing is going to write it.
+    func testAFinishedChildWithNoTranscriptSaysSoRatherThanWaiting() throws {
+        var timeline = SubagentTimeline(sessionID: SessionID())
+        timeline.apply(.discovered(SubagentDescriptor(threadID: "done", role: "Explore")))
+        timeline.apply(.state(threadID: "done", status: .completed, message: nil))
+
+        let controller = SubagentTranscriptViewController()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 480)
+        controller.update(timeline, selectedThreadID: "done")
+        controller.view.layoutSubtreeIfNeeded()
+
+        let labels = descendants(of: controller.view)
+            .compactMap { $0 as? NSTextField }
+            .map(\.stringValue)
+        XCTAssertTrue(labels.contains("No transcript was recorded for this child."))
+        XCTAssertFalse(labels.contains { $0.contains("has not arrived yet") })
+    }
+
+    /// Aligned by ink: dropping the chevron must not drag the row's words left, or a list that
+    /// mixes openable and empty children reads as ragged.
+    func testARowThatLeadsNowhereStillLinesUpWithTheRowsThatOpen() throws {
+        let view = SubagentSummaryView()
+        view.selectionStyle = .navigation
+        view.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "opens",
+                    title: "Parser audit",
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: nil,
+                    detailLines: ["Finished"],
+                    transcriptURL: URL(fileURLWithPath: "/tmp/agent-opens.jsonl"),
+                    canOpenTranscript: true
+                ),
+                SubagentSummaryItem(
+                    id: "empty",
+                    title: "Render check",
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: nil,
+                    detailLines: [],
+                    canOpenTranscript: false
+                )
+            ],
+            workingCount: 0,
+            doneCount: 2
+        )
+        _ = laidOut(view)
+
+        let button = try XCTUnwrap(
+            descendants(of: view).compactMap { $0 as? ThemedButton }
+                .first { $0.title == "Parser audit" }
+        )
+        let label = try XCTUnwrap(
+            descendants(of: view).compactMap { $0 as? NSTextField }
+                .first { $0.stringValue == "Render check" }
+        )
+        // Measured on alignment rects, not frames — that is what the stack lays out against,
+        // and an `NSTextField` carries a 2pt horizontal alignment inset a raw frame would
+        // report as a misalignment that is not on screen.
+        let buttonInk = alignedLeadingX(of: button, in: view)
+            + ThemedButton.plainTitleLeadingInset
+        let labelInk = alignedLeadingX(of: label, in: view)
+
+        XCTAssertEqual(labelInk, buttonInk, accuracy: 0.5)
+    }
+
     private func makeAgent(
         sessionID: SessionID = SessionID(),
         threadID: String,
@@ -1124,5 +1273,12 @@ final class SubagentSummaryViewTests: XCTestCase {
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    /// Where a view's *ink* starts, in another view's coordinates.
+    private func alignedLeadingX(of view: NSView, in ancestor: NSView) -> CGFloat {
+        guard let parent = view.superview else { return view.frame.minX }
+        let aligned = view.alignmentRect(forFrame: view.frame)
+        return parent.convert(aligned.origin, to: ancestor).x
     }
 }

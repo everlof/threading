@@ -120,6 +120,27 @@ struct HookLifecycleReport {
             task["id"] as? String ?? "#\(index)"
         }
     }
+
+    // MARK: - Child Admission
+
+    /// Whether a `SubagentStart`/`SubagentStop` report describes a real delegated child, rather
+    /// than the parent reporting its own turn — see `SubagentChildAdmission` for that shape and
+    /// the measurements behind the rule.
+    ///
+    /// A child already tracked is always admitted, so one accepted at Start still receives its
+    /// Stop even if that report carries less than the first did.
+    func describesChildAgent(
+        isAlreadyTracked: Bool,
+        transcriptExists: (String) -> Bool = {
+            FileManager.default.fileExists(atPath: $0)
+        }
+    ) -> Bool {
+        isAlreadyTracked || SubagentChildAdmission.namesAChild(
+            role: subagentType,
+            path: subagentTranscriptPath,
+            transcriptExists: transcriptExists
+        )
+    }
 }
 
 // MARK: - Hook Lifecycle Relay

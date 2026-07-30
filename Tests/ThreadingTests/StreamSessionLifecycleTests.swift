@@ -368,6 +368,47 @@ final class SubagentSessionStateTests: XCTestCase {
         XCTAssertEqual(agent.activity, ["Reasoning: Chronology: legacy message"])
     }
 
+    /// Refusing the parent's own turn at the hook stops new rows, but a navigator persisted
+    /// before that keeps its rows across every relaunch. The store sweeps them on read, or the
+    /// sessions that already have them never get better.
+    func testLoadingDropsStoredRowsThatNameNoChild() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let transcript = directory.appendingPathComponent("agent-real.jsonl")
+        try Data("{}\n".utf8).write(to: transcript)
+
+        let sessionID = SessionID()
+        let store = SubagentStateStore(directory: directory)
+        let seeded = SubagentSessionState(sessionID: sessionID, store: store)
+
+        // The measured shape: an empty role and a transcript path the CLI never wrote.
+        seeded.apply(.discovered(SubagentDescriptor(
+            threadID: "aeeaf42678b4c16f7",
+            parentThreadID: sessionID.uuidString.lowercased(),
+            role: "",
+            path: directory.appendingPathComponent("agent-phantom.jsonl").path
+        )))
+        seeded.apply(.state(threadID: "aeeaf42678b4c16f7", status: .completed, message: nil))
+        seeded.apply(.discovered(SubagentDescriptor(
+            threadID: "a3575fa54125f456c",
+            role: "Explore",
+            path: transcript.path
+        )))
+        seeded.apply(.state(threadID: "a3575fa54125f456c", status: .completed, message: nil))
+        seeded.flushPersistence()
+        XCTAssertEqual(seeded.timeline.agents.count, 2)
+
+        let restored = SubagentSessionState(sessionID: sessionID, store: store)
+        XCTAssertEqual(
+            restored.timeline.agents.map(\.descriptor.threadID),
+            ["a3575fa54125f456c"],
+            "Only the child that names a role or has a transcript survives the sweep"
+        )
+    }
+
     func testSnapshotRestoresNavigatorMetadataAndSettlesLiveChildren() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -495,6 +536,22 @@ final class SubagentSessionStateTests: XCTestCase {
         ))
         XCTAssertEqual(restored.agents.count, 1)
         XCTAssertEqual(restored.agents.first?.status, .failed)
+    }
+
+    /// The hook adapter admits a later event for a child it already accepted, so the lookup has
+    /// to answer for a provider's *other* identity too — Claude's terminal hook reports the
+    /// agent id where native history has already stored the tool-use id.
+    func testAlreadyTrackedAnswersForEveryIdentityAChildIsKnownBy() {
+        var timeline = SubagentTimeline(sessionID: SessionID())
+        timeline.apply(.discovered(SubagentDescriptor(
+            threadID: "tool-use-123",
+            alternateThreadIDs: ["agent-789"],
+            role: "Explore"
+        )))
+
+        XCTAssertTrue(timeline.contains(threadID: "tool-use-123"))
+        XCTAssertTrue(timeline.contains(threadID: "agent-789"))
+        XCTAssertFalse(timeline.contains(threadID: "agent-000"))
     }
 
     func testTranscriptLoaderRejectsLogicalPathsAndAcceptsRegularFiles() throws {

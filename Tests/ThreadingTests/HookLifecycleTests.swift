@@ -71,6 +71,113 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(report.lastAssistantMessage, "Found the call site.")
     }
 
+    // MARK: - Child Admission
+
+    /// The measured shape of Claude reporting its **own** turn through `SubagentStop`: the root
+    /// agent's id, an *empty* `agent_type`, a transcript path under `<session>/subagents/` that
+    /// the CLI never writes, and the parent's own closing message.
+    ///
+    /// Taken verbatim from a persisted navigator, where seventeen of twenty recorded children
+    /// had this shape — each one a row that opened onto nothing and could never be dismissed.
+    private func mainAgentStopReport(
+        transcriptPath: String = "/Users/x/.claude/projects/-p/sess/subagents/agent-a1b2c3.jsonl"
+    ) throws -> HookLifecycleReport {
+        try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .subagentStopped,
+            payload: [
+                "session_id": "ea15ac11-65a0-4dd0-9380-6bb6e6fe2e34",
+                "agent_id": "a1b2c3",
+                "agent_type": "",
+                "agent_transcript_path": transcriptPath,
+                "last_assistant_message": "Goal: fix the navigator. Nothing is changed yet."
+            ]
+        ))
+    }
+
+    func testTheParentReportingItsOwnTurnIsNotAChild() throws {
+        let report = try mainAgentStopReport()
+
+        XCTAssertFalse(report.describesChildAgent(
+            isAlreadyTracked: false,
+            transcriptExists: { _ in false }
+        ))
+    }
+
+    func testANamedAgentTypeIsAChild() throws {
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .subagentStarted,
+            payload: ["agent_id": "child-1", "agent_type": "Explore"]
+        ))
+
+        XCTAssertTrue(
+            report.describesChildAgent(
+                isAlreadyTracked: false,
+                transcriptExists: { _ in false }
+            ),
+            "A child names its type before it has written anything"
+        )
+    }
+
+    /// The terminal analogue of native's "accepted only when its tool-use id is already known":
+    /// with no type to go on, a transcript on disk is what proves there is a child behind it.
+    func testAnUnnamedTypeIsAdmittedOnlyWithATranscriptOnDisk() throws {
+        let report = try mainAgentStopReport()
+
+        XCTAssertTrue(report.describesChildAgent(
+            isAlreadyTracked: false,
+            transcriptExists: { _ in true }
+        ))
+    }
+
+    /// A child admitted at `SubagentStart` must still receive its `SubagentStop`, or it stays
+    /// working for the rest of the session.
+    func testAChildAlreadyTrackedStaysAdmitted() throws {
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .subagentStopped,
+            payload: ["agent_id": "child-1", "agent_type": ""]
+        ))
+
+        XCTAssertFalse(report.describesChildAgent(
+            isAlreadyTracked: false,
+            transcriptExists: { _ in false }
+        ))
+        XCTAssertTrue(report.describesChildAgent(
+            isAlreadyTracked: true,
+            transcriptExists: { _ in false }
+        ))
+    }
+
+    /// The injected predicate is a test seam, not the behaviour — this pins the default the app
+    /// actually runs with against a real file and a real absence.
+    func testTheDefaultTranscriptCheckReadsTheFileSystem() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-hook-admission-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let written = directory.appendingPathComponent("agent-child.jsonl")
+        try Data("{}\n".utf8).write(to: written)
+
+        XCTAssertTrue(try mainAgentStopReport(transcriptPath: written.path)
+            .describesChildAgent(isAlreadyTracked: false))
+        XCTAssertFalse(try mainAgentStopReport(
+            transcriptPath: directory.appendingPathComponent("absent.jsonl").path
+        ).describesChildAgent(isAlreadyTracked: false))
+    }
+
+    func testAReportWithNoTranscriptPathAndNoTypeIsRefused() throws {
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .subagentStopped,
+            payload: ["agent_id": "child-1"]
+        ))
+
+        XCTAssertFalse(report.describesChildAgent(isAlreadyTracked: false))
+    }
+
     /// An unnamed event is refused rather than defaulted. A lifecycle post whose query string
     /// was mangled says nothing about the turn, and guessing would move the session's state on
     /// no evidence.

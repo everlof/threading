@@ -19,6 +19,14 @@ struct SubagentSummaryItem: Equatable {
     let detailLines: [String]
     let transcriptURL: URL?
 
+    /// Whether opening this child leads to a transcript — one already replayed, one on disk, or
+    /// one a still-running child is about to write.
+    ///
+    /// The component cannot work this out: a live child streams rows it has no file for, and a
+    /// finished one may name a path the provider never wrote. Feature code owns the answer, and
+    /// the component owns what a row that leads nowhere looks like — see `isExpandable`.
+    let canOpenTranscript: Bool
+
     init(
         id: String,
         title: String,
@@ -26,7 +34,8 @@ struct SubagentSummaryItem: Equatable {
         state: State,
         statusDetail: String?,
         detailLines: [String],
-        transcriptURL: URL? = nil
+        transcriptURL: URL? = nil,
+        canOpenTranscript: Bool = true
     ) {
         self.id = id
         self.title = title
@@ -35,6 +44,7 @@ struct SubagentSummaryItem: Equatable {
         self.statusDetail = statusDetail
         self.detailLines = detailLines
         self.transcriptURL = transcriptURL
+        self.canOpenTranscript = canOpenTranscript
     }
 }
 
@@ -200,14 +210,39 @@ final class SubagentSummaryView: NSView {
         }
     }
 
+    /// Whether the row's chevron would lead anywhere.
+    ///
+    /// A disclosure chevron is a promise, and a row that opens onto "nothing arrived yet" is a
+    /// dead control the user has no way to tell from a slow one. Inline rows promise the detail
+    /// this component draws itself; navigation rows promise a transcript, which only the
+    /// feature can vouch for.
+    private func isExpandable(_ item: SubagentSummaryItem) -> Bool {
+        switch selectionStyle {
+        case .detail:
+            return false
+        case .inline:
+            return !(item.subtitle ?? "").isEmpty || !item.detailLines.isEmpty
+        case .navigation:
+            return item.canOpenTranscript
+        }
+    }
+
     private func makeRow(_ item: SubagentSummaryItem) -> NSView {
-        let showsInlineDetail = selectionStyle == .inline && selectedID == item.id
-        let showsSelection = selectionStyle == .navigation && selectedID == item.id
+        let isExpandable = isExpandable(item)
+        let showsInlineDetail = isExpandable
+            && selectionStyle == .inline
+            && selectedID == item.id
+        let showsSelection = isExpandable
+            && selectionStyle == .navigation
+            && selectedID == item.id
         let title: NSView
-        if selectionStyle == .detail {
+        if !isExpandable {
             let label = NSTextField(labelWithString: item.title)
             label.translatesAutoresizingMaskIntoConstraints = false
-            label.applyFont(.subheading)
+            // The detail header names the transcript already on screen, so it carries the
+            // heading weight. A row that simply leads nowhere is still one of a list and keeps
+            // the type its siblings' buttons use.
+            label.applyFont(selectionStyle == .detail ? .subheading : .control)
             label.textColor = Design.Text.label
             label.lineBreakMode = .byTruncatingTail
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -263,6 +298,16 @@ final class SubagentSummaryView: NSView {
         heading.alignment = .centerY
         heading.spacing = Design.Spacing.small
         heading.translatesAutoresizingMaskIntoConstraints = false
+        // A row with no chevron still starts where the chevron rows' words do, so a list that
+        // mixes the two is aligned by ink rather than by whether it happens to be openable.
+        if !isExpandable, selectionStyle != .detail {
+            heading.edgeInsets = NSEdgeInsets(
+                top: 0,
+                left: ThemedButton.plainTitleLeadingInset,
+                bottom: 0,
+                right: 0
+            )
+        }
 
         let row = NSStackView()
         row.orientation = .vertical
@@ -277,6 +322,16 @@ final class SubagentSummaryView: NSView {
 
         if let statusDetail = item.statusDetail, !statusDetail.isEmpty {
             addDetail(statusDetail, to: row, color: Design.Text.tertiary)
+        }
+
+        // Removing the chevron answers "why does this not open"; without a line saying so the
+        // row is merely quiet about it, and a missing transcript reads as a missing feature.
+        if !isExpandable, selectionStyle == .navigation {
+            addDetail(
+                L10n.string("No transcript recorded."),
+                to: row,
+                color: Design.Text.tertiary
+            )
         }
 
         if showsInlineDetail {

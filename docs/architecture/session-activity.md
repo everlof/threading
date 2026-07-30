@@ -55,6 +55,28 @@ structured stream uses the spawning Agent tool-use id as the stable UI identity;
 would create duplicate children. Claude terminal uses the hooks. Codex uses its child thread id
 in both app-server and hooks, so the hook can enrich either surface without a second row.
 
+**Not every subagent hook is about a subagent.** Claude reports the *root* agent's own turn
+through `SubagentStop` as well: the root's `agent_id`, an **empty** `agent_type`, an
+`agent_transcript_path` under `<session>/subagents/` that the CLI never writes, and the parent's
+own `last_assistant_message`. Threading accepted them, so the navigator filled with rows that
+opened onto nothing and could not be dismissed — nothing retracts a discovered child. Measured
+across five sessions' persisted navigators: 17 of 20 recorded children had this shape, every one
+of them with no transcript on disk and the parent's own prompt or turn summary as its message,
+while all three real children named their type (`Explore`, `Plan`) and had their transcripts.
+
+`HookLifecycleReport.describesChildAgent` is the admission rule: a named `agent_type` is a child;
+an unnamed one is admitted only when the reported transcript exists, and an already-tracked id is
+always admitted so a child accepted at Start still receives its Stop. This is the terminal
+analogue of the rule `ClaudeSubagentEvent` already applies natively — "an explicit non-agent type
+must never become a child row" — and it holds for Codex too, since the contract above has Start
+supplying the type and Stop supplying a path that, for a real child, is on disk. A child that
+satisfies neither is by definition one that cannot be opened.
+
+Refusing them at the hook only stops new ones: a navigator keeps its rows across relaunches, so
+`SubagentStateStore.load` applies the same rule to what is already on disk. Swept on read rather
+than behind a version bump — the file's shape did not change, only which rows belong in it, and
+the next save writes the result.
+
 Three things shape it, and each was wrong first or would have been:
 
 - **The lifecycle endpoint never blocks**, unlike the permission one. These hooks fire on the

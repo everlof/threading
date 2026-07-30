@@ -182,8 +182,13 @@ final class SubagentTranscriptViewController: NSViewController {
 
         var hasTranscriptRow = false
         if agent.conversation.rows.isEmpty {
+            // "Not arrived yet" is only true while there is still something to arrive. A child
+            // that has finished without leaving a transcript never will, and saying otherwise
+            // leaves the pane waiting on a file the provider is not going to write.
             add(ConversationRowView.notice(
-                L10n.string("The structured child transcript has not arrived yet."),
+                canOpenTranscript(agent)
+                    ? L10n.string("The structured child transcript has not arrived yet.")
+                    : L10n.string("No transcript was recorded for this child."),
                 kind: .muted
             ))
         } else {
@@ -277,6 +282,18 @@ final class SubagentTranscriptViewController: NSViewController {
         }
     }
 
+    /// Whether opening this child would reach a transcript.
+    ///
+    /// Three ways it can: rows already replayed or streamed, a provider transcript on disk, or a
+    /// child still running — which is the one case where "has not arrived yet" is the truth
+    /// rather than a permanent state. A finished child with none of the three has nothing behind
+    /// it, and the navigator must not offer a way in.
+    private func canOpenTranscript(_ agent: SubagentTimeline.Agent) -> Bool {
+        !agent.conversation.rows.isEmpty
+            || SubagentTranscriptLoader.transcriptURL(for: agent.descriptor) != nil
+            || agent.status.isWorking
+    }
+
     private func summaryItem(_ agent: SubagentTimeline.Agent) -> SubagentSummaryItem {
         let detailLines = agent.activity.isEmpty
             ? agent.message.map { [$0] } ?? []
@@ -288,7 +305,8 @@ final class SubagentTranscriptViewController: NSViewController {
             state: summaryState(agent.status),
             statusDetail: agent.statusDetail,
             detailLines: Array(detailLines.suffix(SubagentDefaults.activityLimit)),
-            transcriptURL: SubagentTranscriptLoader.transcriptURL(for: agent.descriptor)
+            transcriptURL: SubagentTranscriptLoader.transcriptURL(for: agent.descriptor),
+            canOpenTranscript: canOpenTranscript(agent)
         )
     }
 }
