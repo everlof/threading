@@ -2229,6 +2229,67 @@ final class ExtensionContractTests: XCTestCase {
         }
     }
 
+    /// The corner card's two vocabularies, and the line between them.
+    ///
+    /// The compact row still refuses controls — the card's own click targets are host-owned and
+    /// a button in that line would fight them. The level the host reveals from a row fights
+    /// nothing, because opening it is what the reader just asked for, so it may act.
+    func testCornerCardRefusesControlsInItsRowAndAllowsThemBehindADisclosure() throws {
+        let contract = ThreadingComponentCatalog.sessionCornerCard
+        let action = ExtensionNode.button(
+            id: "open-checks",
+            title: "Open on GitHub",
+            role: .standard,
+            isEnabled: true
+        )
+
+        func patch(_ children: [ExtensionNode]) -> ExtensionComponentPatch {
+            ExtensionComponentPatch(
+                id: "ci",
+                target: .sessionCornerCard(),
+                slots: [.init(slot: "top-trailing", children: children)]
+            )
+        }
+
+        XCTAssertThrowsError(
+            try contract.validate(patch([action])),
+            "a control in the compact row would fight the card's own hit targets"
+        )
+        XCTAssertNoThrow(
+            try contract.validate(patch([
+                .disclosure(
+                    id: "ci-checks",
+                    summary: .status("3 pending", role: .warning),
+                    detail: [.text("build-ananke", role: .compactBody), action]
+                )
+            ]))
+        )
+
+        // A revealed level still has a budget; it is a reading, not a page.
+        let manyRows = (0..<40).map { index in
+            ExtensionNode.text("check-\(index)", role: .compactBody)
+        }
+        XCTAssertThrowsError(
+            try contract.validate(patch([
+                .disclosure(
+                    id: "ci-checks",
+                    summary: .status("3 pending", role: .warning),
+                    detail: manyRows + manyRows
+                )
+            ]))
+        )
+        XCTAssertThrowsError(
+            try contract.validate(patch([
+                .disclosure(
+                    id: "ci-checks",
+                    summary: .status("3 pending", role: .warning),
+                    detail: []
+                )
+            ])),
+            "a disclosure with nothing behind it is a row that lies about having more"
+        )
+    }
+
     func testProjectHoverCardSupportsHooksAndExclusiveReplacement() throws {
         let contract = ThreadingComponentCatalog.sidebarProjectHoverCard
         let target = ExtensionComponentTarget.projectHoverCard(projectID: "project-1")

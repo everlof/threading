@@ -19,6 +19,22 @@ public indirect enum ExtensionNode: Equatable, Sendable {
         isEnabled: Bool
     )
     case status(String, role: ExtensionStatusRole)
+    /// A summary that has a second level behind it.
+    ///
+    /// `summary` is what the surface shows in place — one compact reading, subject to that
+    /// surface's own vocabulary. `detail` is what the second level says, and Threading presents
+    /// it on a surface of its own: the host owns the reveal gesture, its timing, the popover's
+    /// placement, chrome, sizing and dismissal, so an extension states *what* is behind the
+    /// summary and never *how* it opens.
+    ///
+    /// The revealed level has room the summary does not, so it has a vocabulary of its own —
+    /// including actions, where the compact row that carries the summary usually forbids them.
+    /// A surface states both budgets; see `ExtensionComponentSlot.detailConstraints`.
+    case disclosure(
+        id: String,
+        summary: ExtensionNode,
+        detail: [ExtensionNode]
+    )
     /// Invokes the next visual hook, eventually reaching the component's native content.
     case proceed
     /// Places extension content above existing or extension-rendered content.
@@ -92,6 +108,8 @@ extension ExtensionNode: Codable {
         case base
         case overlay
         case surface
+        case summary
+        case detail
     }
 
     private enum Kind: String, Codable {
@@ -99,6 +117,7 @@ extension ExtensionNode: Codable {
         case image
         case button
         case status
+        case disclosure
         case proceed
         case overlay
         case customSurface
@@ -138,6 +157,12 @@ extension ExtensionNode: Codable {
             self = .status(
                 try container.decode(String.self, forKey: .text),
                 role: try container.decode(ExtensionStatusRole.self, forKey: .role)
+            )
+        case .disclosure:
+            self = .disclosure(
+                id: try container.decode(String.self, forKey: .id),
+                summary: try container.decode(Self.self, forKey: .summary),
+                detail: try container.decode([ExtensionNode].self, forKey: .detail)
             )
         case .proceed:
             self = .proceed
@@ -194,6 +219,11 @@ extension ExtensionNode: Codable {
             try container.encode(Kind.status, forKey: .type)
             try container.encode(text, forKey: .text)
             try container.encode(role, forKey: .role)
+        case .disclosure(let id, let summary, let detail):
+            try container.encode(Kind.disclosure, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(summary, forKey: .summary)
+            try container.encode(detail, forKey: .detail)
         case .proceed:
             try container.encode(Kind.proceed, forKey: .type)
         case .overlay(let base, let overlay):

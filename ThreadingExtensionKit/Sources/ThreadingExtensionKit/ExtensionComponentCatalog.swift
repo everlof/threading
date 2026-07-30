@@ -223,18 +223,45 @@ public enum ThreadingComponentCatalog {
             allowsFixedSpacer: true
         )
 
+    /// What a corner-card row's *second level* may say.
+    ///
+    /// The row is a reading in the corner of someone's work; this is a surface Threading opens
+    /// on purpose, so it has room the row does not: several rows, vertical grouping, dividers,
+    /// longer strings — and actions, which the row itself still refuses. That split is the
+    /// point. A control in the compact row would fight the card's own hit targets; the same
+    /// control on the revealed level fights nothing, because the reveal is what the reader just
+    /// asked for.
+    ///
+    /// `standard` is the only button role: a hover reveal is not where a destructive action or
+    /// a screen's one primary action belongs.
+    private static let cornerCardDetailConstraints = ExtensionComponentNodeConstraints(
+        maximumDepth: 2,
+        maximumNodes: 60,
+        maximumTextLength: 80,
+        allowedStackAxes: [.horizontal, .vertical],
+        allowedTextRoles: [.compactBody, .compactDetail],
+        allowedImageRoles: [.icon, .decoration],
+        allowedButtonRoles: [.standard],
+        allowedStatusRoles: [.neutral, .positive, .warning, .negative],
+        allowsDivider: true,
+        allowsFixedSpacer: true,
+        allowsFlexibleSpacer: true
+    )
+
     /// One corner-card row is a compact horizontal reading, not a control surface: the whole
     /// card is one click target whose navigation stays host-owned, so the slot vocabulary has
-    /// no buttons. Depth 1 permits either a bare status or one row stack of leaves.
+    /// no buttons. Depth 2 permits a bare status, one row stack of leaves, or a disclosure
+    /// whose summary is that row stack.
     private static let cornerCardSlotConstraints = ExtensionComponentNodeConstraints(
-        maximumDepth: 1,
+        maximumDepth: 2,
         maximumNodes: 8,
         maximumTextLength: 40,
         allowedStackAxes: [.horizontal],
         allowedTextRoles: [.compactBody, .compactDetail],
         allowedStatusRoles: [.neutral, .positive, .warning, .negative],
         allowsFixedSpacer: true,
-        allowsFlexibleSpacer: true
+        allowsFlexibleSpacer: true,
+        disclosureDetail: .vocabulary(cornerCardDetailConstraints)
     )
 
     public static let sessionCornerCard = ExtensionComponentContract(
@@ -671,7 +698,9 @@ public enum ThreadingComponentCatalog {
             summary: "Compact display rows appended to the floating corner card over the "
                 + "session's pane. The slot ID names the corner: top-trailing is the only "
                 + "card today; top-leading is reserved for a future leading card. The card's "
-                + "click-through, visibility, and activity presentation stay host-owned.",
+                + "click-through, visibility, and activity presentation stay host-owned. A row "
+                + "may be a disclosure: the summary stays a compact reading without controls, "
+                + "while the level Threading reveals from it may list, group and act.",
             contract: sessionCornerCard,
             examplePatch: ExtensionComponentPatch(
                 id: "ci-card-row",
@@ -680,13 +709,43 @@ public enum ThreadingComponentCatalog {
                     .init(
                         slot: "top-trailing",
                         children: [
-                            .stack(
-                                axis: .horizontal,
-                                spacing: .small,
-                                children: [
-                                    .text("Checks", role: .compactDetail),
-                                    .flexibleSpacer,
-                                    .status("Successful", role: .positive)
+                            .disclosure(
+                                id: "ci-checks",
+                                summary: .stack(
+                                    axis: .horizontal,
+                                    spacing: .small,
+                                    children: [
+                                        .text("Checks", role: .compactDetail),
+                                        .flexibleSpacer,
+                                        .status("3 pending", role: .warning)
+                                    ]
+                                ),
+                                detail: [
+                                    .stack(
+                                        axis: .horizontal,
+                                        spacing: .small,
+                                        children: [
+                                            .text("build-ananke", role: .compactBody),
+                                            .flexibleSpacer,
+                                            .status("Running", role: .warning)
+                                        ]
+                                    ),
+                                    .stack(
+                                        axis: .horizontal,
+                                        spacing: .small,
+                                        children: [
+                                            .text("tagger", role: .compactBody),
+                                            .flexibleSpacer,
+                                            .status("Succeeded", role: .positive)
+                                        ]
+                                    ),
+                                    .divider,
+                                    .button(
+                                        id: "open-checks",
+                                        title: "Open on GitHub",
+                                        role: .standard,
+                                        isEnabled: true
+                                    )
                                 ]
                             )
                         ]

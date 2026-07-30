@@ -250,6 +250,15 @@ required root axis, allowed stack axes and semantic roles, and whether dividers 
 spacers are available. An extension can therefore validate generated content with the same
 machine-readable rules before publication.
 
+A vocabulary may also describe a **second** one. `disclosureDetail` is the vocabulary a
+`disclosure` node's revealed level may use — absent, and summaries on that surface have no
+second level. It is a full constraint set rather than a flag because the revealed level is a
+different room: Threading opens it on a surface of its own, so it can be wider than the compact
+row that summarises it, and the corner card uses exactly that to keep controls out of its line
+while allowing them behind a reveal. The recursion is boxed
+(`ExtensionComponentDetailConstraints`), which is the only reason that indirect enum exists; it
+encodes as the nested vocabulary itself.
+
 The current `sidebar.session-row` v1 replacement contract requires one horizontal root stack,
 allows at most eight nodes and one nested level, caps each text value at 80 characters, and
 accepts only compact text, identity/icon/decoration images, standard buttons, statuses, and
@@ -512,6 +521,21 @@ the durable extension surface.
   the card, but extension content alone cannot — the card is session state, not a blank easel.
 - [x] Preserve the card's occlusion decisions: slot rows render inside the flattened
   `WindowBackdrop.opaque` fill and share the contents' resting alpha and hover lift.
+
+### Phase 15 — a second level behind a summary
+
+- [x] Add `ExtensionNode.disclosure(id:summary:detail:)`: an extension states that a reading has
+  more behind it and what that more says. The reveal gesture, its dwell, the surface, placement,
+  growth limit, pointer bridge and dismissal stay host-owned, presented through the named
+  `extension.node-detail` popover.
+- [x] Give a vocabulary a second vocabulary (`disclosureDetail`) rather than a Boolean, so the
+  revealed level's own budget, roles and axes are machine-readable and validated by the SDK
+  before publication — with one budget shared across the whole revealed level, not one per row.
+- [x] Amend the corner card's display-only rule at the *row*, not at the surface: the row still
+  refuses controls that would fight the card's own hit targets; the revealed level accepts
+  `standard` buttons and refuses `primary`/`destructive`, which do not belong behind a hover.
+- [x] Render both levels in one renderer pass, so a button in the detail keeps the host view's
+  action bridge — AppKit's `target` is weak, and a lazily built detail hands back dead buttons.
 
 ## Expected intrusion
 

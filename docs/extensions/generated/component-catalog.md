@@ -114,7 +114,7 @@ One compact status annotation after each intact native display-tab title.
 
 ## `session.corner-card` v1
 
-Compact display rows appended to the floating corner card over the session's pane. The slot ID names the corner: top-trailing is the only card today; top-leading is reserved for a future leading card. The card's click-through, visibility, and activity presentation stay host-owned.
+Compact display rows appended to the floating corner card over the session's pane. The slot ID names the corner: top-trailing is the only card today; top-leading is reserved for a future leading card. The card's click-through, visibility, and activity presentation stay host-owned. A row may be a disclosure: the summary stays a compact reading without controls, while the level Threading reveals from it may list, group and act.
 
 - Context: `session-presentation`
 - Replacement: `none`

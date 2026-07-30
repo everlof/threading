@@ -164,6 +164,12 @@ struct ExtensionLocalizationResolver: Sendable {
             )
         case .status(let text, let role):
             return .status(string(text), role: role)
+        case .disclosure(let id, let summary, let detail):
+            return .disclosure(
+                id: id,
+                summary: node(summary),
+                detail: detail.map { self.node($0) }
+            )
         case .proceed:
             return .proceed
         case .overlay(let base, let overlay):

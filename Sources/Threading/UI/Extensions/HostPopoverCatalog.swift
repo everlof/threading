@@ -12,6 +12,7 @@ enum HostPopoverID: String, CaseIterable {
     case sidebarSessionHoverCard = "sidebar.session-hover-card"
     case toolbarAccountUsage = "toolbar.account-usage-popover"
     case settingsAccountIconPicker = "settings.account-icon-picker"
+    case extensionNodeDetail = "extension.node-detail"
 
     var exposure: HostPopoverExposure {
         switch self {
@@ -21,6 +22,14 @@ enum HostPopoverID: String, CaseIterable {
             return .component(.sidebarSessionHoverCard)
         case .toolbarAccountUsage:
             return .component(.toolbarAccountUsagePopover)
+        case .extensionNodeDetail:
+            return .hostOnly(
+                reason: "The second level behind an extension's own summary. Its *body* is "
+                    + "already that extension's tree, so there is nothing here for another "
+                    + "extension to compose into — and the surface only exists while a reader "
+                    + "is holding a row open. The reveal, its timing, placement, chrome and "
+                    + "dismissal stay host-owned; see ExtensionNode.disclosure."
+            )
         case .settingsAccountIconPicker:
             return .hostOnly(
                 reason: "Edits an explicit user-owned identity choice; extensions contribute "

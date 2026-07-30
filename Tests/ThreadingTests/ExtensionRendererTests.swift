@@ -84,6 +84,134 @@ final class ExtensionRendererTests: XCTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
     }
 
+    /// A summary keeps a compact surface compact; the second level is drawn only once the host
+    /// reveals it, on a surface of the host's own.
+    func testDisclosureKeepsItsDetailOffTheRowUntilTheHostRevealsIt() throws {
+        let node = ExtensionNode.disclosure(
+            id: "ci-checks",
+            summary: .stack(
+                axis: .horizontal,
+                spacing: .small,
+                children: [
+                    .text("Checks", role: .compactDetail),
+                    .flexibleSpacer,
+                    .status("3 pending", role: .warning)
+                ]
+            ),
+            detail: [
+                .stack(
+                    axis: .horizontal,
+                    spacing: .small,
+                    children: [
+                        .text("build-ananke", role: .compactBody),
+                        .flexibleSpacer,
+                        .status("Running", role: .warning)
+                    ]
+                ),
+                .button(id: "rerun", title: "Re-run", role: .standard, isEnabled: true)
+            ]
+        )
+
+        var actions: [String] = []
+        let host = try ExtensionNodeRenderer.render(node) { actions.append($0) }
+
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
+        let disclosure = try XCTUnwrap(
+            descendants(in: host).compactMap { $0 as? ExtensionDisclosureNodeView }.first
+        )
+        XCTAssertEqual(disclosure.accessibilityIdentifier(), "extension.disclosure.ci-checks")
+        XCTAssertEqual(disclosure.accessibilityRole(), .button)
+        XCTAssertFalse(disclosure.isAccessibilityExpanded())
+
+        // The summary is in the row; nothing the detail says is.
+        let rowText = descendants(in: host)
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(rowText.contains("Checks"))
+        XCTAssertFalse(
+            rowText.contains("build-ananke"),
+            "the second level was drawn into the compact row"
+        )
+        XCTAssertNil(disclosure.detailContent)
+        XCTAssertFalse(disclosure.isRevealed)
+    }
+
+    /// The revealed level is the one place a corner-card contribution may act, so the button it
+    /// carries has to still reach the extension. It does because both levels are rendered in one
+    /// pass by the host view that owns the action bridge — AppKit's `target` is weak, and a
+    /// detail built by anything else hands back buttons whose action goes nowhere.
+    func testDisclosureDetailKeepsTheHostActionBridge() throws {
+        let node = ExtensionNode.disclosure(
+            id: "ci-checks",
+            summary: .status("3 pending", role: .warning),
+            detail: [
+                .button(id: "rerun", title: "Re-run", role: .standard, isEnabled: true)
+            ]
+        )
+
+        var actions: [String] = []
+        let host = try ExtensionNodeRenderer.render(node) { actions.append($0) }
+        let disclosure = try XCTUnwrap(
+            descendants(in: host).compactMap { $0 as? ExtensionDisclosureNodeView }.first
+        )
+
+        // Built with the summary rather than at reveal time, so the bridge is already live.
+        let button = try XCTUnwrap(
+            disclosure.detailViewsForTesting
+                .flatMap { [$0] + descendants(in: $0) }
+                .compactMap { $0 as? ThemedButton }
+                .first { $0.accessibilityIdentifier() == "extension.action.rerun" }
+        )
+        button.performClick()
+
+        XCTAssertEqual(actions, ["rerun"])
+    }
+
+    /// What the reveal puts on screen, asserted without one: the surface carries the extension's
+    /// rows, a bounded width, a scroller for a list that outgrows a popover, and the hover
+    /// bridge that lets the pointer cross into it — the detail is the one level that can carry
+    /// a button, and a surface that closes as you reach for it would make that button a lie.
+    func testDisclosureDetailSurfaceIsBoundedScrollableAndHoverBridged() throws {
+        let rows = (0..<30).map { index in
+            ExtensionNode.text("check-\(index)", role: .compactBody)
+        }
+        let node = ExtensionNode.disclosure(
+            id: "ci-checks",
+            summary: .status("30 pending", role: .warning),
+            detail: rows
+        )
+
+        let host = try ExtensionNodeRenderer.render(node) { _ in }
+        let disclosure = try XCTUnwrap(
+            descendants(in: host).compactMap { $0 as? ExtensionDisclosureNodeView }.first
+        )
+
+        let surface = disclosure.makeDetailSurface().view
+        surface.layoutSubtreeIfNeeded()
+        let inside = descendants(in: surface)
+
+        XCTAssertEqual(
+            surface.fittingSize.width,
+            ExtensionDisclosureDefaults.contentWidth + 2 * Design.Spacing.inset,
+            accuracy: 0.5
+        )
+        let scroll = try XCTUnwrap(inside.compactMap { $0 as? ThemedScrollView }.first)
+        XCTAssertTrue(scroll.hasVerticalScroller)
+        XCTAssertLessThanOrEqual(
+            scroll.frame.height,
+            ExtensionDisclosureDefaults.maximumContentHeight,
+            "a second level grew past the height a popover should have"
+        )
+        XCTAssertNotNil(
+            inside.first { $0 is HoverTrackingView } ?? (surface as? HoverTrackingView),
+            "nothing bridges the pointer from the row into what it opened"
+        )
+
+        let drawn = Set(inside.compactMap { ($0 as? NSTextField)?.stringValue })
+        XCTAssertTrue(drawn.contains("check-0"))
+        XCTAssertTrue(drawn.contains("check-29"))
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: surface), [])
+    }
+
     func testRendererSupportsCompactHStackImagesAndFlexibleSpace() throws {
         let node = ExtensionNode.stack(
             axis: .horizontal,
@@ -4094,19 +4222,26 @@ final class ExtensionRendererTests: XCTestCase {
         container.layoutSubtreeIfNeeded()
         XCTAssertTrue(card.isHidden)
 
-        card.update(with: GitChangeMonitor.Reading(
+        let reading = GitChangeMonitor.Reading(
             branch: "main",
             summary: GitChangeSummary(files: 2, added: 35, removed: 1)
-        ))
+        )
+        card.update(with: reading)
         container.layoutSubtreeIfNeeded()
         XCTAssertFalse(card.isHidden)
+
+        // What the same reading is worth on a card with no slot bound to it: the card stacks
+        // one row per fact, so "its own height" is no longer a single constant.
+        let native = GitStatusOverlayView()
+        native.update(with: reading)
+        let nativeHeight = native.fittingSize.height
 
         let row = try XCTUnwrap(descendants(in: card).first {
             $0.accessibilityIdentifier() == "extension.component.slot.top-trailing"
         })
         XCTAssertGreaterThan(
             card.frame.height,
-            GitStatusOverlayDefaults.height,
+            nativeHeight,
             "A card with an extension row grows below its summary line"
         )
         XCTAssertEqual(
@@ -4127,9 +4262,9 @@ final class ExtensionRendererTests: XCTestCase {
         })
         XCTAssertEqual(
             card.frame.height,
-            GitStatusOverlayDefaults.height,
+            nativeHeight,
             accuracy: 0.5,
-            "An empty slot reproduces the original single-line height exactly"
+            "An empty slot reproduces the card's own height exactly"
         )
 
         // Family-wide rows decorate the bound session, and detaching the slot between
@@ -4159,7 +4294,7 @@ final class ExtensionRendererTests: XCTestCase {
         XCTAssertNil(descendants(in: card).first {
             $0.accessibilityIdentifier() == "extension.component.slot.top-trailing"
         })
-        XCTAssertEqual(card.frame.height, GitStatusOverlayDefaults.height, accuracy: 0.5)
+        XCTAssertEqual(card.frame.height, nativeHeight, accuracy: 0.5)
         XCTAssertFalse(card.isHidden, "Detaching the slot never hides the native summary")
     }
 

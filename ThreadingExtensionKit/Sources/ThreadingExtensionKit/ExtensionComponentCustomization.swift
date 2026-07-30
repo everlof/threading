@@ -279,6 +279,32 @@ public enum ExtensionIdentityBadgeAlignment: String, Codable, Equatable, Sendabl
     case bottomTrailing
 }
 
+/// The vocabulary a disclosure's revealed level may use.
+///
+/// A box, and `indirect` is the reason it exists: a constraint set that describes a constraint
+/// set is a recursive value, and Swift needs one boxed edge to give it a size. It encodes as the
+/// nested vocabulary itself, so the published catalogue reads as one constraint set inside
+/// another rather than as a wrapper nobody asked about.
+public indirect enum ExtensionComponentDetailConstraints: Equatable, Sendable {
+    case vocabulary(ExtensionComponentNodeConstraints)
+
+    public var constraints: ExtensionComponentNodeConstraints {
+        switch self {
+        case .vocabulary(let constraints): return constraints
+        }
+    }
+}
+
+extension ExtensionComponentDetailConstraints: Codable {
+    public init(from decoder: Decoder) throws {
+        self = .vocabulary(try ExtensionComponentNodeConstraints(from: decoder))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try constraints.encode(to: encoder)
+    }
+}
+
 /// Machine-readable limits for semantic content rendered inside a compact host component.
 ///
 /// The SDK can apply the same validation as Threading before publishing a patch. Empty role/axis
@@ -301,6 +327,14 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     public let allowsOverlay: Bool
     public let allowedCustomSurfaceKinds: [ExtensionCustomSurfaceKind]
 
+    /// What a summary's second level may say here, or nil where summaries have no second level.
+    ///
+    /// One switch rather than a Boolean beside a vocabulary, which could disagree with each
+    /// other. The revealed level is described in full rather than inherited: Threading shows it
+    /// on a surface of its own, so a row that must stay a compact reading without controls can
+    /// still reveal a list that scrolls, groups and acts.
+    public let disclosureDetail: ExtensionComponentDetailConstraints?
+
     public init(
         maximumDepth: Int,
         maximumNodes: Int,
@@ -317,7 +351,8 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         allowsProceed: Bool = false,
         requiresProceed: Bool = false,
         allowsOverlay: Bool = false,
-        allowedCustomSurfaceKinds: [ExtensionCustomSurfaceKind] = []
+        allowedCustomSurfaceKinds: [ExtensionCustomSurfaceKind] = [],
+        disclosureDetail: ExtensionComponentDetailConstraints? = nil
     ) {
         self.maximumDepth = maximumDepth
         self.maximumNodes = maximumNodes
@@ -335,6 +370,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         self.requiresProceed = requiresProceed
         self.allowsOverlay = allowsOverlay
         self.allowedCustomSurfaceKinds = allowedCustomSurfaceKinds
+        self.disclosureDetail = disclosureDetail
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -342,6 +378,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         case allowedStackAxes, allowedTextRoles, allowedImageRoles, allowedButtonRoles
         case allowedStatusRoles, allowsDivider, allowsFixedSpacer, allowsFlexibleSpacer
         case allowsProceed, requiresProceed, allowsOverlay, allowedCustomSurfaceKinds
+        case disclosureDetail
     }
 
     public init(from decoder: Decoder) throws {
@@ -383,6 +420,10 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
             [ExtensionCustomSurfaceKind].self,
             forKey: .allowedCustomSurfaceKinds
         ) ?? []
+        disclosureDetail = try container.decodeIfPresent(
+            ExtensionComponentDetailConstraints.self,
+            forKey: .disclosureDetail
+        )
     }
 
     public func validate() throws {
@@ -437,6 +478,33 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         }
         if !issues.isEmpty {
             throw ExtensionValidationError(issues: issues)
+        }
+    }
+
+    /// Several roots against one budget — what a disclosure's revealed level is.
+    ///
+    /// `validate(_:)` starts a fresh count per call, which is right for a slot's own root and
+    /// wrong for a list: validated one at a time, ten rows would each be allowed the whole
+    /// node budget.
+    func validateSiblings(
+        _ nodes: [ExtensionNode],
+        path: String,
+        issues: inout [ExtensionValidationIssue]
+    ) {
+        var count = 0
+        var proceedCount = 0
+        for (index, node) in nodes.enumerated() {
+            validateNode(
+                node,
+                path: "\(path)[\(index)]",
+                depth: 0,
+                count: &count,
+                proceedCount: &proceedCount,
+                issues: &issues
+            )
+        }
+        if proceedCount > 0 {
+            issues.append(.init(path: path, message: "may not contain a proceed node"))
         }
     }
 
@@ -508,6 +576,44 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                 issues: &issues
             )
             validateText(text, path: "\(path).text", issues: &issues)
+
+        case .disclosure(let id, let summary, let detail):
+            require(
+                disclosureDetail != nil,
+                path: path,
+                message: "disclosure is not allowed",
+                issues: &issues
+            )
+            require(
+                ExtensionIdentifierRules.isContributionIdentifier(id),
+                path: "\(path).id",
+                message: ExtensionIdentifierRules.contributionMessage,
+                issues: &issues
+            )
+            // The summary is drawn in place, so it spends this vocabulary's own budget.
+            validateNode(
+                summary,
+                path: "\(path).summary",
+                depth: depth + 1,
+                count: &count,
+                proceedCount: &proceedCount,
+                issues: &issues
+            )
+            require(
+                !detail.isEmpty,
+                path: "\(path).detail",
+                message: "must not be empty",
+                issues: &issues
+            )
+            // The revealed level is drawn somewhere else, so it spends a budget of its own —
+            // one shared across its rows, not one per row.
+            if let detailConstraints = disclosureDetail?.constraints {
+                detailConstraints.validateSiblings(
+                    detail,
+                    path: "\(path).detail",
+                    issues: &issues
+                )
+            }
 
         case .proceed:
             proceedCount += 1

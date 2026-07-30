@@ -82,6 +82,14 @@ enum ExtensionNodeRenderer {
         case .overlay(let base, let overlay):
             try validate(base, depth: depth + 1, count: &count)
             try validate(overlay, depth: depth + 1, count: &count)
+        case .disclosure(_, let summary, let detail):
+            // Both levels are built in this pass, so both spend the renderer's own budget. The
+            // contract's separate budget for a revealed level is a *narrower* limit stated per
+            // surface, not a licence to hand this renderer an unbounded tree.
+            try validate(summary, depth: depth + 1, count: &count)
+            for child in detail {
+                try validate(child, depth: depth + 1, count: &count)
+            }
         default:
             break
         }
@@ -175,6 +183,15 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
             label.lineBreakMode = .byTruncatingTail
             label.setAccessibilityIdentifier("extension.status")
             return label
+
+        case .disclosure(let id, let summary, let detail):
+            // Built in one pass with the summary, so every button in the revealed level is
+            // registered against *this* view's action bridge — see `ExtensionDisclosureNodeView`.
+            return ExtensionDisclosureNodeView(
+                id: id,
+                summary: try makeView(for: summary, parentAxis: parentAxis),
+                detail: try detail.map { try makeView(for: $0, parentAxis: .vertical) }
+            )
 
         case .proceed:
             let placeholder = ExtensionProceedPlaceholderView()

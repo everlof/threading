@@ -68,7 +68,42 @@
                   "allowsFlexibleSpacer" : true,
                   "allowsOverlay" : false,
                   "allowsProceed" : false,
-                  "maximumDepth" : 1,
+                  "disclosureDetail" : {
+                    "allowedButtonRoles" : [
+                      "standard"
+                    ],
+                    "allowedCustomSurfaceKinds" : [
+
+                    ],
+                    "allowedImageRoles" : [
+                      "icon",
+                      "decoration"
+                    ],
+                    "allowedStackAxes" : [
+                      "horizontal",
+                      "vertical"
+                    ],
+                    "allowedStatusRoles" : [
+                      "neutral",
+                      "positive",
+                      "warning",
+                      "negative"
+                    ],
+                    "allowedTextRoles" : [
+                      "compactBody",
+                      "compactDetail"
+                    ],
+                    "allowsDivider" : true,
+                    "allowsFixedSpacer" : true,
+                    "allowsFlexibleSpacer" : true,
+                    "allowsOverlay" : false,
+                    "allowsProceed" : false,
+                    "maximumDepth" : 2,
+                    "maximumNodes" : 60,
+                    "maximumTextLength" : 80,
+                    "requiresProceed" : false
+                  },
+                  "maximumDepth" : 2,
                   "maximumNodes" : 8,
                   "maximumTextLength" : 40,
                   "requiresProceed" : false

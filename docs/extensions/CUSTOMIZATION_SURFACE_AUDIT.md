@@ -32,7 +32,7 @@ general; a selector such as `NSView > NSStackView:nth-child(2)` is not.
 | Permission card | `conversation.permission-card@1` | display-only protected hook | queue, context, decisions, remote mirroring | Implemented |
 | Display-pane header | `display.pane-header@1` | protected command/status hook | tab ownership, close/select/order, overflow, persistence, `+` menu | Implemented |
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
-| Session corner card | `session.corner-card@1` | display-only placement slot | card navigation, visibility, activity presentation, refresh | Implemented |
+| Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity presentation, refresh, the whole reveal gesture | Implemented |
 
 ## Project hover-card precedent
 
@@ -67,6 +67,12 @@ The name describes the durable product presentation, not the AppKit object. This
 popover from being added without making an extension-boundary decision, while still allowing
 host-only presentations such as the account icon picker when extensions must not replace an
 explicit user-owned choice.
+
+`extension.node-detail` is host-only for a different reason from the others: its *body* is
+already an extension's own tree, so there is nothing in it for a second extension to compose
+into, and the surface exists only while a reader holds a row open. What stays host-owned there
+is the gesture — the dwell, the placement, the growth limit, the pointer bridge that lets the
+pointer cross into it, and the dismissal.
 
 ## Composer precedent
 
@@ -106,11 +112,22 @@ checkout's branch and counters today, and may show agents or attachments tomorro
 when a leading card ships, it becomes an additive `top-leading` slot on the same contract
 version rather than a rename or a sibling component.
 
-The slot is display-only. Built-in segments own navigation — Git opens Review and child-agent
-status opens Subagents — so an extension button inside the same compact line would fight the
-host's hit targets; extensions with more to say use hover cards or a panel. Rows ride the native
-card's visibility. Git state usually supplies that visibility, while child-agent state can keep
-the session card present without a Git sentence; there is still no extension-only presentation.
+The slot's **row** is display-only. Built-in segments own navigation — Git opens Review and
+child-agent status opens Subagents — so an extension button inside the same compact line would
+fight the host's hit targets. Rows ride the native card's visibility. Git state usually supplies
+that visibility, while child-agent state can keep the session card present without a Git
+sentence; there is still no extension-only presentation.
+
+"Extensions with more to say use hover cards or a panel" was the answer to that rule, and for
+one version it pointed at a door that did not exist: an extension could compose into a hover
+card the host *already* shows, and could not give a card of its own to a row it had
+contributed. `ExtensionNode.disclosure` is that door. A row states that it has a second level
+and what that level says; Threading owns the reveal — the dwell, the surface, its placement,
+how far it grows before it scrolls, and what dismisses it. The revealed level has its own
+vocabulary in the contract (`disclosureDetail`), which is where the display-only rule stops:
+the corner card's second level may carry `standard` buttons, because a control there fights
+nothing. Opening it is what the reader just asked for. A hover reveal is still not where a
+destructive or primary action belongs, and the contract says so by allowing neither role.
 
 ## Gate for every new surface
 

@@ -536,6 +536,14 @@ usage refresh, active-account selection, popover chrome and the pointer-tracking
 keeps the hover presentation alive. Those behaviors remain intact even when an extension
 replaces the complete visual body.
 
+Those three are cards Threading already shows, which an extension may compose into. The reverse
+— an extension's *own* row revealing a card — is `ExtensionNode.disclosure`: the extension gives
+a summary and the level behind it, and Threading gives the reveal. The dwell, the surface, its
+placement, how far it grows before it scrolls, the pointer bridge into it, and the dismissal are
+all host-owned, presented through the named `extension.node-detail` popover. A contract states
+the revealed level's vocabulary separately from the row's (`disclosureDetail`), which is how the
+corner card keeps controls out of its compact line while allowing them one level in.
+
 The two composer contracts are intentionally more constrained:
 `composer.session-start@1` targets a project and `composer.conversation-reply@1` targets a
 session. Each accepts compact controls before or after one `.proceed` in a horizontal stack,

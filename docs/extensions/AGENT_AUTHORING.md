@@ -494,7 +494,7 @@ mark. Four rules, and the first is the one that decides the shape of your asset:
   mark together, so the pairing is yours to get right — check it against your theme's `ground`
   in both variants if your theme is adaptive.
 - **It is optional, and the fallback is good.** A theme with no `iconMark` gets Threading's own
-  chevron drawn in your theme's `accent` on your `ground`, with your `material.glow` behind it —
+  mark drawn in your theme's `accent` on your `ground`, with your `material.glow` behind it —
   the same treatment every built-in style gets. Declare a mark only when your theme's identity is
   genuinely a *different glyph*, not merely different colours.
 
@@ -650,6 +650,52 @@ let root = ExtensionNode.stack(
 
 Threading decides how heading text, positive status, primary actions, spacing, focus,
 accessibility, and live theme changes render.
+
+### A summary with a second level
+
+Compact surfaces have room for one reading. When there is more behind it — seven check runs
+behind "3 pending checks" — say so with `disclosure` rather than trying to fit the list into the
+row or dropping the detail entirely:
+
+```swift
+.disclosure(
+    id: "ci-checks",
+    summary: .stack(
+        axis: .horizontal,
+        spacing: .small,
+        children: [
+            .text("Checks", role: .compactDetail),
+            .flexibleSpacer,
+            .status("3 pending", role: .warning)
+        ]
+    ),
+    detail: [
+        .stack(
+            axis: .horizontal,
+            spacing: .small,
+            children: [
+                .text("build-ananke", role: .compactBody),
+                .flexibleSpacer,
+                .status("Running", role: .warning)
+            ]
+        ),
+        .divider,
+        .button(id: "open-checks", title: "Open on GitHub", role: .standard, isEnabled: true)
+    ]
+)
+```
+
+You state *what* is behind the summary. Threading owns the reveal itself — the dwell before it
+opens, the surface it opens on, where that surface goes, how far it grows before it scrolls, and
+what closes it. There is no way to ask for a placement, an animation, or an open state, and no
+event is delivered when a reader opens one.
+
+The two levels have **separate vocabularies**, and the second one is usually wider: a contract
+that forbids buttons in its compact row may still allow them behind a disclosure, because a
+control on a surface the reader just opened fights nothing. Read the vocabulary from the
+contract rather than assuming — `disclosureDetail` in the component catalogue is the machine-
+readable answer, and `nil` there means summaries on that surface have no second level at all.
+The revealed level has a node budget of its own; it is a reading, not a page.
 
 ## Providing and consuming services
 

@@ -1819,7 +1819,42 @@
                 "allowsFlexibleSpacer" : true,
                 "allowsOverlay" : false,
                 "allowsProceed" : false,
-                "maximumDepth" : 1,
+                "disclosureDetail" : {
+                  "allowedButtonRoles" : [
+                    "standard"
+                  ],
+                  "allowedCustomSurfaceKinds" : [
+
+                  ],
+                  "allowedImageRoles" : [
+                    "icon",
+                    "decoration"
+                  ],
+                  "allowedStackAxes" : [
+                    "horizontal",
+                    "vertical"
+                  ],
+                  "allowedStatusRoles" : [
+                    "neutral",
+                    "positive",
+                    "warning",
+                    "negative"
+                  ],
+                  "allowedTextRoles" : [
+                    "compactBody",
+                    "compactDetail"
+                  ],
+                  "allowsDivider" : true,
+                  "allowsFixedSpacer" : true,
+                  "allowsFlexibleSpacer" : true,
+                  "allowsOverlay" : false,
+                  "allowsProceed" : false,
+                  "maximumDepth" : 2,
+                  "maximumNodes" : 60,
+                  "maximumTextLength" : 80,
+                  "requiresProceed" : false
+                },
+                "maximumDepth" : 2,
                 "maximumNodes" : 8,
                 "maximumTextLength" : 40,
                 "requiresProceed" : false
@@ -1839,24 +1874,80 @@
             {
               "children" : [
                 {
-                  "axis" : "horizontal",
-                  "children" : [
+                  "detail" : [
                     {
-                      "role" : "compactDetail",
-                      "text" : "Checks",
-                      "type" : "text"
+                      "axis" : "horizontal",
+                      "children" : [
+                        {
+                          "role" : "compactBody",
+                          "text" : "build-ananke",
+                          "type" : "text"
+                        },
+                        {
+                          "type" : "flexibleSpacer"
+                        },
+                        {
+                          "role" : "warning",
+                          "text" : "Running",
+                          "type" : "status"
+                        }
+                      ],
+                      "spacing" : "small",
+                      "type" : "stack"
                     },
                     {
-                      "type" : "flexibleSpacer"
+                      "axis" : "horizontal",
+                      "children" : [
+                        {
+                          "role" : "compactBody",
+                          "text" : "tagger",
+                          "type" : "text"
+                        },
+                        {
+                          "type" : "flexibleSpacer"
+                        },
+                        {
+                          "role" : "positive",
+                          "text" : "Succeeded",
+                          "type" : "status"
+                        }
+                      ],
+                      "spacing" : "small",
+                      "type" : "stack"
                     },
                     {
-                      "role" : "positive",
-                      "text" : "Successful",
-                      "type" : "status"
+                      "type" : "divider"
+                    },
+                    {
+                      "id" : "open-checks",
+                      "isEnabled" : true,
+                      "role" : "standard",
+                      "title" : "Open on GitHub",
+                      "type" : "button"
                     }
                   ],
-                  "spacing" : "small",
-                  "type" : "stack"
+                  "id" : "ci-checks",
+                  "summary" : {
+                    "axis" : "horizontal",
+                    "children" : [
+                      {
+                        "role" : "compactDetail",
+                        "text" : "Checks",
+                        "type" : "text"
+                      },
+                      {
+                        "type" : "flexibleSpacer"
+                      },
+                      {
+                        "role" : "warning",
+                        "text" : "3 pending",
+                        "type" : "status"
+                      }
+                    ],
+                    "spacing" : "small",
+                    "type" : "stack"
+                  },
+                  "type" : "disclosure"
                 }
               ],
               "slot" : "top-trailing"
@@ -1870,7 +1961,7 @@
         "hostAssets" : [
 
         ],
-        "summary" : "Compact display rows appended to the floating corner card over the session's pane. The slot ID names the corner: top-trailing is the only card today; top-leading is reserved for a future leading card. The card's click-through, visibility, and activity presentation stay host-owned."
+        "summary" : "Compact display rows appended to the floating corner card over the session's pane. The slot ID names the corner: top-trailing is the only card today; top-leading is reserved for a future leading card. The card's click-through, visibility, and activity presentation stay host-owned. A row may be a disclosure: the summary stays a compact reading without controls, while the level Threading reveals from it may list, group and act."
       },
       "patchSchema" : {
         "$id" : "https://threading.codes/schema/components/session.corner-card-v1.schema.json",
@@ -1942,7 +2033,42 @@
                         "allowsFlexibleSpacer" : true,
                         "allowsOverlay" : false,
                         "allowsProceed" : false,
-                        "maximumDepth" : 1,
+                        "disclosureDetail" : {
+                          "allowedButtonRoles" : [
+                            "standard"
+                          ],
+                          "allowedCustomSurfaceKinds" : [
+
+                          ],
+                          "allowedImageRoles" : [
+                            "icon",
+                            "decoration"
+                          ],
+                          "allowedStackAxes" : [
+                            "horizontal",
+                            "vertical"
+                          ],
+                          "allowedStatusRoles" : [
+                            "neutral",
+                            "positive",
+                            "warning",
+                            "negative"
+                          ],
+                          "allowedTextRoles" : [
+                            "compactBody",
+                            "compactDetail"
+                          ],
+                          "allowsDivider" : true,
+                          "allowsFixedSpacer" : true,
+                          "allowsFlexibleSpacer" : true,
+                          "allowsOverlay" : false,
+                          "allowsProceed" : false,
+                          "maximumDepth" : 2,
+                          "maximumNodes" : 60,
+                          "maximumTextLength" : 80,
+                          "requiresProceed" : false
+                        },
+                        "maximumDepth" : 2,
                         "maximumNodes" : 8,
                         "maximumTextLength" : 40,
                         "requiresProceed" : false
