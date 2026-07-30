@@ -74,7 +74,8 @@ Components so far:
 | `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. |
 | `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
 | `ThemedSpinner` / `ThemedProgressBar` | `NSProgressIndicator`, in the theme's accent. |
-| `ThemedScrollView` | An `NSScrollView` that starts transparent — the stock one paints a system surface. A nested horizontal-only viewport opts into `forwardsVerticalScrollToAncestor`, so code and tables do not trap a conversation's vertical gesture. |
+| `ThemedScroller` | AppKit's scrollbar behavior, geometry, hit testing and overlay/legacy preference, with its thumb and track drawn from the correct ink source under authored themes. System delegates both draw hooks back to AppKit. |
+| `ThemedScrollView` | An `NSScrollView` that starts transparent — the stock one paints a system surface — and installs themed vertical and horizontal scrollers without enabling either. A nested horizontal-only viewport opts into `forwardsVerticalScrollToAncestor`, so code and tables do not trap a conversation's vertical gesture. |
 | `ThemedTextView` | An `NSTextView` in theme colours; `.scrolling()` replaces `scrollableTextView()`. |
 | `ThemedTableView` / `ThemedOutlineView` | Tables that start transparent, replacing the system background. |
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |

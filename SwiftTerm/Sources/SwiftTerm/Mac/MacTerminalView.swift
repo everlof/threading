@@ -364,6 +364,20 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         scroller.action = #selector(scrollerActivated)
         scroller.target = self
     }
+
+    /// Replaces the terminal's scrollbar without replacing its scrolling behavior.
+    ///
+    /// The embedder owns application chrome while SwiftTerm owns scroll position, sizing and
+    /// actions. Supplying an `NSScroller` here is the seam between them: setup restates every
+    /// behavioral property and subsequent buffer changes continue updating the replacement.
+    public func installScroller(_ replacement: NSScroller)
+    {
+        guard replacement !== scroller else { return }
+        scroller.removeFromSuperview()
+        scroller = replacement
+        setupScroller()
+        updateScroller()
+    }
     
     /// This method sents the `nativeForegroundColor` and `nativeBackgroundColor`
     /// to match macOS default colors for text and its background.

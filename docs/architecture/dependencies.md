@@ -9,6 +9,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - Location: `./SwiftTerm/` (git submodule)
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
+  - **The scroller seam is ours.** `MacTerminalView.installScroller` lets the embedding app
+    replace only the visible `NSScroller`; SwiftTerm immediately restates its target, action,
+    geometry and current scroll position and continues updating that instance. Threading uses
+    this to install `ThemedScroller` with backdrop ink while retaining SwiftTerm's legacy-style
+    column and all of its scrolling behavior.
   - **The PTY seam is ours.** Local processes launch through `forkpty`; a `posix_spawn`-based
     wrapper cannot establish the child as the PTY's controlling terminal. The launch publishes
     the exact child PID synchronously, before its exit source is activated, and reaps that PID

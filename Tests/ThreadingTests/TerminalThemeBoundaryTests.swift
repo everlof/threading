@@ -2,10 +2,10 @@ import XCTest
 import SwiftTerm
 @testable import Threading
 
-/// The terminal is a SwiftTerm rendering surface that brings its own `NSScroller`. The runtime
-/// theme audit fatals on a raw scroller in app-owned content, so `EmojiFixedTerminalView`
-/// declares itself a system-chrome boundary. These pin that the exemption covers the scroller
-/// and nothing more — a debug build fatals the moment either half is wrong.
+/// The terminal is a SwiftTerm rendering surface whose scrollbar is application chrome.
+/// SwiftTerm retains its scrolling behavior while `EmojiFixedTerminalView` replaces the stock
+/// scroller with the same themed component used elsewhere. These pin both halves of that seam.
+@MainActor
 final class TerminalThemeBoundaryTests: XCTestCase {
 
     private func terminal() -> EmojiFixedTerminalView {
@@ -162,32 +162,45 @@ final class TerminalThemeBoundaryTests: XCTestCase {
         return NSEvent(cgEvent: event)
     }
 
-    // MARK: - The permission contract
+    // MARK: - The scroller seam
 
-    func testTerminalPermitsAScrollerButNotAnArbitraryControl() {
+    func testTerminalInstallsAThemedBackdropScrollerWithoutChangingItsBehavior() throws {
         let terminal = terminal()
-        XCTAssertTrue(terminal.permitsSystemChrome(NSScroller()), "the terminal's own scroller must pass")
-        XCTAssertFalse(terminal.permitsSystemChrome(NSButton()), "the exemption must not cover a stray control")
+        let scroller = try XCTUnwrap(
+            terminal.subviews.compactMap { $0 as? ThemedScroller }.first
+        )
+
+        if case .backdrop = scroller.inkSource {
+            // Expected: terminal chrome resolves against the terminal/window backdrop.
+        } else {
+            XCTFail("terminal scrollbar used chrome ink instead of backdrop ink")
+        }
+        XCTAssertEqual(scroller.scrollerStyle, .legacy)
+        XCTAssertTrue(scroller.target === terminal)
+        XCTAssertNotNil(scroller.action)
+
+        for line in 0..<200 {
+            terminal.feed(text: "line \(line)\r\n")
+        }
+        XCTAssertTrue(scroller.isEnabled)
+        XCTAssertLessThan(scroller.knobProportion, 1)
     }
 
     // MARK: - The audit over the real tree
 
-    /// A scroller inside the terminal is what fataled the app at launch; the audit must now let
-    /// it through.
-    func testAuditPassesAScrollerInsideTheTerminal() {
+    func testAuditPassesTheInstalledThemedScroller() {
         let terminal = terminal()
-        terminal.addSubview(NSScroller(frame: NSRect(x: 0, y: 0, width: 15, height: 300)))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: terminal), [])
     }
 
-    /// The exemption is scoped: a control that is *not* the terminal's chrome still fails, so the
-    /// boundary cannot be used to smuggle unthemed UI into the terminal subtree.
-    func testAuditStillFlagsAForeignControlInsideTheTerminal() {
+    func testAuditStillFlagsRawChromeInsideTheTerminal() {
         let terminal = terminal()
+        terminal.addSubview(NSScroller(frame: NSRect(x: 0, y: 0, width: 15, height: 300)))
         terminal.addSubview(NSButton(title: "x", target: nil, action: nil))
 
-        let violations = ThemeBoundaryAudit.violations(in: terminal)
-        XCTAssertTrue(violations.contains { $0.className == "NSButton" }, "a raw button rode the scroller exemption")
+        let violations = Set(ThemeBoundaryAudit.violations(in: terminal).map(\.className))
+        XCTAssertTrue(violations.contains("NSScroller"))
+        XCTAssertTrue(violations.contains("NSButton"))
     }
 }
 

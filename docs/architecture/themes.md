@@ -282,6 +282,14 @@ colours under each appearance. Duplicating it materialises editable light and da
 Legacy custom documents with top-level `roles`/`material`/`terminalPalette` decode into one
 equivalent variant, while new documents write a `variants` map.
 
+Scrollbars follow that same identity rule without taking over scrolling. `ThemedScroller`
+subclasses AppKit's control so geometry, hit testing, dragging, fades and the user's
+overlay/legacy preference remain the platform's; under System its thumb and track draw methods
+call AppKit unchanged. An authored theme draws only those two parts: secondary ink for the thumb
+and a quiet surface role for the track, with the theme's radius. Ordinary scroll views resolve
+against chrome ink. SwiftTerm keeps its legacy column but installs the same component with
+backdrop ink, because the terminal palette — not the app theme — owns the ground beneath it.
+
 Built-ins are immutable and use stable IDs. MCP exposes list/get/set/create/duplicate/update.
 `get_app_theme` returns `appearance` plus `variants.light`/`variants.dark` in the same snake-case
 `roles`, `material`, and `terminal_colors` vocabulary create/update accept, with resolved roles

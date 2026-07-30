@@ -14,10 +14,10 @@ layout objects, frameless `NSImageView`, table columns, delegate parameter types
 types that do not choose visible styling.
 
 System-owned chrome is allowed only behind a named containment boundary. Current examples are
-the invisible `NSColorWell` inside `ThemeSwatchView`, overlay scrollers owned by
-`ThemedScrollView`, the private field editor inside `ThemedTextField`, outline disclosure
-buttons, application/context menus, alerts, toolbars, and open/save panels. The system object
-must not leak out as the component callers build against.
+the invisible `NSColorWell` inside `ThemeSwatchView`, the private field editor inside
+`ThemedTextField`, AppKit's overlay-scroll effect pockets around `ThemedScroller`, outline
+disclosure buttons, application/context menus, alerts, toolbars, and open/save panels. The
+system object must not leak out as the component callers build against.
 
 Containment includes API shape, not only where construction happens. `ChipView` and
 `ThemedPopUp` accept `ThemedMenuEntry` values and present them through the app-owned

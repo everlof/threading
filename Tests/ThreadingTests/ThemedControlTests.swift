@@ -2334,6 +2334,108 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertFalse(ThemedTextView(frame: .zero, textContainer: nil).drawsBackground)
     }
 
+    func testThemedScrollViewInstallsScrollerBoundariesWithoutChangingPolicy() throws {
+        let scroll = ThemedScrollView()
+        let vertical = try XCTUnwrap(scroll.verticalScroller as? ThemedScroller)
+        let horizontal = try XCTUnwrap(scroll.horizontalScroller as? ThemedScroller)
+
+        XCTAssertFalse(scroll.hasVerticalScroller)
+        XCTAssertFalse(scroll.hasHorizontalScroller)
+        XCTAssertEqual(scroll.scrollerStyle, NSScroller.preferredScrollerStyle)
+        XCTAssertTrue(ThemedScroller.isCompatibleWithOverlayScrollers)
+        if case .chrome = vertical.inkSource {
+            // Expected: ordinary scroll views sit on the app theme's chrome.
+        } else {
+            XCTFail("vertical scrollbar did not use chrome ink")
+        }
+        if case .chrome = horizontal.inkSource {
+            // Expected.
+        } else {
+            XCTFail("horizontal scrollbar did not use chrome ink")
+        }
+
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        XCTAssertTrue(scroll.verticalScroller === vertical)
+        XCTAssertTrue(scroll.horizontalScroller === horizontal)
+
+        scroll.scrollerStyle = scroll.scrollerStyle == .overlay ? .legacy : .overlay
+        XCTAssertTrue(scroll.verticalScroller === vertical)
+        XCTAssertTrue(scroll.horizontalScroller === horizontal)
+    }
+
+    func testScrollerKeepsSystemRenderingAndDistinguishesAuthoredThemes() throws {
+        func configured(_ scroll: NSScrollView) throws -> NSScroller {
+            scroll.frame = NSRect(x: 0, y: 0, width: 120, height: 180)
+            scroll.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 720))
+            scroll.scrollerStyle = .legacy
+            scroll.hasVerticalScroller = true
+            scroll.autohidesScrollers = false
+            scroll.layoutSubtreeIfNeeded()
+
+            let scroller = try XCTUnwrap(scroll.verticalScroller)
+            scroller.controlSize = .regular
+            scroller.isEnabled = true
+            scroller.doubleValue = 0.35
+            scroller.knobProportion = 0.25
+            scroller.appearance = NSAppearance(named: .darkAqua)
+            return scroller
+        }
+
+        AppThemePalette.set(.system)
+        let systemScroller = try XCTUnwrap(configured(ThemedScrollView()) as? ThemedScroller)
+        XCTAssertTrue(
+            systemScroller.delegatesDrawingToAppKit,
+            "System must hand scrollbar drawing back to AppKit"
+        )
+        let system = try renderedPNG(of: systemScroller)
+        attach(system, named: "scroller-system")
+
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let cyberScroller = try XCTUnwrap(configured(ThemedScrollView()) as? ThemedScroller)
+        XCTAssertFalse(cyberScroller.delegatesDrawingToAppKit)
+        let cyber = try renderedPNG(of: cyberScroller)
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        let swissScroller = try XCTUnwrap(configured(ThemedScrollView()) as? ThemedScroller)
+        XCTAssertFalse(swissScroller.delegatesDrawingToAppKit)
+        let swiss = try renderedPNG(of: swissScroller)
+        attach(cyber, named: "scroller-cyberpunk")
+        attach(swiss, named: "scroller-swiss-minimalist")
+
+        XCTAssertNotEqual(cyber, system)
+        XCTAssertNotEqual(swiss, system)
+        XCTAssertNotEqual(cyber, swiss)
+    }
+
+    func testScrollerRedrawsWhenItsInkSourceChanges() {
+        let chrome = ThemedScroller(frame: NSRect(x: 0, y: 0, width: 17, height: 180))
+        let backdrop = ThemedScroller(
+            frame: NSRect(x: 20, y: 0, width: 17, height: 180),
+            inkSource: .backdrop
+        )
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 180))
+        root.addSubview(chrome)
+        root.addSubview(backdrop)
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = root
+        defer { window.orderOut(nil) }
+
+        chrome.needsDisplay = false
+        NotificationCenter.default.post(
+            AppThemeDidChange(themeID: AppThemeStyles.cyberpunk.id)
+        )
+        XCTAssertTrue(chrome.needsDisplay)
+
+        backdrop.needsDisplay = false
+        NotificationCenter.default.post(WindowBackdropDidChange(color: .black))
+        XCTAssertTrue(backdrop.needsDisplay)
+    }
+
     func testHorizontalOnlyScrollSurfaceHandsVerticalGestureToConversation() throws {
         let outer = ScrollWheelSpy(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
         let document = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 640))
@@ -2445,6 +2547,16 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    func testThemedScrollViewDoesNotExemptARawReplacementScroller() {
+        let scroll = ThemedScrollView()
+        scroll.verticalScroller = NSScroller(frame: .zero)
+        scroll.hasVerticalScroller = true
+
+        XCTAssertTrue(
+            ThemeBoundaryAudit.violations(in: scroll).contains { $0.className == "NSScroller" }
+        )
+    }
+
     func testPromptUsesOnlyThemedRuntimeBoundaries() {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: PromptView()), [])
     }
@@ -2545,6 +2657,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedOutlineView",
                 "ThemedPopUp",
                 "ThemedProgressBar",
+                "ThemedScroller",
                 "ThemedScrollView",
                 "ThemedSpinner",
                 "ThemedSplitView",

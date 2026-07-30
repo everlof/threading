@@ -106,6 +106,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedOutlineView",
         "ThemedPopUp",
         "ThemedProgressBar",
+        "ThemedScroller",
         "ThemedScrollView",
         "ThemedSpinner",
         "ThemedSplitView",

@@ -19,7 +19,7 @@
     "NSProgressIndicator": "ThemedSpinner or ThemedProgressBar",
     "NSRuleEditor": "a component from UI/Design",
     "NSScrollView": "ThemedScrollView",
-    "NSScroller": "system chrome contained by ThemedScrollView",
+    "NSScroller": "ThemedScroller",
     "NSSearchField": "ThemedSearchField",
     "NSSecureTextField": "a secure component from UI/Design",
     "NSSegmentedControl": "a component from UI/Design",
@@ -144,6 +144,12 @@
       "kind": "inherit",
       "symbol": "NSScrollView",
       "reason": "The themed boundary has to subclass the AppKit surface it contains."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/ThemedScrollView.swift",
+      "kind": "inherit",
+      "symbol": "NSScroller",
+      "reason": "The themed boundary preserves AppKit's scrolling, interaction and fade behavior while replacing only its documented thumb and track drawing hooks."
     },
     {
       "path": "Sources/Threading/UI/Design/ThemedTables.swift",
