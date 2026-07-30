@@ -23,19 +23,25 @@ import Foundation
 /// rather than the stored set alone, so a stale raw value cannot keep a newly non-negotiable
 /// prompt silent.
 ///
-/// Applicability is deliberately *not* policy and stays at the call site. The four lifecycle
-/// prompts also require `AgentRuntime.isRunning`: a dormant session has nothing to interrupt,
-/// which is a fact about the session rather than a preference about the prompt.
+/// Applicability is deliberately *not* policy and stays at the call site. The lifecycle prompts
+/// also require `AgentRuntime.isRunning`: a dormant session has nothing to interrupt, which is a
+/// fact about the session rather than a preference about the prompt.
 enum ConfirmationPrompt: String, CaseIterable {
 
     // MARK: Session lifecycle
 
-    // Four prompts that were one switch. Each interrupts a running agent and each is
-    // recoverable — the conversation survives all four — which is what makes them the
-    // repetitive ones worth being able to switch off.
+    // Prompts that were one switch. Each interrupts a running agent and each is recoverable —
+    // the conversation survives all of them — which is what makes them the repetitive ones
+    // worth being able to switch off.
+    //
+    // **Archiving is deliberately not among them any more**, and the case was removed rather
+    // than left switched off: it is the one action here whose whole effect can be put back by
+    // pressing something, so it acts, reports, and offers an undo instead of asking first
+    // (`SessionCoordinator.archiveToast`). A prompt is right where the way back is a *different*
+    // action the user would have to know to take; it is wrong where the way back can be handed
+    // to them. Anything added below should be read against that line before it earns a case.
 
     case closeRunningSession
-    case archiveRunningSession
     case moveRunningSessionToAccount
     case continueRunningSessionWithAnotherProvider
     case switchRunningSessionSurface
@@ -116,15 +122,6 @@ enum ConfirmationPrompt: String, CaseIterable {
                 settingsTitle: L10n.string("Ask before closing a running session"),
                 settingsSubtitle: L10n.string(
                     "Closing ends the agent and keeps the session in the sidebar to resume."
-                )
-            ))
-
-        case .archiveRunningSession:
-            return .suppressible(Policy.Suppression(
-                settingsTitle: L10n.string("Ask before archiving a running session"),
-                settingsSubtitle: L10n.string(
-                    "Archiving ends the agent and moves the session into Settings ▸ Archived, "
-                        + "where it can be restored."
                 )
             ))
 
@@ -230,18 +227,19 @@ enum ConfirmationPrompt: String, CaseIterable {
         }
     }
 
-    /// Declaration order, which is the order the Confirmations card takes: the four that were
-    /// one switch, then the two that joined them.
+    /// Declaration order, which is the order the Confirmations card takes: the lifecycle
+    /// prompts that were one switch, then the ones that joined them.
     static var suppressible: [ConfirmationPrompt] {
         allCases.filter { $0.suppression != nil }
     }
 
     /// What the single `confirmsBeforeClosingRunningSession` switch became. Listed here rather
-    /// than inside the migration so the two cannot drift — a fifth lifecycle prompt added to
-    /// this list is a deliberate edit next to the cases it names.
+    /// than inside the migration so the two cannot drift — a lifecycle prompt added to or taken
+    /// off this list is a deliberate edit next to the cases it names. Archiving was here until
+    /// it stopped asking altogether; a user who had switched the old bool off simply carries
+    /// that answer onto the prompts that still exist.
     static let closingConfirmationSuccessors: [ConfirmationPrompt] = [
         .closeRunningSession,
-        .archiveRunningSession,
         .moveRunningSessionToAccount,
         .switchRunningSessionSurface
     ]

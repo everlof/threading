@@ -2674,6 +2674,8 @@ final class ThemedControlTests: XCTestCase {
                 "ThemeRedraw",
                 "ThemedIconButton",
                 "ThemedImagePreview",
+                "ToastPresenter",
+                "ToastView",
                 "ToolbarButtonGroupView",
                 "WorkingOrbView",
                 "WindowBackdrop"

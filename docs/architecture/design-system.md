@@ -94,6 +94,7 @@ Components so far:
 | `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
 | `PaneHeaderView` | The footer's mirror at a pane's top. Its height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it), so the two panes' hairlines land on one line. |
 | `PairingCodeImage` | The Remote Access QR code, drawn rather than scaled up from `CIQRCodeGenerator`: Chromium's geometry (dots at 0.8 of the pitch, rounded finder patterns), a four-module quiet zone Core Image does not supply, and a plate and ink carrying the accent's hue at a stated saturation. The only artwork here a *machine* has to read, so it is tested by decoding the render, not by asserting on the constants that drew it. |
+| `ToastView` / `ToastPresenter` | A receipt for something already done, floating above a pane's footer, with the way back on it. The view is one message, one optional detail line and one `ThemedButton`; the presenter owns everything that is about *time* — one band at a time, a six-second dwell, the clock stopping while the pointer is on it, and the VoiceOver announcement a surface that takes no focus would otherwise never make. |
 | `ImageCompareView` | Two images against each other: a draggable wipe seam (either axis), a crossfade, a pixel difference, and side by side, with per-side title tags and a mode chip. One scrubbed fraction serves every mode — there is deliberately no slider control: the seam *is* the control (accent-inked, since it is the one thing on the surface asking to be used), fade held at the middle is the onion skin, and both images draw at one shared scale so a resized asset stays visibly resized rather than being normalised into "looks identical". The canvas is a `ThemedControl`: arrow keys nudge the scrub, Space recentres it, and VoiceOver reads it as a slider. |
 
 **Two components say "every" for a reason, and it is the design system's sharpest lesson so
@@ -171,6 +172,17 @@ interruption was earned, and offered no way to stop it. `ConfirmationPrompt.poli
 exhaustive `switch` with no `default:` and no defaulted value, so a case added to the register
 does not compile until somebody has answered the question — and the answer is a type rather than
 a `Bool`, because a `Bool` records which way it went and not that anyone chose.
+
+**The first question the register asks is whether there should be a question at all.** A
+confirmation stops everybody who meant the action in order to catch the one who did not; a
+receipt with a way back on it charges the mistake alone. So an action whose whole effect can be
+put back by pressing something takes a `ToastRequest` instead of a `ConfirmationPrompt` — it
+acts, says what it did, and leaves the undo on screen for six seconds. Archiving a session is
+the first of them, and its case was *removed* from the register rather than left switched off,
+because a case nobody asks still ships a Settings row for a question that no longer exists. The
+line, written beside the remaining lifecycle prompts: **a prompt is right where the way back is
+a different action the user has to know to take, and wrong where the way back can be handed to
+them.** Deleting is the other side of it — nothing survives to undo with, so it still asks.
 
 Five rules, each one a bug it prevents:
 

@@ -181,6 +181,8 @@
 		9DCD807006BD21A0C5CFEA03 /* SidebarStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72FC6ECDA03C49B7923B0767 /* SidebarStyleTests.swift */; };
 		2B1E9E11721DFB1810662162 /* SidebarBrandViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28F2040BEAFBFE46160DF5A /* SidebarBrandViewTests.swift */; };
 		78A153DE81433FC366A6D633 /* ShareChatSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F498473EB9F57E071F86FD68 /* ShareChatSheetTests.swift */; };
+		8230F80B6DBC52AC3844F0AA /* ToastTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D6E5071CD39E2C48FF724C /* ToastTests.swift */; };
+		848E256B37EE297666E7DD93 /* ToastRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E716F7AED733087F8126C89 /* ToastRenderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -406,6 +408,8 @@
 		72FC6ECDA03C49B7923B0767 /* SidebarStyleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarStyleTests.swift; sourceTree = "<group>"; };
 		E28F2040BEAFBFE46160DF5A /* SidebarBrandViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarBrandViewTests.swift; sourceTree = "<group>"; };
 		F498473EB9F57E071F86FD68 /* ShareChatSheetTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareChatSheetTests.swift; sourceTree = "<group>"; };
+		00D6E5071CD39E2C48FF724C /* ToastTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToastTests.swift; sourceTree = "<group>"; };
+		1E716F7AED733087F8126C89 /* ToastRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToastRenderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -691,6 +695,8 @@
 				72FC6ECDA03C49B7923B0767 /* SidebarStyleTests.swift */,
 				E28F2040BEAFBFE46160DF5A /* SidebarBrandViewTests.swift */,
 				F498473EB9F57E071F86FD68 /* ShareChatSheetTests.swift */,
+				00D6E5071CD39E2C48FF724C /* ToastTests.swift */,
+				1E716F7AED733087F8126C89 /* ToastRenderTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1222,6 +1228,8 @@
 				9DCD807006BD21A0C5CFEA03 /* SidebarStyleTests.swift in Sources */,
 				2B1E9E11721DFB1810662162 /* SidebarBrandViewTests.swift in Sources */,
 				78A153DE81433FC366A6D633 /* ShareChatSheetTests.swift in Sources */,
+				8230F80B6DBC52AC3844F0AA /* ToastTests.swift in Sources */,
+				848E256B37EE297666E7DD93 /* ToastRenderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

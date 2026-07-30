@@ -337,8 +337,7 @@ Hovering a session row swaps the indicator for two buttons, so the list stays qu
 reach for it: a **⋯** holding the row's actions — Archive, Close Session, Rename, Delete — and,
 outboard of it at the row's trailing edge, an **archive** button that files the session away in
 one press without opening the menu first. The archive button is the menu item's shortcut, not a
-second behaviour: both ask before interrupting a running agent, and both are undone the same way
-from **Settings ▸ Archived**.
+second behaviour.
 
 Close and Archive sound alike and answer different questions. **Close Session** ends the
 agent but keeps the row — greyed out, ready to be resumed. (It ships without a keyboard
@@ -346,8 +345,17 @@ shortcut — **Cmd+W** closes tabs and pages, never an agent — but can be give
 **Settings ▸ Keyboard**.) **Archive** files the whole session away: the row leaves the sidebar for
 **Settings ▸ Archived**, where it can be restored or deleted for good, and a running agent
 is stopped first rather than left running with nothing listing it. Neither touches the
-conversation itself. Both ask before interrupting a running agent, and each is switched off
-separately — see [Confirmations](#confirmations).
+conversation itself. Closing a running session asks first, and that question can be switched
+off — see [Confirmations](#confirmations).
+
+**Archiving asks nothing, and hands you the way back instead.** The row leaves the sidebar
+immediately, and a small band appears at the bottom of the sidebar naming the session, saying
+whether its agent was stopped, and where it went — with **Undo** on it. The band stays for about
+six seconds, and holds for as long as the pointer rests on it, so it will not disappear while
+you are reaching for it. Undo puts the row back where it was and reopens the session if it was
+the one on screen; the agent is not restarted, so the session comes back dormant with **Resume**
+on it, exactly as it would after Close. Miss the band and nothing is lost — the session is in
+**Settings ▸ Archived**, which is what the band's second line says.
 
 How it works: an idle agent writes nothing to its terminal, so sustained output means it is
 working, and output stopping means it has finished. A terminal bell counts as an explicit
@@ -480,10 +488,15 @@ Two kinds of transcript are deliberately left out:
 
 ### Confirmations
 Some actions stop and ask first. The ones you can safely undo carry a **Don't ask again**
-checkbox, and it is remembered **for that one prompt only** — ticking it on the archive sheet
-does not stop the close sheet asking. It is also only remembered **when you go ahead**: tick
-the box and then press Cancel and nothing is stored, because the next attempt would otherwise
-sail past an action you had just declined.
+checkbox, and it is remembered **for that one prompt only** — ticking it on the close sheet
+does not stop the account-move sheet asking. It is also only remembered **when you go ahead**:
+tick the box and then press Cancel and nothing is stored, because the next attempt would
+otherwise sail past an action you had just declined.
+
+A few actions ask nothing at all and put the way back on screen afterwards instead — archiving
+a session is the one to know about. A question stops you every time you meant it in order to
+catch the once you did not; an **Undo** sitting in the corner for six seconds costs only the
+mistake.
 
 Statements get the same courtesy as questions. When an extension command finishes, it may
 confirm with a short message — "Checks refreshed." — and that alert carries a **Don't show
@@ -495,8 +508,8 @@ Everything you switch off this way has a row in **Settings ▸ General ▸ Confi
 there is always a way back:
 
 - Closing a running session
-- Archiving a running session
 - Moving a running chat to another account
+- Continuing a running chat with another provider
 - Switching a running chat's interface
 - Quitting with agents running
 - Removing an extension

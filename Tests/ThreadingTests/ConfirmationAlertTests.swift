@@ -12,13 +12,13 @@ import XCTest
 final class ConfirmationAlertTests: XCTestCase {
 
     private func request(
-        _ prompt: ConfirmationPrompt = .archiveRunningSession
+        _ prompt: ConfirmationPrompt = .closeRunningSession
     ) -> ConfirmationRequest {
         ConfirmationRequest(
             prompt: prompt,
-            title: "Archive “Refactor the parser”?",
+            title: "Close “Refactor the parser”?",
             message: "The agent will stop.",
-            confirmTitle: "Archive"
+            confirmTitle: "Close Session"
         )
     }
 
@@ -41,7 +41,7 @@ final class ConfirmationAlertTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let settings = AppSettings(defaults: defaults)
-        settings.setAsks(false, before: .archiveRunningSession)
+        settings.setAsks(false, before: .closeRunningSession)
 
         XCTAssertTrue(ConfirmationAlert.ask(request(), settings: settings))
     }

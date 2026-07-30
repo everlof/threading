@@ -32,7 +32,6 @@ final class ConfirmationPromptTests: XCTestCase {
     func testTheRegistersRawValuesAreTheOnesOnDisk() {
         XCTAssertEqual(ConfirmationPrompt.allCases.map(\.rawValue), [
             "closeRunningSession",
-            "archiveRunningSession",
             "moveRunningSessionToAccount",
             "continueRunningSessionWithAnotherProvider",
             "switchRunningSessionSurface",
@@ -107,14 +106,14 @@ final class ConfirmationPromptTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
         XCTAssertTrue(ConfirmationPrompt.allCases.allSatisfy(settings.asks(before:)))
 
-        settings.setAsks(false, before: .archiveRunningSession)
+        settings.setAsks(false, before: .closeRunningSession)
 
         // Stored as the suppressed set, so switching one off leaves the rest — and a prompt
         // added later — asking, with no defaults migration.
         let reread = AppSettings(defaults: defaults)
-        XCTAssertFalse(reread.asks(before: .archiveRunningSession))
-        XCTAssertTrue(reread.asks(before: .closeRunningSession))
+        XCTAssertFalse(reread.asks(before: .closeRunningSession))
         XCTAssertTrue(reread.asks(before: .moveRunningSessionToAccount))
+        XCTAssertTrue(reread.asks(before: .switchRunningSessionSurface))
         XCTAssertTrue(reread.asks(before: .removeExtension))
     }
 
@@ -138,7 +137,7 @@ final class ConfirmationPromptTests: XCTestCase {
 
     // MARK: - Migration
 
-    func testTheClosingSwitchCarriesOverToTheFourLifecyclePrompts() {
+    func testTheClosingSwitchCarriesOverToTheLifecyclePrompts() {
         settings { _, defaults, suite in
             defaults.set(false, forKey: "confirmsBeforeClosingRunningSession")
             defaults.removeObject(forKey: "didMigrateClosingConfirmation")
@@ -149,7 +148,7 @@ final class ConfirmationPromptTests: XCTestCase {
             }
             XCTAssertTrue(
                 migrated.asks(before: .removeExtension),
-                "the switch covered four prompts; it must not carry into a fifth"
+                "the switch covered the lifecycle prompts; it must not carry past them"
             )
             // The persistent domain, not `object(forKey:)` — the seed the migration depends on
             // lives in the registration domain and answers there whatever the user wrote.
@@ -162,7 +161,7 @@ final class ConfirmationPromptTests: XCTestCase {
 
     /// The common case: the switch was left alone, so nothing is suppressed. Seeded `true`, so
     /// this is also what proves the seed has to stay — an unregistered key reads `false`, which
-    /// would silence all four prompts for every user alive.
+    /// would silence every one of those prompts for every user alive.
     func testAnUntouchedClosingSwitchSuppressesNothing() {
         settings { settings, _, _ in
             XCTAssertTrue(ConfirmationPrompt.allCases.allSatisfy(settings.asks(before:)))
@@ -177,10 +176,10 @@ final class ConfirmationPromptTests: XCTestCase {
             defaults.removeObject(forKey: "didMigrateClosingConfirmation")
 
             let migrated = AppSettings(defaults: defaults)
-            migrated.setAsks(true, before: .archiveRunningSession)
+            migrated.setAsks(true, before: .moveRunningSessionToAccount)
 
             let relaunched = AppSettings(defaults: defaults)
-            XCTAssertTrue(relaunched.asks(before: .archiveRunningSession))
+            XCTAssertTrue(relaunched.asks(before: .moveRunningSessionToAccount))
             XCTAssertFalse(relaunched.asks(before: .closeRunningSession))
         }
     }

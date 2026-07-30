@@ -20,6 +20,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// its top rather than restating its height.
     private var footer: PaneFooterView!
 
+    /// Where a receipt for something the list just did appears — above the footer, in the
+    /// column the row left from. See `present(_:)`.
+    private var toasts: ToastPresenter!
+
     /// The band above the list: the brand row at its leading edge, the list's own controls
     /// at its trailing one. The list starts at its bottom. In settings mode the *controls*
     /// hide — they act on the list, which is not on screen — while the band and the brand
@@ -267,6 +271,8 @@ private extension ProjectSidebarViewController {
     /// Header holding the brand row at the leading edge and the list's two controls — add,
     /// then arrangement — at the trailing one. The band itself — the hairline, the height,
     /// the corner-aware insets — is `PaneHeaderView`'s to state.
+
+        toasts = ToastPresenter(host: view, above: footer.topAnchor)
     ///
     /// The brand went here rather than staying absent (the band long said "no app-name label")
     /// because the top-left of the sidebar is now a *themed* surface: a chrome may restate the
@@ -374,6 +380,18 @@ extension ProjectSidebarViewController {
             // The existing nodes are kept deliberately: the outline identifies rows by
             // object identity, and replacing equivalent nodes would invalidate every row
             // for nothing. Content is read from the store at configure time anyway.
+    /// Shows a receipt for something the list just did, with the way back on it.
+    ///
+    /// It appears **here**, at the bottom of this column, because this is the column the change
+    /// happened in: an archived row leaves the sidebar and the undo puts it back into the
+    /// sidebar, so the eye is already on the pane the band arrives in. The other two placements
+    /// fail for the same reason from opposite ends — a band centred on the window covers the
+    /// composer, and one in the content pane's corner reports a sidebar change somewhere the
+    /// sidebar is not.
+    func presentToast(_ toast: ToastRequest) {
+        toasts.present(toast)
+    }
+
             refreshRows()
             return
         }

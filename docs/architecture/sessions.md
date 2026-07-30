@@ -353,17 +353,40 @@ this rule closed: the sidebar's Archive once flipped the flag and left the agent
 invisibly, while the remote archive route had discarded the process from the start. Both
 routes now stop the agent first. Restoring implies nothing; a session comes back dormant.
 
-Every action that interrupts a running agent — close, archive, move to another account,
-continue with another provider, and the surface switch — confirms, and each states its own
-consequence, because "where does the session go" is exactly what the verbs fail to say. Each is
-a registered `ConfirmationPrompt` with a switch of its own. The original four were one setting,
-`confirmsBeforeClosingRunningSession`, and that setting was wrong for exactly the reason their
-alerts exist separately: someone tired of being asked about archiving had to stop being asked
-about closing too. `AppSettings` carries a stored `false` from the old switch over to those four
-on first launch; cross-provider continuation arrived later and has no legacy value to migrate
-— see [design-system.md](design-system.md) for the register itself.
+**Archiving does not ask. It acts, says so, and offers the way back.** It carried a registered
+confirmation for as long as the interruption was the only thing that could be said about it,
+and that alert stopped everyone who meant it in order to catch the one who did not — twice a
+day for anybody who files chats away as they finish. Nothing archiving does is beyond reach:
+the row comes back, the conversation resumes by the same id, and the only thing genuinely lost
+is the turn in flight, which is what closing costs too. So the surface moved to the other side
+of the action. `SessionCoordinator.archiveToast` builds a receipt carrying the three facts the
+alert used to ask with — which session, that its agent stopped, and that it is now in
+Settings ▸ Archived — plus **Undo**, and the sidebar floats it above its own footer for six
+seconds (`ToastPresenter`, see [design-system.md](design-system.md)).
 
-Applicability stays here rather than in the register: all five also require
+The undo restores the record and puts the row back. It re-selects the session only if the
+archive took it *off screen*, since undoing a stray click must not move somebody off what they
+were doing; and it does not relaunch the agent, because archiving stopped it exactly as closing
+does and starting a process is a heavier thing than a click being taken back. The session
+returns dormant, with Resume on its placeholder.
+
+`ConfirmationPrompt.archiveRunningSession` was removed rather than left switched off: a case
+nobody asks still ships a Settings row for a question that no longer exists. The line the
+register now draws is written beside the remaining lifecycle cases — **a prompt is right where
+the way back is a different action the user has to know to take, and wrong where the way back
+can be handed to them.**
+
+The other actions that interrupt a running agent — close, move to another account, continue
+with another provider, and the surface switch — still confirm, and each states its own
+consequence, because "where does the session go" is exactly what the verbs fail to say. Each is
+a registered `ConfirmationPrompt` with a switch of its own. They were one setting,
+`confirmsBeforeClosingRunningSession`, and that setting was wrong for exactly the reason their
+alerts exist separately: someone tired of being asked about one had to stop being asked about
+the others too. `AppSettings` carries a stored `false` from the old switch over to them on first
+launch; cross-provider continuation arrived later and has no legacy value to migrate — see
+[design-system.md](design-system.md) for the register itself.
+
+Applicability stays here rather than in the register: each also requires
 `AgentRuntime.isRunning`, because a dormant session has nothing to interrupt, which is a fact
 about the session and not a preference about the prompt.
 
@@ -374,8 +397,9 @@ provider-native child that can resume the same transcript semantics. A cross-pro
 snapshot belongs to the destination row and is removed with it (or its project), so a future
 launch can regenerate the same bootstrap without depending on a mutable source transcript.
 
-**Deleting asks whatever the session is doing**, which is what separates it from the four
-above: they keep the session, and this one is the row itself going. It shipped for a long time
+**Deleting asks whatever the session is doing**, which is what separates it from everything
+above: they keep the session, and this one is the row itself going — the case a toast could not
+serve, because there would be nothing left to undo it with. It shipped for a long time
 with no confirmation at all, beside a Close that had one — which read as Delete being the
 lesser of the two. Its sheet says what survives, because "Delete" reads as the conversation
 going with the row and it does not: the CLI's own transcript stays on disk and can be imported

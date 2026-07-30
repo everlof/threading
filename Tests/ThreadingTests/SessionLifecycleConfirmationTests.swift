@@ -6,11 +6,12 @@ import XCTest
 ///
 /// The two actions read as near-synonyms in a menu, and for a while they behaved almost
 /// unrelatedly: Close stopped the agent and kept the row, Archive hid the row and left the
-/// agent running with nothing listing it. The confirmation alerts are where the difference
-/// is actually said, so these tests hold each one to naming what a user cannot guess from
-/// the verb alone: that the agent stops, where the session ends up, and that its
-/// conversation survives. Built separately from being asked — the same seam the sidebar's
-/// menu builders offer — so no modal is involved.
+/// agent running with nothing listing it. Neither verb says any of that, so the surface each
+/// one puts up is where the difference is actually said — an alert *before* the close, a toast
+/// *after* the archive — and these tests hold both to naming what a user cannot guess: that the
+/// agent stops, where the session ends up, and that its conversation survives. Built separately
+/// from being shown — the same seam the sidebar's menu builders offer — so no modal and no
+/// window are involved.
 @MainActor
 final class SessionLifecycleConfirmationTests: XCTestCase {
 
@@ -30,50 +31,97 @@ final class SessionLifecycleConfirmationTests: XCTestCase {
         XCTAssertTrue(request.message.contains("resumed"))
     }
 
-    func testTheArchiveAlertSaysTheAgentStopsAndWhereTheSessionGoes() {
-        let request = SessionCoordinator.archiveConfirmation(for: session())
+    /// Archiving asks nothing, so everything the alert used to say has to survive in the
+    /// receipt: which session, what stopped with it, and where it went — the sidebar lists no
+    /// archived session at all, so nothing else on screen would say.
+    func testTheArchiveToastNamesTheSessionAndWhereItWent() throws {
+        let toast = SessionCoordinator.archiveToast(
+            for: session(),
+            wasRunning: true,
+            undo: {}
+        )
 
-        XCTAssertTrue(request.title.contains("Archive"))
-        XCTAssertTrue(request.title.contains("Refactor the parser"))
+        XCTAssertTrue(toast.message.contains("Archived"))
+        XCTAssertTrue(toast.message.contains("Refactor the parser"))
+
+        let detail = try XCTUnwrap(toast.detail)
         XCTAssertTrue(
-            request.message.contains("will stop"),
-            "archiving a running session stops its agent, and the alert must say so"
+            detail.contains("agent stopped"),
+            "archiving a running session stops its agent, and the receipt must say so"
         )
         XCTAssertTrue(
-            request.message.contains("Archived"),
-            "the alert names where an archived session can be found again"
+            detail.contains("Settings ▸ Archived"),
+            "the receipt names where an archived session can be found again"
         )
-        XCTAssertTrue(request.message.contains("restored"))
     }
 
-    /// Cancel stays the way out on both: interrupting a running agent is never the only
-    /// button on offer. Structural now that the request carries exactly one confirm title and
-    /// one cancel title, so what is worth asserting is that the built alert still says so.
-    func testBothAlertsOfferCancelLast() {
-        let alerts = [
-            ConfirmationAlert.makeAlert(SessionCoordinator.closeConfirmation(for: session())),
-            ConfirmationAlert.makeAlert(SessionCoordinator.archiveConfirmation(for: session()))
-        ]
+    /// A dormant session had nothing to stop, and a receipt that says otherwise is reporting an
+    /// interruption that never happened.
+    func testTheArchiveToastOnlyReportsAStopWhenSomethingWasRunning() throws {
+        let dormant = SessionCoordinator.archiveToast(
+            for: session(),
+            wasRunning: false,
+            undo: {}
+        )
 
-        for alert in alerts {
-            XCTAssertEqual(alert.buttons.count, 2)
-            XCTAssertEqual(alert.buttons.last?.title, "Cancel")
-        }
+        let detail = try XCTUnwrap(dormant.detail)
+        XCTAssertFalse(detail.contains("stopped"))
+        XCTAssertTrue(detail.contains("Settings ▸ Archived"))
     }
 
-    /// The two were one setting, and switching off the archive prompt used to switch off the
-    /// close prompt with it. Each carries its own registered prompt now, and each one's
-    /// settings copy has to name where the session ends up — the same thing the alert says,
-    /// because that is what someone deciding whether to stop being asked needs to know.
-    func testBothLifecyclePromptsCanBeSwitchedOffAndSayWhereTheSessionGoes() {
-        let close = try? XCTUnwrap(ConfirmationPrompt.closeRunningSession.suppression)
-        let archive = try? XCTUnwrap(ConfirmationPrompt.archiveRunningSession.suppression)
+    /// The undo is the whole reason the question is gone. A receipt that reports an archive and
+    /// offers no way back is strictly worse than the alert it replaced.
+    func testTheArchiveToastCarriesTheWayBack() {
+        var undone = 0
+        let toast = SessionCoordinator.archiveToast(
+            for: session(),
+            wasRunning: false,
+            undo: { undone += 1 }
+        )
 
-        XCTAssertTrue(close?.settingsSubtitle.contains("sidebar") == true)
-        XCTAssertTrue(archive?.settingsSubtitle.contains("Archived") == true)
+        XCTAssertTrue(toast.hasAction)
+        XCTAssertEqual(toast.actionTitle, "Undo")
+        toast.action?()
+        XCTAssertEqual(undone, 1)
+    }
+
+    /// Archiving is deliberately not in the register. Left as a case it would ship a Settings
+    /// row for a question nobody asks; the point of removing it is that the way back replaced
+    /// the way out.
+    func testArchivingNoLongerCarriesAConfirmationPrompt() {
+        XCTAssertFalse(
+            ConfirmationPrompt.allCases.map(\.rawValue).contains("archiveRunningSession"),
+            "an archive prompt is back in the register; the toast is the surface for this action"
+        )
+
+        // Deleting an *archived* session keeps its prompt, and must: that one is the end of the
+        // conversation, which is the case a way back cannot be offered for.
+        XCTAssertTrue(ConfirmationPrompt.allCases.contains(.deleteArchivedSession))
+    }
+
+    /// Cancel stays the way out: interrupting a running agent is never the only button on
+    /// offer. Structural now that the request carries exactly one confirm title and one cancel
+    /// title, so what is worth asserting is that the built alert still says so.
+    func testTheCloseAlertOffersCancelLast() {
+        let alert = ConfirmationAlert.makeAlert(SessionCoordinator.closeConfirmation(for: session()))
+
+        XCTAssertEqual(alert.buttons.count, 2)
+        XCTAssertEqual(alert.buttons.last?.title, "Cancel")
+    }
+
+    /// The lifecycle prompts were one setting, and switching off the one you meant used to
+    /// switch off its neighbour. Each carries its own registered prompt now, and each one's
+    /// settings copy has to name what the action does to the session — that is what someone
+    /// deciding whether to stop being asked needs to know.
+    func testEachLifecyclePromptHasItsOwnRowAndSaysWhatItInterrupts() throws {
+        let close = try XCTUnwrap(ConfirmationPrompt.closeRunningSession.suppression)
+        let move = try XCTUnwrap(ConfirmationPrompt.moveRunningSessionToAccount.suppression)
+
+        XCTAssertTrue(close.settingsSubtitle.contains("sidebar"))
+        XCTAssertTrue(move.settingsSubtitle.contains("account"))
         XCTAssertNotEqual(
-            close?.settingsTitle,
-            archive?.settingsTitle,
+            close.settingsTitle,
+            move.settingsTitle,
             "one row each, or switching off the one you meant switches off the other"
         )
     }

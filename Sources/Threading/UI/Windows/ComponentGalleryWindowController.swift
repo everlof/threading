@@ -123,10 +123,16 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemeRedraw",
         "ThemedIconButton",
         "ThemedImagePreview",
+        "ToastPresenter",
+        "ToastView",
         "ToolbarButtonGroupView",
         "WorkingOrbView",
         "WindowBackdrop"
     ]
+
+    /// The toast story's presenter, retained so the button beside the pane can send a band into
+    /// it more than once.
+    private var toastPresenter: ToastPresenter?
 
     private let themePopUp = ThemedPopUp()
     /// The mark stories' views, retained so the replay control can reach them.
@@ -973,8 +979,62 @@ final class ComponentGalleryViewController: NSViewController {
                         + "height is one measure, and a pane wearing both should read as a "
                         + "matched pair.",
                     makePaneHeaderSample()
+                ),
+                story(
+                    "ToastView",
+                    "A receipt for something already done, with the way back on it. Press Show "
+                        + "to send one into the pane below: it slides in above the footer, holds "
+                        + "while the pointer is on it, and leaves by itself otherwise.",
+                    makeToastSample()
                 )
             ]
+        )
+    }
+
+    /// The toast in the pane it is used in rather than on its own, because both things this
+    /// component has to get right are relationships: whether a card floating over a column still
+    /// reads as floating, and whether it clears the footer band under it. Driven rather than
+    /// looked at — the dwell and the pointer hold are the component, and a still picture of a
+    /// band says nothing about either.
+    private func makeToastSample() -> NSView {
+        let pane = ThemedSurfaceView()
+        pane.applySurface(fill: Design.Surface.background, radius: .control)
+        pane.translatesAutoresizingMaskIntoConstraints = false
+
+        let footer = PaneFooterView()
+        pane.addSubview(footer)
+
+        NSLayoutConstraint.activate([
+            pane.widthAnchor.constraint(equalToConstant: SidebarDefaults.defaultWidth),
+            pane.heightAnchor.constraint(equalToConstant: 170),
+            footer.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: pane.bottomAnchor)
+        ])
+
+        toastPresenter = ToastPresenter(host: pane, above: footer.topAnchor)
+
+        let show = ThemedButton()
+        show.title = L10n.string("Show")
+        show.applyFont(.controlRegular)
+        show.target = self
+        show.action = #selector(showGalleryToast(_:))
+
+        let row = NSStackView(views: [pane, show])
+        row.orientation = .horizontal
+        row.alignment = .bottom
+        row.spacing = Design.Spacing.inset
+        return row
+    }
+
+    /// The archive receipt as the app actually builds it, rather than a second copy of its
+    /// wording that could drift from the one that ships.
+    @objc private func showGalleryToast(_ sender: NSButton) {
+        let session = AgentSession(kind: .claude, title: "Refactor the parser")
+        toastPresenter?.present(
+            SessionCoordinator.archiveToast(for: session, wasRunning: true) { [weak self] in
+                self?.showReceipt(L10n.string("Undo"))
+            }
         )
     }
 

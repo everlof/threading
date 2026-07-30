@@ -84,18 +84,55 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// not keep running unseen. The remote archive route has always stopped the process first;
     /// this is the sidebar reaching the same rule. Restoring implies nothing — a dormant
     /// session returns to the sidebar dormant.
+    ///
+    /// **Archiving asks nothing and reports afterwards.** It carried a registered confirmation
+    /// for as long as the interruption was the only thing that could be said about it, and the
+    /// alert stopped everybody who meant it in order to catch the one who did not. Everything
+    /// the question was protecting is recoverable — the row comes back, the conversation
+    /// resumes by the same id — so the honest shape is to do it, say so, and leave the way back
+    /// on screen; only the turn in flight is lost, which is what the toast's detail line says.
+    /// See `archiveToast(for:wasRunning:undo:)`.
     func setArchived(_ archived: Bool, for sessionID: SessionID) {
-        if archived {
-            guard confirmArchiveIfRunning(sessionID: sessionID) else { return }
-            container.closeTerminal(for: sessionID)
+        guard archived else {
+            ProjectStore.shared.setArchived(false, for: sessionID)
+            sidebar.reload()
+            return
         }
 
-        ProjectStore.shared.setArchived(archived, for: sessionID)
+        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        let wasRunning = AgentRuntime.shared.isRunning(sessionID: sessionID)
+        let wasShowing = sessionID == container.currentSessionID
 
-        if archived, sessionID == container.currentSessionID {
+        container.closeTerminal(for: sessionID)
+        ProjectStore.shared.setArchived(true, for: sessionID)
+
+        if wasShowing {
             container.show(sessionID: nil)
         }
         sidebar.reload()
+
+        sidebar.presentToast(Self.archiveToast(for: session, wasRunning: wasRunning) { [weak self] in
+            self?.restore(sessionID, reselecting: wasShowing)
+        })
+    }
+
+    /// The undo behind the archive toast.
+    ///
+    /// It puts the row back and stops there for a session that was merely listed. The one that
+    /// was **on screen** is also selected again, because that is the state the archive took
+    /// away: the pane went empty, and a row silently reappearing in the list while the pane
+    /// stays empty is half an undo. A background session is deliberately not selected — undoing
+    /// a stray click must not also move the user off what they are doing.
+    ///
+    /// The agent does not come back with it. Archiving stopped it, exactly as closing does, and
+    /// the session opens on its dormant placeholder with Resume on it; relaunching a process
+    /// behind an undo would be a heavier thing than the click being taken back.
+    private func restore(_ sessionID: SessionID, reselecting: Bool) {
+        ProjectStore.shared.setArchived(false, for: sessionID)
+        sidebar.reload()
+
+        guard reselecting else { return }
+        sidebar.select(sessionID: sessionID)
     }
 
     func setUsesNativeUI(_ usesNative: Bool, for sessionID: SessionID) {
@@ -327,21 +364,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         return ConfirmationAlert.ask(Self.closeConfirmation(for: session))
     }
 
-    /// Archiving interrupts a running agent exactly as closing does — with its own wording,
-    /// because what happens next differs: the session leaves the sidebar rather than staying to
-    /// be resumed. Its own registered prompt too, so someone who stops being asked about one is
-    /// still asked about the other; they were a single switch until the difference in wording
-    /// turned out to be the whole reason both alerts exist.
-    private func confirmArchiveIfRunning(sessionID: SessionID) -> Bool {
-        guard AgentRuntime.shared.isRunning(sessionID: sessionID),
-              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
-
-        return ConfirmationAlert.ask(Self.archiveConfirmation(for: session))
-    }
-
-    /// The two requests are built separately from being asked so a test can hold their wording
-    /// to what the action actually does — the same seam the sidebar's menu builders offer. Each
-    /// one says where the session ends up, since "Close" and "Archive" alone do not.
+    /// The request is built separately from being asked so a test can hold its wording to what
+    /// the action actually does — the same seam the sidebar's menu builders offer. It says
+    /// where the session ends up, since "Close" alone does not.
     static func closeConfirmation(for session: AgentSession) -> ConfirmationRequest {
         ConfirmationRequest(
             prompt: .closeRunningSession,
@@ -355,20 +380,32 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         )
     }
 
-    static func archiveConfirmation(for session: AgentSession) -> ConfirmationRequest {
-        ConfirmationRequest(
-            prompt: .archiveRunningSession,
-            title: L10n.format("Archive “%@”?", session.displayTitle),
-            message: session.kind.supportsResume
-                ? L10n.string(
-                    "The agent will stop, and the session moves out of the sidebar into "
-                        + "Settings ▸ Archived. The conversation is kept and can be restored from there."
-                )
-                : L10n.string(
-                    "The shell will stop, and the session moves out of the sidebar into "
-                        + "Settings ▸ Archived, where it can be restored."
-                ),
-            confirmTitle: L10n.string("Archive")
+    /// What the archive says after the fact, where its alert used to ask beforehand.
+    ///
+    /// It carries the same three facts the alert did, in the order a receipt needs them: what
+    /// happened and to which session, what stopped along with it, and where the session can be
+    /// found once the band is gone — the sidebar lists no archived sessions at all, so nothing
+    /// else on screen would say. `Undo` is last because it is the only part that is optional to
+    /// read.
+    ///
+    /// Built separately from being shown, for the reason the confirmations are: this is where a
+    /// test can hold the wording to what the action actually did.
+    static func archiveToast(
+        for session: AgentSession,
+        wasRunning: Bool,
+        undo: @escaping () -> Void
+    ) -> ToastRequest {
+        let whereItWent = L10n.string("Restore it from Settings ▸ Archived.")
+        let stopped = session.kind.supportsResume
+            ? L10n.string("The agent stopped.")
+            : L10n.string("The shell stopped.")
+
+        return ToastRequest(
+            message: L10n.format("Archived “%@”", session.displayTitle),
+            detail: wasRunning ? "\(stopped) \(whereItWent)" : whereItWent,
+            actionTitle: L10n.string("Undo"),
+            action: undo,
+            identifier: "sidebar.toast.archive"
         )
     }
 

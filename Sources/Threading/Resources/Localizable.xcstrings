@@ -11,6 +11,17 @@
         }
       }
     },
+    "A receipt for something already done, with the way back on it. Press Show to send one into the pane below: it slides in above the footer, holds while the pointer is on it, and leaves by itself otherwise.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En kvittens för något som redan har gjorts, med vägen tillbaka på sig. Tryck på Visa för att skicka in en i panelen nedan: den glider in ovanför sidfoten, stannar kvar så länge pekaren vilar på den och försvinner annars av sig själv."
+          }
+        }
+      }
+    },
     "Add Annotation": {
       "localizations": {
         "sv": {
@@ -47,6 +58,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Läggs till en gång efter uppgiften du skriver. Det skickas inte igen när en befintlig konversation återupptas."
+          }
+        }
+      }
+    },
+    "Archived “%@”": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkiverade ”%@”"
           }
         }
       }
@@ -161,12 +183,34 @@
         }
       }
     },
+    "Restore it from Settings ▸ Archived.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ den från Inställningar ▸ Arkiverade."
+          }
+        }
+      }
+    },
     "Save Annotation": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Spara anteckning"
+          }
+        }
+      }
+    },
+    "Show": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa"
           }
         }
       }
@@ -181,6 +225,17 @@
         }
       }
     },
+    "The agent stopped.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenten stoppades."
+          }
+        }
+      }
+    },
     "The note stays in Threading and is never exposed to the web page.": {
       "localizations": {
         "sv": {
@@ -191,12 +246,34 @@
         }
       }
     },
+    "The shell stopped.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skalet stoppades."
+          }
+        }
+      }
+    },
     "This user-authored note stays outside the page and will be available to the agent.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Den här användarskrivna anteckningen stannar utanför sidan och blir tillgänglig för agenten."
+          }
+        }
+      }
+    },
+    "ToastView": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ToastView"
           }
         }
       }
