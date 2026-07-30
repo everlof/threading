@@ -81,13 +81,25 @@ final class EventLog {
 
     /// Opens a launch: drops expired journals, says how the *previous* launch ended, and
     /// leaves a marker behind that only a deliberate quit removes.
+    /// Whether the launch before this one ended on purpose — `nil` on a first launch, which has
+    /// no previous launch to judge.
+    ///
+    /// Read at `beginLaunch` and kept, because the marker it is derived from is overwritten a
+    /// few lines later. A support report wants this exact fact and cannot recover it afterwards.
+    private(set) var previousLaunchEndedCleanly: Bool?
+
     func beginLaunch() {
         queue.sync {
             pruneExpiredJournals()
 
             // Written before the launch record, so the journal reads in the order the events
             // happened: the previous launch's ending, then this one's beginning.
-            if let previous = previousLaunch() {
+            // A missing marker means either "exited cleanly" or "never ran". Only an existing
+            // journal separates the two, and it has to be asked before this launch appends one.
+            let previous = previousLaunch()
+            previousLaunchEndedCleanly = journalExists() ? previous == nil : nil
+
+            if let previous {
                 append(line(
                     category: .app,
                     message: EventLogDefaults.uncleanExitMessage,
@@ -257,6 +269,17 @@ final class EventLog {
 
     /// Drops journals past the retention window. Runs once per launch, which is often enough
     /// for a file per day.
+    /// Whether any journal from a previous launch survives. Called before this launch appends,
+    /// so it answers "has this app ever run here" rather than "is there a journal now".
+    private func journalExists() -> Bool {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return false }
+
+        return contents.contains { $0.pathExtension == EventLogDefaults.fileExtension }
+    }
+
     private func pruneExpiredJournals() {
         let cutoff = Date().addingTimeInterval(-EventLogDefaults.retention)
 

@@ -31,14 +31,17 @@ enum MacRemoteDiagnostics {
         return "\(prefix)-\(short)"
     }
 
-    static func supportReport() throws -> URL {
+    static func supportReport(
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
+    ) throws -> URL {
         let info = Bundle.main.infoDictionary
         return try journal.writeSupportReport(
             appVersion: info?["CFBundleShortVersionString"] as? String ?? "?",
             appBuild: info?["CFBundleVersion"] as? String ?? "?",
             operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
             protocolVersion: RemoteProtocol.current,
-            minimumProtocolVersion: RemoteProtocol.minimumSupported
+            minimumProtocolVersion: RemoteProtocol.minimumSupported,
+            additionalDetails: additionalDetails
         )
     }
 }

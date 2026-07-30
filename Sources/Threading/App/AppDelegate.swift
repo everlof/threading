@@ -954,9 +954,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Creates the share-safe report, not a copy of the owner-local journal. The latter may
     /// contain prompts, commands and paths and remains available separately for local diagnosis.
-    @objc private func createRemoteSupportReport() {
+    /// The grants are read first because two of them arrive through a callback, and a report
+    /// missing the notification row is missing the answer to the most common question about it.
+    @MainActor @objc private func createRemoteSupportReport() {
+        SystemPrivacyStatusReader().load { [weak self] statuses in
+            self?.writeSupportReport(privacyStatuses: statuses)
+        }
+    }
+
+    @MainActor
+    private func writeSupportReport(
+        privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus]
+    ) {
+        let projects = ProjectStore.shared.projects
+        let extensions = ExtensionManager.shared.installedExtensions
+        let accounts = AgentKind.allCases.reduce(into: [String: Int]()) { counts, kind in
+            counts[kind.rawValue] = AgentAccountDiscovery.allAccounts(for: kind).count
+        }
+
+        let details = MacSupportReportDetails(
+            privacyStatuses: privacyStatuses,
+            remoteAccessEnabled: AppSettings.shared.remoteAccessEnabled,
+            appThemeID: AppThemeLibrary.current.id.rawValue,
+            projectCount: projects.count,
+            sessionCount: projects.reduce(0) { $0 + $1.sessions.count },
+            extensionCount: extensions.count,
+            companionCount: extensions.reduce(0) { $0 + $1.companions.count },
+            agentAccounts: accounts,
+            previousLaunchWasClean: EventLog.shared.previousLaunchEndedCleanly
+        )
+
         do {
-            let report = try MacRemoteDiagnostics.supportReport()
+            let report = try MacRemoteDiagnostics.supportReport(
+                additionalDetails: details.fields
+            )
             NSWorkspace.shared.activateFileViewerSelecting([report])
         } catch {
             let alert = NSAlert()

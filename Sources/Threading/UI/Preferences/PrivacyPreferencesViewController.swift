@@ -66,9 +66,10 @@ final class PrivacyPreferencesViewController: NSViewController {
             SettingsUI.section("System Permissions", permissionsCard()),
             SettingsUI.section("Who Uses These Grants", attributionCard()),
             SettingsUI.section("Stored Credentials", credentialsCard()),
+            SettingsUI.section("Leaving This Mac", egressCard()),
             SettingsUI.note(
-                "Threading has no analytics and sends nothing about your projects anywhere. "
-                    + "Agents reach the network on their own account, under their own logins."
+                "Agents reach the network on their own account, under their own logins. "
+                    + "Threading does not watch what they do there."
             )
         ])
         page.setAccessibilityIdentifier("settings.privacy.page")
@@ -219,6 +220,37 @@ final class PrivacyPreferencesViewController: NSViewController {
                 title: "Agent logins stay with the agent",
                 detail: "Threading reads which accounts exist under ~/.claude and ~/.codex so "
                     + "it can route a session to one. It never reads or copies their credentials."
+            )
+        ])
+    }
+
+    /// The old copy here claimed Threading "sends nothing about your projects anywhere". That
+    /// was wrong, and wrong in the way that costs trust rather than accuracy: a lock-screen
+    /// notification carries the chat's own name, and the chat is usually named by the agent.
+    /// Naming the exceptions is worth more than a clean sentence, because someone watching the
+    /// traffic will find them either way.
+    private func egressCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.detailRow(
+                symbol: "chart.bar.xaxis",
+                title: "No analytics",
+                detail: "Threading has no usage tracking and no identifier for this install. "
+                    + "Nothing is sent when you launch it, open a project, or run an agent."
+            ),
+            SettingsUI.detailRow(
+                symbol: "bell.badge",
+                title: "Notification titles reach Apple",
+                detail: "To arrive on your iPhone, a notification travels through Apple's push "
+                    + "service, and its title is the chat's name — usually the one the agent "
+                    + "chose. Tool arguments, paths and diffs are deliberately left out. This "
+                    + "happens only while Remote Access is on."
+            ),
+            SettingsUI.detailRow(
+                symbol: "lifepreserver",
+                title: "Support reports are yours to send",
+                detail: "Help ▸ Create Remote Support Report… writes a file of versions, "
+                    + "counts and grant states — no names, paths or prompts — and reveals it in "
+                    + "the Finder. Threading never uploads it; sending it is your decision."
             )
         ])
     }

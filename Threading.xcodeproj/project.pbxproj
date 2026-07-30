@@ -172,6 +172,7 @@
 		9E7BE8E867E82C3FD9228BB0 /* PrivacyPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59A10C3A55DA8276E3B8E82 /* PrivacyPreferencesTests.swift */; };
 		8178333D2C32D47D3E1E2179 /* SidebarRowClickRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05772B04BCD057501E3D142C /* SidebarRowClickRoutingTests.swift */; };
 		ADD0254BF2C9A50A74A91CB5 /* PreferenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */; };
+		E21DDDA58293E78DC2749CF8 /* MacSupportReportDetailsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -389,6 +390,7 @@
 		E59A10C3A55DA8276E3B8E82 /* PrivacyPreferencesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PrivacyPreferencesTests.swift; sourceTree = "<group>"; };
 		05772B04BCD057501E3D142C /* SidebarRowClickRoutingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarRowClickRoutingTests.swift; sourceTree = "<group>"; };
 		7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PreferenceStoreTests.swift; sourceTree = "<group>"; };
+		0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSupportReportDetailsTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -665,6 +667,7 @@
 				E59A10C3A55DA8276E3B8E82 /* PrivacyPreferencesTests.swift */,
 				05772B04BCD057501E3D142C /* SidebarRowClickRoutingTests.swift */,
 				7CD889EB5F4E58ECD2411AB9 /* PreferenceStoreTests.swift */,
+				0CE14F5A721D90824829DBCD /* MacSupportReportDetailsTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1186,6 +1189,7 @@
 				9E7BE8E867E82C3FD9228BB0 /* PrivacyPreferencesTests.swift in Sources */,
 				8178333D2C32D47D3E1E2179 /* SidebarRowClickRoutingTests.swift in Sources */,
 				ADD0254BF2C9A50A74A91CB5 /* PreferenceStoreTests.swift in Sources */,
+				E21DDDA58293E78DC2749CF8 /* MacSupportReportDetailsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

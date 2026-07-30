@@ -101,6 +101,21 @@ public enum RemoteDiagnosticExtraField: String, Sendable {
     case activeCapability
     case notificationAuthorization
     case notificationDelivery
+
+    // The Mac host's own facts. Every one of these is a count, an enum, or a version string —
+    // never a name, path, or anything an agent produced. That is the same rule the rest of this
+    // file follows, and it is the reason a support report can be handed to someone else without
+    // reading it first.
+    case accessibilityAuthorization
+    case screenRecordingAuthorization
+    case remoteAccessEnabled
+    case appThemeID
+    case projectCount
+    case sessionCount
+    case extensionCount
+    case extensionCompanionCount
+    case agentAccountSummary
+    case previousLaunchClean
 }
 
 public struct RemoteDiagnosticRecord: Codable, Equatable, Sendable {

@@ -12235,17 +12235,6 @@
         }
       }
     },
-    "Threading has no analytics and sends nothing about your projects anywhere. Agents reach the network on their own account, under their own logins.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Threading har ingen analys och skickar ingenting om dina projekt någonstans. Agenter når nätverket för egen räkning, under sina egna inloggningar."
-          }
-        }
-      }
-    },
     "Threading is already running": {
       "extractionState": "stale",
       "localizations": {
@@ -17371,6 +17360,94 @@
           "stringUnit": {
             "state": "translated",
             "value": "⌃ hierarki · ⌥ avstånd"
+          }
+        }
+      }
+    },
+    "Leaving This Mac": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lämnar den här Macen"
+          }
+        }
+      }
+    },
+    "No analytics": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen analys"
+          }
+        }
+      }
+    },
+    "Notification titles reach Apple": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aviseringsrubriker når Apple"
+          }
+        }
+      }
+    },
+    "Support reports are yours to send": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supportrapporter skickar du själv"
+          }
+        }
+      }
+    },
+    "Agents reach the network on their own account, under their own logins. Threading does not watch what they do there.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenter når nätverket för egen räkning, under sina egna inloggningar. Threading bevakar inte vad de gör där."
+          }
+        }
+      }
+    },
+    "Threading has no usage tracking and no identifier for this install. Nothing is sent when you launch it, open a project, or run an agent.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading har ingen användningsspårning och ingen identifierare för den här installationen. Ingenting skickas när du startar den, öppnar ett projekt eller kör en agent."
+          }
+        }
+      }
+    },
+    "To arrive on your iPhone, a notification travels through Apple's push service, and its title is the chat's name — usually the one the agent chose. Tool arguments, paths and diffs are deliberately left out. This happens only while Remote Access is on.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För att nå din iPhone färdas en avisering via Apples pushtjänst, och rubriken är chattens namn – oftast det agenten valde. Verktygsargument, sökvägar och diffar utelämnas medvetet. Det här sker bara när Fjärråtkomst är på."
+          }
+        }
+      }
+    },
+    "Help ▸ Create Remote Support Report… writes a file of versions, counts and grant states — no names, paths or prompts — and reveals it in the Finder. Threading never uploads it; sending it is your decision.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hjälp ▸ Skapa fjärrsupportrapport… skriver en fil med versioner, antal och behörighetsstatus – inga namn, sökvägar eller prompter – och visar den i Finder. Threading laddar aldrig upp den; du bestämmer om den skickas."
           }
         }
       }

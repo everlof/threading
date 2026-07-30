@@ -233,7 +233,10 @@ final class PrivacyPreferencesTests: XCTestCase {
     func testEveryWrappingDetailUsesTheWidthItIsGiven() throws {
         let controller = page(reader())
         let cards = descendants(in: controller.view).compactMap { $0 as? SettingsCard }
-        XCTAssertEqual(cards.count, 3, "the page no longer has the three cards this measures")
+        // A floor, not an equality: this guards against measuring an empty page, and a page
+        // gaining a card is not a reason for a layout test to fail. The `measured` count below
+        // is what actually proves something was inspected.
+        XCTAssertGreaterThanOrEqual(cards.count, 3, "the page lost the cards this measures")
 
         var measured = 0
         for card in cards {
