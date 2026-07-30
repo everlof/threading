@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import XCTest
 @testable import Threading
 
@@ -756,6 +757,39 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    private func auxiliaryMouseEvent(
+        _ type: NSEvent.EventType,
+        at point: NSPoint,
+        buttonNumber: UInt32 = 2
+    ) throws -> NSEvent {
+        let cgType: CGEventType
+        switch type {
+        case .otherMouseDown:
+            cgType = .otherMouseDown
+        case .otherMouseDragged:
+            cgType = .otherMouseDragged
+        case .otherMouseUp:
+            cgType = .otherMouseUp
+        default:
+            XCTFail("Not an auxiliary mouse event: \(type)")
+            cgType = .otherMouseDown
+        }
+
+        // Quartz uses a top-left display origin while AppKit reports window points bottom-up.
+        // The test event has no real window, so mirror the point here to make
+        // `event.locationInWindow` equal the point the fixture asked for.
+        let displayHeight = CGDisplayBounds(CGMainDisplayID()).height
+        let quartzPoint = CGPoint(x: point.x, y: displayHeight - point.y)
+        let button = try XCTUnwrap(CGMouseButton(rawValue: buttonNumber))
+        let cgEvent = try XCTUnwrap(CGEvent(
+            mouseEventSource: nil,
+            mouseType: cgType,
+            mouseCursorPosition: quartzPoint,
+            mouseButton: button
+        ))
+        return try XCTUnwrap(NSEvent(cgEvent: cgEvent))
+    }
+
     private func menuHarness() throws -> (NSWindow, NSView, NSView) {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
         let source = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
@@ -931,6 +965,106 @@ final class ThemedControlTests: XCTestCase {
 
         tab.isSelected = true
         XCTAssertEqual(tab.accessibilityValue() as? Bool, true)
+    }
+
+    func testMiddleClickClosesATabOnReleaseWithoutSelectingIt() throws {
+        let tab = ThemedTabItemView(
+            title: "Browser",
+            symbolName: "globe",
+            placement: .horizontal,
+            showsClose: true,
+            inkSource: .chrome
+        )
+        tab.translatesAutoresizingMaskIntoConstraints = true
+        tab.frame = NSRect(x: 30, y: 20, width: 180, height: Design.Size.tabHeight)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(tab)
+
+        var selections = 0
+        var closes = 0
+        tab.onSelect = { selections += 1 }
+        tab.onClose = { closes += 1 }
+
+        let inside = NSPoint(x: tab.frame.midX, y: tab.frame.midY)
+        let down = try auxiliaryMouseEvent(.otherMouseDown, at: inside)
+        let up = try auxiliaryMouseEvent(.otherMouseUp, at: inside)
+        XCTAssertEqual(down.buttonNumber, 2, "the fixture did not create a middle-button event")
+
+        tab.otherMouseDown(with: down)
+        XCTAssertEqual(closes, 0, "middle click closed before the release")
+        tab.otherMouseUp(with: up)
+
+        XCTAssertEqual(closes, 1)
+        XCTAssertEqual(selections, 0, "closing an inactive tab selected it first")
+    }
+
+    func testDraggingAMiddleClickOffTheTabCancelsTheClose() throws {
+        let tab = ThemedTabItemView(
+            title: "Browser",
+            symbolName: "globe",
+            placement: .horizontal,
+            showsClose: true,
+            inkSource: .chrome
+        )
+        tab.translatesAutoresizingMaskIntoConstraints = true
+        tab.frame = NSRect(x: 30, y: 20, width: 180, height: Design.Size.tabHeight)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 100),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(tab)
+
+        var closes = 0
+        tab.onClose = { closes += 1 }
+
+        let inside = NSPoint(x: tab.frame.midX, y: tab.frame.midY)
+        let outside = NSPoint(x: tab.frame.midX, y: tab.frame.maxY + Design.Spacing.large)
+        tab.otherMouseDown(
+            with: try auxiliaryMouseEvent(.otherMouseDown, at: inside)
+        )
+        tab.otherMouseDragged(
+            with: try auxiliaryMouseEvent(.otherMouseDragged, at: outside)
+        )
+        tab.otherMouseUp(
+            with: try auxiliaryMouseEvent(.otherMouseUp, at: outside)
+        )
+
+        XCTAssertEqual(closes, 0)
+    }
+
+    func testAuxiliaryButtonsBeyondMiddleDoNotCloseATab() throws {
+        let tab = ThemedTabItemView(
+            title: "Browser",
+            symbolName: "globe",
+            placement: .horizontal,
+            showsClose: true,
+            inkSource: .chrome
+        )
+        tab.frame = NSRect(x: 0, y: 0, width: 180, height: Design.Size.tabHeight)
+
+        var closes = 0
+        tab.onClose = { closes += 1 }
+        let inside = NSPoint(x: tab.bounds.midX, y: tab.bounds.midY)
+
+        tab.otherMouseDown(
+            with: try auxiliaryMouseEvent(.otherMouseDown, at: inside, buttonNumber: 3)
+        )
+        tab.otherMouseUp(
+            with: try auxiliaryMouseEvent(.otherMouseUp, at: inside, buttonNumber: 3)
+        )
+
+        XCTAssertEqual(closes, 0, "a navigation mouse button was mistaken for the middle button")
     }
 
     func testAnOffsetTabItemReceivesPointerHitTesting() {

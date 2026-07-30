@@ -22,6 +22,10 @@ import AppKit
 /// is only one place that draws.
 final class ThemedTabItemView: BackdropThemedControl {
 
+    /// AppKit numbers the primary, secondary and middle buttons 0, 1 and 2.
+    /// Buttons beyond the middle one are auxiliary navigation controls, not tab-close gestures.
+    private static let middleMouseButtonNumber = 2
+
     /// Rounded rect rather than pill: a tab is a small container in the window's furniture, which
     /// is what `Design.Radius.control` names.
     private static var radius: CGFloat { Design.Radius.control }
@@ -305,6 +309,8 @@ final class ThemedTabItemView: BackdropThemedControl {
     /// Where the press landed, kept so a drag can be told from a press with a wobble.
     private var dragOrigin: NSPoint?
     private var isDragging = false
+    private var isTrackingMiddleClose = false
+    private var isMiddleCloseInside = false
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
@@ -346,6 +352,51 @@ final class ThemedTabItemView: BackdropThemedControl {
             return
         }
         _ = onContextMenu()
+    }
+
+    /// The standard tab gesture: a middle-button click closes without selecting first.
+    ///
+    /// Like the tab's visible close button, this is an action and therefore fires on release.
+    /// Tracking the pointer also preserves the platform's change-your-mind affordance: dragging
+    /// away before releasing cancels the close.
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == Self.middleMouseButtonNumber,
+              isEnabled,
+              onClose != nil
+        else {
+            super.otherMouseDown(with: event)
+            return
+        }
+
+        isTrackingMiddleClose = true
+        isMiddleCloseInside = bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        guard event.buttonNumber == Self.middleMouseButtonNumber,
+              isTrackingMiddleClose
+        else {
+            super.otherMouseDragged(with: event)
+            return
+        }
+
+        isMiddleCloseInside = bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard event.buttonNumber == Self.middleMouseButtonNumber,
+              isTrackingMiddleClose
+        else {
+            super.otherMouseUp(with: event)
+            return
+        }
+
+        let shouldClose = isEnabled
+            && isMiddleCloseInside
+            && bounds.contains(convert(event.locationInWindow, from: nil))
+        isTrackingMiddleClose = false
+        isMiddleCloseInside = false
+        if shouldClose { onClose?() }
     }
 
     override func performPrimaryAction() -> Bool {

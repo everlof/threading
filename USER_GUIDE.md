@@ -985,12 +985,12 @@ it reopens the next time the agent displays something. It can also be opened by 
 panel toggle at the session header's right edge, or **View ▸ Display Panel** — so its tabs (the
 browser, Git Review, Session Info) are reachable without an agent putting content there first.
 
-The tabs are yours to arrange: drag one along the strip to reorder it, or use its
-secondary-click menu — **Close Tab**, **Close Other Tabs**, **Close Tabs to the Right**,
-then **Move Left** / **Move Right**. The order is the same one the agent sees, and it
-survives a relaunch. **⌘⇧[** and **⌘⇧]** step through the strip, and **⌘1**–**⌘9** jump to a
-tab by its place in it. The same menu, with the same commands, sits on the shell drawer's
-tabs.
+The tabs are yours to arrange: drag one along the strip to reorder it, middle-click one to
+close it, or use its secondary-click menu — **Close Tab**, **Close Other Tabs**,
+**Close Tabs to the Right**, then **Move Left** / **Move Right**. The order is the same one
+the agent sees, and it survives a relaunch. **⌘⇧[** and **⌘⇧]** step through the strip, and
+**⌘1**–**⌘9** jump to a tab by its place in it. The same gestures and menu, with the same
+commands, work on the shell drawer's tabs.
 
 **Opening a picture properly.** An image in the panel is drawn at whatever width the pane has,
 so a screenshot is legible but not full size. Press **Space** with the image selected, or
