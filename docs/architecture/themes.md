@@ -119,7 +119,19 @@ hangs off:
 - **Hue is drawn toward the nearest colour the palette actually contains**, by a fraction of
   the distance and never past a cap. A contraction toward attractors cannot fold the circle, so
   eight background blocks stay eight distinct readable categories — which snapping to a small
-  set of anchors would not.
+  set of anchors would not. The pull **ramps in with the chroma being compressed**: a colour
+  quiet enough to be left at its own chroma has not asked for anything, and is not realigned
+  either. Without that tie the transform was not the identity on quiet colours — a region
+  filled with the terminal's own background had its chroma correctly left alone and its hue
+  rotated anyway, so `#082019` came back `#06201C` and the block seamed against the real ground.
+- **Below the knee the original colour is returned**, not a rebuilt one. The trip through Oklab
+  and back is not bit-exact, so reconstructing a colour nothing is being done to still moves it
+  a step — which is the same seam by another route. Returning the input is the only way to mean
+  *unchanged*.
+- **A colour the palette already states is left alone at any chroma.** A program can emit a
+  palette entry as truecolor rather than as an index — anything echoing an OSC 4 query does —
+  and the two spellings of one colour have to render identically. The palette is in tune with
+  the theme by definition.
 
 None of it knows what a diff is, deliberately: a rule that fired only on colours it guessed
 were diffs would guess wrong on somebody's progress bar. Foregrounds are never offered to the
@@ -141,8 +153,50 @@ own rendering was wrong; the terminal had simply never said what colour it was.
 
 `TerminalSession.applyProfile` runs before the child launches, so the answer is the session's own
 palette rather than SwiftTerm's default black. The question is asked **once, at startup**: a theme
-switched under a running agent does not reach it (Claude's `/theme` does), and Claude subscribes to
-no live colour-scheme notification — it parses `CSI ? 997 ; 1|2 n` but never enables the mode.
+switched under a running agent does not reach it, and Claude's `/theme` does.
+
+**Answering the question was not enough, so the answer is also stated up front.** The handshake
+is the problem: the agent asks in its first few bytes, waits, and falls back to dark. Sessions
+launched from a build that answers correctly still came up in the dark palette — the same
+white-on-cream diff. Driven against Claude Code 2.1.220 in a bare PTY, the reply this app sends
+is byte-for-byte one it accepts and switches on, so the sequence is right and the *timing* is
+what cannot be relied on.
+
+`TerminalTheme.colorFGBG` states the same fact where nothing can race it, and
+`TerminalSession.buildEnvironment` writes it on every launch:
+
+- `COLORFGBG=0;15` on paper, `15;0` on ink — rxvt's convention, `<foreground>;<background>` as
+  ANSI indices. Only the background is ever read, and only for the one bit it carries.
+- It is Claude's **fallback** behind its own query, not an override: `"theme": "auto"` consults
+  it, an explicitly chosen theme still wins. Threading describes the terminal; it does not pick
+  for the program. vim, less and delta read the same variable.
+- Written from `profile`, not inherited. Threading is launched by launchd, so an inherited value
+  describes whichever terminal started the app — and two sessions side by side need not agree.
+- Reporting the palette's own nearest ANSI index would be worse than it looks: Bauhaus's slot 7
+  is a dark grey-brown, so warm paper would have described itself with a colour nothing on
+  screen is.
+
+**The third leg: a switch under a running agent is announced.** The first two answers are both
+given at startup, and Claude keeps whatever it heard — so a theme switched later repainted the
+terminal and moved nothing on the agent's side. That is the white-on-white diff surviving a
+correct handshake *and* a correct environment: a session that launched while the app was
+briefly wearing another palette (a startup restore, 13 seconds in, was the reproduced case),
+or the user switching themes with agents running, kept an agent painting the old page's ink
+onto the new page forever.
+
+Claude enables `DECSET 2031` (colour-scheme reports) at startup, and the report it subscribes
+to — `CSI ? 997 ; 1 n` on ink, `; 2 n` on paper — is a **prompt to re-ask, not the news
+itself**: on hearing it the agent sends a fresh `OSC 11 ; ?` and adopts that answer. This is
+why feeding it `CSI ? 997 ; 2 n` by hand once read as "not wired up in 2.1.220": the terminal
+behind the experiment kept giving the *old* answer to the re-ask, so nothing visibly moved.
+The fork now tracks the 2031 subscription (`Terminal.colorSchemeReportingEnabled`, honoured by
+`reportColorSchemeChange`), and `TerminalSession.applyProfile` reports through it whenever an
+applied profile actually changes the emulator's background — palette first, report second, so
+the re-ask hears the new page; font tweaks and re-applies of the same palette stay silent.
+Driven against Claude Code 2.1.220 in a PTY: dark ink, report, re-ask, light ink, live.
+
+`TerminalColorQueryTests` pins all three — the bytes on the wire, the environment the child is
+launched into, and the announce → re-ask → new-answer exchange.
 
 ## A theme states a typeface
 
@@ -177,7 +231,8 @@ second namespace — twenty factories in two copies would have to keep agreeing 
 carries `.conversation` too, since what is typed becomes a bubble in the thread and a composer
 in SF feeding a bubble in Baskerville changes font at the one moment the user is watching.
 
-Three things no font setting reaches, and each is a rule rather than an oversight: **code** is
+Three things no *font-family* setting reaches, and each is a rule rather than an oversight:
+**code** is
 monospaced under every style (a serif diff is a defect), **numerics** keep SF's aligned digits
 (a usage column that stops aligning costs more than a serif digit is worth), and the **terminal**
 takes its font from `TerminalProfile`, which is the user's. `TerminalSession.applyProfile`
@@ -307,3 +362,38 @@ time a font assumption here was wrong until measured):
 A registered family changes what recorded roles resolve to, so the registry answers a font-set
 change the way `startObservingFontOverrides` answers an override change: `repaintEverything()`
 plus `AppThemeDidChange` — one event, the consumers it already has.
+
+## 2026-07-30 — the standing choice is written where a hosted test cannot reach it
+
+Reported as **"theme selection doesn't persist between app launches."** Nothing in the restore
+path was wrong: `apply` records `appThemeID` on its first line, `restore()` reads it back, and
+both were doing exactly that. What changed the answer was the **test suite**.
+
+`ThreadingTests` is hosted in the app target, so `UserDefaults.standard` inside a test *is* the
+developer's own preferences — the ones the app they are running launches into. Three test classes
+apply a theme in `setUp` (`ThemedControlTests`, `DiffInkTests`, `ThemeResolutionTests`) and
+exactly one of them put the old value back. So the last test to run answered the question, and
+the next launch honoured that answer. Measured: a stored `swiss-minimalist` came back as `system`
+after a single `-only-testing:ThreadingTests/ThemedControlTests` run. The same leak had already
+left a palette named *Reserved Name Probe* standing in the real terminal-theme list.
+
+So the store is decided **once**, in `PreferenceStore`: `.standard` in the app, a named scratch
+suite when `NSClassFromString("XCTestCase")` answers — the signal `AppDelegate` already skips its
+whole startup on, for the same reason. Everything that records a theme *choice* goes through it:
+
+| Store | Key |
+|---|---|
+| `AppThemeLibrary` | `appThemeID` |
+| `AppThemeStore` | `customAppThemes` |
+| `ThemeManager` | `customTerminalThemes` |
+| `ProfileStorage` | `terminalProfiles`, `defaultProfileName` (the profile carries the default palette) |
+
+**Behavioural settings deliberately stay on `.standard`.** Several tests set an `AppSettings` key
+and then assert the app read it; a seam under those would break the thing they are testing. The
+line is *recorded choice* versus *behaviour under test*, not "everything in `UserDefaults`".
+
+A test that needs to read a choice back reads it through `PreferenceStore.shared` too —
+`ExtensionAppearanceTests` does, because reaching past the seam would assert against a key the
+app no longer writes. `PreferenceStore.isRedirected` exists so the redirect is asserted rather
+than assumed: a full 1868-test run now leaves the stored choice untouched, which is the
+regression this is really guarding.

@@ -58,8 +58,14 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     var onUserInput: (() -> Void)?
     private var isInjectingRemoteInput = false
 
+    /// Every chunk sent upstream to the child — keystrokes, paste, and the terminal's own
+    /// answers (query replies, colour-scheme reports) alike. `TerminalColorQueryTests` reads
+    /// the answers off this to pin the wire contract; nil costs nothing.
+    var onInputBytes: ((ArraySlice<UInt8>) -> Void)?
+
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
         if !isInjectingRemoteInput { onUserInput?() }
+        onInputBytes?(data)
         super.send(source: source, data: data)
     }
 
@@ -88,7 +94,21 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     // MARK: - Dropped Files
 
-    /// Dropping a file on the terminal types its path, which is what every other terminal
+    /// Who is on the other end of a drop. Set by the surface that owns this terminal; a shell
+    /// is the safe default, because it is the reader that wants the path left alone.
+    var dropReader: TerminalDropReader = .shell
+
+    /// The reader a drop is actually answered for.
+    ///
+    /// Turning the setting off makes every terminal answer the way the shell drawer already
+    /// does — paths, exactly as dropped — because "do not convert" and "hand this to something
+    /// that only reads text" are the same instruction. That is what someone debugging their own
+    /// HEIC handling wants: the agent given their file, not a PNG of it.
+    private var effectiveDropReader: TerminalDropReader {
+        AppSettings.convertsDroppedImages ? dropReader : .shell
+    }
+
+    /// Dropping a file on the terminal pastes its path, which is what every other terminal
     /// does and what makes an image reachable by an agent at all: neither CLI can be handed
     /// pixels, so a path is the whole vocabulary.
     ///
@@ -107,15 +127,20 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let paths = PromptAttachment.paths(from: sender.draggingPasteboard)
+        accept(sender.draggingPasteboard)
+    }
+
+    /// The drop itself, reachable without an `NSDraggingInfo` — what is worth testing here is
+    /// the bytes a pasteboard turns into, and none of them come from the gesture.
+    func accept(_ pasteboard: NSPasteboard) -> Bool {
+        let paths = PromptAttachment.paths(from: pasteboard)
         guard !paths.isEmpty else { return false }
 
-        // Through `insertText` rather than `send`, so the drop travels the same path a
-        // keystroke does and the terminal's own input handling stays the only writer.
-        insertText(
-            TerminalDrop.text(for: paths),
-            replacementRange: NSRange(location: 0, length: 0)
-        )
+        // As a paste rather than as typing, which is the difference between a dropped
+        // screenshot arriving as `[Image #1]` and arriving as the path it was written to.
+        // Both CLIs read a paste of an image path as the image; neither watches typed
+        // characters for one, and a drop is a paste in every terminal that has one.
+        pasteText(TerminalDrop.text(for: TerminalDropImage.readable(paths, for: effectiveDropReader)))
         return true
     }
 
@@ -240,41 +265,28 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
         let session = ProjectStore.shared.session(withID: sessionID)
 
-        let alert = NSAlert()
-        alert.messageText = L10n.string("Rename Session")
-        alert.addButton(withTitle: L10n.string("Rename"))
         // The same button the sidebar's rename offers, for the same reason: returning to the
         // agent's own name is an action, and it was written out as an instruction.
         let hasCustomTitle = !(session?.customTitle ?? "").isEmpty
-        if hasCustomTitle {
-            alert.addButton(withTitle: L10n.string("Use Agent's Name"))
-        }
-        alert.addButton(withTitle: L10n.string("Cancel"))
-
-        let textField = ThemedTextField(frame: NSRect(
-            x: 0, y: 0,
-            width: SidebarDefaults.renameFieldWidth,
-            height: SidebarDefaults.renameFieldHeight
-        ))
-        textField.stringValue = session?.customTitle ?? ""
-        textField.placeholderString = session?.displayTitle ?? ""
-        alert.accessoryView = textField
-        alert.window.initialFirstResponder = textField
-
-        let response = alert.runModal()
-
-        if hasCustomTitle, response == .alertSecondButtonReturn {
-            ProjectStore.shared.renameSession(id: sessionID, to: "")
-            return
-        }
-
-        guard response == .alertFirstButtonReturn else { return }
-
-        // An empty value clears the custom name rather than being rejected.
-        ProjectStore.shared.renameSession(
-            id: sessionID,
-            to: textField.stringValue.trimmingCharacters(in: .whitespaces)
+        let request = TextPromptRequest(
+            title: L10n.string("Rename Session"),
+            confirmTitle: L10n.string("Rename"),
+            clearTitle: hasCustomTitle ? L10n.string("Use Agent's Name") : nil,
+            current: session?.customTitle ?? "",
+            placeholder: session?.displayTitle ?? "",
+            // An empty value clears the custom name rather than being rejected.
+            allowsEmpty: true,
+            fieldSize: NSSize(
+                width: SidebarDefaults.renameFieldWidth,
+                height: SidebarDefaults.renameFieldHeight
+            )
         )
+
+        switch TextPromptAlert.ask(request) {
+        case .text(let name): ProjectStore.shared.renameSession(id: sessionID, to: name)
+        case .cleared: ProjectStore.shared.renameSession(id: sessionID, to: "")
+        case nil: return
+        }
     }
 
     /// Finds the session hosting this terminal by walking the responder chain, which

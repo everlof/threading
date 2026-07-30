@@ -334,7 +334,13 @@ open class Terminal {
     /// Indicates that the application has toggled bracketed paste mode, which means that when content is pasted into
     /// the terminal, the content will be wrapped in "ESC [ 200 ~" to start, and "ESC [ 201 ~" to end.
     public private(set) var bracketedPasteMode: Bool = false
-    
+
+    /// DECSET 2031: the application asked to be told when the terminal's colour scheme changes,
+    /// with a `CSI ? 997 ; 1|2 n` report. Claude Code enables this at startup; a program that
+    /// hears the report re-asks `OSC 11 ; ?` and re-themes live, which is what makes a theme
+    /// switched under a running agent actually reach it — see `reportColorSchemeChange`.
+    public private(set) var colorSchemeReportingEnabled: Bool = false
+
     private var charset: [UInt8:String]? = nil
     var gcharset: Int = 0
     var reverseWraparound: Bool = false
@@ -755,7 +761,8 @@ open class Terminal {
         setInsertMode(false)
         setWraparound(true)
         bracketedPasteMode = false
-        
+        colorSchemeReportingEnabled = false
+
         // charset'
         charset = nil
         gcharset = 0
@@ -1629,7 +1636,7 @@ open class Terminal {
     // Debug helper to write to log file
     private func osc133Log(_ message: String) {
         #if DEBUG
-        let logPath = "/tmp/skalman-osc133.log"
+        let logPath = "/tmp/threading-osc133.log"
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let line = "[\(timestamp)] \(message)\n"
         if let data = line.data(using: .utf8) {
@@ -1839,6 +1846,17 @@ open class Terminal {
     
     func reportColor (oscCode: Int, color: Color) {
         sendResponse(cc.OSC, "\(oscCode);\(color.formatAsXcolor ())", cc.ST)
+    }
+
+    /// Tells the application the terminal's colour scheme changed, if it subscribed (DECSET 2031).
+    ///
+    /// The report carries one bit — `CSI ? 997 ; 1 n` for dark, `; 2 n` for light — and is a
+    /// *prompt*, not the news itself: a program that hears it re-asks `OSC 11 ; ?` and reads the
+    /// answer. The embedder must therefore update `backgroundColor` **before** calling this, or
+    /// the re-ask is answered with the palette the terminal just left.
+    public func reportColorSchemeChange (dark: Bool) {
+        guard colorSchemeReportingEnabled else { return }
+        sendResponse (cc.CSI, "?997;\(dark ? 1 : 2)n")
     }
     
     // This handles both setting the foreground, but spill into background and cursor color
@@ -3135,6 +3153,8 @@ open class Terminal {
                 // keyboard emulation mode: 1050, 1051, 1052, 1053, 1060, 1061
             case 2004:
                 res = bracketedPasteMode ? modeSet : modeReset
+            case 2031:
+                res = colorSchemeReportingEnabled ? modeSet : modeReset
             default:
                 break
             }
@@ -3845,6 +3865,9 @@ open class Terminal {
             case 2004: // bracketed paste mode (https://cirw.in/blog/bracketed-paste)
                 bracketedPasteMode = false
                 break
+
+            case 2031: // colour-scheme change reports (CSI ? 997 ; 1|2 n)
+                colorSchemeReportingEnabled = false
             default:
                 log ("Unhandled DEC Private Mode Reset (DECRST) with \(par)")
                 break
@@ -4079,6 +4102,9 @@ open class Terminal {
             case 2004: // bracketed paste mode (https://cirw.in/blog/bracketed-paste)
                 // TODO: must implement bracketed paste mode
                 bracketedPasteMode = true
+
+            case 2031: // colour-scheme change reports (CSI ? 997 ; 1|2 n)
+                colorSchemeReportingEnabled = true
             default:
                 log ("Unhandled DEC Private Mode Set (DECSET) with \(par)")
                 break;

@@ -29,6 +29,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets
     `Terminal.userScrolling`, so output repaints do not pull the viewport back to the bottom.
+  - **`pasteText` is ours.** Upstream reaches bracketed paste only through `paste(_:)`, which
+    reads `NSPasteboard.general` — so text that never came from the clipboard could only be sent
+    as typing, or by writing over the user's clipboard first. A drop is a paste, and the markers
+    are what say so: Claude Code turns a *pasted* image path into `[Image #1]` and Codex into its
+    own attachment, while the identical bytes typed stay a line of path. See
+    `TerminalDrop` and `TerminalDropPasteTests`, which pin the wire format.
   - **The Option-word keys are ours.** `TerminalSession` sets `optionAsMetaKey = false` so
     Option still composes `~ | \ @` on non-US layouts. Upstream's meta branch is also the only
     place that turned Option-arrow into word motion, so that one switch silently dropped the
@@ -53,8 +59,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     applied to the colour *slot*, each further parameter names the next colour along, and a
     query is answered with the code for the colour it asked about — 10, 11 or 12, where the
     cursor's reply used to claim to be 11. `TerminalColorQueryTests` pins the bytes on both
-    sides. An agent asks once, at startup, so a theme switched under a *running* session does
-    not reach it; Claude's own `/theme` does.
+    sides. An agent asks once, at startup — so the fork also tracks `DECSET 2031`
+    (`colorSchemeReportingEnabled`, answered through DECRQM too), and
+    `reportColorSchemeChange` sends the subscribed program `CSI ? 997 ; 1|2 n` when the
+    embedder changes the palette under it. The report prompts the program to *re-ask* `OSC 11`,
+    which is how a theme switched under a running agent finally reaches it — see
+    [`themes.md`](themes.md) for the whole three-leg contract.
   - **Still unclaimed, and dead the same way:** `deleteToBeginningOfLine:` (Cmd-Delete). Option
     with *forward* delete never reaches `doCommand(by:)` at all — `NSDeleteFunctionKey` carries
     `.function`, so `keyDown`'s function branch answers it first and sends plain forward-delete,
@@ -69,7 +79,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     CoreGraphics engine, display link on 14+ / 60Hz timer on 13). SwiftUI ships in the package
     but the app touches none of it, so the app itself stays AppKit-only.
   - **The `tint` seam is ours.** The stock engine draws grayscale ink keyed off a `dark: Bool`,
-    so it follows macOS light/dark but knows nothing of Skalman's accent. `paint` gained an
+    so it follows macOS light/dark but knows nothing of Threading's accent. `paint` gained an
     optional `tint`: when set, depth rides on opacity instead of luminance (a dot's visibility
     is `1 - white` on either substrate), so a tinted orb reads identically in light and dark,
     only in the accent's hue. `WorkingOrbView` (in `UI/Design/`) is the theme boundary that

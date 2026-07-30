@@ -103,6 +103,10 @@ final class TerminalSession: NSObject {
     }
 
     private func applyProfile() {
+        // Sampled before the palette lands so the announcement below can tell a re-apply from
+        // an actual change of page.
+        let previousBackground = terminalView.getTerminal().backgroundColor
+
         // The terminal is the one surface whose typeface comes from TerminalProfile rather
         // than the app/conversation typography stack. `profile.font` also owns the fallback
         // when a saved family is no longer installed.
@@ -136,6 +140,19 @@ final class TerminalSession: NSObject {
 
         // Force redraw
         terminalView.needsDisplay = true
+
+        // A theme changed under a running program has to be *announced*, or it never lands:
+        // Claude asks what colour the terminal is once, at startup (`OSC 11 ; ?`), and keeps
+        // that answer for the whole session — repainting the view moves nothing on its side,
+        // which is precisely the white-on-white diff. It does subscribe to colour-scheme
+        // reports (`DECSET 2031`), and the report is a prompt to *re-ask*, not the news
+        // itself — so it must be sent only after the palette above is in place, and it moves
+        // nothing unless the answer to the re-ask has actually changed. Gated on the
+        // background actually changing so font tweaks and re-applies stay silent.
+        let terminal = terminalView.getTerminal()
+        if terminal.backgroundColor != previousBackground {
+            terminal.reportColorSchemeChange(dark: profile.theme.hasDarkBackground)
+        }
     }
 
     private func swiftTermCursorStyle(from style: TerminalProfile.CursorStyle, blink: Bool) -> CursorStyle {
@@ -244,11 +261,15 @@ final class TerminalSession: NSObject {
         shellPid = 0
     }
 
-    private func buildEnvironment() -> [String] {
+    /// The environment the child is launched into.
+    ///
+    /// Not `private`: `TerminalColorQueryTests` reads it back, because what this hands a child is
+    /// the whole of what the child knows about the palette before it draws anything.
+    func buildEnvironment() -> [String] {
         var env = ProcessInfo.processInfo.environment
 
         // Drop the launching process's own agent identity. These describe whoever started
-        // Skalman — if that was itself an agent session, every session spawned here would
+        // Threading — if that was itself an agent session, every session spawned here would
         // inherit its identifiers and believe it was a nested child of that conversation.
         for key in env.keys where AgentEnvironment.isInheritedAgentIdentity(key) {
             env.removeValue(forKey: key)
@@ -257,7 +278,15 @@ final class TerminalSession: NSObject {
         env[EnvironmentKeys.term] = TerminalDefaults.terminalType
         env[EnvironmentKeys.colorTerm] = TerminalDefaults.colorTerm
         env[EnvironmentKeys.shell] = profile.shellPath
-        env["TERM_PROGRAM"] = "Skalman"
+        env["TERM_PROGRAM"] = "Threading"
+
+        // Says whether this session's page is paper or ink, before the child draws anything —
+        // the standing answer behind the `OSC 11` handshake, which an agent asks for in its
+        // first few bytes and gives up on quickly. Set from `profile`, so it is this session's
+        // palette rather than the app's: two sessions side by side may not agree. Always
+        // written, never defaulted-to: Threading inherits launchd's environment, and whatever a
+        // terminal that started the app happened to leave here describes *that* terminal.
+        env[EnvironmentKeys.colorFGBG] = profile.theme.colorFGBG
 
         if env[EnvironmentKeys.lang] == nil {
             env[EnvironmentKeys.lang] = "en_US.UTF-8"
