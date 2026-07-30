@@ -2685,6 +2685,15 @@ final class ThemedControlTests: XCTestCase {
     }
 
     func testComponentGalleryRendersEveryStockThemeInBothAppearances() throws {
+        // The gallery's theme control is the *app's*: `setTheme` calls `AppThemeLibrary.apply`,
+        // which sets the palette and pins `NSApp.appearance` for the whole process. Walking the
+        // stock list and stopping left the last one — Christmas — applied for every test that ran
+        // after this one, and for the app the developer had running, since `NSApp.appearance` is
+        // not something a scratch defaults suite can redirect. The same rule CLAUDE.md states for
+        // a user's stored choice, in the piece of global state that is not stored at all.
+        let restoreTheme = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(restoreTheme) }
+
         let owner = ComponentGalleryWindowController()
         let window = try XCTUnwrap(owner.window)
         let controller = try XCTUnwrap(
