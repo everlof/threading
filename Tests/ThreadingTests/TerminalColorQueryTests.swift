@@ -40,6 +40,72 @@ final class TerminalColorQueryTests: XCTestCase {
         return (terminal, recorder)
     }
 
+    // MARK: - Faint Text
+
+    /// Claude Code marks its composer's proposed text — the `Try "…"` hint, autosuggestions —
+    /// with bare SGR 2 (faint) over the *default* foreground, no colour of its own (measured
+    /// against 2.0.61 and 2.1.220 in a bare PTY). No palette can therefore distinguish a
+    /// suggestion from typed text; only the renderer's faint handling can, which is why this
+    /// asserts on drawn pixels end to end — parser flag, attribute cache, and the glyph pass
+    /// each held half of a fix that no other assertion would notice regressing.
+    @MainActor
+    func testFaintTextDrawsDimmerThanTypedText() throws {
+        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 240, height: 80))
+        // Stated rather than defaulted, so ink intensity below is simply the sampled
+        // channel maximum over a black ground — no colour-space arithmetic against
+        // whatever the platform default happens to be.
+        view.nativeBackgroundColor = NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+        view.nativeForegroundColor = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        view.getTerminal().feed(text: "AAAA\r\n\u{1b}[2mAAAA")
+
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+
+        // The strongest ink per pixel row — glyph strokes peak at the text colour whatever
+        // the antialiasing does at the edges.
+        var rowPeaks: [Int: CGFloat] = [:]
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                guard let colour = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+                    continue
+                }
+                let deviation = max(
+                    colour.redComponent,
+                    max(colour.greenComponent, colour.blueComponent)
+                )
+                rowPeaks[y] = max(rowPeaks[y] ?? 0, deviation)
+            }
+        }
+
+        // Two bands of ink, top to bottom: the typed row, then the faint row.
+        var bands: [CGFloat] = []
+        var current: CGFloat?
+        for y in 0..<rep.pixelsHigh {
+            if let peak = rowPeaks[y], peak > 0.05 {
+                current = max(current ?? 0, peak)
+            } else if let finished = current {
+                bands.append(finished)
+                current = nil
+            }
+        }
+        if let finished = current { bands.append(finished) }
+
+        XCTAssertEqual(bands.count, 2, "expected a typed row and a faint row, got \(bands)")
+        let typed = bands[0]
+        let faint = bands[1]
+        XCTAssertGreaterThan(typed, 0.8, "the typed row did not draw at full strength")
+        XCTAssertLessThan(
+            faint,
+            typed * 0.7,
+            "a proposed suggestion is indistinguishable from text the user typed"
+        )
+        XCTAssertGreaterThan(
+            faint,
+            typed * 0.25,
+            "faint means dimmer, not gone"
+        )
+    }
+
     // MARK: - Answering a Query
 
     func testBackgroundQueryIsAnswered() {

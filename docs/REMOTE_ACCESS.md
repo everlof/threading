@@ -61,7 +61,21 @@ relayed ANSI stream locally rather than receiving a scaled screenshot. The Mac s
 **Fit to iPhone · columns×rows** while this lease is active and explains that its desktop size
 returns when the remote view closes. Rotating the phone updates the lease, and disconnecting
 restores the newest natural Mac grid (or another phone that is still controlling the session).
-View-only clients never resize the process.
+
+**The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
+a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the
+session off its own frame and put the rest behind a scrollbar, and only resizing the *Mac* ever
+changed it — `term.resize(msg.cols, msg.rows)` was the file's one sizing call, and it takes the
+host's numbers. An interactive page now asks for the grid it can actually show, on connect and on
+every window resize, clamped to the range the server validates so a request is answered rather
+than refused as `invalidViewport`.
+
+View-only clients never resize the process — the server refuses them a lease, which is the point
+of the capability. So the browser gives them the other half instead: whatever grid the Mac
+settled on, the page shrinks its own type until the whole of it, width and height, is inside the
+frame. Height counts as much as width there, because the rows that fall off the bottom are the
+live ones. A grid that already fits is restored to full size, which is also what returns an
+interactive page to 13px once its lease is honoured.
 
 The Mac and paired iPhone share one app appearance. Choose **Appearance** in the iPhone
 dashboard's `…` menu or choose an app theme on the Mac; the other side changes immediately.
@@ -79,10 +93,22 @@ Pairing and sharing are deliberately different actions:
 - **Pair iPhone** is for your own trusted devices. A paired owner device sees your unarchived
   chats, can manage sessions and themes, and may approve bounded Native permission requests.
 - **Share Chat…** in a session's `…` menu creates a single-use invitation for exactly that chat.
-  Choose **View only**, **Allow collaboration**, or **Collaboration + approvals**. Approval is a
-  separate per-member, per-chat right: a trusted collaborator can review a complete Native
-  permission request caused by their work without gaining settings, lifecycle, project, or
-  other-chat access.
+  Approval is a separate per-member, per-chat right: a trusted collaborator can review a complete
+  Native permission request caused by their work without gaining settings, lifecycle, project, or
+  other-chat access. The sheet names all three and says what each withholds, because the grant is
+  the whole decision and a button title cannot carry it — "Collaborator + Approval" is a
+  permission model written as a label, and nothing on screen used to connect it to *letting the
+  agent run commands and change files without asking you*:
+
+  | Grant | Can | Cannot |
+  |---|---|---|
+  | **View only** | Follow the chat as it happens | Type, send a prompt, or answer a permission request |
+  | **Collaborator** | The above, plus typing in the terminal and sending prompts | Answer permission requests — those still come to you |
+  | **Collaborator + approval** | The above, plus answering permission requests | — |
+
+  View only waits for a running chat, and says so beside its dimmed button: a viewer cannot wake
+  a dormant one, so there would be nothing to watch. The three live in `ShareLinkGrant`, which is
+  what replaced a `switch` on the alert's button *index*.
 - An unused invitation expires after 24 hours. Accepting it consumes that URL and creates a new
   device-bound membership without a 24-hour timer. The member keeps access until **Stop
   Sharing**, Remote Access is disabled, or the Mac app exits. Create another invitation for

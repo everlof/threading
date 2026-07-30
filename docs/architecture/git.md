@@ -197,6 +197,11 @@ than making one, and only `index`, `HEAD`, `refs/` and their kin mean the diff c
 is also the second reason `--no-optional-locks` matters: without it a read would refresh the
 index, the watcher would see it, and the pane would re-read itself forever.
 
+Teardown follows FSEvents' required order: stop, invalidate, release. `Stop` synchronously
+prevents another callback and `Invalidate` removes the dispatch-queue schedule. Clearing the
+queue explicitly before invalidating is not an extra safety step — the framework documents
+that state as an error, and it has crashed inside FSEvents while releasing a long-lived stream.
+
 The selected session's **floating status card** is fed by `GitChangeMonitor`, a smaller
 read-side coordinator over that same watcher. It serializes summary reads and remembers one
 trailing refresh when a new write lands mid-read, so a burst always ends on a reading taken
@@ -242,7 +247,41 @@ Vertical padding comes from the bands themselves: the summary line and the child
 each a 26-point band with their text centred, so only a bare counters line at the bottom needs
 the card to end below it. On a **detached head** there is no first line to draw, so the band
 moves to the counters row, which leads with its own mark — the reason each row owning a mark is
-worth the column it costs.
+worth the column it costs. The **agent line** below the counters can lead too (a detached head
+with a clean tree), so the band moves again; every row that can lead needs it available.
+
+**The agent line says what the session's own CLI does not.** It carries the model, and where they
+are knowable the effort and Fast state, under the checkout rows and above the children — the rows
+reading outward from what the pane *is*: which branch, what changed in it, which agent is working
+it, who it delegated to. It reuses the `cpu` mark the composer and the conversation's status row
+already give the model chip, so one fact keeps one mark wherever it appears.
+
+Which facts belong to the card is decided *before* it. A **native conversation** gets none: its
+status row already carries model, effort and speed as chips directly above the composer, so the
+card would say them twice in one view — the same rule the run spinner follows. A **terminal
+session** gets whatever its status line leaves out, which `ClaudeStatusLineCoverage` answers by
+running the account's own command (see
+[`session-activity.md`](session-activity.md)); on the machine this was written against three of
+four Claude logins print usage and nothing else, so the model appears nowhere until the card shows
+it. `GitStatusOverlayView.ModelReading` is handed the decision rather than asked to make one — a
+nil field means "do not say this", not "unknown" — which keeps a Claude-specific rule out of a
+Git-shaped view and lets each part drop independently: a line of just "Fast" is correct for an
+account whose status line names the model and effort but not the speed.
+
+Two facts are withheld rather than guessed. **Fast mode is a reading only where Threading sets
+it** — `appendCodexConversationOverrides` is Codex-only, and Claude's fast-mode state belongs to
+its print transport (`AgentModels.defaultFastMode` returns nil for Claude and says why) — so a
+Claude *terminal* session reports no speed at all. **Effort for a Claude terminal session is the
+account's configured value**, what the CLI will inherit, which goes stale the moment the user
+types `/effort`; when their status line prints effort the card hides its own, which is also the
+case where the staleness would have shown. The transcript records what each turn actually ran at
+and is the authoritative source where a conversation is being replayed — see
+[`native-conversations.md`](native-conversations.md).
+
+One consequence worth stating: a session in a **non-git folder** now shows a card where it
+previously showed none, because the model is a fact the pane has even when the checkout is not
+one. The card was already a session status card rather than a Git one — children alone have kept
+it on screen since the subagent receipt joined it.
 
 **Drawn counts are abbreviated**, `+4.2K`, in the reader's own notation — the same
 `.compactName` the Git Review changed-files pill uses for the same diff, so the two surfaces

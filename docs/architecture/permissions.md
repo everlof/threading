@@ -9,7 +9,9 @@ The app is **unsandboxed** with the **Hardened Runtime on**. The sandbox is not 
 can be revisited: a PTY cannot be opened, and a login shell cannot be launched, from inside it.
 
 `Sources/Threading/Resources/Threading.entitlements` is the shipped set. `Threading-Debug.entitlements`
-is the Debug configuration's, and differs by exactly one key.
+is the Debug configuration's. The Debug build is ad-hoc signed when no development team is set,
+so it must not carry restricted `com.apple.developer.*` entitlements: static `codesign --verify`
+accepts that combination, but taskgated kills it before `main`.
 
 | Entitlement | Why | Configurations |
 |---|---|---|
@@ -37,6 +39,23 @@ timestamp, and no `get-task-allow`, and the script fails rather than hand a bund
 [`releasing.md`](releasing.md) for why distribution signing cannot live in the build settings.
 
 Do not "fix" a local Release build by putting the key back in the entitlements file.
+
+## A restricted entitlement is not a setting, and one was tried
+
+The entitlements above are *unrestricted*: any signature may carry them. Most
+`com.apple.developer.*` keys are **restricted** — they must be backed by a provisioning
+profile, or AMFI refuses to spawn the process. This is not a launch-time warning but a kill:
+`amfid` logs "The file is adhoc signed but contains restricted entitlements" and the app
+never runs.
+
+Measured with `com.apple.developer.usernotifications.communication` (July 2026, macOS 26),
+wanted so attention banners could wear the project's icon in place of the app icon. Three
+walls, each verified: a dev build carrying the key dies at spawn as above; without the key, a
+properly signed probe's `INSendMessageIntent` rewrite posts without error and the system
+draws the generic icon anyway; and Apple issues the capability to iOS-family targets only, so
+neither our Developer ID export nor a macOS development profile can ever hold it. The
+supported remainder — the icon as a banner *attachment* — is what shipped; see
+[`session-activity.md`](session-activity.md).
 
 ## TCC attributes a child process to the responsible parent
 

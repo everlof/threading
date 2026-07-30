@@ -73,6 +73,12 @@ enum ProjectIconStore {
         return image
     }
 
+    /// The stored PNG bytes as written, for handing the icon to a system service that draws
+    /// it itself — the notification avatar — rather than drawing it ourselves.
+    static func pngData(for icon: ProjectIcon) -> Data? {
+        try? Data(contentsOf: directory.appendingPathComponent(icon.fileName))
+    }
+
     static func remove(fileName: String) {
         invalidateDerived(fileName: fileName)
         cache.removeObject(forKey: fileName as NSString)

@@ -46,6 +46,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "deleteTerminalTheme",
             "removeReclaimableDirectories",
             "approveAgentStorageCleanup",
+            "resetAppData",
             "clearBrowserWebsiteData",
             "runDestructiveExtensionCommand",
             "grantBrowserOriginAccess",

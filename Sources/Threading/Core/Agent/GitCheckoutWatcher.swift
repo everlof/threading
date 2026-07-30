@@ -146,9 +146,9 @@ final class GitCheckoutWatcher {
 
         guard let stream else { return }
         FSEventStreamStop(stream)
-        // Unscheduling is what actually guarantees no further callbacks; invalidating alone
-        // leaves the window where one is already on the queue.
-        FSEventStreamSetDispatchQueue(stream, nil)
+        // Stop synchronously guarantees that the callback will not run again; invalidate then
+        // unschedules the stream from its dispatch queue. Do not clear the queue first:
+        // FSEvents documents invalidating an already-unscheduled stream as an error.
         FSEventStreamInvalidate(stream)
         FSEventStreamRelease(stream)
         self.stream = nil

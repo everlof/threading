@@ -483,6 +483,7 @@ final class BrowserViewController: NSViewController {
     private var findBarHeightConstraint: NSLayoutConstraint?
     private var findBarSeparatorHeightConstraint: NSLayoutConstraint?
     private var isFindBarVisible = false
+    private let appEvents = AppEventObservations()
     private var testConditionsMenuSession: AnyObject?
     private var overflowMenuSession: AnyObject?
     private var downloadsMenuSession: AnyObject?
@@ -800,6 +801,36 @@ final class BrowserViewController: NSViewController {
 
         updateTestConditionChrome()
         updateNavButtons()
+        observeRuleWeights()
+    }
+
+    /// The weight of the two rules that can collapse, in one place.
+    ///
+    /// Both bars hide by dropping their rule's height to zero, so the shown height has to be a
+    /// *constant* — an intrinsic size cannot also mean "nothing". A constant is the one rule weight
+    /// in the app that a theme change does not reach on its own: `SeparatorView` is remeasured (see
+    /// `ThemeRedraw`), and a constraint constant is simply whatever it was last set to. Switching
+    /// theme with the find bar open therefore left one rule ruling for the theme that had left.
+    private func applyRuleWeights() {
+        deviceToolbarSeparatorHeightConstraint?.constant =
+            isDeviceToolbarVisible ? Design.Radius.border : 0
+        findBarSeparatorHeightConstraint?.constant = isFindBarVisible ? Design.Radius.border : 0
+    }
+
+    private func observeRuleWeights() {
+        for observe in [
+            { self.appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.reweigh() } },
+            {
+                self.appEvents.observe(AccessibilityDisplayOptionsDidChange.self) {
+                    [weak self] _ in self?.reweigh()
+                }
+            }
+        ] { observe() }
+    }
+
+    private func reweigh() {
+        applyRuleWeights()
+        view.needsLayout = true
     }
 
     private func observeWebView() {
@@ -2251,7 +2282,7 @@ final class BrowserViewController: NSViewController {
         deviceToolbar.isHidden = false
         deviceToolbarSeparator.isHidden = false
         deviceToolbarHeightConstraint?.constant = deviceToolbar.intrinsicContentSize.height
-        deviceToolbarSeparatorHeightConstraint?.constant = Design.Radius.border
+        applyRuleWeights()
         syncDeviceToolbar()
         view.needsLayout = true
     }
@@ -2261,7 +2292,7 @@ final class BrowserViewController: NSViewController {
         deviceToolbar.isHidden = true
         deviceToolbarSeparator.isHidden = true
         deviceToolbarHeightConstraint?.constant = 0
-        deviceToolbarSeparatorHeightConstraint?.constant = 0
+        applyRuleWeights()
         if resetViewport {
             resetResponsiveViewportToPanel()
         }
@@ -2278,7 +2309,7 @@ final class BrowserViewController: NSViewController {
         findBar.isHidden = false
         findBarSeparator.isHidden = false
         findBarHeightConstraint?.constant = findBar.intrinsicContentSize.height
-        findBarSeparatorHeightConstraint?.constant = Design.Radius.border
+        applyRuleWeights()
         view.needsLayout = true
         view.layoutSubtreeIfNeeded()
         findBar.focus()
@@ -2293,7 +2324,7 @@ final class BrowserViewController: NSViewController {
         findBar.isHidden = true
         findBarSeparator.isHidden = true
         findBarHeightConstraint?.constant = 0
-        findBarSeparatorHeightConstraint?.constant = 0
+        applyRuleWeights()
         findBar.setMatchFound(nil)
         clearFindInPage()
         view.window?.makeFirstResponder(webView)

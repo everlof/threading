@@ -19,8 +19,7 @@ Threading.xcodeproj/xcshareddata/xcschemes/Threading.xcscheme
 Sources/Threading/App/AppDelegate.swift
 Sources/Threading/App/SingleInstanceLock.swift
 Sources/Threading/App/main.swift
-Sources/Threading/AppIcon.icon/Assets/Bold Black Arrow on Checkered Background.png
-Sources/Threading/AppIcon.icon/Assets/ChatGPT Image Dec 6, 2025, 04_13_44 PM.png
+Sources/Threading/AppIcon.icon/Assets/Threading Mark.png
 Sources/Threading/AppIcon.icon/icon.json
 Sources/Threading/Core/AI/AIProvider.swift
 Sources/Threading/Core/AI/AIService.swift

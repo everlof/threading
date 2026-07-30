@@ -93,6 +93,18 @@ final class GeneralSettingsRenderTests: XCTestCase {
             labels.contains { $0.contains("always asks") },
             "the card has to say why the destructive prompts are not on this list"
         )
+
+        // The notice register's half of the same invariant: its keys are dynamic, so instead
+        // of a row per key the card carries the one control that un-hides everything — and a
+        // "Don't show this message again" box with no way back is the same one-way door.
+        XCTAssertTrue(
+            labels.contains(L10n.string("Hidden extension messages")),
+            "notices can be hidden with no control to bring them back"
+        )
+        XCTAssertTrue(
+            labels.contains { $0.contains("failures always show") },
+            "the row has to say that errors cannot be hidden"
+        )
     }
 
     private static func labels(in view: NSView) -> Set<String> {

@@ -228,7 +228,8 @@ final class SessionRowActionsTests: XCTestCase {
     // MARK: - Shared Session Menu
 
     /// The pane-header menu calls this exact builder too, so this is the contract both
-    /// entrances expose rather than a row-only inventory.
+    /// entrances expose rather than a row-only inventory. The occasional items live in the
+    /// Session Options fold now, so that is where they are held to being.
     func testSharedSessionMenuIncludesAttachmentsAndBothInterfaces() throws {
         let sidebar = ProjectSidebarViewController()
         let menu = NSMenu()
@@ -236,20 +237,21 @@ final class SessionRowActionsTests: XCTestCase {
             menu,
             for: AgentSession(kind: .claude, title: "Terminal", usesNativeUI: false)
         )
+        let options = try sessionOptions(in: menu)
 
         XCTAssertNotNil(
-            menu.items.first { $0.title == SessionActionMenuDefaults.attachmentsTitle }
+            options.items.first { $0.title == SessionActionMenuDefaults.attachmentsTitle }
         )
 
         // Nothing has muted this session or its project, so the item offers the change rather
         // than describing the state — an Unmute on something already audible would read as
         // the opposite of what is true.
         XCTAssertNotNil(
-            menu.items.first { $0.title == L10n.string("Mute Notifications") },
+            options.items.first { $0.title == L10n.string("Mute Notifications") },
             "the session menu lost its mute item"
         )
 
-        let interface = try XCTUnwrap(menu.items.first { $0.title == "Interface" }?.submenu)
+        let interface = try XCTUnwrap(options.items.first { $0.title == "Interface" }?.submenu)
         XCTAssertEqual(
             interface.items.map(\.title),
             [SessionSurfaceTogglePresentation.nativeTitle, AgentKind.claude.originalUITitle]
@@ -262,9 +264,60 @@ final class SessionRowActionsTests: XCTestCase {
             for: AgentSession(kind: .claude, title: "Native", usesNativeUI: true)
         )
         let nativeInterface = try XCTUnwrap(
-            nativeMenu.items.first { $0.title == "Interface" }?.submenu
+            try sessionOptions(in: nativeMenu).items.first { $0.title == "Interface" }?.submenu
         )
         XCTAssertEqual(nativeInterface.items.map(\.state), [.on, .off])
+    }
+
+    /// The menu reads in groups — it had grown to seventeen top-level items with a twelve-item
+    /// unbroken middle — and the fold takes what is set once and left alone. Theme and
+    /// Permission Mode stay top-level because they are reached for repeatedly; the fold's own
+    /// order is stated because it is a decision, not an accident of call order.
+    func testTheSessionMenuFoldsTheSetOnceItemsAndKeepsItsGroupsApart() throws {
+        let sidebar = ProjectSidebarViewController()
+        let menu = NSMenu()
+        sidebar.populateSessionActions(
+            menu,
+            for: AgentSession(kind: .claude, title: "Terminal", usesNativeUI: false)
+        )
+
+        let options = try sessionOptions(in: menu)
+        XCTAssertEqual(
+            options.items.map(\.title),
+            [
+                "Interface",
+                "Claude Remote Control",
+                L10n.string("Mute Notifications"),
+                SessionActionMenuDefaults.attachmentsTitle
+            ]
+        )
+
+        // Every actionable item in the fold carries its own target: the builder's retarget
+        // loop walks only the top level, and an untargeted submenu item draws, disables or —
+        // worse — silently does nothing.
+        for item in options.items where item.action != nil {
+            XCTAssertNotNil(item.target, "\(item.title) has no target inside the fold")
+        }
+
+        XCTAssertNotNil(menu.items.first { $0.title == L10n.string("Theme") })
+        XCTAssertNotNil(menu.items.first { $0.title == L10n.string("Permission Mode") })
+
+        // Most of the middle groups are conditional, so an absent group must fold its
+        // separator away rather than leaving two in a row.
+        for (index, item) in menu.items.enumerated() where item.isSeparatorItem {
+            XCTAssertTrue(
+                index > 0 && !menu.items[index - 1].isSeparatorItem,
+                "an empty group left its separator behind at index \(index)"
+            )
+        }
+    }
+
+    private func sessionOptions(in menu: NSMenu) throws -> NSMenu {
+        try XCTUnwrap(
+            menu.items.first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
+                .submenu,
+            "the session menu has no Session Options fold"
+        )
     }
 
     /// The dedicated header button is a transition, not a mode badge: it always names and

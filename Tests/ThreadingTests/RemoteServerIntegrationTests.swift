@@ -109,6 +109,44 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("try {\n    deviceID = localStorage.getItem(deviceKey)"))
     }
 
+    /// The browser client shipped without either half of this, so it rendered the Mac's grid at
+    /// a fixed 13px into whatever box it had: on a narrower window the session simply ran off
+    /// the frame and behind a scrollbar. `term.resize(msg.cols, msg.rows)` was the *only* sizing
+    /// call in the file, and it takes the host's numbers.
+    func testTheClientScriptFitsTheHostsGridToItsOwnFrame() throws {
+        let script = String(decoding: try XCTUnwrap(get("/app.js")).body, as: UTF8.self)
+
+        XCTAssertTrue(
+            script.contains("type: \"viewport\""),
+            "an interactive client asks the Mac to reflow to the grid it can actually show — "
+                + "the lease the phone already takes, named `viewport` in RemoteAccessServer"
+        )
+        XCTAssertTrue(
+            script.contains("type: \"viewportRelease\""),
+            "and gives it back, so the Mac's own grid returns when nobody is holding it"
+        )
+        XCTAssertTrue(
+            script.contains("term.options.fontSize = size"),
+            "a view-only client cannot hold a lease — the server refuses one — so it shrinks "
+                + "its own type until the host's grid fits instead"
+        )
+        XCTAssertTrue(
+            script.contains("window.addEventListener(\"resize\", scheduleFit)"),
+            "resizing the browser has to re-fit; only resizing the Mac did before"
+        )
+    }
+
+    /// The client clamps to the same range the server validates against, so a request from a
+    /// very small or very large window is answered rather than refused as `invalidViewport`.
+    func testTheClientAsksInsideTheRangeTheServerAccepts() throws {
+        let script = String(decoding: try XCTUnwrap(get("/app.js")).body, as: UTF8.self)
+
+        XCTAssertTrue(script.contains("minCols: 20"))
+        XCTAssertTrue(script.contains("maxCols: 240"))
+        XCTAssertTrue(script.contains("minRows: 4"))
+        XCTAssertTrue(script.contains("maxRows: 160"))
+    }
+
     func testUnknownPathIs404() throws {
         XCTAssertEqual(try XCTUnwrap(get("/does-not-exist")).status, 404)
     }

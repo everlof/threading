@@ -108,6 +108,10 @@ final class DisplayTabBar: NSView {
         translatesAutoresizingMaskIntoConstraints = false
 
         strip.chipMaxWidth = DisplayPaneDefaults.tabChipMaxWidth
+        // This bar is pinned to both edges of the pane's header — the panel's `+` sits at the
+        // pane's trailing edge rather than following the tabs — so the strip fills the row. Left
+        // hugging its tabs, it was the panel's *maximum* width: see `fillsHostWidth`.
+        strip.fillsHostWidth = true
         strip.chipDecorator = { [weak self] tab, _ in
             guard let self, let target = self.currentTarget else { return tab }
             return DisplayTabHeaderCustomizationView(

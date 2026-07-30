@@ -5647,3 +5647,61 @@ private final class BrowserStallingSchemeHandler: NSObject, WKURLSchemeHandler {
         lock.unlock()
     }
 }
+
+// MARK: - The Browser's Own Rules
+
+/// The two rules in the browser pane that can collapse — above the device toolbar and above the
+/// find bar — are the only rule weights in the app driven by a constraint *constant* rather than by
+/// `SeparatorView`'s intrinsic size, because a hidden bar's rule has to be able to mean nothing.
+///
+/// Held in its own class rather than in `BrowserAgentBridgeIntegrationTests`, which is skipped in
+/// `fast` as a whole: nothing here orders a window, loads a page, or renders, so nothing here needs
+/// to be.
+@MainActor
+final class BrowserRuleWeightTests: XCTestCase {
+
+    override func tearDown() {
+        AppThemePalette.set(.system)
+        super.tearDown()
+    }
+
+    /// Every rule standing open on the browser's surface, by the height it was actually placed at.
+    /// A collapsed rule is zero and says nothing about the theme, so it is not one of them.
+    private func openRuleWeights(in view: NSView) -> Set<CGFloat> {
+        func rules(in view: NSView) -> [SeparatorView] {
+            view.subviews.flatMap { rules(in: $0) } + view.subviews.compactMap { $0 as? SeparatorView }
+        }
+        view.layoutSubtreeIfNeeded()
+        return Set(rules(in: view).filter { !$0.isHidden && $0.frame.height > 0 }.map(\.frame.height))
+    }
+
+    private func switchTheme(to theme: AppTheme) {
+        AppThemePalette.set(theme)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
+    }
+
+    /// A constraint constant is whatever it was last set to, so the rule above an open find bar kept
+    /// ruling for the theme that had left — beside a pane header that had been remeasured and a
+    /// split seam that reads the token per draw. One surface, three weights, one decision.
+    func testAnOpenBarsRuleTakesTheWeightOfTheThemeThatArrives() {
+        switchTheme(to: AppThemeStyles.neoBrutalism)
+
+        let browser = BrowserViewController(contextKind: .private)
+        browser.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        browser.showFind()
+
+        XCTAssertEqual(
+            openRuleWeights(in: browser.view),
+            [3],
+            "the browser did not open ruling at Neo Brutalism's weight throughout"
+        )
+
+        switchTheme(to: AppThemeStyles.editorial)
+
+        XCTAssertEqual(
+            openRuleWeights(in: browser.view),
+            [1],
+            "a rule kept the weight of the theme that just left"
+        )
+    }
+}

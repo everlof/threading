@@ -38,6 +38,9 @@ enum SettingsPages {
     static let usageID = ExtensionHostSettingsPage.usage.rawValue
     static let storageID = ExtensionHostSettingsPage.storage.rawValue
     static let archivedID = ExtensionHostSettingsPage.archived.rawValue
+    /// No `hostPage`: an extension contributing rows to the page that resets the app — and that
+    /// names where its own state lives — is a door nothing needs to be opened.
+    static let advancedID = "advanced"
 
     // Compatibility names for existing doors while they migrate to IDs.
     static var storageTitle: String { L10n.string("Storage") }
@@ -164,7 +167,19 @@ enum SettingsPages {
             title: L10n.string("Archived"),
             symbol: "archivebox",
             searchTerms: terms("conversations", "sessions", "restore", "delete")
-        ) { ArchivedPreferencesViewController() }
+        ) { ArchivedPreferencesViewController() },
+        // Last, and deliberately: it is the page nobody needs until something is wrong, and its
+        // two buttons are the widest-reaching in Settings.
+        Page(
+            id: advancedID,
+            hostPage: nil,
+            title: L10n.string("Advanced"),
+            symbol: "wrench.and.screwdriver",
+            searchTerms: terms(
+                "reset", "start over", "fresh", "erase", "corrupt", "preferences file",
+                "application support", "where", "location", "reveal", "backup", "restart"
+            )
+        ) { AdvancedPreferencesViewController() }
     ]
 
     static var all: [Page] {

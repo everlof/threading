@@ -12,9 +12,9 @@ import AppKit
 /// piece of code.
 ///
 /// **The silhouette never changes.** Only the ground, the ink and the shadow treatment follow
-/// the theme; the chevron's geometry is fixed. An app icon's first job is to be found in ⌘-Tab
+/// the theme; the Threading mark's geometry is fixed. An app icon's first job is to be found in ⌘-Tab
 /// by its shape, and a mark that redrew itself per theme would trade the whole point of an icon
-/// for a colour match. The chevron is the shipped `AppIcon.icon` document's own mark, restated
+/// for a colour match. This is the shipped `AppIcon.icon` document's own mark, restated
 /// as geometry.
 ///
 /// **The System theme gets no generated icon** — `image(for:appearance:)` answers nil, and
@@ -89,7 +89,7 @@ enum GeneratedAppIcon {
         let shadow: Shadow?
         let corner: Corner
 
-        /// A contributed theme's own mark, drawn in place of the chevron.
+        /// A contributed theme's own mark, drawn in place of the default Threading mark.
         ///
         /// The **plate is never the extension's** — it is the theme's `ground`, drawn here — so
         /// a package supplies a glyph rather than an icon. That is what keeps every contributed
@@ -99,8 +99,7 @@ enum GeneratedAppIcon {
         /// arrives here it has transparency to composite against.
         var mark: NSImage?
 
-        /// How the theme finishes a stroke — the chevron's cap and join, and the apex that keeps
-        /// the ink optically centred under each.
+        /// How the theme finishes the Threading mark's strokes.
         enum Corner {
             case round
             case mitred
@@ -138,7 +137,7 @@ enum GeneratedAppIcon {
                 let ground = theme.resolved(.ground, appearance: appearance)
                     .usingColorSpace(.sRGB) ?? .black
                 // A theme whose accent sits too close to its own ground would draw an invisible
-                // chevron. `legible(on:)` moves it along its own lightness axis and leaves a
+                // mark. `legible(on:)` moves it along its own lightness axis and leaves a
                 // palette that already passes completely alone, so this is a floor rather than a
                 // correction — no theme in the stock library is touched by it.
                 let ink = (theme.resolved(.accent, appearance: appearance)
@@ -173,7 +172,7 @@ enum GeneratedAppIcon {
             ground = resolvedGround
             ink = resolvedInk
             shadow = resolvedShadow
-            // The chevron is a small element, so it follows the radius the theme gives its small
+            // The mark is a small element, so it follows the radius the theme gives its small
             // elements. Without this Bauhaus and Newsprint are two beige plates carrying the same
             // rounded mark; with it one is printed with hard corners and the other is not.
             corner = material.controlRadius >= Layout.roundedControlThreshold
@@ -191,7 +190,7 @@ enum GeneratedAppIcon {
             // `ObjectIdentifier` rather than the bytes: the registry hands back one memoized
             // image per theme and replaces it when the package changes, so identity is exactly
             // the right grain — and hashing a megabyte of PNG on every redraw is not.
-            let markKey = mark.map { "\(ObjectIdentifier($0))" } ?? "chevron"
+            let markKey = mark.map { "\(ObjectIdentifier($0))" } ?? "threading"
             return "\(ground.hexString)-\(ink.hexString)-\(corner)-\(shadowKey)-\(markKey)"
         }
     }
@@ -219,7 +218,7 @@ enum GeneratedAppIcon {
             if let mark = recipe.mark {
                 drawMark(mark, recipe, in: body)
             } else {
-                drawChevron(recipe, in: body)
+                drawThreadingMark(recipe, in: body)
             }
             NSGraphicsContext.restoreGraphicsState()
 
@@ -245,7 +244,7 @@ enum GeneratedAppIcon {
     /// **Aspect is preserved and the mark is never upscaled past the safe area.** An author
     /// exports whatever shape their glyph is; forcing it into a square would letterbox some
     /// marks and stretch others, and neither is a failure the author can see from their own
-    /// asset. The theme's glow applies here for the same reason it applies to the chevron — a
+    /// asset. The theme's glow applies here for the same reason it applies to the default mark — a
     /// printed style's mark should sit on the page the way its panels do.
     private static func drawMark(_ mark: NSImage, _ recipe: Recipe, in body: NSRect) {
         let size = mark.size
@@ -282,20 +281,137 @@ enum GeneratedAppIcon {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private static func drawChevron(_ recipe: Recipe, in body: NSRect) {
-        let apexX = recipe.corner == .round ? Layout.apexXRound : Layout.apexXMitred
-
+    private static func drawThreadingMark(_ recipe: Recipe, in body: NSRect) {
         func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
-            NSPoint(x: body.minX + body.width * x, y: body.minY + body.height * y)
+            let scaledX = 0.5 + (x - 0.5) * Layout.defaultMarkScale
+            let scaledY = 0.5 + (y - 0.5) * Layout.defaultMarkScale
+            return NSPoint(
+                x: body.minX + body.width * scaledX,
+                y: body.minY + body.height * scaledY
+            )
         }
 
-        let path = NSBezierPath()
-        path.move(to: point(Layout.armX, Layout.armTopY))
-        path.line(to: point(apexX, Layout.apexY))
-        path.line(to: point(Layout.armX, Layout.armBottomY))
-        path.lineWidth = body.width * Layout.strokeRatio
-        path.lineCapStyle = recipe.corner.lineCap
-        path.lineJoinStyle = recipe.corner.lineJoin
+        func quadratic(
+            _ path: NSBezierPath,
+            from start: CGPoint,
+            control: CGPoint,
+            to end: CGPoint
+        ) {
+            let first = CGPoint(
+                x: start.x + (control.x - start.x) * 2 / 3,
+                y: start.y + (control.y - start.y) * 2 / 3
+            )
+            let second = CGPoint(
+                x: end.x + (control.x - end.x) * 2 / 3,
+                y: end.y + (control.y - end.y) * 2 / 3
+            )
+            path.curve(
+                to: point(end.x, end.y),
+                controlPoint1: point(first.x, first.y),
+                controlPoint2: point(second.x, second.y)
+            )
+        }
+
+        let outerPoints: [(end: CGPoint, control: CGPoint)] = [
+            (.init(x: 0.865390625, y: 0.7109375), .init(x: 0.667109375, y: 0.789375)),
+            (.init(x: 0.865390625, y: 0.2890625), .init(x: 0.834140625, y: 0.5)),
+            (.init(x: 0.5, y: 0.078125), .init(x: 0.667109375, y: 0.210625)),
+            (.init(x: 0.134609375, y: 0.2890625), .init(x: 0.332890625, y: 0.210625)),
+            (.init(x: 0.134609375, y: 0.7109375), .init(x: 0.165859375, y: 0.5)),
+            (.init(x: 0.5, y: 0.921875), .init(x: 0.332890625, y: 0.789375))
+        ]
+        let outer = NSBezierPath()
+        var start = CGPoint(x: 0.5, y: 0.921875)
+        outer.move(to: point(start.x, start.y))
+        for edge in outerPoints {
+            quadratic(outer, from: start, control: edge.control, to: edge.end)
+            start = edge.end
+        }
+        outer.close()
+        outer.lineWidth = body.width * Layout.outerStrokeRatio * Layout.defaultMarkScale
+        outer.lineCapStyle = recipe.corner.lineCap
+        outer.lineJoinStyle = recipe.corner.lineJoin
+
+        func rotated(_ value: CGPoint, turns: Int) -> CGPoint {
+            let angle = -CGFloat(turns) * .pi / 3
+            let dx = value.x - 0.5
+            let dy = value.y - 0.5
+            return CGPoint(
+                x: 0.5 + dx * cos(angle) - dy * sin(angle),
+                y: 0.5 + dx * sin(angle) + dy * cos(angle)
+            )
+        }
+
+        let spoke = NSBezierPath()
+        let spokeStart = CGPoint(x: 0.5, y: 0.90625)
+        let control1 = CGPoint(x: 0.515625, y: 0.7734375)
+        let control2 = CGPoint(x: 0.5234375, y: 0.6640625)
+        let spokeEnd = CGPoint(x: 0.45703125, y: 0.54296875)
+        for turns in 0..<6 {
+            let segmentStart = rotated(spokeStart, turns: turns)
+            let segmentControl1 = rotated(control1, turns: turns)
+            let segmentControl2 = rotated(control2, turns: turns)
+            let segmentEnd = rotated(spokeEnd, turns: turns)
+            spoke.move(to: point(segmentStart.x, segmentStart.y))
+            spoke.curve(
+                to: point(segmentEnd.x, segmentEnd.y),
+                controlPoint1: point(segmentControl1.x, segmentControl1.y),
+                controlPoint2: point(segmentControl2.x, segmentControl2.y)
+            )
+        }
+        spoke.lineWidth = body.width * Layout.strokeRatio * Layout.defaultMarkScale
+        spoke.lineCapStyle = recipe.corner.lineCap
+        spoke.lineJoinStyle = recipe.corner.lineJoin
+
+        let center = NSBezierPath()
+        // Slightly larger than the display SVG's junction. A square-ended theme stops each
+        // strand before its half-stroke can reach the SVG-sized hexagon; this radius covers
+        // those endpoints too, so every material keeps the center genuinely solid.
+        [
+            CGPoint(x: 0.5, y: 0.575),
+            CGPoint(x: 0.5649519, y: 0.5375),
+            CGPoint(x: 0.5649519, y: 0.4625),
+            CGPoint(x: 0.5, y: 0.425),
+            CGPoint(x: 0.4350481, y: 0.4625),
+            CGPoint(x: 0.4350481, y: 0.5375)
+        ].enumerated().forEach { index, vertex in
+            if index == 0 {
+                center.move(to: point(vertex.x, vertex.y))
+            } else {
+                center.line(to: point(vertex.x, vertex.y))
+            }
+        }
+        center.close()
+
+        // Compose the complete silhouette before its themed shadow is applied. Casting from the
+        // six strands independently leaves six small shadow wedges at their overlaps, which
+        // visually re-opens the center even though its geometry is filled.
+        let side = Int(canvasSide)
+        guard let raster = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: side,
+            pixelsHigh: side,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .calibratedRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return }
+        raster.size = NSSize(width: canvasSide, height: canvasSide)
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: raster)
+        recipe.ink.setStroke()
+        outer.stroke()
+        spoke.stroke()
+        recipe.ink.setFill()
+        center.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        let mark = NSImage(size: raster.size)
+        mark.addRepresentation(raster)
 
         NSGraphicsContext.saveGraphicsState()
         if let shadow = recipe.shadow {
@@ -305,8 +421,12 @@ enum GeneratedAppIcon {
             cast.shadowOffset = shadow.offset
             cast.set()
         }
-        recipe.ink.setStroke()
-        path.stroke()
+        mark.draw(
+            in: NSRect(origin: .zero, size: raster.size),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1
+        )
         NSGraphicsContext.restoreGraphicsState()
     }
 }
@@ -315,7 +435,7 @@ enum GeneratedAppIcon {
 
 extension GeneratedAppIcon {
 
-    /// Apple's macOS icon grid, and the chevron stated as fractions of the plate it sits on.
+    /// Apple's macOS icon grid, and the Threading mark stated as fractions of the plate it sits on.
     ///
     /// Fractions rather than points so the same numbers draw the 1024 canvas and any preview
     /// size a settings page asks for.
@@ -326,45 +446,37 @@ extension GeneratedAppIcon {
         /// 185.4 of the 824pt body — the template's continuous corner.
         static let cornerRatio: CGFloat = 185.4 / 824.0
 
-        /// The chevron's stroke, as a fraction of the plate. Matched to the shipped
-        /// `AppIcon.icon` document's mark.
-        static let strokeRatio: CGFloat = 0.14
-        /// Where both arms end, on the left.
-        static let armX: CGFloat = 0.385
-        static let armTopY: CGFloat = 0.755
-        static let armBottomY: CGFloat = 0.245
-        static let apexY: CGFloat = 0.5
+        /// The display SVG uses 7pt for its outer hexagon and 7.5pt for the six strands on a
+        /// 128pt canvas. Keeping those separate preserves the slightly stronger inner motion.
+        static let outerStrokeRatio: CGFloat = 7.0 / 128.0
+        static let strokeRatio: CGFloat = 7.5 / 128.0
+        /// The runtime mark gets more air than the standalone SVG because it sits inside a
+        /// rounded app-icon plate and carries the theme's glow or printed lift around it.
+        static let defaultMarkScale: CGFloat = 0.76
 
-        /// The apex differs by join because a mitre extends past the vertex and a round join does
-        /// not: at this chevron's 102° the mitre reaches `halfStroke / sin(51°)` — about 1.28
-        /// half-strokes — so a shared apex would put the two variants' ink on different centres.
-        /// Both values land the drawn ink on the plate's centre line.
-        static let apexXRound: CGFloat = 0.615
-        static let apexXMitred: CGFloat = 0.595
-
-        /// A theme that rounds its controls rounds the chevron.
+        /// A theme that rounds its controls rounds the mark.
         static let roundedControlThreshold: CGFloat = 6
 
         /// The margin a contributed mark keeps inside the plate, per edge.
         ///
-        /// Matched to the chevron's own: its ink spans 0.315…0.685 of the plate, so it already
-        /// leaves just under a third clear on each side. A mark drawn to the plate's edge would
+        /// A contributed mark keeps the same safe-area discipline as the default mark. A mark
+        /// drawn to the plate's edge would
         /// read as a different *kind* of icon beside every stock style, which is the one thing
         /// the mark-only rule exists to prevent.
         static let markInsetRatio: CGFloat = 0.16
 
         /// Glow radii and offsets are authored in chrome points, beside controls whose ink is
-        /// about this heavy. The chevron's stroke is the icon's equivalent ink, so the two are
+        /// about this heavy. The mark's stroke is the icon's equivalent ink, so the two are
         /// matched on **weight of mark** rather than on canvas size.
         ///
         /// Measured by looking at it. Scaling by the canvas instead — an 824pt plate against a
-        /// ~96pt chrome element, so 8.6× — put Bauhaus's 4pt printed offset at 34pt against a
-        /// 115pt stroke, which stops reading as a lift and starts reading as a second chevron
+        /// ~96pt chrome element, so 8.6× — put Bauhaus's 4pt printed offset at 34pt against the
+        /// mark, which stops reading as a lift and starts reading as a second silhouette
         /// in the theme's label colour. Bauhaus, Neo Brutalism, Newsprint and Industrial all
         /// state a zero-radius offset shadow, so all four failed the same way.
         static let chromeReferenceInk: CGFloat = 28
         static var shadowScale: CGFloat {
-            (canvasSide * bodyRatio * strokeRatio) / chromeReferenceInk
+            (canvasSide * bodyRatio * strokeRatio * defaultMarkScale) / chromeReferenceInk
         }
 
         /// The shadow the Dock adds for a bundle icon and does not add for a runtime one.

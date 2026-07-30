@@ -133,3 +133,10 @@ iOSInjectionProject/
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,swift,xcode
 fastlane/.env
+
+# Coverage output an xcodebuild test run drops in the working directory.
+default.profraw
+
+# The marketing site is its own git repository checked out here; the app repo must not
+# swallow it as a bare gitlink.
+/web/

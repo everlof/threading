@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import UserNotifications
 
 // MARK: - Attention Alert
@@ -119,6 +120,42 @@ enum AttentionAlertScope {
     /// The precedence itself, kept pure so it is testable without a store.
     static func resolve(session: Bool?, project: Bool?) -> Bool {
         session ?? project ?? false
+    }
+}
+
+// MARK: - Attention Alert Icon
+
+/// Puts the project's icon on the banner — as its attachment, on the trailing side.
+///
+/// The leading slot is not takeable. It always draws the posting app's icon, and the one
+/// sanctioned replacement — a communication notification's sender avatar — needs
+/// `com.apple.developer.usernotifications.communication`, which is a *restricted*
+/// entitlement: AMFI kills a dev-signed build that requests it ("adhoc signed but contains
+/// restricted entitlements"), Apple grants the capability to the iOS family only, and our
+/// Developer ID pipeline has no profile to carry it. Measured (July 2026, macOS 26): an
+/// unentitled `updating(from:)` posts without error and the system draws the generic icon
+/// anyway. The attachment is the supported remainder, and needs none of that.
+enum AttentionAlertIcon {
+
+    /// An attachment holding a *copy* of the icon, never the stored file itself: scheduling
+    /// an attachment **moves** the file into the system's attachment store, and the original
+    /// belongs to `ProjectIconStore`. Nil — meaning the banner posts bare — when the copy
+    /// cannot be written or the attachment is refused; the icon is decoration, not payload.
+    static func attachment(iconPNGData: Data) -> UNNotificationAttachment? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(ProjectIconDefaults.storedExtension)
+        do {
+            try iconPNGData.write(to: url)
+            return try UNNotificationAttachment(
+                identifier: "",
+                url: url,
+                options: [UNNotificationAttachmentOptionsTypeHintKey: UTType.png.identifier]
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
     }
 }
 
@@ -257,6 +294,11 @@ final class AttentionAlertCenter: NSObject {
             : nil
         content.userInfo = [AttentionAlertDefaults.sessionKey: sessionID.uuidString]
         if let project { content.threadIdentifier = project.id.uuidString }
+        if let icon = project?.icon,
+           let png = ProjectIconStore.pngData(for: icon),
+           let attachment = AttentionAlertIcon.attachment(iconPNGData: png) {
+            content.attachments = [attachment]
+        }
         delivered[sessionID] = alert
 
         // The request id is the session id, so a session's newer state replaces its older

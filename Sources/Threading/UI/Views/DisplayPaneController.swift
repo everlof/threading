@@ -337,6 +337,22 @@ final class DisplayPaneController: NSViewController {
         placeholderLabel.applyFont(.detail())
         placeholderLabel.textColor = Design.Text.tertiary
         placeholderLabel.alignment = .center
+        placeholderLabel.lineBreakMode = .byTruncatingTail
+
+        // **Neither label is a measurement.** Both are held inside the pane with a `>=` — the
+        // caption off the leading edge, the placeholder either side of the centre — and a label
+        // like that still charges the pane its whole text, through the compression resistance
+        // every `NSTextField` carries. A pane's width is the *window's* minimum
+        // (`DisplayPaneDefaults.slimmestWidth`), so "Nothing to show yet." and a long file name
+        // each quietly decided how small the window was allowed to be: 259pt of it, for text
+        // both line-break modes here already say may be shortened. Below
+        // `.fittingSizeCompression` they truncate instead of pushing, and the panel goes on
+        // costing the window its own chrome and nothing else.
+        let mayTruncate = NSLayoutConstraint.Priority(
+            NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1
+        )
+        captionLabel.setContentCompressionResistancePriority(mayTruncate, for: .horizontal)
+        placeholderLabel.setContentCompressionResistancePriority(mayTruncate, for: .horizontal)
 
         view.addSubview(imageView)
         view.addSubview(webView)

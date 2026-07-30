@@ -109,6 +109,13 @@ final class TerminalContainerViewController: NSViewController {
         appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
             self?.settingsCatalogueDidChange()
         }
+        // The card's agent line reads the *stored* session, and this event fires for content edits
+        // as well as structural ones. Without it a model chosen for the session on screen sat
+        // stale on the card until the selection moved away and came back. Cheap to repeat: the
+        // status-line coverage behind it answers from cache once the account's command is known.
+        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
+            self?.refreshGitStatusOverlayModel()
+        }
     }
 
     /// Repaints the pane behind whatever surface is on screen after a theme change.
@@ -837,6 +844,7 @@ private extension TerminalContainerViewController {
         gitStatusOverlay.clear()
         gitStatusOverlay.showSession(currentSessionID?.uuidString.lowercased())
         refreshGitStatusOverlaySubagents()
+        refreshGitStatusOverlayModel()
 
         guard let sessionID = currentSessionID,
               let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
@@ -899,6 +907,94 @@ private extension TerminalContainerViewController {
             workingCount: timeline?.workingCount ?? 0,
             doneCount: timeline?.doneCount ?? 0
         )
+    }
+
+    /// Feeds the card the agent facts *this pane* is responsible for showing.
+    ///
+    /// **A native conversation shows its own.** Its status row already carries model, effort and
+    /// speed as chips directly above the composer, so the card would be saying them a second time
+    /// in the same view — the rule the run spinner already follows.
+    ///
+    /// **A terminal session shows what its CLI does not.** Claude draws a status line in its TUI,
+    /// and for three of four logins on the machine this was written against that line is usage and
+    /// nothing else — no model. `ClaudeStatusLineCoverage` runs the account's own command and
+    /// reports which facts it prints; whatever is left is what the card owes the user. The card is
+    /// only told the answer, so a Claude-specific rule stays out of a Git-shaped view.
+    ///
+    /// Two facts are deliberately withheld rather than guessed. Fast mode is a reading only where
+    /// Threading sets it: `appendCodexConversationOverrides` is Codex-only, and Claude's own
+    /// fast-mode state belongs to its print transport (`AgentModels.defaultFastMode` returns nil
+    /// for Claude and says why), so a Claude *terminal* session has no honest speed to report.
+    /// Effort for a Claude terminal session is the account's configured value — what the CLI will
+    /// inherit, which is the best answer available and goes stale the moment the user types
+    /// `/effort`. When their status line prints effort we hide ours, which is also the case where
+    /// staleness would have shown.
+    func refreshGitStatusOverlayModel() {
+        guard let sessionID = currentSessionID,
+              let session = ProjectStore.shared.session(withID: sessionID),
+              let project = ProjectStore.shared.project(forSessionID: sessionID),
+              currentConversation == nil
+        else {
+            gitStatusOverlay.updateModel(nil)
+            return
+        }
+
+        let account = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
+        )
+        let model = session.model ?? AgentModels.defaultModel(
+            for: session.kind,
+            account: account
+        )
+        let effort = AgentModels.effectiveEffort(for: session, model: model, account: account)
+        let isFast = session.kind == .codex
+            && (
+                session.fastMode
+                    ?? AgentModels.defaultFastMode(
+                        for: session.kind,
+                        model: model,
+                        account: account
+                    )
+                    ?? false
+            )
+
+        let reading = GitStatusOverlayView.ModelReading(
+            name: model.map { ModelName.display(for: $0) },
+            effort: effort.map {
+                AgentReasoningLevel(effort: $0, description: "").displayName
+            },
+            isFast: isFast
+        )
+
+        // Only Claude runs a status line, so a Codex terminal has nothing to complement.
+        guard session.kind == .claude else {
+            gitStatusOverlay.updateModel(reading)
+            return
+        }
+
+        var facts = ClaudeStatusLineCoverage.Facts(
+            workingDirectory: project.folderURL.path,
+            projectDirectory: project.folderURL.path
+        )
+        facts.modelIdentifier = model
+        facts.modelDisplayName = reading.name
+        facts.effort = effort
+        facts.sessionID = session.resumeState.transcriptID?.rawValue
+        facts.branch = session.branch
+
+        // Set inside the completion rather than before it: `resolve` answers immediately when the
+        // account has no status line or the command is already known, and the row appearing with
+        // every fact and then dropping the covered ones would be a visible flinch on first paint.
+        ClaudeStatusLineCoverage.resolve(account: account, facts: facts) { [weak self] coverage in
+            guard let self, self.currentSessionID == sessionID else { return }
+
+            var filtered = reading
+            if coverage.model { filtered.name = nil }
+            if coverage.effort { filtered.effort = nil }
+            if coverage.fastMode { filtered.isFast = false }
+            self.gitStatusOverlay.updateModel(filtered)
+        }
     }
 
     /// Opens the most relevant child, after which the display pane owns navigation among all

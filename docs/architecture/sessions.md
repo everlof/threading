@@ -394,6 +394,19 @@ logout". `AppDelegate` reads `NSWorkspace.willPowerOffNotification` for that rat
 quit Apple Event's reason — one documented name, where a subtly wrong descriptor keyword fails
 silently in the direction of blocking a shutdown.
 
+**The `⋯` menu reads in groups, and the set-once items fold.** It had grown to seventeen
+top-level items with a twelve-item unbroken run in the middle — every conditional item just
+appended — so `populateSessionActions` now states its groups: lifecycle (Pin, Archive, Close),
+side chats, appearance and conduct, identity and housekeeping (Rename, Copy Session ID,
+sharing, account moves, continuation), then Delete, with Extensions always last
+(`RowExtensionCommandMenuTests` pins that). Theme and Permission Mode stay top-level because
+they are reached for repeatedly; what folds behind **Session Options** is what is set once and
+left alone — Interface, Claude Remote Control, Mute Notifications, Attachments. Three details
+are load-bearing: the fold's members carry their own targets, because the builder's retarget
+loop walks only the top level; an absent group folds its separator away rather than leaving two
+in a row (`addGroupSeparator`); and the toolbar's Context button gave up its "Session Options"
+tooltip so the fold's name means one thing.
+
 All of this lives in `SessionCoordinator`: the row menu once discarded the process itself,
 skipping the confirmation the same action asked for as Cmd+W, which is why the sidebar
 delegates lifecycle decisions instead of touching `AgentRuntime` directly. The requests are

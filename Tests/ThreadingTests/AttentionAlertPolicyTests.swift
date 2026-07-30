@@ -1,3 +1,4 @@
+import UserNotifications
 import XCTest
 @testable import Threading
 
@@ -6,7 +7,9 @@ import XCTest
 ///
 /// The judgement is two questions, and both are here: whether the *edge* is worth an alert
 /// (`AttentionAlertPolicy`), and whether the user still wants that kind of alert for that
-/// session (`AppSettings` and `AttentionAlertScope`). Only delivery needs the center.
+/// session (`AppSettings` and `AttentionAlertScope`). Only delivery needs the center. The
+/// icon attachment — the banner carrying the project's face — is pure for the same reason,
+/// and checked here too.
 @MainActor
 final class AttentionAlertPolicyTests: XCTestCase {
 
@@ -181,5 +184,33 @@ final class AttentionAlertPolicyTests: XCTestCase {
     func testASessionOverridesItsProjectInBothDirections() {
         XCTAssertFalse(AttentionAlertScope.resolve(session: false, project: true))
         XCTAssertTrue(AttentionAlertScope.resolve(session: true, project: false))
+    }
+
+    // MARK: - The Project Icon on the Banner
+
+    /// The attachment must be a *copy* carrying the icon's own bytes: scheduling an
+    /// attachment moves its file into the system's store, so handing over the original
+    /// would drain `ProjectIconStore` one banner at a time.
+    func testTheIconAttachmentIsACopyCarryingTheIconBytes() throws {
+        let png = try samplePNG()
+
+        let attachment = try XCTUnwrap(AttentionAlertIcon.attachment(iconPNGData: png))
+        defer { try? FileManager.default.removeItem(at: attachment.url) }
+
+        XCTAssertTrue(attachment.url.isFileURL)
+        XCTAssertEqual(try Data(contentsOf: attachment.url), png)
+    }
+
+    private func samplePNG() throws -> Data {
+        let side = 8
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { bounds in
+            NSColor.systemRed.setFill()
+            bounds.fill()
+            return true
+        }
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        return try XCTUnwrap(
+            NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+        )
     }
 }

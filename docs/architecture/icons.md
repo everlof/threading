@@ -139,7 +139,7 @@ asks for. (`Resources/Assets.xcassets/AppIcon.appiconset` is empty and vestigial
 `AppIcon`, `actool` resolves to the `.icon`, and the appiconset should be deleted.)
 
 **The Dock icon follows the app theme** (`GeneratedAppIcon`, installed by `AppIconPresenter`).
-Ground plate from `.ground`, chevron from `.accent`, and the theme's own `material.glow` behind
+Ground plate from `.ground`, Threading mark from `.accent`, and the theme's own `material.glow` behind
 the mark — which is not a recolour, because that glow is a soft halo for Cyberpunk and a hard
 offset printed shadow for Bauhaus and Neo Brutalism. Without it a beige Bauhaus tile and a beige
 Newsprint tile are the same picture.
@@ -159,7 +159,7 @@ Four decisions carry it:
   unmasked: none of the rounding, and on macOS 26 none of the squircle, a bundle icon gets free.
   Hence Apple's own grid in `Layout` — an 824pt body on a 1024 canvas, leaving the 100pt margin
   the platform reserves for the shadow it is not adding here.
-- **The silhouette never changes.** Only ground, ink and shadow follow the theme; the chevron's
+- **The silhouette never changes.** Only ground, ink and shadow follow the theme; the Threading mark's
   geometry is fixed. An icon's first job is to be found in ⌘-Tab by its shape, and a mark that
   redrew itself per theme would trade the whole point of an icon for a colour match. The only
   geometry a theme moves is the stroke's cap and join, from `material.controlRadius` — a small
@@ -169,22 +169,22 @@ Four decisions carry it:
   from. `Recipe.cacheKey` is the resolved ground, ink, corner and shadow.
 
 Two things about that shadow were measured rather than reasoned, and both were wrong first.
-Its **scale is matched to the weight of the mark, not to the canvas** — the chevron's stroke
+Its **scale is matched to the weight of the mark, not to the canvas** — the mark's stroke
 against a chrome control's ink, about 4×. Scaling by canvas size instead (an 824pt plate against
 a ~96pt element, 8.6×) put Bauhaus's 4pt printed offset at 34pt behind a 115pt stroke, which
-stops reading as a lift and becomes a second chevron; all four zero-radius styles failed the same
+stops reading as a lift and becomes a second silhouette; all four zero-radius styles failed the same
 way. And its **vertical offset is negated**: a theme states its shadow for `CALayer.shadowOffset`,
 which `Design.applyThemeGlow` passes through in the layer's y-up space, so `offsetY: -4` casts
 *downward* — and `NSShadow` in this drawing context resolves the same number the other way. The
 first render put every printed style's lift above its mark instead of below it.
 
 The accent is floored through `NSColor.legible(on:)` rather than trusted: a theme whose accent
-sits near its own ground would draw an invisible chevron. No stock theme is touched by it —
+sits near its own ground would draw an invisible mark. No stock theme is touched by it —
 `AppIconRenderTests` checks the floor against the pixels actually drawn, not the colour asked
 for, alongside a 16pt rendition where a mark stops being a mark.
 
 **A contributed theme may ship its own mark** — `ExtensionThemeContribution.iconMark`, a
-package-relative PNG beside the theme document. It replaces the chevron; it never replaces the
+package-relative PNG beside the theme document. It replaces the default mark; it never replaces the
 plate, which stays the theme's own `ground` drawn by `GeneratedAppIcon`.
 
 That split is the whole design, and it is enforced where it cannot be argued with:
@@ -221,10 +221,11 @@ made.
 
 **The phone cannot do any of this.** iOS has no API that accepts an image: `setAlternateIconName`
 selects from icons compiled into the bundle at build time, and nothing else changes an app icon.
-So `ThreadingMobile` gets one icon, drawn by `scripts/generate_mobile_app_icon.swift` — full-bleed
-and unrounded, because iOS masks the icon itself, which is the exact opposite of what the Dock
-needs. `AppIconRenderTests.testThePhoneIconRestatesTheSameChevron` pins the script's geometry
-against `GeneratedAppIcon.Layout`, since the script is not part of the app target and restates it.
+So `ThreadingMobile` gets one icon copied by `scripts/generate_mobile_app_icon.swift` from
+`Brand/ThreadingMark-Navy-1024.png` — full-bleed and unrounded, because iOS masks the icon itself,
+which is the exact opposite of what the Dock needs.
+`AppIconRenderTests.testThePhoneIconMatchesTheCanonicalBrandExport` pins the asset catalogue to
+that canonical export byte-for-byte, so the website and phone cannot drift by hand.
 
 Per-theme alternates on the phone were considered and are **not** worth it as an auto-follow.
 `RemoteThemeDTO` already carries the theme's id and resolved mode, so the trigger exists — but

@@ -25,6 +25,10 @@ final class GeneralPreferencesViewController: NSViewController {
         uniqueKeysWithValues: ConfirmationPrompt.suppressible.map { ($0, ThemedToggle()) }
     )
 
+    /// The one control that un-hides notices — dynamic keys get a count and a way back, not a
+    /// row per key, because a hidden receipt's extension may no longer exist to name it.
+    private var showHiddenNoticesButton: ThemedButton?
+
     /// One toggle per alert kind, built from the enum rather than declared one by one, so a
     /// kind added later cannot arrive without a row to switch it off.
     private let alertToggles: [AttentionAlert: ThemedToggle] = Dictionary(
@@ -45,6 +49,13 @@ final class GeneralPreferencesViewController: NSViewController {
         view = NSView()
         setupControls()
         setupLayout()
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        // The page is cached across visits and messages are hidden from alerts elsewhere, so
+        // the count is re-read on the way in rather than showing the last visit's state.
+        updateHiddenNoticesControl()
     }
 
     // MARK: - Setup
@@ -354,7 +365,7 @@ final class GeneralPreferencesViewController: NSViewController {
     /// same thing — they were one setting over four prompts, and switching off the one you
     /// meant switched off three you did not.
     private func confirmationRows() -> [NSView] {
-        ConfirmationPrompt.suppressible.compactMap { prompt in
+        var rows: [NSView] = ConfirmationPrompt.suppressible.compactMap { prompt in
             guard let suppression = prompt.suppression,
                   let toggle = confirmationToggles[prompt] else { return nil }
             return SettingsUI.row(
@@ -364,6 +375,36 @@ final class GeneralPreferencesViewController: NSViewController {
                 localizes: false
             )
         }
+        rows.append(hiddenNoticesRow())
+        return rows
+    }
+
+    /// The notice register's way back, beside the confirmations because the two boxes read as
+    /// one family. One control for all of them rather than a row per hidden message: notice
+    /// keys are dynamic — an extension command each — so a hidden receipt whose extension was
+    /// removed would be a row with no honest title. Disabled rather than hidden while nothing
+    /// is hidden, the same rule the notification refinements follow: a control that vanishes
+    /// explains less than one that waits.
+    private func hiddenNoticesRow() -> NSView {
+        let button = SettingsUI.button(
+            "Show All",
+            target: self,
+            action: #selector(showHiddenNoticesAgain)
+        )
+        showHiddenNoticesButton = button
+        updateHiddenNoticesControl()
+
+        return SettingsUI.row(
+            title: "Hidden extension messages",
+            subtitle: "An extension command's “done” message offers "
+                + "“Don't show this message again”. Show All brings every hidden message back; "
+                + "failures always show either way.",
+            control: button
+        )
+    }
+
+    private func updateHiddenNoticesControl() {
+        showHiddenNoticesButton?.isEnabled = AppSettings.shared.hiddenNoticeCount > 0
     }
 
     /// The master switch, then one row per alert kind, then the sound.
@@ -464,6 +505,11 @@ final class GeneralPreferencesViewController: NSViewController {
     @objc private func confirmationChanged(_ sender: ThemedToggle) {
         guard let prompt = confirmationToggles.first(where: { $0.value === sender })?.key else { return }
         AppSettings.shared.setAsks(sender.state == .on, before: prompt)
+    }
+
+    @objc private func showHiddenNoticesAgain() {
+        AppSettings.shared.showAllNoticesAgain()
+        updateHiddenNoticesControl()
     }
 
     @objc private func automaticUpdateChecksChanged() {

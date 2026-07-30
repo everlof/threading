@@ -224,6 +224,19 @@ attention state, the session coming on screen (`setVisibleSession` →
 half the feature. `start()` runs only from the real app startup, which is what keeps
 `UNUserNotificationCenter` and its permission prompt out of the test host.
 
+**A banner carries the project's icon as an attachment** (`AttentionAlertIcon`), on the
+trailing side — the leading slot is the app's and cannot be taken. That was measured, not
+assumed (July 2026, macOS 26): the one sanctioned replacement is a communication
+notification's sender avatar, and it dead-ends twice — the
+`com.apple.developer.usernotifications.communication` entitlement is *restricted*, so AMFI
+refuses to spawn a dev-signed build that requests it, and a signed probe app whose
+`updating(from:)` rewrite posted without error still rendered the generic icon, because
+Apple grants that capability to the iOS family only. Details in
+[`permissions.md`](permissions.md). Two rules the attachment must keep: it attaches a *copy*,
+because scheduling an attachment **moves** the file into the system's store and the original
+is `ProjectIconStore`'s; and a failed copy drops the icon, never the banner — the icon is
+decoration, not payload.
+
 **Which of the three arrive is the user's, on four levels**, because the kinds are not equally
 welcome — being blocked is work stopping, a turn ending in the background is the chatty one —
 and one switch forces a choice between all of it and none of it. `notifiesOnAttention` stays
@@ -383,3 +396,55 @@ One bug worth keeping: every command reads stdin **before** its guard
 (`threading_payload=$(cat)`). A guard that returns without reading leaves Codex writing the event
 into a pipe nobody drains, and it is the *unrouted* runs — the user's own terminal sessions —
 that would pay for it. Found by a probe whose hook posted an empty body, and pinned by a test.
+
+## The account's own status line
+
+Claude draws a status line from its **interactive TUI** only. The runner is driven by an Ink
+component's effects and renders into a `<Text>` in that tree, so a native conversation — which
+runs `--print --output-format stream-json` and mounts no TUI — never invokes the command at all.
+(The guards inside the runner itself are `disableAllHooks` and workspace trust; the print-mode
+answer comes from the component never mounting, not from a check in the runner.) So a terminal
+pane may already be showing the user facts, while a native pane never is. `ClaudeStatusLineCoverage` answers which facts those are, so the session's status
+card (see [`git.md`](git.md)) can add the rest instead of printing them twice.
+
+**Coverage cannot be read off the configuration.** The command is the user's own program with the
+user's own authority. The status line on the machine this was written against ignored the
+`total_lines_added` and `rate_limits` handed to it and printed `+1699 -331` and `5h 0%` instead,
+because it shells out to `git -C "$cwd" diff --numstat` and reads usage from its own cache and a
+`curl`. Its output is not a function of its input, so the only honest way to learn what it prints
+is to run it and read the result. Verified by feeding it a payload whose numbers it contradicted.
+
+**The payload carries only truth.** Every field is either a real value or absent — `cost` and
+`rate_limits` are omitted rather than zeroed, because Threading cannot observe the former and must
+not invent the latter. A status line is commonly a *caching bridge*: the one here writes
+`~/Library/Application Support/Claudex/ClaudeStatus/<profile>.json`, which is the file
+`ClaudeUsageCache` reads back for the account's usage. An earlier design probed by substituting
+sentinel values to see which were echoed; against a bridge that would have cached Threading's own
+fiction and fed it back as the account's usage. Passing only truth makes the run
+indistinguishable from Claude's, which is also why it needs no consent the launch did not already
+have.
+
+The rule was then checked against that bridge rather than left as prudence: its `writeCache` opens
+with `guard let rateLimits = status.rateLimits, rateLimits.containsValue else { return }`, so a
+payload with no `rate_limits` cannot touch the usage cache. It does append a
+`<profile>.heartbeat.json` entry recording `rate_limits_present: false` — a separate file nothing
+here reads, and the only trace a coverage run leaves.
+
+**Coverage is a search for values we already hold, not a parse.** If the output contains "Opus 5"
+the model is covered. A script that abbreviates it to something unrecognised reads as *not*
+covered and the card shows the model a second time — duplicating a fact is the safe direction for
+a guess, and hiding one the user asked for is not. Two consequences worth keeping: fast mode is
+only ever recognised when it is **on**, because "off" and "not shown" are the same absence; and
+the line counts are matched as the `+N`/`N` pair a numstat summary prints, so a token total of
+`1699` cannot pass for a diff stat.
+
+Precedence follows the CLI's, which for this key is **not** a merge: a managed policy replaces the
+user's `statusLine` outright, and below that `.claude/settings.local.json`,
+`.claude/settings.json` and the account's `settings.json` override most-specific-first. The answer
+is cached against the resolved command and the CLI version rather than against the account,
+because coverage is a property of the program — two accounts pointing at one script share it, and
+a newer CLI may hand that script a field it starts printing.
+
+The same stdin rule as the hooks above applies in reverse here: the payload is written and the
+handle **closed** before the output pipe is drained, because these commands open with
+`input=$(cat)` and write nothing until they have EOF.

@@ -367,6 +367,152 @@ final class TranscriptReplayTests: XCTestCase {
         XCTAssertEqual(timeline.agents.first?.status, .completed)
     }
 
+    // MARK: - Reasoning Effort
+
+    /// Claude stamps `effort` on every assistant record, and that is the only place the effort a
+    /// settled turn *actually ran at* is recorded: `AgentModels.defaultEffort` reads the account
+    /// config, which is the launch-time intention rather than the turn's history.
+    func testClaudeReplayCarriesTheEffortEachTurnRanAt() throws {
+        let events = try replay(
+            [
+                #"{"type":"user","message":{"role":"user","content":"first"}}"#,
+                #"{"type":"assistant","effort":"xhigh","message":{"role":"assistant","# +
+                    #""content":[{"type":"text","text":"a"}],"stop_reason":"end_turn"}}"#
+            ],
+            kind: .claude
+        )
+
+        XCTAssertEqual(efforts(in: events), ["xhigh"])
+    }
+
+    /// `/effort` mid-conversation is exactly the case the config-read answer gets wrong, so each
+    /// turn has to keep its own reading rather than the session's latest.
+    func testClaudeReplayKeepsEachTurnsOwnEffortWhenItChangesMidSession() throws {
+        let events = try replay(
+            [
+                #"{"type":"user","message":{"role":"user","content":"first"}}"#,
+                #"{"type":"assistant","effort":"xhigh","message":{"role":"assistant","# +
+                    #""content":[{"type":"text","text":"a"}],"stop_reason":"end_turn"}}"#,
+                #"{"type":"user","message":{"role":"user","content":"second"}}"#,
+                #"{"type":"assistant","effort":"low","message":{"role":"assistant","# +
+                    #""content":[{"type":"text","text":"b"}],"stop_reason":"end_turn"}}"#
+            ],
+            kind: .claude
+        )
+
+        XCTAssertEqual(efforts(in: events), ["xhigh", "low"])
+    }
+
+    /// A turn that reports no effort ran at whatever the last one did — the CLI restates the
+    /// value only when a turn carries it, so carrying it forward is the reading, not a guess.
+    func testAnEffortlessTurnInheritsTheOneBeforeIt() throws {
+        let events = try replay(
+            [
+                #"{"type":"user","message":{"role":"user","content":"first"}}"#,
+                #"{"type":"assistant","effort":"high","message":{"role":"assistant","# +
+                    #""content":[{"type":"text","text":"a"}],"stop_reason":"end_turn"}}"#,
+                #"{"type":"user","message":{"role":"user","content":"second"}}"#,
+                #"{"type":"assistant","message":{"role":"assistant","# +
+                    #""content":[{"type":"text","text":"b"}],"stop_reason":"end_turn"}}"#
+            ],
+            kind: .claude
+        )
+
+        XCTAssertEqual(efforts(in: events), ["high", "high"])
+    }
+
+    /// Sidechains are excluded on the same rule as the context reading: a subagent's turn is not
+    /// this conversation's, and a delegated agent running at a different effort must not be
+    /// reported as what the user's own turn ran at.
+    func testASubagentsEffortIsNotTheConversations() throws {
+        let events = try replay(
+            [
+                #"{"type":"user","message":{"role":"user","content":"first"}}"#,
+                #"{"type":"assistant","effort":"high","message":{"role":"assistant","# +
+                    #""content":[{"type":"text","text":"a"}],"stop_reason":"end_turn"}}"#,
+                #"{"type":"assistant","effort":"low","isSidechain":true,"# +
+                    #""message":{"role":"assistant","content":[{"type":"text","text":"sub"}]}}"#
+            ],
+            kind: .claude
+        )
+
+        XCTAssertEqual(efforts(in: events), ["high"])
+    }
+
+    /// An empty string is not a reading. It would otherwise overwrite a real inherited value with
+    /// something no UI can name.
+    func testAnEmptyEffortIsNotAReading() throws {
+        let events = try replay(
+            [
+                #"{"type":"user","message":{"role":"user","content":"first"}}"#,
+                #"{"type":"assistant","effort":"high","message":{"role":"assistant","# +
+                    #""content":[{"type":"text","text":"a"}],"stop_reason":"end_turn"}}"#,
+                #"{"type":"user","message":{"role":"user","content":"second"}}"#,
+                #"{"type":"assistant","effort":"","message":{"role":"assistant","# +
+                    #""content":[{"type":"text","text":"b"}],"stop_reason":"end_turn"}}"#
+            ],
+            kind: .claude
+        )
+
+        XCTAssertEqual(efforts(in: events), ["high", "high"])
+    }
+
+    /// Codex records it on a `turn_context` record, which the event mapping produces no row for —
+    /// the reason this is read before the mapping can bail, like the context reading beside it.
+    func testCodexReplayReadsEffortFromTurnContext() throws {
+        let events = try replay(
+            [
+                #"{"type":"turn_context","payload":{"effort":"high","model":"gpt-5"}}"#,
+                #"{"type":"event_msg","payload":{"type":"user_message","message":"first"}}"#,
+                #"{"type":"response_item","payload":{"type":"agent_message","text":"a"}}"#
+            ],
+            kind: .codex
+        )
+
+        XCTAssertEqual(efforts(in: events), ["high"])
+    }
+
+    /// When no turn stated its own effort, the applied thread settings are the next best answer.
+    func testCodexFallsBackToAppliedThreadSettings() throws {
+        let events = try replay(
+            [
+                #"{"type":"event_msg","payload":{"type":"thread_settings_applied","# +
+                    #""thread_settings":{"reasoning_effort":"medium"}}}"#,
+                #"{"type":"event_msg","payload":{"type":"user_message","message":"first"}}"#,
+                #"{"type":"response_item","payload":{"type":"agent_message","text":"a"}}"#
+            ],
+            kind: .codex
+        )
+
+        XCTAssertEqual(efforts(in: events), ["medium"])
+    }
+
+    // MARK: - Helpers
+
+    private func replay(_ lines: [String], kind: AgentKind) throws -> [StreamEvent] {
+        let directory = try makeTemporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("session.jsonl")
+
+        try write(lines.joined(separator: "\n") + "\n", to: transcript)
+
+        let (events, isTruncated) = TranscriptReplay.read(at: transcript, kind: kind)
+        XCTAssertFalse(isTruncated)
+        return events
+    }
+
+    /// The effort each settled turn reports, in order. Mapped off the metrics rather than
+    /// compact-mapped off the effort, so a turn that reports *none* stays visible as nil instead
+    /// of vanishing from the list and passing a count assertion it should fail.
+    private func efforts(in events: [StreamEvent]) -> [String?] {
+        events
+            .compactMap { event -> TurnMetrics? in
+                guard case .turnFinished(_, _, let metrics) = event else { return nil }
+                return metrics
+            }
+            .map(\.effort)
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-claude-subagents-\(UUID().uuidString)")

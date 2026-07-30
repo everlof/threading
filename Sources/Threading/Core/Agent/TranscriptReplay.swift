@@ -87,6 +87,10 @@ enum TranscriptReplay {
         var lastEventAt: Date?
         var lastContextTokens: Int?
         var lastContextWindow: Int?
+        // Carried across turns on purpose, like the context readings above: both CLIs restate
+        // effort only when a turn reports it, so a turn that reported none ran at whatever the
+        // last one did.
+        var lastEffort: String?
 
         func endOpenTurn() {
             guard turnIsOpen else { return }
@@ -99,6 +103,7 @@ enum TranscriptReplay {
             }
             metrics.contextTokens = lastContextTokens
             metrics.contextWindow = lastContextWindow
+            metrics.effort = lastEffort
             events.append(.turnFinished(text: nil, isError: false, metrics: metrics))
         }
 
@@ -109,6 +114,7 @@ enum TranscriptReplay {
                 lastContextTokens = context.tokens
                 if let window = context.window { lastContextWindow = window }
             }
+            if let effort = effortReading(of: record, kind: kind) { lastEffort = effort }
 
             guard let event = self.event(from: record, kind: kind) else { return true }
 
@@ -133,6 +139,44 @@ enum TranscriptReplay {
         endOpenTurn()
 
         return (events, dropped > 0)
+    }
+
+    /// The reasoning effort a turn actually ran at, where the record says.
+    ///
+    /// Read beside `contextReading` and for the same reason: the fact rides records the event
+    /// mapping skips — Codex's `turn_context` produces no row at all — so it has to be taken
+    /// before the mapping can bail.
+    ///
+    /// **This is more authoritative than the launch-time setting.** `AgentModels.defaultEffort`
+    /// answers what a session *would* request by reading the account's config, which is the only
+    /// answer available before a turn runs; it cannot see a mid-session change, so a conversation
+    /// switched with `/effort` replayed at its original setting. The transcript records what each
+    /// turn was actually given.
+    ///
+    /// Claude stamps `effort` at the top level of every assistant record. Sidechains are excluded
+    /// on the same rule as the context reading: a subagent's turn is not this conversation's.
+    /// Codex writes it as `payload.effort` on a `turn_context` record, and restates it in
+    /// `thread_settings` when a setting is applied — the turn's own value is preferred, since the
+    /// applied settings describe the thread rather than the turn that followed.
+    private static func effortReading(of record: [String: Any], kind: AgentKind) -> String? {
+        func nonEmpty(_ value: Any?) -> String? {
+            guard let text = value as? String, !text.isEmpty else { return nil }
+            return text
+        }
+
+        switch kind {
+        case .claude:
+            guard record["type"] as? String == "assistant",
+                  record["isSidechain"] as? Bool != true
+            else { return nil }
+            return nonEmpty(record["effort"])
+
+        case .codex:
+            guard let payload = record["payload"] as? [String: Any] else { return nil }
+            if let effort = nonEmpty(payload["effort"]) { return effort }
+            guard let settings = payload["thread_settings"] as? [String: Any] else { return nil }
+            return nonEmpty(settings["reasoning_effort"])
+        }
     }
 
     /// How full the model's window was as of this record, where the record says.

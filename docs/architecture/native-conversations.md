@@ -396,6 +396,23 @@ conversation — `last_token_usage` is the context figure — and a Ready status
 metrics (the post-replay reset) must not blank a reading that still holds, so the view
 retains the newest reading apart from the status.
 
+**Effort rides the same metrics, and the transcript is more authoritative than the setting.**
+`AgentModels.defaultEffort` reads the account's config, which is the only answer available
+*before* a turn runs and the wrong one afterwards: it cannot see a mid-session `/effort`, so a
+replayed conversation reported its launch-time value for every settled turn. Both CLIs record
+what each turn was actually given — Claude stamps `effort` at the top level of every assistant
+record, Codex writes `payload.effort` on a `turn_context` record and restates it under
+`thread_settings` when settings are applied — and `TranscriptReplay.effortReading` takes it
+beside the context reading, before the event mapping can bail, because `turn_context` produces
+no row at all. Sidechains are excluded on the same rule as the context reading: a subagent
+running at its own effort is not what the user's turn ran at. The value carries across turns,
+since a turn that restates nothing ran at whatever the last one did — an empty string is
+therefore not a reading, or it would erase a real inherited value with something no chip can
+name. This is what a Claude effort control would read; the chip stays Codex-only until the model
+catalog has a source for Claude's *levels* (`reasoningLevels` comes only from Codex's own models
+cache), and `--effort` is a real Claude flag, so that is a plumbing gap rather than a protocol
+one.
+
 **Auto-scroll is a mode, not a reflex** (`ConversationAutoScroll`, the state machine tested
 apart from the scroll view). The naive version — pin to bottom on every appended row, result,
 and streaming delta — is what this replaced, and it is the version t3code shipped and then

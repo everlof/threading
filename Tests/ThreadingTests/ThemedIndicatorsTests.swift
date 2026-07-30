@@ -112,6 +112,124 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertTrue(view.needsDisplay, "a theme change left the rule undrawn")
     }
 
+    // MARK: - A Rule's Weight, Theme By Theme
+
+    /// A pane header pinned in a window, which is where a rule's thickness is actually decided:
+    /// the header pins its `SeparatorView` on three edges and leaves the fourth to
+    /// `intrinsicContentSize`. Asserted through the header rather than on a bare rule because a
+    /// component measured outside the container it ships in can agree with the token and still be
+    /// drawn at another weight.
+    private func hostedPaneHeader() throws -> PaneHeaderView {
+        let header = PaneHeaderView()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 60),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let content = try XCTUnwrap(window.contentView)
+        content.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            header.topAnchor.constraint(equalTo: content.topAnchor)
+        ])
+        windows.append(window)
+        return header
+    }
+
+    /// The thickness the header's rule was *placed* at, which is what the eye reads.
+    /// `intrinsicContentSize` is only the claim.
+    private func ruleThickness(in header: PaneHeaderView) throws -> CGFloat {
+        header.layoutSubtreeIfNeeded()
+        let rules = descendants(of: header).compactMap { $0 as? SeparatorView }
+        XCTAssertEqual(rules.count, 1, "the header no longer holds exactly one rule")
+        return try XCTUnwrap(rules.first).frame.height
+    }
+
+    /// A weight as the device can actually place it. Auto Layout backing-aligns every frame, so a
+    /// 1.5-point rule is 1.5 points on a Retina backing store and 2 on a 1× one; comparing two
+    /// weights means comparing them on the same grid.
+    private func onePixelGrid(_ view: NSView, of weight: CGFloat) -> CGFloat {
+        view.backingAlignedRect(
+            NSRect(x: 0, y: 0, width: weight, height: weight),
+            options: .alignAllEdgesNearest
+        ).height
+    }
+
+    /// A theme switch as the app performs it: the palette moves, then everything on screen is told.
+    private func switchTheme(to theme: AppTheme) {
+        AppThemePalette.set(theme)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
+    }
+
+    /// A theme change moves a rule's *weight* as well as its ink, and a rule already on screen was
+    /// placed against the weight the constraint system last asked for. `intrinsicContentSize` reads
+    /// the token live, but AppKit caches the answer until it is told the answer moved — so
+    /// repainting alone left every rule in the window ruling for the theme that had just left,
+    /// while anything built after the switch took the new weight. Arriving at Editorial (1) from
+    /// Neo Brutalism (3), one window drew both.
+    ///
+    /// The same staleness as the split seam's, one view along: see
+    /// `AppThemeTests.testTheSeamIsRelaidOutWhenTheThemeChangesUnderIt`.
+    func testARuleAlreadyLaidOutTakesTheWeightOfTheThemeThatArrives() throws {
+        switchTheme(to: AppThemeStyles.neoBrutalism)
+        let header = try hostedPaneHeader()
+        XCTAssertEqual(
+            try ruleThickness(in: header),
+            3,
+            "the header did not start at Neo Brutalism's weight"
+        )
+
+        switchTheme(to: AppThemeStyles.editorial)
+
+        XCTAssertEqual(
+            try ruleThickness(in: header),
+            1,
+            "the rule kept the weight of the theme that just left"
+        )
+    }
+
+    /// Every rule in the window is one decision — `Design.Radius.border` — so a pane header's rule
+    /// and the split seam between the very same panes have to agree under **every** style, however
+    /// the window arrived there.
+    ///
+    /// Swept across the whole catalogue rather than the three styles that happened to be on screen
+    /// when the seam's own weight was fixed: the seam reads the token live and was therefore right
+    /// all along, while the header's rule kept whatever it was last measured at. Each theme is
+    /// entered from Neo Brutalism because the heaviest style leaves the widest stale rule behind,
+    /// so a theme is never entered from itself — which is why entering Neo Brutalism *from* Neo
+    /// Brutalism was the case that passed while the rest of the catalogue did not.
+    ///
+    /// Compared against the token **as the backing store can place it**: Auto Layout rounds a
+    /// frame to whole device pixels, so the four styles that rule at 1.5 land on a half point on
+    /// Retina and on a whole one at 1×, and a raw comparison would assert the screen away.
+    func testEveryStockThemeRulesAtOneWeightThroughoutTheWindow() throws {
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        let header = try hostedPaneHeader()
+
+        for theme in [AppTheme.system] + AppThemeStyles.all {
+            switchTheme(to: AppThemeStyles.neoBrutalism)
+            _ = try ruleThickness(in: header)
+            switchTheme(to: theme)
+
+            let placed = try ruleThickness(in: header)
+            XCTAssertEqual(
+                placed,
+                onePixelGrid(header, of: Design.Radius.border),
+                accuracy: 0.01,
+                "\(theme.name)'s rules did not weigh what the theme itself states"
+            )
+            XCTAssertEqual(
+                placed,
+                onePixelGrid(header, of: split.dividerThickness),
+                accuracy: 0.01,
+                "\(theme.name) ruled inside its panes and between them at two different weights"
+            )
+        }
+    }
+
     // MARK: - Spinner
 
     func testMotionDurationsBecomeImmediateWhenReduceMotionIsEnabled() {
@@ -553,8 +671,11 @@ final class ThemedIndicatorsTests: XCTestCase {
         card.frame = NSRect(origin: .zero, size: card.fittingSize)
         card.layoutSubtreeIfNeeded()
 
+        // Only the marks actually drawn: the card keeps a row per fact in its hierarchy and hides
+        // the ones it has nothing to say for, so an undrawn mark has no column to be in.
         let marks = descendants(of: card)
             .compactMap { $0 as? NSImageView }
+            .filter { !$0.isHiddenOrHasHiddenAncestor }
             .map { card.convert($0.bounds, from: $0).minX }
         XCTAssertEqual(marks.count, 2, "the branch and counters marks should both be drawn")
 
@@ -595,6 +716,166 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         card.updateSubagents(workingCount: 0, doneCount: 0)
         XCTAssertTrue(card.isHidden)
+    }
+
+    // MARK: - The Card's Agent Line
+
+    /// The row the terminal pane owes the user: for three of four logins on the machine this was
+    /// written against, Claude's own status line is usage and nothing else, so the card is the only
+    /// place the model appears.
+    func testTheAgentLineNamesTheModelAndHowItRuns() throws {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "test-levels-and-sidebar-archive",
+            summary: GitChangeSummary(files: 2, added: 35, removed: 1)
+        ))
+        card.updateModel(GitStatusOverlayView.ModelReading(
+            name: "Opus 5",
+            effort: "Extra High",
+            isFast: true
+        ))
+        card.applyInk(WindowBackdrop.ink)
+
+        XCTAssertFalse(card.isHidden)
+        // Spoken as the rows are stacked, the agent line last.
+        XCTAssertEqual(
+            card.accessibilityLabel(),
+            "test-levels-and-sidebar-archive  ·  2 files +35 −1  ·  Opus 5 · Fast · Extra High"
+        )
+
+        let marks = descendants(of: card)
+            .compactMap { $0 as? NSImageView }
+            .filter { !$0.isHiddenOrHasHiddenAncestor }
+            .compactMap { $0.image?.accessibilityDescription }
+        XCTAssertTrue(marks.contains("Model"), "the agent line lost its mark")
+    }
+
+    /// Each part is independently droppable, because the caller has already removed whatever the
+    /// session's own status line prints. A card told only about speed says only that.
+    func testTheAgentLineShowsOnlyTheFactsItWasGiven() {
+        let card = GitStatusOverlayView()
+        card.updateModel(GitStatusOverlayView.ModelReading(isFast: true))
+        card.applyInk(WindowBackdrop.ink)
+
+        XCTAssertFalse(card.isHidden, "a fact with no Git reading still deserves the card")
+        XCTAssertEqual(card.accessibilityLabel(), "Fast")
+
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5"))
+        XCTAssertEqual(card.accessibilityLabel(), "Opus 5")
+    }
+
+    /// An empty reading and no reading mean the same thing: the caller whose status line already
+    /// says everything and the caller with nothing to add both want the row gone.
+    func testAnEmptyAgentReadingHidesTheRowEntirely() throws {
+        let card = GitStatusOverlayView()
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5"))
+        card.applyInk(WindowBackdrop.ink)
+        XCTAssertFalse(card.isHidden)
+
+        card.updateModel(GitStatusOverlayView.ModelReading())
+        XCTAssertTrue(card.isHidden, "an all-nil reading left an empty row holding the card open")
+
+        card.updateModel(nil)
+        XCTAssertTrue(card.isHidden)
+    }
+
+    /// A model-only card is not a Git receipt, so it must not claim to be a button that opens Git
+    /// Review — and clicking it must do nothing.
+    func testAModelOnlyCardIsNotAGitReceipt() {
+        let card = GitStatusOverlayView()
+        var opened = 0
+        card.onOpen = { opened += 1 }
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5"))
+        card.applyInk(WindowBackdrop.ink)
+
+        XCTAssertEqual(card.accessibilityRole(), .group)
+        XCTAssertNil(card.toolTip)
+        card.mouseDown(with: NSEvent())
+        XCTAssertEqual(opened, 0, "a card with no Git sentence opened Git Review")
+    }
+
+    /// Whichever row leads carries the card's top padding, and only a band does. The agent line
+    /// leads a card with no checkout sentence, which is where the band has to move to it.
+    func testTheAgentLineTakesTheBandWhenItLeads() throws {
+        let card = GitStatusOverlayView()
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5"))
+        card.applyInk(WindowBackdrop.ink)
+        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+        card.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            card.fittingSize.height,
+            GitStatusOverlayDefaults.height,
+            accuracy: 0.5,
+            "a leading agent line should reproduce the card's single-band height"
+        )
+    }
+
+    /// The row grows the card downward rather than taking width from the branch name — the whole
+    /// reason the card stacks instead of running facts along one line.
+    func testTheAgentLineGrowsTheCardDownward() {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "test-levels-and-sidebar-archive",
+            summary: GitChangeSummary(files: 2, added: 35, removed: 1)
+        ))
+        card.applyInk(WindowBackdrop.ink)
+        let without = card.fittingSize
+
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5", effort: "Extra High"))
+        let with = card.fittingSize
+
+        XCTAssertGreaterThan(with.height, without.height, "the agent line did not add a row")
+        XCTAssertLessThanOrEqual(
+            with.width,
+            GitStatusOverlayDefaults.maxWidth,
+            "the card broke its own ceiling"
+        )
+    }
+
+    /// The card carries its colours inside attributed strings, which cannot be re-inked in place —
+    /// so an ink arriving after the row was built has to rebuild it.
+    ///
+    /// **Switched by backdrop, not by app theme.** This card is a `BackdropOverlay`: it floats on
+    /// the *terminal's* ground and takes its ink from there, so an app palette change leaves its
+    /// label colours exactly where they were. Written against `AppThemePalette` first, this test
+    /// passed nothing and proved nothing — both readings were white at 70% and 50%.
+    func testTheAgentLineRestylesWhenTheInkChanges() throws {
+        WindowBackdrop.set(.terminal(NSColor(srgbRed: 0.05, green: 0.05, blue: 0.07, alpha: 1)))
+        defer { WindowBackdrop.set(.chrome) }
+        let card = GitStatusOverlayView()
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5", effort: "Extra High"))
+        card.applyInk(WindowBackdrop.ink)
+
+        func modelRowColours() -> [NSColor] {
+            descendants(of: card)
+                .compactMap { $0 as? NSTextField }
+                .filter { !$0.isHiddenOrHasHiddenAncestor }
+                .compactMap { $0.attributedStringValue }
+                .flatMap { string -> [NSColor] in
+                    var found: [NSColor] = []
+                    string.enumerateAttribute(
+                        .foregroundColor,
+                        in: NSRange(location: 0, length: string.length)
+                    ) { value, _, _ in
+                        if let colour = value as? NSColor { found.append(colour) }
+                    }
+                    return found
+                }
+        }
+
+        let before = modelRowColours()
+        XCTAssertFalse(before.isEmpty, "the agent line drew no coloured run")
+
+        // A near-white ground has to flip the label ink the dark one produced.
+        WindowBackdrop.set(.terminal(NSColor(srgbRed: 0.97, green: 0.97, blue: 0.95, alpha: 1)))
+        card.applyInk(WindowBackdrop.ink)
+
+        XCTAssertNotEqual(
+            before.map(\.description),
+            modelRowColours().map(\.description),
+            "the agent line kept the ink measured against the previous ground"
+        )
     }
 
     func testRunReceiptRendersUnderSystemAndContrastingThemes() throws {

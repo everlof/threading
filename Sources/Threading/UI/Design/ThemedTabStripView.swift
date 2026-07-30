@@ -99,6 +99,29 @@ final class ThemedTabStripView: NSView {
     /// hosts set it once at setup.
     var chipMaxWidth: CGFloat?
 
+    /// Set by a host that pins **both** of the strip's edges, so the strip stretches to the room
+    /// it is given instead of hugging its tabs.
+    ///
+    /// The default is the other arrangement — `intrinsicContentSize` plus `.defaultHigh` hugging,
+    /// which is what lets a host place a control *after* the tabs and have it follow them. Pin
+    /// both edges without saying this and that hugging becomes a **maximum on the host**: at 750
+    /// it outranks the priority `NSSplitViewController` positions a pane with
+    /// (`DisplayPaneDefaults.holdingPriority`, 260), so the display panel could not be dragged
+    /// wider than its own tab titles — the divider stopped dead a few points past the `+`, and
+    /// where it stopped moved with the length of the page's name. Below that priority the strip
+    /// is stretched and the divider is the user's to place, which is the whole point of a strip
+    /// that scrolls rather than shrinks.
+    var fillsHostWidth = false {
+        didSet {
+            guard fillsHostWidth != oldValue else { return }
+            setContentHuggingPriority(
+                fillsHostWidth ? .defaultLow : .defaultHigh,
+                for: .horizontal
+            )
+            invalidateIntrinsicContentSize()
+        }
+    }
+
     private let inkSource: InkSource
     private let showsClose: Bool
 
@@ -468,9 +491,12 @@ final class ThemedTabStripView: NSView {
     // MARK: - Sizing
 
     /// As wide as its chips want to be, so hosts that place things *after* the strip — a `+`,
-    /// a usage pill — can follow its content. Hosts that pin both edges (the display panel)
-    /// simply override this with constraints. Compression is deliberately easy to win: a strip
+    /// a usage pill — can follow its content. Compression is deliberately easy to win: a strip
     /// squeezed for room scrolls, it never squeezes its neighbours.
+    ///
+    /// A host that pins both edges says so with `fillsHostWidth`, and pinning is *not* enough on
+    /// its own: the pins fix the strip's width against the **host's**, which leaves the hugging
+    /// priority to argue with whatever places the host — see that property.
     override var intrinsicContentSize: NSSize {
         NSSize(width: ceil(stack.fittingSize.width), height: NSView.noIntrinsicMetric)
     }

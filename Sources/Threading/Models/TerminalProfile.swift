@@ -34,11 +34,24 @@ struct TerminalProfile: Codable, Equatable {
 
     // MARK: - Default Profile
 
+    /// **The default terminal palette follows the app theme.**
+    ///
+    /// It used to be `.basic` — white on black, whatever the chrome was doing. That made the
+    /// designed pairing in every stock theme (`AppTheme.terminalPalette`, sixteen ANSI colours
+    /// written out per style precisely because deriving them from eleven roles gives eight
+    /// near-hues) invisible unless the user went looking for it in a submenu, and it left a
+    /// light-mode window holding a black terminal, which is the one thing `WindowBackdrop` and
+    /// the OSC 11 reply exist to keep coherent. It also made the chain's default the one scope
+    /// that could not move: with every session and project on Inherit — the shipped state —
+    /// switching app theme changed the window and not the terminal inside it.
+    ///
+    /// Nothing is taken away: naming a palette at any scope still wins over this, and the
+    /// narrowest scope still decides.
     static let `default` = TerminalProfile(
         name: "Default",
         fontName: TerminalDefaults.defaultFont,
         fontSize: TerminalDefaults.defaultFontSize,
-        theme: .basic,
+        theme: .followsAppTheme,
         shellPath: TerminalDefaults.defaultShell,
         shellArguments: ["-l"],
         cursorStyle: .block,

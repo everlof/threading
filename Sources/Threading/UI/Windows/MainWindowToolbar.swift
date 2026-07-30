@@ -241,11 +241,14 @@ extension MainWindowController: NSToolbarDelegate {
     /// The context button: the same menu as the session row, rebuilt on every open so live
     /// checkmarks, runtime actions, accounts, and extension commands cannot drift.
     private func makeSessionContextButton() -> ThemedIconButton {
+        // "Context", as the user guide names it — "Session Options" is now the row menu's own
+        // folded submenu, and a button tooltip repeating a submenu title would read as a
+        // shortcut to it rather than to the whole menu.
         let button = ThemedIconButton(
             symbolName: "ellipsis",
-            accessibility: L10n.string("Session options")
+            accessibility: L10n.string("Session context menu")
         )
-        button.toolTip = L10n.string("Session Options")
+        button.toolTip = L10n.string("Context")
         button.presentsMenu = true
         button.onPress = { [weak self, weak button] in
             guard let self, let button else { return }

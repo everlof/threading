@@ -334,14 +334,20 @@ final class ClaudeRemoteControlTests: XCTestCase {
         XCTAssertEqual(ticked, ["Always On"])
     }
 
-    func testCodexSessionsAreNotOfferedTheItem() {
+    func testCodexSessionsAreNotOfferedTheItem() throws {
         let menu = NSMenu()
         ProjectSidebarViewController().populateSessionActions(
             menu,
             for: AgentSession(kind: .codex, title: "Codex")
         )
 
-        XCTAssertNil(menu.items.first { $0.title == "Claude Remote Control" })
+        // The item lives in the Session Options fold, so that is where its absence means
+        // anything — a top-level check would pass whatever the fold held.
+        let options = try XCTUnwrap(
+            menu.items.first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
+                .submenu
+        )
+        XCTAssertNil(options.items.first { $0.title == "Claude Remote Control" })
     }
 
     // MARK: - Settings Page
@@ -383,9 +389,14 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let menu = NSMenu()
         ProjectSidebarViewController().populateSessionActions(menu, for: session)
 
+        let options = try XCTUnwrap(
+            menu.items.first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
+                .submenu,
+            "the session menu has no Session Options fold"
+        )
         let item = try XCTUnwrap(
-            menu.items.first { $0.title == "Claude Remote Control" },
-            "the session menu has no Claude Remote Control item"
+            options.items.first { $0.title == "Claude Remote Control" },
+            "Session Options has no Claude Remote Control item"
         )
         return try XCTUnwrap(item.submenu, "the item has no submenu")
     }

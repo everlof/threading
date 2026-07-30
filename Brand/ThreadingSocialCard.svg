@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="halo" cx="78%" cy="48%" r="54%">
+      <stop offset="0" stop-color="#173251" />
+      <stop offset="0.55" stop-color="#0B2037" />
+      <stop offset="1" stop-color="#07172B" />
+    </radialGradient>
+    <linearGradient id="thread" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#C95726" stop-opacity="0" />
+      <stop offset="0.75" stop-color="#D9692B" stop-opacity="0.35" />
+      <stop offset="1" stop-color="#FF9A3D" stop-opacity="0.65" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#halo)" />
+  <g fill="none" stroke="url(#thread)" stroke-width="2">
+    <path d="M 0 128 C 330 128 545 192 780 282" />
+    <path d="M 0 190 C 340 190 555 226 780 296" />
+    <path d="M 0 440 C 350 440 560 380 780 330" />
+    <path d="M 0 502 C 360 502 565 412 780 344" />
+  </g>
+
+  <text
+    x="78"
+    y="284"
+    fill="#F7F3EB"
+    font-family="-apple-system, BlinkMacSystemFont, Helvetica Neue, sans-serif"
+    font-size="76"
+    font-weight="700"
+    letter-spacing="-2"
+  >THREADING</text>
+  <text
+    x="82"
+    y="352"
+    fill="#C9C4BA"
+    font-family="-apple-system, BlinkMacSystemFont, Helvetica Neue, sans-serif"
+    font-size="38"
+    font-weight="400"
+  >Supervise the work.</text>
+
+  <image href="ThreadingMark.svg" x="782" y="112" width="416" height="416" />
+</svg>

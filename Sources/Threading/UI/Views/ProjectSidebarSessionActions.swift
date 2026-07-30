@@ -29,9 +29,208 @@ struct SessionSurfaceTogglePresentation: Equatable {
     }
 }
 
+// MARK: - Share Link Grants
+
+/// The three links Share Chat can put on the clipboard, and what each one hands out.
+///
+/// They existed only as three button titles and a `switch` on the button *index*, which put the
+/// two facts a person actually decides between — what the holder may do, and what they still may
+/// not — in no place the dialog could show them. "Collaborator + Approval" is a permission model
+/// stated as a button label; nobody reads it as "may let the agent run commands without me".
+/// Naming the grant is what lets the sheet print it beside the button that hands it out, and
+/// what replaces the index arithmetic with a case.
+enum ShareLinkGrant: CaseIterable {
+    /// Watch, and nothing else.
+    case view
+    /// Watch and drive, but permission requests still come back to the owner.
+    case collaborate
+    /// Watch, drive, and answer permission requests in the owner's place.
+    case collaborateAndApprove
+
+    var capability: RemoteCapability {
+        switch self {
+        case .view: .view
+        case .collaborate, .collaborateAndApprove: .interact
+        }
+    }
+
+    var canApprovePermissions: Bool { self == .collaborateAndApprove }
+
+    /// A chat that has never run has nothing to watch, and a viewer cannot wake it — only a
+    /// participant who may act can. So this is the one grant that waits for a running session.
+    var requiresRunningSession: Bool { self == .view }
+
+    /// The button, which says what pressing it *does* — it copies a link rather than sharing
+    /// there and then, and every one of the three had to admit that or none of them could.
+    var buttonTitle: String {
+        switch self {
+        case .view: L10n.string("Copy View-Only Link")
+        case .collaborate: L10n.string("Copy Collaborator Link")
+        case .collaborateAndApprove: L10n.string("Copy Collaborator + Approval Link")
+        }
+    }
+
+    /// The grant's name in the sheet's own words, directly above the button that grants it.
+    var name: String {
+        switch self {
+        case .view: L10n.string("View only")
+        case .collaborate: L10n.string("Collaborator")
+        case .collaborateAndApprove: L10n.string("Collaborator + approval")
+        }
+    }
+
+    /// One line, phrased as what the holder can do and then what they still cannot — the second
+    /// half being the part a title can never carry.
+    var summary: String {
+        switch self {
+        case .view:
+            L10n.string(
+                "Follows this chat as it happens. Cannot type, cannot send a prompt, and cannot "
+                    + "answer a permission request."
+            )
+        case .collaborate:
+            L10n.string(
+                "Everything a viewer can do, and can also type in the terminal and send prompts. "
+                    + "Permission requests still come to you."
+            )
+        case .collaborateAndApprove:
+            L10n.string(
+                "Everything a collaborator can do, and can also answer permission requests — "
+                    + "letting the agent run commands and change files without asking you."
+            )
+        }
+    }
+
+    /// Shown under the grant when this session cannot offer it yet, in place of a button that
+    /// is merely dimmed and unexplained.
+    static var unavailableUntilRunning: String {
+        L10n.string("Start this chat first — watching alone never starts an agent.")
+    }
+}
+
+enum ShareSheetDefaults {
+    /// Matches the permission sheet's diff, so the two alerts that carry an accessory are the
+    /// same width rather than each one the width its own content happened to want.
+    static let accessoryWidth: CGFloat = PermissionDiffDefaults.width
+}
+
+/// The Share Chat sheet, built without being run.
+///
+/// Separated from the menu handler for the reason `ConfirmationRequest` gives for keeping copy
+/// at the call site: a test can then hold the wording, the button order and the disabled state
+/// to what the action actually does. The handler is a modal and a pasteboard write, neither of
+/// which a test can read through.
+@MainActor
+enum ShareChatSheet {
+
+    static func request(chatTitle: String, isRunning: Bool) -> ChoiceRequest {
+        // Four buttons, and the named modal responses stop at three — so the fourth used to
+        // arrive through `default:`, sharing that branch with every unrelated dismissal.
+        // `choose` reads it back by index.
+        ChoiceRequest(
+            prompt: .shareChatLink,
+            title: L10n.format("Share “%@”", chatTitle),
+            message: L10n.string(
+                "A single-use invitation to this one chat. It expires in 24 hours if nobody "
+                    + "accepts it; once accepted, that person keeps access until you choose Stop "
+                    + "Sharing Chat. No link reaches your other chats, projects, or settings."
+            ),
+            options: ShareLinkGrant.allCases.map {
+                ConfirmationOption(
+                    title: $0.buttonTitle,
+                    isEnabled: isRunning || !$0.requiresRunningSession
+                )
+            },
+            style: .informational,
+            accessory: grantsAccessory(isRunning: isRunning)
+        )
+    }
+
+    /// Each grant named and described, in the order of the buttons underneath — so the sheet
+    /// reads top to bottom as three offers and then three ways to take one.
+    ///
+    /// A grant the session cannot offer yet keeps its place and says why, rather than leaving a
+    /// dimmed button to be guessed at; that is the same rule `ConfirmationOption.isEnabled`
+    /// already states for the button itself.
+    ///
+    /// Sized rather than left to Auto Layout: `NSAlert` lays an accessory out by its **frame**,
+    /// so the height has to be measured here, against a width the wrapping labels were told
+    /// about. A stack left at its natural size arrives one line tall with the rest clipped.
+    static func grantsAccessory(isRunning: Bool) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.medium
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        for grant in ShareLinkGrant.allCases {
+            let group = NSStackView()
+            group.orientation = .vertical
+            group.alignment = .leading
+            group.spacing = Design.Spacing.hairline
+            group.translatesAutoresizingMaskIntoConstraints = false
+
+            group.addArrangedSubview(label(
+                grant.name,
+                font: Design.Typography.emphasizedBody(),
+                color: Design.Text.label
+            ))
+            group.addArrangedSubview(label(
+                grant.summary,
+                font: Design.Typography.subheading(),
+                color: Design.Text.secondary
+            ))
+            if grant.requiresRunningSession, !isRunning {
+                group.addArrangedSubview(label(
+                    ShareLinkGrant.unavailableUntilRunning,
+                    font: Design.Typography.subheading(),
+                    color: Design.Text.tertiary
+                ))
+            }
+
+            stack.addArrangedSubview(group)
+            group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        // Measured *before* the container exists, and the container built at that height. Sizing
+        // it afterwards is what an accessory looks like when it renders blank: the stack is laid
+        // out against the height the container had at the time, and pinning its top to a box of
+        // no height puts every label below the bounds that get drawn. Each label carries a
+        // `preferredMaxLayoutWidth`, so the stack can answer for its own height with no ancestor.
+        let container = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: ShareSheetDefaults.accessoryWidth,
+            height: stack.fittingSize.height
+        ))
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+        return container
+    }
+
+    private static func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = font
+        label.textColor = color
+        label.isSelectable = false
+        label.preferredMaxLayoutWidth = ShareSheetDefaults.accessoryWidth
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }
+}
+
 enum SessionActionMenuDefaults {
     static var attachmentsTitle: String { L10n.string("Attachments") }
     static let attachmentsSymbol = "paperclip"
+
+    /// The submenu holding the set-once-and-leave configuration. Named here because the row
+    /// menu and its tests must agree on where those items went.
+    static var sessionOptionsTitle: String { L10n.string("Session Options") }
 
     /// What the permission-mode submenu's first row says, given the app-wide default: the
     /// inherited answer where there is one, and where the decision goes where there is not.
@@ -96,22 +295,19 @@ extension ProjectSidebarViewController {
             )
         }
 
-        menu.addItem(.separator())
+        // The middle of this menu was once a twelve-item unbroken run, so it now reads in
+        // groups: side chats, then the appearance-and-conduct pair plus the folded options,
+        // then identity-and-housekeeping. The fold takes what is set once and left alone;
+        // Theme and Permission Mode stay top-level because they are reached for repeatedly.
+        addGroupSeparator(to: menu)
         addSideChatItems(to: menu, for: session)
-        addSurfaceMenu(to: menu, for: session)
+
+        addGroupSeparator(to: menu)
         menu.addItem(makeSessionThemeItem(for: sessionID))
-        let attachments = menu.addItem(
-            withTitle: SessionActionMenuDefaults.attachmentsTitle,
-            action: #selector(attachmentsClicked),
-            keyEquivalent: ""
-        )
-        attachments.image = NSImage(
-            systemSymbolName: SessionActionMenuDefaults.attachmentsSymbol,
-            accessibilityDescription: SessionActionMenuDefaults.attachmentsTitle
-        )
         addPermissionModeItem(to: menu, for: session)
-        addRemoteControlItem(to: menu, for: session)
-        addMuteItem(to: menu, for: session)
+        menu.addItem(makeSessionOptionsItem(for: session))
+
+        addGroupSeparator(to: menu)
         menu.addItem(
             withTitle: L10n.string("Rename Session…"),
             action: #selector(renameSessionClicked),
@@ -123,7 +319,6 @@ extension ProjectSidebarViewController {
             keyEquivalent: ""
         )
         if AppSettings.shared.remoteAccessEnabled {
-            menu.addItem(.separator())
             menu.addItem(
                 withTitle: L10n.string("Share Chat…"),
                 action: #selector(shareSessionClicked),
@@ -139,7 +334,8 @@ extension ProjectSidebarViewController {
         }
         addMoveToAccountItem(to: menu, for: session)
         addContinueWithProviderItem(to: menu, for: session)
-        menu.addItem(.separator())
+
+        addGroupSeparator(to: menu)
         menu.addItem(
             withTitle: L10n.string("Delete Session"),
             action: #selector(deleteSessionClicked),
@@ -161,19 +357,62 @@ extension ProjectSidebarViewController {
         )
     }
 
+    /// Starts a new group. Skips where the previous group contributed nothing — most of the
+    /// middle items are conditional, and two separators in a row read as a missing item rather
+    /// than an empty group.
+    private func addGroupSeparator(to menu: NSMenu) {
+        guard let last = menu.items.last, !last.isSeparatorItem else { return }
+        menu.addItem(.separator())
+    }
+
+    /// The set-once configuration, folded behind one item: Interface, Claude Remote Control,
+    /// Mute Notifications and Attachments. Everything in here keeps its own condition — the
+    /// fold never shows an item the flat menu would have hidden — and the submenu is never
+    /// empty, because the mute and attachments items are unconditional.
+    private func makeSessionOptionsItem(for session: AgentSession) -> NSMenuItem {
+        let submenu = NSMenu(title: SessionActionMenuDefaults.sessionOptionsTitle)
+        addSurfaceMenu(to: submenu, for: session)
+        addRemoteControlItem(to: submenu, for: session)
+        addMuteItem(to: submenu, for: session)
+        addAttachmentsItem(to: submenu)
+
+        let item = NSMenuItem(
+            title: SessionActionMenuDefaults.sessionOptionsTitle,
+            action: nil,
+            keyEquivalent: ""
+        )
+        item.submenu = submenu
+        return item
+    }
+
     /// Silences one conversation, or lets it speak again.
     ///
     /// The title reads the *resolved* answer rather than the session's own field, so a session
     /// inside a muted project offers Unmute — the alternative is a Mute item on something that
     /// is already silent, which says the state is the opposite of what it is.
     private func addMuteItem(to menu: NSMenu, for session: AgentSession) {
-        menu.addItem(
+        let item = menu.addItem(
             withTitle: AttentionAlertScope.isMuted(sessionID: session.id)
                 ? L10n.string("Unmute Notifications")
                 : L10n.string("Mute Notifications"),
             action: #selector(toggleMutedClicked),
             keyEquivalent: ""
         )
+        // Inside the Session Options submenu, which the caller's retarget loop never walks.
+        item.target = self
+    }
+
+    private func addAttachmentsItem(to menu: NSMenu) {
+        let item = menu.addItem(
+            withTitle: SessionActionMenuDefaults.attachmentsTitle,
+            action: #selector(attachmentsClicked),
+            keyEquivalent: ""
+        )
+        item.image = NSImage(
+            systemSymbolName: SessionActionMenuDefaults.attachmentsSymbol,
+            accessibilityDescription: SessionActionMenuDefaults.attachmentsTitle
+        )
+        item.target = self
     }
 
     @objc private func toggleMutedClicked() {
@@ -554,59 +793,30 @@ extension ProjectSidebarViewController {
     /// A copied link is a single-use invitation for this chat only. Collaboration and permission
     /// approval are separate rights, so a trusted participant can handle requests caused by
     /// their work without gaining theme, lifecycle, project, or other-chat access.
+    ///
+    /// The mechanics of the invitation — one use, one chat, 24 hours, revocable — belong in the
+    /// message, but the *grants* do not: three sentences about three buttons in one paragraph is
+    /// how "Collaborator + Approval" came to be a phrase the sheet never explained. Each grant
+    /// now prints above its own button, in `shareGrantsAccessory`.
     @objc private func shareSessionClicked() {
         guard let sessionID = actionSessionID,
               let session = ProjectStore.shared.session(withID: sessionID) else { return }
 
-        let isRunning = AgentRuntime.shared.isRunning(sessionID: sessionID)
-
-        // Four buttons, and the named modal responses stop at three — so the fourth used to
-        // arrive through `default:`, sharing that branch with every unrelated dismissal.
-        // `choose` reads it back by index.
-        let request = ChoiceRequest(
-            prompt: .shareChatLink,
-            title: L10n.format("Share “%@”", session.displayTitle),
-            message: isRunning
-                ? L10n.string(
-                    "This single-use invitation opens only this chat and expires after 24 hours "
-                        + "if nobody accepts it. Once accepted, that member keeps access until you "
-                        + "stop sharing. Choose permission approval only for someone you trust."
-                )
-                : L10n.string(
-                    "This single-use invitation opens only this chat and expires after 24 hours "
-                        + "if nobody accepts it. Once accepted, that member keeps access until you "
-                        + "stop sharing. Choose permission approval only for someone you trust. "
-                        + "Start this chat before creating a view-only link; viewing alone never "
-                        + "starts an agent process."
-                ),
-            options: [
-                ConfirmationOption(title: L10n.string("Copy View-Only Link"), isEnabled: isRunning),
-                ConfirmationOption(title: L10n.string("Copy Collaborator Link")),
-                ConfirmationOption(title: L10n.string("Copy Collaborator + Approval Link"))
-            ],
-            style: .informational
+        let grants = ShareLinkGrant.allCases
+        let request = ShareChatSheet.request(
+            chatTitle: session.displayTitle,
+            isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID)
         )
 
-        let capability: RemoteCapability
-        let canApprovePermissions: Bool
-        switch ConfirmationAlert.choose(request) {
-        case 0:
-            capability = .view
-            canApprovePermissions = false
-        case 1:
-            capability = .interact
-            canApprovePermissions = false
-        case 2:
-            capability = .interact
-            canApprovePermissions = true
-        default:
+        guard let chosen = ConfirmationAlert.choose(request), grants.indices.contains(chosen) else {
             return
         }
+        let grant = grants[chosen]
 
         guard let url = RemoteAccessCoordinator.shared.shareURL(
             for: sessionID,
-            capability: capability,
-            canApprovePermissions: canApprovePermissions
+            capability: grant.capability,
+            canApprovePermissions: grant.canApprovePermissions
         ) else {
             let unavailable = NSAlert()
             unavailable.messageText = L10n.string("Secure relay isn’t ready")

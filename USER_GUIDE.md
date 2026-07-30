@@ -373,7 +373,8 @@ finish and notify as usual while it keeps running.
 The same states can reach you outside the app. When a session stops to ask for an approval,
 finishes off screen, or finishes its turn while Threading is behind another app, a macOS
 notification is posted — with sound only for the blocked case, matching the filled dot's
-urgency. Clicking it brings Threading forward and opens that session.
+urgency. Clicking it brings Threading forward and opens that session. When the project has an
+icon, the banner carries it as a thumbnail, so a glance says which project wants you.
 
 Banners only appear while Threading is in the background; in the app, the sidebar marks above
 are the cue. A notification is withdrawn on its own the moment it stops being true — the
@@ -395,7 +396,7 @@ row shows the sentence its notification would say:
 | **Finished a turn in the background** | A turn ended while Threading was behind another app — the chattiest of the three. |
 | **Play a sound** | Only the blocked alert ever sounds; the other two are silent either way. Off keeps the banner without the ping. |
 
-**Silencing one chat or one project.** **Mute Notifications** in a session's `⋯` menu quiets
+**Silencing one chat or one project.** **Session Options ▸ Mute Notifications** in a session's `⋯` menu quiets
 that conversation; the same item on a project row quiets the whole checkout, including sessions
 started in it later. A session follows its project unless you answer for it — so you can mute a
 busy project and leave one conversation audible, or the reverse. The item reads **Unmute
@@ -484,6 +485,12 @@ does not stop the close sheet asking. It is also only remembered **when you go a
 the box and then press Cancel and nothing is stored, because the next attempt would otherwise
 sail past an action you had just declined.
 
+Statements get the same courtesy as questions. When an extension command finishes, it may
+confirm with a short message — "Checks refreshed." — and that alert carries a **Don't show
+this message again** checkbox, remembered for that one command only. Failures always show,
+whatever you hid: a command whose errors stopped appearing would look like it was working.
+Hidden messages come back all at once with **Show All** on the same Settings card.
+
 Everything you switch off this way has a row in **Settings ▸ General ▸ Confirmations**, so
 there is always a way back:
 
@@ -566,8 +573,8 @@ chat instead:
 - **Settings > General > Claude Remote Control** sets what new Claude sessions do. *Follow
   Claude's setting* is the default and changes nothing — the account's `/config` still
   decides. *Always on* and *Always off* override it.
-- A single chat's **⋯** menu has a **Claude Remote Control** submenu: *Always On*, *Always
-  Off*, or the inherit item, which follows the setting above. This is the one to reach for
+- A single chat's **⋯** menu has a **Session Options ▸ Claude Remote Control** submenu:
+  *Always On*, *Always Off*, or the inherit item, which follows the setting above. This is the one to reach for
   when you want everything reachable from your phone except one conversation.
 
 Both take effect the next time the session launches or resumes. A chat that is already
@@ -880,8 +887,8 @@ Worth knowing:
 A session is not stuck on the surface it was created with. Use the interface button in the
 session header to switch directly to the other one: it shows a chat symbol in the agent's
 terminal UI and a terminal symbol in Threading's native UI. For an explicit choice, open
-**Interface** from either the session row's `⋯` or the header's **Context** menu. The two menus
-are the same menu, including their current-surface checkmark.
+**Session Options ▸ Interface** from either the session row's `⋯` or the header's **Context**
+menu. The two menus are the same menu, including their current-surface checkmark.
 
 The conversation carries over — the agent picks up exactly where it left off, with everything
 that was said before still in its context.
@@ -944,11 +951,21 @@ browser or the Threading iPhone app. **Open Locally** tests the browser client o
 and **Pair iPhone…** shows an owner-device QR code for the native app. Pairing is for your own
 trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded
 Native permission requests. To involve somebody else, use a session's **… > Share Chat…** and
-choose a view-only, collaborator, or collaborator-with-approval invitation for that chat alone.
-The invitation works once and expires after 24 hours only if unused. Acceptance creates a
-device-bound membership that lasts until **Stop Sharing**, Remote Access is disabled, or the Mac
-app exits. Permission approval is an explicit right for that member and chat; it never grants
-another chat, Mac settings, or the ability to create shares.
+choose an invitation for that chat alone. The sheet names each grant and what it withholds:
+**View only** follows the chat but cannot type, prompt, or answer a permission request;
+**Collaborator** adds typing and prompts while permission requests still come to you; and
+**Collaborator + approval** adds answering those requests, which lets the agent run commands and
+change files without asking you. View only needs the chat to be running — watching alone never
+starts an agent — so its button waits, and says why. The invitation works once and expires after
+24 hours only if unused. Acceptance creates a device-bound membership that lasts until
+**Stop Sharing**, Remote Access is disabled, or the Mac app exits. Permission approval is an
+explicit right for that member and chat; it never grants another chat, Mac settings, or the
+ability to create shares.
+
+A shared chat sizes itself to the window it is opened in. A collaborator's browser asks the Mac
+to reflow the terminal to the width it can actually show — the same lease the iPhone takes, given
+back when the page closes — while a view-only page, which is never allowed to resize your
+session, shrinks its own type until the whole grid fits its frame instead.
 
 A dormant session can be resumed remotely; a running agent UI mirrors its terminal scrollback
 and accepts keyboard input, while Native sessions show the conversation, composer, and
@@ -1047,8 +1064,9 @@ out of the history.
 Four buttons sit at the header's right edge:
 
 - **Context** (⋯) — the same full menu as the session row's `⋯`: pinning, archiving, side
-  chats, **Interface**, **Theme**, **Attachments**, rename, account moves, sharing, deletion,
-  and any installed extension actions that apply.
+  chats, **Theme**, **Permission Mode**, **Session Options** (Interface, Claude Remote
+  Control, Mute Notifications, Attachments), rename, account moves, sharing, deletion, and
+  any installed extension actions that apply.
 - **Interface** — switches directly to the other renderer. Its icon points at the destination:
   chat for Threading's native UI, terminal for Claude Code's or Codex's own UI.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
@@ -1077,7 +1095,7 @@ PDF, Threading adds it to that session's **Attachments** tab. The same detection
 Chat replies, and an image deliberately shown through the display tool is added too. Code files
 are ignored because Git Review already covers them.
 
-Open **Attachments** from the session header's **⋯** menu or the panel's **+** menu. The list
+Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu. The list
 sits above an inline image/PDF preview; **Open**, **Finder**, and **Copy Path** act on the
 selected file. A new reference to the same path moves it to the top and refreshes the preview,
 so the project file remains the source of truth rather than being copied into Threading.
@@ -1410,6 +1428,18 @@ Each menu's **Inherit** item clears that level's choice and names what it falls 
 choice anywhere follows the default wherever it moves — the level is remembered as *inherit*,
 not as a copy of whatever was current at the time.
 
+**Follow App Theme** is the other way to not choose, and it is a different one. Inherit takes
+whatever the *next level out* says; Follow App Theme takes whatever the **app theme** says,
+using the terminal palette that ships with each style — Cyberpunk's neon, Bauhaus's primaries,
+Art Deco's brass — and moving whenever you switch chrome. It is a real choice, so it beats the
+levels outside it: a session set to Follow App Theme keeps following the chrome even if its
+project names Solarized. Under the System theme it also tracks macOS light and dark.
+
+**Out of the box the default is Follow App Theme**, so with nothing chosen anywhere, switching
+app theme moves the terminals too. If you have used Threading before and your terminals stay put,
+you have a saved profile holding the old fixed palette — pick **Follow App Theme** once in
+Settings ▸ Themes ▸ **Use as Default**.
+
 Deleting a theme leaves anything using it inheriting again. Renaming one keeps them.
 
 Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
@@ -1564,7 +1594,8 @@ than borrowing an unrelated app translation.
 - **Discover project icons** — see [Project icons](#project-icons)
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
-- **Confirmations** — one switch per prompt; see [Confirmations](#confirmations)
+- **Confirmations** — one switch per prompt, plus **Hidden extension messages ▸ Show All**;
+  see [Confirmations](#confirmations)
 - **Allow remote access** — see [Remote Access](#remote-access-beta)
 - **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)
 - **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
@@ -1825,6 +1856,38 @@ Removal is immediate rather than to the Trash, since space in the Trash has not 
 Sizes are measured the way `du` measures them, counting a hard-linked file once however many
 names it has — build directories are full of them, and counting each name would promise space
 that deleting does not return.
+
+### Advanced
+Where Threading keeps what it remembers, and how to start over.
+
+Everything lives in exactly two places, and both are shown with a **Reveal** button rather than
+described:
+
+| | Where | Holds |
+|---|---|---|
+| Settings | `~/Library/Preferences/codes.threading.plist` | Themes, profiles, every preference |
+| Data | `~/Library/Application Support/Threading` | Projects, sessions, conversations, panel layouts, icons, caches |
+
+Two ways to start over, because they cost different things:
+
+- **Reset Settings…** puts themes, profiles and every preference back to their defaults. Projects,
+  sessions and conversations are untouched. This is the one for "something in my settings is
+  wrong", and it is worth trying before the other.
+- **Reset Everything…** also clears the data directory, so Threading restarts as if newly
+  installed — no projects, no sessions, no conversations.
+
+**Nothing is deleted.** Both resets *move* the old state into a dated folder,
+`~/Library/Application Support/Threading Resets/2026-07-30 14-32-05/`, so a reset you regret is a
+drag back rather than a loss, and a database that was corrupt is still there to be looked at. The
+folders stay until you remove them, which is the other reason the page reveals that location.
+
+Threading restarts itself immediately after a reset. That is not a convenience: the running app
+holds your projects and window layout in memory and would write them straight back over the reset
+otherwise.
+
+**Only Threading's own two places are touched.** Your agent logins, and anything the Claude or
+Codex CLIs keep for themselves, live in their own folders and are left exactly where they are —
+so a reset does not sign you out.
 
 ### Profiles, Themes, AI
 Terminal font and cursor, colour schemes, and AI provider configuration.

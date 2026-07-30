@@ -377,6 +377,73 @@ final class FollowsAppThemeTests: XCTestCase {
         XCTAssertTrue(ThemeAssignments.availableIDs.contains(.followsAppTheme))
     }
 
+    /// **The shipped default follows the chrome**, which is what makes Inherit mean anything.
+    ///
+    /// The chain's last answer is the default profile's embedded theme, and while that was
+    /// `.basic` the one state every session ships in — Inherit all the way up — resolved to a
+    /// fixed white-on-black palette. Switching app theme moved the window and left the terminal
+    /// inside it alone, and the two read as one thing broken rather than two settings.
+    func testTheShippedDefaultFollowsTheAppTheme() {
+        XCTAssertEqual(
+            TerminalProfile.default.theme.id,
+            .followsAppTheme,
+            "a fresh install's terminal does not follow its chrome"
+        )
+    }
+
+    /// Stored as the reserved ID and not as the palette it happened to mean at the time, so the
+    /// chain's last answer re-resolves like any other scope — asserted through
+    /// `ThemeAssignments.defaultTheme`, the singleton path the app actually reads.
+    ///
+    /// The default is *written* first rather than assumed: `PreferenceStore`'s scratch suite is
+    /// named and therefore persistent, so a profile stored by an earlier run of
+    /// `ThemeToolTests.testSetThemeCanMakeTheGlobalDefaultFollowAppTheme` outlives it and shadows
+    /// the factory value — which is the same shadowing a real user with a saved profile sees, and
+    /// exactly why this reads the shipped struct instead of trusting what is on disk.
+    func testTheDefaultsPaletteMovesWithTheAppTheme() {
+        let previous = ThemeAssignments.defaultTheme
+        defer { ThemeAssignments.setDefaultTheme(previous) }
+        ThemeAssignments.setDefaultTheme(TerminalProfile.default.theme)
+
+        XCTAssertEqual(ThemeAssignments.defaultTheme.id, .followsAppTheme)
+
+        AppThemeLibrary.apply(AppThemeStyles.cyberpunk)
+        let cyber = ThemeAssignments.palette(withID: ThemeAssignments.defaultTheme.id)
+
+        AppThemeLibrary.apply(AppThemeStyles.newsprint)
+        let newsprint = ThemeAssignments.palette(withID: ThemeAssignments.defaultTheme.id)
+
+        XCTAssertEqual(cyber.background.hexString,
+                       AppThemeStyles.cyberpunk.terminalPalette.background.hexString)
+        XCTAssertEqual(newsprint.background.hexString,
+                       AppThemeStyles.newsprint.terminalPalette.background.hexString)
+        XCTAssertNotEqual(cyber.background.hexString, newsprint.background.hexString,
+                          "the default stayed on the palette it was created with")
+    }
+
+    /// A session that never chose — the state everything ships in — reaches the app theme through
+    /// two empty scopes. This is the user-visible claim: switch chrome, the terminal moves.
+    ///
+    /// Resolved against the shipped default rather than the stored one, so the claim being made is
+    /// about what the app ships with and not about what this machine has on disk.
+    func testASessionThatChoseNothingReachesTheAppThemeThroughTheChain() throws {
+        let resolved = try XCTUnwrap(ThemeResolution.resolve(
+            session: nil,
+            project: nil,
+            global: TerminalProfile.default.theme.id,
+            available: ThemeAssignments.availableIDs
+        ))
+        XCTAssertEqual(resolved.scope, .global)
+        XCTAssertEqual(resolved.themeID, .followsAppTheme)
+
+        AppThemeLibrary.apply(AppThemeStyles.bauhaus)
+        XCTAssertEqual(
+            ThemeAssignments.palette(withID: resolved.themeID).background.hexString,
+            AppThemeStyles.bauhaus.terminalPalette.background.hexString,
+            "an inheriting session did not land on the app theme's own palette"
+        )
+    }
+
     /// The palette is the live one, not a copy taken when the choice was made.
     func testThePaletteFollowsTheAppThemeRatherThanBeingCopied() {
         AppThemeLibrary.apply(AppThemeStyles.cyberpunk)

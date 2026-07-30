@@ -408,6 +408,20 @@ extension TerminalTheme {
         brightWhite: .white
     )
 
+    /// The app-theme entry in **stored** form, for the one place that must hold a palette rather
+    /// than resolve one: the default profile embeds its theme instead of naming it, so that a
+    /// terminal keeps drawing after the theme it named has been deleted.
+    ///
+    /// Only the reserved ID is load-bearing here — `ThemeAssignments.palette(withID:)` answers it
+    /// from the live app theme, so these colours are never what a terminal draws with. They are
+    /// `systemDark`'s so that anything reading a raw profile without resolving it still gets the
+    /// palette the System theme pairs with rather than a blank one. A static snapshot cannot be
+    /// appearance-aware; the resolved answer is, which is the whole reason the ID is stored.
+    static let followsAppTheme = systemDark.identified(
+        .followsAppTheme,
+        named: TerminalThemeNames.followsAppTheme
+    )
+
     static let systemDark = TerminalTheme(
         id: TerminalThemeID("system-dark"),
         name: "System",

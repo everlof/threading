@@ -49,30 +49,45 @@ enum ExtensionCommandInvoker {
         ) { result in
             switch result {
             case .failure(let error):
-                presentResult(
-                    title: command.title,
-                    message: error.localizedDescription,
-                    isError: true,
+                NoticeAlert.show(
+                    resultNotice(
+                        for: command,
+                        message: error.localizedDescription,
+                        isError: true
+                    ),
                     in: window
                 )
             case .success(let response):
                 if let error = response.error {
-                    presentResult(
-                        title: command.title,
-                        message: error,
-                        isError: true,
+                    NoticeAlert.show(
+                        resultNotice(for: command, message: error, isError: true),
                         in: window
                     )
                 } else if let message = response.message {
-                    presentResult(
-                        title: command.title,
-                        message: message,
-                        isError: false,
+                    NoticeAlert.show(
+                        resultNotice(for: command, message: message, isError: false),
                         in: window
                     )
                 }
             }
         }
+    }
+
+    /// The receipt or the failure, as one request. A success carries the command's own notice
+    /// key, so its "done" message can be declined per command; an error carries none, so it
+    /// can never be hidden — a command whose failures stopped showing would read as working.
+    /// Internal rather than private for exactly that assertion (`NoticeAlertTests`).
+    static func resultNotice(
+        for command: AppCommand,
+        message: String,
+        isError: Bool
+    ) -> NoticeRequest {
+        NoticeRequest(
+            notice: isError ? nil : .extensionCommandReceipt(commandID: command.id),
+            title: command.title,
+            message: message,
+            style: isError ? .warning : .informational
+        )
     }
 
     private static func presentConfirmation(
@@ -93,20 +108,4 @@ enum ExtensionCommandInvoker {
         ConfirmationAlert.ask(request, in: window, completion: completion)
     }
 
-    private static func presentResult(
-        title: String,
-        message: String,
-        isError: Bool,
-        in window: NSWindow?
-    ) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = isError ? .warning : .informational
-        if let window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
-    }
 }

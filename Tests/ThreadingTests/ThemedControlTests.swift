@@ -2520,6 +2520,9 @@ final class ThemedControlTests: XCTestCase {
             [
                 "BackdropOverlay",
                 "BackdropThemedControl",
+                "BrowserAnnotationOverlay",
+                "BrowserDeviceToolbar",
+                "BrowserFindBar",
                 "ChipView",
                 "FileActivityMapView",
                 "ImageCompareCanvas",

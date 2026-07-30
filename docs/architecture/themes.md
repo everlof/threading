@@ -80,6 +80,19 @@ macOS the way every System role does.
 
 Three decisions carry it:
 
+- **It is what the app ships with.** `TerminalProfile.default.theme` is
+  `TerminalTheme.followsAppTheme`, the entry in stored form. It was `.basic` — white on black
+  whatever the chrome did — and since every session and project ships on Inherit, the chain's last
+  answer was the one scope that could not move: switching app theme changed the window and left the
+  terminal inside it alone, which reads as one thing broken rather than two settings. It also left a
+  light-mode window holding a black terminal, the case `WindowBackdrop` and the OSC 11 reply exist
+  to keep coherent, and it hid every theme's designed pairing behind a submenu. **There is no
+  migration**: `defaultTheme` is an embedded copy, so anyone with a saved profile — one
+  `ProfileStorage.save` is enough — keeps the palette already on disk and changes it in Settings if
+  they want the new behaviour. The same shadowing bites the test suite, because
+  `PreferenceStore.hostedTestSuiteName` is a *named* suite: a default written by
+  `ThemeToolTests` outlives its run, so a test asserting the shipped value must state its own
+  starting point rather than read one off disk (`FollowsAppThemeTests`).
 - **It is a reserved stable ID, not a fourth setting.** `TerminalThemeID.followsAppTheme`
   participates in the same three scoped assignments as every other terminal theme, so a session
   can follow the chrome while its project names Solarized and the narrowest scope still wins.
@@ -324,6 +337,27 @@ crossed the split — one stated decision rendered at two weights. `ThemedSplitV
 `dividerThickness` (floored at a point, because that seam is also the drag handle) and invalidates
 its constraints on `AppThemeDidChange`: the split reads the thickness while placing its panes and
 never asks again, so repainting alone left them spaced for the theme that just left.
+
+**A theme states sizes as well as colours, so following one is a redraw *and* a remeasure.** Fixing
+the seam left the mismatch in place from the other side, and this is why: `dividerThickness` is
+computed per read, so the seam was right the moment the palette moved, while every `SeparatorView`
+in the window — a pane header's rule, a footer's, the drawer's, the display panel's — is placed
+against the size the constraint system last *asked* for, and `intrinsicContentSize` reading the
+token live does not make AppKit re-ask. Repainting alone left every rule ruling for the theme that
+had just left while anything built after the switch took the new weight, so arriving at Editorial
+(1) from Neo Brutalism (3) drew hairlines, 3-point rules and a 1-point seam at once — and the three
+styles the seam's own fix was checked against all happened to be entered from themselves.
+`ThemeRedraw` now invalidates the intrinsic size beside asking for the redraw, which is the one
+place that already knows a theme changed; a view that states no intrinsic size is unaffected, and
+the sweep across the whole catalogue is `ThemedIndicatorsTests`
+(`testEveryStockThemeRulesAtOneWeightThroughoutTheWindow`), entering each style from the heaviest
+one so a stale rule has somewhere to show.
+
+The exception, and it is structural: the browser's device toolbar and find bar hide by dropping
+their rule's height to **zero**, so those two weights are constraint constants rather than
+intrinsic sizes — an intrinsic size cannot also mean "nothing". A constant is whatever it was last
+set to, so `BrowserViewController` reapplies both (`applyRuleWeights`) on a theme change. Anything
+else that collapses a rule this way owes the same reapplication.
 
 ## 2026-07-27 — extension-contributed themes and fonts (the third tier)
 

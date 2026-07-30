@@ -88,7 +88,7 @@ Components so far:
 | `ToolbarButtonGroupView` | Related toolbar actions as one item, so their spacing is ours rather than `NSToolbar`'s. |
 | `WorkingOrbView` | The dotted "working" orb, tinted with the accent — the theme boundary for the `ThinkingOrbs` view. |
 | `ThemedTabItemView` | **Every** tab: the display pane's strip, the settings sidebar, and the toolbar's active page. A middle-button click closes a closable tab on release without selecting it first; dragging away cancels, and other auxiliary buttons keep their own meaning. |
-| `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its `bandHeight` is `PaneHeaderView.bandHeight`, so every strip's hairline lands on the panes' shared line. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut`/`onDragEnded` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land, the receiving strip washing as a drop target (`isDropTarget`), and the slot named by the same midpoint rule as the reorder (`insertionIndex(forWindowPoint:)`) — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. |
+| `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its `bandHeight` is `PaneHeaderView.bandHeight`, so every strip's hairline lands on the panes' shared line. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut`/`onDragEnded` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land, the receiving strip washing as a drop target (`isDropTarget`), and the slot named by the same midpoint rule as the reorder (`insertionIndex(forWindowPoint:)`) — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. A host that pins **both** of the strip's edges says so with `fillsHostWidth`: the default `.defaultHigh` hugging is what lets a control placed *after* the tabs follow them, and in a host that has no such control it is a *maximum on the host* — it capped the display panel at its own tab titles (see [`mcp-and-display.md`](mcp-and-display.md)). |
 | `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. |
 | `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
 | `PaneHeaderView` | The footer's mirror at a pane's top. Its height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it), so the two panes' hairlines land on one line. |
@@ -207,6 +207,22 @@ Banning `NSAlert` would need an exception per OK-only alert; the precise signal 
 dictates in `BrowserViewController`. Honest gaps: comparing `response.rawValue == 1000`, running a
 two-button alert and discarding the answer, or adding a second gate. Those are deliberate evasion;
 reflex is what the lint catches.
+
+**A repeated statement earns the same way out a repeated question does.** An OK-only alert asks
+nothing, which is why the register above deliberately does not cover it — but a receipt shown
+after every invocation of the same command ("Checks refreshed.") interrupts exactly as a
+question would. `NoticeAlert`, in the same directory for the same reason (honouring the box
+means reading the response the lint bans elsewhere), shows a statement whose request may carry
+an `AppNotice` key; the box says "Don't show this message again" rather than "Don't ask again",
+because nothing was asked, and it is honoured only when OK dismissed the alert. The registers
+stay separate because their shapes differ: notice keys are **dynamic** — the first ones are
+extension command receipts, one per qualified command id — so there is no compile-time case per
+key to hang a policy switch on, and the Confirmations card carries one "Hidden extension
+messages ▸ Show All" control instead of a row per key (a hidden receipt whose extension was
+removed has no honest title left for a row; `GeneralSettingsRenderTests` holds the control to
+existing). "Errors always show" is enforced by construction rather than by a flag: an error
+path is never given a key at all, and `ExtensionCommandInvoker.resultNotice` is the one seam
+that states it.
 
 `TextPromptAlert` lives in the same directory and carries no prompt, because an input prompt's
 answer *is* the input and cannot be remembered. It is there so the lint's exception list stays at

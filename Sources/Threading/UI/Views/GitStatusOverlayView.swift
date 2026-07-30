@@ -40,6 +40,28 @@ enum GitStatusOverlayDefaults {
 /// slot already does.
 final class GitStatusOverlayView: BackdropOverlay {
 
+    // MARK: - Types
+
+    /// What the card should say about the agent this session runs, **already reduced to the facts
+    /// its own status line does not show**.
+    ///
+    /// The filtering happens before the card, and deliberately: for a terminal session it is
+    /// `ClaudeStatusLineCoverage` that decides — by running the account's `statusLine` and looking
+    /// for values Threading already holds — and a native conversation has no status line to
+    /// complement, so it passes everything. Either way this view is handed a decision rather than
+    /// asked to make one, which is what keeps a Claude-specific rule out of a Git-shaped card.
+    ///
+    /// A nil field is not "unknown", it is "do not say this". A caller that wants the model shown
+    /// puts it here; a caller whose status line already prints it leaves it out.
+    struct ModelReading: Equatable {
+        var name: String?
+        /// Already display-named — "Extra High", not "xhigh".
+        var effort: String?
+        var isFast = false
+
+        var isEmpty: Bool { name == nil && effort == nil && !isFast }
+    }
+
     // MARK: - Properties
 
     /// Called when the Git portion is clicked; the container routes it to the review tab.
@@ -47,20 +69,26 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// The child-agent segment is a distinct destination inside the same status card.
     var onOpenSubagents: (() -> Void)?
 
-    /// The card's rows, top down: the summary line, the counters line, the children line.
+    /// The card's rows, top down: the summary line, the counters line, the agent line, the
+    /// children line.
     private let content = NSStackView()
     /// The first row — the mark and whichever sentence leads: branch, plan position, or, on a
     /// detached head, the counters themselves.
     private let summaryRow = NSStackView()
     /// The counters line: how many files, and the two totals held to the trailing edge.
     private let countersRow = NSStackView()
+    /// The agent line: which model this session is running, and how, for the facts its own
+    /// status line does not already say.
+    private let modelRow = NSStackView()
     private let glyph = NSImageView()
     private let countersMark = NSImageView()
+    private let modelMark = NSImageView()
     private let subagentsButton: ThemedButton
     private var summaryLabel: NSTextField?
     private var filesLabel: NSTextField?
     private var countersGap: NSView?
     private var countersLabel: NSTextField?
+    private var modelLabel: NSTextField?
     /// Whether there is a Git sentence to click through to Git Review with.
     private var hasGitReceipt = false
 
@@ -79,6 +107,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var slotTopConstraint: NSLayoutConstraint?
     private var summaryRowHeightConstraint: NSLayoutConstraint?
     private var countersRowHeightConstraint: NSLayoutConstraint?
+    private var modelRowHeightConstraint: NSLayoutConstraint?
     private var slotRowWidthConstraints: [NSLayoutConstraint] = []
 
     /// Held so a backdrop change can rebuild the label, which carries its colours inside an
@@ -87,6 +116,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var isRunActive = false
     private var runProgress: RunProgress?
     private var subagentCounts = (working: 0, done: 0)
+    private var modelReading: ModelReading?
 
     /// Lifts the card's *contents* to full strength under the pointer. The surface behind them
     /// does not move: it is what keeps the pane's text out of the card.
@@ -130,6 +160,9 @@ final class GitStatusOverlayView: BackdropOverlay {
         // a stray colour rather than as a state.
         configureMark(glyph, symbol: "arrow.triangle.branch", description: L10n.string("Branch"))
         configureMark(countersMark, symbol: "plusminus", description: L10n.string("Changes"))
+        // The same symbol the composer and the conversation's status row already use for the
+        // model chip, so one fact keeps one mark wherever it is shown.
+        configureMark(modelMark, symbol: "cpu", description: L10n.string("Model"))
 
         summaryRow.orientation = .horizontal
         summaryRow.alignment = .centerY
@@ -144,6 +177,13 @@ final class GitStatusOverlayView: BackdropOverlay {
         countersRow.isHidden = true
         countersRow.addArrangedSubview(countersMark)
 
+        modelRow.orientation = .horizontal
+        modelRow.alignment = .centerY
+        modelRow.spacing = GitStatusOverlayDefaults.markGap
+        modelRow.translatesAutoresizingMaskIntoConstraints = false
+        modelRow.isHidden = true
+        modelRow.addArrangedSubview(modelMark)
+
         // No spacing between rows: the summary band and the children button are each a
         // 26-point band with their own text centred in it, so the padding is already there.
         // A spacing token here would be counted twice and the lines would drift apart.
@@ -154,6 +194,9 @@ final class GitStatusOverlayView: BackdropOverlay {
         content.translatesAutoresizingMaskIntoConstraints = false
         content.addArrangedSubview(summaryRow)
         content.addArrangedSubview(countersRow)
+        // Under the checkout, over the children: the rows read outward from what this pane *is* —
+        // which branch, what changed in it, which agent is working it, who it delegated to.
+        content.addArrangedSubview(modelRow)
 
         subagentsButton.target = self
         subagentsButton.action = #selector(openSubagents)
@@ -202,18 +245,26 @@ final class GitStatusOverlayView: BackdropOverlay {
         // keeps every row's *frame* at the content edge, so the button never has to hang
         // outside its parent to line up, which would leave its leading edge unclickable.
         let markInset = subagentsButton.opticalHorizontalInset
-        for row in [summaryRow, countersRow] {
+        for row in [summaryRow, countersRow, modelRow] {
             row.edgeInsets = NSEdgeInsets(top: 0, left: markInset, bottom: 0, right: markInset)
         }
         let countersRowHeight = countersRow.heightAnchor.constraint(
             equalToConstant: GitStatusOverlayDefaults.height
         )
         countersRowHeight.isActive = false
+        // Whichever row leads carries the card's top padding, and only a band does — so every
+        // row that *can* lead needs the band available to it. The agent line leads a card with no
+        // checkout sentence and no counters, which is a detached head with a clean tree.
+        let modelRowHeight = modelRow.heightAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.height
+        )
+        modelRowHeight.isActive = false
         collapsedBottomConstraint = collapsedBottom
         expandedBottomConstraint = expandedBottom
         slotTopConstraint = slotTop
         summaryRowHeightConstraint = summaryRowHeight
         countersRowHeightConstraint = countersRowHeight
+        modelRowHeightConstraint = modelRowHeight
 
         NSLayoutConstraint.activate([
             widthAnchor.constraint(lessThanOrEqualToConstant: GitStatusOverlayDefaults.maxWidth),
@@ -278,6 +329,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         applyLayerBorder(ink.border.composited(over: surface))
         glyph.contentTintColor = ink.secondary
         countersMark.contentTintColor = ink.tertiary
+        modelMark.contentTintColor = ink.tertiary
         subagentsButton.contentTintColor = ink.secondary
         subagentsButton.hoverFill = ink.surfaceHover
         rebuild()
@@ -313,13 +365,25 @@ final class GitStatusOverlayView: BackdropOverlay {
         rebuild()
     }
 
+    /// States which agent facts the card is responsible for, or nil to say none.
+    ///
+    /// Nil and an all-nil reading mean the same thing here — no agent line — because the caller
+    /// that has nothing to add and the caller whose status line already says everything both want
+    /// the row gone.
+    func updateModel(_ reading: ModelReading?) {
+        modelReading = (reading?.isEmpty ?? true) ? nil : reading
+        rebuild()
+    }
+
     func clear() {
         lastReading = nil
         isRunActive = false
         runProgress = nil
         subagentCounts = (working: 0, done: 0)
+        modelReading = nil
         hasGitReceipt = false
         subagentsButton.isHidden = true
+        modelRow.isHidden = true
         isHidden = true
     }
 
@@ -375,22 +439,25 @@ final class GitStatusOverlayView: BackdropOverlay {
         )
         let counters = Self.countersText(for: lastReading, ink: ink, diff: diff)
 
+        let model = Self.modelText(for: modelReading, ink: ink)
+
         hasGitReceipt = head != nil || counters != nil
         let hasSubagents = subagentCounts.working + subagentCounts.done > 0
-        guard hasGitReceipt || hasSubagents else {
+        guard hasGitReceipt || hasSubagents || model != nil else {
             isHidden = true
             return
         }
 
         // Rebuilt rather than reassigned: a label measures itself at creation, and the helper
         // exists precisely because assigning attributed text afterwards does not re-measure.
-        for view in [summaryLabel, filesLabel, countersLabel, countersGap] {
+        for view in [summaryLabel, filesLabel, countersLabel, countersGap, modelLabel] {
             view?.removeFromSuperview()
         }
         summaryLabel = nil
         filesLabel = nil
         countersGap = nil
         countersLabel = nil
+        modelLabel = nil
 
         if let head {
             let label = NSTextField.label(attributed: head)
@@ -425,19 +492,36 @@ final class GitStatusOverlayView: BackdropOverlay {
             countersLabel = totals
             countersRow.addArrangedSubview(totals)
         }
+        if let model {
+            let label = NSTextField.label(attributed: model)
+            label.cell?.lineBreakMode = .byTruncatingTail
+            modelLabel = label
+            modelRow.addArrangedSubview(label)
+        }
 
         summaryRow.isHidden = head == nil
         countersRow.isHidden = counters == nil
+        modelRow.isHidden = model == nil
         summaryRowHeightConstraint?.isActive = head != nil
         // Whichever row leads carries the card's top padding, and only a band does. On a
-        // detached head the counters lead, so the band moves to them.
+        // detached head the counters lead, so the band moves to them — and with a clean tree as
+        // well, the agent line leads and it moves again.
         countersRowHeightConstraint?.isActive = head == nil && counters != nil
+        modelRowHeightConstraint?.isActive = head == nil && counters == nil && model != nil
         subagentsButton.isHidden = !hasSubagents
 
-        // Only a bare label needs the card to end below it; the bands end below themselves.
-        let endsOnBareLabel = counters != nil
-            && !hasSubagents
-            && countersRowHeightConstraint?.isActive != true
+        // Only a bare label needs the card to end below it; the bands end below themselves. The
+        // last row is the children button when there is one, then the agent line, then the
+        // counters — and either of the latter two is a band instead when it happens to lead.
+        let endsOnBareLabel: Bool
+        if hasSubagents {
+            endsOnBareLabel = false
+        } else if model != nil {
+            endsOnBareLabel = modelRowHeightConstraint?.isActive != true
+        } else {
+            endsOnBareLabel = counters != nil
+                && countersRowHeightConstraint?.isActive != true
+        }
         let bottomInset = endsOnBareLabel ? Design.Spacing.small : 0
         collapsedBottomConstraint?.constant = bottomInset
         slotTopConstraint?.constant = bottomInset
@@ -452,19 +536,29 @@ final class GitStatusOverlayView: BackdropOverlay {
             // Put the destination in help instead of trying to replace that truthful title.
             subagentsButton.setAccessibilityHelp(L10n.string("Open Subagents"))
         }
+        // The agent line rides whichever label the card already spoke: it is a row of the same
+        // card, and a row nobody hears is a row that is not there for half the readers. It does
+        // not make the card *clickable* — only a Git receipt does that, so the role still follows
+        // `hasGitReceipt` and a model-only card stays a group.
         if hasGitReceipt {
             setAccessibilityRole(.button)
             setAccessibilityLabel(Self.spokenText(
                 for: lastReading,
                 isRunActive: isRunActive,
-                progress: runProgress
+                progress: runProgress,
+                model: modelReading
             ))
             toolTip = L10n.string("Open Git Review (⇧⌘R)")
         } else {
             setAccessibilityRole(.group)
-            setAccessibilityLabel(
-                L10n.format("Subagents: %@", subagentsButton.title)
-            )
+            var parts: [String] = []
+            if hasSubagents {
+                parts.append(L10n.format("Subagents: %@", subagentsButton.title))
+            }
+            if let spoken = Self.spokenModelText(for: modelReading) {
+                parts.append(spoken)
+            }
+            setAccessibilityLabel(parts.joined(separator: "  ·  "))
             toolTip = nil
         }
         isHidden = false
@@ -544,12 +638,61 @@ final class GitStatusOverlayView: BackdropOverlay {
         return (files, totals)
     }
 
+    /// The agent line: the model leading, then how it is running.
+    ///
+    /// The name takes `secondary` and its qualifiers `tertiary` — the same split the counters row
+    /// makes between the file count and its totals, and what keeps a three-part line reading as
+    /// one fact with detail rather than three of equal weight.
+    ///
+    /// Nil when there is nothing to say, which is the caller's cue to hide the row. Each part is
+    /// independently optional because the caller has already dropped whatever the session's own
+    /// status line prints: a line of just "Fast" is the correct output for an account whose status
+    /// line names the model and effort but not the speed.
+    private static func modelText(
+        for reading: ModelReading?,
+        ink: Design.Ink
+    ) -> NSAttributedString? {
+        guard let reading, !reading.isEmpty else { return nil }
+        let font = Design.Typography.numericDetail(weight: .medium)
+        let text = NSMutableAttributedString()
+
+        if let name = reading.name {
+            text.append(NSAttributedString(string: name, attributes: [
+                .font: font,
+                .foregroundColor: ink.secondary
+            ]))
+        }
+
+        var details: [String] = []
+        if reading.isFast { details.append(L10n.string("Fast")) }
+        if let effort = reading.effort { details.append(effort) }
+        guard !details.isEmpty else { return text }
+
+        let joined = details.joined(separator: " · ")
+        text.append(NSAttributedString(
+            string: text.length == 0 ? joined : " · \(joined)",
+            attributes: [.font: font, .foregroundColor: ink.tertiary]
+        ))
+        return text
+    }
+
+    /// The agent line as one spoken phrase, or nil when the card has no agent row.
+    private static func spokenModelText(for reading: ModelReading?) -> String? {
+        guard let reading, !reading.isEmpty else { return nil }
+        var parts: [String] = []
+        if let name = reading.name { parts.append(name) }
+        if reading.isFast { parts.append(L10n.string("Fast")) }
+        if let effort = reading.effort { parts.append(effort) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     /// Every row the card is showing, as one sentence, for the reader who hears it rather than
     /// sees it: exact counts, and a separator where the eye sees a line break.
     private static func spokenText(
         for reading: GitChangeMonitor.Reading?,
         isRunActive: Bool,
-        progress: RunProgress?
+        progress: RunProgress?,
+        model: ModelReading?
     ) -> String {
         var parts: [String] = []
         if isRunActive {
@@ -565,6 +708,8 @@ final class GitStatusOverlayView: BackdropOverlay {
                     + " −\(formatted(reading.summary.removed))"
             )
         }
+
+        if let spoken = spokenModelText(for: model) { parts.append(spoken) }
 
         return parts.joined(separator: "  ·  ")
     }

@@ -4,7 +4,7 @@ import XCTest
 
 /// Draws the generated Dock icon under every stock theme and writes the contact sheet out.
 ///
-/// The same reason the other render tests exist: whether the chevron still reads at 16pt on
+/// The same reason the other render tests exist: whether the Threading mark still reads at 16pt on
 /// Newsprint's beige, or whether Bauhaus's hard printed shadow lands on the plate or hangs off
 /// its corner, is a question about a picture. The assertions here cover what a picture cannot —
 /// that the ink is legible on its own ground, that the System theme leaves the bundle icon
@@ -80,7 +80,7 @@ final class AppIconRenderTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(
                     strongestContrast(in: raster, against: ground),
                     ThemeContrast.minimumRatio,
-                    "\(theme.name)'s chevron does not read on its own plate"
+                    "\(theme.name)'s mark does not read on its own plate"
                 )
             }
         }
@@ -88,7 +88,7 @@ final class AppIconRenderTests: XCTestCase {
 
     /// 16pt is the switcher's smallest rendition and where a mark stops being a mark. Asserted
     /// rather than eyeballed because the contact sheet is drawn large.
-    func testTheChevronSurvivesTheSmallestDockSize() throws {
+    func testTheMarkSurvivesTheSmallestDockSize() throws {
         for theme in AppThemeLibrary.stock where theme.id != .system {
             let appearance = try XCTUnwrap(appearances(for: theme).first)
             let image = try XCTUnwrap(GeneratedAppIcon.image(for: theme, appearance: appearance))
@@ -97,7 +97,7 @@ final class AppIconRenderTests: XCTestCase {
 
             XCTAssertGreaterThan(
                 strongestContrast(in: raster, against: ground), 1.5,
-                "\(theme.name)'s chevron dissolves into its plate at 16pt"
+                "\(theme.name)'s mark dissolves into its plate at 16pt"
             )
         }
     }
@@ -126,7 +126,7 @@ final class AppIconRenderTests: XCTestCase {
             GeneratedAppIcon.image(for: theme(accent: .systemOrange), appearance: appearance)
         )
 
-        // Compared across the whole raster rather than at one point: where the chevron's ink
+        // Compared across the whole raster rather than at one point: where the mark's ink
         // falls depends on the join, and a probe aimed at the plate's centre lands just inside
         // the vertex's *inner* edge — reading the ground from both, which is a pass by accident.
         let first = try XCTUnwrap(rasterize(before, side: Render.sheetSide))
@@ -143,7 +143,7 @@ final class AppIconRenderTests: XCTestCase {
     /// Pinned because the two coordinate systems disagree and nothing else would notice.
     /// `Design.applyThemeGlow` hands the theme's `offsetY: -4` to `CALayer.shadowOffset`, whose
     /// y is up, so the lift lands below the panel. `NSShadow` in this drawing context resolves
-    /// the same number the other way, and the first render put Bauhaus's black chevron above
+    /// the same number the other way, and the first render put Bauhaus's black mark above
     /// its red one — a picture that reads as two marks rather than one lifted off the page.
     func testAPrintedStyleCastsItsLiftDownAndRight() throws {
         let bauhaus = try XCTUnwrap(
@@ -179,30 +179,32 @@ final class AppIconRenderTests: XCTestCase {
 
     // MARK: - A Contributed Mark
 
-    /// A contributed theme's mark replaces the chevron — and the plate stays the theme's.
+    /// A contributed theme's mark replaces the default mark — and the plate stays the theme's.
     ///
     /// The second assertion is the one that matters: an extension supplies a glyph, never a
     /// tile, so whatever it ships the icon's ground is still the ground the theme states.
     /// `ExtensionBundleLoader` refuses an opaque mark at inspection; this checks the drawing
     /// half of the same rule.
-    func testAContributedMarkReplacesTheChevronButNotThePlate() throws {
+    func testAContributedMarkReplacesTheDefaultMarkButNotThePlate() throws {
         let theme = AppThemeStyles.cyberpunk
         let appearance = try XCTUnwrap(theme.mode.appearance)
         let recipe = try XCTUnwrap(GeneratedAppIcon.Recipe(theme: theme, appearance: appearance))
 
-        let withChevron = try XCTUnwrap(
+        let withDefaultMark = try XCTUnwrap(
             GeneratedAppIcon.image(for: theme, appearance: appearance, mark: nil)
         )
         let withMark = try XCTUnwrap(
             GeneratedAppIcon.image(for: theme, appearance: appearance, mark: squareMark())
         )
 
-        let chevronRaster = try XCTUnwrap(rasterize(withChevron, side: Render.sheetSide))
+        let defaultMarkRaster = try XCTUnwrap(
+            rasterize(withDefaultMark, side: Render.sheetSide)
+        )
         let markRaster = try XCTUnwrap(rasterize(withMark, side: Render.sheetSide))
 
         XCTAssertGreaterThan(
-            meanDifference(chevronRaster, markRaster), 0.01,
-            "the contributed mark did not replace the chevron"
+            meanDifference(defaultMarkRaster, markRaster), 0.01,
+            "the contributed mark did not replace the default mark"
         )
 
         let plate = try XCTUnwrap(sample(markRaster, at: Render.groundSample))
@@ -246,41 +248,25 @@ final class AppIconRenderTests: XCTestCase {
 
     // MARK: - The Phone's Copy
 
-    /// The phone's icon is drawn by `scripts/generate_mobile_app_icon.swift`, which restates the
-    /// chevron because it is not part of the app target. Restated geometry drifts; this is what
-    /// stops it. The script is read as text on purpose — it is the artefact that has to agree,
-    /// and compiling it into the test would prove something about a copy of it instead.
-    func testThePhoneIconRestatesTheSameChevron() throws {
-        let script = URL(fileURLWithPath: #filePath)
+    /// iOS receives the canonical full-bleed export byte-for-byte. Keeping this as an equality
+    /// assertion catches either a stale asset catalogue or an accidental hand edit.
+    func testThePhoneIconMatchesTheCanonicalBrandExport() throws {
+        let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("scripts/generate_mobile_app_icon.swift")
-        let source = try String(contentsOf: script, encoding: .utf8)
+        let canonical = repository.appendingPathComponent(
+            "Brand/ThreadingMark-Navy-1024.png"
+        )
+        let mobile = repository.appendingPathComponent(
+            "Sources/ThreadingMobile/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
+        )
 
-        let expected: [String: CGFloat] = [
-            "strokeRatio": GeneratedAppIcon.Layout.strokeRatio,
-            "armX": GeneratedAppIcon.Layout.armX,
-            "armTopY": GeneratedAppIcon.Layout.armTopY,
-            "armBottomY": GeneratedAppIcon.Layout.armBottomY,
-            "apexY": GeneratedAppIcon.Layout.apexY,
-            "apexX": GeneratedAppIcon.Layout.apexXRound
-        ]
-
-        for (name, value) in expected {
-            let pattern = "static let \(name): CGFloat = ([0-9.]+)"
-            let match = try XCTUnwrap(
-                source.range(of: pattern, options: .regularExpression),
-                "\(name) is not stated in the phone's generator"
-            )
-            let stated = try XCTUnwrap(
-                Double(source[match].split(separator: "=")[1].trimmingCharacters(in: .whitespaces))
-            )
-            XCTAssertEqual(
-                CGFloat(stated), value, accuracy: 0.0001,
-                "the phone's \(name) has drifted from the Mac's"
-            )
-        }
+        XCTAssertEqual(
+            try Data(contentsOf: mobile),
+            try Data(contentsOf: canonical),
+            "run scripts/generate_mobile_app_icon.swift after exporting the brand assets"
+        )
     }
 
     // MARK: - Render

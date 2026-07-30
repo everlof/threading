@@ -67,7 +67,7 @@ prompt's attachment thumbnails: a 40pt chip is not something anyone is reading, 
 picture is. `QuickLookPresenter` owns the panel's data for both call sites, because
 `QLPreviewPanel.dataSource` is non-retaining and the panel is one system window.
 
-Four things were measured rather than assumed, each having first been wrong:
+These were measured rather than assumed, each having first been wrong:
 
 - **A split item's `holdingPriority` ties with its content's hugging**, and both are 250. That
   tie is what let a dragged panel spring back on mouse-up: the divider's new width and the
@@ -77,6 +77,21 @@ Four things were measured rather than assumed, each having first been wrong:
   makes the terminal absorb a window resize. The `NSImageView` note below is the same bug from
   the other end, fixed by flooring the content instead — one pane's worth of content cannot be
   floored one view at a time, which is why the priority moved.
+- **That priority cuts both ways: anything in the pane that resists being *stretched* above 260
+  is the panel's maximum width.** The divider is held where it was dragged by a constraint at the
+  item's holding priority, so a view inside the pane that hugs its own content harder than that
+  decides how wide the panel may be — and the panel's tab strip hugged its tabs at
+  `.defaultHigh`. Measured: 228pt, whatever the window's width, with the wall moving as the page
+  renamed itself, since a longer tab title bought a wider panel; a divider that could be dragged
+  narrower but never wider; and the width restored on reveal quietly undone by the next layout
+  pass. `ThemedTabStripView.fillsHostWidth` puts the strip below the divider — it scrolls when
+  squeezed, so it never needed to hold — and pinning both its edges was *not* enough on its own,
+  because the pins fix the strip's width against the pane's and leave the hugging to argue with
+  whatever places the pane. The panel's own two labels are the same claim in words: the caption
+  and the placeholder are both held with a `>=`, which reads as "shrink me first" and is not what
+  an `NSTextField` does — their compression resistance was charging the *window* 259pt of minimum
+  width for text both line-break modes were already willing to truncate, hidden until then behind
+  the strip's 750 hugging winning that tie. Both now sit below `.fittingSizeCompression`.
 - **`NSSplitView.setPosition` does nothing** under `NSSplitViewController`, which lays its
   items out with Auto Layout. `setPosition(915, ofDividerAt: 1)` left the pane at its 260pt
   minimum. Width is set with a temporary constraint, released once honoured so the divider

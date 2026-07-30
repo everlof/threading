@@ -17645,6 +17645,654 @@
           }
         }
       }
+    },
+    "A reset moves the old state into “Threading Resets” rather than deleting it. Nothing outside Threading's own two locations is touched — agent logins and anything the Claude or Codex CLIs keep for themselves stay where they are.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En återställning flyttar det gamla tillståndet till ”Threading Resets” i stället för att radera det. Ingenting utanför Threadings egna två platser rörs — agentinloggningar och allt som Claude- eller Codex-kommandoradsverktygen sparar åt sig själva ligger kvar."
+          }
+        }
+      }
+    },
+    "A single-use invitation to this one chat. It expires in 24 hours if nobody accepts it; once accepted, that person keeps access until you choose Stop Sharing Chat. No link reaches your other chats, projects, or settings.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En engångsinbjudan till just den här konversationen. Den upphör efter 24 timmar om ingen accepterar den; när den har accepterats behåller personen åtkomsten tills du väljer Stoppa delning av konversation. Ingen länk når dina andra konversationer, projekt eller inställningar."
+          }
+        }
+      }
+    },
+    "Advanced": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avancerat"
+          }
+        }
+      }
+    },
+    "An extension command's “done” message offers “Don't show this message again”. Show All brings every hidden message back; failures always show either way.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ett tilläggskommandos ”klart”-meddelande erbjuder ”Visa inte det här meddelandet igen”. Visa alla tar tillbaka alla dolda meddelanden; fel visas alltid ändå."
+          }
+        }
+      }
+    },
+    "Collaborator": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samarbetspartner"
+          }
+        }
+      }
+    },
+    "Collaborator + approval": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samarbetspartner + godkännande"
+          }
+        }
+      }
+    },
+    "Context": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontext"
+          }
+        }
+      }
+    },
+    "Could not reset": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kunde inte återställa"
+          }
+        }
+      }
+    },
+    "Don't show this message again": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa inte det här meddelandet igen"
+          }
+        }
+      }
+    },
+    "Everything a collaborator can do, and can also answer permission requests — letting the agent run commands and change files without asking you.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allt en samarbetspartner kan göra, och kan dessutom svara på behörighetsförfrågningar — vilket låter agenten köra kommandon och ändra filer utan att fråga dig."
+          }
+        }
+      }
+    },
+    "Everything a viewer can do, and can also type in the terminal and send prompts. Permission requests still come to you.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allt en tittare kan göra, och kan dessutom skriva i terminalen och skicka prompter. Behörighetsförfrågningar går fortfarande till dig."
+          }
+        }
+      }
+    },
+    "Follows this chat as it happens. Cannot type, cannot send a prompt, and cannot answer a permission request.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Följer konversationen medan den pågår. Kan inte skriva, inte skicka en prompt och inte svara på en behörighetsförfrågan."
+          }
+        }
+      }
+    },
+    "Hidden extension messages": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dolda tilläggsmeddelanden"
+          }
+        }
+      }
+    },
+    "Locations": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Platser"
+          }
+        }
+      }
+    },
+    "Model": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modell"
+          }
+        }
+      }
+    },
+    "Projects, sessions and caches": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projekt, sessioner och cachar"
+          }
+        }
+      }
+    },
+    "Puts themes, profiles and every preference back to their defaults. Your projects, sessions and conversations are untouched.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställer teman, profiler och alla inställningar till standardvärdena. Dina projekt, sessioner och konversationer lämnas orörda."
+          }
+        }
+      }
+    },
+    "Reset Everything…": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ allt…"
+          }
+        }
+      }
+    },
+    "Reset Settings…": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ inställningar…"
+          }
+        }
+      }
+    },
+    "Reset all settings?": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställa alla inställningar?"
+          }
+        }
+      }
+    },
+    "Reset everything": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ allt"
+          }
+        }
+      }
+    },
+    "Reset everything?": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställa allt?"
+          }
+        }
+      }
+    },
+    "Reset settings": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ inställningar"
+          }
+        }
+      }
+    },
+    "Sample Project": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exempelprojekt"
+          }
+        }
+      }
+    },
+    "Sample Session": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exempelkonversation"
+          }
+        }
+      }
+    },
+    "Session context menu": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konversationens kontextmeny"
+          }
+        }
+      }
+    },
+    "Start Over": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Börja om"
+          }
+        }
+      }
+    },
+    "Start this chat first — watching alone never starts an agent.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta konversationen först — att bara titta startar aldrig en agent."
+          }
+        }
+      }
+    },
+    "The above, plus every project, session, conversation and cache. Threading restarts as if newly installed.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ovanstående, plus varje projekt, session, konversation och cache. Threading startas om som om det vore nyinstallerat."
+          }
+        }
+      }
+    },
+    "Threading will restart as if newly installed: no projects, no sessions, no conversations. Everything is moved into a dated folder beside your data rather than deleted, so it can be recovered by hand.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading startas om som om det vore nyinstallerat: inga projekt, inga sessioner, inga konversationer. Allt flyttas till en datummärkt mapp bredvid dina data i stället för att raderas, så det kan återställas för hand."
+          }
+        }
+      }
+    },
+    "Threading will restart with its default settings. Your projects and conversations are kept. The current settings are saved into a dated folder beside your data, so nothing is thrown away.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading startas om med sina standardinställningar. Dina projekt och konversationer behålls. De nuvarande inställningarna sparas i en datummärkt mapp bredvid dina data, så ingenting kastas bort."
+          }
+        }
+      }
+    },
+    "View only": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endast visning"
+          }
+        }
+      }
+    },
+    "Where Threading keeps your settings and your work, and how to start over.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Var Threading sparar dina inställningar och ditt arbete, och hur du börjar om."
+          }
+        }
+      }
+    },
+    "application support": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "application support"
+          }
+        }
+      }
+    },
+    "backup": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "säkerhetskopia"
+          }
+        }
+      }
+    },
+    "corrupt": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "korrupt"
+          }
+        }
+      }
+    },
+    "erase": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "radera"
+          }
+        }
+      }
+    },
+    "fresh": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "nytt"
+          }
+        }
+      }
+    },
+    "location": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "plats"
+          }
+        }
+      }
+    },
+    "preferences file": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "inställningsfil"
+          }
+        }
+      }
+    },
+    "restart": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "starta om"
+          }
+        }
+      }
+    },
+    "reveal": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "visa"
+          }
+        }
+      }
+    },
+    "start over": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "börja om"
+          }
+        }
+      }
+    },
+    "where": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "var"
+          }
+        }
+      }
+    },
+    "Browser chrome": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Webbläsarchrome"
+          }
+        }
+      }
+    },
+    "BrowserAnnotationOverlay": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserAnnotationOverlay"
+          }
+        }
+      }
+    },
+    "BrowserDeviceToolbar": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserDeviceToolbar"
+          }
+        }
+      }
+    },
+    "BrowserFindBar": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserFindBar"
+          }
+        }
+      }
+    },
+    "BrowserAnnotationOverlay left annotation mode.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserAnnotationOverlay lämnade anteckningsläget."
+          }
+        }
+      }
+    },
+    "BrowserAnnotationOverlay placed pin %lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserAnnotationOverlay placerade nål %lld."
+          }
+        }
+      }
+    },
+    "BrowserAnnotationOverlay selected pin %lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserAnnotationOverlay valde nål %lld."
+          }
+        }
+      }
+    },
+    "BrowserDeviceToolbar applied %lld×%lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserDeviceToolbar tillämpade %lld×%lld."
+          }
+        }
+      }
+    },
+    "BrowserDeviceToolbar asked to hide.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserDeviceToolbar begärde att döljas."
+          }
+        }
+      }
+    },
+    "BrowserDeviceToolbar chose %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserDeviceToolbar valde %@."
+          }
+        }
+      }
+    },
+    "BrowserDeviceToolbar rotated the viewport.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserDeviceToolbar roterade visningsytan."
+          }
+        }
+      }
+    },
+    "BrowserFindBar asked to close.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserFindBar begärde att stängas."
+          }
+        }
+      }
+    },
+    "BrowserFindBar searched for “%@”.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserFindBar sökte efter ”%@”."
+          }
+        }
+      }
+    },
+    "BrowserFindBar searched back for “%@”.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BrowserFindBar sökte bakåt efter ”%@”."
+          }
+        }
+      }
+    },
+    "CSS viewport presets and a custom size; no touch or device emulation.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CSS-förinställningar för visningsytan och en egen storlek; ingen pek- eller enhetsemulering."
+          }
+        }
+      }
+    },
+    "Find in page, with the match count folded away when the bar is narrow.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök på sidan, med antalet träffar hopfällt när fältet är smalt."
+          }
+        }
+      }
+    },
+    "The agent-visible pin layer, shown in annotation mode — click the panel to place one.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nållagret som agenten ser, visat i anteckningsläge — klicka i panelen för att placera en."
+          }
+        }
+      }
+    },
+    "The bars fold their labels below their own width thresholds; drag the gallery narrower to see it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fälten fäller ihop sina etiketter under sina egna breddgränser; dra galleriet smalare för att se det."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

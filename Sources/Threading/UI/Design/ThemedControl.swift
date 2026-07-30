@@ -245,7 +245,7 @@ enum ThemedSurface {
 
 // MARK: - Theme Redraw
 
-/// Redraws a view on every theme change — the app theme, and the profile/assignment changes that
+/// Restyles a view on every theme change — the app theme, and the profile/assignment changes that
 /// can move a role too. A view drawn from roles needs nothing more.
 ///
 /// Held separately from `ThemedControl` because not every themed control can inherit from it:
@@ -257,13 +257,34 @@ final class ThemeRedraw {
 
     init(_ view: NSView) {
         for observe in [
-            { self.appEvents.observe(AppThemeDidChange.self) { [weak view] _ in view?.needsDisplay = true } },
-            { self.appEvents.observe(ProfileDidChange.self) { [weak view] _ in view?.needsDisplay = true } },
+            { self.appEvents.observe(AppThemeDidChange.self) { [weak view] _ in view?.restyle() } },
+            { self.appEvents.observe(ProfileDidChange.self) { [weak view] _ in view?.restyle() } },
             {
                 self.appEvents.observe(AccessibilityDisplayOptionsDidChange.self) {
-                    [weak view] _ in view?.needsDisplay = true
+                    [weak view] _ in view?.restyle()
                 }
             }
         ] { observe() }
+    }
+}
+
+private extension NSView {
+
+    /// A theme states sizes as well as colours, so following it is a redraw **and** a remeasure.
+    ///
+    /// A themed view whose `intrinsicContentSize` reads a token — `SeparatorView`'s thickness is
+    /// `Design.Radius.border`, the same token the split seam weighs itself with — is placed against
+    /// the size the constraint system last *asked* for, and AppKit caches that until it is told the
+    /// answer moved. Repainting alone left every rule in the window ruling for the theme that had
+    /// just left, while anything built after the switch took the new weight: arriving at Editorial
+    /// (1) from Neo Brutalism (3), one window drew hairlines and 3-point rules at once. The seam
+    /// itself was already right — `dividerThickness` is computed per read — which is exactly why
+    /// the mismatch survived being fixed there.
+    ///
+    /// Invalidating for views that state no intrinsic size costs nothing: `noIntrinsicMetric`
+    /// re-read is still `noIntrinsicMetric`, and a theme change is a rare, user-driven event.
+    func restyle() {
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
     }
 }

@@ -172,3 +172,43 @@ writes for that session remain blocked rather than overwriting the only recovera
 Removing a session also invalidates its in-memory state before deleting the file. This matters
 because token accounting finishes off-main: a late completion must not recreate a snapshot for
 a session that no longer exists.
+
+## 2026-07-30 — Where it all is, and starting over
+
+Two locations hold everything Threading remembers, and `AppDataLocations` is the only place that
+says so: the **preferences domain** (the bundle identifier, `codes.threading`) and one directory,
+`~/Library/Application Support/Threading`, which is `StateManager`'s root and therefore also the
+store, the panel layouts and their cached PNGs, project icons, avatars, usage history,
+icon-research records and the instance lock. Settings ▸ **Advanced** shows both and reveals them,
+because "where is my data" is a question answered with a path to copy rather than a sentence.
+
+**What is deliberately outside the two.** Anything written into *another* program's folder is not
+ours to reset: the Claude status-line cache under `Claudex/ClaudeStatus` is there because that is
+where the CLI reads it from, and per-session hook and MCP config files are handed to an agent
+process. A reset that swept Application Support for its own leavings would take those with it, so
+it never sweeps — it names.
+
+Two resets, because the blast radii differ and offering only the wider one would make a broken
+preference cost every conversation. `settings` clears the domain; `everything` also moves the
+directory. Three decisions carry it:
+
+- **Moved aside, never deleted** — into `Threading Resets/<yyyy-MM-dd HH-mm-ss>/`, which is the
+  posture `ProjectStore` already takes with a database it cannot open. A mistaken reset costs a
+  drag back, and a store reset *because* it was corrupt is still there to be read. The folder is a
+  **sibling** of the directory it holds: a backup that moves with the thing it backs up is not one,
+  and `AppDataResetTests` pins that a second reset cannot carry off the first one's.
+- **Preferences go through `UserDefaults`, not the file.** `cfprefsd` owns the plist and holds the
+  domain in memory, so a file moved out from under it is written back — the reset would appear to
+  work and undo itself at the next flush. The domain is serialised into the backup first, then
+  `removePersistentDomain`.
+- **The app restarts, and leaves without saving.** Every store here is a singleton holding its
+  state in memory, so a running app carries on from what it read at launch and would write the
+  projects, the layout and the session list straight back into a fresh directory. `AppRelaunch`
+  therefore `exit`s rather than calling `NSApp.terminate`, which is the only path in the app that
+  does — discarding is the whole point, and a polite quit would undo it. It also spawns a detached
+  `sh` that waits before opening the bundle, because `SingleInstanceLock` is an `flock` held for
+  the process's lifetime and a copy started too early sees the lock and refuses to launch.
+
+The reset is `ConfirmationPrompt.resetAppData`, on the `.alwaysAsks(.irreversible)` branch. Not
+strictly true — the state is kept — but nothing *in the app* brings it back, and Return belongs on
+Cancel for a button that restarts the app under you.

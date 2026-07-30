@@ -234,6 +234,24 @@
   var isReportingTyping = false;
   var hostTheme = null;
   var activeTerminalTheme = null;
+  var leasedGrid = null;
+  var fitTimer = null;
+
+  // The Mac owns the character grid and pushes it here, so a browser narrower than that grid
+  // paints past its own frame and leaves the rest behind a scrollbar. Two answers, because a
+  // guest has two kinds of standing: one who may type asks for the grid it can actually show —
+  // the same lease the phone takes, which the server refuses to anyone view-only — and one who
+  // may only watch shrinks its own type until the Mac's grid fits. `min` matches the server's
+  // range in `RemoteAccessServer.handleViewport`, so a request is never merely rejected.
+  var FIT = {
+    baseFontSize: 13,
+    minFontSize: 6,
+    minCols: 20,
+    maxCols: 240,
+    minRows: 4,
+    maxRows: 160,
+    debounceMS: 80,
+  };
 
   function validHex(value) {
     return typeof value === "string" && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value);
@@ -770,12 +788,111 @@
         convertEol: false,
         cursorBlink: true,
         fontFamily: "SF Mono, Menlo, Consolas, monospace",
-        fontSize: 13,
+        fontSize: FIT.baseFontSize,
         theme: xtermTheme(activeTerminalTheme),
       });
       term.open(els.terminal);
     }
     show("terminal");
+    scheduleFit();
+  }
+
+  // --- Fitting the host's grid -------------------------------------------
+
+  function clampNumber(value, low, high) {
+    return Math.max(low, Math.min(high, value));
+  }
+
+  // The box the terminal may paint in, with `#terminal`'s own padding taken off. Read rather
+  // than duplicated as a constant, so the CSS stays the one place the padding is decided.
+  function terminalBox() {
+    var style = window.getComputedStyle(els.terminal);
+    return {
+      width: els.terminal.clientWidth -
+        parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      height: els.terminal.clientHeight -
+        parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+    };
+  }
+
+  // One character cell as xterm actually rendered it, normalised back to the base font size.
+  // A view-only client is usually looking at shrunken type, and the grid it *would* ask for
+  // has to be measured in the size it would ask at, not the size it settled for.
+  function baseCellSize() {
+    if (!term || !term.element || !term.cols || !term.rows) { return null; }
+    var screen = term.element.querySelector(".xterm-screen");
+    if (!screen) { return null; }
+    var rendered = term.options.fontSize || FIT.baseFontSize;
+    var scale = FIT.baseFontSize / rendered;
+    var width = (screen.offsetWidth / term.cols) * scale;
+    var height = (screen.offsetHeight / term.rows) * scale;
+    if (!(width > 0) || !(height > 0)) { return null; }
+    return { width: width, height: height };
+  }
+
+  // Asks the Mac to reflow the shared PTY to what this browser can show. The request is
+  // deduplicated against the last one sent — not against the grid that came back — because the
+  // Mac may answer with a different one, and comparing against the answer would re-ask forever.
+  function requestViewportLease() {
+    if (activeCapability !== "interact") { return; }
+    if (!socket || socket.readyState !== WebSocket.OPEN) { return; }
+    var box = terminalBox();
+    var cell = baseCellSize();
+    if (!cell || !(box.width > 0) || !(box.height > 0)) { return; }
+
+    var grid = {
+      cols: clampNumber(Math.floor(box.width / cell.width), FIT.minCols, FIT.maxCols),
+      rows: clampNumber(Math.floor(box.height / cell.height), FIT.minRows, FIT.maxRows),
+    };
+    if (leasedGrid && leasedGrid.cols === grid.cols && leasedGrid.rows === grid.rows) { return; }
+    leasedGrid = grid;
+    socket.send(JSON.stringify({ type: "viewport", cols: grid.cols, rows: grid.rows }));
+  }
+
+  // The floor under both paths: whatever grid the Mac settled on, the type shrinks until the
+  // whole of it is inside the frame. Height counts as much as width — the rows that fall off
+  // the bottom are the live ones, the prompt among them, and a watcher who has to scroll to
+  // reach the present is worse off than one reading small type. A grid that already fits is
+  // restored to full size, which is what returns an interactive client to 13px once its lease
+  // is honoured.
+  function fitFontToGrid() {
+    if (!term) { return; }
+    var box = terminalBox();
+    var cell = baseCellSize();
+    if (!cell || !(box.width > 0) || !(box.height > 0)) { return; }
+
+    var ratio = Math.min(
+      box.width / (cell.width * term.cols),
+      box.height / (cell.height * term.rows)
+    );
+    var size = ratio >= 1
+      ? FIT.baseFontSize
+      : Math.max(FIT.minFontSize, Math.floor(FIT.baseFontSize * ratio));
+    if (term.options.fontSize !== size) { term.options.fontSize = size; }
+  }
+
+  function fitTerminal() {
+    if (!term || activeSurface !== "terminal" || els.terminal.hidden) { return; }
+    requestViewportLease();
+    fitFontToGrid();
+  }
+
+  // Coalesced because a live window drag fires continuously, and because xterm has to have
+  // laid the grid out before it can be measured — the terminal is opened while still hidden.
+  function scheduleFit() {
+    if (fitTimer !== null) { clearTimeout(fitTimer); }
+    fitTimer = setTimeout(function () {
+      fitTimer = null;
+      fitTerminal();
+    }, FIT.debounceMS);
+  }
+
+  function releaseViewportLease() {
+    if (!leasedGrid) { return; }
+    leasedGrid = null;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "viewportRelease" }));
+    }
   }
 
   function handleServerMessage(msg, openedSocket) {
@@ -787,9 +904,11 @@
         if (msg.cols && msg.rows && term) { term.resize(msg.cols, msg.rows); }
         if (msg.title) { els.title.textContent = msg.title; }
         setCapability(msg.capability, openedSocket);
+        scheduleFit();
         break;
       case "resize":
         if (msg.cols && msg.rows && term) { term.resize(msg.cols, msg.rows); }
+        scheduleFit();
         break;
       case "title":
         if (msg.title) { els.title.textContent = msg.title; }
@@ -1142,6 +1261,13 @@
   }
 
   function disposeTerminal() {
+    if (fitTimer !== null) {
+      clearTimeout(fitTimer);
+      fitTimer = null;
+    }
+    // Before the terminal goes, not after: a lease this page is no longer showing would
+    // otherwise hold the Mac's grid at a size nobody is looking at until the socket closed.
+    releaseViewportLease();
     if (inputSubscription) {
       inputSubscription.dispose();
       inputSubscription = null;
@@ -1161,6 +1287,8 @@
     applyTheme(hostTheme, null);
     beginSessionList();
   });
+
+  window.addEventListener("resize", scheduleFit);
 
   window.addEventListener("pagehide", function () {
     cancelPoll();

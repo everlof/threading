@@ -62,6 +62,29 @@ final class DisplayPaneLayoutTests: XCTestCase {
         )
     }
 
+    /// The caption is the same claim in words. It is held off the leading edge with a `>=`, which
+    /// reads as "shrink me first" and is not what an `NSTextField` does: its compression
+    /// resistance charged the pane the whole file name, and a pane's width is the window's
+    /// minimum. It already truncates in the middle — this is only what makes it do so before the
+    /// window is made to grow instead.
+    func testTheCaptionLendsThePaneNoWidthOfItsOwn() throws {
+        let short = paneShowing(
+            try imageOnDisk(size: NSSize(width: 40, height: 40), name: "a.png").content
+        )
+        let long = paneShowing(
+            try imageOnDisk(
+                size: NSSize(width: 40, height: 40),
+                name: String(repeating: "a-rather-long-", count: 8) + "name.png"
+            ).content
+        )
+
+        XCTAssertEqual(
+            short.view.fittingSize.width,
+            long.view.fittingSize.width,
+            "a long file name asked the panel — and so the window — to be wider"
+        )
+    }
+
     func testThePreviewStatesNoIntrinsicSize() {
         let preview = ThemedImagePreview()
         preview.image = NSImage(size: NSSize(width: 900, height: 600))
@@ -121,6 +144,75 @@ final class DisplayPaneLayoutTests: XCTestCase {
             open - closed,
             DisplayPaneDefaults.minWidth,
             "opening the panel put its whole opening width under the window"
+        )
+    }
+
+    // MARK: - The User Sizes the Panel, Not Its Tabs
+
+    /// `NSSplitViewController` holds a divider where it was dragged with a constraint at the
+    /// item's holding priority — `DisplayPaneDefaults.holdingPriority`, 260. Anything inside a
+    /// pane that resists being *stretched* above that priority is therefore the pane's maximum
+    /// width, and the panel's tab strip hugged its tabs at `.defaultHigh`: the divider stopped a
+    /// few points past the `+` and the panel could be dragged narrower but never wider — with the
+    /// wall moving as the page renamed itself, since a longer title bought a wider panel.
+    ///
+    /// Driven at the divider's own priority rather than through a required width, which would
+    /// out-rank the bug and pass with it in place.
+    func testTheDividerCanTakeThePanelPastItsTabs() throws {
+        let (content, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let pane = paneShowing(content)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 600),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        let host = try XCTUnwrap(window.contentView)
+        pane.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(pane.view)
+
+        let requested: CGFloat = 700
+        let divider = pane.view.widthAnchor.constraint(equalToConstant: requested)
+        divider.priority = DisplayPaneDefaults.holdingPriority
+
+        NSLayoutConstraint.activate([
+            pane.view.topAnchor.constraint(equalTo: host.topAnchor),
+            pane.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            pane.view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            pane.view.leadingAnchor.constraint(greaterThanOrEqualTo: host.leadingAnchor),
+            divider
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            pane.view.frame.width,
+            requested,
+            accuracy: 1,
+            "the panel stopped at its tabs' own width instead of where the divider was put"
+        )
+    }
+
+    /// The strip's default hugging is right for the drawer — whose `+` sits after the tabs and
+    /// has to follow them — and wrong for the panel, whose `+` is pinned to the pane's trailing
+    /// edge. Both halves are asserted because either mistake is silent: too high and the host
+    /// cannot be grown, too low and the control after the strip drifts away from the tabs.
+    func testTheStripOnlyOutranksADividerWhereItsHostFollowsItsTabs() {
+        let strip = ThemedTabStripView(inkSource: .chrome)
+
+        XCTAssertEqual(
+            strip.contentHuggingPriority(for: .horizontal),
+            .defaultHigh,
+            "a host that places a control after the tabs needs the strip to hug them"
+        )
+
+        strip.fillsHostWidth = true
+
+        XCTAssertLessThan(
+            strip.contentHuggingPriority(for: .horizontal).rawValue,
+            DisplayPaneDefaults.holdingPriority.rawValue,
+            "a stretched strip still outranked the divider that places its pane"
         )
     }
 

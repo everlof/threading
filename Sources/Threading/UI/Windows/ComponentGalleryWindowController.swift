@@ -81,6 +81,9 @@ final class ComponentGalleryViewController: NSViewController {
     static let componentNames: Set<String> = [
         "BackdropOverlay",
         "BackdropThemedControl",
+        "BrowserAnnotationOverlay",
+        "BrowserDeviceToolbar",
+        "BrowserFindBar",
         "ChipView",
         "FileActivityMapView",
         "ImageCompareCanvas",
@@ -316,6 +319,7 @@ final class ComponentGalleryViewController: NSViewController {
             makeTextSection(),
             makeFeedbackSection(),
             makeContainersSection(),
+            makeBrowserChromeSection(),
             makeColourSection(),
             makeExtensionSection(),
             makeInfrastructureSection()
@@ -1267,6 +1271,113 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         return split
+    }
+
+    /// The three components that dress a live web view.
+    ///
+    /// They are the hardest ones in the vocabulary to review in place: each appears only over a
+    /// real page, two of them fold their own controls away below a width threshold, and the
+    /// third declines hit testing entirely unless it has been switched on. A story is the only
+    /// place all of that can be driven without a browser — which is the argument the catalogue
+    /// test makes for every component, and why it went red the moment these landed.
+    private func makeBrowserChromeSection() -> NSView {
+        let findBar = BrowserFindBar()
+        // The app's own name, which is a plausible query, the same word in every language, and
+        // read from the bundle rather than written down — see `AppInfo`.
+        findBar.queryField.stringValue = AppInfo.name
+        findBar.setMatchFound(true)
+        findBar.onFind = { [weak self] query, backwards in
+            self?.showReceipt(L10n.format(
+                backwards ? "BrowserFindBar searched back for “%@”."
+                    : "BrowserFindBar searched for “%@”.",
+                query
+            ))
+        }
+        findBar.onDismiss = { [weak self] in
+            self?.showReceipt(L10n.string("BrowserFindBar asked to close."))
+        }
+
+        let deviceToolbar = BrowserDeviceToolbar()
+        deviceToolbar.setViewport(
+            CGSize(width: 390, height: 844),
+            preset: BrowserViewportPreset.catalog.last
+        )
+        deviceToolbar.onChoosePreset = { [weak self] preset in
+            self?.showReceipt(L10n.format(
+                "BrowserDeviceToolbar chose %@.",
+                preset?.title ?? L10n.string("Responsive")
+            ))
+        }
+        deviceToolbar.onApplyCustomSize = { [weak self] width, height in
+            self?.showReceipt(L10n.format(
+                "BrowserDeviceToolbar applied %lld×%lld.",
+                Int64(width),
+                Int64(height)
+            ))
+            return true
+        }
+        deviceToolbar.onRotate = { [weak self] in
+            self?.showReceipt(L10n.string("BrowserDeviceToolbar rotated the viewport."))
+        }
+        deviceToolbar.onDismiss = { [weak self] in
+            self?.showReceipt(L10n.string("BrowserDeviceToolbar asked to hide."))
+        }
+
+        // Switched on, because an overlay in its resting state is a component that deliberately
+        // draws and answers nothing — a blank card would be an accurate and useless story.
+        let overlay = BrowserAnnotationOverlay()
+        overlay.isAnnotating = true
+        overlay.markers = [
+            BrowserAnnotationMarker(id: 1, point: CGPoint(x: 54, y: 34)),
+            BrowserAnnotationMarker(id: 2, point: CGPoint(x: 168, y: 66))
+        ]
+        overlay.onAdd = { [weak self] point in
+            guard let self else { return }
+            let next = (overlay.markers.map(\.id).max() ?? 0) + 1
+            overlay.markers.append(BrowserAnnotationMarker(id: next, point: point))
+            self.showReceipt(L10n.format("BrowserAnnotationOverlay placed pin %lld.", Int64(next)))
+        }
+        overlay.onSelect = { [weak self] id in
+            self?.showReceipt(L10n.format("BrowserAnnotationOverlay selected pin %lld.", Int64(id)))
+        }
+        overlay.onDismiss = { [weak self] in
+            self?.showReceipt(L10n.string("BrowserAnnotationOverlay left annotation mode."))
+        }
+        overlay.applySurface(
+            fill: Design.Surface.ground,
+            radius: .control,
+            border: Design.Surface.border
+        )
+
+        for bar in [findBar, deviceToolbar] as [NSView] {
+            bar.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        }
+        NSLayoutConstraint.activate([
+            overlay.widthAnchor.constraint(equalToConstant: 460),
+            overlay.heightAnchor.constraint(equalToConstant: 120)
+        ])
+
+        return section(
+            "Browser chrome",
+            note: "The bars fold their labels below their own width thresholds; drag the gallery narrower to see it.",
+            rows: [
+                story(
+                    "BrowserFindBar",
+                    "Find in page, with the match count folded away when the bar is narrow.",
+                    findBar
+                ),
+                story(
+                    "BrowserDeviceToolbar",
+                    "CSS viewport presets and a custom size; no touch or device emulation.",
+                    deviceToolbar
+                ),
+                story(
+                    "BrowserAnnotationOverlay",
+                    "The agent-visible pin layer, shown in annotation mode — click the panel to place one.",
+                    overlay
+                )
+            ]
+        )
     }
 
     private func makeColourSection() -> NSView {

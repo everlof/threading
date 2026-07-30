@@ -187,6 +187,52 @@ final class AppSettings {
         suppressedConfirmations = suppressed
     }
 
+    // MARK: - Notices
+
+    /// The notices hidden by their alert's "Don't show this message again" box, stored as the
+    /// negation for the same reason the confirmations are: any notice — including one minted
+    /// by an extension installed later — starts visible, with no defaults migration and no
+    /// seed per key. Raw strings rather than an enum's raw values, because notice keys are
+    /// dynamic (`AppNotice`).
+    private var hiddenNotices: Set<String> {
+        get { Set(defaults.stringArray(forKey: Keys.hiddenNotices) ?? []) }
+        set {
+            defaults.set(newValue.sorted(), forKey: Keys.hiddenNotices)
+            notifyChanged()
+        }
+    }
+
+    /// Whether this notice is still shown.
+    func shows(_ notice: AppNotice) -> Bool {
+        !hiddenNotices.contains(notice.storageKey)
+    }
+
+    /// Written from the alert's own box and from the Settings control that brings everything
+    /// back. Same state deliberately — a checkbox with a private store beside a switch with
+    /// another is how one of them goes stale.
+    func setShows(_ shows: Bool, for notice: AppNotice) {
+        var hidden = hiddenNotices
+        if shows {
+            hidden.remove(notice.storageKey)
+        } else {
+            hidden.insert(notice.storageKey)
+        }
+        hiddenNotices = hidden
+    }
+
+    /// What the Settings row can honestly display for dynamic keys: how many, not which — a
+    /// stored key whose extension is gone has no title left to print.
+    var hiddenNoticeCount: Int {
+        hiddenNotices.count
+    }
+
+    /// The one un-hide control. All-or-nothing rather than per-key, because a per-key list
+    /// would have to name keys whose extensions may no longer exist.
+    func showAllNoticesAgain() {
+        guard !hiddenNotices.isEmpty else { return }
+        hiddenNotices = []
+    }
+
     /// Whether the one alert that sounds is heard.
     ///
     /// Separate from the alert itself: someone who wants to see that a turn is blocked without
@@ -739,6 +785,7 @@ final class AppSettings {
         /// Read only by `migrateClosingConfirmation`; the setting itself is four prompts now.
         static let confirmsBeforeClosingRunningSession = "confirmsBeforeClosingRunningSession"
         static let suppressedConfirmations = "suppressedConfirmations"
+        static let hiddenNotices = "hiddenNotices"
         static let didMigrateClosingConfirmation = "didMigrateClosingConfirmation"
         static let usesTerminalTitleInSidebar = "usesTerminalTitleInSidebar"
         static let groupsSessionsByBranch = "groupsSessionsByBranch"

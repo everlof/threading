@@ -13,7 +13,10 @@ final class BrowserAnnotationOverlay: ThemedControl {
 
     private enum Layout {
         static let markerDiameter: CGFloat = Design.Size.chipHeight
-        static let markerBorderWidth: CGFloat = Design.Radius.border
+        /// Computed, not stored: a `static let` resolves once and keeps the weight of whichever
+        /// theme happened to be current at first draw — for the rest of the process, not merely
+        /// until the next layout. The diameter and the inset above are fixed tokens and may store.
+        static var markerBorderWidth: CGFloat { Design.Radius.border }
         static let markerHitInset: CGFloat = Design.Spacing.tight
     }
 

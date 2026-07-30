@@ -1,56 +1,21 @@
 {
   "fill" : {
-    "automatic-gradient" : "srgb:0.00000,0.00000,0.00000,1.00000"
+    "automatic-gradient" : "srgb:0.02745,0.09020,0.16863,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
-          "blend-mode" : "plus-darker",
-          "fill" : {
-            "solid" : "srgb:0.25486,1.00000,0.00000,1.00000"
-          },
-          "glass" : true,
-          "hidden" : true,
-          "image-name" : "ChatGPT Image Dec 6, 2025, 04_13_44 PM.png",
-          "name" : "ChatGPT Image Dec 6, 2025, 04_13_44 PM",
-          "opacity" : 0.5,
-          "position" : {
-            "scale" : 0.4,
-            "translation-in-points" : [
-              -232.609375,
-              -248.2546875
-            ]
-          }
-        },
-        {
-          "blend-mode" : "plus-darker",
-          "fill" : {
-            "linear-gradient" : [
-              "srgb:0.36248,0.50541,0.93024,1.00000",
-              "srgb:0.90644,0.00000,1.00000,1.00000"
-            ],
-            "orientation" : {
-              "start" : {
-                "x" : 0.5,
-                "y" : 1
-              },
-              "stop" : {
-                "x" : 0.46019744873046875,
-                "y" : 0.12186431884765625
-              }
-            }
-          },
           "glass" : true,
           "hidden" : false,
-          "image-name" : "Bold Black Arrow on Checkered Background.png",
-          "name" : "Bold Black Arrow on Checkered Background",
-          "opacity" : 0.8,
+          "image-name" : "Threading Mark.png",
+          "name" : "Threading Mark",
+          "opacity" : 1,
           "position" : {
-            "scale" : 0.5,
+            "scale" : 0.72,
             "translation-in-points" : [
-              -199.5,
-              -181.9453125
+              0,
+              0
             ]
           }
         }
@@ -61,7 +26,7 @@
       },
       "translucency" : {
         "enabled" : true,
-        "value" : 0.5
+        "value" : 0.2
       }
     }
   ],
