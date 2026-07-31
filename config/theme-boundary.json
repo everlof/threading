@@ -309,6 +309,12 @@
       "kind": "frozenLayerColor",
       "symbol": "backgroundColor",
       "reason": "The tiled sidebar pattern is a CGColor by Core Animation's own contract; apply() restates it on every theme change and appearance flip."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/ThemedSplitView.swift",
+      "kind": "interactiveComponent",
+      "symbol": "ThemedSplitView",
+      "reason": "The divider drag stays AppKit's — super runs the whole tracking loop, and the override only reads where it ended. There is no activation to route: the panes it shuts are reachable by keyboard and by the toolbar's own themed controls."
     }
   ]
 }

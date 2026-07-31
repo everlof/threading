@@ -76,6 +76,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Suppresses width recording while the panel is being revealed, so the transient
     /// thickness that pass produces is not mistaken for a width the user chose.
     private var isRestoringDisplayPaneWidth = false
+
+    /// The sidebar's width is not worth recording until the stored one has been put back.
+    ///
+    /// Launch lays the column out at its default before the restore can run, and the resize that
+    /// produces would otherwise overwrite the width being restored — with the default, one turn
+    /// of the run loop before it was going to be read.
+    private var recordsSidebarWidth = false
     private var pendingWorkspaceNavigatorWidth: CGFloat?
 
     /// Store-change observations, released with the window.
@@ -255,9 +262,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // A floor, not the floor: `updateSidebarMinimumThickness` raises it to clear the window
         // controls floating over the column as soon as they can be measured.
         sidebarItem.minimumThickness = SidebarDefaults.minWidth
-        sidebarItem.maximumThickness = SidebarDefaults.maxWidth
-        // Dragged past that minimum the column snaps shut rather than stopping dead, which is
-        // the only sensible next size once it can no longer hold its own controls.
+        // **No ceiling of its own.** A fixed 400 stopped the divider in open space with the
+        // window nowhere near full, which reads as the drag being broken rather than as a
+        // decision — and there is nothing at 400 that the column stops being useful past. What
+        // the sidebar may take is what the terminal can spare, and the terminal already states
+        // that itself (`MainWindowDefaults.minContentWidth`), so the split view enforces one
+        // rule instead of two. `SidebarDefaults.maxWidth` remains what the app opens *itself*
+        // to, which is a different question from how wide the user may drag.
+        sidebarItem.maximumThickness = NSSplitViewItem.unspecifiedDimension
+        // Pushed past that minimum the column shuts rather than stopping dead, which is the only
+        // sensible next size once it can no longer hold its own controls — see
+        // `SidebarSplitViewController.shutPaneIfPushedPast`.
         sidebarItem.canCollapse = true
         // The sidebar is the fixed column: a window resize is absorbed by the terminal, which is
         // what the sidebar behaviour arranged for itself and a plain item does not.
@@ -308,9 +323,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         // The toolbar was installed a moment ago and has not laid its items out yet, so the
         // sidebar's floor is claimed on the next turn of the run loop — before the window is on
-        // screen, and well before a divider can be dragged.
+        // screen, and well before a divider can be dragged. The stored width follows in the same
+        // turn, once there is a floor for it to be clamped against.
         DispatchQueue.main.async { [weak self] in
-            self?.updateSidebarMinimumThickness()
+            guard let self else { return }
+            self.updateSidebarMinimumThickness()
+            self.restoreSidebarWidth()
         }
     }
 
@@ -496,6 +514,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // Cheap and idempotent, and this is the first moment on a cold launch at which the
         // toolbar's controls have a frame to measure.
         updateSidebarMinimumThickness()
+        // A pane can also be shut by dragging its divider past it, which never reaches
+        // `toggleSidebar` — and left the toolbar's toggle lit for a pane that was gone.
+        // Just the two toggles: the full control pass reads the store, and this fires on
+        // every tick of a drag.
+        updatePaneToggleSelection()
+        recordSidebarWidth()
 
         guard !displayItem.isCollapsed, !isRestoringDisplayPaneWidth else {
             return
@@ -585,6 +609,33 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard abs(sidebarItem.minimumThickness - target) > 0.5 else { return }
 
         sidebarItem.minimumThickness = target
+    }
+
+    /// Keeps the stored width in step with the divider.
+    ///
+    /// Not while the column is shut, and not while it is on its way there: a collapse animates
+    /// through every width down to zero, and recording those would answer "how wide was it" with
+    /// the last frame of it disappearing. The width a shut column reopens at is the one it had.
+    private func recordSidebarWidth() {
+        guard recordsSidebarWidth, !sidebarItem.isCollapsed else { return }
+        SidebarWidth.record(sidebarItem.viewController.view.bounds.width)
+    }
+
+    /// Opens the column at the width the user left it at.
+    ///
+    /// Moved through the divider rather than a width constraint, for the reason
+    /// `applyDisplayPaneWidth` records: the split view goes on positioning its items from its own
+    /// constraint, so a constraint released after one layout pass is undone by the next.
+    /// `setPosition` clamps against the other items' minimums itself, which is also the whole of
+    /// the sidebar's ceiling — a width wider than the terminal can spare arrives as the widest
+    /// the terminal can spare.
+    private func restoreSidebarWidth() {
+        defer { recordsSidebarWidth = true }
+        guard let width = SidebarWidth.stored, !sidebarItem.isCollapsed else { return }
+
+        splitView.layoutSubtreeIfNeeded()
+        splitView.setPosition(width, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
     }
 
     // MARK: - Display Pane
@@ -767,9 +818,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Applies a contribution's width only when the user explicitly chooses it. The temporary
     /// constraint is released immediately, so subsequent divider movement remains authoritative.
+    ///
+    /// Bounded by `SidebarDefaults.maxWidth` rather than by the item's own maximum, which is
+    /// deliberately unset: how wide the user may *drag* the column is their business, and how
+    /// wide an extension may open it is not.
     private func requestWorkspaceNavigatorWidth(_ proposedWidth: CGFloat) {
         pendingWorkspaceNavigatorWidth = min(
-            sidebarItem.maximumThickness,
+            SidebarDefaults.maxWidth,
             max(sidebarItem.minimumThickness, proposedWidth)
         )
         guard !sidebarItem.isCollapsed else { return }
@@ -1468,6 +1523,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateToolbarControlStates()
     }
 
+    /// A filled pane button means that pane is actually visible, however it was closed.
+    ///
+    /// Split out of `updateToolbarControlStates` because the divider drag needs exactly this
+    /// much on every tick of the drag, and none of the store reads around it.
+    private func updatePaneToggleSelection() {
+        sidebarToolbarButton?.isSelected = !sidebarItem.isCollapsed
+        displayPaneToolbarButton?.isSelected = !displayItem.isCollapsed
+    }
+
     /// Keeps toolbar controls semantic: a filled pane button means the pane is actually visible,
     /// and controls that need a session leave the key-view loop when no session is selected.
     func updateToolbarControlStates() {
@@ -1475,7 +1539,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             ProjectStore.shared.session(withID: $0)
         }
         let hasSession = session != nil
-        sidebarToolbarButton?.isSelected = !sidebarItem.isCollapsed
+        updatePaneToggleSelection()
         // **New Session is hidden while Settings is the page.** It creates a session, which a
         // preferences page is not a context for — and beside a closable "Profiles" tab a `+`
         // reads as "add another one of these", which is the one thing it does not do. The
@@ -1485,7 +1549,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateOpenInControls()
         shellDrawerToolbarButton?.isEnabled = hasSession
         shellDrawerToolbarButton?.isSelected = containerViewController.isShellDrawerOpen
-        displayPaneToolbarButton?.isSelected = !displayItem.isCollapsed
         sessionContextToolbarButton?.isEnabled = hasSession || containerViewController.isShowingSettings
 
         if let session, session.kind.supportsNativeUI {
@@ -2203,6 +2266,34 @@ enum MainWindowDefaults {
     static let toolbarIdentifier = NSToolbar.Identifier("ThreadingMainToolbar")
     static let minContentWidth: CGFloat = 320
 
+}
+
+// MARK: - Sidebar Width
+
+/// Remembers how wide the user left the sidebar, across launches.
+///
+/// The window's own frame is autosaved, so a restart used to bring back the window the user
+/// arranged with the column inside it reset to 240. Same reasoning as `DisplayPaneWidth`, and
+/// the same store: this is a choice made with a divider, and a hosted test must not write it
+/// into the developer's own preferences.
+enum SidebarWidth {
+    private static let key = "ThreadingSidebarWidth"
+
+    /// The width to open at, or nil if the divider has never been moved.
+    ///
+    /// Narrower than the list's own floor is not a width anyone chose — it is a transient
+    /// caught mid-collapse — and restoring one would open the column at a size it cannot hold
+    /// its rows at.
+    static var stored: CGFloat? {
+        let saved = PreferenceStore.shared.double(forKey: key)
+        guard saved >= SidebarDefaults.minWidth else { return nil }
+        return CGFloat(saved)
+    }
+
+    static func record(_ width: CGFloat) {
+        guard width >= SidebarDefaults.minWidth else { return }
+        PreferenceStore.shared.set(Double(width), forKey: key)
+    }
 }
 
 // MARK: - Display Pane Width

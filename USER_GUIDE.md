@@ -12,9 +12,12 @@ A third pane opens on the right when an agent displays something the terminal ca
 See [Display Panel](#display-panel).
 
 There is no title bar — the window controls sit over the top of the sidebar. That is also as
-narrow as the sidebar goes: drag its divider and it stops where those controls end, and dragging
-further collapses it altogether. **⌃⌘S** toggles it back, as does the sidebar button beside the
-traffic lights.
+narrow as the sidebar goes: drag its divider and it stops where those controls end, and pushing
+on past that stop closes the sidebar altogether. **⌃⌘S** brings it back, as does the sidebar
+button beside the traffic lights.
+
+Widening has no fixed limit — the sidebar takes whatever the terminal beside it can spare — and
+the width you leave it at is the width it opens at next launch.
 
 ## Concepts
 

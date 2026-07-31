@@ -404,8 +404,24 @@ enum SidebarDefaults {
     /// fixed x, so the real floor is where they end — claimed at runtime by
     /// `MainWindowController.updateSidebarMinimumThickness`, which can only ever raise this.
     static let minWidth: CGFloat = 180
+
+    /// The widest the app opens the column *itself* — restoring a stored width, or honouring an
+    /// extension's preferred one. **Not a limit on the divider**: the split item sets no maximum,
+    /// so a drag runs until the terminal reaches its own floor. A number here stopped the divider
+    /// dead in open space, which reads as a broken drag rather than as a decision.
     static let maxWidth: CGFloat = 400
     static let defaultWidth: CGFloat = 240
+
+    /// How far past the floor the divider has to be pushed before the column shuts instead of
+    /// stopping dead — see `SidebarSplitViewController.shutPaneIfPushedPast`.
+    ///
+    /// Past the floor the pane stops moving under the pointer, so this distance is travelled
+    /// with no feedback at all: short enough that carrying on past the stop is the whole
+    /// gesture, long enough that letting go a little early does not lose the column. AppKit's
+    /// own rule is *half* the floor — about a hundred points here, far enough into the blind
+    /// zone that the gesture read as gone.
+    static let shutOvershoot: CGFloat = 60
+
     static let rowHeight: CGFloat = 28
     /// Project rows are a single line — the branch shows in a hover popover, not beneath the
     /// name — so one compact height covers them all.

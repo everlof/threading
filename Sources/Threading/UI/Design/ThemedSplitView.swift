@@ -22,6 +22,15 @@ import AppKit
 /// later.
 final class ThemedSplitView: NSSplitView {
 
+    /// Called when a divider drag ends, with the divider's index and where the pointer was let
+    /// go, in this view's coordinates.
+    ///
+    /// A pane stops dead at its floor while the pointer keeps travelling, and the distance
+    /// between the two is the only record of how hard the divider was pushed — the frames say
+    /// nothing, because nothing moved. The owner decides what a push that far means; this view
+    /// only knows that a drag ended and where the hand was.
+    var dividerDragDidEnd: ((_ dividerIndex: Int, _ pointerX: CGFloat) -> Void)?
+
     private let appEvents = AppEventObservations()
 
     // MARK: - Initialization
@@ -82,6 +91,45 @@ final class ThemedSplitView: NSSplitView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
+    }
+
+    // MARK: - Dragging
+
+    /// How far either side of the seam still counts as grabbing it. The drawn divider is a
+    /// hairline, and AppKit widens its own hit area for exactly this reason; the answer only
+    /// has to be as good as "which divider", since `super` decides whether a drag begins.
+    private static let dividerGrab = Design.Spacing.small
+
+    /// Reports where a divider drag ended, without taking the drag over.
+    ///
+    /// `super.mouseDown` does not return until the tracking loop has pulled its own mouse-up —
+    /// there are no gesture recognizers on this view, checked at runtime — so everything AppKit
+    /// does with a divider still happens, and the release is read once it has finished.
+    ///
+    /// The release point is read first from the **event that ended the loop**, which `nextEvent`
+    /// leaves as the application's current one, and only then from the pointer itself. The two
+    /// agree in the app, and only the first can be driven from a test, where the physical mouse
+    /// is wherever the developer left it — while only the second survives a loop that ends on
+    /// something other than a mouse-up.
+    override func mouseDown(with event: NSEvent) {
+        let index = dividerIndex(at: convert(event.locationInWindow, from: nil))
+        super.mouseDown(with: event)
+        guard let index else { return }
+
+        if let release = NSApp.currentEvent, release.type == .leftMouseUp {
+            dividerDragDidEnd?(index, convert(release.locationInWindow, from: nil).x)
+        } else if let window {
+            let pointer = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+            dividerDragDidEnd?(index, convert(pointer, from: nil).x)
+        }
+    }
+
+    private func dividerIndex(at point: NSPoint) -> Int? {
+        arrangedSubviews.dropLast().indices.first { index in
+            let seam = arrangedSubviews[index].frame.maxX
+            return point.x >= seam - Self.dividerGrab
+                && point.x <= seam + dividerThickness + Self.dividerGrab
+        }
     }
 
     // MARK: - Private Methods

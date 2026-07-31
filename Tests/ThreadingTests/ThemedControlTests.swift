@@ -1782,6 +1782,217 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    private enum DividerDragFixture {
+        static let windowSize = NSSize(width: 1200, height: 700)
+        /// One mouse-move's worth of travel. Small enough that the pointer passes through every
+        /// width the floor and the shut threshold live at rather than jumping over them.
+        static let step: CGFloat = 8
+        /// One mouse-up ends the drag; the rest are slack. `mouseDown(with:)` does not return
+        /// until the tracking loop has pulled an up of its own, so a loop that wants one more
+        /// event than it was queued would hang the whole suite rather than fail a test.
+        static let mouseUps = 8
+        /// Comfortably inside a band, so neither case is decided by a rounding error: a push
+        /// this far past the threshold shuts the column, and a stop this far short of it
+        /// does not.
+        static let margin: CGFloat = 20
+        /// A width that is plainly nobody's default and comfortably inside what the window can
+        /// give, so restoring it proves the store rather than the layout.
+        static let chosenWidthOffset: CGFloat = 97
+    }
+
+    /// Drags the sidebar's divider to `pointerX` through the loop AppKit actually runs for a
+    /// divider, and answers whether the column ended up shut.
+    ///
+    /// `setPosition` — what the other collapse tests here use — takes the item's Auto Layout
+    /// path and cannot see any of this: past the floor the divider stops dead and the pointer
+    /// travels on alone, and it is that overshoot, invisible in every frame, that decides
+    /// whether the column shuts. The events are queued on the window *before* the loop is
+    /// entered, because `mouseDown(with:)` does not return until it has pulled its own mouse-up.
+    @MainActor
+    private func dragSidebarDivider(
+        to pointerX: CGFloat,
+        in controller: MainWindowController
+    ) throws -> Bool {
+        let window = try XCTUnwrap(controller.window)
+        let splitView = controller.splitViewController.splitView
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        let pane = sidebarItem.viewController.view
+        func inWindow(_ x: CGFloat) -> NSPoint {
+            splitView.convert(NSPoint(x: x, y: splitView.frame.midY), to: nil)
+        }
+
+        var queued: [NSEvent] = []
+        var x = pane.frame.maxX
+        while x > pointerX + DividerDragFixture.step {
+            x -= DividerDragFixture.step
+            queued.append(try mouseEvent(.leftMouseDragged, at: inWindow(x), in: window))
+        }
+        queued.append(try mouseEvent(.leftMouseDragged, at: inWindow(pointerX), in: window))
+        queued.append(
+            contentsOf: try (0..<DividerDragFixture.mouseUps).map { _ in
+                try mouseEvent(.leftMouseUp, at: inWindow(pointerX), in: window)
+            }
+        )
+        for event in queued { window.postEvent(event, atStart: false) }
+
+        let grab = pane.frame.maxX + splitView.dividerThickness / 2
+        splitView.mouseDown(with: try mouseEvent(.leftMouseDown, at: inWindow(grab), in: window))
+        window.contentView?.layoutSubtreeIfNeeded()
+        // The shut is animated, like the toolbar's.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: Design.Motion.standard))
+        window.contentView?.layoutSubtreeIfNeeded()
+        return sidebarItem.isCollapsed
+    }
+
+    /// A fresh window whose sidebar sits at the floor the running app gives it.
+    @MainActor
+    private func windowAtSidebarFloor() throws -> (MainWindowController, CGFloat) {
+        // Spare mouse-ups from an earlier drag are still in the app's queue, and
+        // `nextEvent(matching:)` does not care which window they were made for.
+        while NSApp.nextEvent(
+            matching: .any,
+            until: Date(timeIntervalSinceNow: 0),
+            inMode: .default,
+            dequeue: true
+        ) != nil {}
+
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(DividerDragFixture.windowSize)
+        window.contentView?.layoutSubtreeIfNeeded()
+        // The floor is claimed a turn of the run loop after setup, once the toolbar's own
+        // controls can be measured — drag against the one the app really has.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: Design.Motion.standard))
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        return (controller, sidebarItem.minimumThickness)
+    }
+
+    /// Carrying the divider on past the column shuts it.
+    ///
+    /// AppKit's own rule wants *half the floor* — around a hundred points past a column that
+    /// has already stopped moving, every one of them without feedback, which is how "it does not
+    /// collapse any more" gets reported about a gesture that technically still works.
+    /// `SidebarDefaults.shutOvershoot` is where the push becomes an answer instead.
+    @MainActor
+    func testPushingTheDividerPastTheSidebarShutsIt() throws {
+        let (controller, floor) = try windowAtSidebarFloor()
+        let toggle = try XCTUnwrap(controller.sidebarToolbarButton)
+        XCTAssertTrue(toggle.isSelected, "the toggle did not start out lit for a visible sidebar")
+
+        let shut = try dragSidebarDivider(
+            to: floor - SidebarDefaults.shutOvershoot - DividerDragFixture.margin,
+            in: controller
+        )
+
+        XCTAssertTrue(shut, "the divider pushed past the sidebar's floor stopped dead")
+        // A pane shut this way never reaches `toggleSidebar`, which used to be the only place
+        // the toolbar's toggle was told.
+        XCTAssertFalse(
+            toggle.isSelected,
+            "the toolbar's sidebar toggle stayed lit for a column that had been shut"
+        )
+    }
+
+    /// And stopping at the column does not.
+    ///
+    /// The floor is a size the user asks for deliberately — as narrow as the sidebar goes — so
+    /// arriving there, or drifting a little past it, has to leave the column standing.
+    @MainActor
+    func testStoppingAtTheSidebarsFloorLeavesItOpen() throws {
+        let (controller, floor) = try windowAtSidebarFloor()
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+
+        let shut = try dragSidebarDivider(
+            to: floor - SidebarDefaults.shutOvershoot + DividerDragFixture.margin,
+            in: controller
+        )
+
+        XCTAssertFalse(shut, "the sidebar shut on a drag that only reached its floor")
+        XCTAssertEqual(
+            sidebarItem.viewController.view.frame.width,
+            floor,
+            accuracy: 1,
+            "the sidebar did not come to rest at the floor the drag pushed it to"
+        )
+    }
+
+    /// The column has no ceiling of its own — only the one the terminal implies.
+    ///
+    /// A fixed 400pt maximum stopped the divider in open space with the window nowhere near
+    /// full, which reads as a broken drag. What is left is the terminal's own floor, which the
+    /// split view enforces without being asked twice.
+    @MainActor
+    func testTheSidebarMayBeDraggedPastItsOldCeiling() throws {
+        let (controller, _) = try windowAtSidebarFloor()
+        let window = try XCTUnwrap(controller.window)
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        let splitView = controller.splitViewController.splitView
+
+        let beyond = SidebarDefaults.maxWidth + DividerDragFixture.margin
+        splitView.setPosition(beyond, ofDividerAt: 0)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            sidebarItem.viewController.view.frame.width,
+            beyond,
+            accuracy: 1,
+            "the sidebar was held at a ceiling of its own with the window nowhere near full"
+        )
+
+        // And the terminal's floor is the limit that is left, not a number in the sidebar's.
+        splitView.setPosition(
+            DividerDragFixture.windowSize.width,
+            ofDividerAt: 0
+        )
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThanOrEqual(
+            controller.splitViewController.splitViewItems[1].viewController.view.frame.width,
+            MainWindowDefaults.minContentWidth,
+            "the sidebar took width the terminal had said it needed"
+        )
+    }
+
+    /// The width the user left the divider at is the width the app opens at next time.
+    ///
+    /// The window's own frame is autosaved, so a restart brought back the arranged window with
+    /// the column inside it reset to its default.
+    @MainActor
+    func testTheSidebarOpensAtTheWidthItWasLeftAt() throws {
+        let stored = PreferenceStore.shared.double(forKey: SidebarWidthTestKey.key)
+        defer {
+            PreferenceStore.shared.set(stored, forKey: SidebarWidthTestKey.key)
+        }
+
+        let (controller, floor) = try windowAtSidebarFloor()
+        let window = try XCTUnwrap(controller.window)
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        let chosen = floor + DividerDragFixture.chosenWidthOffset
+
+        controller.splitViewController.splitView.setPosition(chosen, ofDividerAt: 0)
+        window.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertEqual(SidebarWidth.stored ?? 0, chosen, accuracy: 1, "the divider recorded nothing")
+
+        // A second launch, reading what the first one left.
+        let (relaunched, _) = try windowAtSidebarFloor()
+        let restored = try XCTUnwrap(relaunched.splitViewController.splitViewItems.first)
+        XCTAssertEqual(
+            restored.viewController.view.frame.width,
+            chosen,
+            accuracy: 1,
+            "the sidebar came back at its default rather than the width it was left at"
+        )
+        XCTAssertFalse(sidebarItem.isCollapsed)
+    }
+
+    private enum SidebarWidthTestKey {
+        /// The store's own key, restated so the test can put the developer's value back — a
+        /// hosted test writes to a scratch suite, but it is still shared across the suite.
+        static let key = "ThreadingSidebarWidth"
+    }
+
     /// The other half of the same fact: those controls sit at a fixed window x, so the sidebar
     /// cannot be narrower than they are.
     ///

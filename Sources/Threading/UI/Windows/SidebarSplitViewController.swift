@@ -18,7 +18,11 @@ final class SidebarSplitViewController: NSSplitViewController {
     /// the property is read, and adding an item reads it.
     init() {
         super.init(nibName: nil, bundle: nil)
-        splitView = ThemedSplitView()
+        let themedSplitView = ThemedSplitView()
+        splitView = themedSplitView
+        themedSplitView.dividerDragDidEnd = { [weak self] index, pointerX in
+            self?.shutPaneIfPushedPast(dividerAt: index, releasedAt: pointerX)
+        }
     }
 
     @available(*, unavailable)
@@ -60,6 +64,43 @@ final class SidebarSplitViewController: NSSplitViewController {
             .contains { splitViewItems[$0].isCollapsed }
     }
 
+    // MARK: - Collapsing by Drag
+
+    /// Shuts a pane the moment the divider has been pushed past it, rather than a hundred points
+    /// later.
+    ///
+    /// **In the running app a dragged divider has never shut this column.** Not "stopped
+    /// working" — never, on the report of the person dragging it. Every collapse it has ever
+    /// done came from the toolbar, the View menu, or a test calling `setPosition`.
+    ///
+    /// AppKit is not simply refusing. Driven through the same tracking loop in a fixture it
+    /// collapses a `canCollapse` pane at *half the pane's floor* — with the floor at 207pt,
+    /// released at 120 the column stayed and at 90 it shut — so the machinery is there and
+    /// something about the real window keeps it from firing. Whatever that is, the threshold
+    /// was never reachable in practice anyway: past the floor the divider stops dead under the
+    /// pointer, so a hundred points are travelled blind, against a column that has visibly
+    /// stopped. Nothing about carrying on says the column is about to go.
+    ///
+    /// So the answer is ours rather than AppKit's, and it comes at
+    /// `SidebarDefaults.shutOvershoot` — near enough to the stop that the push is one gesture.
+    /// AppKit's rule is left in place underneath: if it ever does fire, a longer push is still
+    /// a push.
+    private func shutPaneIfPushedPast(dividerAt index: Int, releasedAt pointerX: CGFloat) {
+        guard splitViewItems.indices.contains(index),
+              splitView.arrangedSubviews.indices.contains(index) else { return }
+
+        let item = splitViewItems[index]
+        guard item.canCollapse, !item.isCollapsed else { return }
+
+        // Measured from where the pane *starts*, so the answer is the pane's own width rather
+        // than a window x — true by construction for the leading pane, and stated so it stays
+        // true if this window ever grows a fourth.
+        let thickness = pointerX - splitView.arrangedSubviews[index].frame.minX
+        guard thickness < item.minimumThickness - SidebarDefaults.shutOvershoot else { return }
+
+        setCollapsed(true, on: item)
+    }
+
     // MARK: - Actions
 
     override func toggleSidebar(_ sender: Any?) {
@@ -68,12 +109,19 @@ final class SidebarSplitViewController: NSSplitViewController {
             return
         }
 
-        let targetIsCollapsed = !sidebarItem.isCollapsed
+        setCollapsed(!sidebarItem.isCollapsed, on: sidebarItem)
+    }
+
+    // MARK: - Private Methods
+
+    /// The one place a pane's collapse is animated and reported, so a pane shut at its divider
+    /// arrives in the same state, by the same route, as one shut from the toolbar.
+    private func setCollapsed(_ collapsed: Bool, on item: NSSplitViewItem) {
         NSAnimationContext.runAnimationGroup(
             { context in
                 context.duration = Design.Motion.standard
                 context.allowsImplicitAnimation = true
-                sidebarItem.isCollapsed = targetIsCollapsed
+                item.isCollapsed = collapsed
             },
             completionHandler: { [weak self] in
                 // The completion runs before AppKit commits the split views' final model
@@ -81,7 +129,10 @@ final class SidebarSplitViewController: NSSplitViewController {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.splitView.layoutSubtreeIfNeeded()
-                    self.sidebarTransitionDidComplete?(targetIsCollapsed)
+                    // The report is about the *sidebar* — it moves the pane header out from
+                    // under the window controls — so another pane's collapse must not raise it.
+                    guard item === self.splitViewItems.first else { return }
+                    self.sidebarTransitionDidComplete?(collapsed)
                 }
             }
         )

@@ -38,12 +38,31 @@ from the window's leading edge — leaving half a button hanging over the termin
 `updateSidebarMinimumThickness` raises the split item's minimum to that edge plus
 `Spacing.medium`, on the run-loop turn after setup and again on any split resize; it is
 idempotent, and it can only ever raise the constant. Below that width there is no useful size
-left, and there does not need to be: `canCollapse` means a divider dragged past the minimum snaps
-the column shut, so the sizes are "as narrow as its controls" and then "gone".
+left, and there does not need to be: a divider pushed past the minimum shuts the column, so the
+sizes are "as narrow as its controls" and then "gone" — see
+[Dragging a pane shut](#dragging-a-pane-shut), which is where that push is turned into an
+answer, and why `canCollapse` alone does not buy it.
 
 A split item's minimum is a *required* constraint and therefore also a floor on the window's
 width, so this costs the window the ~28pt the sidebar gained (see `DisplayPaneDefaults.slimmestWidth`
 for the other end of that trade).
+
+**The column has no ceiling of its own.** `sidebarItem.maximumThickness` is
+`NSSplitViewItem.unspecifiedDimension`: a fixed 400 stopped the divider in open space with the
+window nowhere near full, which reads as a broken drag rather than as a decision, and there is
+nothing at 400 that the column stops being useful past. What it may take is what the terminal
+can spare, and the terminal states that itself in `MainWindowDefaults.minContentWidth` — one
+rule instead of two. `SidebarDefaults.maxWidth` survives as the ceiling on widths the *app*
+proposes: a restored width, or an extension navigator's `preferredWidth`. How wide the user may
+drag is a different question from how wide the app may open it unasked.
+
+**And the width survives a relaunch.** The window's frame is autosaved, so a restart used to
+bring the arranged window back with the column reset to 240. `SidebarWidth` records it on divider
+movement and `restoreSidebarWidth` puts it back, both through `PreferenceStore` and for the same
+reasons as `DisplayPaneWidth` — it is a choice made with a divider, and a hosted test must not
+write it into the developer's own preferences. Two orderings are load-bearing: the restore runs
+in the same run-loop turn that claims the floor, and `recordsSidebarWidth` stays false until it
+has, or launch's default layout would overwrite the stored width one turn before it was read.
 
 `NSTrackingSeparatorToolbarItem` hid that for years, and stopped the day the sidebar became a
 plain split item: measured on macOS 26 across all three split-item kinds, it follows the divider
@@ -115,6 +134,49 @@ reappears without it.
 The stock implementation collapses but does not restore here, which left no way back to the
 sidebar. Overriding it fixes the toolbar button and the View menu together, since both route
 through that one method.
+
+### Dragging a pane shut
+
+**The overshoot is the gesture.** Past its floor a pane stops dead under the pointer, which
+keeps going; that gap is the only record of how hard the divider was pushed, because no frame
+moved.
+
+In the running app, a dragged divider has **never** shut this column — not "stopped working",
+never, on the report of the person dragging it. Every collapse it has ever done came from the
+toolbar, the View menu, or a test calling `setPosition`. AppKit is not flatly refusing, either:
+driven through the same tracking loop in a fixture it collapses a `canCollapse` pane at *half
+the pane's floor* (floor 207pt — released at 120 the column stayed, at 90 it shut), so the
+machinery exists and something about the real window keeps it from firing. Worth knowing, not
+worth depending on: that threshold sits a hundred points past a column that has visibly stopped,
+travelled blind, which is not a gesture anyone would find.
+
+`SidebarSplitViewController.shutPaneIfPushedPast` shuts the pane once the pointer is released
+`SidebarDefaults.shutOvershoot` past the floor — near enough to the stop that the push is one
+movement. AppKit's rule stays underneath: if it ever does fire, a longer push is still a push.
+
+The drag itself stays AppKit's. `ThemedSplitView.mouseDown` calls `super`, which does not return
+until its tracking loop has pulled the mouse-up — there are no gesture recognizers on this split
+view, checked at runtime — and then reports the divider and where the release landed. The
+release point is read from `NSApp.currentEvent`, the event that ended the loop, rather than
+`NSEvent.mouseLocation`: they agree in the app, and only the first can be driven from a test.
+That override is the one entry in `config/theme-boundary.json` for this file — the interactive
+rule is right that a view answering `mouseDown` is usually a control, and this one routes no
+activation of its own.
+
+Which mechanism runs matters when reading tests. `setPosition(_:ofDividerAt:)` and `isCollapsed`
+take the item's Auto Layout path and cannot see an overshoot at all, so a test written against
+them passes over a gesture that is broken — which is exactly what happened here.
+`testPushingTheDividerPastTheSidebarShutsIt` and `testStoppingAtTheSidebarsFloorLeavesItOpen`
+drive the real tracking loop by queueing events on the window before entering it.
+
+Double-click is gone for good and is not worth restoring:
+`splitView(_:shouldCollapseSubview:forDoubleClickOnDividerAt:)` is deprecated since macOS 10.15
+with "this delegate method is never called".
+
+**A pane shut at its divider never reaches `toggleSidebar`**, so the toolbar's toggle is lit
+from `splitViewDidResize` (`updatePaneToggleSelection`) rather than only from the action. That
+is deliberately the two `isSelected` lines and not the full control pass, which reads the
+session store and would do so on every tick of a drag.
 
 **The sidebar is a plain split item, not `NSSplitViewItem(sidebarWithViewController:)`**, and
 that single line is the whole of its silhouette. On macOS 26 the sidebar *behaviour* draws the
