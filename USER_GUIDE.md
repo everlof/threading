@@ -23,7 +23,9 @@ optional beyond the first click:
    first time there is genuinely something to say.
 
 Closing the walkthrough quits the app and it returns on the next launch; finishing it opens
-the main window. Run it again anytime from **Settings ▸ Advanced ▸ Welcome Tour**.
+the main window. **Settings ▸ Advanced ▸ Welcome Tour** offers it again in two ways: **Show
+Again…** opens it immediately over the running app, and **Clear Flag** makes the *next launch*
+open with it — the true first-launch experience, main window held back and all.
 
 ## Layout
 
@@ -1633,10 +1635,16 @@ process draws — a web page in the display panel — may appear blank in it.
 
 ### Full Screen
 - **Cmd+Ctrl+F**: toggle full screen
+- **Double-click the strip along the top of the window** — beside the traffic lights, over the
+  sidebar, or anywhere across it that isn't a control — to fill the screen, and again to put the
+  window back. It does whatever **System Settings ▸ Desktop & Dock ▸ "Double-click a window's
+  title bar to"** is set to, including nothing at all.
 
 ### Themes
 
-Open **Settings > Current Theme** to inspect the app chrome that is active now. The page shows
+Open **View ▸ Current Theme**, or pick **Current Theme** from the `+` in the display panel beside
+a conversation, to inspect the app chrome that is active now. It opens in that panel and stays
+open as you move between conversations — it belongs to the app, not to one chat. The page shows
 its light/dark variants, material, sidebar treatment, paired terminal colours, and the semantic
 colour roles the app actually reads. Built-in and extension themes are shown at full strength but
 locked; **Duplicate to Edit** creates and applies a custom copy in one step. A custom theme's

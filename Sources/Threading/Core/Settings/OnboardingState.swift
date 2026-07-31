@@ -19,20 +19,48 @@ enum OnboardingState {
     static let currentVersion = 1
 
     static var needsOnboarding: Bool {
-        needsOnboarding(
-            completedVersion: PreferenceStore.shared.integer(forKey: Keys.completedVersion),
-            hasProjects: !ProjectStore.shared.projects.isEmpty
+        let hasProjects = !ProjectStore.shared.projects.isEmpty
+
+        // Grandfathering is a one-time *recording*, not a standing veto: a store with projects
+        // and no record at all belongs to someone who predates the walkthrough, so the first
+        // read writes the record for them. From then on the record alone decides — which is
+        // what lets Advanced's "Clear Flag" bring the walkthrough back over an existing store:
+        // clearing writes an explicit zero, a record saying "run again", where a *missing* key
+        // would be indistinguishable from the upgrade case and be silently re-grandfathered.
+        if !hasRecord, hasProjects {
+            markCompleted()
+            return false
+        }
+        return needsOnboarding(
+            completedVersion: completedVersion,
+            hasRecord: hasRecord,
+            hasProjects: hasProjects
         )
     }
 
-    /// The pure rule. `hasProjects` grandfathers an existing user: a store that already holds
-    /// projects belongs to someone who needs no welcome, whatever the flag says — the flag did
-    /// not exist when they started.
-    static func needsOnboarding(completedVersion: Int, hasProjects: Bool) -> Bool {
-        completedVersion < currentVersion && !hasProjects
+    /// The pure rule, testable without a store: with a record the version decides; without
+    /// one, only a store with no projects is a first launch (the other case grandfathers).
+    static func needsOnboarding(completedVersion: Int, hasRecord: Bool, hasProjects: Bool) -> Bool {
+        hasRecord ? completedVersion < currentVersion : !hasProjects
     }
+
+    static var hasRecord: Bool {
+        PreferenceStore.shared.object(forKey: Keys.completedVersion) != nil
+    }
+
+    static var completedVersion: Int {
+        PreferenceStore.shared.integer(forKey: Keys.completedVersion)
+    }
+
+    static var isRecorded: Bool { completedVersion >= currentVersion }
 
     static func markCompleted() {
         PreferenceStore.shared.set(currentVersion, forKey: Keys.completedVersion)
+    }
+
+    /// Forgets the completion, so the next launch opens with the walkthrough — the true
+    /// first-launch path, deferred main window and all. Advanced's row calls this.
+    static func clear() {
+        PreferenceStore.shared.set(0, forKey: Keys.completedVersion)
     }
 }

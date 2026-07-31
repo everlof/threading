@@ -33,14 +33,23 @@ window (`applicationShouldHandleReopen`).
 `OnboardingState` (Core/Settings) stores an integer completion *version* in
 **`PreferenceStore`**, not `UserDefaults.standard` — hosted tests build these controllers and
 mark them completed, and the scratch suite is what keeps a test run from deciding what the
-developer's own next launch shows (the `appThemeID` rationale). The rule is pure and tested:
-`completedVersion < currentVersion && !hasProjects`. The `hasProjects` guard grandfathers
-existing users — a store that already holds projects belongs to someone who needs no welcome,
-whatever the flag says, because the flag did not exist when they started.
+developer's own next launch shows (the `appThemeID` rationale).
 
-Settings ▸ Advanced ▸ **Welcome Tour** re-runs the walkthrough over the open main window
-(`AppDelegate.presentOnboarding`); completion's `showWindow` is then a no-op, and the import
-page naturally offers only what is not yet tracked.
+Grandfathering is a one-time **recording**, not a standing veto: a store with projects and no
+record at all belongs to someone who predates the walkthrough, so the first read writes the
+record for them and answers no. From then on the record alone decides. That design is what
+makes Advanced's **Clear Flag** possible — clearing writes an explicit **zero** rather than
+removing the key, because a *missing* key with projects present is indistinguishable from the
+upgrade case and would be silently re-grandfathered; the explicit zero is a record that says
+"run again". The pure rule (`needsOnboarding(completedVersion:hasRecord:hasProjects:)`) and
+the cleared-vs-never-set distinction are both held by `OnboardingStateTests`.
+
+Settings ▸ Advanced ▸ **Welcome Tour** carries both spellings: **Show Again…** runs the
+walkthrough immediately over the open main window (`AppDelegate.presentOnboarding`;
+completion's `showWindow` is then a no-op, and the import page naturally offers only what is
+not yet tracked), and **Clear Flag** arms the true first-launch path — deferred main window
+and all — for the next launch. The row's detail line reflects the current record, which is
+also the click's acknowledgement.
 
 ## Pages
 

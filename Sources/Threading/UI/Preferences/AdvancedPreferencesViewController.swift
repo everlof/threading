@@ -52,6 +52,14 @@ final class AdvancedPreferencesViewController: NSViewController {
                     detail: AdvancedStrings.tourDetail,
                     button: AdvancedStrings.tourButton,
                     action: #selector(showWelcomeTour)
+                ),
+                resetRow(
+                    title: AdvancedStrings.tourFlagTitle,
+                    detail: OnboardingState.isRecorded
+                        ? AdvancedStrings.tourFlagRecordedDetail
+                        : AdvancedStrings.tourFlagClearedDetail,
+                    button: AdvancedStrings.tourFlagButton,
+                    action: #selector(clearOnboardingFlag)
                 )
             ])),
             SettingsUI.section(AdvancedStrings.resetSection, SettingsCard(rows: [
@@ -164,6 +172,13 @@ final class AdvancedPreferencesViewController: NSViewController {
         AppDelegate.shared?.presentOnboarding()
     }
 
+    /// Non-destructive, so no confirmation: the only consequence is a walkthrough on the next
+    /// launch. The rebuilt row's detail line is the acknowledgement.
+    @objc private func clearOnboardingFlag() {
+        OnboardingState.clear()
+        rebuild()
+    }
+
     @objc private func resetSettings() {
         reset(.settings, title: AdvancedStrings.confirmSettingsTitle,
               message: AdvancedStrings.confirmSettingsBody,
@@ -249,6 +264,18 @@ enum AdvancedStrings {
         )
     }
     static var tourButton: String { L10n.string("Show Again…") }
+
+    static var tourFlagTitle: String { L10n.string("Run at next launch") }
+    static var tourFlagRecordedDetail: String {
+        L10n.string(
+            "Clears the completed flag, so the next launch opens with the walkthrough — the "
+                + "true first-launch path, main window deferred and all."
+        )
+    }
+    static var tourFlagClearedDetail: String {
+        L10n.string("Cleared — the walkthrough opens on the next launch.")
+    }
+    static var tourFlagButton: String { L10n.string("Clear Flag") }
 
     static var resetSection: String { L10n.string("Start Over") }
     static var resetSettingsTitle: String { L10n.string("Reset settings") }

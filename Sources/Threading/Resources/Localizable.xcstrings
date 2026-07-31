@@ -21679,6 +21679,46 @@
           }
         }
       }
+    },
+    "Run at next launch": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kör vid nästa start"
+          }
+        }
+      }
+    },
+    "Clears the completed flag, so the next launch opens with the walkthrough — the true first-launch path, main window deferred and all.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rensar flaggan för slutförd genomgång, så nästa start öppnar med genomgången — den riktiga första-startvägen, med huvudfönstret uppskjutet och allt."
+          }
+        }
+      }
+    },
+    "Cleared — the walkthrough opens on the next launch.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rensad — genomgången öppnas vid nästa start."
+          }
+        }
+      }
+    },
+    "Clear Flag": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rensa flagga"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
