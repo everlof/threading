@@ -197,7 +197,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // Full-size content so the sidebar runs the whole height of the window and the
         // traffic lights sit over it, rather than above a separate title bar. Views that
         // must not slide under the toolbar pin to their safe area instead.
-        let window = NSWindow(
+        // `TitlebarActionWindow` rather than a plain `NSWindow` because of what the next two
+        // lines cost together: full-size content *and* a transparent titlebar is the one
+        // combination in which AppKit stops hit-testing the strip, so a double-click there
+        // reaches the content view and the platform's zoom-on-double-click never runs. That
+        // class puts the gesture back — see its own note.
+        let window = TitlebarActionWindow(
             contentRect: contentRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,

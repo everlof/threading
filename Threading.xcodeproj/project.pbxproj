@@ -205,6 +205,7 @@
 		EC69F77D22B7CDD1A3A8EB46 /* ThemedToggleRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 737CEB9D363AD13CDF1140C2 /* ThemedToggleRenderTests.swift */; };
 		4F60EC839B7F378534D65F6E /* GitHubIssueSubmitterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D3DEE9BB53A5948DDDDD4D /* GitHubIssueSubmitterTests.swift */; };
 		C52950FA0054230980738459 /* IssueReportingRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4BBF5802D44227EB2E2A8A5 /* IssueReportingRenderTests.swift */; };
+		21784437C4536523D2704BC0 /* TitlebarDoubleClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82373011D8034BC7FD92008F /* TitlebarDoubleClickTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -454,6 +455,7 @@
 		737CEB9D363AD13CDF1140C2 /* ThemedToggleRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedToggleRenderTests.swift; sourceTree = "<group>"; };
 		E4D3DEE9BB53A5948DDDDD4D /* GitHubIssueSubmitterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitHubIssueSubmitterTests.swift; sourceTree = "<group>"; };
 		E4BBF5802D44227EB2E2A8A5 /* IssueReportingRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = IssueReportingRenderTests.swift; sourceTree = "<group>"; };
+		82373011D8034BC7FD92008F /* TitlebarDoubleClickTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TitlebarDoubleClickTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -763,6 +765,7 @@
 				737CEB9D363AD13CDF1140C2 /* ThemedToggleRenderTests.swift */,
 				E4D3DEE9BB53A5948DDDDD4D /* GitHubIssueSubmitterTests.swift */,
 				E4BBF5802D44227EB2E2A8A5 /* IssueReportingRenderTests.swift */,
+				82373011D8034BC7FD92008F /* TitlebarDoubleClickTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1318,6 +1321,7 @@
 				EC69F77D22B7CDD1A3A8EB46 /* ThemedToggleRenderTests.swift in Sources */,
 				4F60EC839B7F378534D65F6E /* GitHubIssueSubmitterTests.swift in Sources */,
 				C52950FA0054230980738459 /* IssueReportingRenderTests.swift in Sources */,
+				21784437C4536523D2704BC0 /* TitlebarDoubleClickTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
