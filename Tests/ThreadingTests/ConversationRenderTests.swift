@@ -718,7 +718,9 @@ final class ConversationRenderTests: XCTestCase {
 
         let replayStarted = DispatchTime.now().uptimeNanoseconds
         Self.apply(events, to: controller)
+        let presentationEnded = DispatchTime.now().uptimeNanoseconds
         controller.finishReplayRendering()
+        let reloadEnded = DispatchTime.now().uptimeNanoseconds
         controller.refreshMinimap()
         let replayEnded = DispatchTime.now().uptimeNanoseconds
         controller.view.layoutSubtreeIfNeeded()
@@ -736,6 +738,10 @@ final class ConversationRenderTests: XCTestCase {
                 + "presented=\(presentedCount) cached_heights=\(cachedHeightCount) "
                 + "descendants=\(descendantCount) "
                 + "model_ms=\(Self.milliseconds(modelElapsed)) "
+                + "presentation_ms="
+                + Self.milliseconds(presentationEnded - replayStarted) + " "
+                + "reload_ms=\(Self.milliseconds(reloadEnded - presentationEnded)) "
+                + "minimap_ms=\(Self.milliseconds(replayEnded - reloadEnded)) "
                 + "render_ms=\(Self.milliseconds(replayEnded - replayStarted)) "
                 + "layout_ms=\(Self.milliseconds(layoutEnded - replayEnded)) "
                 + "elapsed_ms=\(Self.milliseconds(layoutEnded - replayStarted))"

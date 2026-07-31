@@ -315,4 +315,11 @@ enum DesignSymbols {
     static let submit = "return"
     static let search = "magnifyingglass"
     static let removeAttachment = "xmark"
+    /// Entering annotation mode on a browser page, and being in it.
+    static let annotate = "plus.bubble"
+    static let annotating = "checkmark.bubble.fill"
+    /// How a report ended: filed, or refused. Beside wording that already says which, so the
+    /// pair carries the outcome without relying on the colour they are tinted.
+    static let reportFiled = "checkmark.circle"
+    static let reportRefused = "exclamationmark.triangle"
 }

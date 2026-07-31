@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingExtensionKit
 
 // MARK: - Tab Host Identity
 
@@ -9,10 +10,10 @@ import AppKit
 /// would wrap this in a reference that also names a window — nothing in the tab model needs a
 /// window today, which is exactly what keeps one possible tomorrow.
 enum TabHostID: Hashable {
-    /// The display panel on the right split item.
-    case displayPanel
-    /// The drawer strip at the content pane's bottom edge.
-    case drawer
+  /// The display panel on the right split item.
+  case displayPanel
+  /// The drawer strip at the content pane's bottom edge.
+  case drawer
 }
 
 // MARK: - Display Content
@@ -20,23 +21,26 @@ enum TabHostID: Hashable {
 /// One piece of content shown in the panel.
 struct DisplayContent {
 
-    /// What is being shown, which decides both the view used and the actions offered.
-    enum Body {
-        /// An image on disk. The URL is kept so the panel can act on the file itself —
-        /// reveal it, copy its path, open it elsewhere.
-        case image(NSImage, url: URL)
+  /// What is being shown, which decides both the view used and the actions offered.
+  enum Body {
+    /// An image on disk. The URL is kept so the panel can act on the file itself —
+    /// reveal it, copy its path, open it elsewhere.
+    case image(NSImage, url: URL)
 
-        /// A self-contained HTML document the agent generated.
-        case html(String)
-    }
+    /// A self-contained HTML document the agent generated.
+    case html(String)
 
-    let body: Body
+    /// A bounded semantic visualization rendered entirely by Threading's native design system.
+    case semanticScene(ExtensionScene)
+  }
 
-    /// The agent's own caption, when it supplied one.
-    let title: String?
+  let body: Body
 
-    /// What was shown, in the app's words rather than the agent's.
-    let subtitle: String
+  /// The agent's own caption, when it supplied one.
+  let title: String?
+
+  /// What was shown, in the app's words rather than the agent's.
+  let subtitle: String
 }
 
 // MARK: - Pane Tab
@@ -52,160 +56,174 @@ struct DisplayContent {
 @MainActor
 final class PaneTab {
 
-    enum Body {
-        case content(DisplayContent)
-        case browser(BrowserViewController)
-        case review(GitReviewViewController)
-        case info(SessionInfoViewController)
-        case terminal(ShellDrawerViewController)
-        case files(FileTreeViewController)
-        case attachments(SessionAttachmentsViewController)
-        case subagents(SubagentTranscriptViewController)
-        case extensionPanel(ExtensionPanelViewController)
-        case compare(CompareViewController)
+  enum Body {
+    case content(DisplayContent)
+    case browser(BrowserViewController)
+    case review(GitReviewViewController)
+    case info(SessionInfoViewController)
+    case terminal(ShellDrawerViewController)
+    case files(FileTreeViewController)
+    case attachments(SessionAttachmentsViewController)
+    case subagents(SubagentTranscriptViewController)
+    case sharing(SessionSharingViewController)
+    case extensionPanel(ExtensionPanelViewController)
+    case compare(CompareViewController)
+  }
+
+  let id: UUID
+  var body: Body
+
+  /// The session a tab belongs to, kept on the tab because a *moved* tab must still know:
+  /// its shell and browser context stay the session's, and the session's deletion is what
+  /// ends it, wherever it is hosted.
+  var owningSessionID: SessionID?
+
+  /// For an image tab: the PNG filename cached on disk, kept so it can be removed when the tab
+  /// closes and re-loaded when the session is restored.
+  var cacheFile: String?
+
+  init(id: UUID = UUID(), body: Body, owningSessionID: SessionID? = nil) {
+    self.id = id
+    self.body = body
+    self.owningSessionID = owningSessionID
+  }
+
+  var content: DisplayContent? {
+    if case .content(let content) = body { return content }
+    return nil
+  }
+
+  var browser: BrowserViewController? {
+    if case .browser(let browser) = body { return browser }
+    return nil
+  }
+
+  var review: GitReviewViewController? {
+    if case .review(let review) = body { return review }
+    return nil
+  }
+
+  var info: SessionInfoViewController? {
+    if case .info(let info) = body { return info }
+    return nil
+  }
+
+  var terminal: ShellDrawerViewController? {
+    if case .terminal(let terminal) = body { return terminal }
+    return nil
+  }
+
+  var files: FileTreeViewController? {
+    if case .files(let files) = body { return files }
+    return nil
+  }
+
+  var attachments: SessionAttachmentsViewController? {
+    if case .attachments(let attachments) = body { return attachments }
+    return nil
+  }
+
+  var subagents: SubagentTranscriptViewController? {
+    if case .subagents(let subagents) = body { return subagents }
+    return nil
+  }
+
+  var sharing: SessionSharingViewController? {
+    if case .sharing(let sharing) = body { return sharing }
+    return nil
+  }
+
+  var extensionPanel: ExtensionPanelViewController? {
+    if case .extensionPanel(let panel) = body { return panel }
+    return nil
+  }
+
+  var compare: CompareViewController? {
+    if case .compare(let compare) = body { return compare }
+    return nil
+  }
+
+  /// The tab's view controller, when its body is a live surface rather than rendered content.
+  var hostedController: NSViewController? {
+    switch body {
+    case .content: return nil
+    case .browser(let browser): return browser
+    case .review(let review): return review
+    case .info(let info): return info
+    case .terminal(let terminal): return terminal
+    case .files(let files): return files
+    case .attachments(let attachments): return attachments
+    case .subagents(let subagents): return subagents
+    case .sharing(let sharing): return sharing
+    case .extensionPanel(let panel): return panel
+    case .compare(let compare): return compare
     }
+  }
 
-    let id: UUID
-    var body: Body
-
-    /// The session a tab belongs to, kept on the tab because a *moved* tab must still know:
-    /// its shell and browser context stay the session's, and the session's deletion is what
-    /// ends it, wherever it is hosted.
-    var owningSessionID: SessionID?
-
-    /// For an image tab: the PNG filename cached on disk, kept so it can be removed when the tab
-    /// closes and re-loaded when the session is restored.
-    var cacheFile: String?
-
-    init(id: UUID = UUID(), body: Body, owningSessionID: SessionID? = nil) {
-        self.id = id
-        self.body = body
-        self.owningSessionID = owningSessionID
+  /// The glyph the tab strip draws — the terminal-familiar vocabulary of the surface kind.
+  var symbolName: String {
+    switch body {
+    case .content(let content):
+      if case .image = content.body { return "photo" }
+      if case .semanticScene = content.body { return "square.grid.3x3" }
+      return "doc.richtext"
+    case .browser(let browser):
+      return browser.contextKind == .private ? "hand.raised.fill" : "globe"
+    case .review:
+      return "plus.forwardslash.minus"
+    case .info:
+      return "info.circle"
+    case .terminal:
+      return "terminal"
+    case .files:
+      return "folder"
+    case .attachments:
+      return "paperclip"
+    case .subagents:
+      return "person.2"
+    case .sharing:
+      // The same eye the corner card's row leads with: this pane is who is looking.
+      return "eye"
+    case .extensionPanel:
+      return "puzzlepiece.extension"
+    case .compare:
+      return "rectangle.on.rectangle"
     }
+  }
 
-    var content: DisplayContent? {
-        if case .content(let content) = body { return content }
-        return nil
+  /// What the strip and header call the tab: the agent's caption, else the file, the kind, or
+  /// the live page's own title.
+  var title: String {
+    switch body {
+    case .content(let content):
+      if let title = content.title, !title.isEmpty { return title }
+      if case .image(_, let url) = content.body { return url.lastPathComponent }
+      if case .semanticScene = content.body { return "Scene" }
+      return "Document"
+    case .browser(let browser):
+      if let title = browser.currentTitle, !title.isEmpty { return title }
+      return browser.currentURL?.host
+        ?? (browser.contextKind == .private ? "Private Browser" : "Browser")
+    case .review:
+      return "Review"
+    case .info:
+      return "Info"
+    case .terminal:
+      return "Terminal"
+    case .files:
+      return "Files"
+    case .attachments:
+      return "Attachments"
+    case .subagents:
+      return "Subagents"
+    case .sharing:
+      return "Sharing"
+    case .extensionPanel(let panel):
+      return panel.panelTitle
+    case .compare:
+      return "Compare"
     }
-
-    var browser: BrowserViewController? {
-        if case .browser(let browser) = body { return browser }
-        return nil
-    }
-
-    var review: GitReviewViewController? {
-        if case .review(let review) = body { return review }
-        return nil
-    }
-
-    var info: SessionInfoViewController? {
-        if case .info(let info) = body { return info }
-        return nil
-    }
-
-    var terminal: ShellDrawerViewController? {
-        if case .terminal(let terminal) = body { return terminal }
-        return nil
-    }
-
-    var files: FileTreeViewController? {
-        if case .files(let files) = body { return files }
-        return nil
-    }
-
-    var attachments: SessionAttachmentsViewController? {
-        if case .attachments(let attachments) = body { return attachments }
-        return nil
-    }
-
-    var subagents: SubagentTranscriptViewController? {
-        if case .subagents(let subagents) = body { return subagents }
-        return nil
-    }
-
-    var extensionPanel: ExtensionPanelViewController? {
-        if case .extensionPanel(let panel) = body { return panel }
-        return nil
-    }
-
-    var compare: CompareViewController? {
-        if case .compare(let compare) = body { return compare }
-        return nil
-    }
-
-    /// The tab's view controller, when its body is a live surface rather than rendered content.
-    var hostedController: NSViewController? {
-        switch body {
-        case .content: return nil
-        case .browser(let browser): return browser
-        case .review(let review): return review
-        case .info(let info): return info
-        case .terminal(let terminal): return terminal
-        case .files(let files): return files
-        case .attachments(let attachments): return attachments
-        case .subagents(let subagents): return subagents
-        case .extensionPanel(let panel): return panel
-        case .compare(let compare): return compare
-        }
-    }
-
-    /// The glyph the tab strip draws — the terminal-familiar vocabulary of the surface kind.
-    var symbolName: String {
-        switch body {
-        case .content(let content):
-            if case .image = content.body { return "photo" }
-            return "doc.richtext"
-        case .browser(let browser):
-            return browser.contextKind == .private ? "hand.raised.fill" : "globe"
-        case .review:
-            return "plus.forwardslash.minus"
-        case .info:
-            return "info.circle"
-        case .terminal:
-            return "terminal"
-        case .files:
-            return "folder"
-        case .attachments:
-            return "paperclip"
-        case .subagents:
-            return "person.2"
-        case .extensionPanel:
-            return "puzzlepiece.extension"
-        case .compare:
-            return "rectangle.on.rectangle"
-        }
-    }
-
-    /// What the strip and header call the tab: the agent's caption, else the file, the kind, or
-    /// the live page's own title.
-    var title: String {
-        switch body {
-        case .content(let content):
-            if let title = content.title, !title.isEmpty { return title }
-            if case .image(_, let url) = content.body { return url.lastPathComponent }
-            return "Document"
-        case .browser(let browser):
-            if let title = browser.currentTitle, !title.isEmpty { return title }
-            return browser.currentURL?.host
-                ?? (browser.contextKind == .private ? "Private Browser" : "Browser")
-        case .review:
-            return "Review"
-        case .info:
-            return "Info"
-        case .terminal:
-            return "Terminal"
-        case .files:
-            return "Files"
-        case .attachments:
-            return "Attachments"
-        case .subagents:
-            return "Subagents"
-        case .extensionPanel(let panel):
-            return panel.panelTitle
-        case .compare:
-            return "Compare"
-        }
-    }
+  }
 }
 
 /// The display panel named this type while it was the only tab host; the drawer now hosts the

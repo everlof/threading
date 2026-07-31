@@ -50,6 +50,46 @@ final class ToastTests: XCTestCase {
         return (host, footer.topAnchor, window)
     }
 
+    /// The same pane, held at a width the way a split view holds the sidebar's: by a constraint
+    /// a shade above `defaultLow`, which anything inside the column can outrank and push.
+    private func column(width: CGFloat) -> (
+        column: NSView,
+        bottom: NSLayoutYAxisAnchor,
+        window: NSWindow
+    ) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        let root = NSView(frame: window.contentLayoutRect)
+        window.contentView = root
+
+        let column = NSView()
+        column.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(column)
+
+        let held = column.widthAnchor.constraint(equalToConstant: width)
+        held.priority = SidebarDefaults.holdingPriority
+
+        let footer = PaneFooterView()
+        column.addSubview(footer)
+
+        NSLayoutConstraint.activate([
+            column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            column.topAnchor.constraint(equalTo: root.topAnchor),
+            column.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            column.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor),
+            held,
+            footer.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: column.bottomAnchor)
+        ])
+        root.layoutSubtreeIfNeeded()
+        return (column, footer.topAnchor, window)
+    }
+
     private func archiveRequest(
         message: String = "Archived “Refactor the parser”",
         detail: String? = "The agent stopped. Restore it from Settings ▸ Archived.",
@@ -132,6 +172,36 @@ final class ToastTests: XCTestCase {
         AppThemePalette.set(.system)
     }
 
+    /// The band floats *in* a column; it does not get to decide how wide that column is.
+    ///
+    /// The sidebar holds its width with a constraint one step above `defaultLow`, and a wrapping
+    /// label resists compression at 750 — so a chain of required pins carried the receipt's own
+    /// text out to the split view, and the sidebar jumped wider as the band arrived and snapped
+    /// back six seconds later when it left. The column here is held exactly the way the split
+    /// view holds the real one, and the band has more words than fit in it.
+    func testTheBandDoesNotWidenTheColumnItFloatsIn() throws {
+        let (column, bottom, _) = column(width: SidebarDefaults.minWidth)
+        let presenter = ToastPresenter(host: column, above: bottom)
+
+        presenter.present(archiveRequest(
+            message: "Archived “Rewrite the rollout discovery so Codex reports its own id”",
+            detail: "The agent stopped. Restore it from Settings ▸ Archived."
+        ))
+        column.superview?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            column.frame.width,
+            SidebarDefaults.minWidth,
+            accuracy: 0.5,
+            "the receipt's own words widened the column it was reporting into"
+        )
+        XCTAssertLessThanOrEqual(
+            try XCTUnwrap(presenter.current).frame.width,
+            SidebarDefaults.minWidth - ToastDefaults.hostInset * 2 + 0.5,
+            "the band overhung the column instead of wrapping inside it"
+        )
+    }
+
     // MARK: - The clock
 
     func testPresentingPutsTheBandAboveThePanesFooter() throws {
@@ -173,21 +243,6 @@ final class ToastTests: XCTestCase {
         XCTAssertNil(toast.superview, "the band stayed in the pane after its action was taken")
     }
 
-    /// Two bands in a column is a queue nobody asked for, and the second report is always the
-    /// one that describes the state the user is in.
-    func testASecondToastReplacesTheFirstRatherThanStacking() throws {
-        let (host, bottom, _) = pane()
-        let presenter = ToastPresenter(host: host, above: bottom)
-
-        presenter.present(archiveRequest(message: "Archived “One”"))
-        let first = try XCTUnwrap(presenter.current)
-        presenter.present(archiveRequest(message: "Archived “Two”"))
-
-        XCTAssertNil(first.superview)
-        XCTAssertEqual(descendants(of: host).compactMap { $0 as? ToastView }.count, 1)
-        XCTAssertEqual(presenter.current?.request.message, "Archived “Two”")
-    }
-
     func testTheBandLeavesOnItsOwnWhenTheDwellRunsOut() throws {
         let (host, bottom, _) = pane()
         let presenter = ToastPresenter(host: host, above: bottom)
@@ -200,6 +255,30 @@ final class ToastTests: XCTestCase {
 
         XCTAssertNil(presenter.current)
         XCTAssertNil(toast.superview)
+    }
+
+    /// A receipt for something nobody just did has to outlast the glance that finds it: the six
+    /// seconds are measured from a click, and an agent archiving its own session is the same
+    /// band arriving with no click behind it. The length belongs to the request, because it is a
+    /// fact about who caused the thing rather than about the pane it appears in.
+    func testABandMayAskToHoldLongerThanThePaneWouldKeepIt() throws {
+        XCTAssertGreaterThan(ToastDefaults.unattendedDwell, ToastDefaults.dwell)
+
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 0.02
+
+        var request = archiveRequest()
+        request.dwell = 30
+        presenter.present(request)
+
+        waitForRunLoop(0.3)
+
+        XCTAssertNotNil(
+            presenter.current,
+            "the band left on the pane's clock instead of on its own"
+        )
+        presenter.dismiss()
     }
 
     /// A way back that expires while it is being reached for is worse than no way back, because
@@ -225,6 +304,114 @@ final class ToastTests: XCTestCase {
 
         waitForRunLoop(0.4)
         XCTAssertNil(presenter.current)
+    }
+
+    // MARK: - The clock, drawn
+
+    /// The band is the one surface in the window whose *remaining* time is worth knowing, so it
+    /// shows it: the rail runs while the clock does, and stops with it.
+    func testTheBandShowsACountdownForItsOwnDwellAndStopsItUnderThePointer() throws {
+        Design.Motion.reduceMotionOverrideForTesting = false
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+        XCTAssertTrue(toast.isDwellRunning)
+        XCTAssertTrue(toast.showsDwellCountdown)
+
+        toast.mouseEntered(with: NSEvent())
+        XCTAssertFalse(toast.isDwellRunning, "the rail kept draining on a clock that had stopped")
+        XCTAssertTrue(toast.showsDwellCountdown, "what is left of the band's time vanished with it")
+
+        toast.mouseExited(with: NSEvent())
+        XCTAssertTrue(toast.isDwellRunning, "the clock restarted and the rail did not")
+        presenter.dismiss()
+    }
+
+    /// Under Reduce Motion the rail goes rather than freezing full: a still line is not a slower
+    /// countdown, it is a band claiming a clock it is not showing. The dwell is unchanged.
+    func testReduceMotionTakesTheRailAwayAndLeavesTheClockAlone() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        let toast = try XCTUnwrap(presenter.current)
+
+        XCTAssertFalse(toast.showsDwellCountdown)
+        XCTAssertTrue(toast.isDwellRunning, "Reduce Motion shortened the band's life instead")
+        presenter.dismiss()
+    }
+
+    // MARK: - A burst
+
+    /// Four archives in a row are four separate ways back. A receipt overwritten a moment after
+    /// it lands is one whose action nobody ever gets to press — and that action is the whole
+    /// reason the archive stopped asking first.
+    func testAReceiptWithAWayBackIsQueuedRatherThanOverwritten() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        var undone: [String] = []
+        presenter.present(archiveRequest(message: "Archived “One”") { undone.append("One") })
+        presenter.present(archiveRequest(message: "Archived “Two”") { undone.append("Two") })
+
+        XCTAssertEqual(presenter.current?.request.message, "Archived “One”")
+        XCTAssertEqual(presenter.queued.map(\.message), ["Archived “Two”"])
+        XCTAssertEqual(
+            descendants(of: host).compactMap { $0 as? ToastView }.count,
+            1,
+            "both bands were on screen at once"
+        )
+
+        // The first leaves — its clock, its button, it makes no difference — and the second
+        // takes the pane it was holding.
+        presenter.dismiss()
+        waitForRunLoop(0.2)
+        let second = try XCTUnwrap(presenter.current)
+        XCTAssertEqual(second.request.message, "Archived “Two”")
+        XCTAssertTrue(presenter.queued.isEmpty)
+
+        try XCTUnwrap(buttons(in: second).first).performClick()
+        XCTAssertEqual(undone, ["Two"], "the queue ran the wrong receipt's undo")
+    }
+
+    /// Nothing to lose, so nothing waits: the newer report is the one that describes the state
+    /// the user is in — the navigator's error arriving behind its own progress line.
+    func testAReceiptWithNothingToOfferIsReplacedWhereItStands() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+
+        presenter.present(ToastRequest(message: "Loading the navigator"))
+        presenter.present(ToastRequest(message: "The navigator extension stopped"))
+
+        XCTAssertEqual(presenter.current?.request.message, "The navigator extension stopped")
+        XCTAssertTrue(presenter.queued.isEmpty)
+        XCTAssertEqual(descendants(of: host).compactMap { $0 as? ToastView }.count, 1)
+    }
+
+    /// A queue is measured in dwells, so it is bounded — and what falls off the end is the
+    /// oldest receipt waiting, the one whose consequence the user has had longest to notice.
+    func testABurstLongerThanTheQueueKeepsTheMostRecentReceipts() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        for index in 0...(ToastDefaults.queueLimit + 2) {
+            presenter.present(archiveRequest(message: "Archived “\(index)”"))
+        }
+
+        XCTAssertEqual(presenter.current?.request.message, "Archived “0”")
+        XCTAssertEqual(presenter.queued.count, ToastDefaults.queueLimit)
+        XCTAssertEqual(
+            presenter.queued.last?.message,
+            "Archived “\(ToastDefaults.queueLimit + 2)”",
+            "the newest receipt was the one dropped"
+        )
+        presenter.dismiss()
     }
 
     // MARK: - Helpers

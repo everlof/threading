@@ -1826,6 +1826,185 @@ final class BrowserAgentBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func testAnnotationOverlayTracksThePointerOnlyWhileAnnotating() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 390, height: 844),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let overlay = BrowserAnnotationOverlay(
+            frame: NSRect(x: 0, y: 0, width: 390, height: 844)
+        )
+        window.contentView?.addSubview(overlay)
+        overlay.layoutSubtreeIfNeeded()
+
+        var probes: [CGPoint?] = []
+        overlay.onTargetProbe = { probes.append($0) }
+        let move = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: CGPoint(x: 120, y: 240),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 0,
+            pressure: 0
+        ))
+
+        overlay.updateTrackingAreas()
+        XCTAssertFalse(
+            overlay.trackingAreas.contains { $0.options.contains(.mouseMoved) },
+            "Ordinary browsing must install no per-movement tracking at all"
+        )
+        overlay.mouseMoved(with: move)
+        XCTAssertTrue(probes.isEmpty)
+
+        overlay.isAnnotating = true
+        XCTAssertTrue(overlay.trackingAreas.contains { $0.options.contains(.mouseMoved) })
+        overlay.mouseMoved(with: move)
+        XCTAssertEqual(probes.count, 1)
+        XCTAssertEqual(probes.first ?? nil, overlay.convert(CGPoint(x: 120, y: 240), from: nil))
+
+        overlay.hoveredTarget = BrowserAnnotationTarget(
+            rect: CGRect(x: 40, y: 60, width: 200, height: 44),
+            label: "button \u{201C}Sign in\u{201D}"
+        )
+        overlay.mouseExited(with: move)
+        XCTAssertNil(
+            overlay.hoveredTarget,
+            "A pointer that left the page leaves no component highlighted behind it"
+        )
+        XCTAssertEqual(probes.count, 2)
+        XCTAssertNil(probes.last ?? CGPoint.zero)
+
+        overlay.hoveredTarget = BrowserAnnotationTarget(
+            rect: CGRect(x: 40, y: 60, width: 200, height: 44),
+            label: "link \u{201C}Docs\u{201D}"
+        )
+        overlay.isAnnotating = false
+        XCTAssertNil(overlay.hoveredTarget)
+        XCTAssertFalse(overlay.trackingAreas.contains { $0.options.contains(.mouseMoved) })
+    }
+
+    /// Annotation mode changes what a click *means*, so it has to be legible on the surface the
+    /// click lands on — not only on the toolbar button that started it.
+    @MainActor
+    func testAnnotationModeIsVisibleOnTheBrowserSurfaceItself() throws {
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let overlay = BrowserAnnotationOverlay(
+            frame: NSRect(x: 0, y: 0, width: 390, height: 844)
+        )
+        let window = NSWindow(
+            contentRect: overlay.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.contentView?.addSubview(overlay)
+        overlay.appearance = appearance
+        overlay.layoutSubtreeIfNeeded()
+
+        /// How much ink the overlay put down at one point of the page, whatever colour the
+        /// active theme's accent happens to be.
+        func ink(atX x: CGFloat, y: CGFloat) throws -> CGFloat {
+            let rep = try XCTUnwrap(
+                overlay.bitmapImageRepForCachingDisplay(in: overlay.bounds)
+            )
+            appearance.performAsCurrentDrawingAppearance {
+                overlay.cacheDisplay(in: overlay.bounds, to: rep)
+            }
+            let scaleX = CGFloat(rep.pixelsWide) / overlay.bounds.width
+            let scaleY = CGFloat(rep.pixelsHigh) / overlay.bounds.height
+            return rep.colorAt(
+                x: Int(x * scaleX),
+                y: Int(y * scaleY)
+            )?.alphaComponent ?? 0
+        }
+
+        // The viewport's left edge, and the badge's own pill in the bottom-left corner.
+        let edge = (x: CGFloat(1), y: CGFloat(400))
+        let badge = (x: CGFloat(14), y: overlay.bounds.height - 21)
+
+        XCTAssertEqual(
+            try ink(atX: edge.x, y: edge.y),
+            0,
+            accuracy: 0.01,
+            "an ordinary page carries no mode chrome at all"
+        )
+        XCTAssertEqual(try ink(atX: badge.x, y: badge.y), 0, accuracy: 0.01)
+
+        overlay.isAnnotating = true
+        XCTAssertGreaterThan(
+            try ink(atX: edge.x, y: edge.y),
+            0.5,
+            "the frame is what makes the browser look modal"
+        )
+        XCTAssertGreaterThan(
+            try ink(atX: badge.x, y: badge.y),
+            0.5,
+            "and the badge is what names the mode"
+        )
+
+        overlay.isAnnotating = false
+        XCTAssertEqual(
+            try ink(atX: edge.x, y: edge.y),
+            0,
+            accuracy: 0.01,
+            "leaving the mode leaves the page as it found it"
+        )
+        XCTAssertEqual(try ink(atX: badge.x, y: badge.y), 0, accuracy: 0.01)
+    }
+
+    func testAnnotationTargetLabelLeadsWithTheRoleAndStaysBounded() throws {
+        func probe(
+            role: String?,
+            name: String?,
+            tag: String? = "div"
+        ) -> BrowserAnnotationTargetProbe {
+            BrowserAnnotationTargetProbe(
+                ok: true,
+                ref: nil,
+                tag: tag,
+                role: role,
+                name: name,
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10
+            )
+        }
+
+        XCTAssertEqual(
+            probe(role: "button", name: "Sign in").label,
+            "button \u{201C}Sign in\u{201D}"
+        )
+        XCTAssertEqual(probe(role: "navigation", name: nil).label, "navigation")
+        XCTAssertEqual(
+            probe(role: nil, name: "Read more", tag: "article").label,
+            "article \u{201C}Read more\u{201D}"
+        )
+        XCTAssertEqual(probe(role: nil, name: nil, tag: nil).label, "")
+        XCTAssertEqual(
+            probe(role: "link", name: "Getting\n  started  guide").label,
+            "link \u{201C}Getting started guide\u{201D}",
+            "Page text arrives with the page's own line breaks; the label is one line"
+        )
+
+        let overflowing = probe(role: "button", name: String(repeating: "long name ", count: 20))
+        XCTAssertLessThanOrEqual(
+            overflowing.label.count,
+            BrowserAgentDefaults.maximumAnnotationTargetLabelLength
+        )
+        XCTAssertTrue(overflowing.label.hasSuffix("\u{2026}"), overflowing.label)
+        XCTAssertTrue(overflowing.label.hasPrefix("button \u{201C}long name"), overflowing.label)
+    }
+
+    @MainActor
     func testCurrentBrowserMeansVisibleBrowserNotHiddenAgentTarget() throws {
         let sessionID = SessionID()
         let pane = DisplayPaneController()
@@ -2548,6 +2727,112 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         XCTAssertFalse(
             second.text.contains("isolated=1"),
             "A second isolated run must not inherit cookies from the first"
+        )
+    }
+
+    /// The annotation overlay outlines a component, not the deepest node under the pointer.
+    ///
+    /// Pointing at the word inside a button is pointing at the button, and a pin dropped on the
+    /// glyph of an icon link is about the link: the probe therefore climbs to the nearest thing
+    /// the page names. It also has to answer in the *top-level* viewport's coordinates, because
+    /// that is the space the overlay draws in — a box reported in a frame's own coordinates lands
+    /// on top of unrelated content.
+    func testAnnotationTargetProbeNamesTheComponentUnderThePointer() async throws {
+        let schemeHandler = BrowserFixtureSchemeHandler(pages: [
+            "/annotate": #"""
+                <!doctype html>
+                <html>
+                  <head>
+                    <title>Annotation target fixture</title>
+                    <style>
+                      body { margin: 0; }
+                      #submit {
+                        height: 44px; left: 40px; position: absolute; top: 60px; width: 200px;
+                      }
+                      #prose { left: 40px; position: absolute; top: 140px; }
+                      iframe {
+                        border: 0; height: 120px; left: 20px; position: absolute;
+                        top: 200px; width: 300px;
+                      }
+                    </style>
+                  </head>
+                  <body>
+                    <button id="submit" type="button"><span id="word">Sign in</span></button>
+                    <p id="prose">Ordinary paragraph text</p>
+                    <iframe src="threading-test://fixture/annotate-frame"></iframe>
+                  </body>
+                </html>
+                """#,
+            "/annotate-frame": #"""
+                <!doctype html>
+                <html>
+                  <head><style>
+                    body { margin: 0; }
+                    a { display: block; height: 30px; left: 10px; position: absolute; top: 25px; }
+                  </style></head>
+                  <body><a href="#docs" aria-label="Read the docs"><b>Docs</b></a></body>
+                </html>
+                """#
+        ])
+        let browser = BrowserViewController(
+            urlSchemeHandlers: ["threading-test": schemeHandler]
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = browser
+        window.setContentSize(NSSize(width: 640, height: 480))
+        browser.view.frame = window.contentView?.bounds
+            ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.orderFront(nil)
+        defer { window.close() }
+        browser.view.layoutSubtreeIfNeeded()
+
+        let navigation = await performNavigation(
+            browser,
+            to: "threading-test://fixture/annotate"
+        )
+        XCTAssertTrue(navigation.0, navigation.1)
+
+        let onWord = try await browser.annotationTargetProbe(x: 140, y: 82)
+        XCTAssertTrue(onWord.ok)
+        XCTAssertEqual(onWord.role, "button")
+        XCTAssertEqual(onWord.name, "Sign in")
+        XCTAssertEqual(onWord.label, "button \u{201C}Sign in\u{201D}")
+        XCTAssertEqual(onWord.x, 40, accuracy: 1)
+        XCTAssertEqual(onWord.y, 60, accuracy: 1)
+        XCTAssertEqual(onWord.width, 200, accuracy: 1)
+        XCTAssertEqual(onWord.height, 44, accuracy: 1)
+
+        let onProse = try await browser.annotationTargetProbe(x: 60, y: 150)
+        XCTAssertTrue(onProse.ok)
+        XCTAssertEqual(onProse.tag, "p")
+        XCTAssertTrue(onProse.label.contains("Ordinary paragraph text"), onProse.label)
+
+        // Inside a same-origin frame: the link's own box, offset back into the outer viewport.
+        let inFrame = try await browser.annotationTargetProbe(x: 40, y: 240)
+        XCTAssertTrue(inFrame.ok)
+        XCTAssertEqual(inFrame.role, "link")
+        XCTAssertEqual(inFrame.name, "Read the docs")
+        XCTAssertEqual(inFrame.x, 30, accuracy: 2)
+        XCTAssertEqual(inFrame.y, 225, accuracy: 2)
+
+        let offPage = try await browser.annotationTargetProbe(x: 5_000, y: 5_000)
+        XCTAssertFalse(offPage.ok)
+        XCTAssertNil(offPage.role)
+
+        let snapshotBefore = try await browser.agentSnapshot()
+        let refsBefore = snapshotBefore.nodes.compactMap(\.ref)
+        _ = try await browser.annotationTargetProbe(x: 140, y: 82)
+        let snapshotAfter = try await browser.agentSnapshot()
+        XCTAssertEqual(
+            refsBefore,
+            snapshotAfter.nodes.compactMap(\.ref),
+            "Hovering must not renumber the refs the agent is working against"
         )
     }
 

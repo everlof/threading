@@ -12,7 +12,7 @@ final class DisplayPaneLayoutTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    /// A picture with a file behind it, since Quick Look needs one that exists.
+    /// A picture with a file behind it, since inspection and file actions need one that exists.
     private func imageOnDisk(
         size: NSSize,
         name: String = "shot.png"
@@ -147,6 +147,94 @@ final class DisplayPaneLayoutTests: XCTestCase {
         )
     }
 
+    // MARK: - The Panel Opens Wide Enough to Read
+
+    /// A required width constraint, laid out and then released, holds the pane for exactly as
+    /// long as it is active — the split view keeps positioning its items with its own constraint
+    /// at `holdingPriority`, whose constant is still the thickness the pane had. So the reveal
+    /// measured 372 while the constraint was up and **48** on the next layout pass: the panel's
+    /// chrome floor, which is where `display_image` opened it.
+    ///
+    /// Driven through the divider, so the width becomes the split view's own answer and survives
+    /// the passes that follow.
+    func testThePanelOpensAtTheWidthItRemembersRatherThanItsChromeFloor() throws {
+        let previous = DisplayPaneWidth.stored
+        defer { DisplayPaneWidth.stored = previous }
+        DisplayPaneWidth.stored = 420
+
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1400, height: 800))
+
+        controller.setDisplayPaneVisible(true)
+        window.layoutIfNeeded()
+        settle()
+        window.layoutIfNeeded()
+
+        XCTAssertEqual(
+            controller.displayPaneController.view.bounds.width, 420, accuracy: 1,
+            "the panel opened at \(controller.displayPaneController.view.bounds.width)"
+        )
+    }
+
+    /// The panel is written to on every divider move, and the test bundle is hosted in the app —
+    /// so this has to be the *scratch* suite, or a fixture window's idea of how wide the panel is
+    /// lands in the preferences of the app the developer is running. That is not hypothetical:
+    /// it is how a real machine came to have the 48pt floor saved as its panel width.
+    func testTheRememberedWidthIsNotWrittenToTheDevelopersOwnPreferences() {
+        XCTAssertTrue(PreferenceStore.isRedirected, "a hosted test is writing the real defaults")
+
+        let previous = DisplayPaneWidth.stored
+        defer { DisplayPaneWidth.stored = previous }
+        DisplayPaneWidth.stored = 517
+
+        XCTAssertEqual(DisplayPaneWidth.stored, 517)
+        XCTAssertNotEqual(
+            UserDefaults.standard.double(forKey: "ThreadingDisplayPaneWidth"), 517,
+            "the panel's width went into the real preferences"
+        )
+    }
+
+    /// A width nobody chose is not restored: below the panel's own `minWidth` the stored value
+    /// is read as absent, so a sliver recorded by a layout — the bug above — cannot become the
+    /// width every later reveal opens at.
+    func testASliverIsNeverRestoredAsAChosenWidth() {
+        let previous = DisplayPaneWidth.stored
+        defer { DisplayPaneWidth.stored = previous }
+
+        DisplayPaneWidth.stored = DisplayPaneDefaults.slimmestWidth
+        XCTAssertEqual(DisplayPaneWidth.stored, DisplayPaneDefaults.defaultWidth)
+        XCTAssertGreaterThanOrEqual(
+            DisplayPaneWidth.opening(in: 1400), DisplayPaneDefaults.defaultWidth
+        )
+    }
+
+    /// With no width ever chosen, the panel takes a share of the window rather than one fixed
+    /// number — floored so it stays legible on a small window, capped so it shares a large one.
+    func testAFirstOpenScalesWithTheWindow() {
+        let previous = DisplayPaneWidth.stored
+        defer { DisplayPaneWidth.stored = previous }
+        DisplayPaneWidth.stored = 0
+
+        XCTAssertEqual(DisplayPaneWidth.opening(in: 900), DisplayPaneDefaults.defaultWidth)
+        XCTAssertEqual(
+            DisplayPaneWidth.opening(in: 1600),
+            1600 * DisplayPaneDefaults.openingFraction,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(DisplayPaneWidth.opening(in: 4000), DisplayPaneDefaults.widestOpening)
+        XCTAssertEqual(DisplayPaneWidth.opening(in: 0), DisplayPaneDefaults.defaultWidth)
+    }
+
+    /// The reveal restores the width two run-loop turns later; ours queue behind both.
+    private func settle() {
+        let settled = expectation(description: "the panel settled")
+        DispatchQueue.main.async {
+            DispatchQueue.main.async { DispatchQueue.main.async { settled.fulfill() } }
+        }
+        wait(for: [settled], timeout: 2)
+    }
+
     // MARK: - The User Sizes the Panel, Not Its Tabs
 
     /// `NSSplitViewController` holds a divider where it was dragged with a constraint at the
@@ -251,6 +339,47 @@ final class DisplayPaneLayoutTests: XCTestCase {
         XCTAssertFalse(newTab?.isHidden == true, "leaving Current Theme did not restore the +")
     }
 
+    /// The door belongs beside the room it opens. The sidebar showed none of this document and
+    /// carried a permanent row to it anyway; the panel that *does* show it carries the way in.
+    ///
+    /// It is still not one of the chat's surfaces — choosing it takes the whole panel and joins
+    /// no tab list — so it sits behind its own separator, below them, and follows the same Tools
+    /// switch as **View ▸ Current Theme**.
+    func testTheNewTabMenuOffersTheGlobalDocumentBelowTheChatsOwnSurfaces() throws {
+        let settings = AppSettings.shared
+        let previous = settings.disabledToolGroupIDs
+        defer { settings.disabledToolGroupIDs = previous }
+        settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: true)
+
+        let pane = DisplayPaneController()
+        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        let sessionID = SessionID()
+        pane.showSession(sessionID)
+
+        let entries = pane.newTabEntries(for: sessionID)
+        let theme = try XCTUnwrap(
+            entries.firstIndex { $0.itemTitle == L10n.string("Current Theme") },
+            "the panel's + offers no way into the app-wide theme document"
+        )
+        let review = try XCTUnwrap(entries.firstIndex { $0.itemTitle == "Review" })
+        XCTAssertGreaterThan(theme, review, "the global document led the chat's own surfaces")
+        guard case .separator = entries[theme - 1] else {
+            return XCTFail("Current Theme reads as another of this chat's tabs")
+        }
+
+        try XCTUnwrap(entries[theme].item).onChoose?()
+        XCTAssertTrue(pane.isShowingCurrentTheme, "the entry did not open the document")
+        XCTAssertFalse(pane.hasContent(for: sessionID), "the global document became a chat tab")
+
+        settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: false)
+        XCTAssertNil(
+            pane.newTabEntries(for: sessionID).firstIndex {
+                $0.itemTitle == L10n.string("Current Theme")
+            },
+            "the + kept a door to a document no enabled tool can edit"
+        )
+    }
+
     func testWindowCommandTogglesTheInspectorWithoutOpeningSettings() throws {
         let settings = AppSettings.shared
         let previous = settings.disabledToolGroupIDs
@@ -345,7 +474,7 @@ final class DisplayPaneLayoutTests: XCTestCase {
 
     // MARK: - Reaching the Picture
 
-    func testTheMenuOffersQuickLookForAFileThatIsThere() throws {
+    func testTheMenuLeadsWithInspectionAndKeepsSystemQuickLookAsFallback() throws {
         let (content, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
         defer { try? FileManager.default.removeItem(at: url) }
 
@@ -353,27 +482,29 @@ final class DisplayPaneLayoutTests: XCTestCase {
 
         XCTAssertEqual(
             titles.first,
-            L10n.string("Quick Look"),
-            "Quick Look should lead: it is the one action that keeps the user where they are"
+            L10n.string("Inspect"),
+            "the in-window inspector should lead because it keeps the user in Threading"
         )
+        XCTAssertEqual(titles.last, L10n.string("Open in System Quick Look"))
     }
 
-    /// A Quick Look of a file that has since been deleted can do nothing but beep, so it is
-    /// left out rather than offered and then refused.
-    func testTheMenuDropsQuickLookWhenTheFileIsGone() throws {
+    /// Neither inspector can show a file that has since been deleted, so both routes are left
+    /// out rather than offered and then refused.
+    func testTheMenuDropsPreviewRoutesWhenTheFileIsGone() throws {
         let (content, url) = try imageOnDisk(size: NSSize(width: 40, height: 40))
         try FileManager.default.removeItem(at: url)
 
         let titles = paneShowing(content).makeContentMenu().items.map(\.title)
 
-        XCTAssertFalse(titles.contains(L10n.string("Quick Look")))
+        XCTAssertFalse(titles.contains(L10n.string("Inspect")))
+        XCTAssertFalse(titles.contains(L10n.string("Open in System Quick Look")))
         XCTAssertTrue(titles.contains(L10n.string("Copy Image")), "the rest should still be there")
     }
 
     /// Focus, a key, a pointer and an accessibility action all reach the same place. Asserted
     /// through the *refusal* path — a file that is not there — because the success path opens a
     /// real system window, which is the one thing a test in `fast` must not do.
-    func testEveryRouteToQuickLookRefusesTogetherWhenThereIsNoFile() {
+    func testEveryRouteToInspectionRefusesTogetherWhenThereIsNoFile() {
         let preview = ThemedImagePreview()
         preview.image = NSImage(size: NSSize(width: 40, height: 40))
         preview.fileURL = URL(fileURLWithPath: "/nowhere/threading-missing.png")
@@ -427,4 +558,17 @@ final class DisplayPaneLayoutTests: XCTestCase {
         try FileManager.default.removeItem(at: url)
         XCTAssertFalse(QuickLookPresenter.canPreview(url), "a deleted file is not previewable")
     }
+}
+
+// MARK: - Menu Reading
+
+/// A menu is asserted by its semantic entries, since presenting one needs a window on screen.
+private extension ThemedMenuEntry {
+
+    var item: ThemedMenuItem? {
+        guard case .item(let item) = self else { return nil }
+        return item
+    }
+
+    var itemTitle: String? { item?.title }
 }

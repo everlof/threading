@@ -9,6 +9,18 @@ struct BrowserAnnotationMarker: Equatable {
     let point: CGPoint
 }
 
+/// The page component under the pointer while a pin is being placed.
+///
+/// A pin is dropped at a *point*, but the user is aiming at a *thing* — a button, a row, a field —
+/// and a bare crosshair over live content says nothing about which one a click will be read as.
+/// The rect arrives in the overlay's own coordinates, converted from CSS pixels by the browser so
+/// page zoom is already accounted for, and the label is page-authored text the bridge has already
+/// collapsed to one bounded line.
+struct BrowserAnnotationTarget: Equatable {
+    let rect: CGRect
+    let label: String
+}
+
 final class BrowserAnnotationOverlay: ThemedControl {
 
     @MainActor
@@ -19,6 +31,23 @@ final class BrowserAnnotationOverlay: ThemedControl {
         /// until the next layout. The diameter and the inset above are fixed tokens and may store.
         static var markerBorderWidth: CGFloat { Design.Radius.border }
         static let markerHitInset: CGFloat = Design.Spacing.tight
+
+        /// The target outline is drawn at the focus ring's weight, and for the focus ring's
+        /// reason: both say "this is the thing the next action lands on". It also inherits that
+        /// token's answer to Increase Contrast, where a 2pt line over an arbitrary page is thin.
+        static var targetOutlineWidth: CGFloat { Design.Accessibility.focusRingWidth }
+        static let targetLabelHeight: CGFloat = Design.Size.chipHeight
+        static let targetLabelInset: CGFloat = Design.Spacing.small
+        static let targetLabelGap: CGFloat = Design.Spacing.hairline
+
+        /// The mode frame is the same weight as the outline inside it: one line says "this
+        /// surface is in a mode", the other says "this is the part of it you are on".
+        static var modeFrameWidth: CGFloat { Design.Accessibility.focusRingWidth }
+        static let modeBadgeHeight: CGFloat = Design.Size.chipHeight
+        static let modeBadgeInset: CGFloat = Design.Spacing.medium
+        static let modeBadgePadding: CGFloat = Design.Spacing.small
+        static let modeBadgeGlyphGap: CGFloat = Design.Spacing.tight
+        static let modeBadgeGlyphSize: CGFloat = Design.Symbol.control
     }
 
     var markers: [BrowserAnnotationMarker] = [] {
@@ -31,18 +60,42 @@ final class BrowserAnnotationOverlay: ThemedControl {
         }
     }
 
-    var isAnnotating = false {
+    /// The component the pointer is over, or nil when it is over nothing the page names.
+    ///
+    /// Held rather than derived because resolving it is a round trip into WebKit: the browser
+    /// probes on movement and hands the answer back, so drawing stays synchronous.
+    var hoveredTarget: BrowserAnnotationTarget? {
         didSet {
-            guard isAnnotating != oldValue else { return }
-            setAccessibilityEnabled(isAnnotating)
-            window?.invalidateCursorRects(for: self)
+            guard hoveredTarget != oldValue else { return }
             needsDisplay = true
         }
     }
 
+    var isAnnotating = false {
+        didSet {
+            guard isAnnotating != oldValue else { return }
+            setAccessibilityEnabled(isAnnotating)
+            if !isAnnotating { hoveredTarget = nil }
+            window?.invalidateCursorRects(for: self)
+            updateTrackingAreas()
+            needsDisplay = true
+        }
+    }
+
+    /// The badge's glyph, resolved once: the same mark the toolbar's control wears while the
+    /// mode is on, so the two readings of "annotating" are visibly the same statement.
+    private let modeBadgeGlyph = Design.Symbol.image(
+        DesignSymbols.annotating,
+        slot: Layout.modeBadgeGlyphSize,
+        pointSize: Design.Symbol.control
+    )
+
     var onAdd: ((CGPoint) -> Void)?
     var onSelect: ((Int) -> Void)?
     var onDismiss: (() -> Void)?
+    /// Where the pointer is while annotating, and nil when it leaves. The browser answers with a
+    /// `target`; the overlay deliberately does not resolve one for itself.
+    var onTargetProbe: ((CGPoint?) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -73,6 +126,55 @@ final class BrowserAnnotationOverlay: ThemedControl {
                 cursor: .pointingHand
             )
         }
+    }
+
+    // MARK: - Pointer
+
+    /// Movement is tracked only while annotating, so an ordinary browsing session installs no
+    /// per-move work at all — and the moment the mode ends, the tracking that drove the highlight
+    /// is gone rather than merely ignored.
+    private var moveTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let moveTrackingArea {
+            removeTrackingArea(moveTrackingArea)
+            self.moveTrackingArea = nil
+        }
+        guard isAnnotating else { return }
+
+        // Movement only. Entering and leaving are already `ThemedControl`'s tracking, and asking
+        // for them twice delivers `mouseExited` twice for one crossing.
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        moveTrackingArea = area
+    }
+
+    /// Where the pointer is right now, or nil when it is not on the overlay.
+    ///
+    /// Read when the *page* moves under a stationary pointer — a scroll — which produces no
+    /// mouse event at all, and so no chance for movement tracking to notice that the component
+    /// under the pointer has changed.
+    var pointerLocation: CGPoint? {
+        guard isAnnotating, isPointerInside, let window else { return nil }
+        return convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard isAnnotating else { return }
+        onTargetProbe?(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        guard isAnnotating else { return }
+        hoveredTarget = nil
+        onTargetProbe?(nil)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -109,12 +211,23 @@ final class BrowserAnnotationOverlay: ThemedControl {
         L10n.string("Browser Annotation Canvas")
     }
 
+    // MARK: - Drawing
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        if isAnnotating {
+            drawModeFrame()
+        }
+        if isAnnotating, let hoveredTarget {
+            draw(hoveredTarget)
+        }
         for marker in markers where markerRect(for: marker).intersects(dirtyRect) {
             draw(marker)
         }
         if isAnnotating {
+            // Last, so the badge stays readable over a component outline that covers the page —
+            // a highlighted `<body>` is a rectangle the size of everything.
+            drawModeBadge()
             drawKeyboardFocus(
                 around: ThemedSurface.Shape(rect: bounds, radius: 0)
             )
@@ -157,6 +270,141 @@ final class BrowserAnnotationOverlay: ThemedControl {
             at: CGPoint(
                 x: floor(rect.midX - size.width / 2),
                 y: floor(rect.midY - size.height / 2)
+            ),
+            withAttributes: attributes
+        )
+    }
+
+    /// States on the browser surface itself that the surface is in a mode.
+    ///
+    /// The toolbar button already changes, but the pointer is over the *page* for the whole of
+    /// annotation mode, and a crosshair is a cursor rather than a statement — a click that lands
+    /// on a note instead of a link should not be a surprise. Drawn as a frame around the viewport
+    /// rather than as a wash over it: a tint would recolour the page the user came here to look
+    /// at, which is the one thing an annotation surface must not do.
+    private func drawModeFrame() {
+        let width = Layout.modeFrameWidth
+        let shape = ThemedSurface.Shape(
+            rect: bounds,
+            radius: Design.Radius.control(fitting: bounds.size)
+        ).inset(by: width / 2)
+        Design.Surface.accent.setStroke()
+        let path = shape.path
+        path.lineWidth = width
+        path.stroke()
+    }
+
+    /// Names the mode in the corner, in the same accent pill vocabulary as the pins.
+    ///
+    /// Bottom-left because that is where a browser already puts transient status, and because
+    /// the hovered component's own label is drawn *above* its outline: two labels that never
+    /// contend for the same strip of page.
+    private func drawModeBadge() {
+        let title = L10n.string("Annotating")
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Design.Typography.detail(weight: .semibold),
+            .foregroundColor: Design.Text.selected
+        ]
+        let textSize = title.size(withAttributes: attributes)
+        let glyphWidth = modeBadgeGlyph == nil ? 0 : Layout.modeBadgeGlyphSize + Layout.modeBadgeGlyphGap
+        let width = Layout.modeBadgePadding * 2 + glyphWidth + textSize.width
+        let badge = CGRect(
+            x: Layout.modeBadgeInset,
+            y: bounds.height - Layout.modeBadgeInset - Layout.modeBadgeHeight,
+            width: width,
+            height: Layout.modeBadgeHeight
+        )
+        guard badge.minY > 0, badge.maxX < bounds.width else { return }
+
+        Design.Surface.accent.setFill()
+        ThemedSurface.Shape(
+            rect: badge,
+            radius: Design.Radius.pill(height: badge.height)
+        ).path.fill()
+
+        var textX = badge.minX + Layout.modeBadgePadding
+        if let glyph = modeBadgeGlyph {
+            TemplateImageDrawing.draw(
+                glyph,
+                in: CGRect(
+                    x: textX,
+                    y: floor(badge.midY - Layout.modeBadgeGlyphSize / 2),
+                    width: Layout.modeBadgeGlyphSize,
+                    height: Layout.modeBadgeGlyphSize
+                ),
+                tint: Design.Text.selected
+            )
+            textX += Layout.modeBadgeGlyphSize + Layout.modeBadgeGlyphGap
+        }
+        title.draw(
+            at: CGPoint(x: textX, y: floor(badge.midY - textSize.height / 2)),
+            withAttributes: attributes
+        )
+    }
+
+    /// Outlines the component under the pointer and names it beside the outline.
+    ///
+    /// Clipped to the overlay rather than drawn as the page reported it: an element may begin
+    /// above the viewport or run past its bottom, and a stroke laid down out there returns as a
+    /// line along the overlay's edge that belongs to nothing on screen.
+    private func draw(_ target: BrowserAnnotationTarget) {
+        let width = Layout.targetOutlineWidth
+        let visible = target.rect.intersection(bounds)
+        guard !visible.isNull, visible.width > width, visible.height > width else { return }
+
+        let shape = ThemedSurface.Shape(
+            rect: visible,
+            radius: Design.Radius.control(fitting: visible.size)
+        ).inset(by: width / 2)
+        Design.Surface.annotationTarget.setFill()
+        shape.path.fill()
+        Design.Surface.accent.setStroke()
+        let path = shape.path
+        path.lineWidth = width
+        path.stroke()
+
+        drawLabel(target.label, above: visible)
+    }
+
+    /// Places the name above the outline, or inside its top edge when the component is against
+    /// the top of the viewport — the one case where "above" is off screen.
+    private func drawLabel(_ label: String, above rect: CGRect) {
+        guard !label.isEmpty else { return }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Design.Typography.detail(weight: .semibold),
+            .foregroundColor: Design.Text.selected,
+            .paragraphStyle: paragraph
+        ]
+
+        let textWidth = label.size(withAttributes: attributes).width
+        let maximumWidth = bounds.width - Layout.targetLabelInset * 2
+        let chipWidth = min(textWidth + Layout.targetLabelInset * 2, maximumWidth)
+        guard chipWidth > 0 else { return }
+
+        let above = rect.minY - Layout.targetLabelHeight - Layout.targetLabelGap
+        let chip = CGRect(
+            x: min(max(0, rect.minX), max(0, bounds.width - chipWidth)),
+            y: above >= 0 ? above : min(rect.minY + Layout.targetLabelGap, bounds.height),
+            width: chipWidth,
+            height: Layout.targetLabelHeight
+        )
+
+        Design.Surface.accent.setFill()
+        ThemedSurface.Shape(
+            rect: chip,
+            radius: Design.Radius.pill(height: chip.height)
+        ).path.fill()
+
+        let textHeight = label.size(withAttributes: attributes).height
+        label.draw(
+            in: CGRect(
+                x: chip.minX + Layout.targetLabelInset,
+                y: floor(chip.midY - textHeight / 2),
+                width: chip.width - Layout.targetLabelInset * 2,
+                height: textHeight
             ),
             withAttributes: attributes
         )

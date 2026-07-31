@@ -136,9 +136,11 @@ extension ConversationViewController {
     /// allowed, which is worth more than the symmetry.
     func foldTurn(startingAt startIndex: Int, stopped: Bool) {
         guard !foldedTurnStarts.contains(startIndex),
-              let turn = timeline.turns.first(where: { $0.rowIndex == startIndex }),
+              let turn = timeline.turn(startingAt: startIndex),
               turn.endIndex > turn.rowIndex,
-              let userPosition = presentationRow(forTimelineIndex: turn.rowIndex) else { return }
+              let userPosition = presentationItems.lastIndex(where: {
+                  $0.id == .timeline(turn.rowIndex)
+              }) else { return }
 
         let turnIndices = turn.rowIndex + 1 ... turn.endIndex
         let hiddenIndices = turnIndices.filter { $0 != turn.finalAssistantIndex }
@@ -147,9 +149,16 @@ extension ConversationViewController {
         foldedTurnStarts.insert(startIndex)
 
         let hiddenSet = Set(hiddenIndices)
-        presentationItems.removeAll { item in
-            guard case .timeline(let index) = item.content else { return false }
-            return hiddenSet.contains(index)
+        let removalPositions = presentationItems.indices
+            .dropFirst(userPosition + 1)
+            .filter { position in
+                guard case .timeline(let index) = presentationItems[position].content else {
+                    return false
+                }
+                return hiddenSet.contains(index)
+            }
+        for position in removalPositions.reversed() {
+            presentationItems.remove(at: position)
         }
         let insertion = min(userPosition + 1, presentationItems.count)
         presentationItems.insert(PresentationItem(
@@ -496,10 +505,12 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
     }
 
     func presentationRow(forTimelineIndex index: Int) -> Int? {
-        presentationItems.firstIndex { item in
-            if case .timeline(index) = item.content { return true }
-            return false
+        if let row = presentationRowsByTimelineIndex[index],
+           presentationItems.indices.contains(row),
+           presentationItems[row].id == .timeline(index) {
+            return row
         }
+        return presentationItems.firstIndex { $0.id == .timeline(index) }
     }
 
     func invalidateConversationHeightCacheIfNeeded() {
@@ -526,6 +537,9 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
     func appendPresentationItem(_ item: PresentationItem) {
         let index = presentationItems.count
         presentationItems.append(item)
+        if !isReplaying, case .timeline(let timelineIndex) = item.content {
+            presentationRowsByTimelineIndex[timelineIndex] = index
+        }
         notifyPresentationRowsInserted(at: IndexSet(integer: index))
     }
 
@@ -541,9 +555,20 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
 
     func reloadConversationRows(force: Bool = false) {
         guard isViewLoaded, force || !isReplaying else { return }
+        rebuildPresentationRowIndex()
         rowViews.removeAll(keepingCapacity: true)
         pendingToolViews.removeAll(keepingCapacity: true)
         tableView.reloadData()
+    }
+
+    private func rebuildPresentationRowIndex() {
+        presentationRowsByTimelineIndex.removeAll(keepingCapacity: true)
+        presentationRowsByTimelineIndex.reserveCapacity(presentationItems.count)
+        for (row, item) in presentationItems.enumerated() {
+            if case .timeline(let timelineIndex) = item.content {
+                presentationRowsByTimelineIndex[timelineIndex] = row
+            }
+        }
     }
 
     func noteTimelineRowHeightChanged(_ index: Int) {

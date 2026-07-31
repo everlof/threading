@@ -12,7 +12,7 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index and the
 | Navigation | Back, forward, reload/stop, address/search, reload from origin | Navigate, history, stop, tabs, bounded pop-ups | Complete |
 | Responsive testing | Device toolbar, editable width/height, rotate, reset, 12 named presets | `browser_resize`; isolated browser for fuller emulation | Complete for CSS viewport; presets do not claim touch, DPR, mobile identity, or hardware emulation |
 | Test conditions | Theme-owned color scheme, CSS media, and User-Agent controls | `browser_emulate`, `browser_capabilities`, `browser_run_isolated` | Complete with unsupported WebKit conditions reported honestly |
-| Annotation | Native annotation mode, numbered pins, edit/delete | Read-only `browser_annotations` | Complete; user-authored runtime state stays outside the DOM and is returned separately from untrusted page data |
+| Annotation | Native annotation mode, numbered pins, edit/delete, hovered component outlined and named | Read-only `browser_annotations` | Complete; user-authored runtime state stays outside the DOM and is returned separately from untrusted page data, and the hover highlight is drawn from page text without entering either |
 | Page discovery | Find bar with live next/previous search | Semantic snapshots, strict query, waits | Complete |
 | Interaction | Normal WebKit pointer/keyboard behavior and inspector | Ref, selector, semantic locator, coordinate, form-fill, key, hover, drag, scroll | Complete within the documented semantic and safety bounds |
 | Visual inspection | Visible-page screenshot save | Viewport/full-page/element screenshot and visual compare | Complete; native annotation pins remain a separate trusted layer rather than being baked into page pixels |

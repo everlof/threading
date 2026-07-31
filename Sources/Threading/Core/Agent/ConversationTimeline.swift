@@ -271,23 +271,30 @@ struct ConversationTimeline {
     var turns: [Turn] {
         var turns: [Turn] = []
 
-        for (index, row) in rows.enumerated() {
-            guard case .userMessage(let text) = row else { continue }
-            let compacted = Self.compact(text)
-            guard !compacted.isEmpty else { continue }
-
-            let conclusion = finalAssistant(after: index)
-            turns.append(Turn(
-                rowIndex: index,
-                endIndex: conclusion.endIndex,
-                finalAssistantIndex: conclusion.index,
-                userText: compacted,
-                assistantText: conclusion.text,
-                duration: turnDurations[index]
-            ))
+        for index in rows.indices {
+            if let turn = turn(startingAt: index) { turns.append(turn) }
         }
 
         return turns
+    }
+
+    /// Derives one known turn without rebuilding every earlier exchange. A settle change already
+    /// carries its opening row, so replay folding should pay for that turn's rows only.
+    func turn(startingAt index: Int) -> Turn? {
+        guard rows.indices.contains(index),
+              case .userMessage(let text) = rows[index] else { return nil }
+        let compacted = Self.compact(text)
+        guard !compacted.isEmpty else { return nil }
+
+        let conclusion = finalAssistant(after: index)
+        return Turn(
+            rowIndex: index,
+            endIndex: conclusion.endIndex,
+            finalAssistantIndex: conclusion.index,
+            userText: compacted,
+            assistantText: conclusion.text,
+            duration: turnDurations[index]
+        )
     }
 
     /// The last assistant message between this user turn and the next, with where the turn's

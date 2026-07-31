@@ -114,6 +114,46 @@ struct BrowserTargetDescription: Decodable, Equatable {
     let isPassword: Bool
 }
 
+/// The page component under the pointer while the user places an annotation.
+///
+/// Read for the app's own overlay rather than for the agent: the highlight has to name what a pin
+/// will land on before the pin exists, so this never reaches a tool result. `role` and `name` are
+/// page-authored strings — the bridge bounds and collapses them, and `label` bounds the pair again
+/// on this side, because whatever they say is about to be drawn over the page that wrote it.
+struct BrowserAnnotationTargetProbe: Decodable, Equatable {
+    let ok: Bool
+    let ref: String?
+    let tag: String?
+    let role: String?
+    let name: String?
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+
+    /// What the overlay writes beside the outline: what the component *is*, then what the page
+    /// calls it. The role leads because it is the part drawn from a known vocabulary — a page
+    /// chooses its own accessible names, and an unnamed component still deserves a label.
+    var label: String {
+        let kind = Self.singleLine(role ?? tag ?? "")
+        let title = Self.singleLine(name ?? "")
+        let combined: String
+        switch (kind.isEmpty, title.isEmpty) {
+        case (true, true): return ""
+        case (false, true): combined = kind
+        case (true, false): combined = "\u{201C}\(title)\u{201D}"
+        case (false, false): combined = "\(kind) \u{201C}\(title)\u{201D}"
+        }
+        let limit = BrowserAgentDefaults.maximumAnnotationTargetLabelLength
+        guard combined.count > limit else { return combined }
+        return combined.prefix(limit - 1).trimmingCharacters(in: .whitespaces) + "\u{2026}"
+    }
+
+    private static func singleLine(_ value: String) -> String {
+        value.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+}
+
 struct BrowserActionOutcome: Decodable, Equatable {
     let ok: Bool
     let message: String
@@ -1233,6 +1273,61 @@ enum BrowserAgentScripts {
           isSubmit: isSubmit,
           isInForm: Boolean(form),
           isPassword: tag === 'input' && inputType === 'password'
+        });
+        """#
+
+    /// Names the component under the pointer while the user is placing an annotation.
+    ///
+    /// It answers with a *component* rather than with the innermost node the hit test reaches:
+    /// pointing at the word inside a button means the button, so this climbs to the nearest
+    /// ancestor the agent could address — one already carrying a ref, an ARIA or implicit role,
+    /// or a test id — and falls back to the deepest element when the climb finds nothing.
+    /// Read-only, and bounded: no ref is minted here, so hovering never renumbers the page the
+    /// agent is working against.
+    static let annotationTargetProbe = targetPrelude + #"""
+        const missed = JSON.stringify({
+          ok: false, ref: null, tag: null, role: null, name: null,
+          x: 0, y: 0, width: 0, height: 0
+        });
+        const point = resolvePointTarget();
+        if (!point || point.message || !point.element) return missed;
+
+        function addressable(candidate) {
+          if (!candidate || candidate.tagName?.toLowerCase() === 'html') return false;
+          if (state.elementToRef.get(candidate)) return true;
+          if (roleOf(candidate)) return true;
+          return Boolean(clean(
+            candidate.getAttribute?.('data-testid')
+              || candidate.getAttribute?.('data-test-id')
+              || candidate.getAttribute?.('data-test')
+              || candidate.getAttribute?.('data-qa')
+          ));
+        }
+
+        let chosen = point.element;
+        for (let depth = 0; depth < 6 && !addressable(chosen); depth += 1) {
+          const parent = chosen.parentElement
+            || (chosen.getRootNode?.()?.nodeType === 11 ? chosen.getRootNode().host : null);
+          if (!parent) break;
+          chosen = parent;
+        }
+        if (!addressable(chosen)) chosen = point.element;
+
+        const rect = chosen.getBoundingClientRect();
+        // The hit test descends through frames; the difference between the point it started from
+        // and the point it ended on is exactly the offset back to the top-level viewport.
+        const offsetX = point.topX - point.clientX;
+        const offsetY = point.topY - point.clientY;
+        return JSON.stringify({
+          ok: rect.width > 0 && rect.height > 0,
+          ref: state.elementToRef.get(chosen) || null,
+          tag: chosen.tagName ? chosen.tagName.toLowerCase() : null,
+          role: roleOf(chosen) || null,
+          name: clean(nameOf(chosen), 80) || null,
+          x: rect.left + offsetX,
+          y: rect.top + offsetY,
+          width: rect.width,
+          height: rect.height
         });
         """#
 
@@ -3293,6 +3388,10 @@ enum BrowserAgentDefaults {
     static let maximumSnapshotNodes = 180
     static let maximumFormFields = 25
     static let maximumRenderedNameLength = 220
+    /// How much of a component's role and name the annotation overlay draws over the page. Long
+    /// enough for "button “Continue with another provider”", short enough that a page cannot lay
+    /// a paragraph of its own text across its own content in the app's accent.
+    static let maximumAnnotationTargetLabelLength = 64
     static let maximumConsoleMessages = 250
     static let maximumConsoleMessageLength = 2_000
     static let maximumNetworkEntries = 300

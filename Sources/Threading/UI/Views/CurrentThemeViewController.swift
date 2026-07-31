@@ -1,12 +1,12 @@
 import AppKit
 
-/// The active app theme as a living workspace document beside the conversation.
+/// The active app theme as a living document in the global display panel.
 ///
 /// This is intentionally separate from both Settings and the per-session tab list. There is one
 /// app chrome for the whole window, while terminal palettes can be assigned at session, project,
-/// and default scopes. The document always follows `AppThemeLibrary.current`: a colour changed
+/// and default scopes. The inspector always follows `AppThemeLibrary.current`: a colour changed
 /// here repaints the window immediately, and a patch arriving through MCP or an extension's
-/// watched document is reflected in these controls without reopening it.
+/// watched document is reflected without reopening the surface.
 final class CurrentThemeViewController: NSViewController {
 
     // MARK: - Properties

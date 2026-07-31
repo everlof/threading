@@ -228,7 +228,9 @@ final class ThemedPopUp: ThemedControl {
 
     override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
     override func accessibilityValue() -> Any? { displayedItem?.title }
-    override func accessibilityTitle() -> String? { displayedItem?.title }
+    override func accessibilityTitle() -> String? {
+        accessibilityLabel() ?? displayedItem?.title
+    }
 
     /// Both the press and the show-menu actions open the list, because assistive clients and UI
     /// scripts reach a pop-up through either one.

@@ -217,6 +217,25 @@ page's notes separately from the untrusted DOM snapshot, with explicit `user_aut
 and document-space CSS-pixel coordinates. The agent cannot create, edit, or delete them. Annotation
 mode ends on navigation, while notes remain runtime-only for a later visit to the same page URL.
 
+The mode itself is stated on the browser surface rather than only on the control that started it:
+an accent frame around the viewport and an accent badge in its bottom-left corner, both drawn by
+the overlay and both gone the moment the mode ends. Deliberately a frame and not a wash — a tint
+over the whole page would recolour the very thing the user opened annotation mode to look at.
+
+While that mode is on, the overlay also outlines and names the component under the pointer, because
+a crosshair over live content says where a pin will land and nothing about *what* it will be read
+as. The overlay resolves nothing itself: it reports pointer movement, and the browser answers with
+one bounded read of the page — the box in top-level viewport CSS pixels plus a role and accessible
+name. It answers with a **component**, climbing from the deepest hit element to the nearest ancestor
+the agent could already address (an existing ref, an ARIA or implicit role, a test id) within six
+levels, so pointing at the word inside a button highlights the button. The probe mints no refs: it
+reads `elementToRef` and never writes it, so hovering cannot renumber the page underneath an agent
+mid-task. Everything it returns is page-authored and stays page-authored — collapsed to one line
+and cut to a bounded length before it is drawn, and never added to an annotation, a tool result, or
+`browser_annotations`, whose `user_authored` provenance therefore remains exactly true. One probe
+runs at a time with only the newest pointer position queued behind it, and the highlight is re-asked
+on scroll, which moves the page under a stationary pointer without generating a mouse event.
+
 Password fields refuse agent typing and reveal the browser for user takeover. Form submissions,
 including Enter on a focused form control, require an app-owned confirmation whose description
 is derived from the live target rather than from agent prose. A short-lived, one-shot navigation

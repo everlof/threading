@@ -64,6 +64,7 @@ final class ConversationViewController: NSViewController {
         minimap.onSelect = { [weak self] rowIndex in self?.scrollToRow(rowIndex) }
         return minimap
     }()
+    private var minimapTurns: [ConversationTimeline.Turn] = []
     private lazy var minimapWidth = minimap.widthAnchor.constraint(equalToConstant: 0)
     private lazy var minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
     private lazy var promptView: PromptView = {
@@ -251,6 +252,11 @@ final class ConversationViewController: NSViewController {
     /// integer identity; expensive Markdown/tool views are constructed when the table requests
     /// a viewport row and released when that host is reused.
     var presentationItems: [PresentationItem] = []
+
+    /// Exact timeline identity → table row lookup. Replay leaves it empty while folding mutates
+    /// the presentation and builds it once at the final reload; live structural edits rebuild it
+    /// at their existing reload boundary.
+    var presentationRowsByTimelineIndex: [Int: Int] = [:]
 
     /// Currently materialized timeline rows. This is intentionally viewport-sized; it exists
     /// for live result delivery and diagnostics, not as the transcript's ownership graph.
@@ -680,18 +686,25 @@ final class ConversationViewController: NSViewController {
     /// Rebuilds the rail from the timeline. Cheap: turns are derived from rows, and a
     /// conversation is hundreds of rows.
     func refreshMinimap() {
-        minimap.setTurns(timeline.turns)
+        minimapTurns = timeline.turns
+        minimap.setTurns(minimapTurns)
         updateVisibleTurns()
     }
 
     /// Which turns are on screen, so the rail can say where you are as well as what is there.
     private func updateVisibleTurns() {
         let visibleRect = scrollView.contentView.documentVisibleRect
+        let visibleRows = tableView.rows(in: visibleRect)
         var indices: Set<Int> = []
 
-        for (index, turn) in timeline.turns.enumerated() {
+        guard visibleRows.location != NSNotFound else {
+            minimap.setVisibleTurnIndices(indices)
+            return
+        }
+
+        for (index, turn) in minimapTurns.enumerated() {
             guard let tableRow = presentationRow(forTimelineIndex: turn.rowIndex) else { continue }
-            if tableView.rect(ofRow: tableRow).intersects(visibleRect) { indices.insert(index) }
+            if NSLocationInRange(tableRow, visibleRows) { indices.insert(index) }
         }
 
         minimap.setVisibleTurnIndices(indices)

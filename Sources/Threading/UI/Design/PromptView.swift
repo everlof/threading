@@ -444,6 +444,22 @@ final class PromptView: NSView, ThemedComponent {
             attachments.append(attachment)
 
             let thumbnail = PromptAttachmentThumbnail(attachment: attachment)
+            thumbnail.inspectorSelectionProvider = { [weak self] in
+                guard let self,
+                      let selectedIndex = self.attachments.firstIndex(where: {
+                          $0.id == attachment.id
+                      })
+                else { return nil }
+
+                let items = self.attachments.map {
+                    MediaInspectorItem(
+                        url: URL(fileURLWithPath: $0.path),
+                        title: $0.name,
+                        image: $0.image
+                    )
+                }
+                return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
+            }
             thumbnail.onRemove = { [weak self, weak thumbnail] in
                 guard let self, let thumbnail else { return }
                 self.removeAttachment(id: attachment.id, thumbnail: thumbnail)
@@ -601,6 +617,7 @@ private final class PromptAttachmentThumbnail: ThemedControl {
     private var menuSession: AnyObject?
 
     var onRemove: (() -> Void)?
+    var inspectorSelectionProvider: (() -> MediaInspectorSelection?)?
 
     init(attachment: PromptImageAttachment) {
         self.attachment = attachment
@@ -722,14 +739,25 @@ private final class PromptAttachmentThumbnail: ThemedControl {
     override func accessibilityRole() -> NSAccessibility.Role? { .image }
     override func accessibilityLabel() -> String? { attachment.name }
     override func accessibilityHelp() -> String? {
-        "Press to open \(attachment.name) in Quick Look"
+        L10n.format("Press to inspect %@", attachment.name)
     }
 
     override func performPrimaryAction() -> Bool {
         guard isEnabled else { return false }
         window?.makeFirstResponder(self)
 
-        guard QuickLookPresenter.shared.present(existingFileURL) else {
+        let selection = inspectorSelectionProvider?()
+            ?? existingFileURL.map {
+                MediaInspectorSelection(
+                    items: [MediaInspectorItem(
+                        url: $0,
+                        title: attachment.name,
+                        image: attachment.image
+                    )],
+                    selectedIndex: 0
+                )
+            }
+        guard let selection, MediaInspectorPresenter.present(selection, from: self) else {
             NSSound.beep()
             return false
         }
@@ -740,13 +768,15 @@ private final class PromptAttachmentThumbnail: ThemedControl {
         guard menuSession == nil else { return true }
 
         let entries: [ThemedMenuEntry] = [
-            item("Quick Look") { [weak self] in self?.openQuickLook() },
+            item("Inspect") { [weak self] in _ = self?.performPrimaryAction() },
             item("Open in Default App") { [weak self] in self?.openInDefaultApp() },
             item("Reveal in Finder") { [weak self] in self?.revealInFinder() },
             .separator,
             item("Copy Image") { [weak self] in self?.copyImage() },
             item("Copy File Name") { [weak self] in self?.copyFileName() },
             item("Copy File Path") { [weak self] in self?.copyFilePath() },
+            .separator,
+            item("Open in System Quick Look") { [weak self] in self?.openQuickLook() },
             .separator,
             item("Remove Attachment") { [weak self] in self?.removeAttachment() }
         ]
@@ -766,7 +796,10 @@ private final class PromptAttachmentThumbnail: ThemedControl {
     }
 
     private func openQuickLook() {
-        _ = performPrimaryAction()
+        guard QuickLookPresenter.shared.present(existingFileURL) else {
+            NSSound.beep()
+            return
+        }
     }
 
     private func openInDefaultApp() {

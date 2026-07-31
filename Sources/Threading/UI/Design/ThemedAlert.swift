@@ -237,7 +237,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
     private let messageLabel: NSTextField
     private let iconView = NSImageView()
     private var buttonControls: [ThemedButton] = []
-    private var checkbox: ThemedAlertCheckbox?
+    private var checkbox: ThemedCheckbox?
     private let appEvents = AppEventObservations()
 
     var preferredFirstResponder: NSResponder? {
@@ -297,7 +297,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             sections.append(wrappedAccessory(accessory))
         }
         if let suppression = alert.suppressionButton {
-            let checkbox = ThemedAlertCheckbox(
+            let checkbox = ThemedCheckbox(
                 title: suppression.title,
                 state: suppression.state
             ) { state in
@@ -419,123 +419,6 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             fill: Design.Surface.elevated,
             border: Design.Surface.border,
             radius: Design.Radius.panel
-        )
-    }
-}
-
-// MARK: - Suppression control
-
-/// Full-row checkbox semantics for “don't ask/show again”, including hover, press, keyboard,
-/// VoiceOver, and drag-out cancellation.
-@MainActor
-private final class ThemedAlertCheckbox: ThemedControl {
-    private enum Layout {
-        static let box: CGFloat = 16
-        static let gap: CGFloat = Design.Spacing.small
-        static let inset: CGFloat = Design.Spacing.tight
-    }
-
-    let title: String
-    private(set) var state: NSControl.StateValue
-    private let changed: (NSControl.StateValue) -> Void
-    private var isPressed = false { didSet { needsDisplay = true } }
-
-    init(
-        title: String,
-        state: NSControl.StateValue,
-        changed: @escaping (NSControl.StateValue) -> Void
-    ) {
-        self.title = title
-        self.state = state
-        self.changed = changed
-        super.init(frame: .zero)
-        toolTip = title
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override var intrinsicContentSize: NSSize {
-        let width = ceil(title.size(withAttributes: [.font: Design.Typography.controlRegular()]).width)
-        return NSSize(
-            width: Layout.inset * 2 + Layout.box + Layout.gap + width,
-            height: Design.Size.chipHeight
-        )
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        guard isEnabled else { return }
-        window?.makeFirstResponder(self)
-        isPressed = true
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        isPressed = bounds.contains(convert(event.locationInWindow, from: nil))
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        let fires = isPressed && bounds.contains(convert(event.locationInWindow, from: nil))
-        isPressed = false
-        if fires { _ = performPrimaryAction() }
-    }
-
-    override func performPrimaryAction() -> Bool {
-        guard isEnabled else { return false }
-        state = state == .on ? .off : .on
-        changed(state)
-        needsDisplay = true
-        NSAccessibility.post(element: self, notification: .valueChanged)
-        return true
-    }
-
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
-
-    override func accessibilityRole() -> NSAccessibility.Role? { .checkBox }
-    override func accessibilityTitle() -> String? { title }
-    override func accessibilityValue() -> Any? { state == .on }
-    override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        if isHovered || isPressed {
-            ThemedSurface.draw(
-                bounds,
-                fill: isPressed ? Design.Surface.controlHover : Design.Surface.controlResting,
-                radius: Design.Radius.control
-            )
-        }
-
-        let box = NSRect(
-            x: Layout.inset,
-            y: (bounds.height - Layout.box) / 2,
-            width: Layout.box,
-            height: Layout.box
-        )
-        let fill = state == .on ? Design.Surface.accent : Design.Surface.controlResting
-        let shape = ThemedSurface.draw(
-            box,
-            fill: fill,
-            border: state == .on ? nil : Design.Surface.border,
-            radius: Design.Radius.control(fitting: box.size)
-        )
-        if state == .on,
-           let check = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?
-            .withSymbolConfiguration(Design.Symbol.configuration(10, weight: .semibold)) {
-            TemplateImageDrawing.draw(check, in: box.insetBy(dx: 3, dy: 3), tint: Design.Text.selected)
-        }
-        drawKeyboardFocus(around: shape)
-
-        let font = Design.Typography.controlRegular()
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: isEnabled ? Design.Text.label : Design.Text.tertiary
-        ]
-        let x = box.maxX + Layout.gap
-        let height = ceil(font.boundingRectForFont.height)
-        (title as NSString).draw(
-            in: NSRect(x: x, y: bounds.midY - height / 2, width: max(0, bounds.maxX - x), height: height),
-            withAttributes: attributes
         )
     }
 }

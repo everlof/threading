@@ -587,12 +587,15 @@ final class ConversationTimelineTests: XCTestCase {
         XCTAssertEqual(first.endIndex, 4)
         XCTAssertEqual(first.finalAssistantIndex, 4)
         XCTAssertEqual(first.assistantText, "Fixed.")
+        XCTAssertEqual(timeline.turn(startingAt: 0), first)
 
         // The turn in flight ends at the newest row and has no conclusion yet.
         let second = turns[1]
         XCTAssertEqual(second.rowIndex, 5)
         XCTAssertEqual(second.endIndex, 5)
         XCTAssertNil(second.finalAssistantIndex)
+        XCTAssertEqual(timeline.turn(startingAt: 5), second)
+        XCTAssertNil(timeline.turn(startingAt: 2))
     }
 
     func testATurnRetainsItsDurationFromTheTerminalEvent() {

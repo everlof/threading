@@ -37,12 +37,16 @@ final class ToastRenderTests: XCTestCase {
             ("swiss", AppThemeStyles.swissMinimalist)
         ]
 
-        /// The two receipts the archive can produce: a running session, whose agent stopped, and
-        /// a dormant one, which had nothing to interrupt.
-        static let stories: [(name: String, wasRunning: Bool)] = [
-            ("running", true),
-            ("dormant", false)
-        ]
+        /// The three receipts the archive can produce: a running session, whose agent stopped; a
+        /// dormant one, which had nothing to interrupt; and the one an agent files away itself,
+        /// which names the agent and carries its reason. The third is deliberately the longest —
+        /// a three-sentence detail under a wrapped message is where a 240-point column either
+        /// still reads as a receipt or turns into a paragraph.
+        enum Story: String, CaseIterable {
+            case running
+            case dormant
+            case agent
+        }
     }
 
     // MARK: - Stories
@@ -57,14 +61,17 @@ final class ToastRenderTests: XCTestCase {
         for (themeName, theme) in Render.themes {
             AppThemePalette.set(theme)
             for (appearanceName, appearanceID) in Render.appearances {
-                for (storyName, wasRunning) in Render.stories {
+                for story in Render.Story.allCases {
                     let data = try XCTUnwrap(
-                        toastImage(appearance: appearanceID, wasRunning: wasRunning),
-                        "Failed to render the \(storyName) toast under \(themeName) in \(appearanceName)"
+                        toastImage(appearance: appearanceID, story: story),
+                        """
+                        Failed to render the \(story.rawValue) toast under \(themeName) \
+                        in \(appearanceName)
+                        """
                     )
                     try data.write(
                         to: directory.appendingPathComponent(
-                            "toast-\(storyName)-\(themeName)-\(appearanceName).png"
+                            "toast-\(story.rawValue)-\(themeName)-\(appearanceName).png"
                         )
                     )
                     written += 1
@@ -74,34 +81,50 @@ final class ToastRenderTests: XCTestCase {
 
         XCTAssertEqual(
             written,
-            Render.themes.count * Render.appearances.count * Render.stories.count
+            Render.themes.count * Render.appearances.count * Render.Story.allCases.count
         )
         print("Rendered archive toast storybook to \(directory.path)")
     }
 
     // MARK: - Helpers
 
-    private func toastImage(appearance name: NSAppearance.Name, wasRunning: Bool) -> Data? {
+    /// The receipts as the app builds them, rather than a second copy of their wording here that
+    /// could drift from the one that ships.
+    @MainActor
+    private func request(for story: Render.Story, session: AgentSession) -> ToastRequest {
+        switch story {
+        case .running:
+            return SessionCoordinator.archiveToast(for: session, wasRunning: true, undo: {})
+        case .dormant:
+            return SessionCoordinator.archiveToast(for: session, wasRunning: false, undo: {})
+        case .agent:
+            return SessionCoordinator.agentArchiveToast(
+                for: session,
+                reason: "committed and pushed the parser fix",
+                wasRunning: true,
+                undo: {}
+            )
+        }
+    }
+
+    private func toastImage(appearance name: NSAppearance.Name, story: Render.Story) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
         let render: @MainActor () -> Void = {
             let session = AgentSession(kind: .claude, title: "Refactor the parser")
-            let request = SessionCoordinator.archiveToast(
-                for: session,
-                wasRunning: wasRunning,
-                undo: {}
-            )
+            let request = self.request(for: story, session: session)
 
             let host = ThemedSurfaceView()
-            // Tall enough for the widest band any stock theme draws: a mono-faced style wraps
-            // the message onto a second line, and a fixture cropping the top of the receipt
-            // reports a layout fault the component does not have.
+            // Tall enough for the tallest band any stock theme draws: a mono-faced style wraps
+            // the message onto a second line, the agent's receipt carries three sentences of
+            // detail under it, and a fixture cropping the top of the receipt reports a layout
+            // fault the component does not have.
             host.frame = NSRect(
                 x: 0,
                 y: 0,
                 width: SidebarDefaults.defaultWidth,
-                height: 210
+                height: 280
             )
             // The sidebar's ground, so the band is judged against the surface it floats on
             // rather than against a blank one.

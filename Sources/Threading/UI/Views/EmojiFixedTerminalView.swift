@@ -24,10 +24,9 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// While an interactive phone is showing this terminal, its visible character grid owns
     /// the PTY. The Mac still renders the same bytes locally, but must not resize the process
     /// back to the much wider desktop frame on its next layout pass.
-    private var remoteGrid: (cols: Int, rows: Int)?
+    private(set) var remoteGrid: (cols: Int, rows: Int)?
     private var localGridBeforeRemoteControl: (cols: Int, rows: Int)?
     private var deferredLocalGrid: (cols: Int, rows: Int)?
-    private var isApplyingRemoteGrid = false
 
     // MARK: - Activity Hooks
 
@@ -157,23 +156,28 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         return true
     }
 
-    override var frame: NSRect {
-        get { super.frame }
-        set {
-            super.frame = newValue
-            applyRemoteGrid()
-        }
-    }
-
-    override func shouldApplyProcessSizeChange(newCols: Int, newRows: Int) -> Bool {
-        guard let remoteGrid else { return true }
-        let matchesRemote = newCols == remoteGrid.cols && newRows == remoteGrid.rows
-        if !matchesRemote, newCols > 0, newRows > 0 {
+    /// Refuses the renderer's own frame-derived grid outright while the phone owns the PTY.
+    ///
+    /// This has to answer before the emulator is touched. Letting the resize run and undoing it
+    /// afterwards reflowed the buffer to the desktop grid and back, and SwiftTerm's resize path
+    /// ends in `softReset()` — so an ordinary layout pass, even one that set the identical
+    /// frame, wiped the scrolling region out from under a full-screen agent and left its status
+    /// footer drawn twice at two different widths.
+    override func shouldApplyFrameSizeChange(newCols: Int, newRows: Int) -> Bool {
+        guard remoteGrid != nil else { return true }
+        if newCols > 0, newRows > 0 {
             // Remember what the Mac would have chosen while the phone owned the process. This
             // means resizing the window during remote control restores the *new* desktop grid.
             deferredLocalGrid = (newCols, newRows)
         }
-        return matchesRemote
+        return false
+    }
+
+    /// The second gate, on the PTY rather than the renderer: a grid that reaches the child
+    /// process while the phone is in control must be the phone's.
+    override func shouldApplyProcessSizeChange(newCols: Int, newRows: Int) -> Bool {
+        guard let remoteGrid else { return true }
+        return newCols == remoteGrid.cols && newRows == remoteGrid.rows
     }
 
     /// Makes the remote renderer's visible grid authoritative and sends SIGWINCH through
@@ -201,13 +205,14 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         resize(cols: restore.cols, rows: restore.rows)
     }
 
+    /// A repeat of the grid already in force is not a resize. `resize` soft-resets the emulator,
+    /// so re-applying an unchanged lease would clear a running agent's scrolling region for no
+    /// reason at all.
     private func applyRemoteGrid() {
-        guard !isApplyingRemoteGrid, let remoteGrid else { return }
+        guard let remoteGrid else { return }
         let current = getTerminal().getDims()
         guard current.cols != remoteGrid.cols || current.rows != remoteGrid.rows else { return }
-        isApplyingRemoteGrid = true
         resize(cols: remoteGrid.cols, rows: remoteGrid.rows)
-        isApplyingRemoteGrid = false
     }
 
     required init?(coder: NSCoder) {
