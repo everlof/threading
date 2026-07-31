@@ -57,23 +57,6 @@ final class ProjectSidebarViewController: NSViewController {
     /// without reading or mutating the user's projects.
     let projectStore: ProjectStore
 
-    /// The app-wide document an agent can edit while its conversation remains on screen.
-    private lazy var currentThemeButton: ThemedButton = {
-        let button = ThemedButton()
-        button.title = L10n.string("Current Theme")
-        button.image = NSImage(
-            systemSymbolName: "paintbrush.pointed",
-            accessibilityDescription: L10n.string("Current Theme")
-        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
-        button.isBordered = false
-        button.applyFont(.controlRegular)
-        button.contentTintColor = Design.Text.secondary
-        button.target = self
-        button.action = #selector(currentThemeClicked)
-        button.setAccessibilityIdentifier("sidebar.current-theme")
-        return button
-    }()
-
     /// Retained so settings mode can mark it as the open page.
     private lazy var settingsButton: ThemedButton = {
         let button = ThemedButton()
@@ -88,27 +71,14 @@ final class ProjectSidebarViewController: NSViewController {
         button.action = #selector(settingsClicked)
         return button
     }()
-    /// Global destinations are separate rows rather than unrelated buttons squeezed into one
-    /// band. Hiding an arranged row collapses it, so Current Theme costs no space when agents do
-    /// not have theme tools.
-    private lazy var currentThemeFooter = PaneFooterView(
-        leading: [currentThemeButton],
-        margin: .paneEdge
-    )
+    /// Settings is the sidebar's one standing destination. Surfaces that live in the *trailing*
+    /// panel are opened from that panel — see `DisplayPaneController.newTabEntries(for:)` — so
+    /// this column never carries a permanent door to something it does not show.
     private lazy var footer = PaneFooterView(leading: [settingsButton], margin: .paneEdge)
-    private lazy var footerStack: NSStackView = {
-        let stack = NSStackView(views: [currentThemeFooter, footer])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.distribution = .fill
-        stack.spacing = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
-    }()
 
     /// Where a receipt for something the list just did appears — above the footer, in the
     /// column the row left from. See `present(_:)`.
-    private lazy var toasts = ToastPresenter(host: view, above: footerStack.topAnchor)
+    private lazy var toasts = ToastPresenter(host: view, above: footer.topAnchor)
 
     /// The band above the list: the brand row at its leading edge, the list's own controls
     /// at its trailing one. The list starts at its bottom. In settings mode the *controls*
@@ -180,6 +150,9 @@ final class ProjectSidebarViewController: NSViewController {
     private var sessionNodesByID: [SessionID: SessionNode] = [:]
     private var projectNodesBySessionID: [SessionID: ProjectNode] = [:]
     private var ancestorsBySessionID: [SessionID: [NSObject]] = [:]
+    private var terminalNodesByID: [TerminalID: TerminalNode] = [:]
+    private var projectNodesByTerminalID: [TerminalID: ProjectNode] = [:]
+    private var ancestorsByTerminalID: [TerminalID: [NSObject]] = [:]
 
     weak var delegate: ProjectSidebarViewControllerDelegate?
 
@@ -301,7 +274,7 @@ private extension ProjectSidebarViewController {
             ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: footerStack.topAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
         ])
     }
 
@@ -325,25 +298,21 @@ private extension ProjectSidebarViewController {
         ])
     }
 
-    /// Global destinations at the leading edge — icon *and* word, because they are places the
-    /// sidebar reaches rather than actions on the project list. Current Theme sits above the
-    /// always-present Settings door. Each row's hairline, height and insets remain
-    /// `PaneFooterView`'s to state.
+    /// The global destination at the leading edge — icon *and* word, because it is a place the
+    /// sidebar reaches rather than an action on the project list. The band's hairline, height
+    /// and insets remain `PaneFooterView`'s to state.
     ///
     /// `.paneEdge`, because the sidebar's margin is the list's: the platform's corner
     /// clearance is stated for the whole band's width, and Settings sits well above the
     /// window's bottom curve, so taking it put the gear two steps inboard of every row above
     /// it. See `PaneBandMargin`.
     private func setupFooter() {
-        updateCurrentThemeAvailability()
-        view.addSubview(footerStack)
+        view.addSubview(footer)
 
         NSLayoutConstraint.activate([
-            footerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            footerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            footerStack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            currentThemeFooter.widthAnchor.constraint(equalTo: footerStack.widthAnchor),
-            footer.widthAnchor.constraint(equalTo: footerStack.widthAnchor)
+            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
         _ = toasts
@@ -380,10 +349,6 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebarDidToggleSettings(self)
     }
 
-    @objc private func currentThemeClicked() {
-        delegate?.projectSidebarDidToggleCurrentTheme(self)
-    }
-
     private func observeStoreChanges() {
         appEvents.observe(ProjectsDidChange.self) { [weak self] change in
             self?.projectsDidChange(change)
@@ -396,13 +361,6 @@ private extension ProjectSidebarViewController {
         appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
             self?.extensionSettingsDidChange()
         }
-        appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
-            self?.updateCurrentThemeAvailability()
-        }
-    }
-
-    private func updateCurrentThemeAvailability() {
-        currentThemeFooter.isHidden = !MCPToolCatalog.hasEnabledThemeTools
     }
 
     /// Installs the sidebar's own ground, under every theme including System.
@@ -437,12 +395,6 @@ private extension ProjectSidebarViewController {
 // MARK: - Public Methods
 
 extension ProjectSidebarViewController {
-
-    /// Marks the global destination by raising its ink, matching Settings immediately below it
-    /// and leaving the accent available for attention.
-    func setCurrentThemeMode(_ on: Bool) {
-        currentThemeButton.contentTintColor = on ? Design.Text.label : Design.Text.secondary
-    }
 
     /// Shows a receipt for something the list just did, with the way back on it.
     ///
@@ -500,6 +452,7 @@ extension ProjectSidebarViewController {
         }
 
         let selectedSessionID = selectedNode()?.sessionID ?? projectStore.selectedSessionID
+        let selectedTerminalID = selectedTerminalNode()?.terminalID
 
         rootNodes = rebuilt
         renderedStructure = shape
@@ -540,7 +493,9 @@ extension ProjectSidebarViewController {
             }
         }
 
-        if let selectedSessionID {
+        if let selectedTerminalID {
+            select(terminalID: selectedTerminalID, notifyDelegate: false)
+        } else if let selectedSessionID {
             select(sessionID: selectedSessionID, notifyDelegate: false)
         }
         outlineSpan.end(metadata: ["rows": String(outlineView.numberOfRows)])
@@ -554,6 +509,9 @@ extension ProjectSidebarViewController {
         sessionNodesByID.removeAll(keepingCapacity: true)
         projectNodesBySessionID.removeAll(keepingCapacity: true)
         ancestorsBySessionID.removeAll(keepingCapacity: true)
+        terminalNodesByID.removeAll(keepingCapacity: true)
+        projectNodesByTerminalID.removeAll(keepingCapacity: true)
+        ancestorsByTerminalID.removeAll(keepingCapacity: true)
 
         func walk(
             _ node: NSObject,
@@ -574,7 +532,7 @@ extension ProjectSidebarViewController {
                 }
 
             case let branch as BranchGroupNode:
-                for child in branch.sessionNodes {
+                for child in branch.childNodes {
                     walk(child, ancestors: ancestors + [branch], projectNode: projectNode)
                 }
 
@@ -586,6 +544,13 @@ extension ProjectSidebarViewController {
                 }
                 for child in session.childNodes {
                     walk(child, ancestors: ancestors + [session], projectNode: projectNode)
+                }
+
+            case let terminal as TerminalNode:
+                terminalNodesByID[terminal.terminalID] = terminal
+                ancestorsByTerminalID[terminal.terminalID] = ancestors
+                if let projectNode {
+                    projectNodesByTerminalID[terminal.terminalID] = projectNode
                 }
 
             default:
@@ -621,10 +586,12 @@ extension ProjectSidebarViewController {
                 project.childNodes.forEach(walk)
             case let branch as BranchGroupNode:
                 signature += "b:\(branch.projectID)/\(branch.branch)("
-                branch.sessionNodes.forEach(walk)
+                branch.childNodes.forEach(walk)
             case let session as SessionNode:
                 signature += "s:\(session.sessionID)("
                 session.childNodes.forEach(walk)
+            case let terminal as TerminalNode:
+                signature += "t:\(terminal.terminalID)("
             default:
                 signature += "?("
             }
@@ -761,6 +728,13 @@ extension ProjectSidebarViewController {
         outlineView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
     }
 
+    func refreshRow(terminalID: TerminalID) {
+        guard let node = terminalNodesByID[terminalID] else { return }
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
+        reconfigureRow(at: row)
+    }
+
     /// Re-applies a row's content to the view already on screen.
     ///
     /// `reloadData(forRowIndexes:)` does the same job by handing the row back to the reuse
@@ -822,6 +796,7 @@ extension ProjectSidebarViewController {
     }
 
     var selectedSessionID: SessionID? { selectedNode()?.sessionID }
+    var selectedTerminalID: TerminalID? { selectedTerminalNode()?.terminalID }
 
     func setExpanded(_ expanded: Bool, forProject projectID: ProjectID) {
         guard let node = projectNodesByID[projectID] else { return }
@@ -911,6 +886,11 @@ extension ProjectSidebarViewController {
         scrollSelectionIntoView()
     }
 
+    func reveal(terminalID: TerminalID) {
+        select(terminalID: terminalID, notifyDelegate: false)
+        scrollSelectionIntoView()
+    }
+
     /// The same, for a project — the row behind an open composer.
     func reveal(projectID: ProjectID) {
         guard let node = projectNodesByID[projectID] else { return }
@@ -957,6 +937,26 @@ extension ProjectSidebarViewController {
         guard notifyDelegate else { return }
 
         requestSessionPresentation(sessionID)
+    }
+
+    func select(terminalID: TerminalID, notifyDelegate: Bool = true) {
+        guard let node = terminalNodesByID[terminalID] else { return }
+        for ancestor in ancestorsByTerminalID[terminalID] ?? [] {
+            outlineView.expandItem(ancestor)
+        }
+
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
+
+        suppressSelectionCallback = true
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        suppressSelectionCallback = false
+
+        cancelPendingSessionPresentation()
+        projectStore.selectedSessionID = nil
+        if notifyDelegate {
+            delegate?.projectSidebar(self, didSelectTerminal: terminalID)
+        }
     }
 
     /// Clears the transient page selection without stopping the session behind it.
@@ -1061,7 +1061,7 @@ extension ProjectSidebarViewController {
             ),
             sidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.medium),
             sidebar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.medium),
-            sidebar.bottomAnchor.constraint(lessThanOrEqualTo: footerStack.topAnchor)
+            sidebar.bottomAnchor.constraint(lessThanOrEqualTo: footer.topAnchor)
         ])
 
         settingsSidebar = sidebar
@@ -1157,6 +1157,16 @@ private extension ProjectSidebarViewController {
                 self.projectStore.renameSession(id: node.sessionID, to: newTitle)
                 self.reload()
             }
+        } else if let node = outlineView.item(atRow: row) as? TerminalNode {
+            let terminal = projectStore.terminal(withID: node.terminalID)
+            promptRename(
+                title: L10n.string("Rename Terminal"),
+                current: terminal?.customTitle ?? "",
+                placeholder: terminal?.displayTitle ?? L10n.string("Terminal"),
+                allowsEmpty: true
+            ) { newTitle in
+                self.projectStore.renameTerminal(id: node.terminalID, to: newTitle)
+            }
         }
     }
 
@@ -1167,26 +1177,32 @@ private extension ProjectSidebarViewController {
             removeProject(node.projectID)
         } else if let node = outlineView.item(atRow: row) as? SessionNode {
             removeSession(node.sessionID)
+        } else if let node = outlineView.item(atRow: row) as? TerminalNode {
+            closeTerminal(node.terminalID)
         }
     }
 
     private func removeProject(_ projectID: ProjectID) {
         guard let project = projectStore.project(withID: projectID) else { return }
 
-        let runningCount = project.sessions.filter {
+        let runningSessionCount = project.sessions.filter {
             AgentRuntime.shared.isRunning(sessionID: $0.id)
         }.count
+        let runningTerminalCount = project.terminals.filter {
+            ProjectTerminalRuntime.shared.isRunning(terminalID: $0.id)
+        }.count
+        let runningCount = runningSessionCount + runningTerminalCount
 
         let request = ConfirmationRequest(
             prompt: .removeProject,
             title: L10n.format("Remove “%@”?", project.name),
             message: runningCount > 0
                 ? L10n.format(
-                    "%lld running sessions will be terminated. Saved conversations are not deleted.",
+                    "%lld running chats or terminals will be terminated. Saved conversations are not deleted.",
                     Int64(runningCount)
                 )
                 : L10n.string(
-                    "Its sessions are removed from the sidebar. Saved conversations are not deleted."
+                    "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted."
                 ),
             confirmTitle: L10n.string("Remove")
         )
@@ -1196,10 +1212,22 @@ private extension ProjectSidebarViewController {
         for session in project.sessions {
             AgentRuntime.shared.discard(sessionID: session.id)
         }
+        ProjectTerminalRuntime.shared.discard(terminalsIn: project)
 
         projectStore.removeProject(id: projectID)
         reload()
         delegate?.projectSidebarDidRemoveSessions(self)
+    }
+
+    private func closeTerminal(_ terminalID: TerminalID) {
+        ProjectTerminalRuntime.shared.discard(terminalID: terminalID)
+        projectStore.removeTerminal(id: terminalID)
+        delegate?.projectSidebar(self, didCloseTerminal: terminalID)
+    }
+
+    @objc private func closeTerminalClicked() {
+        guard let terminalID = contextTerminalID() else { return }
+        closeTerminal(terminalID)
     }
 
     /// Opens Storage, which reports every project rather than only this one.
@@ -1241,6 +1269,8 @@ private extension ProjectSidebarViewController {
             reload()
         case .sessionRow(let sessionID):
             refreshRow(sessionID: sessionID)
+        case .terminalRow(let terminalID):
+            refreshRow(terminalID: terminalID)
         }
     }
 
@@ -1248,6 +1278,10 @@ private extension ProjectSidebarViewController {
 
     private func selectedNode() -> SessionNode? {
         outlineView.item(atRow: outlineView.selectedRow) as? SessionNode
+    }
+
+    private func selectedTerminalNode() -> TerminalNode? {
+        outlineView.item(atRow: outlineView.selectedRow) as? TerminalNode
     }
 
     private func sessionNode(for sessionID: SessionID) -> SessionNode? {
@@ -1273,6 +1307,12 @@ private extension ProjectSidebarViewController {
         return node.sessionID
     }
 
+    func contextTerminalID() -> TerminalID? {
+        guard let row = contextRow(),
+              let node = outlineView.item(atRow: row) as? TerminalNode else { return nil }
+        return node.terminalID
+    }
+
     /// The project a context menu action applies to, whether a project or session was clicked.
     func contextProjectID() -> ProjectID? {
         guard let row = contextRow() else { return nil }
@@ -1286,6 +1326,9 @@ private extension ProjectSidebarViewController {
         if let node = outlineView.item(atRow: row) as? SessionNode {
             return projectNodesBySessionID[node.sessionID]?.projectID
         }
+        if let node = outlineView.item(atRow: row) as? TerminalNode {
+            return projectNodesByTerminalID[node.terminalID]?.projectID
+        }
         return nil
     }
 
@@ -1295,6 +1338,32 @@ private extension ProjectSidebarViewController {
     /// The `⋯` button: everything a project offers but starting a session.
     private func showProjectActions(for projectID: ProjectID, from anchor: NSView) {
         presentProjectMenu(for: projectID, from: anchor) { self.addProjectManagementItems(to: $0) }
+    }
+
+    private func showProjectCreationMenu(for projectID: ProjectID, from anchor: NSView) {
+        presentProjectMenu(for: projectID, from: anchor) { menu in
+            menu.addItem(
+                withTitle: L10n.string("New Chat…"),
+                action: #selector(self.newProjectChatClicked),
+                keyEquivalent: ""
+            )
+            menu.addItem(
+                withTitle: L10n.string("New Terminal"),
+                action: #selector(self.newProjectTerminalClicked),
+                keyEquivalent: ""
+            )
+        }
+    }
+
+    @objc private func newProjectChatClicked() {
+        guard let projectID = contextProjectID() else { return }
+        select(projectID: projectID)
+    }
+
+    @objc private func newProjectTerminalClicked() {
+        guard let projectID = contextProjectID(),
+              let terminal = projectStore.addTerminal(to: projectID) else { return }
+        select(terminalID: terminal.id)
     }
 
     /// Pops a project's menu beneath the button that opened it, pinning the row so the
@@ -1315,6 +1384,20 @@ private extension ProjectSidebarViewController {
         // A button click leaves `clickedRow` at whatever was last clicked, so the row this
         // menu targets is pinned while it is open. `popUp` is modal and the handlers read
         // `contextRow()` before it returns, so the pin is cleared immediately afterwards.
+        overrideContextRow = row
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.maxY), in: anchor)
+        overrideContextRow = nil
+    }
+
+    private func showTerminalActions(for terminalID: TerminalID, from anchor: NSView) {
+        guard let node = terminalNodesByID[terminalID] else { return }
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
+
+        let menu = NSMenu()
+        addTerminalMenuItems(to: menu, terminalID: terminalID)
+        for item in menu.items { item.target = self }
+
         overrideContextRow = row
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.maxY), in: anchor)
         overrideContextRow = nil
@@ -1433,7 +1516,7 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
 
         if let group = item as? RepoGroupNode { return group.projectNodes.count }
         if let project = item as? ProjectNode { return project.childNodes.count }
-        if let branch = item as? BranchGroupNode { return branch.sessionNodes.count }
+        if let branch = item as? BranchGroupNode { return branch.childNodes.count }
         if let session = item as? SessionNode { return session.childNodes.count }
         return 0
     }
@@ -1443,7 +1526,7 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
 
         if let group = item as? RepoGroupNode { return group.projectNodes[index] }
         if let project = item as? ProjectNode { return project.childNodes[index] }
-        if let branch = item as? BranchGroupNode { return branch.sessionNodes[index] }
+        if let branch = item as? BranchGroupNode { return branch.childNodes[index] }
         if let session = item as? SessionNode { return session.childNodes[index] }
         return rootNodes[index]
     }
@@ -1495,6 +1578,11 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return apply(item, to: cell) ? cell : nil
         }
 
+        if item is TerminalNode {
+            let cell = dequeueCell(SidebarIdentifiers.terminalCell) { ProjectTerminalRowView() }
+            return apply(item, to: cell) ? cell : nil
+        }
+
         return nil
     }
 
@@ -1522,32 +1610,51 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
             // A collapsed project says how many sessions it is hiding; expanded, the
             // sessions speak for themselves.
-            let hiddenSessions = outlineView.isItemExpanded(projectNode)
+            let hiddenItems = outlineView.isItemExpanded(projectNode)
                 ? 0
-                : projectNode.sessionNodes.count
+                : projectNode.sessionNodes.count + projectNode.terminalNodes.count
 
             cell.configure(
                 with: project,
                 style: isGrouped ? .checkout : .standalone,
-                collapsedSessionCount: hiddenSessions
+                collapsedSessionCount: hiddenItems
             )
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
+            }
+            cell.onCreateAction = { [weak self] anchor in
+                self?.showProjectCreationMenu(for: projectNode.projectID, from: anchor)
             }
             return true
         }
 
         if let branchNode = item as? BranchGroupNode, let cell = view as? ProjectRowView {
-            let hiddenSessions = outlineView.isItemExpanded(branchNode)
+            let hiddenItems = outlineView.isItemExpanded(branchNode)
                 ? 0
-                : branchNode.sessionNodes.count
+                : branchNode.childNodes.count
 
             cell.configureAsBranch(
                 named: branchNode.branch,
-                collapsedSessionCount: hiddenSessions
+                collapsedSessionCount: hiddenItems
             )
             cell.onHoverAction = { [weak self] anchor in
                 self?.showBranchGroupingOptions(from: anchor)
+            }
+            return true
+        }
+
+
+        if let terminalNode = item as? TerminalNode,
+           let cell = view as? ProjectTerminalRowView {
+            guard let terminal = projectStore.terminal(withID: terminalNode.terminalID) else {
+                return false
+            }
+            cell.configure(
+                with: terminal,
+                running: ProjectTerminalRuntime.shared.isRunning(terminalID: terminal.id)
+            )
+            cell.onAction = { [weak self] terminalID, anchor in
+                self?.showTerminalActions(for: terminalID, from: anchor)
             }
             return true
         }
@@ -1577,7 +1684,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     /// Clickable rows highlight under the pointer; group headings do not, since they only
     /// respond at their disclosure triangle.
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-        guard item is ProjectNode || item is SessionNode else { return nil }
+        guard item is ProjectNode || item is SessionNode || item is TerminalNode else { return nil }
         return SidebarHoverRowView()
     }
 
@@ -1602,10 +1709,10 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         return SidebarDefaults.rowHeight
     }
 
-    /// Sessions open their terminal; projects open the composer. Repository headings group
+    /// Chats and terminals open their page; projects open the composer. Repository headings group
     /// their checkouts and select nothing themselves.
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        item is SessionNode || item is ProjectNode
+        item is SessionNode || item is TerminalNode || item is ProjectNode
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -1615,6 +1722,13 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         if let node = item as? SessionNode {
             requestSessionPresentation(node.sessionID)
+            return
+        }
+
+        if let node = item as? TerminalNode {
+            cancelPendingSessionPresentation()
+            projectStore.selectedSessionID = nil
+            delegate?.projectSidebar(self, didSelectTerminal: node.terminalID)
             return
         }
 
@@ -1697,6 +1811,8 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             // the menu opens.
             actionSessionID = node.sessionID
             populateSessionActions(menu, for: session)
+        } else if let node = item as? TerminalNode {
+            addTerminalMenuItems(to: menu, terminalID: node.terminalID)
         }
 
         for menuItem in menu.items {
@@ -1708,6 +1824,21 @@ extension ProjectSidebarViewController: NSMenuDelegate {
     /// starting a session is not in it, because that is what selecting the row does.
     private func addProjectMenuItems(to menu: NSMenu) {
         addProjectManagementItems(to: menu)
+    }
+
+    private func addTerminalMenuItems(to menu: NSMenu, terminalID: TerminalID) {
+        menu.addItem(
+            withTitle: L10n.string("Rename Terminal…"),
+            action: #selector(renameClicked),
+            keyEquivalent: ""
+        )
+        menu.addItem(makeTerminalThemeItem(for: terminalID))
+        menu.addItem(.separator())
+        menu.addItem(
+            withTitle: L10n.string("Close Terminal"),
+            action: #selector(closeTerminalClicked),
+            keyEquivalent: ""
+        )
     }
 
     /// Everything a project offers. Sessions are started by selecting the project, which
@@ -2021,6 +2152,7 @@ enum SidebarIdentifiers {
     static let repoCell = NSUserInterfaceItemIdentifier("SidebarRepoCell")
     static let branchCell = NSUserInterfaceItemIdentifier("SidebarBranchCell")
     static let sessionCell = NSUserInterfaceItemIdentifier("SidebarSessionCell")
+    static let terminalCell = NSUserInterfaceItemIdentifier("SidebarTerminalCell")
 }
 
 // MARK: - ProjectSidebarViewControllerDelegate
@@ -2028,6 +2160,7 @@ enum SidebarIdentifiers {
 @MainActor
 protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectTerminal terminalID: TerminalID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didAddProject project: Project)
     func projectSidebar(
@@ -2068,8 +2201,8 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
         prompt: String?
     )
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didCloseTerminal terminalID: TerminalID)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
-    func projectSidebarDidToggleCurrentTheme(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
 }
 

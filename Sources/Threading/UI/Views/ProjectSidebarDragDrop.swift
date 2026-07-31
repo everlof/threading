@@ -27,7 +27,7 @@ extension ProjectSidebarViewController {
         guard !folders.isEmpty else { return false }
 
         for folder in folders {
-            ProjectStore.shared.addProject(folderURL: folder)
+            projectStore.addProject(folderURL: folder)
         }
         reload()
         return true

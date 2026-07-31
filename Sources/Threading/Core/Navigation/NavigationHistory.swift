@@ -17,6 +17,7 @@ struct NavigationHistory: Equatable {
     /// or a settings page — the same three pages the sidebar can put there.
     enum Page: Equatable, Hashable {
         case session(SessionID)
+        case terminal(TerminalID)
         case composer(ProjectID)
         case settings(String)
     }

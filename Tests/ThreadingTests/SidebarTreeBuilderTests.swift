@@ -14,13 +14,18 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private func project(_ name: String, sessions: [AgentSession]) -> Project {
+    private func project(
+        _ name: String,
+        sessions: [AgentSession],
+        terminals: [ProjectTerminal] = []
+    ) -> Project {
         var project = Project(
             name: name,
             folderURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("threading-tree-\(name)-\(UUID().uuidString)")
         )
         project.sessions = sessions
+        project.terminals = terminals
         return project
     }
 
@@ -50,6 +55,12 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
     private func sessionNodes(in nodes: [NSObject]) -> [SessionNode] {
         nodes.compactMap { $0 as? SessionNode }
+    }
+
+    private func terminal(_ path: String, branch: String?) -> ProjectTerminal {
+        var terminal = ProjectTerminal(currentDirectory: path)
+        terminal.branch = branch
+        return terminal
     }
 
     /// Sets a defaults key for one test and restores the registered seed afterwards.
@@ -169,6 +180,23 @@ final class SidebarTreeBuilderTests: XCTestCase {
             XCTAssertTrue(node.childNodes.first is BranchGroupNode, "the group left its place")
             XCTAssertEqual((node.childNodes.last as? SessionNode)?.sessionID, middle.id)
         }
+    }
+
+    func testAChatAndTerminalOnTheSameBranchShareAHeading() throws {
+        let chat = session("chat", branch: "feature")
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-terminal-tree-\(UUID().uuidString)")
+            .path
+        let shell = terminal(folder, branch: "feature")
+        let roots = SidebarTreeBuilder.rootNodes(
+            from: [project("p", sessions: [chat], terminals: [shell])]
+        )
+        let projectNode = try XCTUnwrap(roots.first as? ProjectNode)
+        let branch = try XCTUnwrap(projectNode.childNodes.first as? BranchGroupNode)
+
+        XCTAssertEqual(branch.branch, "feature")
+        XCTAssertEqual(branch.sessionNodes.map(\.sessionID), [chat.id])
+        XCTAssertEqual(branch.terminalNodes.map(\.terminalID), [shell.id])
     }
 
     // MARK: - Side chats
@@ -291,6 +319,21 @@ final class SidebarTreeBuilderTests: XCTestCase {
         )
         let chain = SidebarTreeBuilder.ancestors(of: second.id, in: roots)
 
+        XCTAssertTrue(chain.first is ProjectNode)
+        XCTAssertEqual((chain.last as? BranchGroupNode)?.branch, "shared")
+    }
+
+    func testAGroupedTerminalOpensItsProjectThenItsBranch() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-terminal-chain-\(UUID().uuidString)")
+            .path
+        let first = terminal(folder, branch: "shared")
+        let second = terminal(folder, branch: "shared")
+        let roots = SidebarTreeBuilder.rootNodes(
+            from: [project("p", sessions: [], terminals: [first, second])]
+        )
+
+        let chain = SidebarTreeBuilder.ancestors(of: second.id, in: roots)
         XCTAssertTrue(chain.first is ProjectNode)
         XCTAssertEqual((chain.last as? BranchGroupNode)?.branch, "shared")
     }

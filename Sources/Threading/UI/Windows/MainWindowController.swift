@@ -144,11 +144,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         containerViewController.currentSessionID
     }
 
+    var currentTerminalID: TerminalID? {
+        containerViewController.currentTerminalID
+    }
+
     /// The project implied by the visible session or composer. Settings and empty states carry
     /// no project context, so project-scoped extension commands disable there.
     var currentProjectID: ProjectID? {
         if let currentSessionID {
             return ProjectStore.shared.project(forSessionID: currentSessionID)?.id
+        }
+        if let currentTerminalID {
+            return ProjectStore.shared.displayProject(forTerminalID: currentTerminalID)?.id
         }
         return containerViewController.currentComposerProjectID
     }
@@ -197,6 +204,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // Full-size content so the sidebar runs the whole height of the window and the
         // traffic lights sit over it, rather than above a separate title bar. Views that
         // must not slide under the toolbar pin to their safe area instead.
+        //
         // `TitlebarActionWindow` rather than a plain `NSWindow` because of what the next two
         // lines cost together: full-size content *and* a transparent titlebar is the one
         // combination in which AppKit stops hit-testing the strip, so a double-click there
@@ -420,8 +428,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         displayPaneController.onClose = { [weak self] in
             self?.setDisplayPaneVisible(false)
         }
-        displayPaneController.onCurrentThemeVisibilityChange = { [weak self] visible in
-            self?.sidebarViewController.setCurrentThemeMode(visible)
+        displayPaneController.onShowCurrentTheme = { [weak self] in
+            self?.toggleCurrentTheme()
         }
         displayPaneController.onReviewLoadingChange = { [weak self] sessionID, isLoading in
             self?.setSessionLoading(
@@ -491,16 +499,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             // sidebar keeps listing settings sections, with no row to show which one arrived.
             self.exitSettingsForNavigation()
             self.sidebarViewController.select(sessionID: event.sessionID)
-        }
-
-        // An agent that was asked to be done with its session archives it through the same
-        // coordinator the row's own Archive uses; the scheduler's only job was to hold the
-        // request until the turn it was made in had ended. See `SessionArchiveScheduler`.
-        appEvents.observe(SessionArchiveRequestDidBecomeDue.self) { [weak self] event in
-            self?.sessionCoordinator.archiveAtAgentRequest(
-                event.sessionID,
-                reason: event.reason
-            )
         }
     }
 
@@ -661,7 +659,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // Read *before* uncollapsing. The layout that follows fires resize notifications
         // carrying a transient thickness — the item's minimum — and recording that would
         // overwrite the width about to be restored with that minimum on every first reveal.
-        let target = DisplayPaneWidth.stored
+        // The window is measured here too, while the panel is still shut and the split view
+        // therefore still the full content width.
+        let target = DisplayPaneWidth.opening(in: splitView.bounds.width)
         isRestoringDisplayPaneWidth = true
         displayItem.isCollapsed = false
         updateToolbarControlStates()
@@ -684,18 +684,36 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// width across restarts. It reads as no snap-back because the width being restored is
     /// the one the user themselves chose.
     ///
-    /// Done with a constraint rather than `NSSplitView.setPosition`, which this window's
-    /// `NSSplitViewController` ignores outright — it lays its items out with Auto Layout, and
-    /// a `setPosition(915, ofDividerAt: 1)` measurably left the pane at its 260pt minimum.
-    /// The constraint is released as soon as it has been honoured, so the divider stays
-    /// draggable instead of being pinned to the width just restored.
+    /// Moved through the split view's own divider, because the width has to become *its* answer.
+    ///
+    /// This used to activate a required width constraint on the pane, lay out, and release it.
+    /// That holds the frame for exactly as long as the constraint is active: the split view goes
+    /// on positioning its items with its own constraint at `holdingPriority`, whose constant is
+    /// still the thickness the pane had, so the very next layout pass puts it back. Traced:
+    /// asked 372 → with constraint 372 → released 372 → **relaid 48**.
+    ///
+    /// It was survivable while the item's minimum was 200 — the panel merely opened narrower
+    /// than it was left. Lowering the minimum to `slimmestWidth` so the panel would stop raising
+    /// the *window's* minimum turned "back" into a 48pt sliver, and `display_image` then opened
+    /// a panel too narrow to show an image in. The two changes were each correct and only wrong
+    /// together, which is why nothing caught it.
+    ///
+    /// The note this replaces said `setPosition` is ignored outright by an
+    /// `NSSplitViewController`. It is not: dividers are indexed among the *panes*, while a split
+    /// view keeps its dividers in `subviews` as well, so a `subviews`-counted index addresses the
+    /// wrong divider — with three panes, `subviews.count - 2` is a divider view, not the
+    /// panel's. AppKit clamps the position against the other items' minimums, so a width wider
+    /// than the window can spare costs the terminal nothing below its own floor.
     private func applyDisplayPaneWidth(_ width: CGFloat) {
-        let paneView = displayItem.viewController.view
+        let dividerIndex = splitViewController.splitViewItems.count - 2
+        guard dividerIndex >= 0 else { return }
 
-        let constraint = paneView.widthAnchor.constraint(equalToConstant: width)
-        constraint.isActive = true
-        paneView.layoutSubtreeIfNeeded()
-        constraint.isActive = false
+        splitView.layoutSubtreeIfNeeded()
+        splitView.setPosition(
+            splitView.bounds.width - width - splitView.dividerThickness,
+            ofDividerAt: dividerIndex
+        )
+        splitView.layoutSubtreeIfNeeded()
     }
 
     /// Points the panel at whichever session is on screen.
@@ -861,6 +879,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                     .id.uuidString.lowercased()
             )
         }
+        if currentTerminalID != nil, let projectID = currentProjectID {
+            return .project(id: projectID.uuidString.lowercased())
+        }
         if let projectID = containerViewController.currentComposerProjectID {
             return .project(id: projectID.uuidString.lowercased())
         }
@@ -925,6 +946,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 // it shows for the same session.
                 icon: session.kind.icon,
                 toolTip: project.map { "\($0.name) — \(session.displayTitle)" }
+            )
+        } else if let terminalID = containerViewController.currentTerminalID,
+                  let terminal = ProjectStore.shared.terminal(withID: terminalID) {
+            showPageTab(
+                title: terminal.displayTitle,
+                symbolName: "terminal",
+                identity: terminalID,
+                toolTip: terminal.currentDirectory
             )
         } else if let projectID = containerViewController.currentComposerProjectID {
             let project = ProjectStore.shared.project(withID: projectID)
@@ -1222,7 +1251,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         if containerViewController.isShowingSettings
             || containerViewController.currentComposerProjectID != nil
-            || containerViewController.currentSessionID != nil {
+            || containerViewController.currentSessionID != nil
+            || containerViewController.currentTerminalID != nil {
             closeActivePageTab()
         } else {
             NSSound.beep()
@@ -1239,6 +1269,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     func revealActivePageInSidebar() {
         if let sessionID = containerViewController.currentSessionID {
             sidebarViewController.reveal(sessionID: sessionID)
+        } else if let terminalID = containerViewController.currentTerminalID {
+            sidebarViewController.reveal(terminalID: terminalID)
         } else if let projectID = containerViewController.currentComposerProjectID {
             sidebarViewController.reveal(projectID: projectID)
         }
@@ -1369,6 +1401,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if let sessionID = containerViewController.currentSessionID {
             return .session(sessionID)
         }
+        if let terminalID = containerViewController.currentTerminalID {
+            return .terminal(terminalID)
+        }
         return containerViewController.currentComposerProjectID.map(NavigationHistory.Page.composer)
     }
 
@@ -1381,6 +1416,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             exitSettingsForNavigation()
             pendingHistoryTarget = page
             sidebarViewController.select(sessionID: sessionID)
+
+        case .terminal(let terminalID):
+            exitSettingsForNavigation()
+            pendingHistoryTarget = page
+            sidebarViewController.select(terminalID: terminalID)
 
         case .composer(let projectID):
             exitSettingsForNavigation()
@@ -1424,7 +1464,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     /// Opens the app-wide theme document beside the conversation. Unlike ordinary panel tabs it
-    /// survives session selection and never joins a session's `+` menu or persisted layout.
+    /// survives session selection and joins no persisted layout — the panel's `+` offers it,
+    /// behind its own separator, as a way *in* rather than as another of that chat's tabs.
     func toggleCurrentTheme() {
         window?.makeKeyAndOrderFront(nil)
         guard MCPToolCatalog.hasEnabledThemeTools else {
@@ -1775,6 +1816,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 syncDisplayPane(to: sessionID)
                 recordVisit(.session(sessionID))
 
+            case .terminal(let terminalID):
+                containerViewController.show(terminalID: terminalID)
+                syncDisplayPane(to: nil)
+                recordVisit(.terminal(terminalID))
+
             case .composer(let projectID):
                 // Restored rather than re-shown: the composer is put back as it was left,
                 // choices, attachments and half-written prompt included. Settings is a detour,
@@ -1824,11 +1870,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     func increaseFontSize() {
-        currentAgentController()?.session.increaseFontSize()
+        containerViewController.activeTerminalSession?.increaseFontSize()
     }
 
     func decreaseFontSize() {
-        currentAgentController()?.session.decreaseFontSize()
+        containerViewController.activeTerminalSession?.decreaseFontSize()
     }
 
     // MARK: - Find
@@ -1841,7 +1887,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         guard let contentView = window?.contentView,
-              let terminalView = currentAgentController()?.session.terminalView else { return }
+              let terminalView = containerViewController.activeTerminalSession?.terminalView
+        else { return }
 
         if findBar == nil {
             let bar = FindBarView()
@@ -1887,7 +1934,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             Task { @MainActor [weak self] in
                 self?.findBar?.removeFromSuperview()
                 self?.findBar = nil
-                self?.currentAgentController()?.focusTerminal()
+                if let terminalID = self?.containerViewController.currentTerminalID,
+                   let controller = ProjectTerminalRuntime.shared.controller(for: terminalID) {
+                    controller.focus()
+                } else {
+                    self?.currentAgentController()?.focusTerminal()
+                }
             }
         })
     }
@@ -1910,9 +1962,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.subtitle = ""
 
         // Still tracked: it drives the proxy icon and path menu if the title bar is shown.
-        window?.representedURL = currentSessionID
-            .flatMap { ProjectStore.shared.project(forSessionID: $0) }?
-            .folderURL
+        window?.representedURL = currentFolderURL
     }
 }
 
@@ -1925,6 +1975,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         // not to every later selection of the same session.
         let prompt = sessionCoordinator.takePendingPrompt()
         let previousSessionID = containerViewController.currentSessionID
+        let previousTerminalID = containerViewController.currentTerminalID
 
         containerViewController.show(sessionID: sessionID, initialPrompt: prompt)
         syncDisplayPane(to: sessionID)
@@ -1939,13 +1990,42 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         if let previousSessionID, previousSessionID != sessionID {
             sidebar.refreshRow(sessionID: previousSessionID)
         }
+        if let previousTerminalID {
+            sidebar.refreshRow(terminalID: previousTerminalID)
+        }
         sidebar.refreshRow(sessionID: sessionID)
+    }
+
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        didSelectTerminal terminalID: TerminalID
+    ) {
+        let previousSessionID = containerViewController.currentSessionID
+        let previousTerminalID = containerViewController.currentTerminalID
+
+        containerViewController.show(terminalID: terminalID)
+        syncDisplayPane(to: nil)
+        recordVisit(.terminal(terminalID))
+        workspaceSidebarViewController.synchronizeSelection(
+            with: currentWorkspaceNavigatorDestination
+        )
+        updateSessionTitleItem()
+        updateWindowTitle()
+
+        if let previousSessionID {
+            sidebar.refreshRow(sessionID: previousSessionID)
+        }
+        if let previousTerminalID, previousTerminalID != terminalID {
+            sidebar.refreshRow(terminalID: previousTerminalID)
+        }
+        sidebar.refreshRow(terminalID: terminalID)
     }
 
     /// A project has no terminal of its own, so selecting one offers the composer: the
     /// choices that are only made when a session starts.
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID) {
         let previousSessionID = containerViewController.currentSessionID
+        let previousTerminalID = containerViewController.currentTerminalID
         containerViewController.showComposer(projectID: projectID)
         syncDisplayPane(to: nil)
         recordVisit(.composer(projectID))
@@ -1954,6 +2034,9 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         )
         if let previousSessionID {
             sidebar.refreshRow(sessionID: previousSessionID)
+        }
+        if let previousTerminalID {
+            sidebar.refreshRow(terminalID: previousTerminalID)
         }
     }
 
@@ -2064,10 +2147,14 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         if let currentSessionID, ProjectStore.shared.session(withID: currentSessionID) == nil {
             containerViewController.show(sessionID: nil)
         }
+        if let currentTerminalID, ProjectStore.shared.terminal(withID: currentTerminalID) == nil {
+            containerViewController.closeTerminal(for: currentTerminalID)
+        }
 
         // A deleted session must not keep its image in memory, nor leave a live MCP endpoint
         // addressing a session that no longer exists.
         let liveSessionIDs = Set(ProjectStore.shared.projects.flatMap { $0.sessions.map(\.id) })
+        let liveTerminalIDs = Set(ProjectStore.shared.projects.flatMap { $0.terminals.map(\.id) })
         displayPaneController.retainOnly(sessionIDs: liveSessionIDs)
         containerViewController.retainDrawerSessions(liveSessionIDs)
         MCPSessionRegistry.retainOnly(sessionIDs: liveSessionIDs)
@@ -2079,6 +2166,8 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
             switch page {
             case .session(let sessionID):
                 return liveSessionIDs.contains(sessionID)
+            case .terminal(let terminalID):
+                return liveTerminalIDs.contains(terminalID)
             case .composer(let projectID):
                 return ProjectStore.shared.project(withID: projectID) != nil
             case .settings:
@@ -2090,12 +2179,22 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         syncDisplayPane(to: containerViewController.currentSessionID)
     }
 
-    func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController) {
-        toggleSettings()
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        didCloseTerminal terminalID: TerminalID
+    ) {
+        containerViewController.closeTerminal(for: terminalID)
+        history.prune { page in
+            if case .terminal(let candidate) = page { return candidate != terminalID }
+            return true
+        }
+        updateNavigationButtons()
+        updateSessionTitleItem()
+        updateWindowTitle()
     }
 
-    func projectSidebarDidToggleCurrentTheme(_ sidebar: ProjectSidebarViewController) {
-        toggleCurrentTheme()
+    func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController) {
+        toggleSettings()
     }
 
     func projectSidebar(
@@ -2260,6 +2359,7 @@ extension MainWindowController: NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         AgentRuntime.shared.terminateAll()
+        ProjectTerminalRuntime.shared.terminateAll()
     }
 }
 
@@ -2307,21 +2407,39 @@ enum SidebarWidth {
 ///
 /// Kept out of `AppSettings`, which holds behavioural preferences the user sets deliberately.
 /// This is window geometry, and belongs with the frame autosave rather than beside them.
+///
+/// Through `PreferenceStore`, not `.standard`: this records a **choice the user made with the
+/// divider**, and the test bundle is hosted in the app, so a test that opens the panel writes
+/// whatever width its fixture window happened to give it into the developer's own preferences.
+/// That is how a real machine came to have 48 saved here — the panel's chrome floor, measured
+/// in an unshown fixture window by a test about something else entirely, and then read back by
+/// the app the developer was running.
 enum DisplayPaneWidth {
     private static let key = "ThreadingDisplayPaneWidth"
 
     static var stored: CGFloat {
-        get {
-            let saved = UserDefaults.standard.double(forKey: key)
-            // Absent, or narrower than the panel is allowed to be, means "never set".
-            guard saved >= DisplayPaneDefaults.minWidth else {
-                return DisplayPaneDefaults.defaultWidth
-            }
-            return CGFloat(saved)
-        }
-        set {
-            UserDefaults.standard.set(Double(newValue), forKey: key)
-        }
+        get { chosen ?? DisplayPaneDefaults.defaultWidth }
+        set { PreferenceStore.shared.set(Double(newValue), forKey: key) }
+    }
+
+    /// The width the user left the divider at, or nil if they never moved it. Absent, or
+    /// narrower than the panel is allowed to be, means "never set" — a sliver recorded by a
+    /// layout nobody asked for is not a choice to restore.
+    private static var chosen: CGFloat? {
+        let saved = PreferenceStore.shared.double(forKey: key)
+        guard saved >= DisplayPaneDefaults.minWidth else { return nil }
+        return CGFloat(saved)
+    }
+
+    /// The width a reveal opens at: the one the user chose, or a share of the window the first
+    /// time — see `DisplayPaneDefaults.openingFraction`.
+    static func opening(in splitWidth: CGFloat) -> CGFloat {
+        if let chosen { return chosen }
+        guard splitWidth > 0 else { return DisplayPaneDefaults.defaultWidth }
+        return min(
+            max(DisplayPaneDefaults.defaultWidth, splitWidth * DisplayPaneDefaults.openingFraction),
+            DisplayPaneDefaults.widestOpening
+        )
     }
 }
 

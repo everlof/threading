@@ -12,6 +12,7 @@ struct ThemeMenuChoice {
 
     enum Target {
         case session(SessionID)
+        case terminal(TerminalID)
         case project(ProjectID)
     }
 
@@ -50,6 +51,14 @@ final class ThemeMenuBuilder: NSObject {
             target: .project(projectID),
             assigned: ThemeAssignments.themeID(forProject: projectID),
             inherited: ThemeAssignments.inheritedName(forProject: projectID)
+        )
+    }
+
+    func terminalThemeItem(for terminalID: TerminalID) -> NSMenuItem {
+        makeThemeItem(
+            target: .terminal(terminalID),
+            assigned: ThemeAssignments.themeID(forTerminal: terminalID),
+            inherited: ThemeAssignments.inheritedName(forTerminal: terminalID)
         )
     }
 
@@ -133,6 +142,8 @@ final class ThemeMenuBuilder: NSObject {
         switch choice.target {
         case .session(let sessionID):
             ThemeAssignments.setTheme(id: choice.themeID, forSession: sessionID)
+        case .terminal(let terminalID):
+            ThemeAssignments.setTheme(id: choice.themeID, forTerminal: terminalID)
         case .project(let projectID):
             ThemeAssignments.setTheme(id: choice.themeID, forProject: projectID)
         }
@@ -156,6 +167,10 @@ extension ProjectSidebarViewController {
 
     func makeProjectThemeItem(for projectID: ProjectID) -> NSMenuItem {
         sidebarThemeBuilder().projectThemeItem(for: projectID)
+    }
+
+    func makeTerminalThemeItem(for terminalID: TerminalID) -> NSMenuItem {
+        sidebarThemeBuilder().terminalThemeItem(for: terminalID)
     }
 
     private func sidebarThemeBuilder() -> ThemeMenuBuilder {

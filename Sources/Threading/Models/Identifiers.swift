@@ -56,6 +56,32 @@ struct SessionID: Hashable, Sendable, Codable, CustomStringConvertible {
     }
 }
 
+/// A standalone project's terminal identity, intentionally separate from chat sessions.
+struct TerminalID: Hashable, Sendable, Codable, CustomStringConvertible {
+    let rawValue: UUID
+
+    init(_ rawValue: UUID = UUID()) {
+        self.rawValue = rawValue
+    }
+
+    init?(uuidString: String) {
+        guard let value = UUID(uuidString: uuidString) else { return nil }
+        self.rawValue = value
+    }
+
+    var uuidString: String { rawValue.uuidString }
+    var description: String { uuidString }
+
+    init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(UUID.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 /// The provider-issued identifier used to locate and resume a CLI transcript.
 ///
 /// Unlike `SessionID`, this value belongs to the agent CLI's identity space. Encoding it as a

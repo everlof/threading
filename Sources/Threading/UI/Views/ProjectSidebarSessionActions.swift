@@ -287,7 +287,7 @@ extension ProjectSidebarViewController {
     /// Archiving is offered rather than deletion, since a session's conversation outlives the
     /// app and filing it away should not destroy anything.
     func showRowActions(for sessionID: SessionID, from anchor: NSView) {
-        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        guard let session = projectStore.session(withID: sessionID) else { return }
 
         let menu = NSMenu()
         actionSessionID = sessionID
@@ -346,7 +346,7 @@ extension ProjectSidebarViewController {
         // A session's folder is its project's checkout, so this is the same offer the project
         // row makes, made where the user already is. It leads the identity group because it is
         // the one item here that leaves the app.
-        if let project = ProjectStore.shared.project(forSessionID: sessionID),
+        if let project = projectStore.project(forSessionID: sessionID),
            let openIn = OpenInMenu.item(
                for: .folder(project.folderURL),
                action: #selector(openSessionFolderInAppClicked),
@@ -406,7 +406,7 @@ extension ProjectSidebarViewController {
             to: menu,
             placement: .sessionRow,
             context: ExtensionCommandContext(
-                projectID: ProjectStore.shared.project(forSessionID: sessionID)?
+                projectID: projectStore.project(forSessionID: sessionID)?
                     .id.uuidString.lowercased(),
                 sessionID: sessionID.uuidString.lowercased()
             )
@@ -475,14 +475,14 @@ extension ProjectSidebarViewController {
         guard let sessionID = actionSessionID else { return }
 
         let wanted = !AttentionAlertScope.isMuted(sessionID: sessionID)
-        let inherited = ProjectStore.shared.project(forSessionID: sessionID)?
+        let inherited = projectStore.project(forSessionID: sessionID)?
             .notificationsMuted ?? false
 
         // Storing nil where the answer already matches the project keeps this session
         // *following* it, so muting the project later still reaches here. An explicit value is
         // written only where it actually differs — which is the whole point of the field being
         // optional rather than a plain flag.
-        ProjectStore.shared.setNotificationsMuted(
+        projectStore.setNotificationsMuted(
             wanted == inherited ? nil : wanted,
             forSessionID: sessionID
         )
@@ -644,7 +644,7 @@ extension ProjectSidebarViewController {
     }
 
     private func addMoveToAccountItem(to menu: NSMenu, for session: AgentSession) {
-        guard let project = ProjectStore.shared.project(forSessionID: session.id),
+        guard let project = projectStore.project(forSessionID: session.id),
               SessionMigration.canMigrate(session, in: project) else { return }
 
         let submenu = NSMenu()
@@ -672,7 +672,7 @@ extension ProjectSidebarViewController {
     /// transcript and can be reversed; Continue creates a new session whose first turn reads a
     /// provider-neutral handoff snapshot through MCP, while the original stays where it is.
     private func addContinueWithProviderItem(to menu: NSMenu, for session: AgentSession) {
-        guard let project = ProjectStore.shared.project(forSessionID: session.id),
+        guard let project = projectStore.project(forSessionID: session.id),
               ConversationContinuation.canContinue(session, in: project) else { return }
 
         let destinations = ConversationContinuation.destinations(for: session)
@@ -735,7 +735,7 @@ extension ProjectSidebarViewController {
         guard let sessionID = actionSessionID,
               let choice = sender.representedObject as? RemoteControlChoice else { return }
 
-        ProjectStore.shared.setRemoteControl(choice.sessionValue, for: sessionID)
+        projectStore.setRemoteControl(choice.sessionValue, for: sessionID)
     }
 
     /// Records the choice only, for the same reason Remote Control does: the mode is stated in
@@ -747,7 +747,7 @@ extension ProjectSidebarViewController {
     @objc private func permissionModeClicked(_ sender: NSMenuItem) {
         guard let sessionID = actionSessionID else { return }
 
-        ProjectStore.shared.setPermissionMode(
+        projectStore.setPermissionMode(
             sender.representedObject as? AgentPermissionMode,
             for: sessionID
         )
@@ -762,7 +762,7 @@ extension ProjectSidebarViewController {
     /// "start it with an opening message" shape, reached from a session instead of a project.
     @objc private func askOnTheSideClicked() {
         guard let sessionID = actionSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return }
+              let session = projectStore.session(withID: sessionID) else { return }
 
         promptForText(
             title: L10n.string("Ask on the Side"),
@@ -781,7 +781,7 @@ extension ProjectSidebarViewController {
 
     @objc private func setSurfaceClicked(_ sender: NSMenuItem) {
         guard let sessionID = actionSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID),
+              let session = projectStore.session(withID: sessionID),
               let usesNativeUI = sender.representedObject as? Bool,
               usesNativeUI != session.usesNativeUI else { return }
 
@@ -806,8 +806,8 @@ extension ProjectSidebarViewController {
 
     @objc private func togglePinnedClicked() {
         guard let sessionID = actionSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return }
-        ProjectStore.shared.setPinned(!session.isPinned, for: sessionID)
+              let session = projectStore.session(withID: sessionID) else { return }
+        projectStore.setPinned(!session.isPinned, for: sessionID)
         reload()
     }
 
@@ -825,7 +825,7 @@ extension ProjectSidebarViewController {
     @objc private func openSessionFolderInAppClicked(_ sender: NSMenuItem) {
         guard let app = OpenInMenu.app(in: sender),
               let sessionID = actionSessionID,
-              let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
+              let project = projectStore.project(forSessionID: sessionID) else { return }
 
         ExternalAppLauncher.shared.open(.folder(project.folderURL), in: app)
     }
@@ -838,7 +838,7 @@ extension ProjectSidebarViewController {
 
     @objc private func renameSessionClicked() {
         guard let sessionID = actionSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return }
+              let session = projectStore.session(withID: sessionID) else { return }
 
         promptRename(
             title: L10n.string("Rename Session"),
@@ -846,7 +846,7 @@ extension ProjectSidebarViewController {
             placeholder: session.displayTitle,
             allowsEmpty: true
         ) { newTitle in
-            ProjectStore.shared.renameSession(id: sessionID, to: newTitle)
+            self.projectStore.renameSession(id: sessionID, to: newTitle)
             self.reload()
         }
     }
@@ -858,7 +858,7 @@ extension ProjectSidebarViewController {
     /// it before this was to ask the agent running inside it.
     @objc private func copySessionIDClicked() {
         guard let sessionID = actionSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return }
+              let session = projectStore.session(withID: sessionID) else { return }
 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(session.externalIdentifier, forType: .string)

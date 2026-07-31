@@ -1,6 +1,6 @@
 import AppKit
 
-/// Reads and writes which theme a session, a project, or the app as a whole draws with.
+/// Reads and writes which theme a session, standalone terminal, project, or the app draws with.
 ///
 /// The assignments live on the records they theme — `AgentSession.themeID` and
 /// `Project.themeID` in `projects.json`, the default on the profile in `UserDefaults` — so
@@ -90,6 +90,31 @@ enum ThemeAssignments {
         return profile
     }
 
+    /// A standalone terminal follows the project at its current cwd, then the app, unless it
+    /// carries its own override.
+    static func theme(forTerminal terminalID: TerminalID) -> TerminalTheme {
+        guard let assignment = resolution(forTerminal: terminalID) else {
+            return palette(withID: defaultTheme.id)
+        }
+        return palette(withID: assignment.themeID)
+    }
+
+    static func profile(forTerminal terminalID: TerminalID) -> TerminalProfile {
+        var profile = ProfileStorage.shared.defaultProfile
+        profile.theme = theme(forTerminal: terminalID)
+        return profile
+    }
+
+    static func resolution(forTerminal terminalID: TerminalID) -> ThemeResolution.Assignment? {
+        let store = ProjectStore.shared
+        return ThemeResolution.resolve(
+            session: canonicalID(store.terminal(withID: terminalID)?.themeID),
+            project: canonicalID(store.displayProject(forTerminalID: terminalID)?.themeID),
+            global: canonicalID(defaultTheme.id),
+            available: availableIDs
+        )
+    }
+
     /// Which theme applies to a session and which scope decided it.
     static func resolution(for sessionID: SessionID) -> ThemeResolution.Assignment? {
         let store = ProjectStore.shared
@@ -119,6 +144,21 @@ enum ThemeAssignments {
         return resolved.map { palette(withID: $0.themeID) } ?? defaultTheme
     }
 
+    static func inheritedName(forTerminal terminalID: TerminalID) -> String {
+        inheritedTheme(forTerminal: terminalID).name
+    }
+
+    static func inheritedTheme(forTerminal terminalID: TerminalID) -> TerminalTheme {
+        let store = ProjectStore.shared
+        let resolved = ThemeResolution.resolve(
+            session: nil,
+            project: canonicalID(store.displayProject(forTerminalID: terminalID)?.themeID),
+            global: canonicalID(defaultTheme.id),
+            available: availableIDs
+        )
+        return resolved.map { palette(withID: $0.themeID) } ?? defaultTheme
+    }
+
     /// The same, one scope out: what a project falls back to.
     static func inheritedName(forProject projectID: ProjectID) -> String {
         defaultTheme.name
@@ -134,6 +174,10 @@ enum ThemeAssignments {
         canonicalID(ProjectStore.shared.project(withID: projectID)?.themeID)
     }
 
+    static func themeID(forTerminal terminalID: TerminalID) -> TerminalThemeID? {
+        canonicalID(ProjectStore.shared.terminal(withID: terminalID)?.themeID)
+    }
+
     /// Assigns a theme to one session, or clears it with nil so it inherits again.
     static func setTheme(id: TerminalThemeID?, forSession sessionID: SessionID) {
         ProjectStore.shared.setThemeID(id, forSessionID: sessionID)
@@ -143,6 +187,11 @@ enum ThemeAssignments {
     /// Assigns a theme to every session in a project that has not chosen its own.
     static func setTheme(id: TerminalThemeID?, forProject projectID: ProjectID) {
         ProjectStore.shared.setThemeID(id, forProjectID: projectID)
+        notifyChanged()
+    }
+
+    static func setTheme(id: TerminalThemeID?, forTerminal terminalID: TerminalID) {
+        ProjectStore.shared.setThemeID(id, forTerminalID: terminalID)
         notifyChanged()
     }
 

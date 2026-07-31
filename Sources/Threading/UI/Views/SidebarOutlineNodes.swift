@@ -13,6 +13,9 @@ final class ProjectNode: NSObject {
     /// (selection, row refresh) go through this so they need not care about grouping.
     var sessionNodes: [SessionNode] = []
 
+    /// Standalone terminals currently positioned in this project by their cwd.
+    var terminalNodes: [TerminalNode] = []
+
     /// What the outline actually shows under the project: a `BranchGroupNode` where a
     /// branch gathered several sessions, a bare `SessionNode` everywhere else.
     var childNodes: [NSObject] = []
@@ -36,6 +39,15 @@ final class SessionNode: NSObject {
     }
 }
 
+/// Reference-typed wrapper for a standalone terminal row.
+final class TerminalNode: NSObject {
+    let terminalID: TerminalID
+
+    init(terminalID: TerminalID) {
+        self.terminalID = terminalID
+    }
+}
+
 /// Groups the checkouts of one repository.
 ///
 /// Only created when a repository has more than one checkout added, so a repository with a
@@ -49,7 +61,7 @@ final class RepoGroupNode: NSObject {
     }
 }
 
-/// Gathers a project's sessions that ran on the same branch.
+/// Gathers a project's chats and standalone terminals that stand on the same branch.
 ///
 /// Only created when grouping is enabled and the branch has more than one session — the
 /// same rule that keeps single-checkout repositories flat, applied one level down. Sessions
@@ -58,6 +70,11 @@ final class BranchGroupNode: NSObject {
     let branch: String
     let projectID: ProjectID
     var sessionNodes: [SessionNode] = []
+    var terminalNodes: [TerminalNode] = []
+
+    var childNodes: [NSObject] {
+        sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
+    }
 
     init(branch: String, projectID: ProjectID) {
         self.branch = branch
@@ -90,6 +107,18 @@ enum SidebarTreeBuilder {
         var roots: [NSObject] = []
         var groupsByIdentity: [String: RepoGroupNode] = [:]
 
+        var terminalsByDisplayProject: [ProjectID: [ProjectTerminal]] = [:]
+        for homeProject in projects {
+            for terminal in homeProject.terminals {
+                let displayProjectID = ProjectTerminalPlacement.projectID(
+                    for: terminal,
+                    homeProject: homeProject,
+                    projects: projects
+                )
+                terminalsByDisplayProject[displayProjectID, default: []].append(terminal)
+            }
+        }
+
         for (project, identity) in zip(projects, identities) {
             let node = ProjectNode(projectID: project.id)
             // Archived sessions are gathered separately, below the projects.
@@ -100,6 +129,8 @@ enum SidebarTreeBuilder {
                 .sorted { precedes($0, $1, order: order) }
                 .map(\.element)
             node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
+            let terminals = terminalsByDisplayProject[project.id] ?? []
+            node.terminalNodes = terminals.map { TerminalNode(terminalID: $0.id) }
 
             // Side chats hang off the session they were forked from, so only what remains
             // at the project's own level is grouped by branch below.
@@ -107,7 +138,9 @@ enum SidebarTreeBuilder {
             node.childNodes = childNodes(
                 projectID: project.id,
                 sessions: top.sessions,
-                sessionNodes: top.nodes
+                sessionNodes: top.nodes,
+                terminals: terminals,
+                terminalNodes: node.terminalNodes
             )
 
             guard let identity, checkoutCounts[identity, default: 0] > 1 else {
@@ -158,13 +191,29 @@ enum SidebarTreeBuilder {
         return []
     }
 
+    /// The rows that must be open for a standalone terminal's cwd-positioned row to exist.
+    static func ancestors(of terminalID: TerminalID, in roots: [NSObject]) -> [NSObject] {
+        func path(from node: NSObject) -> [NSObject]? {
+            if let terminal = node as? TerminalNode, terminal.terminalID == terminalID { return [] }
+            for child in children(of: node) {
+                if let rest = path(from: child) { return [node] + rest }
+            }
+            return nil
+        }
+
+        for root in roots {
+            if let found = path(from: root) { return found }
+        }
+        return []
+    }
+
     /// What the outline view shows under a node — the one place the four node types' differing
     /// child properties are reconciled.
     private static func children(of node: NSObject) -> [NSObject] {
         switch node {
         case let repo as RepoGroupNode: return repo.projectNodes
         case let project as ProjectNode: return project.childNodes
-        case let branch as BranchGroupNode: return branch.sessionNodes
+        case let branch as BranchGroupNode: return branch.childNodes
         case let session as SessionNode: return session.childNodes
         default: return []
         }
@@ -279,18 +328,27 @@ enum SidebarTreeBuilder {
     private static func childNodes(
         projectID: ProjectID,
         sessions: [AgentSession],
-        sessionNodes: [SessionNode]
+        sessionNodes: [SessionNode],
+        terminals: [ProjectTerminal],
+        terminalNodes: [TerminalNode]
     ) -> [NSObject] {
-        guard AppSettings.groupsSessionsByBranch else { return sessionNodes }
+        guard AppSettings.groupsSessionsByBranch else {
+            return sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
+        }
 
-        var sessionCounts: [String: Int] = [:]
+        var itemCounts: [String: Int] = [:]
         for session in sessions {
             if let branch = session.branch {
-                sessionCounts[branch, default: 0] += 1
+                itemCounts[branch, default: 0] += 1
+            }
+        }
+        for terminal in terminals {
+            if let branch = terminal.branch {
+                itemCounts[branch, default: 0] += 1
             }
         }
 
-        let hasSharedBranch = sessionCounts.values.contains { $0 > 1 }
+        let hasSharedBranch = itemCounts.values.contains { $0 > 1 }
         let groupsLoneBranches = AppSettings.groupsLoneBranches && hasSharedBranch
 
         var children: [NSObject] = []
@@ -298,7 +356,7 @@ enum SidebarTreeBuilder {
 
         for (session, sessionNode) in zip(sessions, sessionNodes) {
             guard let branch = session.branch,
-                  groupsLoneBranches || sessionCounts[branch, default: 0] > 1 else {
+                  groupsLoneBranches || itemCounts[branch, default: 0] > 1 else {
                 children.append(sessionNode)
                 continue
             }
@@ -310,6 +368,24 @@ enum SidebarTreeBuilder {
 
             let group = BranchGroupNode(branch: branch, projectID: projectID)
             group.sessionNodes.append(sessionNode)
+            groupsByBranch[branch] = group
+            children.append(group)
+        }
+
+        for (terminal, terminalNode) in zip(terminals, terminalNodes) {
+            guard let branch = terminal.branch,
+                  groupsLoneBranches || itemCounts[branch, default: 0] > 1 else {
+                children.append(terminalNode)
+                continue
+            }
+
+            if let group = groupsByBranch[branch] {
+                group.terminalNodes.append(terminalNode)
+                continue
+            }
+
+            let group = BranchGroupNode(branch: branch, projectID: projectID)
+            group.terminalNodes.append(terminalNode)
             groupsByBranch[branch] = group
             children.append(group)
         }

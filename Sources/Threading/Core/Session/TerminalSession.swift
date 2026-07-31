@@ -346,6 +346,12 @@ final class TerminalSession: NSObject {
         terminalView.sendRemote(bytes[...])
     }
 
+    /// The grid the phones watching this session currently hold it at, or nil when the Mac's own
+    /// frame decides.
+    var remoteViewport: (cols: Int, rows: Int)? {
+        terminalView.remoteGrid
+    }
+
     /// Lets the actively controlling phone own the shared PTY grid. SwiftTerm's ordinary resize
     /// path applies the winsize and raises SIGWINCH, so Claude Code/Codex redraw at mobile width.
     func setRemoteViewport(cols: Int, rows: Int) {

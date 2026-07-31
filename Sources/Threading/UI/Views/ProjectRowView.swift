@@ -71,15 +71,14 @@ final class ProjectRowView: NSTableCellView {
     /// The name behind the generated-tile fallback, kept alongside the record.
     private var shownProjectName = ""
 
-    /// The trailing control revealed under the pointer, crossfaded with the count in the same
-    /// slot — the mechanism session rows use for their `⋯` button. A project row shows `⋯`
-    /// for its actions; a branch heading shows a gear for its grouping options.
-    ///
-    /// A `+` sat beside it once, opening a menu that created a session with defaults for
-    /// agent, account, model and checkout. Selecting the row opens the composer, where those
-    /// are chosen — so the shortcut was a way to skip the only screen that asks.
-    /// The same nested icon button as a session row's `⋯` and a tab's `×`; only its glyph
-    /// changes with the row's role. Inks from the chrome — the sidebar's own ground.
+    /// The trailing controls revealed under the pointer, crossfaded with the count in the same
+    /// slot. A project row shows `+` and `⋯`; a branch heading shows a grouping gear.
+    private let createButton = ThemedIconButton(
+        symbolName: SidebarRowDefaults.createSymbol,
+        accessibility: L10n.string("New chat or terminal"),
+        target: .inline,
+        inkSource: .chrome
+    )
     private let hoverButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.actionSymbol,
         accessibility: L10n.string("Project actions"),
@@ -87,6 +86,7 @@ final class ProjectRowView: NSTableCellView {
         inkSource: .chrome
     )
     private let hoverControls = NSStackView()
+    private var trailingWidthConstraint: NSLayoutConstraint?
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
@@ -97,6 +97,8 @@ final class ProjectRowView: NSTableCellView {
 
     /// Invoked when the `⋯`/gear is pressed, carrying the anchor to hang a menu from.
     var onHoverAction: ((NSView) -> Void)?
+    /// Invoked when the project row's `+` is pressed.
+    var onCreateAction: ((NSView) -> Void)?
 
     /// The project behind the hover popover — set only for project rows, so headings show
     /// none. The popover's content is built at dwell time rather than configure time, because
@@ -177,7 +179,8 @@ final class ProjectRowView: NSTableCellView {
 
         setHoverControls(
             moreSymbol: SidebarRowDefaults.actionSymbol,
-            moreAccessibility: "Project actions"
+            moreAccessibility: "Project actions",
+            showsCreate: true
         )
         nameLabel.applyFont(.emphasizedBody)
 
@@ -213,7 +216,7 @@ final class ProjectRowView: NSTableCellView {
         popoverProject = nil
         dismissPopover()
         hideIcon()
-        setHoverControls(moreSymbol: nil)
+        setHoverControls(moreSymbol: nil, showsCreate: false)
         nameLabel.applyFont(.caption)
         nativeName = name
         setCount(count)
@@ -234,7 +237,8 @@ final class ProjectRowView: NSTableCellView {
         hideIcon()
         setHoverControls(
             moreSymbol: SidebarRowDefaults.settingsSymbol,
-            moreAccessibility: "Grouping options"
+            moreAccessibility: "Grouping options",
+            showsCreate: false
         )
         nameLabel.applyFont(.caption)
         nativeName = branch
@@ -252,13 +256,21 @@ final class ProjectRowView: NSTableCellView {
     ///
     /// The hover state is reasserted rather than reset: a row reconfigures under the pointer
     /// when its count badge changes with expansion.
-    private func setHoverControls(moreSymbol: String?, moreAccessibility: String = "") {
+    private func setHoverControls(
+        moreSymbol: String?,
+        moreAccessibility: String = "",
+        showsCreate: Bool
+    ) {
+        createButton.isHidden = !showsCreate
         hoverButton.isHidden = moreSymbol == nil
         if let moreSymbol {
             hoverButton.setSymbol(moreSymbol, accessibility: moreAccessibility)
         }
 
         showsHoverButton = moreSymbol != nil
+        trailingWidthConstraint?.constant = showsCreate
+            ? SidebarRowDefaults.projectTrailingSlotWidth
+            : SidebarRowDefaults.trailingSlotSize
         updateTrailingSlotVisibility()
 
         if showsHoverButton {
@@ -472,11 +484,16 @@ final class ProjectRowView: NSTableCellView {
         hoverButton.onPress = { [weak self] in self?.hoverButtonClicked() }
         hoverButton.translatesAutoresizingMaskIntoConstraints = false
 
+        createButton.presentsMenu = true
+        createButton.onPress = { [weak self] in self?.createButtonClicked() }
+        createButton.translatesAutoresizingMaskIntoConstraints = false
+
         hoverControls.orientation = .horizontal
         hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
         hoverControls.alignment = .centerY
         hoverControls.alphaValue = 0
         hoverControls.translatesAutoresizingMaskIntoConstraints = false
+        hoverControls.addArrangedSubview(createButton)
         hoverControls.addArrangedSubview(hoverButton)
 
         trailingSlot.translatesAutoresizingMaskIntoConstraints = false
@@ -485,10 +502,12 @@ final class ProjectRowView: NSTableCellView {
         trailingSlot.addSubview(countLabel)
         trailingSlot.addSubview(hoverControls)
 
+        let width = trailingSlot.widthAnchor.constraint(
+            equalToConstant: SidebarRowDefaults.trailingSlotSize
+        )
+        trailingWidthConstraint = width
         NSLayoutConstraint.activate([
-            trailingSlot.widthAnchor.constraint(
-                equalToConstant: SidebarRowDefaults.trailingSlotSize
-            ),
+            width,
             trailingSlot.heightAnchor.constraint(
                 equalToConstant: SidebarRowDefaults.trailingSlotSize
             ),
@@ -673,6 +692,10 @@ final class ProjectRowView: NSTableCellView {
 
     private func hoverButtonClicked() {
         onHoverAction?(hoverButton)
+    }
+
+    private func createButtonClicked() {
+        onCreateAction?(createButton)
     }
 
     private func setCount(_ count: Int) {

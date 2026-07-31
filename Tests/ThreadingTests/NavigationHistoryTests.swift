@@ -56,12 +56,16 @@ final class NavigationHistoryTests: XCTestCase {
     func testMixedPageKindsRetraceInOrder() {
         var history = NavigationHistory()
         let projectID = ProjectID()
+        let terminalID = TerminalID()
         history.visit(.session(sessionA))
+        history.visit(.terminal(terminalID))
         history.visit(.composer(projectID))
         history.visit(.settings("general"))
 
         XCTAssertEqual(history.goBack(), .composer(projectID))
+        XCTAssertEqual(history.goBack(), .terminal(terminalID))
         XCTAssertEqual(history.goBack(), .session(sessionA))
+        XCTAssertEqual(history.goForward(), .terminal(terminalID))
         XCTAssertEqual(history.goForward(), .composer(projectID))
     }
 
