@@ -120,6 +120,7 @@ enum AppCommands {
         static let sessionInfo = "view.info"
         static let shell = "view.shell"
         static let displayPanel = "view.displayPanel"
+        static let currentTheme = "view.currentTheme"
         static let componentGallery = "view.componentGallery"
         static let biggerText = "view.biggerText"
         static let smallerText = "view.smallerText"
@@ -195,6 +196,8 @@ enum AppCommands {
         AppCommand(id: ID.shell, group: .view, title: "Shell",
                    defaultShortcut: KeyboardShortcut(key: "`", modifiers: .control), isEditable: true),
         AppCommand(id: ID.displayPanel, group: .view, title: "Display Panel",
+                   defaultShortcut: nil, isEditable: true),
+        AppCommand(id: ID.currentTheme, group: .view, title: "Current Theme",
                    defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.componentGallery, group: .view, title: "Component Gallery",
                    defaultShortcut: nil, isEditable: true),

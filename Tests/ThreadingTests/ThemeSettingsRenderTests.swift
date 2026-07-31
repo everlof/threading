@@ -148,13 +148,11 @@ final class ThemeSettingsRenderTests: XCTestCase {
     // MARK: - Current App Theme
 
     @MainActor
-    func testSettingsSidebarExposesTheCurrentThemeDocument() throws {
-        let item = try XCTUnwrap(
-            SettingsPages.sidebarItems.first { $0.id == SettingsPages.currentThemeID }
+    func testSettingsSidebarLeavesTheCurrentThemeDocumentToTheWorkspace() {
+        XCTAssertFalse(
+            SettingsPages.sidebarItems.contains { $0.title == L10n.string("Current Theme") },
+            "the collaborative theme document returned to Settings"
         )
-        XCTAssertEqual(item.title, L10n.string("Current Theme"))
-        let page = try XCTUnwrap(SettingsPages.page(id: SettingsPages.currentThemeID))
-        XCTAssertTrue(page.make() is CurrentThemePreferencesViewController)
     }
 
     @MainActor
@@ -167,19 +165,19 @@ final class ThemeSettingsRenderTests: XCTestCase {
         }
 
         AppThemeLibrary.apply(AppThemeStyles.swissMinimalist)
-        let controller = CurrentThemePreferencesViewController()
+        let controller = CurrentThemeViewController()
         _ = laidOut(controller.view, width: Render.widths[1], height: Render.height)
 
         let duplicate = try XCTUnwrap(
             descendant(
                 in: controller.view,
-                accessibilityIdentifier: "settings.current-theme.duplicate"
+                accessibilityIdentifier: "current-theme.duplicate"
             ) as? ThemedButton
         )
         let accent = try XCTUnwrap(
             descendant(
                 in: controller.view,
-                accessibilityIdentifier: "settings.current-theme.color.accent"
+                accessibilityIdentifier: "current-theme.color.accent"
             ) as? ThemeSwatchView
         )
 
@@ -208,12 +206,12 @@ final class ThemeSettingsRenderTests: XCTestCase {
         }
         AppThemeLibrary.apply(copy)
 
-        let controller = CurrentThemePreferencesViewController()
+        let controller = CurrentThemeViewController()
         _ = laidOut(controller.view, width: Render.widths[1], height: Render.height)
         let accent = try XCTUnwrap(
             descendant(
                 in: controller.view,
-                accessibilityIdentifier: "settings.current-theme.color.accent"
+                accessibilityIdentifier: "current-theme.color.accent"
             ) as? ThemeSwatchView
         )
         let changed = try XCTUnwrap(NSColor(hex: "#0055BB"))
@@ -241,12 +239,12 @@ final class ThemeSettingsRenderTests: XCTestCase {
         }
         AppThemeLibrary.apply(copy)
 
-        let controller = CurrentThemePreferencesViewController()
+        let controller = CurrentThemeViewController()
         _ = laidOut(controller.view, width: Render.widths[1], height: Render.height)
         let positive = try XCTUnwrap(
             descendant(
                 in: controller.view,
-                accessibilityIdentifier: "settings.current-theme.color.status_positive"
+                accessibilityIdentifier: "current-theme.color.status_positive"
             ) as? ThemeSwatchView
         )
         let changed = try XCTUnwrap(NSColor(hex: "#006B3C"))
@@ -290,7 +288,7 @@ final class ThemeSettingsRenderTests: XCTestCase {
         var written: [String] = []
         for (name, theme, appearanceName) in fixtures {
             AppThemeLibrary.apply(theme)
-            let controller = CurrentThemePreferencesViewController()
+            let controller = CurrentThemeViewController()
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
             controller.view.appearance = appearance
             let host = laidOut(

@@ -745,6 +745,17 @@ enum MCPToolCatalog {
         allGroups.filter { isEnabled($0) && isAvailable($0) }
     }
 
+    /// Whether at least one built-in theme tool is currently exposed to newly launched agents.
+    ///
+    /// The appearance tools are one group today, but the UI asks the capability question rather
+    /// than depending on that grouping: if terminal and app themes split later, the Current Theme
+    /// workspace stays visible for either half instead of silently following one arbitrary id.
+    @MainActor
+    static var hasEnabledThemeTools: Bool {
+        let themeNames = Set(MCPTools.themeTools + MCPTools.appThemeTools)
+        return enabledToolNames.contains { themeNames.contains($0) }
+    }
+
     /// Static integrity diagnostics. Empty is the only state that may expose every built-in.
     static let catalogIssues: [String] = {
         var issues = MCPTools.definitionIssues

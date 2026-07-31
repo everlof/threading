@@ -54,7 +54,7 @@ final class AppDelegateTests: XCTestCase {
 
         let actions = [
             "showPreferences", "openTerminalTab", "openFilesTab", "openBrowser", "openReview",
-            "openInfo", "toggleShell", "toggleDisplayPanel", "newSession", "addProject",
+            "openInfo", "toggleShell", "toggleDisplayPanel", "toggleCurrentTheme", "newSession", "addProject",
             "newProject", "closeSession", "toggleSidebar", "showFind", "inspectElement",
             "inspectPoint", "increaseFontSize", "decreaseFontSize"
         ]
@@ -116,6 +116,37 @@ final class AppDelegateTests: XCTestCase {
         UserDefaults.standard.set(false, forKey: "groupsSessionsByBranch")
         defer { UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch") }
         XCTAssertFalse(delegate.validateMenuItem(lone))
+    }
+
+    func testCurrentThemeLivesInViewAndFollowsTheThemeToolCapability() throws {
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        let previousHelpMenu = NSApp.helpMenu
+        let settings = AppSettings.shared
+        let previousDisabled = settings.disabledToolGroupIDs
+        defer {
+            settings.disabledToolGroupIDs = previousDisabled
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.helpMenu = previousHelpMenu
+        }
+        settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: true)
+
+        let delegate = AppDelegate()
+        delegate.setupMenuBar()
+        let menus = try XCTUnwrap(NSApp.mainMenu).items.compactMap(\.submenu)
+        let view = try XCTUnwrap(menus.first { $0.title == MenuIdentifiers.viewMenu })
+        let window = try XCTUnwrap(menus.first { $0.title == MenuIdentifiers.windowMenu })
+        let current = try XCTUnwrap(view.item(withTitle: L10n.string("Current Theme")))
+
+        XCTAssertFalse(current.isHidden)
+        XCTAssertNil(
+            window.item(withTitle: L10n.string("Current Theme")),
+            "a workspace panel was put in the Window menu"
+        )
+
+        settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: false)
+        XCTAssertTrue(current.isHidden, "the menu promised an agent workflow with no theme tools")
     }
 
     func testExtensionCommandsRenderAtDeclaredHostMenuAnchors() throws {

@@ -52,7 +52,24 @@ final class ProjectSidebarViewController: NSViewController {
     }()
     private let appEvents = AppEventObservations()
 
-    /// The footer's one control, retained so settings mode can mark it as the open page.
+    /// The app-wide document an agent can edit while its conversation remains on screen.
+    private lazy var currentThemeButton: ThemedButton = {
+        let button = ThemedButton()
+        button.title = L10n.string("Current Theme")
+        button.image = NSImage(
+            systemSymbolName: "paintbrush.pointed",
+            accessibilityDescription: L10n.string("Current Theme")
+        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        button.isBordered = false
+        button.applyFont(.controlRegular)
+        button.contentTintColor = Design.Text.secondary
+        button.target = self
+        button.action = #selector(currentThemeClicked)
+        button.setAccessibilityIdentifier("sidebar.current-theme")
+        return button
+    }()
+
+    /// Retained so settings mode can mark it as the open page.
     private lazy var settingsButton: ThemedButton = {
         let button = ThemedButton()
         button.title = L10n.string("Settings")
@@ -66,13 +83,27 @@ final class ProjectSidebarViewController: NSViewController {
         button.action = #selector(settingsClicked)
         return button
     }()
-    /// The band the footer controls live in; the list and the settings sidebar both end at
-    /// its top rather than restating its height.
+    /// Global destinations are separate rows rather than unrelated buttons squeezed into one
+    /// band. Hiding an arranged row collapses it, so Current Theme costs no space when agents do
+    /// not have theme tools.
+    private lazy var currentThemeFooter = PaneFooterView(
+        leading: [currentThemeButton],
+        margin: .paneEdge
+    )
     private lazy var footer = PaneFooterView(leading: [settingsButton], margin: .paneEdge)
+    private lazy var footerStack: NSStackView = {
+        let stack = NSStackView(views: [currentThemeFooter, footer])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.distribution = .fill
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
 
     /// Where a receipt for something the list just did appears — above the footer, in the
     /// column the row left from. See `present(_:)`.
-    private lazy var toasts = ToastPresenter(host: view, above: footer.topAnchor)
+    private lazy var toasts = ToastPresenter(host: view, above: footerStack.topAnchor)
 
     /// The band above the list: the brand row at its leading edge, the list's own controls
     /// at its trailing one. The list starts at its bottom. In settings mode the *controls*
@@ -255,7 +286,7 @@ private extension ProjectSidebarViewController {
             ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: footerStack.topAnchor)
         ])
     }
 
@@ -279,9 +310,9 @@ private extension ProjectSidebarViewController {
         ])
     }
 
-    /// Footer holding Settings at the leading edge — icon *and* word, because the footer's
-    /// one remaining control names the destination the sidebar can reach rather than an
-    /// action on the list. The band itself — the hairline, the height, the insets — is
+    /// Global destinations at the leading edge — icon *and* word, because they are places the
+    /// sidebar reaches rather than actions on the project list. Current Theme sits above the
+    /// always-present Settings door. Each row's hairline, height and insets remain
     /// `PaneFooterView`'s to state.
     ///
     /// `.paneEdge`, because the sidebar's margin is the list's: the platform's corner
@@ -289,12 +320,15 @@ private extension ProjectSidebarViewController {
     /// window's bottom curve, so taking it put the gear two steps inboard of every row above
     /// it. See `PaneBandMargin`.
     private func setupFooter() {
-        view.addSubview(footer)
+        updateCurrentThemeAvailability()
+        view.addSubview(footerStack)
 
         NSLayoutConstraint.activate([
-            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            footer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            footerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            footerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            footerStack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            currentThemeFooter.widthAnchor.constraint(equalTo: footerStack.widthAnchor),
+            footer.widthAnchor.constraint(equalTo: footerStack.widthAnchor)
         ])
 
         _ = toasts
@@ -331,6 +365,10 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebarDidToggleSettings(self)
     }
 
+    @objc private func currentThemeClicked() {
+        delegate?.projectSidebarDidToggleCurrentTheme(self)
+    }
+
     private func observeStoreChanges() {
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.projectsDidChange()
@@ -343,6 +381,13 @@ private extension ProjectSidebarViewController {
         appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
             self?.extensionSettingsDidChange()
         }
+        appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
+            self?.updateCurrentThemeAvailability()
+        }
+    }
+
+    private func updateCurrentThemeAvailability() {
+        currentThemeFooter.isHidden = !MCPToolCatalog.hasEnabledThemeTools
     }
 
     /// Installs the sidebar's own ground, under every theme including System.
@@ -377,6 +422,12 @@ private extension ProjectSidebarViewController {
 // MARK: - Public Methods
 
 extension ProjectSidebarViewController {
+
+    /// Marks the global destination by raising its ink, matching Settings immediately below it
+    /// and leaving the accent available for attention.
+    func setCurrentThemeMode(_ on: Bool) {
+        currentThemeButton.contentTintColor = on ? Design.Text.label : Design.Text.secondary
+    }
 
     /// Shows a receipt for something the list just did, with the way back on it.
     ///
@@ -862,7 +913,7 @@ extension ProjectSidebarViewController {
             ),
             sidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.medium),
             sidebar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.medium),
-            sidebar.bottomAnchor.constraint(lessThanOrEqualTo: footer.topAnchor)
+            sidebar.bottomAnchor.constraint(lessThanOrEqualTo: footerStack.topAnchor)
         ])
 
         settingsSidebar = sidebar
@@ -1866,6 +1917,7 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     )
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
+    func projectSidebarDidToggleCurrentTheme(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
 }
 

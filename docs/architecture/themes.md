@@ -377,12 +377,22 @@ the sweep across the whole catalogue is `ThemedIndicatorsTests`
 (`testEveryStockThemeRulesAtOneWeightThroughoutTheWindow`), entering each style from the heaviest
 one so a stale rule has somewhere to show.
 
-## 2026-07-30 — the active app theme is a living settings document
+## 2026-07-31 — the active app theme is a living workspace document
 
-Settings now gives the app theme its own **Current Theme** destination, separate from the
+**Current Theme** is an app-wide workspace surface, separate from both Settings and the
 terminal-theme editor. That split follows the model rather than the word “theme”: the app chrome
 has one active value for the whole window, while a terminal palette resolves through session,
-project, and default scopes.
+project, and default scopes. Basic app-theme selection remains in Settings ▸ Appearance; the
+living document is for inspecting, editing, and collaborating with an agent on the active theme.
+
+The direct entry is a conditional sidebar utility immediately above Settings, visible while at
+least one built-in theme MCP tool is enabled. **View ▸ Current Theme** exposes the same command;
+it does not live under Window because it is a surface inside the main window rather than another
+window. The document opens in the trailing display panel beside the conversation, but it is not a
+session tab: it does not appear in the panel's `+` menu, persist in either per-session tab list, or
+move between panels. Selecting another conversation keeps the app-wide document open so the user
+can compare or discuss it without losing context; explicitly opening a session surface restores
+that session's ordinary tabs.
 
 The page reads `AppThemeLibrary.current` every time it refreshes and exposes the theme's source,
 available appearance variants, material, sidebar treatment, paired terminal colours, and the
@@ -393,11 +403,11 @@ swatch change rebuilds only that variant, then goes through `AppThemeEditing.ass
 `AppThemeLibrary.update`, so the ordinary contrast gates, persistence, repaint, and notifications
 remain the only write path.
 
-The inverse flow is equally important. The page observes both `AppThemeDidChange` and
+The inverse flow is equally important. The document observes both `AppThemeDidChange` and
 `AppThemeLibraryDidChange`, so an active document replaced through `update_app_theme`, or a
 contributed document replaced by `ExtensionThemeWatcher`, re-reads into the open controls. An
 appearance-observing root handles the one change with no library event: macOS moving an adaptive
-theme between its light and dark variants. The short agent note on the page names the same
+theme between its light and dark variants. The short agent note in the document names the same
 `get_app_theme` → `duplicate_app_theme (apply: true)` → `update_app_theme` vocabulary the tools
 advertise; it teaches the door without adding a second authoring protocol.
 

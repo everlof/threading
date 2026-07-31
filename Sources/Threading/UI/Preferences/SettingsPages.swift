@@ -107,7 +107,6 @@ enum SettingsPages {
     static let githubID = "github"
     static let accountsID = ExtensionHostSettingsPage.accounts.rawValue
     static let profilesID = ExtensionHostSettingsPage.profiles.rawValue
-    static let currentThemeID = "current-theme"
     static let themesID = ExtensionHostSettingsPage.themes.rawValue
     static let motionID = ExtensionHostSettingsPage.motion.rawValue
     static let extensionsID = ExtensionHostSettingsPage.extensions.rawValue
@@ -184,16 +183,6 @@ enum SettingsPages {
                 "background", "dropped images"
             )
         ) { ProfilePreferencesViewController() },
-        Page(
-            id: currentThemeID,
-            hostPage: nil,
-            title: L10n.string("Current Theme"),
-            symbol: "paintbrush.pointed",
-            searchTerms: terms(
-                "app theme", "Appearance", "Themes", "Duplicate app theme", "Colour & theme",
-                "MCP", "agent"
-            )
-        ) { CurrentThemePreferencesViewController() },
         Page(
             id: themesID,
             hostPage: .themes,

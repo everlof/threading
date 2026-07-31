@@ -1,13 +1,13 @@
 import AppKit
 
-/// The active app theme as a living document.
+/// The active app theme as a living workspace document beside the conversation.
 ///
-/// This is intentionally separate from the terminal-theme editor. There is one app chrome for
-/// the whole window, while terminal palettes can be assigned at session, project, and default
-/// scopes. The page always follows `AppThemeLibrary.current`: a colour changed here repaints the
-/// window immediately, and a patch arriving through MCP or an extension's watched document is
-/// reflected in these controls without reopening Settings.
-final class CurrentThemePreferencesViewController: NSViewController {
+/// This is intentionally separate from both Settings and the per-session tab list. There is one
+/// app chrome for the whole window, while terminal palettes can be assigned at session, project,
+/// and default scopes. The document always follows `AppThemeLibrary.current`: a colour changed
+/// here repaints the window immediately, and a patch arriving through MCP or an extension's
+/// watched document is reflected in these controls without reopening it.
+final class CurrentThemeViewController: NSViewController {
 
     // MARK: - Properties
 
@@ -25,13 +25,13 @@ final class CurrentThemePreferencesViewController: NSViewController {
 
     private lazy var themePopUp: ThemedPopUp = {
         let popUp = SettingsUI.popUp(target: self, action: #selector(themeChanged))
-        popUp.setAccessibilityIdentifier("settings.current-theme.theme")
+        popUp.setAccessibilityIdentifier("current-theme.theme")
         return popUp
     }()
 
     private lazy var variantPopUp: ThemedPopUp = {
         let popUp = SettingsUI.popUp(target: self, action: #selector(variantChanged))
-        popUp.setAccessibilityIdentifier("settings.current-theme.variant")
+        popUp.setAccessibilityIdentifier("current-theme.variant")
         return popUp
     }()
 
@@ -41,7 +41,7 @@ final class CurrentThemePreferencesViewController: NSViewController {
             target: self,
             action: #selector(duplicateToEdit)
         )
-        button.setAccessibilityIdentifier("settings.current-theme.duplicate")
+        button.setAccessibilityIdentifier("current-theme.duplicate")
         return button
     }()
 
@@ -49,7 +49,7 @@ final class CurrentThemePreferencesViewController: NSViewController {
         let note = SettingsUI.note("")
         note.textColor = Design.Status.negative
         note.isHidden = true
-        note.setAccessibilityIdentifier("settings.current-theme.validation")
+        note.setAccessibilityIdentifier("current-theme.validation")
         return note
     }()
 
@@ -61,7 +61,7 @@ final class CurrentThemePreferencesViewController: NSViewController {
             guard let self, self.isViewLoaded else { return }
             self.reload(followCurrentAppearance: true)
         }
-        root.setAccessibilityIdentifier("settings.current-theme")
+        root.setAccessibilityIdentifier("current-theme")
         view = root
     }
 
@@ -517,7 +517,7 @@ private final class CurrentAppThemeRoleControl: NSView {
         hex.textColor = Design.Text.secondary
         hex.setContentHuggingPriority(.required, for: .horizontal)
 
-        swatch.setAccessibilityIdentifier("settings.current-theme.color.\(role.wireName)")
+        swatch.setAccessibilityIdentifier("current-theme.color.\(role.wireName)")
         swatch.onChange = { [weak self] color in
             self?.hex.stringValue = color.hexString
             self?.invalidateIntrinsicContentSize()

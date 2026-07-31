@@ -48,6 +48,8 @@ final class DisplayPaneController: NSViewController {
         }
     )
     private var newTabMenuSession: AnyObject?
+    private var regularTabBarTrailingConstraint: NSLayoutConstraint?
+    private var globalTabBarTrailingConstraint: NSLayoutConstraint?
     private lazy var tabBar: DisplayTabBar = {
         let bar = DisplayTabBar(
             frame: .zero,
@@ -129,6 +131,19 @@ final class DisplayPaneController: NSViewController {
     /// review — so switching tabs can swap it out without rebuilding its state.
     private weak var installedController: NSViewController?
 
+    /// One app-wide document that temporarily occupies the panel without joining any session's
+    /// tab list. It is deliberately not persisted or transferable: changing chats must not clone,
+    /// close, or retarget the theme being inspected.
+    private lazy var currentThemeController: CurrentThemeViewController = {
+        let controller = CurrentThemeViewController()
+        addChild(controller)
+        return controller
+    }()
+    private(set) var isShowingCurrentTheme = false
+    private static let currentThemeTabID = UUID(
+        uuidString: "846E2D46-2DF4-43A7-A591-91A384582D39"
+    )!
+
     private var tabsBySession: [SessionID: [DisplayTab]] = [:]
     private var activeTabIDBySession: [SessionID: UUID] = [:]
     /// The browser the agent and user most recently selected. Kept separately from the visible
@@ -149,18 +164,23 @@ final class DisplayPaneController: NSViewController {
     /// The content of the active tab, if it is an image or a document. Read by `DisplayPaneMenu`,
     /// which acts on the file behind it — a browser tab has no such file, so this is nil for it.
     var currentContent: DisplayContent? {
-        activeTab(for: currentSessionID)?.content
+        guard !isShowingCurrentTheme else { return nil }
+        return activeTab(for: currentSessionID)?.content
     }
 
     /// The browser actually visible in the selected session, if the active display tab is one.
     /// This deliberately differs from the most recently targeted browser: user commands such as
     /// Find must not act on a hidden browser behind an image or terminal tab.
     var currentBrowser: BrowserViewController? {
-        activeTab(for: currentSessionID)?.browser
+        guard !isShowingCurrentTheme else { return nil }
+        return activeTab(for: currentSessionID)?.browser
     }
 
     /// Called when the user closes the pane's last content tab.
     var onClose: (() -> Void)?
+
+    /// Lets the sidebar mark the global destination without reaching into this pane's state.
+    var onCurrentThemeVisibilityChange: ((Bool) -> Void)?
 
     /// Routes child selection back to the renderer that owns provider transcript loading.
     var onSubagentSelection: ((SessionID, String) -> Void)?
@@ -378,6 +398,15 @@ final class DisplayPaneController: NSViewController {
             equalTo: view.safeAreaLayoutGuide.topAnchor
         )
         headerBottom.priority = .init(999)
+        let regularTabBarTrailing = tabBar.trailingAnchor.constraint(
+            equalTo: headerCustomizationView.leadingAnchor,
+            constant: -4
+        )
+        regularTabBarTrailingConstraint = regularTabBarTrailing
+        globalTabBarTrailingConstraint = tabBar.trailingAnchor.constraint(
+            equalTo: headerView.trailingAnchor,
+            constant: -padding
+        )
 
         NSLayoutConstraint.activate([
             headerView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -393,10 +422,7 @@ final class DisplayPaneController: NSViewController {
             tabBar.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
             tabBar.topAnchor.constraint(equalTo: headerView.topAnchor),
             tabBar.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
-            tabBar.trailingAnchor.constraint(
-                equalTo: headerCustomizationView.leadingAnchor,
-                constant: -4
-            ),
+            regularTabBarTrailing,
 
             headerCustomizationView.trailingAnchor.constraint(
                 equalTo: newTabButton.leadingAnchor,
@@ -1198,7 +1224,7 @@ final class DisplayPaneController: NSViewController {
     /// Whether a window point lands where a dropped tab would join this pane — the header
     /// band, full width, since an emptier strip is narrower than the drop it invites.
     func dropBandContains(windowPoint: NSPoint) -> Bool {
-        guard isViewLoaded, view.window != nil else { return false }
+        guard isViewLoaded, view.window != nil, !isShowingCurrentTheme else { return false }
         return headerView.bounds.contains(headerView.convert(windowPoint, from: nil))
     }
 
@@ -1217,6 +1243,7 @@ final class DisplayPaneController: NSViewController {
     /// What else can be done with a tab, offered by the strip on secondary click and through
     /// accessibility — the pointerless route to reordering and to movement.
     private func tabContextEntries(for id: UUID) -> [ThemedMenuEntry] {
+        guard id != Self.currentThemeTabID else { return [] }
         guard let sessionID = currentSessionID else { return [] }
         var entries = standardTabEntries(for: id, sessionID: sessionID)
         guard !entries.isEmpty else { return [] }
@@ -1228,6 +1255,36 @@ final class DisplayPaneController: NSViewController {
     }
 
     // MARK: - Public — Session Lifecycle
+
+    /// Shows the app-wide theme document without adding it to the selected session. Calls from
+    /// that session continue to update the same `AppThemeLibrary.current` the inspector observes.
+    func showCurrentTheme() {
+        guard !isShowingCurrentTheme else { return }
+        isShowingCurrentTheme = true
+        render()
+        onCurrentThemeVisibilityChange?(true)
+    }
+
+    /// Returns the panel to the selected session's own tabs.
+    func hideCurrentTheme() {
+        guard isShowingCurrentTheme else { return }
+        isShowingCurrentTheme = false
+        render()
+        onCurrentThemeVisibilityChange?(false)
+    }
+
+    /// An explicit session-surface command (Browser, Review, Files, and their peers) leaves the
+    /// global inspector first. Ordinary session selection uses `showSession` and intentionally
+    /// preserves it.
+    func showSessionTabs(_ sessionID: SessionID?) {
+        currentSessionID = sessionID
+        if let sessionID { restoreIfNeeded(sessionID) }
+        if isShowingCurrentTheme {
+            isShowingCurrentTheme = false
+            onCurrentThemeVisibilityChange?(false)
+        }
+        render()
+    }
 
     /// Switches the panel to a session's tabs. Passing nil empties it.
     func showSession(_ sessionID: SessionID?) {
@@ -1269,11 +1326,17 @@ final class DisplayPaneController: NSViewController {
     // MARK: - Tab Interaction
 
     private func userActivatedTab(_ id: UUID) {
+        guard id != Self.currentThemeTabID else { return }
         guard let currentSessionID else { return }
         activateTab(id: id, for: currentSessionID)
     }
 
     private func userClosedTab(_ id: UUID) {
+        if id == Self.currentThemeTabID {
+            hideCurrentTheme()
+            onClose?()
+            return
+        }
         guard let sessionID = currentSessionID else { return }
         closeTab(id: id, for: sessionID)
     }
@@ -1307,8 +1370,19 @@ final class DisplayPaneController: NSViewController {
         // Nothing is lost by skipping: `viewDidLoad` renders once they do.
         guard isViewLoaded else { return }
 
-        let tabs = currentSessionID.flatMap { tabsBySession[$0] } ?? []
-        let active = activeTab(for: currentSessionID)
+        let tabs = isShowingCurrentTheme
+            ? []
+            : currentSessionID.flatMap { tabsBySession[$0] } ?? []
+        let active = isShowingCurrentTheme ? nil : activeTab(for: currentSessionID)
+
+        updateHeaderForCurrentTheme()
+        if isShowingCurrentTheme {
+            headerCustomizationView.showSession(nil)
+            renderCurrentThemeTab()
+            renderCurrentThemeContent()
+            placeholderLabel.isHidden = true
+            return
+        }
 
         headerCustomizationView.showSession(
             currentSessionID?.uuidString.lowercased()
@@ -1317,6 +1391,41 @@ final class DisplayPaneController: NSViewController {
         renderContent(active: active)
 
         placeholderLabel.isHidden = active != nil
+    }
+
+    /// The global document owns the whole row. Session-only extension decoration and `+` both
+    /// disappear, and the strip takes their space rather than leaving a blank reservation behind.
+    private func updateHeaderForCurrentTheme() {
+        if isShowingCurrentTheme {
+            regularTabBarTrailingConstraint?.isActive = false
+            globalTabBarTrailingConstraint?.isActive = true
+        } else {
+            globalTabBarTrailingConstraint?.isActive = false
+            regularTabBarTrailingConstraint?.isActive = true
+        }
+        headerCustomizationView.isHidden = isShowingCurrentTheme
+        newTabButton.isHidden = isShowingCurrentTheme
+    }
+
+    private func renderCurrentThemeTab() {
+        tabBar.update(items: [
+            DisplayTabBarItem(
+                id: Self.currentThemeTabID,
+                title: L10n.string("Current Theme"),
+                symbolName: "paintbrush.pointed",
+                isActive: true,
+                customizationTarget: .displayTabHeader(sessionID: nil)
+            )
+        ])
+    }
+
+    private func renderCurrentThemeContent() {
+        imageView.image = nil
+        imageView.isHidden = true
+        hideHTML()
+        captionLabel.isHidden = true
+        contentMenuButton.isHidden = true
+        installHosted(currentThemeController)
     }
 
     /// The strip is the pane's header, so it is always drawn — a lone tab names the pane, which
@@ -1764,27 +1873,32 @@ extension DisplayPaneController: TabHosting {
     }
 
     func tabs(for sessionID: SessionID?) -> [PaneTab] {
-        resolvedSession(sessionID).map { tabs(for: $0) } ?? []
+        guard !isShowingCurrentTheme else { return [] }
+        return resolvedSession(sessionID).map { tabs(for: $0) } ?? []
     }
 
     func activeTabID(for sessionID: SessionID?) -> UUID? {
-        resolvedSession(sessionID).flatMap { activeTabID(for: $0) }
+        guard !isShowingCurrentTheme else { return nil }
+        return resolvedSession(sessionID).flatMap { activeTabID(for: $0) }
     }
 
     @discardableResult
     func activateTab(id: UUID, for sessionID: SessionID?) -> Bool {
+        guard !isShowingCurrentTheme else { return false }
         guard let session = resolvedSession(sessionID) else { return false }
         return activateTab(id: id, for: session)
     }
 
     @discardableResult
     func closeTab(id: UUID, for sessionID: SessionID?) -> Bool {
+        guard !isShowingCurrentTheme else { return false }
         guard let session = resolvedSession(sessionID) else { return false }
         return closeTab(id: id, for: session)
     }
 
     @discardableResult
     func moveTab(id: UUID, toIndex index: Int, for sessionID: SessionID?) -> Bool {
+        guard !isShowingCurrentTheme else { return false }
         guard let session = resolvedSession(sessionID) else { return false }
         return moveTab(id: id, toIndex: index, for: session)
     }

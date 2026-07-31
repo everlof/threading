@@ -190,7 +190,8 @@ final class SidebarBrandViewTests: XCTestCase {
     // MARK: - The sidebar's shape
 
     /// The header carries the brand at its leading edge and the list's two controls at its
-    /// trailing one; the footer carries Settings alone, icon and word, at the leading margin.
+    /// trailing one; the footer carries global destinations, icon and word, at the leading
+    /// margin.
     @MainActor
     func testTheSidebarPlacesBrandAddAndSettingsWhereTheDesignSays() throws {
         AppThemeLibrary.apply(.system)
@@ -226,6 +227,36 @@ final class SidebarBrandViewTests: XCTestCase {
             footer.bounds.midX,
             "Settings moved to the leading edge and should sit in the left half of the band"
         )
+    }
+
+    /// Current Theme is a collaboration affordance, so it appears directly above Settings only
+    /// while at least one theme tool is exposed. The row responds live to the Tools switch and
+    /// collapses completely when unavailable.
+    @MainActor
+    func testCurrentThemeAppearsAboveSettingsOnlyWhileThemeToolsAreEnabled() throws {
+        let settings = AppSettings.shared
+        let previous = settings.disabledToolGroupIDs
+        defer { settings.disabledToolGroupIDs = previous }
+        settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: true)
+
+        let sidebar = ProjectSidebarViewController()
+        sidebar.view.frame = NSRect(x: 0, y: 0, width: 240, height: 600)
+        sidebar.view.layoutSubtreeIfNeeded()
+
+        let buttons = descendants(of: sidebar.view).compactMap { $0 as? ThemedButton }
+        let current = try XCTUnwrap(buttons.first { $0.title == L10n.string("Current Theme") })
+        let settingsButton = try XCTUnwrap(buttons.first { $0.title == L10n.string("Settings") })
+        let currentFooter = try XCTUnwrap(ancestor(of: current, as: PaneFooterView.self))
+
+        XCTAssertFalse(currentFooter.isHidden)
+        XCTAssertGreaterThan(
+            sidebar.view.convert(current.bounds, from: current).midY,
+            sidebar.view.convert(settingsButton.bounds, from: settingsButton).midY,
+            "Current Theme is not the utility row directly above Settings"
+        )
+
+        settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: false)
+        XCTAssertTrue(currentFooter.isHidden, "the disabled collaboration surface stayed visible")
     }
 
     /// The brand and Settings sit on the **list's** margin, not on the platform's.

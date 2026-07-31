@@ -457,6 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var projectExtensionItem: NSMenuItem?
     private var viewExtensionSeparator: NSMenuItem?
     private var viewExtensionItem: NSMenuItem?
+    private var currentThemeMenuItem: NSMenuItem?
 
     /// Holds the shortcut-change subscription for the process lifetime.
     private let menuEvents = AppEventObservations()
@@ -515,6 +516,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         menuEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
             self?.rebuildExtensionMenus()
+        }
+        menuEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
+            self?.updateCurrentThemeMenuVisibility()
         }
     }
 
@@ -793,7 +797,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         menu.addItem(.separator())
 
+        let currentTheme = commandItem(
+            AppCommands.ID.currentTheme,
+            action: #selector(toggleCurrentTheme)
+        )
+        currentThemeMenuItem = currentTheme
+        menu.addItem(currentTheme)
         menu.addItem(commandItem(AppCommands.ID.componentGallery, action: #selector(showComponentGallery)))
+        updateCurrentThemeMenuVisibility()
 
         menu.addItem(.separator())
 
@@ -1003,6 +1014,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if menuItem.action == #selector(navigateForward) {
             return mainWindowController?.canGoForward ?? false
         }
+        if menuItem.action == #selector(toggleCurrentTheme) {
+            menuItem.isHidden = !MCPToolCatalog.hasEnabledThemeTools
+            menuItem.state = mainWindowController?.isCurrentThemeVisible == true ? .on : .off
+            return MCPToolCatalog.hasEnabledThemeTools
+        }
 
         guard menuItem.action == #selector(performExtensionCommand(_:)),
               let id = menuItem.representedObject as? String,
@@ -1021,6 +1037,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case .session:
             return mainWindowController?.currentSessionID != nil
         }
+    }
+
+    private func updateCurrentThemeMenuVisibility() {
+        currentThemeMenuItem?.isHidden = !MCPToolCatalog.hasEnabledThemeTools
     }
 
     // MARK: - Menu Actions
@@ -1154,6 +1174,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func toggleDisplayPanel() {
         mainWindowController?.toggleDisplayPane()
+    }
+
+    @objc private func toggleCurrentTheme() {
+        mainWindowController?.toggleCurrentTheme()
     }
 
     @objc private func showComponentGallery() {

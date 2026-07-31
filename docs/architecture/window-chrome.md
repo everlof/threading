@@ -145,7 +145,7 @@ the safe area already, so AppKit was insetting it a second time for the same tit
 macOS 26 that also installs a scroll-edge-effect `NSVisualEffectView` *inside* the scroll view,
 which `ThemeBoundaryAudit` correctly refuses. One pane, one answer about its own insets.
 
-**The sidebar's top band carries the brand; its bottom band carries Settings.** The header
+**The sidebar's top band carries the brand; its bottom band carries global utilities.** The header
 band (`PaneHeaderView`, pinned to the safe area under the transparent titlebar) holds
 `SidebarBrandView` at its leading edge — the Threading mark, drawn live and stitched in once
 per launch, beside the app's name in a `MorphingTitleLabel`, or whatever the current theme's
@@ -155,10 +155,13 @@ the platform's menu gesture) and the arrangement control. The band long held *no
 label on the argument that it should carry only controls that act on the list; the brand
 earned the slot when the sidebar's top-left became a themed surface — it is the one thing a
 chrome can sign. Adding a project moved up from the footer with it, into the slot every
-source-list app puts its `+`. The footer now holds one control: **Settings**, icon *and*
-word, at the leading margin. In settings mode the list's controls hide with the list they
-act on, but the band and the brand stay — a header that vanished took the logo with it —
-and the settings section list starts below the band rather than at the safe area.
+source-list app puts its `+`. The footer stack holds **Settings**, icon *and* word, at the leading
+margin, with conditional app-wide workspace utilities directly above it. **Current Theme** is the
+first such utility and appears only while a built-in theme MCP tool is enabled; it opens the
+living theme document in the trailing panel rather than entering settings mode. In settings mode
+the list's controls hide with the list they act on, but the band and the brand stay — a header
+that vanished took the logo with it — and the settings section list starts below the band rather
+than at the safe area.
 
 **Both sidebar bands measure their margins from the pane, not from the platform's safe area.**
 `PaneHeaderView`/`PaneFooterView` default to `layoutGuide(for: .safeArea(cornerAdaptation:))`,

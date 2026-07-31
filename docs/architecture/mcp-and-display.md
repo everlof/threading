@@ -80,6 +80,15 @@ can affect resources beyond Threading's local process are marked open-world.
 
 ## Display Panel
 
+The panel normally belongs to the selected session and presents that session's persisted tabs.
+**Current Theme is the deliberate app-wide exception.** It temporarily replaces the visible tab
+strip with one non-persisted inspector while leaving both per-session tab lists untouched. It is
+not offered by the tab `+`, cannot be reordered or transferred, and stays visible when the user
+selects another conversation. An explicit request for a session surface — Browser, Review,
+Terminal, Files, Info, Attachments, Subagents, or a transferred tab — exits the inspector and
+returns to the selected session's tabs. This lets a conversation remain alongside the theme being
+discussed without pretending an app-wide document belongs to that conversation.
+
 `DisplayContent.Body` is an enum, so the panel shows either a `ThemedImagePreview` or a
 `WKWebView` and the `⋯` menu offers only the actions that fit — an image and a document share
 almost nothing worth acting on.

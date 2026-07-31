@@ -216,6 +216,75 @@ final class DisplayPaneLayoutTests: XCTestCase {
         )
     }
 
+    // MARK: - The Current Theme Is Global
+
+    /// The inspector occupies the panel beside a chat, but belongs to neither that chat nor the
+    /// one selected next. It therefore stays visible across selection and leaves both persisted
+    /// tab lists untouched; an explicit per-session surface command is what takes the panel back.
+    func testCurrentThemeSurvivesSessionSelectionWithoutJoiningEitherTabList() {
+        let pane = DisplayPaneController()
+        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        let first = SessionID()
+        let second = SessionID()
+
+        pane.showSession(first)
+        pane.showCurrentTheme()
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(pane.isShowingCurrentTheme)
+        XCTAssertEqual(pane.currentSessionID, first)
+        XCTAssertFalse(pane.hasContent(for: first), "the global inspector became a chat tab")
+        XCTAssertNotNil(
+            descendant(in: pane.view, accessibilityIdentifier: "current-theme"),
+            "the live theme document was not installed into the panel"
+        )
+        let newTab = descendant(in: pane.view, accessibilityLabel: L10n.string("New tab"))
+        XCTAssertTrue(newTab?.isHidden == true, "the chat-scoped + remained beside Current Theme")
+
+        pane.showSession(second)
+        XCTAssertTrue(pane.isShowingCurrentTheme, "changing chats closed the global document")
+        XCTAssertEqual(pane.currentSessionID, second)
+        XCTAssertFalse(pane.hasContent(for: second), "selection copied the inspector into a chat")
+
+        pane.showSessionTabs(second)
+        XCTAssertFalse(pane.isShowingCurrentTheme)
+        XCTAssertFalse(newTab?.isHidden == true, "leaving Current Theme did not restore the +")
+    }
+
+    func testWindowCommandTogglesTheInspectorWithoutOpeningSettings() throws {
+        let settings = AppSettings.shared
+        let previous = settings.disabledToolGroupIDs
+        defer { settings.disabledToolGroupIDs = previous }
+        settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: true)
+
+        let controller = MainWindowController()
+        let container = try XCTUnwrap(
+            controller.splitViewController.splitViewItems[1].viewController
+                as? TerminalContainerViewController
+        )
+
+        controller.toggleCurrentTheme()
+        XCTAssertTrue(controller.isCurrentThemeVisible)
+        XCTAssertFalse(container.isShowingSettings, "the inspector took the old Settings route")
+
+        controller.toggleCurrentTheme()
+        XCTAssertFalse(controller.isCurrentThemeVisible)
+    }
+
+    private func descendant(in view: NSView, accessibilityIdentifier: String) -> NSView? {
+        if view.accessibilityIdentifier() == accessibilityIdentifier { return view }
+        return view.subviews.lazy.compactMap {
+            self.descendant(in: $0, accessibilityIdentifier: accessibilityIdentifier)
+        }.first
+    }
+
+    private func descendant(in view: NSView, accessibilityLabel: String) -> NSView? {
+        if view.accessibilityLabel() == accessibilityLabel { return view }
+        return view.subviews.lazy.compactMap {
+            self.descendant(in: $0, accessibilityLabel: accessibilityLabel)
+        }.first
+    }
+
     // MARK: - The Compare Tab Follows the Pane
 
     /// The compare canvas's height is a function of the width it is given, and it was read

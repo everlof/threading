@@ -397,6 +397,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         displayPaneController.onClose = { [weak self] in
             self?.setDisplayPaneVisible(false)
         }
+        displayPaneController.onCurrentThemeVisibilityChange = { [weak self] visible in
+            self?.sidebarViewController.setCurrentThemeMode(visible)
+        }
         displayPaneController.onReviewLoadingChange = { [weak self] sessionID, isLoading in
             self?.setSessionLoading(
                 isLoading,
@@ -410,6 +413,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         displayPaneController.onShareSession = { sessionID in
             ShareChatSheet.run(for: sessionID)
+        }
+        appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
+            guard let self,
+                  self.displayPaneController.isShowingCurrentTheme,
+                  !MCPToolCatalog.hasEnabledThemeTools else { return }
+            self.setDisplayPaneVisible(false)
         }
 
         // The shell drawer belongs to the terminal container, on the other side of the split; the
@@ -582,6 +591,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Shows or hides the display panel.
     func setDisplayPaneVisible(_ visible: Bool) {
+        if !visible {
+            displayPaneController.hideCurrentTheme()
+        }
         guard displayItem.isCollapsed == visible else { return }
 
         guard visible else {
@@ -636,6 +648,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// and a session with nothing to show closes it rather than leaving the last image up.
     private func syncDisplayPane(to sessionID: SessionID?) {
         displayPaneController.showSession(sessionID)
+
+        // The theme document is app-wide, so changing or temporarily clearing the selected
+        // session must not close it. Its agent attribution remains whichever conversation is in
+        // the main pane; only the inspector itself is global.
+        if displayPaneController.isShowingCurrentTheme {
+            setDisplayPaneVisible(true)
+            return
+        }
 
         guard let sessionID, displayPaneController.hasContent(for: sessionID) else {
             setDisplayPaneVisible(false)
@@ -987,7 +1007,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case .displayPanel:
             guard displayItem.isCollapsed else { return }
             dragSpring.revealedPanel = true
-            displayPaneController.showSession(sessionID)
+            displayPaneController.showSessionTabs(sessionID)
             setDisplayPaneVisible(true)
         }
         updateToolbarControlStates()
@@ -1114,7 +1134,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case .drawer:
             containerViewController.openShellDrawer()
         case .displayPanel:
-            displayPaneController.showSession(sessionID)
+            displayPaneController.showSessionTabs(sessionID)
             setDisplayPaneVisible(true)
         }
     }
@@ -1124,6 +1144,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// composer page closes to the empty pane. Closing is never stopping an agent — Close
     /// Session remains its own command, one menu away.
     func closeActiveTab() {
+        if displayPaneController.isShowingCurrentTheme, !displayItem.isCollapsed,
+           let responder = window?.firstResponder as? NSView,
+           responder.isDescendant(of: displayPaneController.view) {
+            setDisplayPaneVisible(false)
+            return
+        }
+
         if let host = focusedTabHost() {
             if let activeID = host.activeTabID(for: currentSessionID),
                host.closeTab(id: activeID, for: currentSessionID) {
@@ -1336,6 +1363,34 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateToolbarControlStates()
     }
 
+    /// Opens the app-wide theme document beside the conversation. Unlike ordinary panel tabs it
+    /// survives session selection and never joins a session's `+` menu or persisted layout.
+    func toggleCurrentTheme() {
+        window?.makeKeyAndOrderFront(nil)
+        guard MCPToolCatalog.hasEnabledThemeTools else {
+            NSSound.beep()
+            return
+        }
+
+        if displayPaneController.isShowingCurrentTheme, !displayItem.isCollapsed {
+            setDisplayPaneVisible(false)
+            return
+        }
+
+        // The utility is explicitly for working beside a conversation. If invoked from
+        // Settings, restore the page Settings covered before opening the inspector.
+        if containerViewController.isShowingSettings {
+            toggleSettings()
+        }
+        displayPaneController.showSession(containerViewController.currentSessionID)
+        displayPaneController.showCurrentTheme()
+        setDisplayPaneVisible(true)
+    }
+
+    var isCurrentThemeVisible: Bool {
+        displayPaneController.isShowingCurrentTheme && !displayItem.isCollapsed
+    }
+
     /// Opens the browser as a tab in the selected session's display panel, beside the terminal.
     ///
     /// The browser is per-session — it is one of that session's display tabs, so the agent
@@ -1350,7 +1405,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         displayPaneController.activateBrowser(for: sessionID)
-        displayPaneController.showSession(sessionID)
+        displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
 
@@ -1489,7 +1544,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         let review = displayPaneController.activateReview(for: sessionID)
         if let mode { review?.show(mode: mode) }
-        displayPaneController.showSession(sessionID)
+        displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
 
@@ -1503,7 +1558,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         displayPaneController.activateSharing(for: sessionID)
-        displayPaneController.showSession(sessionID)
+        displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
 
@@ -1519,7 +1574,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         displayPaneController.addTerminalTab(for: sessionID)
-        displayPaneController.showSession(sessionID)
+        displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
 
@@ -1532,7 +1587,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         displayPaneController.activateFiles(for: sessionID)
-        displayPaneController.showSession(sessionID)
+        displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
 
@@ -1618,7 +1673,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         displayPaneController.activateInfo(for: sessionID)
-        displayPaneController.showSession(sessionID)
+        displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
 
@@ -1635,7 +1690,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     private func showAttachments(for sessionID: SessionID) {
         displayPaneController.activateAttachments(for: sessionID)
-        displayPaneController.showSession(sessionID)
+        displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
 
@@ -1971,6 +2026,10 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         toggleSettings()
     }
 
+    func projectSidebarDidToggleCurrentTheme(_ sidebar: ProjectSidebarViewController) {
+        toggleCurrentTheme()
+    }
+
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         didSelectSettingsPage pageID: String
@@ -2093,7 +2152,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
             selectedThreadID: agent.descriptor.threadID,
             for: sessionID
         )
-        displayPaneController.showSession(sessionID)
+        displayPaneController.showSessionTabs(sessionID)
         setDisplayPaneVisible(true)
     }
 
