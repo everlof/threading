@@ -3347,6 +3347,7 @@ final class ThemedControlTests: XCTestCase {
                 "SidebarBackdropView",
                 "SidebarBrandView",
                 "SubagentSummaryView",
+                "SubmissionStatusView",
                 "ThreadingMarkView",
                 "ThemeSwatchImage",
                 "ThemeSwatchView",

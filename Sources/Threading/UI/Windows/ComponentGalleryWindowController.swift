@@ -104,6 +104,7 @@ final class ComponentGalleryViewController: NSViewController {
         "SidebarBackdropView",
         "SidebarBrandView",
         "SubagentSummaryView",
+        "SubmissionStatusView",
         "ThreadingMarkView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
@@ -154,6 +155,8 @@ final class ComponentGalleryViewController: NSViewController {
         labelWithString: L10n.string("Ready — interact with any story.")
     )
     private let spinner = ThemedSpinner()
+    /// The submission story's line, retained so the three buttons beside it can re-state it.
+    private let submissionStatus = SubmissionStatusView()
     private let workingOrbs = OrbState.allCases.map { WorkingOrbView(state: $0) }
     private let morphingTitle = MorphingTitleLabel()
 
@@ -962,9 +965,44 @@ final class ComponentGalleryViewController: NSViewController {
                     "GlyphView",
                     "Tinted template glyphs drawn on the device pixel grid; a slot caps foreign artwork.",
                     row(glyphSamples())
+                ),
+                story(
+                    "SubmissionStatusView",
+                    "How a submitted thing ended. Press each: the wording and the glyph carry "
+                        + "the outcome, so it survives Differentiate Without Colour — and every "
+                        + "change announces itself to VoiceOver.",
+                    row([submissionStatus, submissionButtons()])
                 )
             ]
         )
+    }
+
+    /// The three states in the order a submission moves through them.
+    private func submissionButtons() -> NSView {
+        let working = button("Working", action: #selector(showWorkingStatus))
+        working.setAccessibilityIdentifier("gallery.submission-status.working")
+        let done = button("Done", action: #selector(showDoneStatus))
+        done.setAccessibilityIdentifier("gallery.submission-status.done")
+        let failed = button("Failed", action: #selector(showFailedStatus))
+        failed.setAccessibilityIdentifier("gallery.submission-status.failed")
+
+        let stack = NSStackView(views: [working, done, failed])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        return stack
+    }
+
+    @objc private func showWorkingStatus() {
+        submissionStatus.show(L10n.string("Filing the issue on GitHub…"), tone: .working)
+    }
+
+    @objc private func showDoneStatus() {
+        submissionStatus.show(L10n.format("Filed as issue #%lld.", 42), tone: .done)
+    }
+
+    @objc private func showFailedStatus() {
+        submissionStatus.show(L10n.format("GitHub refused the report (%lld).", 403), tone: .failed)
     }
 
     /// One glyph per role, plus foreign artwork under the slot cap — the three ways the view

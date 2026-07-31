@@ -49,6 +49,50 @@ The device-flow steps are static functions over an injected transport, so the st
 real GitHub. Settings ▸ GitHub drives the whole journey and shows the chain's fallbacks with
 live probes, so "why did that read work" is answerable from one screen.
 
+## Filing an issue (`GitHubIssueSubmitter`)
+
+Two places raise a ticket against this app's own repository: the inspector's report sheet
+(View ▸ Inspect Element / Inspect Geometry, then **Submit Issue**) and **Help ▸ Report a
+Problem…**. Both compose through `GitHubIssueComposer` — description first, evidence under it,
+environment last — and both POST through the credential chain above. The repository is a
+constant, not a setting: a field pointing it elsewhere would let one user file this app's
+diagnostics into a stranger's tracker.
+
+A write is not a read, and three rules are the POST's own:
+
+- **Anonymous never posts.** It cannot create an issue under any circumstance, so sending it
+  buys a guaranteed 401. Its presence in the chain is instead the signal that there is nobody to
+  post *as*, which is what selects the prefilled `issues/new` form — the path that keeps working
+  when the repository is public and the user is signed into a browser rather than to `gh`.
+- **A transport failure ends the attempt.** A GET that times out is retried under the next tier
+  for free; a POST that times out may have created the issue already, and the one thing worse
+  than a failed report is two of them. The user retries deliberately or not at all.
+- **401/403/404 walk to the next tier; 422 does not.** The first three say "this token may not
+  write here", which says nothing about the next token. 422 is GitHub reading the body and
+  objecting to it, and every credential hears the same objection.
+
+Every tier refusing ends at the form rather than at an error, because "no credential here may
+write to that repository" is a permission answer with somewhere to go.
+
+### The screenshot is not in the issue, and cannot be
+
+`POST /repos/{owner}/{repo}/issues` takes markdown. Image attachments in the web UI go through
+`github.com/upload/policies/assets`, which requires a `user_session` cookie and answers 422 to
+token auth; as of 2026 there is no REST or GraphQL surface for it, and the `gh` CLI has an open
+request for exactly this with no token-authenticated path to implement it against
+([cli/cli#13256](https://github.com/cli/cli/issues/13256)).
+
+The obvious workaround does not survive contact with a private repository: an image committed to
+the repo and referenced by its raw URL is fetched by GitHub's **camo** proxy, which has no
+session and cannot authenticate, so the ticket would carry a broken image today and a working one
+only after the repo goes public. Driving a signed-in browser session is the only thing that
+actually works, and it is a Playwright hack.
+
+So the capture goes to the **clipboard** as the issue opens in the browser, and the sheet says
+so. One ⌘V in the comment box, no repository writes, and nothing that breaks when the repo
+changes visibility. The report's markdown still carries the screenshot's local *path*, which is
+the form an agent CLI can open — that is what Copy Report was always for.
+
 ## The brokered fetch (`network.brokered`)
 
 The first shape was a bespoke `github.checks.read` capability with a check-runs endpoint. It

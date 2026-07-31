@@ -24,6 +24,21 @@ extension MainWindowController {
         elementInspector.toggle(mode, over: window)
     }
 
+    /// Help ▸ Report a Problem. Lives beside the inspector's own sheet because both file the
+    /// same kind of ticket through the same chain; only the evidence differs.
+    func presentReportProblem() {
+        let sheet = ReportProblemViewController()
+        sheet.onDone = { [weak self, weak sheet] in
+            guard let self, let sheet else { return }
+            self.contentViewController?.dismiss(sheet)
+        }
+
+        let submitter = GitHubIssueSubmitter.live()
+        sheet.onSubmitIssue = { draft in await submitter.submit(draft) }
+
+        contentViewController?.presentAsSheet(sheet)
+    }
+
     // MARK: - Private Methods
 
     private func presentElementReport(for target: NSView, layers: InspectorLayers) {
@@ -122,6 +137,11 @@ extension MainWindowController {
             guard let self, let sheet else { return }
             self.contentViewController?.dismiss(sheet)
         }
+
+        // Resolved here rather than held by the sheet: the credential chain is the window's
+        // business, and a sheet that reached for it could not be built in a test.
+        let submitter = GitHubIssueSubmitter.live()
+        sheet.onSubmitIssue = { draft in await submitter.submit(draft) }
 
         contentViewController?.presentAsSheet(sheet)
     }
