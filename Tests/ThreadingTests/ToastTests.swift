@@ -202,6 +202,52 @@ final class ToastTests: XCTestCase {
         )
     }
 
+    /// The same rule from the other side: the divider has no maximum, so a column can be wider
+    /// than the band's cap plus its insets. The presenter's own fill pin is breakable so the cap
+    /// can win — but at `defaultHigh` it outranked the column's holding priority, and a pin the
+    /// *band* was not allowed to satisfy was satisfied with the column instead: the sidebar
+    /// snapped in to meet the cap as the receipt arrived, and sprang back out when it left.
+    func testTheBandDoesNotNarrowAWideColumnToMeetItsOwnCap() throws {
+        let width = ToastDefaults.maxWidth + ToastDefaults.hostInset * 2 + 60
+        let (column, bottom, _) = column(width: width)
+        let presenter = ToastPresenter(host: column, above: bottom)
+
+        presenter.present(archiveRequest())
+        column.superview?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            column.frame.width,
+            width,
+            accuracy: 0.5,
+            "the band's fill pin dragged the column in to meet the band's own cap"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(presenter.current).frame.width,
+            ToastDefaults.maxWidth,
+            accuracy: 0.5,
+            "the band stopped short of its cap in a column with room for it"
+        )
+    }
+
+    /// A receipt is a band, not a bubble: in a column with more room than its words need, it
+    /// still fills the width it is given, up to its cap. The words are silenced in *both*
+    /// directions — a label's hugging outranking the fill pin would shrink-wrap the band to
+    /// whatever its message happened to be.
+    func testTheBandFillsANarrowColumnEvenWhenItsWordsAreShort() throws {
+        let (column, bottom, _) = column(width: SidebarDefaults.minWidth)
+        let presenter = ToastPresenter(host: column, above: bottom)
+
+        presenter.present(ToastRequest(message: "Archived “P”"))
+        column.superview?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            try XCTUnwrap(presenter.current).frame.width,
+            SidebarDefaults.minWidth - ToastDefaults.hostInset * 2,
+            accuracy: 0.5,
+            "the band shrank to its words instead of filling the column"
+        )
+    }
+
     // MARK: - The clock
 
     func testPresentingPutsTheBandAboveThePanesFooter() throws {

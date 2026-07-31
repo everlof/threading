@@ -44,9 +44,26 @@ enum ToastDefaults {
     /// the sidebar widened to fit the band as it arrived and snapped back six seconds later when
     /// it left — a column resized twice by a message *about something else*.
     ///
-    /// The band takes the width it is given and wraps inside it. Only the words are silenced:
-    /// the action keeps its own resistance, because a way back too narrow to read is not one.
+    /// The band takes the width it is given and wraps inside it. Silenced in both directions —
+    /// compression *and* hugging — because the fill pin below is deliberately weaker than any
+    /// pane's grip on its width, and words hugging at the ordinary 250 would outrank it and
+    /// shrink-wrap the band to its own message. Only the words are silenced: the action keeps
+    /// its own resistance, because a way back too narrow to read is not one.
     static let contentWidthPriority = NSLayoutConstraint.Priority(1)
+
+    /// How hard the band pulls its trailing edge out to fill the column.
+    ///
+    /// Hard enough to beat the silenced words, and softer than the grip *any* pane holds its
+    /// width with — the same step below `defaultLow` that the sidebar and display panes hold
+    /// above it (`SidebarDefaults.holdingPriority`), with the terminal's plain item at the
+    /// default in between. The pin must be this weak because in a pane wider than `maxWidth`
+    /// it cannot be satisfied by the band at all: the required cap holds the band, and a solver
+    /// forbidden from stretching the band satisfies the pin with the *pane* instead. At
+    /// `defaultHigh` it did exactly that — a sidebar dragged past the cap snapped in to meet it
+    /// as a receipt arrived, and sprang back out six seconds later when it left.
+    static let fillPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.defaultLow.rawValue - 10
+    )
 
     /// The countdown rail: how thick it is, and how far its underside sits above the band's
     /// bottom edge. It lives *inside* the band's bottom inset rather than under the content, so
@@ -286,9 +303,14 @@ final class ToastView: NSView {
 
         // A receipt does not get to decide how wide the column it floats in is — see
         // `ToastDefaults.contentWidthPriority`, which is the sidebar jumping wider as the band
-        // arrived and back again as it left.
+        // arrived and back again as it left. Hugging goes with it, so the fill pin — weaker
+        // than a pane's hold on its width — is still the strongest opinion about the band's.
         for label in [messageLabel, detailLabel].compactMap({ $0 }) {
             label.setContentCompressionResistancePriority(
+                ToastDefaults.contentWidthPriority,
+                for: .horizontal
+            )
+            label.setContentHuggingPriority(
                 ToastDefaults.contentWidthPriority,
                 for: .horizontal
             )
@@ -663,12 +685,14 @@ final class ToastPresenter {
         self.bottomConstraint = bottomConstraint
 
         // Fills the column it is given, up to its cap. The trailing pin is breakable so the cap
-        // wins in a pane wider than the band should ever be.
+        // wins in a pane wider than the band should ever be — and weaker than the pane's own
+        // hold on its width, so losing to the cap never narrows the pane to make up the
+        // difference. See `ToastDefaults.fillPriority`.
         let trailing = toast.trailingAnchor.constraint(
             equalTo: host.trailingAnchor,
             constant: -ToastDefaults.hostInset
         )
-        trailing.priority = .defaultHigh
+        trailing.priority = ToastDefaults.fillPriority
 
         NSLayoutConstraint.activate([
             bottomConstraint,
