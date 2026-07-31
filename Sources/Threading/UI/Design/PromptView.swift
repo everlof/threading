@@ -1060,6 +1060,26 @@ enum PromptAttachment {
         return [path]
     }
 
+    /// Files the user handed to a session, filed so they sit beside what the agent made of them.
+    ///
+    /// The one rename: a pasted screenshot is written under a generated name, which is right for
+    /// a file that only has to outlive the turn and unreadable as a row someone is scanning. A
+    /// dropped file keeps the name it already had.
+    @MainActor
+    static func record(paths: [String], sessionID: SessionID, projectRoot: URL) {
+        for path in paths {
+            let url = URL(fileURLWithPath: path)
+            let isGenerated = url.lastPathComponent.hasPrefix(PromptViewDefaults.attachmentPrefix)
+            SessionAttachmentStore.shared.record(
+                declared: url,
+                sessionID: sessionID,
+                projectRoot: projectRoot,
+                origin: .user,
+                preferredName: isGenerated ? L10n.string("Pasted image") : nil
+            )
+        }
+    }
+
     /// Whether `paths` would find anything, without doing the work.
     ///
     /// A drag is answered continuously while the pointer moves, and answering it by writing a

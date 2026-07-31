@@ -1112,7 +1112,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     name: attachment.name,
                     kind: attachment.kind.rawValue,
                     byteCount: Int64(size),
-                    modifiedAt: values.contentModificationDate
+                    modifiedAt: values.contentModificationDate,
+                    origin: attachment.origin.rawValue
                 )
             }
             respond(.respond(RemoteRouter.json(RemoteAttachmentsDTO(

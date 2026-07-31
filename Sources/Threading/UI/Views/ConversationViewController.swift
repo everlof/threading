@@ -73,7 +73,16 @@ final class ConversationViewController: NSViewController {
         prompt.showsImageAttachments = true
         prompt.placeholder = L10n.format("Reply to %@", agentSession.kind.displayName)
         prompt.onSubmit = { [weak self] text in
-            _ = self?.submit(text)
+            guard let self else { return }
+            // Read before submitting, which is what clears the strip. Recorded here rather than
+            // when the image was attached: an attachment removed before sending was never handed
+            // over, and listing it would be the pane reporting an intention.
+            PromptAttachment.record(
+                paths: self.promptView.attachmentPaths,
+                sessionID: self.sessionID,
+                projectRoot: URL(fileURLWithPath: self.project.folderPath, isDirectory: true)
+            )
+            _ = self.submit(text)
         }
         return prompt
     }()

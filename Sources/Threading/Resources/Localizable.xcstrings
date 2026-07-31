@@ -31,6 +31,16 @@
         }
       }
     },
+    "%@, from %@, %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, från %2$@, %3$@"
+          }
+        }
+      }
+    },
     "Accent": {
       "localizations": {
         "sv": {
@@ -57,6 +67,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Adaptivt"
+          }
+        }
+      }
+    },
+    "All": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alla"
+          }
+        }
+      }
+    },
+    "Attachments this session exchanged appear here: images and PDFs you send, and ones the agent shows or names.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilagor som den här sessionen har utbytt visas här: bilder och PDF:er du skickar, och de som agenten visar eller nämner."
           }
         }
       }
@@ -131,6 +161,16 @@
         }
       }
     },
+    "Detection of files named in %@'s output is turned off in Settings › General. Images you attach, and ones the agent shows in the panel, still appear here.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identifiering av filer som nämns i %@:s utdata är avstängd i Inställningar › Allmänt. Bilder du bifogar, och de som agenten visar i panelen, visas fortfarande här."
+          }
+        }
+      }
+    },
     "Duplicate to Edit": {
       "localizations": {
         "sv": {
@@ -191,12 +231,32 @@
         }
       }
     },
+    "Grid": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rutnät"
+          }
+        }
+      }
+    },
     "Keywords": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Nyckelord"
+          }
+        }
+      }
+    },
+    "List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lista"
           }
         }
       }
@@ -231,6 +291,16 @@
         }
       }
     },
+    "Nothing here from %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inget här från %@."
+          }
+        }
+      }
+    },
     "Numbers": {
       "localizations": {
         "sv": {
@@ -241,12 +311,32 @@
         }
       }
     },
+    "Outline": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disposition"
+          }
+        }
+      }
+    },
     "Paired terminal": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Matchande terminal"
+          }
+        }
+      }
+    },
+    "Pasted image": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inklistrad bild"
           }
         }
       }
@@ -287,6 +377,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Serif"
+          }
+        }
+      }
+    },
+    "Show attachments from": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa bilagor från"
           }
         }
       }
@@ -351,12 +451,42 @@
         }
       }
     },
+    "ThemedSegmentedControl": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ThemedSegmentedControl"
+          }
+        }
+      }
+    },
+    "ThemedSegmentedControl selected %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ThemedSegmentedControl valde %@."
+          }
+        }
+      }
+    },
     "Try: “Use Threading’s app-theme MCP tools to make my current theme warmer and soften the sidebar.” The agent can inspect it with get_app_theme, duplicate a locked theme with duplicate_app_theme (apply: true), and make live changes with update_app_theme.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Prova: ”Använd Threadings MCP-verktyg för appteman för att göra mitt aktuella tema varmare och tona ned sidofältet.” Agenten kan inspektera det med get_app_theme, duplicera ett låst tema med duplicate_app_theme (apply: true) och göra ändringar direkt med update_app_theme."
+          }
+        }
+      }
+    },
+    "Two or three fixed choices with selection, arrows, and radio-group accessibility.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Två eller tre fasta val med markering, piltangenter och radiogruppstillgänglighet."
           }
         }
       }
@@ -387,6 +517,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fönstergrund"
+          }
+        }
+      }
+    },
+    "You": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Du"
           }
         }
       }
@@ -3066,17 +3206,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Frågar innan någon ändring görs."
-          }
-        }
-      }
-    },
-    "Attachment detection for %@ is turned off in Settings › General.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bilagadetektering för %@ är avstängd i Inställningar › Allmänt."
           }
         }
       }

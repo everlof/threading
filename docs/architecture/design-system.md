@@ -65,7 +65,8 @@ Components so far:
 
 | | |
 |---|---|
-| `ChipView` | A flat pill that opens a menu. The standard way to offer a choice. |
+| `ChipView` | A flat pill that opens a menu. The standard way to offer a choice — see the chip/segment rule below. |
+| `ThemedSegmentedControl` | Two or three fixed choices with all of them on screen: a track at `controlResting` with the selected segment lifted to `controlHover`. Built as a container of small `ThemedControl`s, the same shape as `ThemedTabStripView`, so each segment inherits hover, focus and its `.radioButton` role rather than one element re-deriving all three for parts of itself that are not views. An unselected segment answers the pointer in *ink* rather than taking a third fill step, because the scale has two control fills and a third invented here is how a scale stops being a scale. Arrow keys walk the run and take the selection with them; the ends hold rather than wrap. |
 | `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
 | `ThemedControl` | The base for a control that draws itself from the theme. |
 | `ThemedToggle` | A drop-in `NSSwitch` whose on-track is the theme's accent. |
@@ -337,6 +338,18 @@ the two surfaces; a terminal follow-up remains the CLI's own input. Thumbnail mo
 `showsImageAttachments` capability rather than the component's default, because `PromptView` also
 serves commit messages and inspector notes — those are plain text fields where a dropped path must
 remain plain text.
+
+**Chip or segment is decided by the option set, not by the look.** A **chip** when the choices
+come from data and change while the app runs — accounts, models, branches, effort — because a
+menu can be any length and a runtime-empty one can hide itself. A **segment** when the set is
+fixed, there are two or three of them, and seeing the ones you are *not* on is part of using it:
+the Attachments pane's All / Agent / You, where the question being asked is "where did the one
+*I* sent go" and a menu answers it only after you already know to open it.
+
+Two or three is the rule, not a guideline. `GitReviewMode` has six cases and `ImageCompareMode`
+five, and both stay chips — at that length a run of segments is a row of equally-weighted words
+nobody reads, and it takes the width the content needs. A fourth segment is the signal that a set
+has outgrown the control, not an invitation to widen it.
 
 The vocabulary these encode, which new work should follow:
 

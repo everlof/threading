@@ -12,7 +12,12 @@ final class SessionAttachmentsViewController: NSViewController {
     let sessionID: SessionID
     private let appEvents = AppEventObservations()
 
+    /// Everything recorded for the session, and the subset the filter is showing. Both are kept:
+    /// the filter decides whether it belongs on screen at all by looking at the whole list, so a
+    /// pane filtered down to nothing must not then read as a session with no attachments.
+    private var allAttachments: [SessionAttachment] = []
     private var attachments: [SessionAttachment] = []
+    private var filter: AttachmentFilter = .all
     private var selectedRelativePath: String?
 
     private lazy var countLabel: NSTextField = {
@@ -21,6 +26,31 @@ final class SessionAttachmentsViewController: NSViewController {
         label.textColor = Design.Text.quaternary
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
+    }()
+    private lazy var filterControl: ThemedSegmentedControl = {
+        let control = ThemedSegmentedControl()
+        control.configure(titles: AttachmentFilter.allCases.map(\.title))
+        control.setAccessibilityLabel(L10n.string("Show attachments from"))
+        control.onSelect = { [weak self] index in
+            guard AttachmentFilter.allCases.indices.contains(index) else { return }
+            self?.filter = AttachmentFilter.allCases[index]
+            self?.refresh()
+        }
+        control.translatesAutoresizingMaskIntoConstraints = false
+        return control
+    }()
+    /// The count and the filter as one line: two halves of the same sentence, and a stack so a
+    /// hidden filter takes its height with it rather than leaving a band of nothing behind.
+    private lazy var headerRow: NSStackView = {
+        let row = NSStackView(views: [countLabel, filterControl])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fill
+        row.spacing = Design.Spacing.small
+        // The label absorbs the slack, which is what puts the filter on the trailing edge.
+        countLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
     }()
     private lazy var tableView: ThemedTableView = {
         let table = ThemedTableView()
@@ -164,7 +194,7 @@ final class SessionAttachmentsViewController: NSViewController {
     // MARK: - Setup
 
     private func setupList() {
-        view.addSubview(countLabel)
+        view.addSubview(headerRow)
         view.addSubview(scrollView)
         view.addSubview(emptyLabel)
     }
@@ -191,15 +221,15 @@ final class SessionAttachmentsViewController: NSViewController {
         let inset = Design.Spacing.inset
 
         NSLayoutConstraint.activate([
-            countLabel.topAnchor.constraint(
+            headerRow.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor,
                 constant: Design.Spacing.small
             ),
-            countLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
-            countLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
+            headerRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
+            headerRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
 
             scrollView.topAnchor.constraint(
-                equalTo: countLabel.bottomAnchor,
+                equalTo: headerRow.bottomAnchor,
                 constant: Design.Spacing.small
             ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -282,16 +312,18 @@ final class SessionAttachmentsViewController: NSViewController {
         guard isViewLoaded else { return }
 
         let previous = selectedAttachment?.relativePath ?? selectedRelativePath
-        attachments = SessionAttachmentStore.shared.attachments(for: sessionID)
+        allAttachments = SessionAttachmentStore.shared.attachments(for: sessionID)
+        attachments = allAttachments.filter(filter.admits)
         countLabel.stringValue = L10n.format(
             "ATTACHMENTS  %lld",
             Int64(attachments.count)
         )
         tableView.reloadData()
         emptyLabel.stringValue = emptyStateMessage()
+        updateFilterControl()
 
         let hasAttachments = !attachments.isEmpty
-        countLabel.isHidden = !hasAttachments
+        headerRow.isHidden = allAttachments.isEmpty
         scrollView.isHidden = !hasAttachments
         previewHost.isHidden = !hasAttachments
         fileLabel.isHidden = !hasAttachments
@@ -315,18 +347,44 @@ final class SessionAttachmentsViewController: NSViewController {
         showSelected()
     }
 
-    /// An empty pane while detection is off would read as "nothing was found", which is the
-    /// wrong explanation — so the one state names the other.
+    /// Hidden while the whole list is one side's, which is the app's rule for a control that is
+    /// offering no choice — and here it is also the common case, since most sessions exchange
+    /// files in one direction only.
+    private func updateFilterControl() {
+        let origins = Set(allAttachments.map(\.origin))
+        filterControl.isHidden = origins.count < 2
+        if filterControl.isHidden, filter != .all {
+            filter = .all
+            attachments = allAttachments
+        }
+        if let index = AttachmentFilter.allCases.firstIndex(of: filter) {
+            filterControl.selectedIndex = index
+        }
+    }
+
+    /// Three different silences, and saying the wrong one is worse than saying nothing: an empty
+    /// pane while detection is off reads as "nothing was found", and an empty pane under a filter
+    /// reads as "this session has no attachments" when the row you want is one click away.
     private func emptyStateMessage() -> String {
+        if !allAttachments.isEmpty, attachments.isEmpty {
+            return L10n.format("Nothing here from %@.", filter.title)
+        }
+
         if let kind = ProjectStore.shared.session(withID: sessionID)?.kind,
            !AppSettings.shared.detectsAttachmentReferences(for: kind) {
             return L10n.format(
-                "Attachment detection for %@ is turned off in Settings › General.",
+                """
+                Detection of files named in %@'s output is turned off in Settings › General. \
+                Images you attach, and ones the agent shows in the panel, still appear here.
+                """,
                 kind.displayName
             )
         }
         return L10n.string(
-            "Images and PDFs mentioned by this session will appear here."
+            """
+            Attachments this session exchanged appear here: images and PDFs you send, \
+            and ones the agent shows or names.
+            """
         )
     }
 
@@ -487,11 +545,47 @@ private final class SessionAttachmentRowView: NSView {
         path.lineBreakMode = .byTruncatingMiddle
         path.translatesAutoresizingMaskIntoConstraints = false
 
+        // Marked on every row rather than only on the user's, because a mark that appears on one
+        // kind makes its absence carry meaning, and absence is exactly what nobody reads.
+        let origin = NSTextField(labelWithString: attachment.origin.title)
+        origin.applyFont(.caption)
+        origin.textColor = Design.Text.quaternary
+        origin.setContentCompressionResistancePriority(.required, for: .horizontal)
+        origin.setContentHuggingPriority(.required, for: .horizontal)
+        origin.translatesAutoresizingMaskIntoConstraints = false
+
         addSubview(icon)
         addSubview(name)
         addSubview(path)
+        addSubview(origin)
+
+        // One element, read as one sentence: three separate labels would be announced as three
+        // unrelated strings with no hint that the last one is the provenance of the first.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(
+            L10n.format(
+                "%@, from %@, %@",
+                attachment.name,
+                attachment.origin.title,
+                attachment.relativePath
+            )
+        )
+        for child in [icon, name, path, origin] {
+            child.setAccessibilityElement(false)
+        }
 
         NSLayoutConstraint.activate([
+            origin.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -Design.Spacing.small
+            ),
+            origin.firstBaselineAnchor.constraint(equalTo: path.firstBaselineAnchor),
+            origin.leadingAnchor.constraint(
+                greaterThanOrEqualTo: path.trailingAnchor,
+                constant: Design.Spacing.small
+            ),
+
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: SessionAttachmentsDefaults.iconSize),
@@ -508,7 +602,6 @@ private final class SessionAttachmentRowView: NSView {
             name.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.tight),
 
             path.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-            path.trailingAnchor.constraint(equalTo: name.trailingAnchor),
             path.topAnchor.constraint(equalTo: name.bottomAnchor, constant: Design.Spacing.hairline)
         ])
     }
@@ -516,6 +609,48 @@ private final class SessionAttachmentRowView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+}
+
+// MARK: - Filter
+
+/// Which side's attachments the pane is showing.
+///
+/// Three fixed choices with `All` first, which is why this is a segment rather than a chip: the
+/// set cannot grow, and the value of seeing `Agent` and `You` sitting there unpicked is the whole
+/// point — the question people ask of this pane is "where did the one *I* sent go", and a menu
+/// answers it only after you already know to open it.
+enum AttachmentFilter: CaseIterable {
+    case all
+    case agent
+    case user
+
+    var title: String {
+        switch self {
+        case .all: return L10n.string("All")
+        case .agent: return SessionAttachment.Origin.agent.title
+        case .user: return SessionAttachment.Origin.user.title
+        }
+    }
+
+    func admits(_ attachment: SessionAttachment) -> Bool {
+        switch self {
+        case .all: return true
+        case .agent: return attachment.origin == .agent
+        case .user: return attachment.origin == .user
+        }
+    }
+}
+
+extension SessionAttachment.Origin {
+
+    /// "You" rather than "Ours": in a window where the other party is also working on your
+    /// behalf, "ours" names both of them.
+    var title: String {
+        switch self {
+        case .agent: return L10n.string("Agent")
+        case .user: return L10n.string("You")
+        }
     }
 }
 

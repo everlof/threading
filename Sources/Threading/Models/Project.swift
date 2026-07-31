@@ -976,10 +976,27 @@ struct PersistedTab: Codable {
 
 /// One attachment reference in the persisted session document.
 struct PersistedSessionAttachment: Codable {
-    let projectRoot: String
+    /// The directory `relativePath` resolves against. Still written under its original key: it
+    /// held only checkouts before the store could take custody of a copy, and every payload
+    /// already written says `projectRoot`.
+    let root: String
     let relativePath: String
+
+    /// Both absent in payloads written before provenance was recorded, which is why neither is
+    /// required — a missing origin is read as `agent`, the only kind that could have been stored.
+    let sourcePath: String?
     let kind: SessionAttachment.Kind
+    let origin: SessionAttachment.Origin?
     let referencedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case root = "projectRoot"
+        case relativePath
+        case sourcePath
+        case kind
+        case origin
+        case referencedAt
+    }
 }
 
 /// A versioned attachment document with an explicit legacy-array migration.
@@ -1023,7 +1040,7 @@ struct PersistedSessionAttachments: Codable {
         codingPath: [CodingKey]
     ) throws {
         guard entries.allSatisfy({
-            !$0.projectRoot.isEmpty
+            !$0.root.isEmpty
                 && !$0.relativePath.isEmpty
                 && !$0.relativePath.hasPrefix("/")
                 && !$0.relativePath.split(separator: "/").contains("..")

@@ -30,9 +30,10 @@ extension AgentToolCoordinator {
 
         if let project = dependencies.projects.project(forSessionID: sessionID) {
             dependencies.attachments.record(
-                url: url,
+                declared: url,
                 sessionID: sessionID,
-                projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true)
+                projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true),
+                origin: .agent
             )
         }
 
@@ -127,7 +128,8 @@ extension AgentToolCoordinator {
             let projectRoot = URL(fileURLWithPath: project.folderPath, isDirectory: true)
             for url in [oldURL, newURL] {
                 dependencies.attachments.record(
-                    url: url, sessionID: sessionID, projectRoot: projectRoot
+                    declared: url, sessionID: sessionID, projectRoot: projectRoot,
+                    origin: .agent
                 )
             }
         }

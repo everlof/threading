@@ -1117,25 +1117,41 @@ Three kinds of content:
 
 ### Attachments
 
-When Claude or Codex prints a path to an existing PNG, JPEG, GIF, WebP, HEIC, TIFF, BMP, or
-PDF, Threading adds it to that session's **Attachments** tab. The same detection runs over native
-Chat replies, and an image deliberately shown through the display tool is added too. Code files
-are ignored because Git Review already covers them.
+The **Attachments** tab is the session's visual history — the images and PDFs that went in either
+direction, newest first. Two things land there:
+
+- **What the agent surfaces.** A path it prints to an existing PNG, JPEG, GIF, WebP, HEIC, TIFF,
+  BMP or PDF, in the terminal or in a native Chat reply, and any image it shows deliberately
+  through the display tool. Code files are ignored because Git Review already covers them.
+- **What you send.** An image you paste or drop into a composer, or drop onto a terminal. These
+  are marked **You** so the picture you just sent is findable next to whatever the agent made of
+  it, rather than disappearing into the conversation.
+
+Every row is marked **Agent** or **You**, and when a session has both a small **All / Agent / You**
+filter appears beside the count. It stays hidden while everything came from one side.
 
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu. The list
 sits above an inline image/PDF preview; **Open**, **Finder**, and **Copy Path** act on the
-selected file. A new reference to the same path moves it to the top and refreshes the preview,
-so the project file remains the source of truth rather than being copied into Threading.
+selected file.
 
-Only real files inside the session's checkout are accepted. Missing paths, unsupported file
-types, directories, and symlinks escaping the checkout are ignored. Terminal discovery happens
-after an output burst settles, so it does not need native rendering or an explicit MCP tool call.
+A file already inside the checkout is *referenced*: a new mention of the same path moves it to the
+top and refreshes the preview, so the project file stays the source of truth. A file from anywhere
+else — a screenshot in a temporary directory, something dropped from the Desktop — is **copied**
+into Threading, because nothing else is keeping it: temporary files are cleaned up by macOS, and a
+list pointing at one would empty itself. Those copies are removed when the row falls off the end
+of the list or the session is deleted, and **Copy Path** gives you Threading's copy.
+
+Paths merely *printed* are still restricted to the session's checkout: any text can name any file,
+and the list is what a paired phone can fetch. Missing paths, unsupported file types, directories,
+and symlinks escaping the checkout are ignored. Terminal discovery happens after an output burst
+settles, so it does not need native rendering or an explicit MCP tool call.
 
 Automatic detection is an opt-out feature and is enabled separately for both agents by default.
 Use **Settings > General > Attachments** to turn **Detect attachments from Claude Code** or
 **Detect attachments from Codex** off independently if a future CLI version changes how it
-renders file paths. Turning detection off stops scanning that agent's terminal and Native replies;
-files deliberately shown through the display tool still appear.
+renders file paths. Turning detection off stops the *scanning* of that agent's terminal and Chat
+replies. Images you attach, and ones the agent shows in the panel, still appear — those are handed
+over deliberately rather than detected.
 
 ### The shared browser
 

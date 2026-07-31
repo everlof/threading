@@ -762,10 +762,12 @@ public struct RemoteRepositoryFileDTO: Codable, Equatable, Identifiable, Sendabl
     }
 }
 
-/// One image or PDF the agent referred to during a session.
+/// One image or PDF that passed between the two parties during a session.
 ///
-/// The path is checkout-relative. File bytes are fetched separately so the list remains cheap
-/// and the phone never receives visual files it has not chosen to preview.
+/// The path is relative to whatever the host resolved it against — the checkout for a file that
+/// lives there, the host's own attachment store for one it took custody of — and is opaque to the
+/// phone, which only ever hands it back. File bytes are fetched separately so the list remains
+/// cheap and the phone never receives visual files it has not chosen to preview.
 public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let path: String
     public let name: String
@@ -774,6 +776,10 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let byteCount: Int64
     public let modifiedAt: Date?
 
+    /// `agent` or `user`. Optional because a host from before provenance was recorded sends no
+    /// such field, and a phone that guessed would be labelling rows with an answer nobody gave.
+    public let origin: String?
+
     public var id: String { path }
 
     public init(
@@ -781,13 +787,15 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
         name: String,
         kind: String,
         byteCount: Int64,
-        modifiedAt: Date? = nil
+        modifiedAt: Date? = nil,
+        origin: String? = nil
     ) {
         self.path = path
         self.name = name
         self.kind = kind
         self.byteCount = byteCount
         self.modifiedAt = modifiedAt
+        self.origin = origin
     }
 }
 

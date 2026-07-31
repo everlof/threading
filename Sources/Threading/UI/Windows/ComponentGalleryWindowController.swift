@@ -108,6 +108,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedProgressBar",
         "ThemedScroller",
         "ThemedScrollView",
+        "ThemedSegmentedControl",
         "ThemedSpinner",
         "ThemedSplitView",
         "ThemedTableHeaderView",
@@ -407,6 +408,20 @@ final class ComponentGalleryViewController: NSViewController {
             labelledInline("Disabled", disabledToggle)
         ])
 
+        let segmented = ThemedSegmentedControl()
+        let segmentTitles = [
+            L10n.string("List"),
+            L10n.string("Outline"),
+            L10n.string("Grid")
+        ]
+        segmented.configure(titles: segmentTitles, selectedIndex: 1)
+        segmented.onSelect = { [weak self] index in
+            self?.showReceipt(L10n.format(
+                "ThemedSegmentedControl selected %@.",
+                segmentTitles[index]
+            ))
+        }
+
         let popUp = ThemedPopUp()
         [
             L10n.string("First choice"),
@@ -537,6 +552,11 @@ final class ComponentGalleryViewController: NSViewController {
             rows: [
                 story("ThemedButton", "Bordered, prominent, icon-only, and disabled.", buttonRow),
                 story("ThemedToggle", "Off, on, disabled, target/action, and accessibility.", toggleRow),
+                story(
+                    "ThemedSegmentedControl",
+                    "Two or three fixed choices with selection, arrows, and radio-group accessibility.",
+                    segmented
+                ),
                 story(
                     "ThemedPopUp & ChipView",
                     "Fully app-owned dropdowns: selection, subtitle, separator, disabled state, and keyboard navigation.",

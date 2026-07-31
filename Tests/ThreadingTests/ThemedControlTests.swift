@@ -193,6 +193,125 @@ final class ThemedControlTests: XCTestCase {
                              "Swiss's track is not red")
     }
 
+    // MARK: - Segmented Control
+
+    private func makeSegmentedControl(
+        selectedIndex: Int = 0
+    ) -> (ThemedSegmentedControl, [Int]) {
+        let control = ThemedSegmentedControl(frame: NSRect(x: 0, y: 0, width: 180, height: 26))
+        control.configure(
+            titles: ["All", "Agent", "You"],
+            selectedIndex: selectedIndex
+        )
+        control.layoutSubtreeIfNeeded()
+        return (control, [])
+    }
+
+    func testASegmentSelectsOnClickAndReportsItOnce() throws {
+        let (control, _) = makeSegmentedControl()
+        var reported: [Int] = []
+        control.onSelect = { reported.append($0) }
+
+        try XCTUnwrap(control.segment(at: 2)).mouseDown(with: .init())
+
+        XCTAssertEqual(control.selectedIndex, 2)
+        XCTAssertEqual(reported, [2])
+
+        // Re-picking the segment already on is not a choice, and reporting it would make every
+        // host re-run whatever the selection drives.
+        try XCTUnwrap(control.segment(at: 2)).mouseDown(with: .init())
+        XCTAssertEqual(reported, [2], "re-selecting the current segment reported a change")
+    }
+
+    /// Setting the property is a host restoring state, not the user picking — so it moves the
+    /// selection and stays silent.
+    func testAProgrammaticSelectionDoesNotReportAChange() {
+        let (control, _) = makeSegmentedControl()
+        var reported: [Int] = []
+        control.onSelect = { reported.append($0) }
+
+        control.selectedIndex = 1
+
+        XCTAssertEqual(control.selectedIndex, 1)
+        XCTAssertTrue(reported.isEmpty, "restoring a selection reported it as a choice")
+    }
+
+    func testTheRunIsWalkedWithTheArrowKeysAndDoesNotWrap() throws {
+        let (control, _) = makeSegmentedControl()
+        let right = try keyEvent(String(UnicodeScalar(NSRightArrowFunctionKey)!), keyCode: 124)
+        let left = try keyEvent(String(UnicodeScalar(NSLeftArrowFunctionKey)!), keyCode: 123)
+
+        try XCTUnwrap(control.segment(at: 0)).keyDown(with: right)
+        XCTAssertEqual(control.selectedIndex, 1)
+
+        try XCTUnwrap(control.segment(at: 1)).keyDown(with: right)
+        XCTAssertEqual(control.selectedIndex, 2)
+
+        // The end holds rather than wrapping: with three segments a wrap reads as the selection
+        // jumping the length of the control instead of moving one step.
+        try XCTUnwrap(control.segment(at: 2)).keyDown(with: right)
+        XCTAssertEqual(control.selectedIndex, 2, "the run wrapped at its end")
+
+        try XCTUnwrap(control.segment(at: 2)).keyDown(with: left)
+        XCTAssertEqual(control.selectedIndex, 1)
+    }
+
+    func testASegmentIsActivatedFromTheKeyboardAndByAccessibility() throws {
+        let (control, _) = makeSegmentedControl()
+        let space = try keyEvent(" ", keyCode: 49)
+
+        try XCTUnwrap(control.segment(at: 1)).keyDown(with: space)
+        XCTAssertEqual(control.selectedIndex, 1)
+
+        XCTAssertTrue(try XCTUnwrap(control.segment(at: 2)).accessibilityPerformPress())
+        XCTAssertEqual(control.selectedIndex, 2)
+    }
+
+    /// A run of mutually exclusive choices is a radio group whose segments are its buttons —
+    /// the same shape `ThemedTabItemView` already reports, so VoiceOver and UI scripting can
+    /// name and pick one segment rather than meeting a single opaque control.
+    func testTheRunReportsItselfAsARadioGroupOfNamedButtons() throws {
+        let (control, _) = makeSegmentedControl(selectedIndex: 1)
+
+        XCTAssertEqual(control.accessibilityRole(), .radioGroup)
+
+        let agent = try XCTUnwrap(control.segment(at: 1))
+        let you = try XCTUnwrap(control.segment(at: 2))
+
+        XCTAssertTrue(agent.isAccessibilityElement())
+        XCTAssertEqual(agent.accessibilityRole(), .radioButton)
+        XCTAssertEqual(agent.accessibilityTitle(), "Agent")
+        XCTAssertEqual(agent.accessibilityValue() as? Bool, true)
+        XCTAssertEqual(you.accessibilityValue() as? Bool, false)
+    }
+
+    func testTheSelectedSegmentIsDrawnDifferentlyFromItsNeighbours() throws {
+        let (control, _) = makeSegmentedControl(selectedIndex: 0)
+        let first = try XCTUnwrap(control.segment(at: 0))
+        let second = try XCTUnwrap(control.segment(at: 1))
+
+        XCTAssertNotEqual(
+            try renderedPNG(of: first),
+            try renderedPNG(of: second),
+            "the selection is not visible on the control"
+        )
+    }
+
+    /// The track goes through `applySurface` and the segments draw from roles, so both follow a
+    /// live switch. A run drawn once and left alone is how a themed control keeps the palette it
+    /// was born under — the bug `ThemedControl` exists to prevent.
+    func testTheRunFollowsALiveThemeSwitch() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let (control, _) = makeSegmentedControl(selectedIndex: 1)
+        let cyber = try renderedPNG(of: control)
+
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        AppThemeRefresh.repaint(control)
+        let swiss = try renderedPNG(of: control)
+
+        XCTAssertNotEqual(cyber, swiss, "the run kept the palette it was built under")
+    }
+
     // MARK: - Pop-Up Drop-in Behaviour
 
     /// `ThemedPopUp` replaces `NSPopUpButton` at call sites that add titled items and read the
@@ -2685,6 +2804,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedProgressBar",
                 "ThemedScroller",
                 "ThemedScrollView",
+                "ThemedSegmentedControl",
                 "ThemedSpinner",
                 "ThemedSplitView",
                 "ThemedTableHeaderView",

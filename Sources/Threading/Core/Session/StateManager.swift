@@ -436,6 +436,21 @@ final class StateManager {
         }
     }
 
+    /// Where `SessionAttachmentStore` keeps the files it had to take custody of.
+    ///
+    /// Bytes rather than rows, so this lives beside the database instead of in it: an attachment
+    /// declared from `$TMPDIR` has no other owner, and a blob column would put a session's
+    /// screenshots into the file the whole app's state is read from. Reset already removes the
+    /// whole Application Support directory, so nothing here needs its own erasure path.
+    var attachmentCopiesDirectory: URL {
+        let directory = appSupportDirectory.appendingPathComponent(
+            "Attachments",
+            isDirectory: true
+        )
+        ensureDirectoryExists(directory)
+        return directory
+    }
+
     /// Reads the `panels/<uuid>.json` files into the database once, then renames the directory.
     ///
     /// Attempted at most once per launch whether or not it finds anything, since the common

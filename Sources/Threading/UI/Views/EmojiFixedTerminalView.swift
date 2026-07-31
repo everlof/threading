@@ -141,7 +141,19 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         // screenshot arriving as `[Image #1]` and arriving as the path it was written to.
         // Both CLIs read a paste of an image path as the image; neither watches typed
         // characters for one, and a drop is a paste in every terminal that has one.
-        pasteText(TerminalDrop.text(for: TerminalDropImage.readable(paths, for: effectiveDropReader)))
+        let readable = TerminalDropImage.readable(paths, for: effectiveDropReader)
+        pasteText(TerminalDrop.text(for: readable))
+
+        // Filed as the user's, because scanning cannot do it: the CLI swallows the path into
+        // `[Image #1]`, so the one place this drop is still a path is right here.
+        if let sessionID = owningSessionID(),
+           let project = ProjectStore.shared.project(forSessionID: sessionID) {
+            PromptAttachment.record(
+                paths: readable,
+                sessionID: sessionID,
+                projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true)
+            )
+        }
         return true
     }
 

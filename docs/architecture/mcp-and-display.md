@@ -226,3 +226,64 @@ leaving, not on grabbing, is what keeps a plain reorder from flinging the other 
 the destination strip washes as a drop target (`isDropTarget`), and a drag that settles
 without its drop puts everything back (`dragDidSettle`). The menu remains the gesture's
 pointerless twin, per the design system's rule.
+
+## Attachments
+
+The Attachments tab is the session's visual history: everything that passed between the two
+parties, newest first, capped at `SessionAttachmentDefaults.maximumPerSession`.
+
+**There are two doors into the list, and conflating them was the bug.**
+
+| | admitted | served to a paired phone |
+|---|---|---|
+| **scanned** — the terminal's rendered buffer, a native conversation's finished assistant prose | inside the checkout only | yes |
+| **declared** — `display_image`, `display_compare_files`, an image dropped or pasted into a prompt or a terminal | anywhere, copied in if it is not already in the checkout | yes |
+
+The containment rule is real, but it is a rule about **what may leave over the wire**, and it was
+being enforced at *admission*. Membership in this list is precisely the allowlist
+`handleAttachment` resolves against — `RemoteInboundPolicy.acceptsRepositoryPath` is only a
+length-and-NUL check — so without containment a single `find ~ -name '*.png'` printed in a
+terminal would enumerate the user's pictures into a remotely fetchable list. That is why *scanned*
+paths still may not leave the checkout: text is not a handoff, and a build log, a `cat`, or a
+repository's own fixtures can name any path on disk.
+
+A *declared* file is a different act, and applying the same rule to it protected nothing while
+costing everything. `display_image` resolves the file, decodes it, size-checks it and draws it in
+the panel — and then handed it to a recorder that dropped it unless it was in the checkout. Agents
+work in one-off places (`$TMPDIR`, `/tmp`, a scratch directory), so in practice the one signal in
+the system that unambiguously means *here is a picture* could never reach the pane. This project
+is its own example: the render tests write every screenshot to `$TMPDIR/ThreadingRenders`.
+
+**A declared file from outside the checkout is copied into
+`Application Support/Threading/Attachments/<session>/<slot>/`, not referenced.** Attachments are
+references everywhere else on purpose — the project file stays authoritative, so an overwrite
+refreshes every preview — and this is the case that rule does not cover: nothing else owns a
+temporary file, the list is persisted and outlives the turn, and reading prunes rows whose file
+has gone. A reference into `$TMPDIR` therefore comes back as an empty pane once the reaper has
+run, which is the vanishing-attachments bug wearing a new hat. Copying also *restores* the
+property containment was really providing, more strongly than before: every file in the list now
+sits somewhere the app controls, the checkout or its own store.
+
+Two consequences worth keeping:
+
+- **The dedupe key is the source path, not the row's own path.** A copy's path is minted per
+  attachment, so matching on it would file every regenerated chart as a new row. A second
+  declaration of the same source keeps the row's slot — and therefore its identity on the remote
+  wire — and overwrites the bytes underneath it.
+- **Custody ends where the row does.** A row evicted by the cap, and every row of a session that
+  `retainOnly` forgets, takes its copied bytes with it. A *referenced* file is never deleted:
+  it belongs to the checkout, and losing a row is not a reason to touch the user's file.
+
+**Provenance is `SessionAttachment.Origin`, and it is coarser than it looks.** A terminal scan
+reads the whole buffer and cannot tell a path the agent printed from one the user typed, so
+everything scanned is `agent` — the session surfaced it. `user` is reserved for a deliberate
+handoff through `PromptAttachment.record`: the composer's attachment strip, and a drop on the
+terminal, which has to be recorded at the drop because the CLI swallows the path into `[Image #1]`
+and scanning never sees it. The pane marks every row and offers All / Agent / You as a
+`ThemedSegmentedControl`, hidden while the whole list is one side's. The phone shows the same mark
+when the host sends one (`RemoteAttachmentDTO.origin`, optional so an older host is not guessed at).
+
+Settings' per-agent **attachment detection** toggle gates *scanning* only. A declared handoff is
+not detection, so turning it off does not hide the images you attach or the ones the agent shows
+in the panel — which the empty state now says, because an empty pane that blames a setting for
+something the setting does not control is worse than an empty pane.

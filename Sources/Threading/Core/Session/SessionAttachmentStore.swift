@@ -2,10 +2,12 @@ import Foundation
 
 // MARK: - Attachment
 
-/// A visual file an agent referred to in one session.
+/// A visual file that passed between the two parties in one session.
 ///
-/// Attachments are references, not copies. The project file remains authoritative, so replacing
-/// an image or PDF at the same path updates every preview without growing a second cache.
+/// Attachments inside the checkout are references, not copies. The project file remains
+/// authoritative, so replacing an image or PDF at the same path updates every preview without
+/// growing a second cache. A file from anywhere else is copied into the store's own directory
+/// instead — see `SessionAttachmentStore` for why that exception exists and where it stops.
 struct SessionAttachment: Equatable, Identifiable {
 
     enum Kind: String, Codable {
@@ -13,14 +15,35 @@ struct SessionAttachment: Equatable, Identifiable {
         case pdf
     }
 
+    /// Which side of the conversation put the file in front of the other.
+    ///
+    /// The distinction is not decorative: the pane mixed the two silently, because a terminal
+    /// scan reads the whole buffer and cannot tell a path the agent printed from one the user
+    /// typed. Everything discovered by scanning is therefore `agent` — the session surfaced it —
+    /// and `user` is reserved for a deliberate handoff from the composer, which is the thing
+    /// someone means when they ask where the picture they sent went.
+    enum Origin: String, Codable {
+        case agent
+        case user
+    }
+
     /// Relative paths are stable across a moved checkout and are safe to put on the remote wire.
     var id: String { relativePath }
 
     let sessionID: SessionID
-    let projectRoot: URL
+
+    /// The directory `relativePath` is resolved against: the checkout for a referenced file, the
+    /// store's own directory for a copied one.
+    let root: URL
     let url: URL
     let relativePath: String
+
+    /// The file as it was named when it was recorded, and the key a second mention is matched
+    /// against. A copy's own path is minted per attachment, so matching on that would file every
+    /// regenerated chart as a new row instead of refreshing the one already there.
+    let sourcePath: String
     let kind: Kind
+    let origin: Origin
     let referencedAt: Date
 
     var name: String { url.lastPathComponent }
@@ -34,12 +57,35 @@ struct SessionAttachmentsDidChange: AppEvent {
 
 // MARK: - Store
 
-/// The session-scoped set of visual files mentioned by terminal and native agents.
+/// The session-scoped set of visual files that passed between the user and the agent.
 ///
-/// Main-thread only, like `ProjectStore` and the display pane. Paths are admitted only after
-/// resolving symlinks and proving the result is a regular supported file inside the checkout.
-/// This boundary matters twice: it keeps noisy terminal output from creating bogus rows, and it
-/// keeps the paired-phone endpoint from becoming an arbitrary local-file reader.
+/// Main-thread only, like `ProjectStore` and the display pane. There are **two doors in, and
+/// they are not the same door**, which is the correction at the centre of this type:
+///
+/// - **Scanned** (`recordReferences`) — paths found by reading live output. Text is not a
+///   handoff: a build log, a `cat`, a repository's own fixtures can name any path on disk, so a
+///   scanned path is admitted only from inside the checkout. That rule is doing more than
+///   suppressing noise. Membership in this list is exactly what the paired-phone endpoint will
+///   serve, so without it one `find ~ -name '*.png'` printed in a terminal would enumerate the
+///   user's pictures into a fetchable list.
+/// - **Declared** (`record(declared:…)`) — a file handed over on purpose: an agent's
+///   `display_image` or comparison, or an image the user attached to their prompt. The
+///   containment rule does not apply, because by then there is nothing left for it to protect —
+///   the bytes have been opened, decoded and drawn on the user's own screen.
+///
+/// Enforcing the scanned rule at *admission* was the bug. It is a rule about what may leave over
+/// the wire, and applying it to declared files silently dropped the one signal in the system that
+/// unambiguously means *here is a picture*: agents work in one-off places — `$TMPDIR`, `/tmp`, a
+/// scratch directory — and so does this project, whose own render tests write every screenshot
+/// they produce to `$TMPDIR/ThreadingRenders`. None of it could ever reach the pane.
+///
+/// A declared file from outside the checkout is **copied in** rather than referenced, which is
+/// the one place attachments are not references. Nothing else owns a temporary file; the list
+/// outlives the turn that named it; and reading prunes entries whose file has gone — so a
+/// reference into `$TMPDIR` comes back as an empty pane once the reaper has run, which is the
+/// vanishing-attachments bug in a new costume. Copying also preserves what the containment rule
+/// was really providing: every file in the list sits somewhere the app controls, the checkout or
+/// its own store, so the remote endpoint stays a reader of its own data.
 ///
 /// The list is **persisted** per session, beside the panel layout it belongs with. Detection
 /// only sees live output — a terminal's recent buffer, a conversation's streamed turns — so a
@@ -56,7 +102,8 @@ final class SessionAttachmentStore {
         return SessionAttachmentStore(
             loadPayload: { StateManager.shared.loadAttachmentsPayload(for: $0) },
             savePayload: { StateManager.shared.saveAttachmentsPayload($0, for: $1) },
-            retainPersisted: { StateManager.shared.retainAttachments(sessionIDs: $0) }
+            retainPersisted: { StateManager.shared.retainAttachments(sessionIDs: $0) },
+            copiesDirectory: { StateManager.shared.attachmentCopiesDirectory }
         )
     }()
 
@@ -68,22 +115,30 @@ final class SessionAttachmentStore {
     private let savePayload: ((String, SessionID) -> Void)?
     private let retainPersisted: ((Set<SessionID>) -> Void)?
 
+    /// Where a declared file from outside the checkout is copied to. Absent means the store may
+    /// only hold references, so a declared file it cannot take custody of is refused rather than
+    /// listed as a path that will rot — the invariant holds either way.
+    private let copiesDirectory: (() -> URL)?
+
     init(
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init,
         loadPayload: ((SessionID) -> String?)? = nil,
         savePayload: ((String, SessionID) -> Void)? = nil,
-        retainPersisted: ((Set<SessionID>) -> Void)? = nil
+        retainPersisted: ((Set<SessionID>) -> Void)? = nil,
+        copiesDirectory: (() -> URL)? = nil
     ) {
         self.fileManager = fileManager
         self.now = now
         self.loadPayload = loadPayload
         self.savePayload = savePayload
         self.retainPersisted = retainPersisted
+        self.copiesDirectory = copiesDirectory
     }
 
-    // MARK: Recording
+    // MARK: Recording — the scanned door
 
+    /// Records the supported files named in live output. In-checkout only; see the type's note.
     @discardableResult
     func recordReferences(
         in text: String,
@@ -100,16 +155,9 @@ final class SessionAttachmentStore {
         return record(urls: urls, sessionID: sessionID, projectRoot: projectRoot)
     }
 
-    /// Records an already-resolved file, used by an explicit display-image tool call.
+    /// Records already-resolved in-checkout files. Scanning resolves its own, so this is for a
+    /// caller that has done the resolving and accepts the same containment rule.
     @discardableResult
-    func record(
-        url: URL,
-        sessionID: SessionID,
-        projectRoot: URL
-    ) -> SessionAttachment? {
-        record(urls: [url], sessionID: sessionID, projectRoot: projectRoot).first
-    }
-
     func record(
         urls: [URL],
         sessionID: SessionID,
@@ -117,13 +165,89 @@ final class SessionAttachmentStore {
     ) -> [SessionAttachment] {
         let timestamp = now()
         let made = urls.compactMap {
-            validatedAttachment(
+            referencedAttachment(
                 at: $0,
                 sessionID: sessionID,
-                projectRoot: projectRoot,
+                root: projectRoot,
+                origin: .agent,
                 referencedAt: timestamp
             )
         }
+        return admit(made, for: sessionID)
+    }
+
+    /// Single-file convenience retained for callers that already resolved an in-checkout path.
+    @discardableResult
+    func record(
+        url: URL,
+        sessionID: SessionID,
+        projectRoot: URL
+    ) -> SessionAttachment? {
+        record(
+            urls: [url],
+            sessionID: sessionID,
+            projectRoot: projectRoot
+        ).first
+    }
+
+    // MARK: Recording — the declared door
+
+    /// Records a file handed over on purpose, from wherever it happens to live.
+    ///
+    /// `preferredName` renames the copy this may take, for the one caller whose file has no name
+    /// worth showing: a pasted screenshot arrives as `threading-attachment-<UUID>.png`, and a row
+    /// reading that tells the person who pasted it nothing at all.
+    @discardableResult
+    func record(
+        declared urls: [URL],
+        sessionID: SessionID,
+        projectRoot: URL,
+        origin: SessionAttachment.Origin,
+        preferredName: String? = nil
+    ) -> [SessionAttachment] {
+        // Loaded before anything is built: a second mention of the same source is matched against
+        // the list as it stands, so a regenerated chart overwrites its copy in place.
+        loadIfNeeded(sessionID)
+
+        let timestamp = now()
+        let made = urls.compactMap {
+            declaredAttachment(
+                at: $0,
+                sessionID: sessionID,
+                projectRoot: projectRoot,
+                origin: origin,
+                preferredName: preferredName,
+                referencedAt: timestamp
+            )
+        }
+        return admit(made, for: sessionID)
+    }
+
+    /// The single-file form, which is every declared caller but a comparison.
+    @discardableResult
+    func record(
+        declared url: URL,
+        sessionID: SessionID,
+        projectRoot: URL,
+        origin: SessionAttachment.Origin,
+        preferredName: String? = nil
+    ) -> SessionAttachment? {
+        record(
+            declared: [url],
+            sessionID: sessionID,
+            projectRoot: projectRoot,
+            origin: origin,
+            preferredName: preferredName
+        ).first
+    }
+
+    // MARK: Recording — admission
+
+    /// Files newest-first, capped, persisted, announced — the half both doors share.
+    private func admit(
+        _ made: [SessionAttachment],
+        for sessionID: SessionID
+    ) -> [SessionAttachment] {
         guard !made.isEmpty else { return [] }
 
         // Loaded first, so a reference arriving before the pane was ever opened lands on top
@@ -131,10 +255,16 @@ final class SessionAttachmentStore {
         loadIfNeeded(sessionID)
         var current = attachmentsBySession[sessionID] ?? []
         for attachment in made {
-            current.removeAll { $0.relativePath == attachment.relativePath }
+            let superseded = current.filter { $0.sourcePath == attachment.sourcePath }
+            current.removeAll { $0.sourcePath == attachment.sourcePath }
+            // A copy that kept its slot is the same file on disk, now overwritten; only one that
+            // lost its slot leaves bytes behind.
+            discardCopies(in: superseded.filter { $0.relativePath != attachment.relativePath })
             current.insert(attachment, at: 0)
         }
         if current.count > SessionAttachmentDefaults.maximumPerSession {
+            let evicted = current.suffix(current.count - SessionAttachmentDefaults.maximumPerSession)
+            discardCopies(in: Array(evicted))
             current.removeLast(current.count - SessionAttachmentDefaults.maximumPerSession)
         }
         attachmentsBySession[sessionID] = current
@@ -149,10 +279,12 @@ final class SessionAttachmentStore {
         loadIfNeeded(sessionID)
         guard let stored = attachmentsBySession[sessionID] else { return [] }
         let current = stored.compactMap {
-            validatedAttachment(
+            referencedAttachment(
                 at: $0.url,
                 sessionID: sessionID,
-                projectRoot: $0.projectRoot,
+                root: $0.root,
+                origin: $0.origin,
+                sourcePath: $0.sourcePath,
                 referencedAt: $0.referencedAt
             )
         }
@@ -174,6 +306,7 @@ final class SessionAttachmentStore {
         attachmentsBySession = attachmentsBySession.filter { sessionIDs.contains($0.key) }
         loadedSessions = loadedSessions.intersection(sessionIDs)
         retainPersisted?(sessionIDs)
+        discardCopiesOutside(sessionIDs)
     }
 
     // MARK: Persistence
@@ -196,13 +329,18 @@ final class SessionAttachmentStore {
         else { return }
 
         attachmentsBySession[sessionID] = document.entries.map { entry in
-            let root = URL(fileURLWithPath: entry.projectRoot, isDirectory: true)
+            let root = URL(fileURLWithPath: entry.root, isDirectory: true)
+            let url = root.appendingPathComponent(entry.relativePath)
             return SessionAttachment(
                 sessionID: sessionID,
-                projectRoot: root,
-                url: root.appendingPathComponent(entry.relativePath),
+                root: root,
+                url: url,
                 relativePath: entry.relativePath,
+                // A payload written before provenance was recorded has no source of its own, and
+                // its own path is the key it was already deduplicated by.
+                sourcePath: entry.sourcePath ?? url.path,
                 kind: entry.kind,
+                origin: entry.origin ?? .agent,
                 referencedAt: entry.referencedAt
             )
         }
@@ -212,9 +350,11 @@ final class SessionAttachmentStore {
         guard let savePayload else { return }
         let entries = attachments.map {
             PersistedSessionAttachment(
-                projectRoot: $0.projectRoot.path,
+                root: $0.root.path,
                 relativePath: $0.relativePath,
+                sourcePath: $0.sourcePath,
                 kind: $0.kind,
+                origin: $0.origin,
                 referencedAt: $0.referencedAt
             )
         }
@@ -226,33 +366,154 @@ final class SessionAttachmentStore {
 
     // MARK: Validation
 
-    private func validatedAttachment(
+    /// A file kept as a reference, proven to be a regular supported file inside `root`.
+    private func referencedAttachment(
         at url: URL,
         sessionID: SessionID,
-        projectRoot: URL,
+        root: URL,
+        origin: SessionAttachment.Origin,
+        sourcePath: String? = nil,
         referencedAt: Date
     ) -> SessionAttachment? {
-        let root = projectRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let base = root.standardizedFileURL.resolvingSymlinksInPath()
         let file = url.standardizedFileURL.resolvingSymlinksInPath()
-        guard AttachmentReferenceDetector.contains(file, inside: root),
+        guard AttachmentReferenceDetector.contains(file, inside: base),
               let kind = AttachmentReferenceDetector.kind(for: file),
               let values = try? file.resourceValues(forKeys: [.isRegularFileKey]),
               values.isRegularFile == true else {
             return nil
         }
 
-        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        let rootPrefix = base.path.hasSuffix("/") ? base.path : base.path + "/"
         let relativePath = String(file.path.dropFirst(rootPrefix.count))
         guard !relativePath.isEmpty else { return nil }
 
         return SessionAttachment(
             sessionID: sessionID,
-            projectRoot: root,
+            root: base,
             url: file,
             relativePath: relativePath,
+            sourcePath: sourcePath ?? file.path,
             kind: kind,
+            origin: origin,
             referencedAt: referencedAt
         )
+    }
+
+    /// A file handed over on purpose: referenced when it is already in the checkout, copied into
+    /// the store's own directory when it is not.
+    private func declaredAttachment(
+        at url: URL,
+        sessionID: SessionID,
+        projectRoot: URL,
+        origin: SessionAttachment.Origin,
+        preferredName: String?,
+        referencedAt: Date
+    ) -> SessionAttachment? {
+        let file = url.standardizedFileURL.resolvingSymlinksInPath()
+        let checkout = projectRoot.standardizedFileURL.resolvingSymlinksInPath()
+
+        if AttachmentReferenceDetector.contains(file, inside: checkout) {
+            return referencedAttachment(
+                at: file,
+                sessionID: sessionID,
+                root: checkout,
+                origin: origin,
+                referencedAt: referencedAt
+            )
+        }
+
+        guard let kind = AttachmentReferenceDetector.kind(for: file),
+              let values = try? file.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true,
+              let root = copiesRoot(for: sessionID) else {
+            return nil
+        }
+
+        // A second mention of the same source reuses the slot it already has, so the row keeps
+        // its identity — and therefore its place on the remote wire — while the bytes are
+        // refreshed underneath it.
+        let name = preferredName.map { sanitized($0, matching: file) } ?? file.lastPathComponent
+        let existing = attachmentsBySession[sessionID]?.first {
+            $0.sourcePath == file.path && AttachmentReferenceDetector.contains($0.url, inside: root)
+        }
+        let relativePath = existing?.relativePath ?? "\(UUID().uuidString)/\(name)"
+        let destination = root.appendingPathComponent(relativePath)
+
+        guard copy(file, to: destination) else { return nil }
+
+        return SessionAttachment(
+            sessionID: sessionID,
+            root: root,
+            url: destination,
+            relativePath: relativePath,
+            sourcePath: file.path,
+            kind: kind,
+            origin: origin,
+            referencedAt: referencedAt
+        )
+    }
+
+    // MARK: Copies
+
+    private func copiesRoot(for sessionID: SessionID) -> URL? {
+        copiesDirectory?().appendingPathComponent(sessionID.uuidString, isDirectory: true)
+    }
+
+    /// Keeps the name readable and the extension truthful: the preview and the remote content
+    /// type are both chosen from the extension, so a rename may not change it.
+    private func sanitized(_ name: String, matching file: URL) -> String {
+        let base = URL(fileURLWithPath: name)
+            .deletingPathExtension()
+            .lastPathComponent
+            .replacingOccurrences(of: "/", with: "-")
+        guard !base.isEmpty else { return file.lastPathComponent }
+        return "\(base).\(file.pathExtension)"
+    }
+
+    private func copy(_ file: URL, to destination: URL) -> Bool {
+        do {
+            try fileManager.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            try fileManager.copyItem(at: file, to: destination)
+            return true
+        } catch {
+            ThreadingLogger.session.error(
+                "Failed to keep attachment \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
+    /// Removes the bytes behind rows that have left the list. A referenced file is untouched —
+    /// it belongs to the checkout, and evicting a row is not a reason to delete the user's file.
+    private func discardCopies(in attachments: [SessionAttachment]) {
+        for attachment in attachments {
+            guard let root = copiesRoot(for: attachment.sessionID),
+                  AttachmentReferenceDetector.contains(attachment.url, inside: root),
+                  // The copy's own directory, not the file: one attachment owns one directory.
+                  let slot = attachment.relativePath.split(separator: "/").first else {
+                continue
+            }
+            try? fileManager.removeItem(at: root.appendingPathComponent(String(slot)))
+        }
+    }
+
+    private func discardCopiesOutside(_ sessionIDs: Set<SessionID>) {
+        guard let directory = copiesDirectory?() else { return }
+        let kept = Set(sessionIDs.map(\.uuidString))
+        let contents = (try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for url in contents where !kept.contains(url.lastPathComponent) {
+            try? fileManager.removeItem(at: url)
+        }
     }
 }
 

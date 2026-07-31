@@ -185,6 +185,7 @@
 		9D3C92123FC0C70AF939DCAD /* WindowEdgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C0EF54B1B5A0259B810C4DB /* WindowEdgeTests.swift */; };
 		8230F80B6DBC52AC3844F0AA /* ToastTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D6E5071CD39E2C48FF724C /* ToastTests.swift */; };
 		848E256B37EE297666E7DD93 /* ToastRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E716F7AED733087F8126C89 /* ToastRenderTests.swift */; };
+		3D98B541B905C53B6060A78C /* SessionAttachmentStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -414,6 +415,7 @@
 		2C0EF54B1B5A0259B810C4DB /* WindowEdgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WindowEdgeTests.swift; sourceTree = "<group>"; };
 		00D6E5071CD39E2C48FF724C /* ToastTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToastTests.swift; sourceTree = "<group>"; };
 		1E716F7AED733087F8126C89 /* ToastRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToastRenderTests.swift; sourceTree = "<group>"; };
+		6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionAttachmentStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -703,6 +705,7 @@
 				2C0EF54B1B5A0259B810C4DB /* WindowEdgeTests.swift */,
 				00D6E5071CD39E2C48FF724C /* ToastTests.swift */,
 				1E716F7AED733087F8126C89 /* ToastRenderTests.swift */,
+				6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1238,6 +1241,7 @@
 				9D3C92123FC0C70AF939DCAD /* WindowEdgeTests.swift in Sources */,
 				8230F80B6DBC52AC3844F0AA /* ToastTests.swift in Sources */,
 				848E256B37EE297666E7DD93 /* ToastRenderTests.swift in Sources */,
+				3D98B541B905C53B6060A78C /* SessionAttachmentStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

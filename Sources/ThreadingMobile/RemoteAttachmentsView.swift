@@ -117,7 +117,7 @@ private struct RemoteAttachmentRow: View {
                     .font(.body.weight(.medium))
                     .foregroundStyle(theme.label)
                     .lineLimit(1)
-                Text("\(attachment.path) · \(formattedSize)")
+                Text(detail)
                     .font(.caption)
                     .foregroundStyle(theme.tertiaryLabel)
                     .lineLimit(1)
@@ -125,6 +125,25 @@ private struct RemoteAttachmentRow: View {
             }
         }
         .frame(minHeight: 52)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Provenance leads when the host sent it: on a phone the list is the whole pane, and which
+    /// side a file came from is the thing the path is least likely to say.
+    private var detail: String {
+        [originLabel, attachment.path, formattedSize]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+
+    /// A host from before provenance existed sends nothing, and a guess would be worse than the
+    /// row the phone has always shown.
+    private var originLabel: String? {
+        switch attachment.origin {
+        case "user": return "You"
+        case "agent": return "Agent"
+        default: return nil
+        }
     }
 
     private var formattedSize: String {
