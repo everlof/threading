@@ -292,7 +292,7 @@ final class AppThemeTests: XCTestCase {
     func testNumericRolesDoNotFollowTheTypeface() throws {
         AppThemePalette.set(.system)
         let numeric = NSTextField(labelWithString: "5h 43%")
-        numeric.applyFont(.numericControl)
+        numeric.applyFont(.numericControl())
         let before = try XCTUnwrap(numeric.font)
 
         AppThemePalette.set(AppThemeStyles.newsprint)

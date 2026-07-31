@@ -5,11 +5,49 @@ import ThreadingExtensionKit
 
 @MainActor
 enum GitStatusOverlayDefaults {
+
+    /// The one role every row of the card is set in — branch, counters, agent line and both
+    /// button rows — so a stack of readings holds one line box and one column.
+    ///
+    /// It is the **control** size rather than the detail size it started at. The card is a glance
+    /// surface floating over a terminal at whatever size the user set *that* to, and at 11pt its
+    /// rows read as a footnote about the pane rather than as the pane's own status. The role also
+    /// carries monospaced digits, which is what keeps the counters from reflowing as they count.
+    static let font = Design.FontRole.numericControl(weight: .medium)
+
     /// One line of the card, and the whole card when the checkout is clean and the session has
     /// no children. Every further fact adds a row beneath it rather than words beside it.
-    static let height: CGFloat = 26
-    static let fontSize: CGFloat = 11
+    ///
+    /// Not a band the rows are laid into — `verticalInset` around one line of the card's own type
+    /// *is* this number, which is why a one-row card comes out at the pill height whichever row it
+    /// holds. **Derived rather than stated**: it was a literal 26 that matched an 11-point line,
+    /// so it was already a point or two out for anyone running the app's text scale above 100%,
+    /// and moving the card's type by one step would have left the pill radius measuring the old one.
+    static var height: CGFloat { verticalInset * 2 + textRowHeight }
+
+    /// The height of a row that is just words — a label at the card's font, which is its line box
+    /// and nothing else.
+    static var textRowHeight: CGFloat {
+        ceil(font.resolved().boundingRectForFont.height)
+    }
+
+    /// Marks are set at the size of the words beside them, so the pair reads as one line rather
+    /// than as a symbol with a caption.
+    static var markPointSize: CGFloat { font.resolved().pointSize }
+
     static let maxWidth: CGFloat = 360
+
+    /// From the card's edge to the first and last row.
+    static let verticalInset: CGFloat = Design.Spacing.small
+    /// Between one reading and the next. Tighter than the inset, so the rows read as a list
+    /// inside a card rather than as three cards sharing a border.
+    ///
+    /// **Uniform, and that is the whole point.** The card used to centre its leading row in a
+    /// 26-point band and leave every row below it bare with the stack spaced at zero, so the
+    /// gap under the first line was the band's own half-padding and the gaps under the rest
+    /// were nothing. Three facts came out at 6 / 0 / 0 — the branch floating alone and the
+    /// counters and the agent line stuck together underneath it.
+    static let rowGap: CGFloat = Design.Spacing.tight
     /// Quiet at rest, per the design system; full under the pointer.
     ///
     /// Carried by the card's **contents** rather than by the card. On the view it also thinned
@@ -69,6 +107,21 @@ final class GitStatusOverlayView: BackdropOverlay {
     var onOpen: (() -> Void)?
     /// The child-agent segment is a distinct destination inside the same status card.
     var onOpenSubagents: (() -> Void)?
+    /// So is the audience segment, which opens the sharing pane.
+    var onOpenSharing: (() -> Void)?
+
+    /// What the card says about who can see this chat from outside this Mac.
+    ///
+    /// Both halves are here because the row appears for either: somebody watching is the live
+    /// fact, and a link nobody has used yet is the standing one. A chat that is reachable and
+    /// unwatched looks exactly like a private chat without this — which is the reason the row
+    /// is not gated on `following > 0`.
+    struct AudienceReading: Equatable {
+        var following = 0
+        var isShared = false
+
+        var isEmpty: Bool { following == 0 && !isShared }
+    }
 
     /// The card's rows, top down: the summary line, the counters line, the agent line, the
     /// children line.
@@ -76,7 +129,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// The first row — the mark and whichever sentence leads: branch, plan position, or, on a
     /// detached head, the counters themselves.
     private let summaryRow = NSStackView()
-    /// The counters line: how many files, and the two totals held to the trailing edge.
+    /// The counters line: how many files, and the two totals a step after the count.
     private let countersRow = NSStackView()
     /// The agent line: which model this session is running, and how, for the facts its own
     /// status line does not already say.
@@ -85,9 +138,9 @@ final class GitStatusOverlayView: BackdropOverlay {
     private let countersMark = NSImageView()
     private let modelMark = NSImageView()
     private let subagentsButton: ThemedButton
+    private let audienceButton: ThemedButton
     private var summaryLabel: NSTextField?
     private var filesLabel: NSTextField?
-    private var countersGap: NSView?
     private var countersLabel: NSTextField?
     private var modelLabel: NSTextField?
     /// Whether there is a Git sentence to click through to Git Review with.
@@ -103,12 +156,10 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// replacement — so the container never joins the hierarchy and composes nothing.
     private let customizationContainer = ComponentContentContainer(defaultContent: NSView())
     private var customizationHost: ComponentCustomizationHost?
+    private var contentTopConstraint: NSLayoutConstraint?
     private var collapsedBottomConstraint: NSLayoutConstraint?
     private var expandedBottomConstraint: NSLayoutConstraint?
     private var slotTopConstraint: NSLayoutConstraint?
-    private var summaryRowHeightConstraint: NSLayoutConstraint?
-    private var countersRowHeightConstraint: NSLayoutConstraint?
-    private var modelRowHeightConstraint: NSLayoutConstraint?
     private var slotRowWidthConstraints: [NSLayoutConstraint] = []
 
     /// Held so a backdrop change can rebuild the label, which carries its colours inside an
@@ -118,6 +169,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var runProgress: RunProgress?
     private var subagentCounts = (working: 0, done: 0)
     private var modelReading: ModelReading?
+    private var audienceReading = AudienceReading()
 
     /// Lifts the card's *contents* to full strength under the pointer. The surface behind them
     /// does not move: it is what keeps the pane's text out of the card.
@@ -127,6 +179,20 @@ final class GitStatusOverlayView: BackdropOverlay {
             let alpha = isHovered ? 1 : GitStatusOverlayDefaults.restingContentAlpha
             content.alphaValue = alpha
             extensionSlotStack.alphaValue = alpha
+        }
+    }
+
+    /// Whether the pointer is on the rows that open Git Review, rather than merely on the card.
+    ///
+    /// The card is **not one button**, and lifting all of it under the pointer said it was: the
+    /// Git rows open Git Review, the children row opens the Subagents tab, the audience row opens
+    /// sharing, and the agent line and any extension row are readings that do nothing at all. The
+    /// two button rows have lit their own words since they were controls; this is what gives the
+    /// third destination — the one drawn as text — the same answer.
+    private var isGitHovered = false {
+        didSet {
+            guard isGitHovered != oldValue else { return }
+            needsDisplay = true
         }
     }
 
@@ -140,6 +206,14 @@ final class GitStatusOverlayView: BackdropOverlay {
         subagentsButton = ThemedButton(
             symbol: "person.2",
             accessibility: L10n.string("Open Subagents"),
+            target: nil,
+            action: nil
+        )
+        // An eye rather than a person: the row is about being *looked at*, and `person.2` is
+        // already the children row two lines above it.
+        audienceButton = ThemedButton(
+            symbol: "eye",
+            accessibility: L10n.string("Open Sharing"),
             target: nil,
             action: nil
         )
@@ -185,12 +259,13 @@ final class GitStatusOverlayView: BackdropOverlay {
         modelRow.isHidden = true
         modelRow.addArrangedSubview(modelMark)
 
-        // No spacing between rows: the summary band and the children button are each a
-        // 26-point band with their own text centred in it, so the padding is already there.
-        // A spacing token here would be counted twice and the lines would drift apart.
+        // One gap, every row, and the card's own inset around the outside — see `rowGap` for
+        // the rhythm this replaced. The children row is the one row that pads itself, and
+        // `rebuild()` gives that padding back out of the gap beside it rather than letting the
+        // stack count it twice.
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 0
+        content.spacing = GitStatusOverlayDefaults.rowGap
         content.alphaValue = GitStatusOverlayDefaults.restingContentAlpha
         content.translatesAutoresizingMaskIntoConstraints = false
         content.addArrangedSubview(summaryRow)
@@ -202,7 +277,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         subagentsButton.target = self
         subagentsButton.action = #selector(openSubagents)
         subagentsButton.emphasis = .tertiary
-        subagentsButton.applyFont(.numericDetail(weight: .medium))
+        subagentsButton.applyFont(GitStatusOverlayDefaults.font)
         // No hoverFill here: this is a BackdropOverlay, and `applyInk` states it from the
         // ink measured against the terminal's backdrop — a chrome role would be wrong by
         // exactly the amount the two palettes differ.
@@ -210,34 +285,51 @@ final class GitStatusOverlayView: BackdropOverlay {
         subagentsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         subagentsButton.isHidden = true
         content.addArrangedSubview(subagentsButton)
+
+        audienceButton.target = self
+        audienceButton.action = #selector(openSharing)
+        audienceButton.emphasis = .tertiary
+        audienceButton.applyFont(GitStatusOverlayDefaults.font)
+        audienceButton.setContentHuggingPriority(.required, for: .horizontal)
+        audienceButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        audienceButton.isHidden = true
+        // Last, under the children: the rows read outward from the work to the people around it,
+        // and who is watching is the outermost fact the card holds.
+        content.addArrangedSubview(audienceButton)
         addSubview(content)
 
         extensionSlotStack.orientation = .vertical
         extensionSlotStack.alignment = .leading
-        extensionSlotStack.spacing = Design.Spacing.tight
+        extensionSlotStack.spacing = GitStatusOverlayDefaults.rowGap
         extensionSlotStack.alphaValue = GitStatusOverlayDefaults.restingContentAlpha
         extensionSlotStack.translatesAutoresizingMaskIntoConstraints = false
         extensionSlotStack.isHidden = true
         extensionSlotStack.setAccessibilityIdentifier("session.corner-card.slot.top-trailing")
         addSubview(extensionSlotStack)
 
-        // The summary keeps its exact 26-point band — top-pinned now instead of centred, so
-        // the card can grow downward under further rows without moving a pixel of the line
-        // the render tests measure. With one row and an empty slot the collapsed bottom
-        // reproduces the original fixed height.
+        // The card is padded rather than banded: the rows sit at their own heights and the
+        // three constants below are the air around and between them. One row of 14-point text
+        // inset top and bottom is exactly `height`, so a single-line card is still the pill
+        // the render tests measure — and it is that whichever of the four rows is the one
+        // showing, which the band could only manage by moving from row to row.
         //
-        // The two constants are the padding a *bare* last row does not carry itself, set in
-        // `rebuild()`: a band-shaped row (the summary line, the children button) already ends
-        // in its own half-band, while the counters line is a label and would otherwise sit on
-        // the card's edge.
-        let collapsedBottom = bottomAnchor.constraint(equalTo: content.bottomAnchor)
+        // `rebuild()` sets the constants, because the children row pads itself and the gap
+        // beside it has to give that padding back.
+        let contentTop = content.topAnchor.constraint(
+            equalTo: topAnchor,
+            constant: GitStatusOverlayDefaults.verticalInset
+        )
+        let collapsedBottom = bottomAnchor.constraint(
+            equalTo: content.bottomAnchor,
+            constant: GitStatusOverlayDefaults.verticalInset
+        )
         let expandedBottom = bottomAnchor.constraint(
             equalTo: extensionSlotStack.bottomAnchor,
-            constant: Design.Spacing.small
+            constant: GitStatusOverlayDefaults.verticalInset
         )
-        let slotTop = extensionSlotStack.topAnchor.constraint(equalTo: content.bottomAnchor)
-        let summaryRowHeight = summaryRow.heightAnchor.constraint(
-            equalToConstant: GitStatusOverlayDefaults.height
+        let slotTop = extensionSlotStack.topAnchor.constraint(
+            equalTo: content.bottomAnchor,
+            constant: GitStatusOverlayDefaults.rowGap
         )
 
         // The children row is a button, and a button carries its own padding around the mark it
@@ -249,33 +341,16 @@ final class GitStatusOverlayView: BackdropOverlay {
         for row in [summaryRow, countersRow, modelRow] {
             row.edgeInsets = NSEdgeInsets(top: 0, left: markInset, bottom: 0, right: markInset)
         }
-        let countersRowHeight = countersRow.heightAnchor.constraint(
-            equalToConstant: GitStatusOverlayDefaults.height
-        )
-        countersRowHeight.isActive = false
-        // Whichever row leads carries the card's top padding, and only a band does — so every
-        // row that *can* lead needs the band available to it. The agent line leads a card with no
-        // checkout sentence and no counters, which is a detached head with a clean tree.
-        let modelRowHeight = modelRow.heightAnchor.constraint(
-            equalToConstant: GitStatusOverlayDefaults.height
-        )
-        modelRowHeight.isActive = false
+        contentTopConstraint = contentTop
         collapsedBottomConstraint = collapsedBottom
         expandedBottomConstraint = expandedBottom
         slotTopConstraint = slotTop
-        summaryRowHeightConstraint = summaryRowHeight
-        countersRowHeightConstraint = countersRowHeight
-        modelRowHeightConstraint = modelRowHeight
 
         NSLayoutConstraint.activate([
             widthAnchor.constraint(lessThanOrEqualToConstant: GitStatusOverlayDefaults.maxWidth),
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.medium),
             content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.medium),
-            content.topAnchor.constraint(equalTo: topAnchor),
-            summaryRowHeight,
-            // Full width, so the totals sit at the card's trailing edge rather than trailing the
-            // file count — the two columns a list of readings is made of.
-            countersRow.widthAnchor.constraint(equalTo: content.widthAnchor),
+            contentTop,
             extensionSlotStack.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: Design.Spacing.medium
@@ -331,8 +406,14 @@ final class GitStatusOverlayView: BackdropOverlay {
         glyph.contentTintColor = ink.secondary
         countersMark.contentTintColor = ink.tertiary
         modelMark.contentTintColor = ink.tertiary
-        subagentsButton.contentTintColor = ink.secondary
-        subagentsButton.hoverFill = ink.surfaceHover
+        // Both button rows, the same way. The audience row used to be given neither, so it drew
+        // in AppKit's own label colour and lifted to nothing under the pointer — the one row of
+        // the card that was inert by omission rather than by design.
+        for button in [subagentsButton, audienceButton] {
+            button.contentTintColor = ink.secondary
+            button.hoverFill = ink.surfaceHover
+        }
+        needsDisplay = true
         rebuild()
     }
 
@@ -376,14 +457,23 @@ final class GitStatusOverlayView: BackdropOverlay {
         rebuild()
     }
 
+    /// States who can see this chat from outside this Mac, and how many are looking now.
+    func updateAudience(_ reading: AudienceReading) {
+        guard reading != audienceReading else { return }
+        audienceReading = reading
+        rebuild()
+    }
+
     func clear() {
         lastReading = nil
         isRunActive = false
         runProgress = nil
         subagentCounts = (working: 0, done: 0)
         modelReading = nil
+        audienceReading = AudienceReading()
         hasGitReceipt = false
         subagentsButton.isHidden = true
+        audienceButton.isHidden = true
         modelRow.isHidden = true
         isHidden = true
     }
@@ -425,6 +515,11 @@ final class GitStatusOverlayView: BackdropOverlay {
             NSLayoutConstraint.activate(slotRowWidthConstraints)
         }
         super.layout()
+
+        // A row appearing or leaving moves the rows that act, under a pointer that has not
+        // moved and a cursor rect the window still believes.
+        refreshGitHover()
+        window?.invalidateCursorRects(for: self)
     }
 
     // MARK: - Private Methods
@@ -444,19 +539,19 @@ final class GitStatusOverlayView: BackdropOverlay {
 
         hasGitReceipt = head != nil || counters != nil
         let hasSubagents = subagentCounts.working + subagentCounts.done > 0
-        guard hasGitReceipt || hasSubagents || model != nil else {
+        let hasAudience = !audienceReading.isEmpty
+        guard hasGitReceipt || hasSubagents || hasAudience || model != nil else {
             isHidden = true
             return
         }
 
         // Rebuilt rather than reassigned: a label measures itself at creation, and the helper
         // exists precisely because assigning attributed text afterwards does not re-measure.
-        for view in [summaryLabel, filesLabel, countersLabel, countersGap, modelLabel] {
+        for view in [summaryLabel, filesLabel, countersLabel, modelLabel] {
             view?.removeFromSuperview()
         }
         summaryLabel = nil
         filesLabel = nil
-        countersGap = nil
         countersLabel = nil
         modelLabel = nil
 
@@ -478,20 +573,19 @@ final class GitStatusOverlayView: BackdropOverlay {
             filesLabel = files
             countersRow.addArrangedSubview(files)
 
-            // Held apart, so the totals land on the card's trailing edge rather than trailing
-            // the file count: two columns, which is what makes a stack of readings a list.
-            let gap = NSView()
-            gap.translatesAutoresizingMaskIntoConstraints = false
-            gap.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            gap.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            countersGap = gap
-            countersRow.addArrangedSubview(gap)
-
             let totals = NSTextField.label(attributed: counters.totals)
             totals.setContentHuggingPriority(.required, for: .horizontal)
             totals.setContentCompressionResistancePriority(.required, for: .horizontal)
             countersLabel = totals
             countersRow.addArrangedSubview(totals)
+            // A step wider than the gap after a mark, and no wider: the totals are a second
+            // reading on the same line, not a second column.
+            //
+            // They used to be held to the card's trailing edge by a flexible spacer. The card
+            // is only as wide as its longest row, so on a long branch name that spacer opened a
+            // hole halfway across the counters line and nowhere else — one stretched gap in a
+            // card whose every other row starts and ends on its own ink.
+            countersRow.setCustomSpacing(Design.Spacing.medium, after: files)
         }
         if let model {
             let label = NSTextField.label(attributed: model)
@@ -503,29 +597,45 @@ final class GitStatusOverlayView: BackdropOverlay {
         summaryRow.isHidden = head == nil
         countersRow.isHidden = counters == nil
         modelRow.isHidden = model == nil
-        summaryRowHeightConstraint?.isActive = head != nil
-        // Whichever row leads carries the card's top padding, and only a band does. On a
-        // detached head the counters lead, so the band moves to them — and with a clean tree as
-        // well, the agent line leads and it moves again.
-        countersRowHeightConstraint?.isActive = head == nil && counters != nil
-        modelRowHeightConstraint?.isActive = head == nil && counters == nil && model != nil
         subagentsButton.isHidden = !hasSubagents
+        audienceButton.isHidden = !hasAudience
 
-        // Only a bare label needs the card to end below it; the bands end below themselves. The
-        // last row is the children button when there is one, then the agent line, then the
-        // counters — and either of the latter two is a band instead when it happens to lead.
-        let endsOnBareLabel: Bool
-        if hasSubagents {
-            endsOnBareLabel = false
-        } else if model != nil {
-            endsOnBareLabel = modelRowHeightConstraint?.isActive != true
-        } else {
-            endsOnBareLabel = counters != nil
-                && countersRowHeightConstraint?.isActive != true
-        }
-        let bottomInset = endsOnBareLabel ? Design.Spacing.small : 0
+        // A button row draws its own padding — a button pads its title out to something a
+        // pointer can hit — so wherever one touches an inset or a gap, that inset or gap gives
+        // the padding back and the ink lands on the same rhythm as every other row's. Two of
+        // them meeting give it back twice, once for each.
+        let childrenInset = childrenRowInset
+        let textRows = [summaryRow, countersRow, modelRow].filter { !$0.isHidden }
+        let buttonRows = [subagentsButton, audienceButton].filter { !$0.isHidden }
+        let hasButtonRows = !buttonRows.isEmpty
+        contentTopConstraint?.constant = textRows.isEmpty
+            ? max(0, GitStatusOverlayDefaults.verticalInset - childrenInset)
+            : GitStatusOverlayDefaults.verticalInset
+        let bottomInset = hasButtonRows
+            ? max(0, GitStatusOverlayDefaults.verticalInset - childrenInset)
+            : GitStatusOverlayDefaults.verticalInset
         collapsedBottomConstraint?.constant = bottomInset
-        slotTopConstraint?.constant = bottomInset
+        // Extension rows continue the same list, so they join it on the same gap.
+        slotTopConstraint?.constant = hasButtonRows
+            ? max(0, GitStatusOverlayDefaults.rowGap - childrenInset)
+            : GitStatusOverlayDefaults.rowGap
+        for row in textRows.dropLast() {
+            content.setCustomSpacing(NSStackView.useDefaultSpacing, after: row)
+        }
+        if let above = textRows.last {
+            content.setCustomSpacing(
+                hasButtonRows
+                    ? max(0, GitStatusOverlayDefaults.rowGap - childrenInset)
+                    : NSStackView.useDefaultSpacing,
+                after: above
+            )
+        }
+        for row in buttonRows.dropLast() {
+            content.setCustomSpacing(
+                max(0, GitStatusOverlayDefaults.rowGap - 2 * childrenInset),
+                after: row
+            )
+        }
 
         if hasSubagents {
             let working = subagentCounts.working
@@ -536,6 +646,13 @@ final class GitStatusOverlayView: BackdropOverlay {
             // A titled `ThemedButton` deliberately exposes its visible title to accessibility.
             // Put the destination in help instead of trying to replace that truthful title.
             subagentsButton.setAccessibilityHelp(L10n.string("Open Subagents"))
+        }
+        if hasAudience {
+            audienceButton.title = Self.audienceText(audienceReading)
+            audienceButton.setAccessibilityHelp(L10n.string("Open Sharing"))
+            audienceButton.toolTip = audienceReading.following > 0
+                ? L10n.string("Somebody has this chat open from another device")
+                : L10n.string("This chat has been shared. Nobody is watching it right now.")
         }
         // The agent line rides whichever label the card already spoke: it is a row of the same
         // card, and a row nobody hears is a row that is not there for half the readers. It does
@@ -556,6 +673,9 @@ final class GitStatusOverlayView: BackdropOverlay {
             if hasSubagents {
                 parts.append(L10n.format("Subagents: %@", subagentsButton.title))
             }
+            if hasAudience {
+                parts.append(Self.audienceText(audienceReading))
+            }
             if let spoken = Self.spokenModelText(for: modelReading) {
                 parts.append(spoken)
             }
@@ -565,11 +685,24 @@ final class GitStatusOverlayView: BackdropOverlay {
         isHidden = false
     }
 
+    /// The vertical air the children row already draws inside its own frame.
+    ///
+    /// It is the one row that is a control rather than a line of text: `ThemedButton` sizes a
+    /// plain button around a hit target, so its title sits inboard of its frame by this much at
+    /// the top and the bottom. Every other row is a bare label whose frame is its line box.
+    private var childrenRowInset: CGFloat {
+        max(0, (subagentsButton.intrinsicContentSize.height - Self.textRowHeight) / 2)
+    }
+
+    /// The height of a row that is just words — an `NSTextField.label` at the card's font, which
+    /// is its line box and nothing else.
+    private static var textRowHeight: CGFloat { GitStatusOverlayDefaults.textRowHeight }
+
     /// One mark, sized and centred in the column every row's mark shares.
     private func configureMark(_ view: NSImageView, symbol: String, description: String) {
         view.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
         view.symbolConfiguration = .init(
-            pointSize: GitStatusOverlayDefaults.fontSize,
+            pointSize: GitStatusOverlayDefaults.markPointSize,
             weight: .medium
         )
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -589,7 +722,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         progress: RunProgress?,
         ink: Design.Ink
     ) -> NSAttributedString? {
-        let font = Design.Typography.numericDetail(weight: .medium)
+        let font = GitStatusOverlayDefaults.font.resolved()
         if isRunActive {
             return NSAttributedString(
                 string: progress?.label ?? "Working…",
@@ -603,8 +736,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         )
     }
 
-    /// The counters line, in the two columns a list of readings is made of: how many files at
-    /// the leading edge, `+N −M` held to the trailing one.
+    /// The counters line: how many files, then `+N −M` a step after it.
     ///
     /// The file count is no longer a run-only extra. It is the label the row wants beside its
     /// totals, and one presentation is one thing to learn — the card used to say it during a run
@@ -621,7 +753,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         diff: Design.DiffInk
     ) -> (files: NSAttributedString, totals: NSAttributedString)? {
         guard let reading, !reading.summary.isClean else { return nil }
-        let font = Design.Typography.numericDetail(weight: .medium)
+        let font = GitStatusOverlayDefaults.font.resolved()
 
         let files = NSAttributedString(
             string: Self.fileCount(reading.summary.files),
@@ -654,7 +786,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         ink: Design.Ink
     ) -> NSAttributedString? {
         guard let reading, !reading.isEmpty else { return nil }
-        let font = Design.Typography.numericDetail(weight: .medium)
+        let font = GitStatusOverlayDefaults.font.resolved()
         let text = NSMutableAttributedString()
 
         if let name = reading.name {
@@ -675,6 +807,16 @@ final class GitStatusOverlayView: BackdropOverlay {
             attributes: [.font: font, .foregroundColor: ink.tertiary]
         ))
         return text
+    }
+
+    /// The audience row's words.
+    ///
+    /// A count while somebody is here, because the number is the fact; the bare state otherwise,
+    /// because "0 following" is a row spent saying nothing. What the row is *for* in that second
+    /// case is that the chat is reachable at all.
+    private static func audienceText(_ reading: AudienceReading) -> String {
+        guard reading.following > 0 else { return L10n.string("Shared") }
+        return L10n.format("%lld following", Int64(reading.following))
     }
 
     /// The agent line as one spoken phrase, or nil when the card has no agent row.
@@ -733,12 +875,58 @@ final class GitStatusOverlayView: BackdropOverlay {
 
     // MARK: - Interaction
 
+    /// The part of the card that opens Git Review, or nil when there is nothing to open.
+    ///
+    /// It is the checkout's own rows and not the whole card. The card carries three destinations
+    /// and two facts, and while the pointer lit all five equally the only way to find out which
+    /// was which was to click: the agent line and an extension row do nothing, and the two button
+    /// rows go somewhere else entirely.
+    ///
+    /// Grown by the children row's own padding, so the shape the pointer lights around a line of
+    /// *text* is the shape it lights around the same line as a button. The two sit one above the
+    /// other in the same card; a wash that hugged the text tighter than the button's would read as
+    /// two conventions rather than one list.
+    private var gitRegion: NSRect? {
+        guard hasGitReceipt else { return nil }
+        let rows = [summaryRow, countersRow].filter { !$0.isHidden }.map(\.frame)
+        guard var union = rows.first else { return nil }
+        for row in rows.dropFirst() { union = union.union(row) }
+        return convert(union, from: content).insetBy(dx: 0, dy: -childrenRowInset)
+    }
+
+    /// Draws the wash under the rows that act.
+    ///
+    /// On the card rather than in a control of its own, because the rows *are* the card's own
+    /// layout — the marks share one column with the children row's, and a wrapper around two of
+    /// the four rows would have to reproduce the whole rhythm to keep it. The fill is the weight
+    /// the children row already lifts to (`ink.surfaceHover`), measured against the terminal's
+    /// backdrop like everything else the card draws.
+    override func draw(_ dirtyRect: NSRect) {
+        guard isGitHovered, let region = gitRegion else { return }
+        ThemedSurface.draw(region, fill: ink.surfaceHover)
+    }
+
     override func mouseDown(with event: NSEvent) {
-        if hasGitReceipt { onOpen?() }
+        // Asked before the event is read: `hasGitReceipt` is false for a card that is only an
+        // agent line, and the location of an event that never came from a mouse is not a point.
+        guard hasGitReceipt, let region = gitRegion else { return }
+        if region.contains(convert(event.locationInWindow, from: nil)) { onOpen?() }
+    }
+
+    /// A card with a Git sentence calls itself a button, and a button that cannot be pressed is
+    /// a label wearing the wrong role. VoiceOver reaches the same destination the pointer does.
+    override func accessibilityPerformPress() -> Bool {
+        guard hasGitReceipt, let onOpen else { return false }
+        onOpen()
+        return true
     }
 
     @objc private func openSubagents() {
         onOpenSubagents?()
+    }
+
+    @objc private func openSharing() {
+        onOpenSharing?()
     }
 
     override func updateTrackingAreas() {
@@ -746,19 +934,52 @@ final class GitStatusOverlayView: BackdropOverlay {
         trackingAreas.forEach(removeTrackingArea)
         addTrackingArea(NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
             owner: self
         ))
 
         // The card is pinned to the pane's trailing edge, so opening a panel slides it out from
         // under a pointer that never moved and no exit is delivered — see `NSView.hoverIsStale`.
         if hoverIsStale(isHovered) { isHovered = false }
+        // The same staleness one level in: the card grows and loses rows while the pointer rests
+        // on it, so the region under the pointer can change without the pointer moving at all.
+        refreshGitHover()
+        window?.invalidateCursorRects(for: self)
     }
 
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        refreshGitHover()
+    }
 
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        isGitHovered = false
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateGitHover(at: convert(event.locationInWindow, from: nil))
+    }
+
+    /// Where the pointer is *now*, rather than where an event last said it was — which is the
+    /// question to ask when the card moved and the pointer did not.
+    private func refreshGitHover() {
+        guard isHovered, let window else {
+            isGitHovered = false
+            return
+        }
+        updateGitHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
+
+    private func updateGitHover(at point: NSPoint) {
+        isGitHovered = gitRegion?.contains(point) ?? false
+    }
+
+    /// The pointing hand belongs to the rows that act, and to nothing else on the card. It used
+    /// to cover the whole of it — including a card holding no Git sentence, where a click did
+    /// nothing at all and the cursor had already promised otherwise.
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
+        guard let region = gitRegion else { return }
+        addCursorRect(region, cursor: .pointingHand)
     }
 }

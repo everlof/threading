@@ -57,7 +57,7 @@ extension Design {
 
         // Numeric — SF's monospaced digits, so columns keep aligning.
         case numericBody
-        case numericControl
+        case numericControl(weight: NSFont.Weight = .regular)
         case numericDetail(weight: NSFont.Weight = .regular)
 
         // Marks, not prose.
@@ -92,10 +92,41 @@ extension Design {
             case .compactCode: return Typography.compactCode()
             case .compactToolName: return Typography.compactToolName()
             case .numericBody: return Typography.numericBody()
-            case .numericControl: return Typography.numericControl()
+            case .numericControl(let weight): return Typography.numericControl(weight: weight)
             case .numericDetail(let weight): return Typography.numericDetail(weight: weight)
             case .accountEmoji: return Typography.accountEmoji()
             case .emojiPickerCell: return Typography.emojiPickerCell()
+            }
+        }
+
+        /// The same role at the next weight up, for the run of a string that has to stand out
+        /// of the rest of it — today, what a search matched.
+        ///
+        /// A **role** rather than a heavier `NSFont`, for the reason the whole enum exists: the
+        /// emphasis is a typographic decision and has to be re-derived after a theme change
+        /// like every other one. Every mapping keeps the point size, because the two runs share
+        /// one line box: `.subheading` goes to `.control` (both 12) rather than to
+        /// `.emphasizedBody` (13), which would raise the line for the words that matched.
+        ///
+        /// A role that is already emphasis, or that is a mark rather than prose, answers with
+        /// itself. Weight is not the only signal a match carries — see `SearchMatchLabel` —
+        /// so a role with nowhere heavier to go loses nothing by staying put.
+        var emphasized: FontRole {
+            switch self {
+            case .body: return .emphasizedBody
+            case .subheading, .controlRegular: return .control
+            case .detail(let weight):
+                return .detail(weight: weight == .regular ? .semibold : weight)
+            case .code(let weight):
+                return .code(weight: weight == .regular ? .semibold : weight)
+            case .numericControl(let weight):
+                return .numericControl(weight: weight == .regular ? .semibold : weight)
+            case .numericDetail(let weight):
+                return .numericDetail(weight: weight == .regular ? .semibold : weight)
+            case .heading, .placeholderTitle, .emphasizedBody, .strongBody, .control, .caption,
+                 .markdownHeading, .wordmark, .inlineCode, .previewCode, .compactCode,
+                 .compactToolName, .numericBody, .accountEmoji, .emojiPickerCell:
+                return self
             }
         }
 

@@ -234,6 +234,30 @@ joins the card and opens the Subagents display-pane tab. It remains visible even
 no Git sentence to show, making the surface a session status card rather than forcing child
 navigation back into the conversation.
 
+**The pointer lights the rows that act, and only those.** The card carries three destinations and
+two facts — Git Review, the Subagents tab, the sharing pane, the agent line, and any extension row
+— and for all of them the answer to the pointer was the same: the whole view lifted from 85% to
+full. That lift is the card waking up and it stays, but it said "all of this is clickable" about a
+card most of which is not, and the pointing hand over the *whole* card said it a second time, on a
+card holding no Git sentence at all where a click did nothing. The Git rows now raise a wash
+(`ink.surfaceHover`, the weight the children row already lifts to) under the words that open Git
+Review, grown by the children row's own vertical padding so the shape around a line of text is the
+shape around the same line as a button. `gitRegion` is one answer used three times — the wash, the
+click, and the cursor rect — because a hover promising a destination the click does not deliver is
+worse than no hover. The two button rows lift themselves, as controls always did; the audience row
+was being handed neither `contentTintColor` nor `hoverFill`, so it drew in AppKit's own label tier
+and lifted to nothing — inert by omission rather than by design. The card also answers
+`accessibilityPerformPress` now: it has called itself a button since it first carried a receipt,
+and a button that cannot be pressed is a label wearing the wrong role.
+
+**The card's rows are set at the control size**, `numericControl(weight: .medium)` — one role for
+branch, counters, agent line and both button rows, so the stack holds one line box and one column.
+It was the detail size, which reads as a footnote *about* the pane rather than as the pane's own
+status, on a surface floating over a terminal at whatever size the user set that to. Moving it also
+turned `GitStatusOverlayDefaults.height` from a literal 26 into `verticalInset * 2 + textRowHeight`:
+26 was an 11-point line plus its insets, so it was already out for anyone running the app's text
+scale above 100%, and it feeds the pill radius.
+
 **The card draws no spinner.** It used to promote its first line with a working orb, and that
 orb was the third one on screen: a terminal session's CLI draws its own a few lines below, and
 a native conversation animates one beside its status. It was also the only one sitting on the

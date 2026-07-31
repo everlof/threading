@@ -294,9 +294,10 @@ Shift+Return breaks the line, because a reply is usually one line and the box sa
 
 **Drop or paste a file** into it. An ordinary file has its path inserted, which is what the
 agent can act on. An image instead appears as a thumbnail above the text; use the **×** on its
-corner to remove it before sending, or click the image to inspect it in macOS Quick Look. With
-keyboard focus, Space or Return opens the same preview. Right-click for Quick Look, the default
-app, Reveal in Finder, image/name/path copying, or removal. The image's path stays out of what
+corner to remove it before sending, or click the image to open Threading's media inspector. With
+keyboard focus, Space or Return opens the same view, and arrows move through all the images in
+the prompt. Right-click for Inspect, the default app, Reveal in Finder, image/name/path copying,
+System Quick Look, or removal. The image's path stays out of what
 you type and is added only when the prompt is submitted. An image with no file of its own — a
 screenshot straight from the clipboard, a picture dragged out of a browser — is written to a
 temporary file first, so the session can still open it.
@@ -368,11 +369,17 @@ off — see [Confirmations](#confirmations).
 **Archiving asks nothing, and hands you the way back instead.** The row leaves the sidebar
 immediately, and a small band appears at the bottom of the sidebar naming the session, saying
 whether its agent was stopped, and where it went — with **Undo** on it. The band stays for about
-six seconds, and holds for as long as the pointer rests on it, so it will not disappear while
-you are reaching for it. Undo puts the row back where it was and reopens the session if it was
-the one on screen; the agent is not restarted, so the session comes back dormant with **Resume**
-on it, exactly as it would after Close. Miss the band and nothing is lost — the session is in
-**Settings ▸ Archived**, which is what the band's second line says.
+six seconds, and a thin line along its lower edge shows how much of that is left. Rest the
+pointer on the band and both stop, so it will not disappear while you are reaching for it; move
+away and the band starts over with its full time again. Undo puts the row back where it was and
+reopens the session if it was the one on screen; the agent is not restarted, so the session comes
+back dormant with **Resume** on it, exactly as it would after Close. Miss the band and nothing is
+lost — the session is in **Settings ▸ Archived**, which is what the band's second line says.
+
+**Archive several in a row and the bands wait their turn.** Each one carries its own Undo, so
+none of them is thrown away to make room for the next: the second band appears when the first
+leaves, and so on. Only the last few are kept if you archive faster than you can read — the
+sessions themselves are all in **Settings ▸ Archived** either way.
 
 **A session can also file itself away when you ask it to.** "Commit this and then close the
 session" is one instruction, and the agent can now carry out both halves: it finishes the work,
@@ -842,8 +849,9 @@ column stops widening past a comfortable reading measure, so a wide window gives
 rather than very long lines, and a rule marks where each new exchange begins.
 
 The reply box accepts images the same way as the new-session prompt: drop or paste one to see a
-removable thumbnail above your text. Click the thumbnail to open Quick Look; its right-click menu
-has the same file and clipboard actions. This follow-up composer belongs to Chat sessions; a
+removable thumbnail above your text. Click the thumbnail to open the media inspector; its
+right-click menu has the same file and clipboard actions, with System Quick Look as a fallback.
+This follow-up composer belongs to Chat sessions; a
 terminal session continues to use the agent CLI's own image input.
 
 Tool calls appear as a single collapsed line: a glyph, the tool, what it ran, and how much it
@@ -1102,7 +1110,9 @@ A terminal can only draw text. The display panel is the way around that: a third
 the right that Claude or Codex can put content into while you keep working in the terminal.
 
 Ask for something visual — "show me that screenshot", "chart the bundle sizes", "render that
-as a table" — and the panel opens beside the terminal. Close it with the **✕** in its header;
+as a table" — and the panel opens beside the terminal, taking about a third of the window the
+first time and the width you last dragged it to after that. Drag its divider to resize it; drag
+it all the way to the edge and the panel closes. Close it with the **✕** in its header;
 it reopens the next time the agent displays something. It can also be opened by hand — the
 panel toggle at the session header's right edge, or **View ▸ Display Panel** — so its tabs (the
 browser, Git Review, Session Info) are reachable without an agent putting content there first.
@@ -1114,13 +1124,13 @@ the agent sees, and it survives a relaunch. **⌘⇧[** and **⌘⇧]** step thr
 **⌘1**–**⌘9** jump to a tab by its place in it. The same gestures and menu, with the same
 commands, work on the shell drawer's tabs.
 
-**Opening a picture properly.** An image in the panel is drawn at whatever width the pane has,
-so a screenshot is legible but not full size. Press **Space** with the image selected, or
-**double-click** it, or use the trackpad's Quick Look gesture — any of them opens it in the
-system Quick Look panel, with the zoom, rotation, sharing, Open With and full-screen that come
-with it. The **⋯** menu beside the caption offers **Quick Look** as its first item, along with
-copying the image, its name or its path, revealing it in Finder, and opening it in whatever app
-owns the file type.
+**Opening a picture properly.** Click an image in the panel, or focus it and press **Space**, to
+open Threading's media inspector inside the same window. It starts fitted; pinch or press
+**⌘+**/**⌘−** to zoom, drag to pan, and double-click or press **Z** to switch between Fit and
+100%. Arrow keys or a horizontal swipe move through a collection and the thumbnail rail jumps
+directly to an item. **Space** or **Escape** closes and returns focus to the image you came from.
+The inspector's **⋯** offers copying, Finder, the default app, and **Open in System Quick Look**
+as the last-resort system viewer. The panel's own **⋯** advertises the same routes.
 
 **The panel gives way to the window.** Showing an image opens the panel, and an open panel used
 to put a floor under how narrow the window could be made. It no longer does: drag the window's
@@ -1221,8 +1231,8 @@ Every row is marked **Agent** or **You**, and when a session has both a small **
 filter appears beside the count. It stays hidden while everything came from one side.
 
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu. The list
-sits above an inline image/PDF preview; **Open**, **Finder**, and **Copy Path** act on the
-selected file.
+sits above an inline image/PDF preview; click an image to enter the same collection-aware media
+inspector. **Open**, **Finder**, and **Copy Path** act on the selected file.
 
 A file already inside the checkout is *referenced*: a new mention of the same path moves it to the
 top and refreshes the preview, so the project file stays the source of truth. A file from anywhere
@@ -1263,7 +1273,10 @@ When exact browser or device conditions exceed the visible WebKit browser, the s
 Playwright tool can run a fresh Chromium, Firefox, or WebKit context without importing the live
 tab's cookies or credentials.
 
-Use **Annotate Page** to place numbered notes directly over what you are reviewing. Notes stay in
+Use **Annotate Page** to place numbered notes directly over what you are reviewing. While
+annotation mode is on, the component under the pointer is outlined and named — `button "Sign in"`,
+`link "Docs"` — so you can see what a pin is about to land on before you click; pointing at the
+word inside a button highlights the button, not the word. Notes stay in
 Threading's native UI rather than entering the page DOM, so the site cannot read or alter them.
 Click an existing pin while annotation mode is active to edit or delete it. The agent can read the
 notes for the currently authorized page with their document-space coordinates, clearly labelled as
@@ -1353,6 +1366,11 @@ session pane's top-right corner showing the current branch and the uncommitted t
 the Review tab uses — and **clicking it opens Git Review**, so the diff is one click away
 without asking the agent for it. A clean checkout shows just the branch; a project that is
 not a repository shows no card at all.
+
+The card holds more than one destination, so **the pointer says which part goes where**: the
+branch and totals highlight together and open Git Review, the children row opens Subagents, the
+audience row opens Sharing, and the model line — a reading rather than a destination — stays
+quiet under the pointer and does nothing when clicked.
 
 While the agent is working, that card becomes a live run receipt: the branch gives way to a
 working orb, the current **Step n / total** when the agent reports a plan, and the number of

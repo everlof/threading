@@ -138,6 +138,15 @@ enum Design {
         /// enough for several to read as attachments rather than as the prompt's main content.
         static let promptAttachmentThumbnail: CGFloat = 80
 
+        /// The app-owned media inspector's title-and-controls band.
+        static let mediaInspectorHeaderHeight: CGFloat = 52
+
+        /// A recognisable member of the inspector's collection rail.
+        static let mediaInspectorThumbnail: CGFloat = 56
+
+        /// The rail around those thumbnails, including its vertical breathing room.
+        static let mediaInspectorRailHeight: CGFloat = 72
+
         /// Widest a column of content grows before it becomes hard to scan.
         static let readableWidth: CGFloat = 620
 
@@ -397,8 +406,8 @@ enum Design {
             .monospacedDigitSystemFont(ofSize: scaled(13), weight: .regular)
         }
 
-        static func numericControl() -> NSFont {
-            .monospacedDigitSystemFont(ofSize: scaled(12), weight: .regular)
+        static func numericControl(weight: NSFont.Weight = .regular) -> NSFont {
+            .monospacedDigitSystemFont(ofSize: scaled(12), weight: weight)
         }
 
         static func numericDetail(weight: NSFont.Weight = .regular) -> NSFont {
@@ -498,6 +507,41 @@ enum Design {
 
         /// A selected row inside app-owned chrome.
         static var selection: NSColor { AppThemePalette.color(.selection) }
+
+        /// The ground behind the run of a string a search matched.
+        ///
+        /// Derived from the accent rather than authored per theme: a match is the one thing on
+        /// the surface the reader asked for, which is what the accent already means everywhere
+        /// else. It is held well back, because an opaque accent behind a word reads as a button
+        /// rather than as a find — and resolved *inside* a dynamic colour so a live theme
+        /// switch, an appearance flip and Increase Contrast each take the decision again. The
+        /// alpha is replaced rather than scaled, matching every other derived role here.
+        static var searchMatch: NSColor {
+            NSColor(name: NSColor.Name("threading.surface.searchMatch")) { _ in
+                let accent = AppThemePalette.current.resolved(.accent)
+                let alpha = Accessibility.increasesContrast
+                    ? Opacity.searchMatchGroundIncreasedContrast
+                    : Opacity.searchMatchGround
+                return (accent.usingColorSpace(.sRGB) ?? accent).withAlphaComponent(alpha)
+            }
+        }
+
+        /// The wash over the page component the next annotation pin will describe.
+        ///
+        /// Derived from the accent for the same reason the search ground is: the accent already
+        /// means "the one thing you are aiming at" everywhere else in the window, and an
+        /// annotation target is that sentence said over a web page. Resolved inside a dynamic
+        /// colour so a live theme switch, an appearance flip and Increase Contrast each get to
+        /// answer again.
+        static var annotationTarget: NSColor {
+            NSColor(name: NSColor.Name("threading.surface.annotationTarget")) { _ in
+                let accent = AppThemePalette.current.resolved(.accent)
+                let alpha = Accessibility.increasesContrast
+                    ? Opacity.annotationTargetGroundIncreasedContrast
+                    : Opacity.annotationTargetGround
+                return (accent.usingColorSpace(.sRGB) ?? accent).withAlphaComponent(alpha)
+            }
+        }
     }
 
     // MARK: - Text
@@ -817,6 +861,14 @@ enum Design {
         /// the panel fades, the acknowledgement every platform menu gives.
         static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
 
+        /// How long a scrollbar that fades itself stays up after the scrolling that revealed
+        /// it — macOS's own beat, long enough to reach the thumb that just appeared.
+        ///
+        /// Not collapsed under Reduce Motion, unlike the fade either side of it: a hold is not
+        /// movement, and a scrollbar that vanishes the instant a gesture ends is harder to
+        /// use, not calmer.
+        static let scrollerHold: TimeInterval = 1.1
+
         /// The pause a repeating demonstration holds a finished state before starting the next
         /// — long enough to read the name that just arrived, short enough that a hovered row
         /// does not look finished.
@@ -847,6 +899,26 @@ enum Design {
         /// A dragged tab while the pointer is over another pane that will take it: still
         /// visible where it came from, clearly on its way out.
         static let dragAway: CGFloat = 0.5
+
+        /// How much accent sits behind a matched run. Measured against the panel a settings
+        /// result and an import row both stand on: below this the find is easy to read past,
+        /// and above it a row of matches reads as a row of filled controls.
+        static let searchMatchGround: CGFloat = 0.28
+
+        /// The same ground under Increase Contrast, where a faint tint is the first thing to go.
+        static let searchMatchGroundIncreasedContrast: CGFloat = 0.5
+
+        /// How much accent covers the page component an annotation is about to land on.
+        ///
+        /// Held further back than a search match, because this tints a whole component rather
+        /// than a run of text and it lies over a page the app did not draw: the point is to say
+        /// *which* element is under the pointer while leaving it legible enough to aim at. The
+        /// outline carries the weight; the wash only says where the outline's edges belong.
+        static let annotationTargetGround: CGFloat = 0.16
+
+        /// The same wash under Increase Contrast, where the outline alone would be doing all
+        /// the work over an arbitrary page.
+        static let annotationTargetGroundIncreasedContrast: CGFloat = 0.34
     }
 
     // MARK: - Accessibility

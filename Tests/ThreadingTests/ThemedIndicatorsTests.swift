@@ -631,6 +631,73 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
     }
 
+    /// Who can see this chat from outside the Mac is a fact the card had no room for and the app
+    /// had nowhere else for: two clients quietly holding one terminal is what made the shared PTY
+    /// flip between grid sizes, and nothing on screen said a second one was there.
+    ///
+    /// The row therefore appears for either half — somebody watching, or a link nobody has used
+    /// yet — because a shared, unwatched chat that looks exactly like a private one is the case
+    /// worth showing.
+    func testTheCardSaysWhoCanSeeThisChatFromOutsideTheMac() {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "master",
+            summary: GitChangeSummary(files: 0, added: 0, removed: 0)
+        ))
+        XCTAssertEqual(card.accessibilityLabel(), "master")
+
+        card.updateAudience(GitStatusOverlayView.AudienceReading(following: 2, isShared: true))
+        XCTAssertFalse(card.isHidden)
+        XCTAssertTrue(
+            descendants(of: card).contains { ($0 as? ThemedButton)?.title == "2 following" },
+            "a live audience is a count, because the number is the fact"
+        )
+
+        card.updateAudience(GitStatusOverlayView.AudienceReading(following: 0, isShared: true))
+        XCTAssertTrue(
+            descendants(of: card).contains { ($0 as? ThemedButton)?.title == "Shared" },
+            "a shared chat nobody is on still says so — \"0 following\" would be a row "
+                + "spent saying nothing, and hiding it makes a reachable chat look private"
+        )
+
+        card.updateAudience(GitStatusOverlayView.AudienceReading())
+        XCTAssertFalse(
+            descendants(of: card).contains {
+                ($0 as? ThemedButton).map { !$0.isHidden && $0.title == "Shared" } ?? false
+            },
+            "a chat nobody can reach spends no row on the fact"
+        )
+    }
+
+    /// The card's own geometry is load-bearing — one row of text inset top and bottom *is* the
+    /// pill height — and a button row gives its own padding back out of whatever it touches.
+    /// A second button row is the case that arithmetic had never seen.
+    func testTwoButtonRowsKeepTheCardOnItsOwnRhythm() {
+        let card = GitStatusOverlayView()
+        card.applyInk(WindowBackdrop.ink)
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "master",
+            summary: GitChangeSummary(files: 0, added: 0, removed: 0)
+        ))
+        card.layoutSubtreeIfNeeded()
+        let oneRow = card.fittingSize.height
+
+        card.updateSubagents(workingCount: 1, doneCount: 2)
+        card.updateAudience(GitStatusOverlayView.AudienceReading(following: 1, isShared: true))
+        card.layoutSubtreeIfNeeded()
+        let threeRows = card.fittingSize.height
+
+        XCTAssertGreaterThan(threeRows, oneRow)
+        // Both button rows are present rather than one having been laid on top of the other.
+        let visibleButtons = descendants(of: card).compactMap { $0 as? ThemedButton }
+            .filter { !$0.isHidden && !($0.title).isEmpty }
+        XCTAssertEqual(visibleButtons.count, 2)
+        XCTAssertEqual(
+            Set(visibleButtons.map(\.title)),
+            ["1 working · 2 done", "1 following"]
+        )
+    }
+
     /// A run promotes the card's first line; it does not put a *third* spinner on screen.
     ///
     /// A terminal session's CLI draws its own a few lines below the card, and a native
@@ -689,6 +756,122 @@ final class ThemedIndicatorsTests: XCTestCase {
             XCTAssertEqual(mark, buttonMark, accuracy: 0.5,
                            "a row's mark sits outside the column the others share")
         }
+    }
+
+    /// Every gap in the card is the same gap, and the card's own inset is the same at both ends.
+    ///
+    /// It was not: the leading row was centred in a 26-point band and every row below it was a
+    /// bare label in a stack spaced at zero, so a three-fact card came out 6 / 0 / 0 — the branch
+    /// alone at the top with the counters and the agent line stuck together under it. Asserted on
+    /// the laid-out frames rather than on the ink, because the rows share one font and therefore
+    /// one line box: equal frame gaps are equal gaps between the words.
+    func testEveryRowSitsOnTheSameRhythm() throws {
+        for children in [0, 9] {
+            let card = GitStatusOverlayView()
+            card.update(with: GitChangeMonitor.Reading(
+                branch: "test-levels-and-sidebar-archive",
+                summary: GitChangeSummary(files: 76, added: 22_431, removed: 14_004)
+            ))
+            card.updateModel(GitStatusOverlayView.ModelReading(
+                name: "Opus",
+                effort: "Extra High"
+            ))
+            card.updateSubagents(workingCount: 0, doneCount: children)
+            card.applyInk(WindowBackdrop.ink)
+            card.frame = NSRect(origin: .zero, size: card.fittingSize)
+            card.layoutSubtreeIfNeeded()
+
+            // The words, not the rows: the children row is a button and pads its title out to a
+            // hit target, so its *frame* is deliberately taller than a line of text. What has to
+            // land on the rhythm is what the reader sees, so the button is measured back down to
+            // the line box its title is drawn in — the same one every other row's label is.
+            let lineBox = GitStatusOverlayDefaults.textRowHeight
+            let words = descendants(of: card)
+                .filter { $0 is NSTextField || $0 is ThemedButton }
+                .filter { !$0.isHiddenOrHasHiddenAncestor }
+                .map { view -> CGRect in
+                    let frame = card.convert(view.bounds, from: view)
+                    guard view is ThemedButton else { return frame }
+                    return frame.insetBy(dx: 0, dy: (frame.height - lineBox) / 2)
+                }
+                // One row per line: the counters row has two labels side by side on the same one.
+                .reduce(into: [CGRect]()) { rows, frame in
+                    if let index = rows.firstIndex(where: { abs($0.midY - frame.midY) < 1 }) {
+                        rows[index] = rows[index].union(frame)
+                    } else {
+                        rows.append(frame)
+                    }
+                }
+                .sorted { $0.maxY > $1.maxY }
+
+            let expected = children > 0 ? 4 : 3
+            XCTAssertEqual(words.count, expected, "the card drew \(words.count) rows, not \(expected)")
+
+            let gaps = zip(words, words.dropFirst()).map { $0.minY - $1.maxY }
+            for gap in gaps {
+                XCTAssertEqual(gap, GitStatusOverlayDefaults.rowGap, accuracy: 0.5,
+                               "the rows are spaced \(gaps) — a card of unequal gaps")
+            }
+
+            let top = card.bounds.maxY - (words.first?.maxY ?? 0)
+            let bottom = words.last?.minY ?? 0
+            XCTAssertEqual(top, GitStatusOverlayDefaults.verticalInset, accuracy: 0.5,
+                           "the first row does not sit on the card's inset")
+            XCTAssertEqual(bottom, top, accuracy: 0.5,
+                           "the card is padded \(top) at the top and \(bottom) at the bottom")
+        }
+    }
+
+    /// One row of any kind, inset above and below, is the pill the card started as — which is
+    /// what lets the corner hold a one-line reading without looking like a panel.
+    func testAnySingleRowMakesTheSameOneLineCard() {
+        let cards: [(String, @MainActor (GitStatusOverlayView) -> Void)] = [
+            ("branch", { $0.update(with: .init(branch: "master", summary: .clean)) }),
+            ("agent", { $0.updateModel(.init(name: "Opus 5")) }),
+            ("children", { $0.updateSubagents(workingCount: 0, doneCount: 9) })
+        ]
+        for (name, state) in cards {
+            let card = GitStatusOverlayView()
+            state(card)
+            card.applyInk(WindowBackdrop.ink)
+            XCTAssertEqual(
+                card.fittingSize.height,
+                GitStatusOverlayDefaults.height,
+                accuracy: 0.5,
+                "a card holding only the \(name) row is not the one-line card"
+            )
+        }
+    }
+
+    /// The totals follow the file count on the same line rather than being pushed to the card's
+    /// trailing edge by a spacer — which on a long branch name opened a hole halfway across the
+    /// counters row and nowhere else.
+    func testTheCountersFollowTheFileCountRatherThanTheCardsEdge() throws {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "test-levels-and-sidebar-archive",
+            summary: GitChangeSummary(files: 12, added: 4_203, removed: 250)
+        ))
+        card.applyInk(WindowBackdrop.ink)
+        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+        card.layoutSubtreeIfNeeded()
+
+        let counters = descendants(of: card)
+            .compactMap { $0 as? NSTextField }
+            .filter { !$0.isHiddenOrHasHiddenAncestor }
+            .filter { $0.stringValue.contains("4.2") || $0.stringValue.contains("12 ") }
+        let frames = counters
+            .map { card.convert($0.bounds, from: $0) }
+            .sorted { $0.minX < $1.minX }
+        guard frames.count == 2 else {
+            return XCTFail("the counters row drew \(frames.count) readings, not two")
+        }
+        // A stack spaces views by their *alignment* rects, and a label's frame stands off its
+        // ink on both sides, so the token is the drawn gap plus those two.
+        let padding = counters[0].alignmentRectInsets.right + counters[1].alignmentRectInsets.left
+        XCTAssertEqual(frames[1].minX - frames[0].maxX + padding,
+                       Design.Spacing.medium, accuracy: 0.5,
+                       "the totals are held apart from the file count by a stretched gap")
     }
 
     func testGitStatusCardCarriesASeparateSubagentDestination() throws {
@@ -1024,21 +1207,37 @@ final class ThemedIndicatorsTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let dirty = GitChangeSummary(files: 12, added: 4_203, removed: 250)
-        let states: [@MainActor (GitStatusOverlayView) -> Void] = [
-            { $0.update(with: .init(branch: "master", summary: .clean)) },
-            { $0.update(with: .init(branch: "test-levels-and-sidebar-archive", summary: dirty)) },
-            {
+        // The last card is drawn with the pointer on its Git rows, because "the part that acts
+        // lights up and the part that does not stays quiet" is a claim about a picture: what a
+        // wash does to a 26-point card floating over a terminal is not readable from a colour.
+        let states: [(hovered: Bool, apply: @MainActor (GitStatusOverlayView) -> Void)] = [
+            (false, { $0.update(with: .init(branch: "master", summary: .clean)) }),
+            (false, {
+                $0.update(with: .init(branch: "test-levels-and-sidebar-archive", summary: dirty))
+            }),
+            (false, {
+                $0.update(with: .init(branch: "master", summary: GitChangeSummary(
+                    files: 76, added: 22_431, removed: 14_004
+                )))
+                $0.updateModel(.init(name: "Opus · 1M", effort: "Extra High"))
+            }),
+            (false, {
                 $0.update(with: .init(branch: "test-levels-and-sidebar-archive", summary: dirty))
                 $0.updateSubagents(workingCount: 2, doneCount: 9)
-            },
-            {
+            }),
+            (false, {
                 $0.update(with: .init(
                     branch: "test-levels-and-sidebar-archive",
                     summary: GitChangeSummary(files: 1_234, added: 8_349, removed: 4_742)
                 ))
                 $0.updateRunState(isActive: true, progress: RunProgress(step: 2, total: 4))
                 $0.updateSubagents(workingCount: 0, doneCount: 9)
-            }
+            }),
+            (true, {
+                $0.update(with: .init(branch: "test-levels-and-sidebar-archive", summary: dirty))
+                $0.updateModel(.init(name: "Opus · 1M", effort: "Extra High"))
+                $0.updateSubagents(workingCount: 2, doneCount: 9)
+            })
         ]
 
         Design.Motion.reduceMotionOverrideForTesting = true
@@ -1050,15 +1249,16 @@ final class ThemedIndicatorsTests: XCTestCase {
 
             appearance.performAsCurrentDrawingAppearance {
                 MainActor.assumeIsolated {
-                    let host = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+                    let host = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 460))
                     host.appearance = appearance
                     host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
 
                     // Laid out from the top down, the way the pane's corner stacks them.
                     var top = Design.Spacing.inset
+                    var lit: [GitStatusOverlayView] = []
                     for state in states {
                         let card = GitStatusOverlayView()
-                        state(card)
+                        state.apply(card)
                         card.applyInk(WindowBackdrop.ink)
                         let size = card.fittingSize
                         card.frame = NSRect(
@@ -1068,10 +1268,27 @@ final class ThemedIndicatorsTests: XCTestCase {
                             height: size.height
                         )
                         host.addSubview(card)
+                        if state.hovered { lit.append(card) }
                         top += size.height + Design.Spacing.large
                     }
 
                     host.layoutSubtreeIfNeeded()
+
+                    // The pointer arrives after layout, since where the Git rows are is the
+                    // question the card only answers once it has laid them out.
+                    for card in lit {
+                        card.mouseEntered(with: NSEvent())
+                        let branch = card.subviews
+                            .compactMap { $0 as? NSStackView }
+                            .flatMap { self.descendants(of: $0) }
+                            .compactMap { $0 as? NSTextField }
+                            .first { $0.stringValue.contains("test-levels") }
+                        guard let branch else { continue }
+                        let words = branch.convert(branch.bounds, to: nil)
+                        card.mouseMoved(with: self.pointer(
+                            at: NSPoint(x: words.midX, y: words.midY)
+                        ))
+                    }
                     guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
                         return
                     }
@@ -1113,6 +1330,152 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertEqual(contents.alphaValue,
                        GitStatusOverlayDefaults.restingContentAlpha,
                        accuracy: 0.001)
+    }
+
+    // MARK: - What the Card Says Can Be Clicked
+
+    /// The pointer lights the rows that open Git Review and nothing else on the card.
+    ///
+    /// It used to light all of it, by a hair: the whole view lifted from 85% to full, which is
+    /// the same answer for the branch that opens a pane, the agent line that does nothing, and an
+    /// extension row that cannot. The lift stays — it is the card waking up — and the wash under
+    /// the words is what says *this part acts*.
+    ///
+    /// Measured after the pointer has already entered, so the alpha lift is in both renders and
+    /// the only thing left to differ is the wash.
+    func testOnlyTheRowsThatActLightUnderThePointer() throws {
+        let card = try laidOutCard()
+        let quiet = try drawing(of: card)
+
+        card.mouseEntered(with: NSEvent())
+        let awake = try drawing(of: card)
+        XCTAssertNotEqual(awake, quiet, "the card did not wake up under the pointer at all")
+
+        card.mouseMoved(with: pointer(at: try centre(of: "Opus 5", in: card)))
+        XCTAssertEqual(try drawing(of: card), awake,
+                       "the agent line lit under the pointer, and it opens nothing")
+
+        card.mouseMoved(with: pointer(at: try centre(of: "main", in: card)))
+        XCTAssertNotEqual(try drawing(of: card), awake,
+                          "the branch row is the card's Git receipt and drew no hover at all")
+
+        card.mouseExited(with: NSEvent())
+        XCTAssertEqual(try drawing(of: card), quiet,
+                       "the wash outlived the pointer that raised it")
+    }
+
+    /// The lit rows and the clickable rows are the same rows. A hover that promises a
+    /// destination the click does not deliver — or the reverse — is worse than no hover.
+    func testTheGitRowsAreTheCardsHitTargetRatherThanTheWholeCard() throws {
+        let card = try laidOutCard()
+        var opened = 0
+        card.onOpen = { opened += 1 }
+
+        card.mouseDown(with: pointer(at: try centre(of: "Opus 5", in: card)))
+        XCTAssertEqual(opened, 0, "the agent line opened Git Review")
+
+        card.mouseDown(with: pointer(at: try centre(of: "main", in: card)))
+        XCTAssertEqual(opened, 1, "the branch row did not open Git Review")
+    }
+
+    /// A card that calls itself a button has to be pressable by something other than a pointer.
+    /// It carried the role and no action, so VoiceOver announced a button that did nothing.
+    func testTheCardOpensGitReviewForAScreenReaderToo() throws {
+        let card = try laidOutCard()
+        var opened = 0
+        card.onOpen = { opened += 1 }
+
+        XCTAssertEqual(card.accessibilityRole(), .button)
+        XCTAssertTrue(card.accessibilityPerformPress())
+        XCTAssertEqual(opened, 1)
+
+        card.clear()
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5"))
+        card.applyInk(WindowBackdrop.ink)
+        XCTAssertFalse(card.accessibilityPerformPress(),
+                       "a card with no Git sentence answered a press")
+        XCTAssertEqual(opened, 1)
+    }
+
+    /// Both button rows are inked for the backdrop they float on, which is what gives them a
+    /// hover at all. The audience row was given neither colour, so it drew in AppKit's own label
+    /// tier and lifted to nothing — inert by omission rather than by design.
+    func testBothButtonRowsAreInkedForTheBackdropTheyFloatOn() throws {
+        let card = GitStatusOverlayView()
+        card.updateSubagents(workingCount: 1, doneCount: 0)
+        card.updateAudience(GitStatusOverlayView.AudienceReading(following: 0, isShared: true))
+        card.applyInk(WindowBackdrop.ink)
+
+        let buttons = card.subviews
+            .compactMap { $0 as? NSStackView }
+            .flatMap(\.arrangedSubviews)
+            .compactMap { $0 as? ThemedButton }
+            .filter { !$0.isHidden }
+        XCTAssertEqual(buttons.count, 2, "the card drew \(buttons.count) button rows, not two")
+
+        for button in buttons {
+            XCTAssertEqual(button.hoverFill, WindowBackdrop.ink.surfaceHover,
+                           "\(button.title) raises nothing under the pointer")
+            XCTAssertEqual(button.contentTintColor, WindowBackdrop.ink.secondary,
+                           "\(button.title) is not inked for the backdrop it floats on")
+        }
+    }
+
+    // MARK: - Card Fixtures
+
+    /// A card carrying all three kinds of row — a Git receipt that acts, and an agent line that
+    /// does not — laid out at its own size so a point can be taken in either.
+    private func laidOutCard() throws -> GitStatusOverlayView {
+        let card = GitStatusOverlayView()
+        card.update(with: GitChangeMonitor.Reading(
+            branch: "main",
+            summary: GitChangeSummary(files: 12, added: 4_203, removed: 250)
+        ))
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5"))
+        card.applyInk(WindowBackdrop.ink)
+        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+        card.layoutSubtreeIfNeeded()
+        return card
+    }
+
+    /// The centre of the row holding a given reading, in the card's own coordinates — which are
+    /// also the window's here, since the fixture card is the root of its own tree at the origin.
+    private func centre(of text: String, in card: GitStatusOverlayView) throws -> NSPoint {
+        let label = try XCTUnwrap(
+            descendants(of: card)
+                .compactMap { $0 as? NSTextField }
+                .filter { !$0.isHiddenOrHasHiddenAncestor }
+                .first { $0.stringValue.contains(text) },
+            "the card is not showing \(text)"
+        )
+        let frame = card.convert(label.bounds, from: label)
+        return NSPoint(x: frame.midX, y: frame.midY)
+    }
+
+    private func pointer(at location: NSPoint) -> NSEvent {
+        NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: location,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 0,
+            pressure: 0
+        ) ?? NSEvent()
+    }
+
+    /// What the view actually drew, as bytes — the comparison a hover wash needs, since the
+    /// thing that changed is a fill behind text rather than a property anyone can read back.
+    private func drawing(of view: NSView) throws -> Data {
+        // A layer-backed view hands `cacheDisplay` whatever its layer already holds, and a state
+        // change only marks that layer dirty — so without this the second capture is a picture of
+        // the first, and every assertion about a redraw passes by never taking one.
+        view.displayIfNeeded()
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
     }
 }
 
