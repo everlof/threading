@@ -1,5 +1,4 @@
 import AppKit
-import PDFKit
 
 /// A session's visual deliverables: a compact list above an in-place image/PDF preview.
 ///
@@ -19,6 +18,17 @@ final class SessionAttachmentsViewController: NSViewController {
     private var attachments: [SessionAttachment] = []
     private var filter: AttachmentFilter = .all
     private var selectedRelativePath: String?
+
+    /// The preview's preferred height — its *content's* height, not the pane's slack.
+    ///
+    /// Without it the preview was the layout's flexible element between a top-pinned list and a
+    /// bottom-pinned footer, so a tall pane stretched it to hundreds of points around a small
+    /// picture and put the file's name and buttons at the window's floor, a screen away from
+    /// the list — reported as the pane feeling "stretched out, landing at the bottom". Stated
+    /// below `required` so a pane *shorter* than the picture still compresses the preview
+    /// rather than pushing the footer out of reach; deactivated for a PDF, which reads better
+    /// the taller it is (`footerPull` is what stretches it then).
+    private var previewHeightConstraint: NSLayoutConstraint?
 
     private lazy var countLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
@@ -49,6 +59,12 @@ final class SessionAttachmentsViewController: NSViewController {
         row.spacing = Design.Spacing.small
         // The label absorbs the slack, which is what puts the filter on the trailing edge.
         countLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // One line *means* one line. The row is pinned above (the pane's top) and below (the
+        // list), and a stack left free to grow was where a tall pane's slack silently went:
+        // the layout was ambiguous, the solver gave this band hundreds of points, and the
+        // centred count label floated mid-pane with the list a screen below it — no constraint
+        // broken, nothing logged, just a caption adrift.
+        row.setHuggingPriority(.required, for: .vertical)
         row.translatesAutoresizingMaskIntoConstraints = false
         return row
     }()
@@ -79,19 +95,22 @@ final class SessionAttachmentsViewController: NSViewController {
         host.wantsLayer = true
         return host
     }()
-    private lazy var imageView: NSImageView = {
-        let image = NSImageView()
-        image.imageAlignment = .alignCenter
-        image.imageScaling = .scaleProportionallyUpOrDown
+    private lazy var imageView: ThemedImagePreview = {
+        let image = ThemedImagePreview()
+        image.inspectorSelectionProvider = { [weak self] in
+            guard let self else { return nil }
+            let row = self.tableView.selectedRow
+            guard self.attachments.indices.contains(row) else { return nil }
+            let items = self.attachments.map {
+                MediaInspectorItem(url: $0.url, title: $0.name)
+            }
+            return MediaInspectorSelection(items: items, selectedIndex: row)
+        }
         image.translatesAutoresizingMaskIntoConstraints = false
         return image
     }()
-    private lazy var pdfView: PDFView = {
-        let pdf = PDFView()
-        pdf.autoScales = true
-        pdf.displayMode = .singlePageContinuous
-        pdf.displayDirection = .vertical
-        pdf.displaysPageBreaks = true
+    private lazy var pdfView: MediaInspectorDocumentView = {
+        let pdf = MediaInspectorDocumentView()
         pdf.translatesAutoresizingMaskIntoConstraints = false
         return pdf
     }()
@@ -189,6 +208,7 @@ final class SessionAttachmentsViewController: NSViewController {
     override func viewDidLayout() {
         super.viewDidLayout()
         tableView.sizeLastColumnToFit()
+        updatePreviewHeight()
     }
 
     // MARK: - Setup
@@ -294,8 +314,11 @@ final class SessionAttachmentsViewController: NSViewController {
                 constant: Design.Spacing.tight
             ),
             copyButton.trailingAnchor.constraint(lessThanOrEqualTo: fileLabel.trailingAnchor),
+            // The floor is a limit, not a home: the footer sits under the preview's content
+            // and the pane's slack falls *below* it, empty. Pinned `==` here, a tall pane
+            // stretched the preview to fill the difference — see `previewHeightConstraint`.
             openButton.bottomAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor,
                 constant: -Design.Spacing.small
             ),
 
@@ -304,6 +327,49 @@ final class SessionAttachmentsViewController: NSViewController {
             emptyLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
             emptyLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset)
         ])
+
+        // What stretches a PDF to the floor — and loses, deliberately, to an image's own
+        // height above. One gentle pull instead of a hard pin is the whole difference between
+        // "a document fills the room it has" and "a snapshot is stretched across it".
+        let footerPull = openButton.bottomAnchor.constraint(
+            equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+            constant: -Design.Spacing.small
+        )
+        footerPull.priority = SessionAttachmentsDefaults.footerPullPriority
+        footerPull.isActive = true
+
+        let previewHeight = previewHost.heightAnchor.constraint(equalToConstant: 0)
+        previewHeight.priority = .defaultHigh
+        previewHeightConstraint = previewHeight
+    }
+
+    /// Re-aims `previewHeightConstraint` at what the preview currently holds. Called when the
+    /// selection changes what is shown and from `viewDidLayout`, because an image's fitted
+    /// height is a function of the pane's *width*.
+    private func updatePreviewHeight() {
+        guard let constraint = previewHeightConstraint else { return }
+
+        if !imageView.isHidden, let image = imageView.image {
+            // Activated even before the pane has a width — the floor stands in, and the
+            // `viewDidLayout` call corrects it the moment the width is real. Returning early
+            // here left the constraint inactive for the first pass, which was a whole pane of
+            // stretched preview until something else caused a layout.
+            let width = previewHost.bounds.width
+            let fitted = width > 0
+                ? ThemedImagePreview.fittedRect(
+                    for: image.size,
+                    in: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)
+                ).height
+                : 0
+            let target = max(fitted, SessionAttachmentsDefaults.minimumPreviewHeight)
+            if constraint.constant != target { constraint.constant = target }
+            constraint.isActive = true
+        } else if !previewMessage.isHidden {
+            constraint.constant = SessionAttachmentsDefaults.messagePreviewHeight
+            constraint.isActive = true
+        } else {
+            constraint.isActive = false
+        }
     }
 
     // MARK: - Public Methods
@@ -422,47 +488,51 @@ final class SessionAttachmentsViewController: NSViewController {
                 showPreviewMessage(L10n.string("The image could not be decoded."))
                 return
             }
-            pdfView.document = nil
+            pdfView.clear()
             pdfView.isHidden = true
             imageView.image = image
+            imageView.fileURL = attachment.url
             imageView.isHidden = false
 
         case .pdf:
-            guard let document = PDFDocument(url: attachment.url) else {
+            guard pdfView.display(attachment.url) else {
                 showPreviewMessage(L10n.string("The PDF could not be decoded."))
                 return
             }
             imageView.image = nil
             imageView.isHidden = true
-            pdfView.document = document
             pdfView.isHidden = false
         }
+
+        updatePreviewHeight()
     }
 
     private func clearPreview() {
         imageView.image = nil
         imageView.isHidden = true
-        pdfView.document = nil
+        pdfView.clear()
         pdfView.isHidden = true
         previewMessage.stringValue = ""
         previewMessage.isHidden = true
         fileLabel.stringValue = ""
         pathLabel.stringValue = ""
+        updatePreviewHeight()
     }
 
     private func showPreviewMessage(_ message: String) {
         imageView.image = nil
         imageView.isHidden = true
-        pdfView.document = nil
+        pdfView.clear()
         pdfView.isHidden = true
         previewMessage.stringValue = message
         previewMessage.isHidden = false
+        updatePreviewHeight()
     }
 
     private func applyPreviewTheme() {
         guard isViewLoaded else { return }
         previewHost.applySurface(fill: Design.Surface.ground, radius: .panel)
-        pdfView.backgroundColor = Design.Surface.ground
+        pdfView.applyTheme()
     }
 
     private func detail(for attachment: SessionAttachment) -> String {
@@ -662,4 +732,13 @@ enum SessionAttachmentsDefaults {
     static let rowHeight: CGFloat = 42
     static let iconSize: CGFloat = 26
     static let maximumPreviewFileBytes = 64 * 1024 * 1024
+
+    /// A floor for the image well, so a small mark still gets a quiet panel rather than a
+    /// sliver whose corner radius outweighs its height.
+    static let minimumPreviewHeight: CGFloat = 96
+    /// The well around a sentence — "too large to preview", "could not be decoded".
+    static let messagePreviewHeight: CGFloat = 160
+    /// Gentle on purpose: it loses to an image's own height (`.defaultHigh`) and wins only
+    /// when nothing states one — a PDF, which fills whatever room the pane has.
+    static let footerPullPriority = NSLayoutConstraint.Priority(300)
 }

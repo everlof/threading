@@ -30,6 +30,28 @@ replay window. The tool lives in the default-enabled **Conversation handoff** ca
 turning that group off also removes the Continue menu because the destination could no longer
 receive its context.
 
+The **This session** group uses the same routing to act rather than to read, and every tool in
+it acts on the session the call arrived on — which is why none takes a session argument. An
+agent can name and end its own conversation and no other. (The group's id is still
+`session-lifecycle`: it is the key the user's disabled-groups set is stored under, so renaming
+it would switch the group back on for everyone who had turned it off.)
+
+`archive_session` is the one tool whose effect would destroy the call that asked for it —
+archiving stops the agent — so it schedules rather than acts, and the archive lands after the
+turn ends. The reasoning, the turn-end signal it waits on and the receipt it produces are in
+[`sessions.md`](sessions.md).
+
+`set_session_name` writes the session's `agentTitle`, the same slot the terminal title and the
+transcript's `ai-title` land in — deliberately not `customTitle`, which is the user's own rename
+and outranks the agent everywhere. It goes through `ProjectStore.updateAgentTitle` rather than
+validating anything itself, so a tool call is held to exactly the rule the two title transports
+are held to: a name that is really the agent's, the account's or the project's is refused. That
+refusal is **reported**, which is why `updateAgentTitle` returns a `Bool` — an agent told its
+call succeeded when the name was dropped goes on to tell the user the session was renamed while
+the sidebar still says what it said before. Two further outcomes are reported as successes with
+a caveat rather than as failures, because both are the user's own settled choice: a `customTitle`
+already showing, and **Settings ▸ General** set to ignore agent titles at all.
+
 Three deliberate choices in the launch line:
 
 - **The display tool is pre-approved** with `--allowedTools mcp__threading__*` for Claude and a
@@ -89,19 +111,39 @@ Terminal, Files, Info, Attachments, Subagents, or a transferred tab — exits th
 returns to the selected session's tabs. This lets a conversation remain alongside the theme being
 discussed without pretending an app-wide document belongs to that conversation.
 
-`DisplayContent.Body` is an enum, so the panel shows either a `ThemedImagePreview` or a
-`WKWebView` and the `⋯` menu offers only the actions that fit — an image and a document share
-almost nothing worth acting on.
+`DisplayContent.Body` is an enum, so the panel shows a `ThemedImagePreview`, a `WKWebView`, or a
+native semantic scene and the `⋯` menu offers only the actions that fit — an image and a document
+share almost nothing worth acting on.
+
+`display_scene` is the generic non-HTML visualization bridge. Its value is the same bounded
+`ExtensionScene` used by safe extension panels: normalized rectangles, host-owned shapes,
+semantic colour roles, labels, detail, selection, and accessibility. `SemanticSceneView` renders
+those marks through Threading's design system, so an external MCP can supply a treemap, heatmap,
+timeline, dependency map, scatter plot, or bubble plot without introducing a domain-specific
+AppKit view. The scene persists as data with its tab.
+
+This deliberately composes with user MCP servers. For example, ArtifactKit's external stdio
+server returns `structuredContent.scene`; the agent passes that value to Threading's
+session-scoped `display_scene` tool. The one-off display command strips mark action identifiers:
+after the tool call returns there is no process waiting for a later click. A persistent safe
+extension panel can render the same scene and keep action routing because its extension process
+owns a continuing panel session.
 
 **The picture is a control.** An image the agent just produced is the thing the user most wants
-to open properly, and Quick Look is where macOS already keeps zoom, rotate, share, Open With and
-full screen. Every route lands on the same `performPrimaryAction`: click to focus and Space or
-Return, a double-click, the trackpad's own Quick Look gesture, VoiceOver's press, and the `⋯`
-menu's first item — the menu because it is the one affordance that *advertises* what can be
-done, and a gesture nobody tries is not a feature. Double-click rather than single, unlike the
-prompt's attachment thumbnails: a 40pt chip is not something anyone is reading, a pane-filling
-picture is. `QuickLookPresenter` owns the panel's data for both call sites, because
-`QLPreviewPanel.dataSource` is non-retaining and the panel is one system window.
+to inspect, so a click, Space/Return, the trackpad's preview gesture, VoiceOver's press, and the
+`⋯` menu's first item all open `MediaInspectorView` inside the current window. The app-owned
+inspector begins fitted, toggles Fit/100% on double-click or Z, magnifies around the pointer,
+pans, and walks the source collection with arrows, swipes, or its thumbnail rail. Space or Escape
+closes and restores the source's focus. The same route serves prompt thumbnails and the session
+Attachments pane, so the interaction does not depend on first finding a row and invoking a
+separate system panel.
+
+System Quick Look remains an explicit last-resort action, not the primary interaction.
+`MediaInspectorDocumentView` uses PDFKit for PDF and embeds `QLPreviewView` for unfamiliar file
+formats behind a named `SystemChromeBoundary`; all surrounding header, navigation, menu, rail,
+zoom, focus, and surfaces remain Threading-owned and theme live. `QuickLookPresenter` still owns
+the optional floating system panel's data because `QLPreviewPanel.dataSource` is non-retaining
+and the panel is one system window.
 
 These were measured rather than assumed, each having first been wrong:
 
@@ -165,6 +207,26 @@ These were measured rather than assumed, each having first been wrong:
 - **The width observer fired during the uncollapse layout**, recording the transient 260pt
   minimum as the user's width and then restoring *that*. `isRestoringDisplayPaneWidth`
   suppresses recording for the reveal, and the target width is read before uncollapsing.
+- **A released constraint restores nothing.** The reveal used to activate a required width on
+  the pane, lay out, and release it: traced, that is `asked 372 → with constraint 372 → released
+  372 → relaid 48`. An `NSSplitViewController` positions its items with *its own* constraint at
+  the item's `holdingPriority`, and that constant is still the thickness the pane had, so the
+  next layout pass puts it straight back. Survivable while the item's minimum was 200 — the
+  panel merely opened narrower than it was left — and fatal once `slimmestWidth` lowered the
+  minimum to 48 so the panel would stop raising the *window's* minimum: two correct changes that
+  were only wrong together, which is why nothing caught it. `applyDisplayPaneWidth` now moves the
+  divider, so the width is the split view's own answer. **`setPosition(_:ofDividerAt:)` is not
+  ignored by an `NSSplitViewController`** — the earlier note here said it was. Dividers are
+  indexed among the *panes* while a split view keeps its dividers in `subviews` too, so a
+  `subviews`-counted index moves the wrong one: with three panes, `subviews.count - 2` is a
+  divider view.
+- **The panel's remembered width is a user choice, so it goes through `PreferenceStore`.** It
+  was on `UserDefaults.standard`, and the test bundle is hosted in the app: a fixture window that
+  opened the panel wrote whatever width it happened to get into the developer's own preferences.
+  A real machine had 48 saved there — the chrome floor, measured in an unshown window by a test
+  about something else. Below `minWidth` a stored width is read as absent rather than restored,
+  and a first open takes `openingFraction` of the window (floored at `defaultWidth`, capped at
+  `widestOpening`) instead of one fixed number.
 
 The web view **allows network** and blocks only navigation. A CSP would be theatre: the agent
 already has a shell, so anything it could exfiltrate through a page it could exfiltrate more
@@ -240,6 +302,17 @@ pointerless twin, per the design system's rule.
 
 The Attachments tab is the session's visual history: everything that passed between the two
 parties, newest first, capped at `SessionAttachmentDefaults.maximumPerSession`.
+
+**The pane leads with its content; the slack falls below the footer, empty.** The preview used
+to be the layout's one flexible element between a top-pinned list and a *bottom-pinned* footer,
+so a tall panel stretched it to hundreds of points around a small picture and put the file's
+name and buttons at the window's floor, a screen below the list they describe. An image now
+states the preview's height (its fitted height at the pane's width, floored at
+`SessionAttachmentsDefaults.minimumPreviewHeight`), the footer's floor is a
+`lessThanOrEqualTo` limit rather than a home, and a gentle pull
+(`SessionAttachmentsDefaults.footerPullPriority`) below the image's priority is what lets the
+one kind that *should* fill the room — a PDF — still do so. A pane shorter than the picture
+compresses the preview, never the footer. `SessionAttachmentsLayoutTests` pins all three.
 
 **There are two doors into the list, and conflating them was the bug.**
 
