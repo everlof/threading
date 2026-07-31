@@ -77,9 +77,6 @@ final class TerminalContainerViewController: NSViewController {
 
     private var settingsPage: NSViewController?
     private var settingsPageCache: [String: NSViewController] = [:]
-    /// The results page, kept across a typing run and dropped the moment a real page is shown.
-    /// Not in `settingsPageCache`: it has no page ID, and nothing routes to it.
-    private var searchResultsPage: SettingsSearchResultsViewController?
 
     /// Whether settings is the surface currently on screen, so the window can title the pane.
     var isShowingSettings: Bool { settingsPage != nil }
@@ -320,7 +317,6 @@ final class TerminalContainerViewController: NSViewController {
         guard let definition = SettingsPages.page(id: id) else { return }
 
         currentSettingsPageID = id
-        searchResultsPage = nil
 
         let cached = settingsPageCache[id]
         let page = cached ?? {
@@ -330,29 +326,6 @@ final class TerminalContainerViewController: NSViewController {
         }()
 
         install(settings: page, repaint: cached != nil)
-    }
-
-    /// Shows what a settings search found, in the pane the reader is already looking at.
-    ///
-    /// One controller for a whole typing run — `update` restates it rather than a new page
-    /// arriving per keystroke, which would throw away the scroll position and flash the pane
-    /// on every letter. `currentSettingsPageID` is deliberately left alone: the results are not
-    /// a page, and clearing the query has to be able to put the chosen one back.
-    func showSettingsSearchResults(query: String, onOpen: @escaping (String) -> Void) {
-        let matches = SettingsPages.search(query)
-
-        if let existing = searchResultsPage {
-            existing.onOpen = onOpen
-            existing.update(query: query, matches: matches)
-            guard settingsPage !== existing else { return }
-            install(settings: existing, repaint: true)
-            return
-        }
-
-        let results = SettingsSearchResultsViewController(query: query, matches: matches)
-        results.onOpen = onOpen
-        searchResultsPage = results
-        install(settings: results, repaint: false)
     }
 
     /// Puts a settings-shaped child in the pane: centred, capped at a readable width, floored by

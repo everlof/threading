@@ -807,12 +807,6 @@ extension ProjectSidebarViewController {
     /// settings replaces the sidebar rather than adding a second one beside it.
     /// Highlights a settings row, for doors that land on a specific page rather than the
     /// first. A no-op outside settings mode, where there is no list to highlight.
-    /// Which settings page the list currently shows as chosen, so a search that is cleared can
-    /// put the pane back on it rather than on whichever page happened to be first.
-    var selectedSettingsPageID: String? {
-        settingsSidebar?.selectedID
-    }
-
     func selectSettingsPage(id: String) {
         settingsSidebar?.select(id: id)
     }
@@ -856,10 +850,6 @@ extension ProjectSidebarViewController {
         sidebar.onSelect = { [weak self] pageID in
             guard let self else { return }
             self.delegate?.projectSidebar(self, didSelectSettingsPage: pageID)
-        }
-        sidebar.onSearch = { [weak self] query in
-            guard let self else { return }
-            self.delegate?.projectSidebar(self, didSearchSettings: query)
         }
         view.addSubview(sidebar)
 
@@ -1877,9 +1867,6 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
-    /// The settings query changed. Empty means the search was cleared, and the pane goes back
-    /// to whichever page the list has selected.
-    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSearchSettings query: String)
 }
 
 // MARK: - Arrangement Menu

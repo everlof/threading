@@ -1980,28 +1980,6 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         recordVisit(.settings(pageID))
     }
 
-    /// A query puts the results in the pane; clearing it puts the chosen page back.
-    ///
-    /// Deliberately no `recordVisit`: the results are a view of the search field's current
-    /// contents, and a back button that returned to a search that is no longer being made would
-    /// be navigating to a moment rather than to a place.
-    func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
-        didSearchSettings query: String
-    ) {
-        if query.isEmpty {
-            containerViewController.showSettingsPage(
-                id: sidebar.selectedSettingsPageID ?? SettingsPages.generalID
-            )
-        } else {
-            containerViewController.showSettingsSearchResults(query: query) { [weak self] pageID in
-                guard let self else { return }
-                self.sidebarViewController.selectSettingsPage(id: pageID)
-                self.projectSidebar(self.sidebarViewController, didSelectSettingsPage: pageID)
-            }
-        }
-        updateSessionTitleItem()
-    }
 }
 
 // MARK: - TerminalContainerViewControllerDelegate

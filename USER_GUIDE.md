@@ -1722,16 +1722,10 @@ case; every word must match. Extension-provided pages and sections participate w
 localized titles, descriptions, choices, and placeholders, and the query stays in place when
 an extension is enabled or disabled.
 
-**A search says what it found, not only where.** Each matching section lists the settings the
-query landed on beneath it, indented — searching *mute* shows **General** with *Mute* under it —
-and picking either the section or one of its matches opens the page. The pane fills with the
-same answer as a results page: every matching section, the terms it matched, and an **Open**
-button for each. Clearing the field puts the selected page back.
-
-On that results page the words themselves are marked, so a row reading
-*Notifications · Mute · Sound* shows you which of the three you asked for rather than leaving
-you to search inside the answer to your search. A match is both emboldened and given a tinted
-ground — two signals, so it is still visible with **Differentiate Without Colour** turned on.
+The sidebar filters immediately while you type and remains a list of pages: searching *mute*,
+for example, leaves **General** as the matching destination. The page already open in the right
+pane stays put until you choose one of those filtered destinations. Clearing the field restores
+the complete page list.
 
 Threading follows the language macOS selects for the app, with English as the per-string fallback.
 Menus, built-in Settings navigation, commands, and Settings components use the app string

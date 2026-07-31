@@ -14,21 +14,6 @@ final class SettingsSidebar: NSView {
         let title: String
         let symbol: String
         let searchText: String
-        /// The page's own vocabulary, shown beneath it while a search is running. See
-        /// `SettingsSearchMatch`.
-        var terms: [String] = []
-    }
-
-    // MARK: - Geometry
-
-    private enum Layout {
-        /// How far a match sits inboard of the page it belongs to. One step of the sidebar's
-        /// own indentation, so a match reads as *under* its section the way a session reads as
-        /// under its project.
-        static let matchIndent: CGFloat = SidebarDefaults.indentationPerLevel
-        /// The mark on a match row. A magnifier rather than a chevron: the row exists because
-        /// the query found it, and it opens the same page its parent does.
-        static let matchSymbol = "text.magnifyingglass"
     }
 
     // MARK: - Properties
@@ -36,10 +21,6 @@ final class SettingsSidebar: NSView {
     /// Called with the stable page ID the user picked. Not fired by `select(id:)`, so the owner can set
     /// the initial page without re-entrancy.
     var onSelect: ((String) -> Void)?
-
-    /// Called whenever the query changes, with the trimmed query. The list narrows itself; this
-    /// is how the *pane* beside it learns to show the results page instead of a settings page.
-    var onSearch: ((String) -> Void)?
 
     private var items: [Item] = []
     private var displayedItems: [Item] = []
@@ -116,20 +97,12 @@ final class SettingsSidebar: NSView {
             SettingsSearch.matches(query: query, text: $0.searchText)
         }
 
-        // Page rows and the matches under them, in reading order. `rows` stays the *pages*
-        // alone — it is what `select(id:)` walks in step with `displayedItems`, and a match row
-        // is never the selected page, it only opens one.
-        var listed: [NSView] = []
+        // Search changes which destinations are offered; it never changes the shape of one
+        // destination into a miniature results tree. Broad queries used to add several term
+        // rows beneath every page, overflowing this non-scrolling sidebar until it appeared to
+        // vanish. The page's full searchable vocabulary still decides whether the row remains.
         rows = displayedItems.map { item in
-            let row = makeRow(title: item.title, symbol: item.symbol, opens: item.id)
-            listed.append(row)
-            guard !query.isEmpty else { return row }
-            for term in SettingsSearch.terms(in: item.terms, touchedBy: query) {
-                listed.append(indented(
-                    makeRow(title: term, symbol: Layout.matchSymbol, opens: item.id)
-                ))
-            }
-            return row
+            makeRow(title: item.title, symbol: item.symbol, opens: item.id)
         }
 
         let noResults = NSTextField(
@@ -140,7 +113,7 @@ final class SettingsSidebar: NSView {
         noResults.alignment = .center
         noResults.isHidden = !rows.isEmpty
 
-        let resultViews: [NSView] = rows.isEmpty ? [noResults] : listed
+        let resultViews: [NSView] = rows.isEmpty ? [noResults] : rows
         let stack = NSStackView(views: resultViews)
         stack.orientation = .vertical
         stack.alignment = rows.isEmpty ? .centerX : .leading
@@ -148,14 +121,15 @@ final class SettingsSidebar: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         if searchField.superview == nil {
             addSubview(searchField)
+            NSLayoutConstraint.activate([
+                searchField.topAnchor.constraint(equalTo: topAnchor),
+                searchField.leadingAnchor.constraint(equalTo: leadingAnchor),
+                searchField.trailingAnchor.constraint(equalTo: trailingAnchor)
+            ])
         }
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: topAnchor),
-            searchField.leadingAnchor.constraint(equalTo: leadingAnchor),
-            searchField.trailingAnchor.constraint(equalTo: trailingAnchor),
-
             stack.topAnchor.constraint(
                 equalTo: searchField.bottomAnchor,
                 constant: Design.Spacing.medium
@@ -185,25 +159,6 @@ final class SettingsSidebar: NSView {
         return row
     }
 
-    /// A match, held one indentation step inboard of its page. The wrapper is what makes the
-    /// step possible: a vertical stack pins every arranged view to its own leading edge, so an
-    /// offset has to belong to a view of its own rather than to the row.
-    private func indented(_ view: NSView) -> NSView {
-        let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        view.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            view.leadingAnchor.constraint(
-                equalTo: container.leadingAnchor,
-                constant: Layout.matchIndent
-            ),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor)
-        ])
-        return container
-    }
 }
 
 // MARK: - NSTextFieldDelegate
@@ -211,6 +166,5 @@ final class SettingsSidebar: NSView {
 extension SettingsSidebar: NSTextFieldDelegate {
     func controlTextDidChange(_ notification: Notification) {
         rebuildResults()
-        onSearch?(searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }

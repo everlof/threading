@@ -330,32 +330,29 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertTrue(SettingsPages.search("").isEmpty, "an empty query is not a search")
     }
 
-    /// The list shows the matches under the page they belong to. The page rows stay the list's
-    /// selectable items — a match opens a page, it is never one.
-    func testTheListShowsMatchesUnderTheirPageWhileSearching() {
+    /// Typing filters destinations in place. Search terms decide whether a page stays, but do
+    /// not become extra rows that can overflow the sidebar or duplicate the destination.
+    func testTheListFiltersPagesWithoutAddingSettingHits() {
         let sidebar = SettingsSidebar(items: [
             .init(
                 id: "general",
                 title: "General",
                 symbol: "gearshape",
-                searchText: "General notifications mute sound",
-                terms: ["Notifications", "Mute", "Sound"]
+                searchText: "General notifications mute sound"
             ),
             .init(
                 id: "themes",
                 title: "Themes",
                 symbol: "paintpalette",
-                searchText: "Themes appearance font",
-                terms: ["Appearance", "Font"]
+                searchText: "Themes appearance font"
             )
         ])
 
         sidebar.updateSearchQuery("mute")
         XCTAssertEqual(sidebar.visibleItemIDs, ["general"])
-        XCTAssertEqual(rowTitles(in: sidebar), ["General", "Mute"])
+        XCTAssertEqual(rowTitles(in: sidebar), ["General"])
 
-        // Cleared, the list is pages again — a term row outliving its query would be a
-        // permanent second copy of the catalogue.
+        // Cleared, every destination returns in place.
         sidebar.updateSearchQuery("")
         XCTAssertEqual(rowTitles(in: sidebar), ["General", "Themes"])
     }

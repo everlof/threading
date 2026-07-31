@@ -306,8 +306,7 @@ enum SettingsPages {
                 id: $0.id,
                 title: $0.title,
                 symbol: $0.symbol,
-                searchText: $0.searchableText,
-                terms: $0.displayTerms
+                searchText: $0.searchableText
             )
         }
     }
