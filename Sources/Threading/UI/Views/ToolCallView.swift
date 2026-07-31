@@ -48,6 +48,10 @@ final class ToolCallView: NSView {
     private var canExpand = false
     private var isHovered = false
 
+    /// Recyclable conversation rows persist this state in their controller and invalidate the
+    /// table's cached height. Standalone renderers can leave it nil.
+    var onExpansionChanged: ((Bool) -> Void)?
+
     // MARK: - Initialization
 
     init(tool: ToolIdentity, summary: String, diff: [DiffLine]? = nil) {
@@ -232,10 +236,10 @@ final class ToolCallView: NSView {
         chevron.isHidden = false
     }
 
-    @objc private func toggle() {
-        guard canExpand else { return }
+    func setExpanded(_ expanded: Bool, notifying: Bool = true) {
+        guard canExpand, expanded != isExpanded else { return }
 
-        isExpanded.toggle()
+        isExpanded = expanded
         bodyView.isHidden = !isExpanded
         headerBottom.isActive = !isExpanded
         bodyBottom.isActive = isExpanded
@@ -245,6 +249,13 @@ final class ToolCallView: NSView {
             accessibilityDescription: nil
         )
         updateSurface()
+        invalidateIntrinsicContentSize()
+        superview?.needsLayout = true
+        if notifying { onExpansionChanged?(isExpanded) }
+    }
+
+    @objc private func toggle() {
+        setExpanded(!isExpanded)
     }
 
     // MARK: - Hover

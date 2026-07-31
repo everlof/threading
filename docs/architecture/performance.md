@@ -88,6 +88,9 @@ scripts/profile_threading.sh git-stress
 # Deterministic native-conversation replay, jump, append, fold, and streaming workloads.
 scripts/profile_threading.sh conversation-stress
 
+# Multi-conversation residency, session switching, background updates, and footprint.
+scripts/profile_threading.sh conversation-residency-stress
+
 # Deterministic production-outline workload from 500 through 5,000 sessions.
 scripts/profile_threading.sh sidebar-stress
 
@@ -101,8 +104,8 @@ scripts/profile_threading.sh trace "Time Profiler" 15 Threading
 # Animation Hitches, and Allocations.
 scripts/profile_threading.sh full 15 Threading
 
-# Release/investigation sweep: full plus CPU Profiler, File Activity, Leaks,
-# Swift Concurrency, System Trace, and Power Profiler.
+# Release/investigation sweep: full plus multi-conversation residency, CPU Profiler,
+# File Activity, Leaks, Swift Concurrency, System Trace, and Power Profiler.
 scripts/profile_threading.sh full+ 15 Threading
 
 # Locate recent CLI and built-in artifacts.
@@ -184,33 +187,88 @@ that accumulation is worth a separate multi-pane test, but it is not a stable sc
 Each result is a `THREADING_PERF conversation-*` line in `conversation-stress.log`.
 
 The first sample put the main thread in `NSView.layoutSubtreeIfNeeded` and CoreAutoLayout while
-attaching the accumulated native tree. Three measured changes are deliberately narrower than full
-virtualization:
+attaching the accumulated native tree. Replay batching and folded-work deferral removed the first
+large tranche, but the remaining user/fold/final-answer rows still formed one `NSStackView`
+constraint chain. Hiding or detaching intermediate rows could not bound that live chain.
 
 `conversation.replay.render` brackets the production transcript-to-native-view pass. It records
-only aggregate event, model-row, materialized-row, arranged-view and folded-turn counts, so traces and
-Points of Interest captures can correlate the same semantic interval with AppKit stacks without
-recording conversation content.
+only aggregate event, model-row, materialized-row, presentation-row, measured-height and
+folded-turn counts, so traces and Points of Interest captures can correlate the same semantic
+interval with AppKit stacks without recording conversation content.
 
 - replay rebuilds the minimap, conversation controls, and remote snapshot once at its boundary,
   rather than once for every prefix of the transcript;
-- replay defers a turn's non-user native views until its terminal event; a successful turn
-  materializes only its fold and final answer, while interrupted and truncated tails materialize
-  in full. Hidden tools are built on first expansion and reused thereafter. A tool-heavy history
-  therefore neither constructs nor constrains hundreds of rows it already knows are collapsed.
-  At the 100-turn production edge, 1,100 tool-heavy model rows now materialize 200 row views —
-  the same 399 arranged views and 2,358 descendants as the 600-row mixed shape;
-- folded intermediate work is retained by `TurnFoldView` but detached from the live hierarchy.
-  Expanding reattaches the exact views and reapplies the active theme. At 50 mixed turns this cut
-  descendants from 4,008 to 1,208, final layout from about 1,505 ms to 175 ms, and a deep jump
-  from about 921 ms to 84 ms in the isolated Debug workload.
+- the presentation is a view-based table. The full timeline and stable presentation identities
+  remain resident, while Markdown/tool views exist only in reusable hosts around the viewport;
+- replay mutates the timeline and presentation model, then reloads the table once. Fold expansion
+  inserts identities and collapse removes them; neither path retains an off-screen constraint tree;
+- AppKit owns automatic row-height estimation/caching; the controller invalidates affected rows
+  and clears its measured-identity mirror when the readable width changes. Tool, user-message and
+  turn disclosure state is held outside recyclable views. Exact jumps therefore do not require a
+  target view to exist and correct after the landing.
 
-The remaining visible user/fold/final-answer rows still form one `NSStackView` constraint chain.
-At the 100-turn edge, jumps and incremental relayout remain hundreds of milliseconds; a manual
-linear layout prototype made jumps cheap but made cold native height measurement substantially
-worse and could not reliably observe every interactive disclosure. The next architecture step,
-when that residual cost is addressed, is reusable turn/row virtualization with height caching —
-not another progressive stack that merely postpones the same retained-layout cliff.
+On the 100-turn mixed Debug case, 600 model rows become 399 presentation rows but only eight live
+row views and 179 descendants. Model reduction measured 31 ms, presentation/reload 938 ms and final
+layout 108 ms, for 1.05 s total versus roughly 3.2 s before the replay and row-lifetime work. The
+same run measured a deepest-turn jump at 264 ms, an 11-row live append at 38 ms, result attachment
+plus folding at 138 ms, and 250 streaming deltas at 86 ms. Cold automatic height discovery and an
+uncached far jump are now the remaining conversation limits; they are separate from session-switch
+layout and must not be "fixed" by retaining the full row tree again.
+
+## Multi-conversation residency stress target
+
+`ConversationRenderTests.testStressConversationResidencyWhenEnabled` keeps multiple production
+`ConversationViewController`s alive at once, matching `AgentRuntime`, and repeatedly reparents
+them through one host the way a sidebar selection does. It measures controller construction, hot
+switch p50/p95/max, detach/reparent/theme/layout phases, a deep turn jump, off-screen tool-rich
+updates, the first return after those updates, and the process's physical footprint. The workload
+uses fresh `xctest` processes per scale point so allocator high-water marks do not leak from one
+case into the next. It is in `full+`, not the routine sweep: the 8 × 100-turn cases deliberately
+reduce thousands of real timeline rows and retain all presentation identities while asserting that
+the attached AppKit working set stays viewport-sized.
+
+The first Debug sweep measured two different cliffs:
+
+| Retained conversations | Turns each | Shape | Switch p95 | Retained footprint delta |
+|---:|---:|---|---:|---:|
+| 2 | 50 | mixed | 165 ms | 77 MB |
+| 4 | 50 | mixed | 114 ms | 130 MB |
+| 8 | 50 | mixed | 106 ms | 232 MB |
+| 8 | 100 | mixed | 427 ms | 433 MB |
+| 8 | 100 | tool-heavy | 400 ms | 422 MB |
+
+Session count controls total memory; the selected conversation's materialized depth controls
+switch latency. Tool-heavy had 8,856 model rows versus mixed's 4,856, but both had 1,656
+materialized row views across the eight controllers and nearly identical switch cost. Folded
+model-only tool rows therefore are not the hot path; the remaining live view hierarchy is.
+
+The first measured fix preserves the detached-theme rule without paying it on every switch.
+`AppThemeRefresh` now advances a generation for each whole-app sweep and stamps every view it
+reaches. A retained conversation calls `repaintIfNeeded` on attach: a tree detached during a real
+theme, accessibility, or font sweep is stale and gets the full repair; an ordinary remove/add
+cycle is already current and returns in O(1). At 8 mixed conversations × 100 turns, switch p95
+fell from 427 ms to 346 ms. The phase split then measured repaint at 0.007 ms and layout at
+336 ms, identifying Auto Layout after reparenting as the remaining latency owner.
+
+Keeping all conversation trees attached but hidden was measured and rejected: the 8 × 100 case
+exceeded the practical memory/runtime envelope and the test process was killed. Hidden AppKit
+trees are still resident layout state.
+
+The view-based table implements the required reusable row lifetime. A post-change Debug sweep:
+
+| Retained conversations | Turns each | Shape | Live row views | Switch p95 | Layout p95 | Footprint delta |
+|---:|---:|---|---:|---:|---:|---:|
+| 2 | 50 | mixed | 16 | 7.7 ms | 7.0 ms | 19.7 MB |
+| 4 | 50 | mixed | 32 | 12.0 ms | 11.3 ms | 31.8 MB |
+| 8 | 50 | mixed | 64 | 8.1 ms | 7.2 ms | 55.3 MB |
+| 8 | 100 | mixed | 64 | 20.4 ms | 17.4 ms | 57.1 MB |
+| 8 | 100 | tool-heavy | 64 | 13.9 ms | 12.9 ms | 56.6 MB |
+
+The direct 8 × 100 mixed comparison is the architectural result: the generation cache first moved
+switch p95 from 427 ms to 346 ms and exposed 336 ms of layout; virtualization then moved switch p95
+to 20.4 ms and layout p95 to 17.4 ms. Retained footprint fell from roughly 433 MB to 57 MB. The
+tool-heavy case has 8,856 model rows versus mixed's 4,856, yet both retain exactly 64 live row views;
+model depth no longer determines the window's constraint-graph size.
 
 ## Project sidebar stress target
 

@@ -349,8 +349,28 @@ fold, so the conversation reads as its exchanges. The rules that came with it: a
 *interrupted* turn stays expanded so the user keeps their place — the next turn folds it, and
 it reads "Stopped after 42s" rather than claiming to have worked; the running turn never
 folds; a decided permission card stays visible through a fold, because it is the record of
-what was allowed. Folding is hide-don't-remove — the stack detaches hidden arranged views, so
-spacing collapses and the click restores the exact views. The facts live in the model:
+what was allowed. Folded work remains in the timeline but not in the live view hierarchy:
+merely setting `isHidden` kept every nested tool and Markdown constraint in the window's layout
+engine, so scrolling a settled conversation still laid out work that was not on screen.
+
+The transcript is now a view-based `NSTableView`, not one retained `NSStackView` chain.
+`presentationItems` owns the complete cheap ordering as stable timeline, divider, fold, card and
+streaming identities; AppKit owns only reusable row hosts around the viewport. Timeline rows build
+their Markdown/tool view when a host requests them and release it when that host is recycled.
+Tool, long-user-message and turn disclosure state lives in controller sets rather than in a
+recyclable view, so returning to a row restores what the user opened. Permission and changed-files
+cards are the small deliberate exception: their live interaction state remains retained as a
+presentation item, but an off-screen card is outside the attached constraint graph.
+
+A collapsed turn removes its intermediate timeline identities from the presentation and inserts
+one fold identity; expansion puts those identities back and collapse removes them again. During
+replay every event mutates only the timeline and presentation model, followed by one table reload,
+so a successful, interrupted or unfinished history no longer requires a retained native view for
+every presented row. Exact minimap navigation resolves the target by timeline identity even when no
+target view exists, lands using the table's estimated/cached row geometry, and corrects after the
+target materializes. This keeps exact-row navigation without restoring the old full-history layout
+chain.
+The facts live in the model:
 `Turn` carries `endIndex`, `finalAssistantIndex` and `duration`, and durations are retained
 per turn from `.turnFinished` (they used to pass through to the status line and be
 discarded). **Replay now emits `.turnFinished` too**, deriving each turn's length from the

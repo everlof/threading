@@ -39,6 +39,7 @@ final class UserMessageBubbleView: NSView {
     private var fade: CAGradientLayer?
 
     private var isExpanded = false
+    var onExpansionChanged: ((Bool) -> Void)?
 
     // MARK: - Initialization
 
@@ -120,8 +121,9 @@ final class UserMessageBubbleView: NSView {
         fade = gradient
     }
 
-    @objc private func toggleExpansion() {
-        isExpanded.toggle()
+    func setExpanded(_ expanded: Bool, notifying: Bool = true) {
+        guard expanded != isExpanded else { return }
+        isExpanded = expanded
 
         label.maximumNumberOfLines = isExpanded ? 0 : ConversationDefaults.longMessageLineCap
         if isExpanded {
@@ -141,6 +143,11 @@ final class UserMessageBubbleView: NSView {
 
         invalidateIntrinsicContentSize()
         superview?.needsLayout = true
+        if notifying { onExpansionChanged?(isExpanded) }
+    }
+
+    @objc private func toggleExpansion() {
+        setExpanded(!isExpanded)
     }
 
     /// The whole message, not the visible prefix.

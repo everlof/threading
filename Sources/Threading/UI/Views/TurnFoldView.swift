@@ -5,9 +5,8 @@ import AppKit
 /// t3code's turn fold, drawn in this app's quiet-row language: once a turn has settled,
 /// everything between its user message and its final assistant reply is hidden behind this
 /// line, so a conversation reads as its exchanges rather than as the work that carried them
-/// out. The fold controls the work views; its placement callback can lazily create, detach and
-/// reattach them, while simpler callers may still toggle visibility. Expansion is view state, like
-/// `ToolCallView.isExpanded`.
+/// out. A presentation owner can handle disclosure through the callback (the virtualized
+/// conversation does); simpler standalone callers may still toggle an existing group of views.
 final class TurnFoldView: NSView {
 
     // MARK: - Properties
@@ -51,11 +50,13 @@ final class TurnFoldView: NSView {
         duration: TimeInterval?,
         stopped: Bool,
         folding views: [NSView],
+        expanded: Bool = false,
         onExpansionChanged: ((TurnFoldView, Bool) -> Void)? = nil
     ) {
         self.foldedViews = views
         self.onExpansionChanged = onExpansionChanged
         self.label = Self.title(duration: duration, stopped: stopped)
+        self.isExpanded = expanded
         super.init(frame: .zero)
         setupViews()
     }
@@ -97,6 +98,12 @@ final class TurnFoldView: NSView {
 
         setAccessibilityRole(.disclosureTriangle)
         setAccessibilityLabel(label)
+        chevron.image = NSImage(
+            systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
+            accessibilityDescription: nil
+        )
+        setAccessibilityExpanded(isExpanded)
+        updateSurface()
         addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(toggle)))
     }
 

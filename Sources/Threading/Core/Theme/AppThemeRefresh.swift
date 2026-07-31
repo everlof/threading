@@ -39,6 +39,7 @@ private final class RecordedSurface {
 
 @MainActor private var recordedSurfaceKey: UInt8 = 0
 @MainActor private var recordedLayerColorsKey: UInt8 = 0
+@MainActor private var appliedRefreshGenerationKey: UInt8 = 0
 
 /// Layer colours that were assigned outside `applySurface`.
 ///
@@ -51,6 +52,21 @@ private final class RecordedLayerColors {
 }
 
 extension NSView {
+
+    fileprivate var appliedAppThemeRefreshGeneration: UInt64? {
+        get {
+            (objc_getAssociatedObject(self, &appliedRefreshGenerationKey) as? NSNumber)?
+                .uint64Value
+        }
+        set {
+            objc_setAssociatedObject(
+                self,
+                &appliedRefreshGenerationKey,
+                newValue.map(NSNumber.init(value:)),
+                .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+            )
+        }
+    }
 
     fileprivate var recordedSurface: RecordedSurface? {
         get { objc_getAssociatedObject(self, &recordedSurfaceKey) as? RecordedSurface }
@@ -235,6 +251,11 @@ enum AppThemeRefresh {
     /// firing for one switch re-resolve the terminal palettes once rather than twice.
     private static var lastNotifiedAppearance: NSAppearance.Name?
 
+    /// Advances only for a whole-app sweep. A detached retained tree keeps the generation it
+    /// last saw, which lets its host distinguish a real missed theme change from an ordinary
+    /// remove-and-reinsert cycle without subscribing every view to notifications.
+    private(set) static var generation: UInt64 = 0
+
     /// AppKit refreshes stock controls when these preferences move; app-owned chrome needs the
     /// same signal. Installed once at launch, after the palette is restored and before windows
     /// are built.
@@ -363,6 +384,7 @@ enum AppThemeRefresh {
     }
 
     static func repaintEverything() {
+        generation &+= 1
         for window in NSApp.windows {
             window.appearance = NSApp.appearance
             guard let root = window.contentView else { continue }
@@ -398,7 +420,21 @@ enum AppThemeRefresh {
             }
         }
 
+        view.appliedAppThemeRefreshGeneration = generation
+
         for subview in view.subviews { repaint(subview) }
+    }
+
+    /// Repaints a cached tree only when it missed a whole-app sweep while detached.
+    ///
+    /// The first call intentionally paints: a newly created tree has no stamp yet. Later hot
+    /// attaches are O(1), while `repaintEverything` advances `generation` before walking visible
+    /// windows, leaving only genuinely detached trees stale.
+    @discardableResult
+    static func repaintIfNeeded(_ view: NSView) -> Bool {
+        guard view.appliedAppThemeRefreshGeneration != generation else { return false }
+        repaint(view)
+        return true
     }
 }
 

@@ -284,7 +284,8 @@ final class ConversationRenderTests: XCTestCase {
 
     // MARK: - Stress Profiling
 
-    /// Opt-in because this deliberately builds several hundred real AppKit/Markdown rows.
+    /// Opt-in because this deliberately reduces several hundred production transcript rows and
+    /// exercises replay, measurement, exact jumps, folding, appends and streaming in AppKit.
     /// It is the repeatable counterpart to sampling a large conversation by hand: the event
     /// shapes are deterministic, but every row, fold, constraint and scroll is the production
     /// native-conversation implementation.
@@ -317,7 +318,49 @@ final class ConversationRenderTests: XCTestCase {
         }
     }
 
-    func testSettledTurnLazilyMaterializesAndReusesFoldedWork() throws {
+    /// Opt-in retained-controller workload. Production keeps every live native conversation in
+    /// `AgentRuntime` and reparents its view when the sidebar selection changes; one isolated
+    /// controller cannot reveal the cumulative layout and memory cost of that lifecycle.
+    func testStressConversationResidencyWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_CONVERSATION_RESIDENCY_STRESS"] == "1",
+            "Set THREADING_CONVERSATION_RESIDENCY_STRESS=1 to run the residency sweep."
+        )
+
+        let environment = ProcessInfo.processInfo.environment
+        let sessionCount = environment["THREADING_CONVERSATION_RESIDENCY_SESSIONS"]
+            .flatMap(Int.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? 8
+        let turns = environment["THREADING_CONVERSATION_RESIDENCY_TURNS"]
+            .flatMap(Int.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? 50
+        let shape = environment["THREADING_CONVERSATION_RESIDENCY_SHAPE"]
+            .flatMap(StressShape.init(rawValue:))
+            ?? .mixed
+        runConversationResidencyStress(
+            shape: shape,
+            sessionCount: sessionCount,
+            turns: turns
+        )
+    }
+
+    func testDetachedConversationTreeRepaintsOnlyAfterMissingAGlobalSweep() {
+        let detachedTree = NSView()
+        detachedTree.addSubview(NSView())
+
+        XCTAssertTrue(AppThemeRefresh.repaintIfNeeded(detachedTree))
+        XCTAssertFalse(AppThemeRefresh.repaintIfNeeded(detachedTree))
+
+        _ = NSApplication.shared
+        AppThemeRefresh.repaintEverything()
+
+        XCTAssertTrue(AppThemeRefresh.repaintIfNeeded(detachedTree))
+        XCTAssertFalse(AppThemeRefresh.repaintIfNeeded(detachedTree))
+    }
+
+    func testSettledTurnVirtualizesFoldedWorkAndRestoresPresentation() throws {
         let session = AgentSession(kind: .codex, title: "Fold restoration", usesNativeUI: true)
         let controller = ConversationViewController(
             agentSession: session,
@@ -338,41 +381,45 @@ final class ConversationRenderTests: XCTestCase {
         let events = Self.stressEvents(shape: .mixed, turns: 1)
         Self.apply(Array(events.prefix(2)), to: controller)
 
-        XCTAssertEqual(controller.stack.arrangedSubviews.count, 1)
-        XCTAssertEqual(controller.deferredReplayRowIndices, Set(1...5))
-        XCTAssertTrue((1...5).allSatisfy { controller.rowViews[$0] == nil })
+        XCTAssertEqual(controller.presentationItems.count, 6)
+        XCTAssertTrue(controller.rowViews.isEmpty)
 
         Self.apply(Array(events.dropFirst(2)), to: controller)
+        controller.finishReplayRendering()
+        controller.view.layoutSubtreeIfNeeded()
 
+        let foldRow = try XCTUnwrap(
+            controller.presentationItems.firstIndex { $0.id == .fold(turnStart: 0) }
+        )
+        let foldHost = try XCTUnwrap(
+            controller.tableView.view(atColumn: 0, row: foldRow, makeIfNecessary: true)
+        )
         let fold = try XCTUnwrap(
-            controller.stack.arrangedSubviews.compactMap { $0 as? TurnFoldView }.first
+            Self.firstDescendant(TurnFoldView.self, in: foldHost)
         )
 
-        XCTAssertEqual(controller.stack.arrangedSubviews.count, 3)
-        XCTAssertTrue(controller.deferredReplayRowIndices.isEmpty)
-        XCTAssertTrue((1...4).allSatisfy { controller.rowViews[$0] == nil })
+        XCTAssertEqual(controller.presentationItems.count, 3)
+        XCTAssertTrue((1...4).allSatisfy {
+            controller.presentationRow(forTimelineIndex: $0) == nil
+        })
 
         fold.setExpanded(true)
-        let foldedWork = try (1...4).map { try XCTUnwrap(controller.rowViews[$0]) }
-        XCTAssertEqual(controller.stack.arrangedSubviews.count, 7)
-        XCTAssertTrue(foldedWork.allSatisfy { $0.superview === controller.stack })
-        XCTAssertTrue(foldedWork.allSatisfy { view in
-            controller.rowEdgeConstraints[ObjectIdentifier(view)]?.allSatisfy(\.isActive) == true
+        XCTAssertEqual(controller.presentationItems.count, 7)
+        XCTAssertTrue((1...4).allSatisfy {
+            controller.presentationRow(forTimelineIndex: $0) != nil
         })
+        XCTAssertTrue(controller.expandedTurnStarts.contains(0))
 
         fold.setExpanded(false)
-        XCTAssertEqual(controller.stack.arrangedSubviews.count, 3)
-        XCTAssertTrue(foldedWork.allSatisfy { $0.superview == nil })
-        XCTAssertTrue(foldedWork.allSatisfy { view in
-            controller.rowEdgeConstraints[ObjectIdentifier(view)]?.allSatisfy { !$0.isActive }
-                == true
+        XCTAssertEqual(controller.presentationItems.count, 3)
+        XCTAssertTrue((1...4).allSatisfy {
+            controller.presentationRow(forTimelineIndex: $0) == nil
         })
+        XCTAssertFalse(controller.expandedTurnStarts.contains(0))
 
         fold.setExpanded(true)
-        XCTAssertEqual(controller.stack.arrangedSubviews.count, 7)
-        XCTAssertTrue(zip(1...4, foldedWork).allSatisfy { pair in
-            controller.rowViews[pair.0] === pair.1
-        })
+        XCTAssertEqual(controller.presentationItems.count, 7)
+        XCTAssertTrue(controller.expandedTurnStarts.contains(0))
     }
 
     func testReplayFinishAttachesAnUnfinishedTail() {
@@ -392,20 +439,254 @@ final class ConversationRenderTests: XCTestCase {
             Array(Self.stressEvents(shape: .mixed, turns: 1).prefix(2)),
             to: controller
         )
-        XCTAssertEqual(controller.stack.arrangedSubviews.count, 1)
-        XCTAssertEqual(controller.deferredReplayRowIndices, Set(1...5))
+        XCTAssertEqual(controller.presentationItems.count, 6)
+        XCTAssertTrue(controller.rowViews.isEmpty)
 
         controller.finishReplayRendering()
 
-        XCTAssertTrue(controller.deferredReplayRowIndices.isEmpty)
-        XCTAssertEqual(controller.stack.arrangedSubviews.count, 6)
-        XCTAssertTrue((0...5).allSatisfy { controller.rowViews[$0]?.superview === controller.stack })
+        XCTAssertEqual(controller.tableView.numberOfRows, 6)
+        XCTAssertTrue((0...5).allSatisfy {
+            controller.presentationRow(forTimelineIndex: $0) != nil
+        })
+    }
+
+    func testLargeReplayMaterializesOnlyViewportRowsAndCanJumpExactly() throws {
+        let controller = ConversationViewController(
+            agentSession: AgentSession(
+                kind: .codex,
+                title: "Virtual conversation",
+                usesNativeUI: true
+            ),
+            project: Project(
+                name: "Virtual conversation",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: Render.viewportHeight
+        )
+        controller.isReplaying = true
+        Self.apply(Self.stressEvents(shape: .mixed, turns: 100), to: controller)
+        controller.finishReplayRendering()
+        controller.isReplaying = false
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(controller.presentationItems.count, 300)
+        XCTAssertLessThan(
+            controller.rowViews.count,
+            40,
+            "The virtual table materialized more than a viewport-sized working set"
+        )
+
+        let lastTurn = try XCTUnwrap(controller.timeline.turns.last)
+        let targetRow = try XCTUnwrap(
+            controller.presentationRow(forTimelineIndex: lastTurn.rowIndex)
+        )
+        controller.scrollToTimelineRow(lastTurn.rowIndex, animated: false)
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            controller.tableView.rect(ofRow: targetRow)
+                .intersects(controller.scrollView.contentView.documentVisibleRect)
+        )
+        XCTAssertNotNil(
+            controller.rowViews[lastTurn.rowIndex],
+            "The exact target row was not materialized after the deep jump"
+        )
+        XCTAssertLessThan(controller.rowViews.count, 40)
     }
 
     private enum StressShape: String {
         case prose
         case mixed
         case toolHeavy = "tool-heavy"
+    }
+
+    private func runConversationResidencyStress(
+        shape: StressShape,
+        sessionCount: Int,
+        turns: Int
+    ) {
+        let events = Self.stressEvents(shape: shape, turns: turns)
+        let baselineMemory = Self.physicalFootprintBytes()
+        var peakMemory = baselineMemory
+        var buildDurations: [UInt64] = []
+        var controllers: [ConversationViewController] = []
+        controllers.reserveCapacity(sessionCount)
+
+        for sessionIndex in 0..<sessionCount {
+            let started = DispatchTime.now().uptimeNanoseconds
+            let session = AgentSession(
+                kind: .codex,
+                title: "Resident conversation \(sessionIndex)",
+                usesNativeUI: true
+            )
+            let controller = ConversationViewController(
+                agentSession: session,
+                project: Project(
+                    name: "Resident project \(sessionIndex)",
+                    folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+                ),
+                customizationLookup: { _ in .empty }
+            )
+            _ = controller.view
+            controller.view.frame = NSRect(
+                x: 0,
+                y: 0,
+                width: Render.width,
+                height: Render.viewportHeight
+            )
+            controller.isReplaying = true
+            Self.apply(events, to: controller)
+            controller.finishReplayRendering()
+            controller.isReplaying = false
+            controller.refreshMinimap()
+            controller.view.layoutSubtreeIfNeeded()
+            buildDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            controllers.append(controller)
+            peakMemory = max(peakMemory, Self.physicalFootprintBytes())
+        }
+
+        let memoryAfterBuild = Self.physicalFootprintBytes()
+        let host = NSViewController()
+        host.view = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: Render.viewportHeight
+        ))
+        var current: ConversationViewController?
+        var detachDurations: [UInt64] = []
+        var reparentDurations: [UInt64] = []
+        var repaintDurations: [UInt64] = []
+        var layoutDurations: [UInt64] = []
+
+        func install(_ controller: ConversationViewController) {
+            host.addChild(controller)
+            controller.view.translatesAutoresizingMaskIntoConstraints = false
+            host.view.addSubview(controller.view)
+            NSLayoutConstraint.activate([
+                controller.view.topAnchor.constraint(equalTo: host.view.topAnchor),
+                controller.view.bottomAnchor.constraint(equalTo: host.view.bottomAnchor),
+                controller.view.leadingAnchor.constraint(equalTo: host.view.leadingAnchor),
+                controller.view.trailingAnchor.constraint(equalTo: host.view.trailingAnchor)
+            ])
+        }
+
+        func detachCurrent() {
+            current?.view.removeFromSuperview()
+            current?.removeFromParent()
+            current = nil
+        }
+
+        func attach(
+            _ controller: ConversationViewController,
+            recordPhases: Bool = false
+        ) -> UInt64 {
+            let started = DispatchTime.now().uptimeNanoseconds
+            detachCurrent()
+            let detached = DispatchTime.now().uptimeNanoseconds
+            install(controller)
+            let reparented = DispatchTime.now().uptimeNanoseconds
+            AppThemeRefresh.repaintIfNeeded(controller.view)
+            let repainted = DispatchTime.now().uptimeNanoseconds
+            host.view.layoutSubtreeIfNeeded()
+            let laidOut = DispatchTime.now().uptimeNanoseconds
+            current = controller
+            if recordPhases {
+                detachDurations.append(detached - started)
+                reparentDurations.append(reparented - detached)
+                repaintDurations.append(repainted - reparented)
+                layoutDurations.append(laidOut - repainted)
+            }
+            return laidOut - started
+        }
+
+        // One unmeasured pass pays any process-global AppKit and theme-cache setup. Later passes
+        // are the ordinary hot sidebar switch between already-resident conversations.
+        for controller in controllers { _ = attach(controller) }
+
+        var switchDurations: [UInt64] = []
+        for _ in 0..<3 {
+            for controller in controllers {
+                switchDurations.append(attach(controller, recordPhases: true))
+            }
+        }
+        peakMemory = max(peakMemory, Self.physicalFootprintBytes())
+
+        var deepJumpDurations: [UInt64] = []
+        for controller in controllers {
+            _ = attach(controller)
+            guard let lastTurn = controller.timeline.turns.last else { continue }
+            let started = DispatchTime.now().uptimeNanoseconds
+            controller.scrollToTimelineRow(lastTurn.rowIndex, animated: false)
+            host.view.layoutSubtreeIfNeeded()
+            deepJumpDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+        }
+
+        // Every update is deliberately off-screen. Production still mutates its retained model
+        // and views, but does not lay the detached hierarchy out until the session is selected.
+        detachCurrent()
+        var backgroundUpdateDurations: [UInt64] = []
+        for (sessionIndex, controller) in controllers.enumerated() {
+            let started = DispatchTime.now().uptimeNanoseconds
+            Self.apply(Self.residencyAppendEvents(sessionIndex: sessionIndex), to: controller)
+            backgroundUpdateDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+        }
+
+        var postUpdateSwitchDurations: [UInt64] = []
+        for controller in controllers {
+            postUpdateSwitchDurations.append(attach(controller))
+        }
+        let memoryAfterUpdates = Self.physicalFootprintBytes()
+        peakMemory = max(peakMemory, memoryAfterUpdates)
+
+        let totalRows = controllers.reduce(0) { $0 + $1.timeline.rows.count }
+        let materializedRows = controllers.reduce(0) { $0 + $1.rowViews.count }
+        let presentedRows = controllers.reduce(0) { $0 + $1.presentationItems.count }
+        let cachedHeights = controllers.reduce(0) { $0 + $1.rowHeightCache.count }
+        let descendants = controllers.reduce(0) { $0 + Self.descendantCount(in: $1.view) }
+        detachCurrent()
+        XCTAssertEqual(host.children.count, 0)
+        XCTAssertFalse(buildDurations.isEmpty)
+        XCTAssertFalse(switchDurations.isEmpty)
+
+        print(
+            "THREADING_PERF conversation-residency "
+                + "shape=\(shape.rawValue) sessions=\(sessionCount) turns=\(turns) "
+                + "rows=\(totalRows) materialized=\(materializedRows) "
+                + "presented=\(presentedRows) cached_heights=\(cachedHeights) "
+                + "descendants=\(descendants) "
+                + "build_total_ms=\(Self.milliseconds(buildDurations.reduce(0, +))) "
+                + "build_p95_ms=\(Self.milliseconds(Self.percentile(buildDurations, 0.95))) "
+                + "switches=\(switchDurations.count) "
+                + "switch_p50_ms=\(Self.milliseconds(Self.percentile(switchDurations, 0.50))) "
+                + "switch_p95_ms=\(Self.milliseconds(Self.percentile(switchDurations, 0.95))) "
+                + "switch_max_ms=\(Self.milliseconds(switchDurations.max() ?? 0)) "
+                + "detach_p95_ms=\(Self.milliseconds(Self.percentile(detachDurations, 0.95))) "
+                + "reparent_p95_ms="
+                + Self.milliseconds(Self.percentile(reparentDurations, 0.95)) + " "
+                + "repaint_p95_ms="
+                + Self.milliseconds(Self.percentile(repaintDurations, 0.95)) + " "
+                + "layout_p95_ms="
+                + Self.milliseconds(Self.percentile(layoutDurations, 0.95)) + " "
+                + "background_update_p95_ms="
+                + Self.milliseconds(Self.percentile(backgroundUpdateDurations, 0.95)) + " "
+                + "post_update_switch_p95_ms="
+                + Self.milliseconds(Self.percentile(postUpdateSwitchDurations, 0.95)) + " "
+                + "deep_jump_p95_ms="
+                + Self.milliseconds(Self.percentile(deepJumpDurations, 0.95)) + " "
+                + "baseline_mb=\(Self.megabytes(baselineMemory)) "
+                + "after_build_mb=\(Self.megabytes(memoryAfterBuild)) "
+                + "peak_mb=\(Self.megabytes(peakMemory)) "
+                + "resident_delta_mb="
+                + Self.megabytes(Self.positiveDifference(peakMemory, baselineMemory))
+        )
     }
 
     private func runConversationStress(shape: StressShape, turns: Int) {
@@ -445,30 +726,24 @@ final class ConversationRenderTests: XCTestCase {
 
         let rowCount = controller.timeline.rows.count
         let materializedRowCount = controller.rowViews.count
-        let arrangedCount = controller.stack.arrangedSubviews.count
+        let presentedCount = controller.presentationItems.count
+        let cachedHeightCount = controller.rowHeightCache.count
         let descendantCount = Self.descendantCount(in: controller.view)
         print(
             "THREADING_PERF conversation-replay "
                 + "shape=\(shape.rawValue) turns=\(turns) events=\(events.count) "
                 + "rows=\(rowCount) materialized=\(materializedRowCount) "
-                + "arranged=\(arrangedCount) descendants=\(descendantCount) "
+                + "presented=\(presentedCount) cached_heights=\(cachedHeightCount) "
+                + "descendants=\(descendantCount) "
                 + "model_ms=\(Self.milliseconds(modelElapsed)) "
                 + "render_ms=\(Self.milliseconds(replayEnded - replayStarted)) "
                 + "layout_ms=\(Self.milliseconds(layoutEnded - replayEnded)) "
                 + "elapsed_ms=\(Self.milliseconds(layoutEnded - replayStarted))"
         )
 
-        if let lastTurn = controller.timeline.turns.last,
-           let rowView = controller.rowViews[lastTurn.rowIndex],
-           let documentView = controller.scrollView.documentView {
+        if let lastTurn = controller.timeline.turns.last {
             let jumpStarted = DispatchTime.now().uptimeNanoseconds
-            controller.autoScroll.noteJumpedToRow()
-            let frame = rowView.convert(rowView.bounds, to: documentView)
-            controller.scrollView.contentView.setBoundsOrigin(NSPoint(
-                x: 0,
-                y: max(0, frame.minY - Design.Spacing.large)
-            ))
-            controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+            controller.scrollToTimelineRow(lastTurn.rowIndex, animated: false)
             controller.view.layoutSubtreeIfNeeded()
             let jumpElapsed = DispatchTime.now().uptimeNanoseconds - jumpStarted
             print(
@@ -648,6 +923,42 @@ final class ConversationRenderTests: XCTestCase {
         return events
     }
 
+    private static func residencyAppendEvents(sessionIndex: Int) -> [StreamEvent] {
+        let toolIDs = (0..<4).map { "resident-\(sessionIndex)-\($0)" }
+        var blocks: [ContentBlock] = [
+            .thinking("Checking the retained conversation before presenting its next result.")
+        ]
+        blocks.append(contentsOf: toolIDs.enumerated().map { index, id in
+            .toolUse(
+                id: id,
+                tool: index.isMultiple(of: 2) ? .read : .bash,
+                input: index.isMultiple(of: 2)
+                    ? ["file_path": .string("Sources/Resident/Case\(sessionIndex)-\(index).swift")]
+                    : ["command": .string("swift test --filter Resident\(sessionIndex)_\(index)")]
+            )
+        })
+        blocks.append(.text("The background update completed and is ready when this chat returns."))
+
+        return [
+            .userMessage("Run one retained-session background check."),
+            .assistantMessage(blocks: blocks),
+            .toolResults(toolIDs.map { id in
+                ToolResult(toolUseID: id, text: "Completed deterministic resident work.", isError: false)
+            }),
+            .turnFinished(
+                text: nil,
+                isError: false,
+                metrics: TurnMetrics(
+                    duration: 0.75,
+                    outputTokens: 96,
+                    effort: "high",
+                    contextTokens: 32_000,
+                    contextWindow: 200_000
+                )
+            )
+        ]
+    }
+
     private static func apply(
         _ events: [StreamEvent],
         to controller: ConversationViewController
@@ -669,8 +980,36 @@ final class ConversationRenderTests: XCTestCase {
         return count
     }
 
+    private static func firstDescendant<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
+        if let match = root as? T { return match }
+        for child in root.subviews {
+            if let match = firstDescendant(type, in: child) { return match }
+        }
+        return nil
+    }
+
     private static func milliseconds(_ nanoseconds: UInt64) -> String {
         String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private static func percentile(_ values: [UInt64], _ fraction: Double) -> UInt64 {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let index = Int((Double(sorted.count - 1) * fraction).rounded(.up))
+        return sorted[min(max(index, 0), sorted.count - 1)]
+    }
+
+    private static func physicalFootprintBytes() -> UInt64 {
+        let pid = pid_t(ProcessInfo.processInfo.processIdentifier)
+        return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
+    }
+
+    private static func positiveDifference(_ larger: UInt64, _ smaller: UInt64) -> UInt64 {
+        larger >= smaller ? larger - smaller : 0
+    }
+
+    private static func megabytes(_ bytes: UInt64) -> String {
+        String(format: "%.1f", Double(bytes) / 1_048_576)
     }
 
     // MARK: - Images

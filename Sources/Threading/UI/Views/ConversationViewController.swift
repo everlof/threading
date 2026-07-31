@@ -22,29 +22,29 @@ final class ConversationViewController: NSViewController {
     var subagents: SubagentTimeline { subagentState.timeline }
     var selectedSubagentThreadID: String? { subagentState.selectedThreadID }
 
-    lazy var stack: NSStackView = {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.medium
-        stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.inset,
-            left: Design.Spacing.inset,
-            bottom: Design.Spacing.inset,
-            right: Design.Spacing.inset
+    /// The transcript is a view-based table rather than one retained stack. AppKit therefore
+    /// owns a bounded set of row hosts near the viewport, while `presentationItems` remains the
+    /// complete, cheap ordering model for exact jumps and minimap navigation.
+    lazy var tableView: ThemedTableView = {
+        let table = ThemedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("ConversationContent")
         )
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = ConversationDefaults.estimatedRowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
     }()
 
-    /// Fills the scroll view so the column can be capped inside it rather than being the
-    /// document itself.
-    private lazy var documentView: NSView = {
-        let document = NSView()
-        document.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(stack)
-        return document
-    }()
+    private var documentView: NSView { tableView }
     lazy var scrollView: ThemedScrollView = {
         let clip = FlippedClipView()
         clip.drawsBackground = false
@@ -53,7 +53,7 @@ final class ConversationViewController: NSViewController {
         scroll.contentView = clip
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        scroll.documentView = documentView
+        scroll.documentView = tableView
         return scroll
     }()
 
@@ -220,21 +220,53 @@ final class ConversationViewController: NSViewController {
     /// theirs rather than as one of our own scrolls landing.
     var lastUserScrollAt: TimeInterval = 0
 
-    /// Every row's outer view, keyed by its index in `timeline.rows`. Turn navigation scrolls
-    /// to the user rows; a settling turn folds the views between its user message and its
-    /// conclusion. Folded rows are deliberately retained here even while detached from the
-    /// stack. Replay may defer a hidden row's first materialization until expansion.
+    enum PresentationID: Hashable {
+        case timeline(Int)
+        case divider(turnStart: Int)
+        case fold(turnStart: Int)
+        case retained(UUID)
+        case streaming
+    }
+
+    struct PresentationItem {
+        enum Content {
+            case timeline(Int)
+            case divider
+            case fold(
+                turnStart: Int,
+                hiddenIndices: [Int],
+                duration: TimeInterval?,
+                stopped: Bool
+            )
+            case retained(NSView)
+            case streaming(NSTextField)
+        }
+
+        let id: PresentationID
+        let content: Content
+        let opensTurn: Bool
+    }
+
+    /// Complete ordering without a complete view tree. Timeline rows carry only their stable
+    /// integer identity; expensive Markdown/tool views are constructed when the table requests
+    /// a viewport row and released when that host is reused.
+    var presentationItems: [PresentationItem] = []
+
+    /// Currently materialized timeline rows. This is intentionally viewport-sized; it exists
+    /// for live result delivery and diagnostics, not as the transcript's ownership graph.
     var rowViews: [Int: NSView] = [:]
 
-    /// The two column-edge constraints owned by each attached row. Folded work keeps these
-    /// inactive beside its retained view so expansion can restore it without accumulating a
-    /// second pair on every disclosure cycle.
-    var rowEdgeConstraints: [ObjectIdentifier: [NSLayoutConstraint]] = [:]
+    /// A diagnostic mirror of the identities AppKit has measured at the current readable width.
+    /// `NSTableView` owns the automatic-height cache used for layout; unknown rows use its
+    /// estimate during a deep jump and the landing is corrected after the target materializes.
+    var rowHeightCache: [PresentationID: CGFloat] = [:]
+    var rowHeightCacheWidth: CGFloat = 0
 
-    /// Replay knows a turn's finished shape a few events later. Defer its non-user rows until
-    /// then so tool-heavy history never constructs and constrains hundreds of native views that
-    /// will immediately disappear behind a fold. Expansion materializes each row once.
-    var deferredReplayRowIndices: Set<Int> = []
+    /// Disclosure state belongs outside recyclable views, so scrolling a row away and back does
+    /// not collapse something the user opened.
+    var expandedTurnStarts: Set<Int> = []
+    var expandedToolRows: Set<Int> = []
+    var expandedUserRows: Set<Int> = []
 
     /// Turns already folded, by the row index of their opening user message, so a fold is
     /// never inserted twice.
@@ -252,8 +284,9 @@ final class ConversationViewController: NSViewController {
     /// Review's Last Turn scope shows. Superseded cards lose the button.
     weak var latestChangedFilesCard: ChangedFilesCardView?
 
-    /// Native tool rows waiting for their asynchronous result. This is separate from
-    /// `rowViews`, which holds the outer customized row used by turn navigation.
+    /// Visible native tool rows waiting for their asynchronous result. Offscreen calls need no
+    /// retained view: their result is already authoritative in `timeline` and is picked up when
+    /// the row next materializes.
     var pendingToolViews: [Int: ToolCallView] = [:]
 
     /// The approval card on screen, if any. Only one is shown at a time.
@@ -421,9 +454,8 @@ final class ConversationViewController: NSViewController {
     // MARK: - Setup
 
     private func setupViews() {
-        // The stack is centred inside a full-width document view rather than being the
-        // document view itself, so the column can be capped while the scroll view still fills
-        // the pane. The space this leaves is what the turn rail lives in.
+        // Each virtual row centres a capped content view inside the full-width table. The
+        // resulting gutter is what the turn rail lives in.
         // What is typed here becomes a bubble in the thread, so it is set in the thread's font.
         setupPromptCustomization()
 
@@ -540,17 +572,6 @@ final class ConversationViewController: NSViewController {
                 constant: -Design.Spacing.inset
             ),
 
-            documentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
-
-            stack.topAnchor.constraint(equalTo: documentView.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
-            stack.centerXAnchor.constraint(equalTo: documentView.centerXAnchor),
-
-            // Capped, not fixed: in a pane narrower than the cap the column simply fills it,
-            // which is also where `ConversationMinimap` reports no room for a rail.
-            stack.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
-            stack.widthAnchor.constraint(lessThanOrEqualTo: documentView.widthAnchor),
-
             // Anchored to the *pane*, not to the column. The column is centred, so a rail
             // hanging off its leading edge drifts inward as the window grows and strands
             // itself in the middle of an empty margin. `railLeading` keeps it by the pane's
@@ -560,12 +581,6 @@ final class ConversationViewController: NSViewController {
         ])
 
         minimapLeading.isActive = true
-
-        // Beats the cap when the pane is wide, so the column reaches `readableWidth` rather
-        // than hugging its content — but yields to it, so it never overflows a narrow pane.
-        let preferredWidth = stack.widthAnchor.constraint(equalToConstant: Design.Size.readableWidth)
-        preferredWidth.priority = .defaultHigh
-        preferredWidth.isActive = true
 
         minimapWidth.isActive = true
     }
@@ -641,6 +656,7 @@ final class ConversationViewController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        invalidateConversationHeightCacheIfNeeded()
         updateMinimapWidth()
         updateVisibleTurns()
     }
@@ -674,9 +690,8 @@ final class ConversationViewController: NSViewController {
         var indices: Set<Int> = []
 
         for (index, turn) in timeline.turns.enumerated() {
-            guard let rowView = rowViews[turn.rowIndex] else { continue }
-            let frame = rowView.convert(rowView.bounds, to: documentView)
-            if frame.intersects(visibleRect) { indices.insert(index) }
+            guard let tableRow = presentationRow(forTimelineIndex: turn.rowIndex) else { continue }
+            if tableView.rect(ofRow: tableRow).intersects(visibleRect) { indices.insert(index) }
         }
 
         minimap.setVisibleTurnIndices(indices)
@@ -685,25 +700,46 @@ final class ConversationViewController: NSViewController {
     /// Brings a row to the top of the pane, a little below it so it does not sit against the
     /// toolbar's edge.
     private func scrollToRow(_ index: Int) {
-        guard let rowView = rowViews[index] else { return }
+        scrollToTimelineRow(index, animated: true)
+    }
+
+    /// Exact row navigation does not depend on the target having a materialized view. The table
+    /// resolves its rect from cached and estimated heights, then a second correction after the
+    /// animated landing accounts for any newly measured rows around the target.
+    func scrollToTimelineRow(_ index: Int, animated: Bool) {
+        guard let tableRow = presentationRow(forTimelineIndex: index) else { return }
 
         // The user deliberately went somewhere; only their own gesture re-pins.
         autoScroll.noteJumpedToRow()
 
-        let frame = rowView.convert(rowView.bounds, to: documentView)
-        let target = max(0, frame.minY - Design.Spacing.large)
+        let target = max(0, tableView.rect(ofRow: tableRow).minY - Design.Spacing.large)
+
+        guard animated else {
+            scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: target))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            view.layoutSubtreeIfNeeded()
+            settleTimelineScroll(to: index)
+            return
+        }
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Design.Motion.standard
             context.allowsImplicitAnimation = true
             scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: target))
         } completionHandler: { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
-                self.updateVisibleTurns()
-            }
+            Task { @MainActor in self?.settleTimelineScroll(to: index) }
         }
+    }
+
+    private func settleTimelineScroll(to index: Int) {
+        guard let correctedRow = presentationRow(forTimelineIndex: index) else { return }
+        let correctedTarget = max(
+            0,
+            tableView.rect(ofRow: correctedRow).minY - Design.Spacing.large
+        )
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: correctedTarget))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        updateVisibleTurns()
     }
 
     // MARK: - Public Methods
@@ -739,7 +775,8 @@ final class ConversationViewController: NSViewController {
             performanceSpan.end(metadata: [
                 "rows": String(self.timeline.rows.count),
                 "materialized_rows": String(self.rowViews.count),
-                "arranged_views": String(self.stack.arrangedSubviews.count),
+                "presentation_rows": String(self.presentationItems.count),
+                "cached_heights": String(self.rowHeightCache.count),
                 "folded_turns": String(self.foldedTurnStarts.count)
             ])
             self.replaySubagentHistoryAndStart()
@@ -812,6 +849,17 @@ final class ConversationViewController: NSViewController {
         authorization: RemoteAuthorization
     ) -> Bool {
         submit(text, authorization: authorization)
+    }
+
+    /// A prompt the app composed on the user's behalf — the sidebar's "Rename with Agent".
+    ///
+    /// Deliberately the ordinary `submit`, so the request is echoed into the transcript as a
+    /// user turn like any other. An instruction sent to an agent invisibly is one the user
+    /// cannot see, correct, or account for when the reply arrives, and this one costs them a
+    /// turn of their own usage.
+    @discardableResult
+    func sendAppPrompt(_ text: String) -> Bool {
+        submit(text)
     }
 
     /// Provider-neutral rows for mobile/web conversation clients. Tool inputs have already
@@ -920,10 +968,12 @@ final class ConversationViewController: NSViewController {
         // After layout, or the target is the frame the row had before it existed.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.autoScroll.mode == .anchored,
-                  let rowView = self.rowViews[index] else { return }
+                  let tableRow = self.presentationRow(forTimelineIndex: index) else { return }
 
-            let frame = rowView.convert(rowView.bounds, to: self.documentView)
-            let target = max(0, frame.minY - Design.Spacing.large)
+            let target = max(
+                0,
+                self.tableView.rect(ofRow: tableRow).minY - Design.Spacing.large
+            )
             self.scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: target))
             self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
         }

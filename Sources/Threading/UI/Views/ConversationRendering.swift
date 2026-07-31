@@ -23,7 +23,6 @@ extension ConversationViewController {
 
             // A turn that stayed expanded because it was interrupted folds the moment the next
             // one begins — the user has moved on, and t3code's rule is exactly this handoff.
-            if startsTurn, isReplaying { attachDeferredReplayRows() }
             if startsTurn, let pending = pendingFold {
                 pendingFold = nil
                 foldTurn(startingAt: pending.startIndex, stopped: pending.interrupted)
@@ -32,28 +31,31 @@ extension ConversationViewController {
             // Not before the first turn: a rule at the very top of the pane separates the
             // conversation from nothing.
             if startsTurn, timeline.rows.count > 1 {
-                addRow(ConversationRowView.turnDivider(), newTurn: true)
+                appendPresentationItem(PresentationItem(
+                    id: .divider(turnStart: index),
+                    content: .divider,
+                    opensTurn: true
+                ))
             }
 
-            if isReplaying, !startsTurn {
-                deferredReplayRowIndices.insert(index)
-            } else {
-                let view = materializeRow(at: index)
-                addRow(view, newTurn: startsTurn)
-            }
+            appendPresentationItem(PresentationItem(
+                id: .timeline(index),
+                content: .timeline(index),
+                opensTurn: startsTurn && timeline.rows.count == 1
+            ))
 
             // The rail indexes user turns, so it only ever changes when one is added.
             if case .userMessage = row, !isReplaying { refreshMinimap() }
 
         case .resultAttached(let index):
             guard case .toolCall(let call) = timeline.rows[index],
-                  let toolView = pendingToolViews[index],
                   let result = call.result else { return }
 
-            toolView.setResult(result.text, outcome: result.outcome)
+            pendingToolViews[index]?.setResult(result.text, outcome: result.outcome)
             // An interrupted row keeps its view reference: the real result can still arrive
             // after the turn ends, and it should land on the row rather than be lost.
             if result.outcome != .interrupted { pendingToolViews[index] = nil }
+            noteTimelineRowHeightChanged(index)
             scrollToBottom()
 
         case .streaming(let text):
@@ -110,7 +112,6 @@ extension ConversationViewController {
             // rather than claiming to have worked.
             if interrupted {
                 pendingFold = (startIndex, true)
-                if isReplaying { attachDeferredReplayRows() }
             } else {
                 foldTurn(startingAt: startIndex, stopped: false)
             }
@@ -130,75 +131,54 @@ extension ConversationViewController {
     /// Collapses a settled turn's work — everything between its user message and its final
     /// assistant reply — behind a one-line `TurnFoldView`.
     ///
-    /// Live work views stay retained but leave the stack and its layout engine. Replayed work
-    /// may remain as timeline rows until the first expansion, then its exact views are reused.
+    /// The canonical rows stay in `timeline`; only their presentation entries leave the table.
     /// Permission cards deliberately stay visible — a decided card is the record of what was
     /// allowed, which is worth more than the symmetry.
     func foldTurn(startingAt startIndex: Int, stopped: Bool) {
         guard !foldedTurnStarts.contains(startIndex),
               let turn = timeline.turns.first(where: { $0.rowIndex == startIndex }),
               turn.endIndex > turn.rowIndex,
-              let userView = rowViews[turn.rowIndex],
-              let userPosition = stack.arrangedSubviews.firstIndex(of: userView) else { return }
+              let userPosition = presentationRow(forTimelineIndex: turn.rowIndex) else { return }
 
         let turnIndices = turn.rowIndex + 1 ... turn.endIndex
         let hiddenIndices = turnIndices.filter { $0 != turn.finalAssistantIndex }
-        guard !hiddenIndices.isEmpty else {
-            attachDeferredReplayRows(in: turnIndices)
-            return
-        }
-        let hiddenViews = hiddenIndices.compactMap { rowViews[$0] }
+        guard !hiddenIndices.isEmpty else { return }
 
         foldedTurnStarts.insert(startIndex)
 
-        let fold = TurnFoldView(
-            duration: turn.duration,
-            stopped: stopped,
-            folding: hiddenViews
-        ) { [weak self] fold, isExpanded in
-            self?.setTurnWork(hiddenIndices, expanded: isExpanded, after: fold)
+        let hiddenSet = Set(hiddenIndices)
+        presentationItems.removeAll { item in
+            guard case .timeline(let index) = item.content else { return false }
+            return hiddenSet.contains(index)
         }
-        stack.insertArrangedSubview(fold, at: userPosition + 1)
-        pinRow(fold)
-
-        // Live rows are already attached and must leave the layout engine. Replayed rows were
-        // deferred, so only the final answer is materialized and enters the stack at all.
-        hiddenViews.filter { $0.superview != nil }.forEach { detachRow($0) }
-        if let finalAssistantIndex = turn.finalAssistantIndex {
-            let finalAssistant = materializeRow(at: finalAssistantIndex)
-            if finalAssistant.superview == nil {
-                stack.insertArrangedSubview(finalAssistant, at: userPosition + 2)
-                pinRow(finalAssistant)
-            }
-        }
-        for index in turnIndices { deferredReplayRowIndices.remove(index) }
+        let insertion = min(userPosition + 1, presentationItems.count)
+        presentationItems.insert(PresentationItem(
+            id: .fold(turnStart: startIndex),
+            content: .fold(
+                turnStart: startIndex,
+                hiddenIndices: hiddenIndices,
+                duration: turn.duration,
+                stopped: stopped
+            ),
+            opensTurn: false
+        ), at: insertion)
+        reloadConversationRows()
     }
 
-    /// Makes an interrupted or truncated replay tail visible. Successful turns consume their
-    /// deferred indices in `foldTurn`, materializing only the final answer.
+    /// Replay mutates only the presentation model. One reload at the end lets AppKit request the
+    /// handful of rows that are actually visible instead of constructing every intermediate
+    /// prefix while the transcript is being reduced.
     func finishReplayRendering() {
-        attachDeferredReplayRows()
+        reloadConversationRows(force: true)
     }
 
-    private func attachDeferredReplayRows(in indices: ClosedRange<Int>? = nil) {
-        let selected = deferredReplayRowIndices
-            .filter { indices?.contains($0) ?? true }
-            .sorted()
-        for index in selected {
-            let view = materializeRow(at: index)
-            if view.superview == nil { addRow(view) }
-            deferredReplayRowIndices.remove(index)
-        }
-    }
-
-    /// Creates a native row at most once. Replayed folded work reaches this only on expansion;
-    /// because the timeline already owns attached tool results, its first view starts in the
-    /// same final state an eagerly-created row would have reached incrementally.
+    /// Creates one viewport instance. The timeline owns result data and the controller owns
+    /// disclosure state, so recycling and later reconstruction produce the same row without
+    /// retaining its constraint tree.
     private func materializeRow(at index: Int) -> NSView {
-        if let existing = rowViews[index] { return existing }
-
         let row = timeline.rows[index]
         let (nativeView, _) = ConversationRowView.make(for: row)
+        configureDisclosureState(in: nativeView, rowIndex: index)
         let view: NSView
         if let target = componentTarget(for: row) {
             view = customizeConversationRow(nativeView, target: target)
@@ -207,9 +187,7 @@ extension ConversationViewController {
         }
         rowViews[index] = view
 
-        // A missing or interrupted result may still arrive after this lazy materialization.
-        // Completed replay results are already represented by `ConversationRowView.make` and
-        // need no pending view entry.
+        // A missing or interrupted result may still arrive while this instance is visible.
         if case .toolCall(let call) = row,
            call.result == nil || call.result?.outcome == .interrupted {
             pendingToolViews[index] = nativeView as? ToolCallView
@@ -217,49 +195,35 @@ extension ConversationViewController {
         return view
     }
 
-    /// Materialized collapsed work is retained for exact restoration, but kept out of the tree.
-    /// Replay delays its first construction until expansion whenever possible.
-    /// `isHidden` alone leaves every nested tool and Markdown constraint in the window's layout
-    /// engine, making an ordinary scroll relayout the full history. Reattaching here preserves
-    /// the disclosure while keeping collapsed turns as cheap as they look.
-    private func setTurnWork(_ indices: [Int], expanded: Bool, after fold: TurnFoldView) {
+    private func setTurnWork(
+        _ indices: [Int],
+        expanded: Bool,
+        turnStart: Int
+    ) {
+        guard let foldPosition = presentationItems.firstIndex(where: {
+            $0.id == .fold(turnStart: turnStart)
+        }) else { return }
+
         if expanded {
-            guard let foldPosition = stack.arrangedSubviews.firstIndex(of: fold) else { return }
-            for (offset, index) in indices.enumerated() {
-                let view = materializeRow(at: index)
-                stack.insertArrangedSubview(view, at: foldPosition + offset + 1)
-                pinRow(view)
-                AppThemeRefresh.repaint(view)
+            expandedTurnStarts.insert(turnStart)
+            let rows = indices.map {
+                PresentationItem(
+                    id: .timeline($0),
+                    content: .timeline($0),
+                    opensTurn: false
+                )
             }
+            presentationItems.insert(contentsOf: rows, at: foldPosition + 1)
         } else {
-            indices.compactMap { rowViews[$0] }.forEach { detachRow($0) }
+            expandedTurnStarts.remove(turnStart)
+            let hiddenSet = Set(indices)
+            presentationItems.removeAll { item in
+                guard case .timeline(let index) = item.content else { return false }
+                return hiddenSet.contains(index)
+            }
         }
-        stack.needsLayout = true
-        scrollView.documentView?.needsLayout = true
-    }
-
-    private func detachRow(_ view: NSView, retainingConstraints: Bool = true) {
-        stack.removeArrangedSubview(view)
-        let key = ObjectIdentifier(view)
-        if let constraints = rowEdgeConstraints[key] {
-            NSLayoutConstraint.deactivate(constraints)
-        }
-        if !retainingConstraints { rowEdgeConstraints[key] = nil }
-        view.removeFromSuperview()
-    }
-
-    private func pinRow(_ view: NSView) {
-        let key = ObjectIdentifier(view)
-        if let constraints = rowEdgeConstraints[key] {
-            NSLayoutConstraint.activate(constraints)
-            return
-        }
-        let constraints = [
-            view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
-            view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
-        ]
-        rowEdgeConstraints[key] = constraints
-        NSLayoutConstraint.activate(constraints)
+        rowHeightCache[.fold(turnStart: turnStart)] = nil
+        reloadConversationRows()
     }
 
     // MARK: - Changed Files Card
@@ -281,10 +245,10 @@ extension ConversationViewController {
 
         changedFilesCardTurns.insert(startIndex)
 
-        // The insert position is remembered as a view, not an index: by the time the diff
-        // returns, the user may already have sent the next message, and the card belongs to
-        // the turn that earned it, not to the bottom of the conversation.
-        let anchor = stack.arrangedSubviews.last
+        // The insert position is remembered as a stable presentation id, not an index: by the
+        // time the diff returns, the user may already have sent the next message, and the card
+        // belongs to the turn that earned it, not to the bottom of the conversation.
+        let anchor = presentationItems.last?.id
 
         GitReviewReader.diff(.lastTurn(baseline), in: root) { [weak self] result in
             guard let self, case .success(let files) = result, !files.isEmpty else { return }
@@ -296,7 +260,7 @@ extension ConversationViewController {
         }
     }
 
-    private func insertChangedFilesCard(_ tree: ChangedFilesTree, after anchor: NSView?) {
+    private func insertChangedFilesCard(_ tree: ChangedFilesTree, after anchor: PresentationID?) {
         let card = ChangedFilesCardView(tree: tree) { [weak self] in
             guard let self else { return }
             self.delegate?.conversationDidRequestTurnDiff(self)
@@ -307,11 +271,15 @@ extension ConversationViewController {
         latestChangedFilesCard = card
 
         let position = anchor
-            .flatMap { stack.arrangedSubviews.firstIndex(of: $0) }
+            .flatMap { anchor in presentationItems.firstIndex { $0.id == anchor } }
             .map { $0 + 1 }
-            ?? stack.arrangedSubviews.count
-        stack.insertArrangedSubview(card, at: position)
-        pinRow(card)
+            ?? presentationItems.count
+        presentationItems.insert(PresentationItem(
+            id: .retained(UUID()),
+            content: .retained(card),
+            opensTurn: false
+        ), at: position)
+        reloadConversationRows()
         scrollToBottom()
     }
 
@@ -393,19 +361,28 @@ extension ConversationViewController {
     private func showStreaming(_ text: String) {
         guard let streamingLabel else {
             let label = ConversationRowView.streaming(text)
-            addRow(label)
+            presentationItems.append(PresentationItem(
+                id: .streaming,
+                content: .streaming(label),
+                opensTurn: false
+            ))
+            notifyPresentationRowsInserted(at: IndexSet(integer: presentationItems.count - 1))
             self.streamingLabel = label
             return
         }
 
         streamingLabel.stringValue = text
+        rowHeightCache[.streaming] = nil
+        notePresentationHeightChanged(.streaming)
         scrollToBottom()
     }
 
     /// Drops the streaming placeholder, whose content the finished message repeats.
     func clearStreaming() {
-        if let streamingLabel {
-            detachRow(streamingLabel, retainingConstraints: false)
+        if let position = presentationItems.firstIndex(where: { $0.id == .streaming }) {
+            presentationItems.remove(at: position)
+            rowHeightCache[.streaming] = nil
+            notifyPresentationRowsRemoved(at: IndexSet(integer: position))
         }
         streamingLabel = nil
     }
@@ -417,15 +394,11 @@ extension ConversationViewController {
     /// `newTurn` opens extra space above the row, used before a user bubble so each exchange
     /// reads as its own block rather than one unbroken column.
     func addRow(_ view: NSView, newTurn: Bool = false) {
-        let previous = stack.arrangedSubviews.last
-
-        stack.addArrangedSubview(view)
-        pinRow(view)
-
-        if newTurn, let previous {
-            stack.setCustomSpacing(Design.Chat.turnSpacing, after: previous)
-        }
-
+        appendPresentationItem(PresentationItem(
+            id: .retained(UUID()),
+            content: .retained(view),
+            opensTurn: newTurn
+        ))
         scrollToBottom()
     }
 
@@ -457,7 +430,7 @@ extension ConversationViewController {
         // sent message holds the top (`anchored`), new content must not move the view.
         guard !isReplaying, autoScroll.followsNewContent else { return }
 
-        // After layout, or the scroll targets the height the stack had before this message.
+        // After layout, or the scroll targets the table height from before this message.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.autoScroll.followsNewContent,
                   let documentView = self.scrollView.documentView else { return }
@@ -465,6 +438,269 @@ extension ConversationViewController {
             let overflow = documentView.bounds.height - self.scrollView.contentSize.height
             documentView.scroll(NSPoint(x: 0, y: max(0, overflow)))
         }
+    }
+}
+
+// MARK: - Virtualized Transcript
+
+extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate {
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        presentationItems.count
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationItems.indices.contains(tableRow) else { return nil }
+        let item = presentationItems[tableRow]
+        let identifier = NSUserInterfaceItemIdentifier("ConversationVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ConversationVirtualRowHost ?? ConversationVirtualRowHost()
+        host.identifier = identifier
+
+        let content = makePresentationView(for: item)
+        let topInset: CGFloat
+        if tableRow == 0 {
+            topInset = Design.Spacing.inset
+        } else if item.opensTurn {
+            topInset = Design.Chat.turnSpacing
+        } else {
+            topInset = Design.Spacing.medium
+        }
+        let bottomInset = tableRow == presentationItems.count - 1
+            ? Design.Spacing.inset
+            : 0
+
+        host.install(
+            content,
+            topInset: topInset,
+            bottomInset: bottomInset,
+            onRelease: releaseHandler(for: item, content: content),
+            onMeasuredHeight: { [weak self] height in
+                guard let self,
+                      self.presentationItems.contains(where: { $0.id == item.id }),
+                      height > 0 else { return }
+                self.rowHeightCache[item.id] = height
+            }
+        )
+        return host
+    }
+
+    func presentationRow(forTimelineIndex index: Int) -> Int? {
+        presentationItems.firstIndex { item in
+            if case .timeline(index) = item.content { return true }
+            return false
+        }
+    }
+
+    func invalidateConversationHeightCacheIfNeeded() {
+        let width = min(
+            Design.Size.readableWidth,
+            max(0, tableView.bounds.width - Design.Spacing.inset * 2)
+        )
+        guard width > 0 else { return }
+        if rowHeightCacheWidth == 0 {
+            rowHeightCacheWidth = width
+            return
+        }
+        guard abs(width - rowHeightCacheWidth) > 0.5 else { return }
+        rowHeightCacheWidth = width
+        let hadCachedHeights = !rowHeightCache.isEmpty
+        rowHeightCache.removeAll(keepingCapacity: true)
+        if hadCachedHeights, tableView.numberOfRows > 0 {
+            tableView.noteHeightOfRows(
+                withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows)
+            )
+        }
+    }
+
+    func appendPresentationItem(_ item: PresentationItem) {
+        let index = presentationItems.count
+        presentationItems.append(item)
+        notifyPresentationRowsInserted(at: IndexSet(integer: index))
+    }
+
+    func notifyPresentationRowsInserted(at indexes: IndexSet) {
+        guard isViewLoaded, !isReplaying, !indexes.isEmpty else { return }
+        tableView.insertRows(at: indexes, withAnimation: [])
+    }
+
+    func notifyPresentationRowsRemoved(at indexes: IndexSet) {
+        guard isViewLoaded, !isReplaying, !indexes.isEmpty else { return }
+        tableView.removeRows(at: indexes, withAnimation: [])
+    }
+
+    func reloadConversationRows(force: Bool = false) {
+        guard isViewLoaded, force || !isReplaying else { return }
+        rowViews.removeAll(keepingCapacity: true)
+        pendingToolViews.removeAll(keepingCapacity: true)
+        tableView.reloadData()
+    }
+
+    func noteTimelineRowHeightChanged(_ index: Int) {
+        notePresentationHeightChanged(.timeline(index))
+    }
+
+    func notePresentationHeightChanged(_ id: PresentationID) {
+        rowHeightCache[id] = nil
+        guard let row = presentationItems.firstIndex(where: { $0.id == id }),
+              row < tableView.numberOfRows else { return }
+        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+    }
+
+    private func makePresentationView(for item: PresentationItem) -> NSView {
+        switch item.content {
+        case .timeline(let index):
+            return materializeRow(at: index)
+
+        case .divider:
+            return ConversationRowView.turnDivider()
+
+        case .fold(let turnStart, let hiddenIndices, let duration, let stopped):
+            return TurnFoldView(
+                duration: duration,
+                stopped: stopped,
+                folding: [],
+                expanded: expandedTurnStarts.contains(turnStart)
+            ) { [weak self] _, expanded in
+                self?.setTurnWork(
+                    hiddenIndices,
+                    expanded: expanded,
+                    turnStart: turnStart
+                )
+            }
+
+        case .retained(let view):
+            AppThemeRefresh.repaintIfNeeded(view)
+            return view
+
+        case .streaming(let label):
+            return label
+        }
+    }
+
+    private func releaseHandler(
+        for item: PresentationItem,
+        content: NSView
+    ) -> (() -> Void)? {
+        guard case .timeline(let index) = item.content else { return nil }
+        return { [weak self, weak content] in
+            guard let self, let content else { return }
+            if self.rowViews[index] === content {
+                self.rowViews[index] = nil
+            }
+            if let tool = Self.firstDescendant(ToolCallView.self, in: content),
+               self.pendingToolViews[index] === tool {
+                self.pendingToolViews[index] = nil
+            }
+        }
+    }
+
+    private func configureDisclosureState(in view: NSView, rowIndex: Int) {
+        if let tool = Self.firstDescendant(ToolCallView.self, in: view) {
+            tool.onExpansionChanged = { [weak self] expanded in
+                guard let self else { return }
+                if expanded {
+                    self.expandedToolRows.insert(rowIndex)
+                } else {
+                    self.expandedToolRows.remove(rowIndex)
+                }
+                self.noteTimelineRowHeightChanged(rowIndex)
+            }
+            tool.setExpanded(expandedToolRows.contains(rowIndex), notifying: false)
+        }
+
+        if let bubble = Self.firstDescendant(UserMessageBubbleView.self, in: view) {
+            bubble.onExpansionChanged = { [weak self] expanded in
+                guard let self else { return }
+                if expanded {
+                    self.expandedUserRows.insert(rowIndex)
+                } else {
+                    self.expandedUserRows.remove(rowIndex)
+                }
+                self.noteTimelineRowHeightChanged(rowIndex)
+            }
+            bubble.setExpanded(expandedUserRows.contains(rowIndex), notifying: false)
+        }
+    }
+
+    private static func firstDescendant<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
+        if let match = root as? T { return match }
+        for child in root.subviews {
+            if let match = firstDescendant(type, in: child) { return match }
+        }
+        return nil
+    }
+}
+
+/// Reusable shell around a conversation row. The host, not the content, is what AppKit recycles;
+/// replacing its child releases offscreen Markdown and tool constraint trees while preserving a
+/// stable measured height for the presentation identity.
+private final class ConversationVirtualRowHost: NSTableCellView {
+    private var releaseContent: (() -> Void)?
+    private var onMeasuredHeight: ((CGFloat) -> Void)?
+
+    func install(
+        _ content: NSView,
+        topInset: CGFloat,
+        bottomInset: CGFloat,
+        onRelease: (() -> Void)?,
+        onMeasuredHeight: @escaping (CGFloat) -> Void
+    ) {
+        releaseInstalledContent()
+        releaseContent = onRelease
+        self.onMeasuredHeight = onMeasuredHeight
+
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+
+        let sideInset = Design.Spacing.inset
+        let readableWidth = content.widthAnchor.constraint(
+            equalToConstant: Design.Size.readableWidth
+        )
+        readableWidth.priority = .defaultHigh
+        let paneWidth = content.widthAnchor.constraint(
+            equalTo: widthAnchor,
+            constant: -sideInset * 2
+        )
+        paneWidth.priority = NSLayoutConstraint.Priority(rawValue: 749)
+
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor, constant: topInset),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bottomInset),
+            content.centerXAnchor.constraint(equalTo: centerXAnchor),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: sideInset),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sideInset),
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
+            readableWidth,
+            paneWidth
+        ])
+    }
+
+    override func layout() {
+        super.layout()
+        if bounds.height > 0 { onMeasuredHeight?(bounds.height) }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        releaseInstalledContent()
+    }
+
+    private func releaseInstalledContent() {
+        releaseContent?()
+        releaseContent = nil
+        onMeasuredHeight = nil
+        subviews.forEach { $0.removeFromSuperview() }
     }
 }
 

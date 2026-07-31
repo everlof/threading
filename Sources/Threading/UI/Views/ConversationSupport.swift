@@ -97,6 +97,11 @@ struct ConversationAutoScroll: Equatable {
 // MARK: - Conversation Defaults
 
 enum ConversationDefaults {
+    /// Used only until an automatic table row has been measured. Most collapsed tool/fold rows
+    /// land near this value; prose replaces it with a cached identity-specific height as soon as
+    /// it enters the viewport.
+    static let estimatedRowHeight: CGFloat = 48
+
     /// Tool output beyond this is truncated. Generous, because output is collapsed by
     /// default — the cost of keeping it is layout, not attention.
     static let toolResultLimit = 20_000

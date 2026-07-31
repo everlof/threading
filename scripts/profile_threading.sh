@@ -4,6 +4,7 @@
 #
 #   scripts/profile_threading.sh git-stress
 #   scripts/profile_threading.sh conversation-stress
+#   scripts/profile_threading.sh conversation-residency-stress
 #   scripts/profile_threading.sh sidebar-stress
 #   scripts/profile_threading.sh sample [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh trace "Time Profiler" [seconds] [process-name-or-pid]
@@ -22,7 +23,7 @@ performance_directory="${THREADING_PROFILE_OUTPUT:-/tmp/threading-profiles}"
 built_in_directory="${HOME}/Library/Application Support/Threading/Performance"
 
 usage() {
-  sed -n '3,13p' "$0"
+  sed -n '3,14p' "$0"
 }
 
 resolve_pid() {
@@ -202,6 +203,79 @@ run_conversation_stress() {
   ) 2>&1 | tee "${output_directory}/conversation-stress.log"
 }
 
+run_conversation_residency_stress() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  echo "Running deterministic multi-conversation residency sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    # Each workload gets a fresh xctest process so physical-footprint deltas are comparable and
+    # cannot inherit allocator high-water marks from the preceding, larger conversation set.
+    local workloads=(
+      "2:50:mixed"
+      "4:50:mixed"
+      "8:50:mixed"
+      "8:100:mixed"
+      "8:100:tool-heavy"
+    )
+    if [[ -n "${THREADING_CONVERSATION_RESIDENCY_SESSIONS:-}" \
+       || -n "${THREADING_CONVERSATION_RESIDENCY_TURNS:-}" \
+       || -n "${THREADING_CONVERSATION_RESIDENCY_SHAPE:-}" ]]; then
+      workloads=(
+        "${THREADING_CONVERSATION_RESIDENCY_SESSIONS:-8}:${THREADING_CONVERSATION_RESIDENCY_TURNS:-50}:${THREADING_CONVERSATION_RESIDENCY_SHAPE:-mixed}"
+      )
+    fi
+    local workload sessions remainder turns shape
+    for workload in "${workloads[@]}"; do
+      sessions="${workload%%:*}"
+      remainder="${workload#*:}"
+      turns="${remainder%%:*}"
+      shape="${remainder##*:}"
+      THREADING_CONVERSATION_RESIDENCY_STRESS=1 \
+      THREADING_CONVERSATION_RESIDENCY_SESSIONS="${sessions}" \
+      THREADING_CONVERSATION_RESIDENCY_TURNS="${turns}" \
+      THREADING_CONVERSATION_RESIDENCY_SHAPE="${shape}" \
+      DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.ConversationRenderTests/testStressConversationResidencyWhenEnabled \
+          "${test_bundle}"
+    done
+  ) 2>&1 | tee "${output_directory}/conversation-residency-stress.log"
+}
+
 run_sidebar_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
@@ -280,6 +354,11 @@ case "${command}" in
     run_conversation_stress "${output_directory}"
     ;;
 
+  conversation-residency-stress)
+    output_directory="$(new_run_directory conversation-residency-stress)"
+    run_conversation_residency_stress "${output_directory}"
+    ;;
+
   sidebar-stress)
     output_directory="$(new_run_directory sidebar-stress)"
     run_sidebar_stress "${output_directory}"
@@ -320,6 +399,8 @@ case "${command}" in
     done
 
     if [[ "${command}" == "full+" ]]; then
+      run_conversation_residency_stress "${output_directory}"
+
       full_plus_templates=(
         "CPU Profiler"
         "File Activity"
