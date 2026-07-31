@@ -30,6 +30,8 @@ coarse operation. The current entry points are:
 
 - application launch;
 - display-pane render and hosted-controller installation;
+- native-conversation transcript replay and render;
+- project-sidebar tree build, outline reload, structure application and disclosure persistence;
 - Git Review's end-to-end load-and-render;
 - Git reader queue wait plus work;
 - each git child process;
@@ -83,13 +85,20 @@ MetricKit are complements.
 # Deterministic Git Review file-index workload.
 scripts/profile_threading.sh git-stress
 
+# Deterministic native-conversation replay, jump, append, fold, and streaming workloads.
+scripts/profile_threading.sh conversation-stress
+
+# Deterministic production-outline workload from 500 through 5,000 sessions.
+scripts/profile_threading.sh sidebar-stress
+
 # Lightweight stacks from an already-running app.
 scripts/profile_threading.sh sample 15 Threading
 
 # One Instruments template from the command line.
 scripts/profile_threading.sh trace "Time Profiler" 15 Threading
 
-# Routine sweep: Git fixture, sample, Time Profiler, Animation Hitches, Allocations.
+# Routine sweep: Git, conversation and sidebar fixtures, sample, Time Profiler,
+# Animation Hitches, and Allocations.
 scripts/profile_threading.sh full 15 Threading
 
 # Release/investigation sweep: full plus CPU Profiler, File Activity, Leaks,
@@ -159,3 +168,94 @@ git.review.load-and-render
 Keep the workload and before/after artifacts with an optimization. Do not virtualize or cache on
 intuition alone: the spans are intentionally arranged so a change can name the cost it removed
 and reveal the cost it merely moved elsewhere.
+
+## Native conversation stress target
+
+`ConversationRenderTests.testStressNativeConversationWhenEnabled` generates prose, mixed and
+tool-heavy transcripts locally and sends them through `ConversationTimeline` plus the production
+`ConversationViewController` row path. The production edge is 400 events: that is 600 native
+rows for the mixed shape and 1,100 for the tool-heavy shape, because one assistant event can
+carry many content blocks. It also measures a jump to the deepest turn, an incremental tool-rich
+append, result attachment plus folding, and 250 cumulative streaming updates.
+
+The command runs each shape and size in a fresh `xctest` process. AppKit layout state and retained
+controllers otherwise make later cases measure the preceding workloads as well as their own;
+that accumulation is worth a separate multi-pane test, but it is not a stable scaling baseline.
+Each result is a `THREADING_PERF conversation-*` line in `conversation-stress.log`.
+
+The first sample put the main thread in `NSView.layoutSubtreeIfNeeded` and CoreAutoLayout while
+attaching the accumulated native tree. Three measured changes are deliberately narrower than full
+virtualization:
+
+`conversation.replay.render` brackets the production transcript-to-native-view pass. It records
+only aggregate event, model-row, materialized-row, arranged-view and folded-turn counts, so traces and
+Points of Interest captures can correlate the same semantic interval with AppKit stacks without
+recording conversation content.
+
+- replay rebuilds the minimap, conversation controls, and remote snapshot once at its boundary,
+  rather than once for every prefix of the transcript;
+- replay defers a turn's non-user native views until its terminal event; a successful turn
+  materializes only its fold and final answer, while interrupted and truncated tails materialize
+  in full. Hidden tools are built on first expansion and reused thereafter. A tool-heavy history
+  therefore neither constructs nor constrains hundreds of rows it already knows are collapsed.
+  At the 100-turn production edge, 1,100 tool-heavy model rows now materialize 200 row views —
+  the same 399 arranged views and 2,358 descendants as the 600-row mixed shape;
+- folded intermediate work is retained by `TurnFoldView` but detached from the live hierarchy.
+  Expanding reattaches the exact views and reapplies the active theme. At 50 mixed turns this cut
+  descendants from 4,008 to 1,208, final layout from about 1,505 ms to 175 ms, and a deep jump
+  from about 921 ms to 84 ms in the isolated Debug workload.
+
+The remaining visible user/fold/final-answer rows still form one `NSStackView` constraint chain.
+At the 100-turn edge, jumps and incremental relayout remain hundreds of milliseconds; a manual
+linear layout prototype made jumps cheap but made cold native height measurement substantially
+worse and could not reliably observe every interactive disclosure. The next architecture step,
+when that residual cost is addressed, is reusable turn/row virtualization with height caching —
+not another progressive stack that merely postpones the same retained-layout cliff.
+
+## Project sidebar stress target
+
+`SidebarTreeBuilderTests.testStressProjectSidebarWhenEnabled` seeds a throwaway `ProjectStore`
+database and loads the production `ProjectSidebarViewController`. It measures cold load and layout,
+same-shape content refresh, collapse/re-expand, a reveal through branch and nested side-chat levels,
+one targeted title event, 250 repeated row updates, and the pure tree builder. The fixture fixes the
+session order and grouping defaults and never reads or changes the user's projects.
+
+`scripts/profile_threading.sh sidebar-stress` runs 500, 1,000, 2,000 and 5,000 sessions in fresh
+`xctest` processes. The profiler's DerivedData lives inside that run's artifact directory: parallel
+developer builds cannot lock its build database, while the three deterministic workloads in `full`
+reuse the same isolated build. Results are `THREADING_PERF project-sidebar` lines in
+`project-sidebar-stress.log`.
+
+At 5,000 sessions the outline contains 5,120 logical rows but materializes only 21 cells, so row-view
+virtualization is already doing its job. The measured fixes are above that layer:
+
+- rendered project, session, owner and ancestor indexes replace repeated flattened and recursive
+  node scans;
+- `ProjectStore` maintains project/session location indexes across structural edits, making the
+  model lookup used by every live row constant-time;
+- content refresh touches only the viewport, since an off-screen row reads current store state when
+  AppKit eventually asks for its view;
+- `ProjectsDidChange` carries a session-row impact for agent titles, unless name ordering means the
+  title can move the row. This keeps the ordinary title path out of the complete builder;
+- outline expansion callbacks ignore disclosure state that already matches the model, and an actual
+  disclosure change upserts only that project row. It never walks or rewrites the session table.
+
+On the 5,000-session Debug fixture, 250 targeted row updates fell from about 608 ms on the original
+scan/store path to roughly 55–65 ms, and a title event takes about 1 ms rather than the roughly 38 ms
+same-shape reload. The latter still exists for genuinely ambiguous content changes; its tree build
+is about 30–33 ms.
+
+The apparent outline cliff had a different cause. Programmatic expansion during cold reload invokes
+the same delegate callback as a user disclosure, and that callback used the store's full save path.
+Cold load therefore upserted all 5,000 sessions once for every expanded project; collapse/re-expand
+did it twice more. Ignoring already-matching state and persisting only the changed project row cut a
+representative 5,000-session controller load from about 3,165 ms to 200 ms and collapse/re-expand
+from about 303 ms to 3.8 ms. A repeated sweep measured 135 ms load, 72 ms first layout and 7.3 ms
+disclosure. These figures are regression-scale evidence, not release-build launch claims.
+
+`sidebar.outline.apply-structure` and `sidebar.disclosure.persist` keep the remaining AppKit and
+SQLite costs separable in a trace. A recursive `expandChildren` experiment remains reverted: before
+the persistence cause was isolated it made both paths slightly slower. The current roughly 200 ms
+cold total at this deliberately extreme scale does not justify replacing `NSOutlineView`; a
+flattened visible-row table remains an option only if a future product target demands substantially
+less than that.

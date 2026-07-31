@@ -611,6 +611,20 @@ struct TerminalSessionDidEnd: AppEvent {
 
 struct ProjectsDidChange: AppEvent {
     static let name = Notification.Name("projectsDidChange")
+
+    /// How much of the sidebar can have changed. Other observers still treat this as the same
+    /// project-store event; the outline uses the narrower case to avoid rebuilding thousands of
+    /// nodes for a title that can only repaint one row.
+    enum SidebarImpact {
+        case structure
+        case sessionRow(SessionID)
+    }
+
+    let sidebarImpact: SidebarImpact
+
+    init(sidebarImpact: SidebarImpact = .structure) {
+        self.sidebarImpact = sidebarImpact
+    }
 }
 
 struct SessionActivityDidChange: AppEvent {

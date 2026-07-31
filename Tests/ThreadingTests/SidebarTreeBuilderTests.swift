@@ -389,4 +389,195 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
         XCTAssertEqual(node.sessionNodes.map(\.sessionID), [live.id])
     }
+
+    // MARK: - Stress profiling
+
+    /// Opt-in because this loads a real `NSOutlineView` with thousands of production nodes.
+    /// The store is backed by a throwaway database, so the workload never reads or changes the
+    /// projects in the running app.
+    func testStressProjectSidebarWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_SIDEBAR_STRESS"] == "1",
+            "Set THREADING_SIDEBAR_STRESS=1 to run the project-sidebar sweep."
+        )
+
+        let defaults = UserDefaults.standard
+        let deterministicDefaults: [(String, Any)] = [
+            ("sidebarSessionOrder", SidebarSessionOrder.manual.rawValue),
+            ("groupsSessionsByBranch", true),
+            ("groupsLoneBranches", true)
+        ]
+        let previousDefaults = deterministicDefaults.map { key, _ in
+            (key, defaults.object(forKey: key))
+        }
+        for (key, value) in deterministicDefaults { defaults.set(value, forKey: key) }
+        defer {
+            for (key, value) in previousDefaults {
+                if let value {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
+
+        let projectCount = ProcessInfo.processInfo.environment["THREADING_SIDEBAR_STRESS_PROJECTS"]
+            .flatMap(Int.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? 10
+        let sessionsPerProject = ProcessInfo.processInfo.environment[
+            "THREADING_SIDEBAR_STRESS_SESSIONS"
+        ]
+            .flatMap(Int.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? 100
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-sidebar-stress-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fixture = stressProjects(
+            projectCount: projectCount,
+            sessionsPerProject: sessionsPerProject,
+            directory: directory
+        )
+        let manager = StateManager(appSupportDirectory: directory)
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: fixture.projects)))
+        let store = ProjectStore(stateManager: manager)
+        let controller = ProjectSidebarViewController(projectStore: store)
+
+        let loadStarted = DispatchTime.now().uptimeNanoseconds
+        _ = controller.view
+        let loadEnded = DispatchTime.now().uptimeNanoseconds
+        controller.view.frame = NSRect(x: 0, y: 0, width: 300, height: 720)
+        controller.view.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        #if DEBUG
+        let allRowsRefreshStarted = DispatchTime.now().uptimeNanoseconds
+        controller.refreshAllRowsForPerformanceComparison()
+        let allRowsRefreshElapsed = DispatchTime.now().uptimeNanoseconds - allRowsRefreshStarted
+        #else
+        let allRowsRefreshElapsed: UInt64 = 0
+        #endif
+
+        let visibleRowsRefreshStarted = DispatchTime.now().uptimeNanoseconds
+        controller.refreshRows()
+        let visibleRowsRefreshElapsed = DispatchTime.now().uptimeNanoseconds
+            - visibleRowsRefreshStarted
+
+        let refreshStarted = DispatchTime.now().uptimeNanoseconds
+        controller.reload()
+        let refreshElapsed = DispatchTime.now().uptimeNanoseconds - refreshStarted
+
+        let disclosureStarted = DispatchTime.now().uptimeNanoseconds
+        controller.setExpanded(false, forProject: fixture.deepProjectID)
+        controller.setExpanded(true, forProject: fixture.deepProjectID)
+        controller.view.layoutSubtreeIfNeeded()
+        let disclosureElapsed = DispatchTime.now().uptimeNanoseconds - disclosureStarted
+
+        let revealStarted = DispatchTime.now().uptimeNanoseconds
+        controller.reveal(sessionID: fixture.deepSessionID)
+        controller.view.layoutSubtreeIfNeeded()
+        let revealElapsed = DispatchTime.now().uptimeNanoseconds - revealStarted
+
+        let titleEventStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(
+            store.updateAgentTitle("Indexed sidebar title", for: fixture.deepSessionID)
+        )
+        let titleEventElapsed = DispatchTime.now().uptimeNanoseconds - titleEventStarted
+
+        let churnIterations = 250
+        #if DEBUG
+        let scanningChurnStarted = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<churnIterations {
+            controller.refreshRowByScanningForPerformanceComparison(
+                sessionID: fixture.deepSessionID
+            )
+        }
+        let scanningChurnElapsed = DispatchTime.now().uptimeNanoseconds - scanningChurnStarted
+        #else
+        let scanningChurnElapsed: UInt64 = 0
+        #endif
+
+        let churnStarted = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<churnIterations {
+            controller.refreshRow(sessionID: fixture.deepSessionID)
+        }
+        let churnElapsed = DispatchTime.now().uptimeNanoseconds - churnStarted
+
+        let treeStarted = DispatchTime.now().uptimeNanoseconds
+        let roots = SidebarTreeBuilder.rootNodes(from: store.projects)
+        let treeElapsed = DispatchTime.now().uptimeNanoseconds - treeStarted
+
+        XCTAssertFalse(roots.isEmpty)
+        XCTAssertEqual(controller.selectedSessionID, fixture.deepSessionID)
+        XCTAssertGreaterThan(controller.outlineRowCount, projectCount * sessionsPerProject)
+        XCTAssertLessThan(controller.instantiatedRowCount, controller.outlineRowCount)
+
+        print(
+            "THREADING_PERF project-sidebar "
+                + "projects=\(projectCount) sessions=\(projectCount * sessionsPerProject) "
+                + "rows=\(controller.outlineRowCount) "
+                + "instantiated=\(controller.instantiatedRowCount) "
+                + "load_ms=\(Self.milliseconds(loadEnded - loadStarted)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - loadEnded)) "
+                + "all_rows_refresh_ms=\(Self.milliseconds(allRowsRefreshElapsed)) "
+                + "visible_rows_refresh_ms=\(Self.milliseconds(visibleRowsRefreshElapsed)) "
+                + "same_shape_refresh_ms=\(Self.milliseconds(refreshElapsed)) "
+                + "disclosure_ms=\(Self.milliseconds(disclosureElapsed)) "
+                + "deep_reveal_ms=\(Self.milliseconds(revealElapsed)) "
+                + "title_event_ms=\(Self.milliseconds(titleEventElapsed)) "
+                + "row_scan_refresh_250_ms=\(Self.milliseconds(scanningChurnElapsed)) "
+                + "row_refresh_250_ms=\(Self.milliseconds(churnElapsed)) "
+                + "tree_build_ms=\(Self.milliseconds(treeElapsed))"
+        )
+    }
+
+    private func stressProjects(
+        projectCount: Int,
+        sessionsPerProject: Int,
+        directory: URL
+    ) -> (projects: [Project], deepProjectID: ProjectID, deepSessionID: SessionID) {
+        var projects: [Project] = []
+        var deepProjectID = ProjectID()
+        var deepSessionID = SessionID()
+
+        for projectIndex in 0..<projectCount {
+            var sessions: [AgentSession] = []
+            let chainStart = max(1, sessionsPerProject - 4)
+
+            for sessionIndex in 0..<sessionsPerProject {
+                let parent = sessionIndex >= chainStart ? sessions.last?.id : nil
+                let item = session(
+                    "Project \(projectIndex) conversation \(sessionIndex)",
+                    branch: "branch-\(sessionIndex % 5)",
+                    forkedFrom: parent,
+                    lastActiveAt: Date(
+                        timeIntervalSinceReferenceDate: Double(projectIndex * sessionsPerProject + sessionIndex)
+                    )
+                )
+                sessions.append(item)
+            }
+
+            var item = project("stress-\(projectIndex)", sessions: sessions)
+            item.folderPath = directory
+                .appendingPathComponent("project-\(projectIndex)", isDirectory: true)
+                .path
+            projects.append(item)
+
+            if projectIndex == projectCount - 1, let last = sessions.last {
+                deepProjectID = item.id
+                deepSessionID = last.id
+            }
+        }
+
+        return (projects, deepProjectID, deepSessionID)
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
 }

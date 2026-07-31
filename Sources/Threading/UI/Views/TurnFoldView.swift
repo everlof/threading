@@ -5,14 +5,16 @@ import AppKit
 /// t3code's turn fold, drawn in this app's quiet-row language: once a turn has settled,
 /// everything between its user message and its final assistant reply is hidden behind this
 /// line, so a conversation reads as its exchanges rather than as the work that carried them
-/// out. The fold owns the views it hid and toggles them on click; expansion is view state,
-/// exactly like `ToolCallView.isExpanded`.
+/// out. The fold controls the work views; its placement callback can lazily create, detach and
+/// reattach them, while simpler callers may still toggle visibility. Expansion is view state, like
+/// `ToolCallView.isExpanded`.
 final class TurnFoldView: NSView {
 
     // MARK: - Properties
 
     private let label: String
     private let foldedViews: [NSView]
+    private let onExpansionChanged: ((TurnFoldView, Bool) -> Void)?
 
     private lazy var chevron: NSImageView = {
         let image = NSImageView()
@@ -45,8 +47,14 @@ final class TurnFoldView: NSView {
     /// `duration` is the turn's measured length, when its terminal event carried one.
     /// `stopped` marks a turn that was interrupted rather than completed — it reads
     /// "Stopped after 42s", t3code's rule, so an abandoned turn does not claim to have worked.
-    init(duration: TimeInterval?, stopped: Bool, folding views: [NSView]) {
+    init(
+        duration: TimeInterval?,
+        stopped: Bool,
+        folding views: [NSView],
+        onExpansionChanged: ((TurnFoldView, Bool) -> Void)? = nil
+    ) {
         self.foldedViews = views
+        self.onExpansionChanged = onExpansionChanged
         self.label = Self.title(duration: duration, stopped: stopped)
         super.init(frame: .zero)
         setupViews()
@@ -56,6 +64,7 @@ final class TurnFoldView: NSView {
     /// child transcript. The caller owns the label because this fold does not describe a turn.
     init(label: String, folding views: [NSView]) {
         self.foldedViews = views
+        self.onExpansionChanged = nil
         self.label = label
         super.init(frame: .zero)
         setupViews()
@@ -102,8 +111,18 @@ final class TurnFoldView: NSView {
     }
 
     @objc private func toggle() {
-        isExpanded.toggle()
-        foldedViews.forEach { $0.isHidden = !isExpanded }
+        setExpanded(!isExpanded)
+    }
+
+    /// Kept separate from pointer handling so restoration is directly regression-testable.
+    func setExpanded(_ expanded: Bool) {
+        guard expanded != isExpanded else { return }
+        isExpanded = expanded
+        if let onExpansionChanged {
+            onExpansionChanged(self, isExpanded)
+        } else {
+            foldedViews.forEach { $0.isHidden = !isExpanded }
+        }
         chevron.image = NSImage(
             systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
             accessibilityDescription: nil

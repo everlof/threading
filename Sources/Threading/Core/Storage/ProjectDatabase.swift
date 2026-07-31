@@ -254,6 +254,14 @@ final class ProjectDatabase {
         }
     }
 
+    /// Persists one project row without walking the sessions beneath it.
+    ///
+    /// Expansion is project-owned UI state. Re-encoding and upserting every session merely
+    /// because one disclosure triangle moved made the gesture scale with the complete sidebar.
+    func saveProject(_ project: Project, position: Int) throws {
+        try upsert(project, position: position)
+    }
+
     /// Persists only window navigation state.
     ///
     /// A sidebar selection changes one value, not the project graph. Routing it through

@@ -123,6 +123,22 @@ final class StateManager {
         }
     }
 
+    /// Writes one project's own fields without touching its session rows.
+    @discardableResult
+    func saveProject(_ project: Project, position: Int) -> Bool {
+        guard writesAreAllowed(for: "project") else { return false }
+        do {
+            try database().saveProject(project, position: position)
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to save project: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+            return false
+        }
+    }
+
     /// Writes the selected row without rewriting the projects and sessions beside it.
     @discardableResult
     func saveSelectedSessionID(_ id: SessionID?) -> Bool {

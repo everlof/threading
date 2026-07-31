@@ -282,6 +282,397 @@ final class ConversationRenderTests: XCTestCase {
         print("Rendered pane widths to \(directory.path)")
     }
 
+    // MARK: - Stress Profiling
+
+    /// Opt-in because this deliberately builds several hundred real AppKit/Markdown rows.
+    /// It is the repeatable counterpart to sampling a large conversation by hand: the event
+    /// shapes are deterministic, but every row, fold, constraint and scroll is the production
+    /// native-conversation implementation.
+    func testStressNativeConversationWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_CONVERSATION_STRESS"] == "1",
+            "Set THREADING_CONVERSATION_STRESS=1 to run the native conversation sweep."
+        )
+
+        var workloads: [(shape: StressShape, turns: Int)] = [
+            (.mixed, 10),
+            (.mixed, 25),
+            (.mixed, 50),
+            (.mixed, 100),
+            (.prose, 125),
+            (.toolHeavy, 100)
+        ]
+        if let override = ProcessInfo.processInfo.environment["THREADING_CONVERSATION_STRESS_TURNS"],
+           let turns = Int(override), turns > 0 {
+            let shape = ProcessInfo.processInfo.environment["THREADING_CONVERSATION_STRESS_SHAPE"]
+                .flatMap(StressShape.init(rawValue:))
+                ?? .mixed
+            workloads = [(shape, turns)]
+        }
+
+        for workload in workloads {
+            autoreleasepool {
+                runConversationStress(shape: workload.shape, turns: workload.turns)
+            }
+        }
+    }
+
+    func testSettledTurnLazilyMaterializesAndReusesFoldedWork() throws {
+        let session = AgentSession(kind: .codex, title: "Fold restoration", usesNativeUI: true)
+        let controller = ConversationViewController(
+            agentSession: session,
+            project: Project(
+                name: "Fold restoration",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: Render.viewportHeight
+        )
+        controller.isReplaying = true
+        let events = Self.stressEvents(shape: .mixed, turns: 1)
+        Self.apply(Array(events.prefix(2)), to: controller)
+
+        XCTAssertEqual(controller.stack.arrangedSubviews.count, 1)
+        XCTAssertEqual(controller.deferredReplayRowIndices, Set(1...5))
+        XCTAssertTrue((1...5).allSatisfy { controller.rowViews[$0] == nil })
+
+        Self.apply(Array(events.dropFirst(2)), to: controller)
+
+        let fold = try XCTUnwrap(
+            controller.stack.arrangedSubviews.compactMap { $0 as? TurnFoldView }.first
+        )
+
+        XCTAssertEqual(controller.stack.arrangedSubviews.count, 3)
+        XCTAssertTrue(controller.deferredReplayRowIndices.isEmpty)
+        XCTAssertTrue((1...4).allSatisfy { controller.rowViews[$0] == nil })
+
+        fold.setExpanded(true)
+        let foldedWork = try (1...4).map { try XCTUnwrap(controller.rowViews[$0]) }
+        XCTAssertEqual(controller.stack.arrangedSubviews.count, 7)
+        XCTAssertTrue(foldedWork.allSatisfy { $0.superview === controller.stack })
+        XCTAssertTrue(foldedWork.allSatisfy { view in
+            controller.rowEdgeConstraints[ObjectIdentifier(view)]?.allSatisfy(\.isActive) == true
+        })
+
+        fold.setExpanded(false)
+        XCTAssertEqual(controller.stack.arrangedSubviews.count, 3)
+        XCTAssertTrue(foldedWork.allSatisfy { $0.superview == nil })
+        XCTAssertTrue(foldedWork.allSatisfy { view in
+            controller.rowEdgeConstraints[ObjectIdentifier(view)]?.allSatisfy { !$0.isActive }
+                == true
+        })
+
+        fold.setExpanded(true)
+        XCTAssertEqual(controller.stack.arrangedSubviews.count, 7)
+        XCTAssertTrue(zip(1...4, foldedWork).allSatisfy { pair in
+            controller.rowViews[pair.0] === pair.1
+        })
+    }
+
+    func testReplayFinishAttachesAnUnfinishedTail() {
+        let session = AgentSession(kind: .codex, title: "Replay tail", usesNativeUI: true)
+        let controller = ConversationViewController(
+            agentSession: session,
+            project: Project(
+                name: "Replay tail",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.isReplaying = true
+
+        Self.apply(
+            Array(Self.stressEvents(shape: .mixed, turns: 1).prefix(2)),
+            to: controller
+        )
+        XCTAssertEqual(controller.stack.arrangedSubviews.count, 1)
+        XCTAssertEqual(controller.deferredReplayRowIndices, Set(1...5))
+
+        controller.finishReplayRendering()
+
+        XCTAssertTrue(controller.deferredReplayRowIndices.isEmpty)
+        XCTAssertEqual(controller.stack.arrangedSubviews.count, 6)
+        XCTAssertTrue((0...5).allSatisfy { controller.rowViews[$0]?.superview === controller.stack })
+    }
+
+    private enum StressShape: String {
+        case prose
+        case mixed
+        case toolHeavy = "tool-heavy"
+    }
+
+    private func runConversationStress(shape: StressShape, turns: Int) {
+        let events = Self.stressEvents(shape: shape, turns: turns)
+
+        var modelTimeline = ConversationTimeline(sessionID: SessionID())
+        let modelStarted = DispatchTime.now().uptimeNanoseconds
+        for event in events { _ = modelTimeline.apply(event) }
+        let modelElapsed = DispatchTime.now().uptimeNanoseconds - modelStarted
+
+        let session = AgentSession(kind: .codex, title: "Conversation stress", usesNativeUI: true)
+        let controller = ConversationViewController(
+            agentSession: session,
+            project: Project(
+                name: "Conversation stress",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: Render.viewportHeight
+        )
+        controller.view.layoutSubtreeIfNeeded()
+        controller.isReplaying = true
+
+        let replayStarted = DispatchTime.now().uptimeNanoseconds
+        Self.apply(events, to: controller)
+        controller.finishReplayRendering()
+        controller.refreshMinimap()
+        let replayEnded = DispatchTime.now().uptimeNanoseconds
+        controller.view.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let rowCount = controller.timeline.rows.count
+        let materializedRowCount = controller.rowViews.count
+        let arrangedCount = controller.stack.arrangedSubviews.count
+        let descendantCount = Self.descendantCount(in: controller.view)
+        print(
+            "THREADING_PERF conversation-replay "
+                + "shape=\(shape.rawValue) turns=\(turns) events=\(events.count) "
+                + "rows=\(rowCount) materialized=\(materializedRowCount) "
+                + "arranged=\(arrangedCount) descendants=\(descendantCount) "
+                + "model_ms=\(Self.milliseconds(modelElapsed)) "
+                + "render_ms=\(Self.milliseconds(replayEnded - replayStarted)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - replayEnded)) "
+                + "elapsed_ms=\(Self.milliseconds(layoutEnded - replayStarted))"
+        )
+
+        if let lastTurn = controller.timeline.turns.last,
+           let rowView = controller.rowViews[lastTurn.rowIndex],
+           let documentView = controller.scrollView.documentView {
+            let jumpStarted = DispatchTime.now().uptimeNanoseconds
+            controller.autoScroll.noteJumpedToRow()
+            let frame = rowView.convert(rowView.bounds, to: documentView)
+            controller.scrollView.contentView.setBoundsOrigin(NSPoint(
+                x: 0,
+                y: max(0, frame.minY - Design.Spacing.large)
+            ))
+            controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+            controller.view.layoutSubtreeIfNeeded()
+            let jumpElapsed = DispatchTime.now().uptimeNanoseconds - jumpStarted
+            print(
+                "THREADING_PERF conversation-deep-jump "
+                    + "shape=\(shape.rawValue) turns=\(turns) target_row=\(lastTurn.rowIndex) "
+                    + "elapsed_ms=\(Self.milliseconds(jumpElapsed))"
+            )
+        }
+
+        controller.isReplaying = false
+        let liveTurn = turns
+        let liveIDs = (0..<8).map { "live-\(shape.rawValue)-\(liveTurn)-\($0)" }
+        var liveBlocks: [ContentBlock] = [
+            .thinking("Checking the last incremental path before replying.")
+        ]
+        liveBlocks.append(contentsOf: liveIDs.enumerated().map { index, id in
+            .toolUse(
+                id: id,
+                tool: index.isMultiple(of: 2) ? .read : .bash,
+                input: index.isMultiple(of: 2)
+                    ? ["file_path": .string("Sources/Generated/Live\(index).swift")]
+                    : ["command": .string("swift test --filter LiveCase\(index)")]
+            )
+        })
+        liveBlocks.append(.text("The incremental update completed and the pane stayed responsive."))
+
+        let appendStarted = DispatchTime.now().uptimeNanoseconds
+        Self.apply([
+            .userMessage("Run one more deep incremental check."),
+            .assistantMessage(blocks: liveBlocks)
+        ], to: controller)
+        controller.view.layoutSubtreeIfNeeded()
+        let appendElapsed = DispatchTime.now().uptimeNanoseconds - appendStarted
+        print(
+            "THREADING_PERF conversation-incremental-append "
+                + "shape=\(shape.rawValue) base_turns=\(turns) added_rows=11 "
+                + "elapsed_ms=\(Self.milliseconds(appendElapsed))"
+        )
+
+        let foldStarted = DispatchTime.now().uptimeNanoseconds
+        Self.apply([
+            .toolResults(liveIDs.enumerated().map { index, id in
+                ToolResult(
+                    toolUseID: id,
+                    text: index.isMultiple(of: 2)
+                        ? "struct LiveCase\(index) {}"
+                        : "Test Suite 'LiveCase\(index)' passed",
+                    isError: false
+                )
+            }),
+            .turnFinished(
+                text: nil,
+                isError: false,
+                metrics: TurnMetrics(
+                    duration: 1.25,
+                    outputTokens: 128,
+                    effort: "high",
+                    contextTokens: 24_000,
+                    contextWindow: 200_000
+                )
+            )
+        ], to: controller)
+        controller.view.layoutSubtreeIfNeeded()
+        let foldElapsed = DispatchTime.now().uptimeNanoseconds - foldStarted
+        print(
+            "THREADING_PERF conversation-result-and-fold "
+                + "shape=\(shape.rawValue) base_turns=\(turns) folded_rows=9 "
+                + "elapsed_ms=\(Self.milliseconds(foldElapsed))"
+        )
+
+        Self.apply([.userMessage("Stream a deterministic long response.")], to: controller)
+        let streamStarted = DispatchTime.now().uptimeNanoseconds
+        for index in 0..<250 {
+            Self.apply([
+                .textDelta(" chunk-\(index) with stable text for native label measurement")
+            ], to: controller)
+        }
+        controller.view.layoutSubtreeIfNeeded()
+        let streamElapsed = DispatchTime.now().uptimeNanoseconds - streamStarted
+        print(
+            "THREADING_PERF conversation-stream-update "
+                + "shape=\(shape.rawValue) base_turns=\(turns) deltas=250 "
+                + "characters=\(controller.timeline.streamingText.count) "
+                + "elapsed_ms=\(Self.milliseconds(streamElapsed))"
+        )
+
+        XCTAssertEqual(controller.timeline.rows.count, modelTimeline.rows.count + 12)
+    }
+
+    private static func stressEvents(shape: StressShape, turns: Int) -> [StreamEvent] {
+        var events: [StreamEvent] = []
+        events.reserveCapacity(turns * 4)
+
+        for turn in 0..<turns {
+            events.append(.userMessage(
+                "Turn \(turn): inspect the deterministic renderer workload and summarize the result."
+            ))
+
+            let toolCount: Int
+            switch shape {
+            case .prose: toolCount = 0
+            case .mixed: toolCount = 3
+            case .toolHeavy: toolCount = 8
+            }
+
+            var blocks: [ContentBlock] = []
+            if shape != .prose {
+                blocks.append(.thinking(
+                    "Reasoning through turn \(turn), its inputs, constraints, and expected output."
+                ))
+            }
+
+            let toolIDs = (0..<toolCount).map { "stress-\(shape.rawValue)-\(turn)-\($0)" }
+            for (index, id) in toolIDs.enumerated() {
+                switch index % 3 {
+                case 0:
+                    blocks.append(.toolUse(
+                        id: id,
+                        tool: .read,
+                        input: [
+                            "file_path": .string("Sources/Generated/Feature\(turn)/Case\(index).swift")
+                        ]
+                    ))
+                case 1:
+                    blocks.append(.toolUse(
+                        id: id,
+                        tool: .bash,
+                        input: ["command": .string("swift test --filter Stress\(turn)_\(index)")]
+                    ))
+                default:
+                    blocks.append(.toolUse(
+                        id: id,
+                        tool: .edit,
+                        input: [
+                            "file_path": .string("Sources/Generated/Feature\(turn)/Case\(index).swift"),
+                            "old_string": .string("let value = \(turn)"),
+                            "new_string": .string("let value = \(turn + index + 1)")
+                        ]
+                    ))
+                }
+            }
+
+            let paragraphCount = shape == .prose ? 6 : 2
+            let markdown = (0..<paragraphCount).map { paragraph in
+                "### Turn \(turn), section \(paragraph)\n\n"
+                    + "The deterministic native-renderer workload keeps wrapping, Markdown "
+                    + "layout, selection, and retained row constraints representative. "
+                    + "It is generated locally and performs no provider or network work."
+            }.joined(separator: "\n\n")
+            blocks.append(.text(markdown))
+            events.append(.assistantMessage(blocks: blocks))
+
+            if !toolIDs.isEmpty {
+                events.append(.toolResults(toolIDs.enumerated().map { index, id in
+                    ToolResult(
+                        toolUseID: id,
+                        text: index.isMultiple(of: 2)
+                            ? "Read 48 lines from deterministic fixture \(turn)-\(index)."
+                            : "Test Suite 'Stress\(turn)_\(index)' passed.",
+                        isError: false
+                    )
+                }))
+            }
+            events.append(.turnFinished(
+                text: nil,
+                isError: false,
+                metrics: TurnMetrics(
+                    duration: Double(turn + 1) / 10,
+                    outputTokens: 96 + turn,
+                    effort: "high",
+                    contextTokens: 8_000 + turn * 320,
+                    contextWindow: 200_000
+                )
+            ))
+        }
+
+        return events
+    }
+
+    private static func apply(
+        _ events: [StreamEvent],
+        to controller: ConversationViewController
+    ) {
+        for event in events {
+            for change in controller.timeline.apply(event) {
+                controller.apply(change)
+            }
+        }
+    }
+
+    private static func descendantCount(in root: NSView) -> Int {
+        var count = 0
+        var pending = root.subviews
+        while let view = pending.popLast() {
+            count += 1
+            pending.append(contentsOf: view.subviews)
+        }
+        return count
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
     // MARK: - Images
 
     func testRendersEveryFixtureInBothAppearances() throws {

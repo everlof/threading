@@ -44,6 +44,50 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(restored.selectedSessionID, selectedSessionID)
     }
 
+    func testProjectStoreLookupIndexesFollowStructuralEdits() throws {
+        let store = ProjectStore(stateManager: makeManager())
+        let firstProject = store.addProject(
+            folderURL: testDirectory.appendingPathComponent("first", isDirectory: true)
+        )
+        let secondProject = store.addProject(
+            folderURL: testDirectory.appendingPathComponent("second", isDirectory: true)
+        )
+        let removedSession = try XCTUnwrap(
+            store.addSession(to: firstProject.id, kind: .claude, title: "removed")
+        )
+        let retainedSession = try XCTUnwrap(
+            store.addSession(to: firstProject.id, kind: .codex, title: "retained")
+        )
+        let shiftedProjectSession = try XCTUnwrap(
+            store.addSession(to: secondProject.id, kind: .claude, title: "shifted")
+        )
+
+        XCTAssertEqual(store.session(withID: retainedSession.id)?.title, "retained")
+        XCTAssertEqual(store.project(forSessionID: retainedSession.id)?.id, firstProject.id)
+
+        store.setProject(id: secondProject.id, expanded: false)
+        let reopened = ProjectStore(stateManager: makeManager())
+        XCTAssertEqual(reopened.project(withID: secondProject.id)?.isExpanded, false)
+        XCTAssertEqual(
+            reopened.project(withID: secondProject.id)?.sessions.map(\.id),
+            [shiftedProjectSession.id],
+            "saving disclosure state must not replace the project's session rows"
+        )
+
+        store.removeSession(id: removedSession.id)
+        XCTAssertNil(store.session(withID: removedSession.id))
+        XCTAssertEqual(store.session(withID: retainedSession.id)?.id, retainedSession.id)
+
+        store.removeProject(id: firstProject.id)
+        XCTAssertNil(store.project(withID: firstProject.id))
+        XCTAssertNil(store.session(withID: retainedSession.id))
+        XCTAssertEqual(store.project(withID: secondProject.id)?.id, secondProject.id)
+        XCTAssertEqual(
+            store.project(forSessionID: shiftedProjectSession.id)?.id,
+            secondProject.id
+        )
+    }
+
     func testMissingKeyFixtureDecodesWithModelDefaults() throws {
         let fixtureURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

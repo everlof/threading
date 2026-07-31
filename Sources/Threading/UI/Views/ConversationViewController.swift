@@ -209,8 +209,8 @@ final class ConversationViewController: NSViewController {
             : backgroundWork.turnEnded(leaving: backgroundWorkInFlight)
     }
 
-    /// Suppresses per-item scrolling while a transcript is being replayed: four hundred items
-    /// each scheduling their own scroll is four hundred layout passes to reach one position.
+    /// Batches replay-only UI work. Four hundred items must not each scroll, rebuild controls,
+    /// publish a remote snapshot, or attach work that the completed turn will immediately fold.
     var isReplaying = false
 
     /// Whether new content may move the view — see `ConversationAutoScroll`.
@@ -222,8 +222,19 @@ final class ConversationViewController: NSViewController {
 
     /// Every row's outer view, keyed by its index in `timeline.rows`. Turn navigation scrolls
     /// to the user rows; a settling turn folds the views between its user message and its
-    /// conclusion. The views are retained by the stack anyway, so this costs references only.
+    /// conclusion. Folded rows are deliberately retained here even while detached from the
+    /// stack. Replay may defer a hidden row's first materialization until expansion.
     var rowViews: [Int: NSView] = [:]
+
+    /// The two column-edge constraints owned by each attached row. Folded work keeps these
+    /// inactive beside its retained view so expansion can restore it without accumulating a
+    /// second pair on every disclosure cycle.
+    var rowEdgeConstraints: [ObjectIdentifier: [NSLayoutConstraint]] = [:]
+
+    /// Replay knows a turn's finished shape a few events later. Defer its non-user rows until
+    /// then so tool-heavy history never constructs and constrains hundreds of native views that
+    /// will immediately disappear behind a fold. Expansion materializes each row once.
+    var deferredReplayRowIndices: Set<Int> = []
 
     /// Turns already folded, by the row index of their opening user message, so a fold is
     /// never inserted twice.
@@ -715,7 +726,22 @@ final class ConversationViewController: NSViewController {
             }
 
             self.isReplaying = true
+            let performanceSpan = PerformanceRecorder.shared.begin(
+                "conversation.replay.render",
+                category: "conversation.ui",
+                metadata: [
+                    "events": String(events.count),
+                    "truncated": String(isTruncated)
+                ]
+            )
             for event in events { self.handle(event) }
+            self.finishReplayRendering()
+            performanceSpan.end(metadata: [
+                "rows": String(self.timeline.rows.count),
+                "materialized_rows": String(self.rowViews.count),
+                "arranged_views": String(self.stack.arrangedSubviews.count),
+                "folded_turns": String(self.foldedTurnStarts.count)
+            ])
             self.replaySubagentHistoryAndStart()
         }
     }
@@ -733,13 +759,19 @@ final class ConversationViewController: NSViewController {
     }
 
     private func finishReplayAndStart() {
+        finishReplayRendering()
         isReplaying = false
+        // Replay changes the rail, controls and remote snapshot many times but exposes only the
+        // completed transcript. Publish that one state instead of rebuilding and mirroring each
+        // intermediate prefix on the main thread.
+        refreshMinimap()
         autoScroll.noteReplayFinished()
         scrollToBottom()
         stream.start()
         apply(.status(.ready(model: nil, lastTurn: nil)))
         restoreConversationConfiguration()
         refreshConversationControls()
+        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
     }
 
     func terminate() {
@@ -918,8 +950,10 @@ final class ConversationViewController: NSViewController {
         }
         recordAttachments(in: event)
         for change in timeline.apply(event) { apply(change) }
-        refreshConversationControls()
-        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+        if !isReplaying {
+            refreshConversationControls()
+            RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+        }
     }
 
     private func handleSubagent(_ event: SubagentEvent) {

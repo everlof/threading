@@ -52,6 +52,11 @@ final class ProjectSidebarViewController: NSViewController {
     }()
     private let appEvents = AppEventObservations()
 
+    /// The persisted tree this controller presents. Production uses the app-wide store; an
+    /// injected store lets deterministic UI workloads exercise the real outline controller
+    /// without reading or mutating the user's projects.
+    let projectStore: ProjectStore
+
     /// The app-wide document an agent can edit while its conversation remains on screen.
     private lazy var currentThemeButton: ThemedButton = {
         let button = ThemedButton()
@@ -167,14 +172,14 @@ final class ProjectSidebarViewController: NSViewController {
     /// refresh the rows rather than rebuild them. See `reload`.
     private var renderedStructure = ""
 
-    /// Every project node, regardless of whether it sits inside a group.
-    private var allProjectNodes: [ProjectNode] {
-        rootNodes.flatMap { node -> [ProjectNode] in
-            if let group = node as? RepoGroupNode { return group.projectNodes }
-            if let project = node as? ProjectNode { return [project] }
-            return []
-        }
-    }
+    /// Stable indexes over the rendered node objects. Row refresh and navigation are frequent;
+    /// neither should allocate a flattened tree or recursively search thousands of unrelated
+    /// sessions just to find one identity.
+    private var allProjectNodes: [ProjectNode] = []
+    private var projectNodesByID: [ProjectID: ProjectNode] = [:]
+    private var sessionNodesByID: [SessionID: SessionNode] = [:]
+    private var projectNodesBySessionID: [SessionID: ProjectNode] = [:]
+    private var ancestorsBySessionID: [SessionID: [NSObject]] = [:]
 
     weak var delegate: ProjectSidebarViewControllerDelegate?
 
@@ -207,6 +212,16 @@ final class ProjectSidebarViewController: NSViewController {
     private var collapsedSideChatParents: Set<SessionID> = []
 
     // MARK: - Lifecycle
+
+    init(projectStore: ProjectStore = .shared) {
+        self.projectStore = projectStore
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func loadView() {
         view = NSView()
@@ -370,8 +385,8 @@ private extension ProjectSidebarViewController {
     }
 
     private func observeStoreChanges() {
-        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
-            self?.projectsDidChange()
+        appEvents.observe(ProjectsDidChange.self) { [weak self] change in
+            self?.projectsDidChange(change)
         }
         // No theme observer for the ground: `SidebarBackdropView` re-decides what it shows on
         // every theme change itself, so the controller cannot forget to tell it.
@@ -449,24 +464,54 @@ extension ProjectSidebarViewController {
     /// row back to the reuse pool, and a recycled cell has no memory of the name it is
     /// replacing, which is exactly what the title's morph animates from.
     func reload() {
-        let rebuilt = SidebarTreeBuilder.rootNodes(from: ProjectStore.shared.projects)
+        let projects = projectStore.projects
+        let reloadSpan = PerformanceRecorder.shared.begin(
+            "sidebar.reload",
+            category: "sidebar",
+            metadata: [
+                "projects": String(projects.count),
+                "sessions": String(projects.reduce(0) { $0 + $1.sessions.count })
+            ]
+        )
+        var reloadKind = "structural"
+        defer {
+            reloadSpan.end(metadata: [
+                "kind": reloadKind,
+                "rows": String(outlineView.numberOfRows)
+            ])
+        }
+
+        let treeSpan = PerformanceRecorder.shared.begin(
+            "sidebar.tree.build",
+            category: "sidebar",
+            metadata: ["projects": String(projects.count)]
+        )
+        let rebuilt = SidebarTreeBuilder.rootNodes(from: projects)
+        treeSpan.end(metadata: ["roots": String(rebuilt.count)])
         let shape = Self.structureSignature(of: rebuilt)
 
         if shape == renderedStructure, !rootNodes.isEmpty {
             // The existing nodes are kept deliberately: the outline identifies rows by
             // object identity, and replacing equivalent nodes would invalidate every row
             // for nothing. Content is read from the store at configure time anyway.
+            reloadKind = "content"
             refreshRows()
             return
         }
 
-        let selectedSessionID = selectedNode()?.sessionID ?? ProjectStore.shared.selectedSessionID
+        let selectedSessionID = selectedNode()?.sessionID ?? projectStore.selectedSessionID
 
         rootNodes = rebuilt
         renderedStructure = shape
+        rebuildNodeIndexes()
 
         emptyStateView.isHidden = !rootNodes.isEmpty
 
+        let outlineSpan = PerformanceRecorder.shared.begin(
+            "sidebar.outline.apply-structure",
+            category: "sidebar",
+            metadata: ["roots": String(rootNodes.count)]
+        )
         outlineView.reloadData()
 
         for node in rootNodes {
@@ -474,7 +519,7 @@ extension ProjectSidebarViewController {
         }
 
         for node in allProjectNodes {
-            let project = ProjectStore.shared.project(withID: node.projectID)
+            let project = projectStore.project(withID: node.projectID)
             if project?.isExpanded ?? true {
                 outlineView.expandItem(node)
             }
@@ -497,6 +542,59 @@ extension ProjectSidebarViewController {
 
         if let selectedSessionID {
             select(sessionID: selectedSessionID, notifyDelegate: false)
+        }
+        outlineSpan.end(metadata: ["rows": String(outlineView.numberOfRows)])
+    }
+
+    /// Rebuilds all identity and ancestry indexes in one walk whenever the outline's shape
+    /// changes. The arrays contain the exact objects handed to `NSOutlineView`.
+    private func rebuildNodeIndexes() {
+        allProjectNodes.removeAll(keepingCapacity: true)
+        projectNodesByID.removeAll(keepingCapacity: true)
+        sessionNodesByID.removeAll(keepingCapacity: true)
+        projectNodesBySessionID.removeAll(keepingCapacity: true)
+        ancestorsBySessionID.removeAll(keepingCapacity: true)
+
+        func walk(
+            _ node: NSObject,
+            ancestors: [NSObject],
+            projectNode: ProjectNode?
+        ) {
+            switch node {
+            case let repo as RepoGroupNode:
+                for child in repo.projectNodes {
+                    walk(child, ancestors: ancestors + [repo], projectNode: nil)
+                }
+
+            case let project as ProjectNode:
+                allProjectNodes.append(project)
+                projectNodesByID[project.projectID] = project
+                for child in project.childNodes {
+                    walk(child, ancestors: ancestors + [project], projectNode: project)
+                }
+
+            case let branch as BranchGroupNode:
+                for child in branch.sessionNodes {
+                    walk(child, ancestors: ancestors + [branch], projectNode: projectNode)
+                }
+
+            case let session as SessionNode:
+                sessionNodesByID[session.sessionID] = session
+                ancestorsBySessionID[session.sessionID] = ancestors
+                if let projectNode {
+                    projectNodesBySessionID[session.sessionID] = projectNode
+                }
+                for child in session.childNodes {
+                    walk(child, ancestors: ancestors + [session], projectNode: projectNode)
+                }
+
+            default:
+                break
+            }
+        }
+
+        for root in rootNodes {
+            walk(root, ancestors: [], projectNode: nil)
         }
     }
 
@@ -549,7 +647,7 @@ extension ProjectSidebarViewController {
     /// Removing a *project* does not come through here; it discards its sessions itself, under
     /// its own single confirmation, so this cannot ask a second time per session.
     func removeSession(_ sessionID: SessionID) {
-        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        guard let session = projectStore.session(withID: sessionID) else { return }
 
         let request = Self.deleteConfirmation(
             for: session,
@@ -558,7 +656,7 @@ extension ProjectSidebarViewController {
         guard ConfirmationAlert.ask(request) else { return }
 
         AgentRuntime.shared.discard(sessionID: sessionID)
-        ProjectStore.shared.removeSession(id: sessionID)
+        projectStore.removeSession(id: sessionID)
         reload()
         delegate?.projectSidebarDidRemoveSessions(self)
     }
@@ -691,9 +789,7 @@ extension ProjectSidebarViewController {
     /// itself now shows in the hover popover, whose data the reconfigure refreshes; a grouped
     /// checkout is also named by its branch, so its title follows too.
     func refreshProjectRow(forSessionID sessionID: SessionID) {
-        guard let node = sessionNode(for: sessionID),
-              let project = allProjectNodes.first(where: { $0.sessionNodes.contains(node) })
-        else { return }
+        guard let project = projectNodesBySessionID[sessionID] else { return }
 
         let row = outlineView.row(forItem: project)
         guard row >= 0 else { return }
@@ -703,10 +799,62 @@ extension ProjectSidebarViewController {
 
     /// Refreshes row contents without rebuilding, used when running state changes.
     func refreshRows() {
+        let visibleRows = outlineView.rows(in: outlineView.visibleRect)
+        guard visibleRows.location != NSNotFound, visibleRows.length > 0 else { return }
+
+        let upperBound = min(NSMaxRange(visibleRows), outlineView.numberOfRows)
+        for row in visibleRows.location..<upperBound {
+            reconfigureRow(at: row)
+        }
+    }
+
+    /// Aggregate outline state used by the deterministic sidebar workload. Keeping this seam
+    /// here lets the test use the production data source, delegate, row reuse and layout path
+    /// without exposing the outline view itself.
+    var outlineRowCount: Int { outlineView.numberOfRows }
+
+    var instantiatedRowCount: Int {
+        (0..<outlineView.numberOfRows).reduce(into: 0) { count, row in
+            if outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) != nil {
+                count += 1
+            }
+        }
+    }
+
+    var selectedSessionID: SessionID? { selectedNode()?.sessionID }
+
+    func setExpanded(_ expanded: Bool, forProject projectID: ProjectID) {
+        guard let node = projectNodesByID[projectID] else { return }
+        if expanded {
+            outlineView.expandItem(node)
+        } else {
+            outlineView.collapseItem(node)
+        }
+    }
+
+    #if DEBUG
+    /// Exact pre-virtualization refresh path, retained only in Debug so the opt-in workload can
+    /// compare both algorithms against the same warm outline in one process.
+    func refreshAllRowsForPerformanceComparison() {
         for row in 0..<outlineView.numberOfRows {
             reconfigureRow(at: row)
         }
     }
+
+    /// Exact pre-index single-row path for the same controlled comparison.
+    func refreshRowByScanningForPerformanceComparison(sessionID: SessionID) {
+        guard let node = allProjectNodes
+            .flatMap(\.sessionNodes)
+            .first(where: { $0.sessionID == sessionID })
+        else { return }
+
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
+
+        reconfigureRow(at: row)
+        outlineView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+    }
+    #endif
 
     /// Shows or clears a row's spinner for one reason.
     ///
@@ -729,7 +877,7 @@ extension ProjectSidebarViewController {
     /// Starting a session goes through here rather than creating one outright: the composer
     /// is the only place agent, account, model and checkout are actually chosen.
     func select(projectID: ProjectID) {
-        guard let node = allProjectNodes.first(where: { $0.projectID == projectID }) else { return }
+        guard let node = projectNodesByID[projectID] else { return }
 
         if let group = outlineView.parent(forItem: node) {
             outlineView.expandItem(group)
@@ -743,7 +891,7 @@ extension ProjectSidebarViewController {
         suppressSelectionCallback = false
 
         cancelPendingSessionPresentation()
-        ProjectStore.shared.selectedSessionID = nil
+        projectStore.selectedSessionID = nil
         delegate?.projectSidebar(self, didSelectProject: projectID)
     }
 
@@ -765,7 +913,7 @@ extension ProjectSidebarViewController {
 
     /// The same, for a project — the row behind an open composer.
     func reveal(projectID: ProjectID) {
-        guard let node = allProjectNodes.first(where: { $0.projectID == projectID }) else { return }
+        guard let node = projectNodesByID[projectID] else { return }
 
         if let group = outlineView.parent(forItem: node) {
             outlineView.expandItem(group)
@@ -795,7 +943,7 @@ extension ProjectSidebarViewController {
         // session it was forked from, so one the user had folded away had no row, and
         // selecting it silently did nothing — including when the request came from a clicked
         // notification, which then left the pane on whatever session it was already showing.
-        for ancestor in SidebarTreeBuilder.ancestors(of: sessionID, in: rootNodes) {
+        for ancestor in ancestorsBySessionID[sessionID] ?? [] {
             outlineView.expandItem(ancestor)
         }
 
@@ -821,13 +969,13 @@ extension ProjectSidebarViewController {
         outlineView.deselectAll(nil)
         suppressSelectionCallback = false
         cancelPendingSessionPresentation()
-        ProjectStore.shared.selectedSessionID = nil
+        projectStore.selectedSessionID = nil
     }
 
     /// Returns to the event loop before constructing or swapping the session surface. That one
     /// turn lets AppKit paint the selection and start the layer-backed spinner immediately.
     private func requestSessionPresentation(_ sessionID: SessionID) {
-        ProjectStore.shared.selectedSessionID = sessionID
+        projectStore.selectedSessionID = sessionID
         setSessionLoading(true, reason: .presentation, for: sessionID)
 
         selectionRequestGeneration += 1
@@ -982,7 +1130,7 @@ private extension ProjectSidebarViewController {
     }
 
     private func addProject(folderURL: URL) {
-        let project = ProjectStore.shared.addProject(folderURL: folderURL)
+        let project = projectStore.addProject(folderURL: folderURL)
         reload()
         delegate?.projectSidebar(self, didAddProject: project)
     }
@@ -993,20 +1141,20 @@ private extension ProjectSidebarViewController {
         if let node = outlineView.item(atRow: row) as? ProjectNode {
             promptRename(
                 title: L10n.string("Rename Project"),
-                current: ProjectStore.shared.project(withID: node.projectID)?.name ?? ""
+                current: projectStore.project(withID: node.projectID)?.name ?? ""
             ) { newName in
-                ProjectStore.shared.renameProject(id: node.projectID, to: newName)
+                self.projectStore.renameProject(id: node.projectID, to: newName)
                 self.reload()
             }
         } else if let node = outlineView.item(atRow: row) as? SessionNode {
-            let session = ProjectStore.shared.session(withID: node.sessionID)
+            let session = projectStore.session(withID: node.sessionID)
             promptRename(
                 title: L10n.string("Rename Session"),
                 current: session?.customTitle ?? "",
                 placeholder: session?.displayTitle ?? "",
                 allowsEmpty: true
             ) { newTitle in
-                ProjectStore.shared.renameSession(id: node.sessionID, to: newTitle)
+                self.projectStore.renameSession(id: node.sessionID, to: newTitle)
                 self.reload()
             }
         }
@@ -1023,7 +1171,7 @@ private extension ProjectSidebarViewController {
     }
 
     private func removeProject(_ projectID: ProjectID) {
-        guard let project = ProjectStore.shared.project(withID: projectID) else { return }
+        guard let project = projectStore.project(withID: projectID) else { return }
 
         let runningCount = project.sessions.filter {
             AgentRuntime.shared.isRunning(sessionID: $0.id)
@@ -1049,7 +1197,7 @@ private extension ProjectSidebarViewController {
             AgentRuntime.shared.discard(sessionID: session.id)
         }
 
-        ProjectStore.shared.removeProject(id: projectID)
+        projectStore.removeProject(id: projectID)
         reload()
         delegate?.projectSidebarDidRemoveSessions(self)
     }
@@ -1072,7 +1220,7 @@ private extension ProjectSidebarViewController {
     @objc private func openProjectInAppClicked(_ sender: NSMenuItem) {
         guard let app = OpenInMenu.app(in: sender),
               let projectID = contextProjectID(),
-              let project = ProjectStore.shared.project(withID: projectID) else { return }
+              let project = projectStore.project(withID: projectID) else { return }
 
         ExternalAppLauncher.shared.open(.folder(project.folderURL), in: app)
     }
@@ -1080,16 +1228,20 @@ private extension ProjectSidebarViewController {
     @objc private func revealInFinderClicked() {
         guard let row = contextRow(),
               let node = outlineView.item(atRow: row) as? ProjectNode,
-              let project = ProjectStore.shared.project(withID: node.projectID) else { return }
+              let project = projectStore.project(withID: node.projectID) else { return }
 
         NSWorkspace.shared.activateFileViewerSelecting([project.folderURL])
     }
 
-    private func projectsDidChange() {
-        // A full rebuild rather than a row refresh: this fires on structural changes — a
-        // session archived or unarchived (possibly from Settings, in another window), added or
-        // removed — which add and drop rows. `reload` preserves selection and expansion.
-        reload()
+    private func projectsDidChange(_ change: ProjectsDidChange) {
+        switch change.sidebarImpact {
+        case .structure:
+            // Archive, add, remove, reorder, branch and grouping changes add, drop or move rows.
+            // `reload` preserves selection and expansion around that structural rebuild.
+            reload()
+        case .sessionRow(let sessionID):
+            refreshRow(sessionID: sessionID)
+        }
     }
 
     // MARK: - Private Methods
@@ -1099,7 +1251,7 @@ private extension ProjectSidebarViewController {
     }
 
     private func sessionNode(for sessionID: SessionID) -> SessionNode? {
-        allProjectNodes.flatMap(\.sessionNodes).first { $0.sessionID == sessionID }
+        sessionNodesByID[sessionID]
     }
 
     /// The row a context menu action applies to: a hover button's pinned row, else the
@@ -1132,7 +1284,7 @@ private extension ProjectSidebarViewController {
             return node.projectID
         }
         if let node = outlineView.item(atRow: row) as? SessionNode {
-            return ProjectStore.shared.project(forSessionID: node.sessionID)?.id
+            return projectNodesBySessionID[node.sessionID]?.projectID
         }
         return nil
     }
@@ -1152,7 +1304,7 @@ private extension ProjectSidebarViewController {
         from anchor: NSView,
         build: (NSMenu) -> Void
     ) {
-        guard let node = allProjectNodes.first(where: { $0.projectID == projectID }) else { return }
+        guard let node = projectNodesByID[projectID] else { return }
         let row = outlineView.row(forItem: node)
         guard row >= 0 else { return }
 
@@ -1360,7 +1512,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         }
 
         if let projectNode = item as? ProjectNode, let cell = view as? ProjectRowView {
-            guard let project = ProjectStore.shared.project(withID: projectNode.projectID) else {
+            guard let project = projectStore.project(withID: projectNode.projectID) else {
                 return false
             }
 
@@ -1401,7 +1553,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         }
 
         if let sessionNode = item as? SessionNode, let cell = view as? SessionRowView {
-            guard let session = ProjectStore.shared.session(withID: sessionNode.sessionID) else {
+            guard let session = projectStore.session(withID: sessionNode.sessionID) else {
                 return false
             }
 
@@ -1468,7 +1620,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         if let node = item as? ProjectNode {
             cancelPendingSessionPresentation()
-            ProjectStore.shared.selectedSessionID = nil
+            projectStore.selectedSessionID = nil
             delegate?.projectSidebar(self, didSelectProject: node.projectID)
         }
     }
@@ -1486,7 +1638,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         }
 
         guard let node = notification.userInfo?["NSObject"] as? ProjectNode else { return }
-        ProjectStore.shared.setProject(id: node.projectID, expanded: true)
+        projectStore.setProject(id: node.projectID, expanded: true)
         reloadRow(for: node)
     }
 
@@ -1503,7 +1655,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         }
 
         guard let node = notification.userInfo?["NSObject"] as? ProjectNode else { return }
-        ProjectStore.shared.setProject(id: node.projectID, expanded: false)
+        projectStore.setProject(id: node.projectID, expanded: false)
         reloadRow(for: node)
     }
 
@@ -1539,7 +1691,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             menu.addItem(makeBranchGroupingItem())
             menu.addItem(makeLoneBranchHeadingsItem())
         } else if let node = item as? SessionNode,
-                  let session = ProjectStore.shared.session(withID: node.sessionID) {
+                  let session = projectStore.session(withID: node.sessionID) {
             // The right-click menu offers exactly what the row's `⋯` button does, built from
             // the one place both share. `actionSessionID` is what every handler reads, set as
             // the menu opens.
@@ -1571,7 +1723,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
         // looked at in a file manager. Finder is in that submenu too, and stays here in its own
         // right — it is one press either way, and the one press is what the item is for.
         if let projectID = contextProjectID(),
-           let project = ProjectStore.shared.project(withID: projectID),
+           let project = projectStore.project(withID: projectID),
            let openIn = OpenInMenu.item(
                for: .folder(project.folderURL),
                action: #selector(openProjectInAppClicked),
@@ -1626,7 +1778,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
     /// each is an explicit click, never a background default. A run in flight shows as a
     /// disabled "Researching…", and the last run's full output stays openable from here.
     private func makeProjectIconItem() -> NSMenuItem {
-        let project = contextProjectID().flatMap { ProjectStore.shared.project(withID: $0) }
+        let project = contextProjectID().flatMap { projectStore.project(withID: $0) }
 
         let submenu = NSMenu()
         submenu.addItem(
@@ -1701,7 +1853,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
     /// session started afterwards, which is the case that makes the setting worth having at
     /// all. Sessions follow unless they answered for themselves.
     private func makeProjectMuteItem(for projectID: ProjectID) -> NSMenuItem {
-        let muted = ProjectStore.shared.project(withID: projectID)?.notificationsMuted ?? false
+        let muted = projectStore.project(withID: projectID)?.notificationsMuted ?? false
         return NSMenuItem(
             title: muted
                 ? L10n.string("Unmute Notifications")
@@ -1713,9 +1865,9 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
     @objc private func toggleProjectMuteClicked() {
         guard let projectID = contextProjectID(),
-              let project = ProjectStore.shared.project(withID: projectID) else { return }
+              let project = projectStore.project(withID: projectID) else { return }
 
-        ProjectStore.shared.setNotificationsMuted(
+        projectStore.setNotificationsMuted(
             !(project.notificationsMuted ?? false),
             forProjectID: projectID
         )
@@ -1748,7 +1900,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
                 return
             }
 
-            ProjectStore.shared.setIcon(
+            self?.projectStore.setIcon(
                 ProjectIcon(source: .custom, fileName: fileName),
                 for: projectID
             )
@@ -1769,7 +1921,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
     @objc private func researchProjectIconClicked() {
         guard let projectID = contextProjectID(),
-              let project = ProjectStore.shared.project(withID: projectID) else { return }
+              let project = projectStore.project(withID: projectID) else { return }
 
         ProjectIconResearch.run(for: project) { [weak self] result in
             guard case .failure(let error) = result else { return }
@@ -1815,7 +1967,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
                     // The user named the site, so this is their choice — never replaced
                     // automatically, exactly like a file they picked.
-                    ProjectStore.shared.setIcon(
+                    self?.projectStore.setIcon(
                         ProjectIcon(source: .custom, fileName: fileName),
                         for: projectID
                     )
@@ -1848,7 +2000,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
     @objc private func removeProjectIconClicked() {
         guard let projectID = contextProjectID() else { return }
-        ProjectStore.shared.setIcon(nil, for: projectID)
+        projectStore.setIcon(nil, for: projectID)
     }
 
     /// A quiet informational alert; icon actions have no state worth a warning style.

@@ -26,6 +26,14 @@ final class ProjectStore {
     private let stateManager: StateManager
     private var isRestoringState = false
 
+    /// Identity indexes for the model's hot lookup paths. Project/session identifiers do not
+    /// change; the indexes are rebuilt only after a structural edit, while title, activity and
+    /// settings mutations keep their locations.
+    private var projectIndicesByID: [ProjectID: Int] = [:]
+    private var sessionLocationsByID: [
+        SessionID: (projectIndex: Int, sessionIndex: Int)
+    ] = [:]
+
     /// Pending coalesced write, see `scheduleSave()`.
     private var saveTimer: Timer?
 
@@ -44,6 +52,7 @@ final class ProjectStore {
     init(stateManager: StateManager = .shared) {
         self.stateManager = stateManager
         load()
+        rebuildLookupIndexes()
     }
 
     // MARK: - Project Management
@@ -65,6 +74,7 @@ final class ProjectStore {
         project.folderPath = normalizedPath
 
         projects.append(project)
+        rebuildLookupIndexes()
         save()
         notifyChanged()
 
@@ -83,6 +93,7 @@ final class ProjectStore {
         DraftStore.shared.clear(for: id)
 
         projects.removeAll { $0.id == id }
+        rebuildLookupIndexes()
         save()
         notifyChanged()
     }
@@ -95,9 +106,16 @@ final class ProjectStore {
     }
 
     func setProject(id: ProjectID, expanded: Bool) {
-        guard let index = index(ofProject: id) else { return }
+        guard let index = index(ofProject: id),
+              projects[index].isExpanded != expanded else { return }
         projects[index].isExpanded = expanded
-        save()
+        let persistenceSpan = PerformanceRecorder.shared.begin(
+            "sidebar.disclosure.persist",
+            category: "sidebar",
+            metadata: ["expanded": String(expanded)]
+        )
+        let saved = stateManager.saveProject(projects[index], position: index)
+        persistenceSpan.end(metadata: ["saved": String(saved)])
     }
 
     /// Records a project's sidebar icon, or clears it. The icon's image file is owned by
@@ -182,6 +200,7 @@ final class ProjectStore {
         session.permissionMode = permissionMode
 
         projects[index].sessions.append(session)
+        rebuildLookupIndexes()
         save()
         notifyChanged()
 
@@ -223,6 +242,7 @@ final class ProjectStore {
         session.permissionMode = parent.permissionMode
 
         projects[location.projectIndex].sessions.append(session)
+        rebuildLookupIndexes()
         save()
         notifyChanged()
 
@@ -255,6 +275,7 @@ final class ProjectStore {
         session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
 
         projects[index].sessions.append(session)
+        rebuildLookupIndexes()
         save()
         notifyChanged()
 
@@ -349,6 +370,7 @@ final class ProjectStore {
         guard let location = locate(sessionID: sessionID) else { return }
         ConversationHandoffStore.remove(for: sessionID)
         projects[location.projectIndex].sessions.remove(at: location.sessionIndex)
+        rebuildLookupIndexes()
 
         if selectedSessionID == sessionID {
             // The property's observer persists the removal together with the selection change.
@@ -378,14 +400,22 @@ final class ProjectStore {
     ///
     /// Agents update this frequently, so the write is coalesced rather than hitting disk on
     /// every change.
-    func updateAgentTitle(_ title: String, for sessionID: SessionID) {
-        guard let location = locate(sessionID: sessionID) else { return }
+    ///
+    /// Returns whether the session's agent title now reads as `title` — true when it was
+    /// stored and when it already said so, false when the session is gone or the name was
+    /// refused as noise. The two title transports ignore the answer, because a terminal that
+    /// reports "Claude Code" every second is not asking a question. `set_session_name` is,
+    /// and an agent told its call succeeded when the name was dropped would go on to tell
+    /// the user the same thing.
+    @discardableResult
+    func updateAgentTitle(_ title: String, for sessionID: SessionID) -> Bool {
+        guard let location = locate(sessionID: sessionID) else { return false }
 
         let project = projects[location.projectIndex]
         let session = project.sessions[location.sessionIndex]
 
         let cleaned = Self.strippingDecoration(from: title)
-        guard session.agentTitle != cleaned else { return }
+        guard session.agentTitle != cleaned else { return cleaned != nil }
 
         if let cleaned {
             let account = AgentAccountDiscovery.account(
@@ -398,12 +428,17 @@ final class ProjectStore {
                 accountDisplayName: account?.displayName,
                 projectName: project.name,
                 folderBasename: project.folderURL.lastPathComponent
-            ) else { return }
+            ) else { return false }
         }
 
         projects[location.projectIndex].sessions[location.sessionIndex].agentTitle = cleaned
         scheduleSave()
-        notifyChanged()
+        let titleCanReorderSidebar = AppSettings.sidebarSessionOrder == .name
+            && AppSettings.usesAgentTitleInSidebar
+        notifyChanged(
+            sidebarImpact: titleCanReorderSidebar ? .structure : .sessionRow(sessionID)
+        )
+        return cleaned != nil
     }
 
     /// Names a session after its first prompt, once.
@@ -520,7 +555,8 @@ final class ProjectStore {
     // MARK: - Lookup
 
     func project(withID projectID: ProjectID) -> Project? {
-        projects.first { $0.id == projectID }
+        guard let index = index(ofProject: projectID) else { return nil }
+        return projects[index]
     }
 
     func session(withID sessionID: SessionID) -> AgentSession? {
@@ -537,20 +573,42 @@ final class ProjectStore {
     // MARK: - Private Methods
 
     private func index(ofProject projectID: ProjectID) -> Int? {
-        projects.firstIndex { $0.id == projectID }
+        guard let index = projectIndicesByID[projectID],
+              projects.indices.contains(index),
+              projects[index].id == projectID else { return nil }
+        return index
     }
 
     private func locate(sessionID: SessionID) -> (projectIndex: Int, sessionIndex: Int)? {
-        for (projectIndex, project) in projects.enumerated() {
-            if let sessionIndex = project.sessions.firstIndex(where: { $0.id == sessionID }) {
-                return (projectIndex, sessionIndex)
-            }
-        }
-        return nil
+        guard let location = sessionLocationsByID[sessionID],
+              projects.indices.contains(location.projectIndex),
+              projects[location.projectIndex].sessions.indices.contains(location.sessionIndex),
+              projects[location.projectIndex].sessions[location.sessionIndex].id == sessionID
+        else { return nil }
+        return location
     }
 
-    private func notifyChanged() {
-        NotificationCenter.default.post(ProjectsDidChange())
+    private func rebuildLookupIndexes() {
+        projectIndicesByID.removeAll(keepingCapacity: true)
+        sessionLocationsByID.removeAll(keepingCapacity: true)
+
+        for (projectIndex, project) in projects.enumerated() {
+            // Preserve the old first-match behavior if a damaged persisted document contains
+            // duplicate identities; validation can report that corruption separately.
+            if projectIndicesByID[project.id] == nil {
+                projectIndicesByID[project.id] = projectIndex
+            }
+            for (sessionIndex, session) in project.sessions.enumerated()
+            where sessionLocationsByID[session.id] == nil {
+                sessionLocationsByID[session.id] = (projectIndex, sessionIndex)
+            }
+        }
+    }
+
+    private func notifyChanged(
+        sidebarImpact: ProjectsDidChange.SidebarImpact = .structure
+    ) {
+        NotificationCenter.default.post(ProjectsDidChange(sidebarImpact: sidebarImpact))
     }
 
     // MARK: - Persistence

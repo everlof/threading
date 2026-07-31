@@ -18,16 +18,12 @@ extension ConversationViewController {
         switch change {
         case .appended(let index):
             let row = timeline.rows[index]
-            let (nativeView, startsTurn) = ConversationRowView.make(for: row)
-            let view: NSView
-            if let target = componentTarget(for: row) {
-                view = customizeConversationRow(nativeView, target: target)
-            } else {
-                view = nativeView
-            }
+            let startsTurn: Bool
+            if case .userMessage = row { startsTurn = true } else { startsTurn = false }
 
             // A turn that stayed expanded because it was interrupted folds the moment the next
             // one begins — the user has moved on, and t3code's rule is exactly this handoff.
+            if startsTurn, isReplaying { attachDeferredReplayRows() }
             if startsTurn, let pending = pendingFold {
                 pendingFold = nil
                 foldTurn(startingAt: pending.startIndex, stopped: pending.interrupted)
@@ -39,19 +35,15 @@ extension ConversationViewController {
                 addRow(ConversationRowView.turnDivider(), newTurn: true)
             }
 
-            // Every row's outer view is retained by index: navigation scrolls to user rows,
-            // and a settling turn folds the views between its user message and its conclusion.
-            // The outer row, so extension annotations fold and scroll with their row. A tool
-            // result instead updates the retained native ToolCallView directly.
-            rowViews[index] = view
-            if case .toolCall = row {
-                pendingToolViews[index] = nativeView as? ToolCallView
+            if isReplaying, !startsTurn {
+                deferredReplayRowIndices.insert(index)
+            } else {
+                let view = materializeRow(at: index)
+                addRow(view, newTurn: startsTurn)
             }
 
-            addRow(view, newTurn: startsTurn)
-
             // The rail indexes user turns, so it only ever changes when one is added.
-            if case .userMessage = row { refreshMinimap() }
+            if case .userMessage = row, !isReplaying { refreshMinimap() }
 
         case .resultAttached(let index):
             guard case .toolCall(let call) = timeline.rows[index],
@@ -118,6 +110,7 @@ extension ConversationViewController {
             // rather than claiming to have worked.
             if interrupted {
                 pendingFold = (startIndex, true)
+                if isReplaying { attachDeferredReplayRows() }
             } else {
                 foldTurn(startingAt: startIndex, stopped: false)
             }
@@ -137,8 +130,8 @@ extension ConversationViewController {
     /// Collapses a settled turn's work — everything between its user message and its final
     /// assistant reply — behind a one-line `TurnFoldView`.
     ///
-    /// Hiding rather than removing: an `NSStackView` detaches hidden arranged views, so the
-    /// spacing collapses with them, and the fold can restore the exact views on click.
+    /// Live work views stay retained but leave the stack and its layout engine. Replayed work
+    /// may remain as timeline rows until the first expansion, then its exact views are reused.
     /// Permission cards deliberately stay visible — a decided card is the record of what was
     /// allowed, which is worth more than the symmetry.
     func foldTurn(startingAt startIndex: Int, stopped: Bool) {
@@ -148,20 +141,125 @@ extension ConversationViewController {
               let userView = rowViews[turn.rowIndex],
               let userPosition = stack.arrangedSubviews.firstIndex(of: userView) else { return }
 
-        let hiddenIndices = (turn.rowIndex + 1 ... turn.endIndex)
-            .filter { $0 != turn.finalAssistantIndex }
+        let turnIndices = turn.rowIndex + 1 ... turn.endIndex
+        let hiddenIndices = turnIndices.filter { $0 != turn.finalAssistantIndex }
+        guard !hiddenIndices.isEmpty else {
+            attachDeferredReplayRows(in: turnIndices)
+            return
+        }
         let hiddenViews = hiddenIndices.compactMap { rowViews[$0] }
-        guard !hiddenViews.isEmpty else { return }
 
         foldedTurnStarts.insert(startIndex)
-        hiddenViews.forEach { $0.isHidden = true }
 
-        let fold = TurnFoldView(duration: turn.duration, stopped: stopped, folding: hiddenViews)
+        let fold = TurnFoldView(
+            duration: turn.duration,
+            stopped: stopped,
+            folding: hiddenViews
+        ) { [weak self] fold, isExpanded in
+            self?.setTurnWork(hiddenIndices, expanded: isExpanded, after: fold)
+        }
         stack.insertArrangedSubview(fold, at: userPosition + 1)
-        NSLayoutConstraint.activate([
-            fold.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
-            fold.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
-        ])
+        pinRow(fold)
+
+        // Live rows are already attached and must leave the layout engine. Replayed rows were
+        // deferred, so only the final answer is materialized and enters the stack at all.
+        hiddenViews.filter { $0.superview != nil }.forEach { detachRow($0) }
+        if let finalAssistantIndex = turn.finalAssistantIndex {
+            let finalAssistant = materializeRow(at: finalAssistantIndex)
+            if finalAssistant.superview == nil {
+                stack.insertArrangedSubview(finalAssistant, at: userPosition + 2)
+                pinRow(finalAssistant)
+            }
+        }
+        for index in turnIndices { deferredReplayRowIndices.remove(index) }
+    }
+
+    /// Makes an interrupted or truncated replay tail visible. Successful turns consume their
+    /// deferred indices in `foldTurn`, materializing only the final answer.
+    func finishReplayRendering() {
+        attachDeferredReplayRows()
+    }
+
+    private func attachDeferredReplayRows(in indices: ClosedRange<Int>? = nil) {
+        let selected = deferredReplayRowIndices
+            .filter { indices?.contains($0) ?? true }
+            .sorted()
+        for index in selected {
+            let view = materializeRow(at: index)
+            if view.superview == nil { addRow(view) }
+            deferredReplayRowIndices.remove(index)
+        }
+    }
+
+    /// Creates a native row at most once. Replayed folded work reaches this only on expansion;
+    /// because the timeline already owns attached tool results, its first view starts in the
+    /// same final state an eagerly-created row would have reached incrementally.
+    private func materializeRow(at index: Int) -> NSView {
+        if let existing = rowViews[index] { return existing }
+
+        let row = timeline.rows[index]
+        let (nativeView, _) = ConversationRowView.make(for: row)
+        let view: NSView
+        if let target = componentTarget(for: row) {
+            view = customizeConversationRow(nativeView, target: target)
+        } else {
+            view = nativeView
+        }
+        rowViews[index] = view
+
+        // A missing or interrupted result may still arrive after this lazy materialization.
+        // Completed replay results are already represented by `ConversationRowView.make` and
+        // need no pending view entry.
+        if case .toolCall(let call) = row,
+           call.result == nil || call.result?.outcome == .interrupted {
+            pendingToolViews[index] = nativeView as? ToolCallView
+        }
+        return view
+    }
+
+    /// Materialized collapsed work is retained for exact restoration, but kept out of the tree.
+    /// Replay delays its first construction until expansion whenever possible.
+    /// `isHidden` alone leaves every nested tool and Markdown constraint in the window's layout
+    /// engine, making an ordinary scroll relayout the full history. Reattaching here preserves
+    /// the disclosure while keeping collapsed turns as cheap as they look.
+    private func setTurnWork(_ indices: [Int], expanded: Bool, after fold: TurnFoldView) {
+        if expanded {
+            guard let foldPosition = stack.arrangedSubviews.firstIndex(of: fold) else { return }
+            for (offset, index) in indices.enumerated() {
+                let view = materializeRow(at: index)
+                stack.insertArrangedSubview(view, at: foldPosition + offset + 1)
+                pinRow(view)
+                AppThemeRefresh.repaint(view)
+            }
+        } else {
+            indices.compactMap { rowViews[$0] }.forEach { detachRow($0) }
+        }
+        stack.needsLayout = true
+        scrollView.documentView?.needsLayout = true
+    }
+
+    private func detachRow(_ view: NSView, retainingConstraints: Bool = true) {
+        stack.removeArrangedSubview(view)
+        let key = ObjectIdentifier(view)
+        if let constraints = rowEdgeConstraints[key] {
+            NSLayoutConstraint.deactivate(constraints)
+        }
+        if !retainingConstraints { rowEdgeConstraints[key] = nil }
+        view.removeFromSuperview()
+    }
+
+    private func pinRow(_ view: NSView) {
+        let key = ObjectIdentifier(view)
+        if let constraints = rowEdgeConstraints[key] {
+            NSLayoutConstraint.activate(constraints)
+            return
+        }
+        let constraints = [
+            view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
+            view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
+        ]
+        rowEdgeConstraints[key] = constraints
+        NSLayoutConstraint.activate(constraints)
     }
 
     // MARK: - Changed Files Card
@@ -213,10 +311,7 @@ extension ConversationViewController {
             .map { $0 + 1 }
             ?? stack.arrangedSubviews.count
         stack.insertArrangedSubview(card, at: position)
-        NSLayoutConstraint.activate([
-            card.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
-            card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
-        ])
+        pinRow(card)
         scrollToBottom()
     }
 
@@ -309,7 +404,9 @@ extension ConversationViewController {
 
     /// Drops the streaming placeholder, whose content the finished message repeats.
     func clearStreaming() {
-        streamingLabel?.removeFromSuperview()
+        if let streamingLabel {
+            detachRow(streamingLabel, retainingConstraints: false)
+        }
         streamingLabel = nil
     }
 
@@ -323,10 +420,7 @@ extension ConversationViewController {
         let previous = stack.arrangedSubviews.last
 
         stack.addArrangedSubview(view)
-        NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
-            view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
-        ])
+        pinRow(view)
 
         if newTurn, let previous {
             stack.setCustomSpacing(Design.Chat.turnSpacing, after: previous)
