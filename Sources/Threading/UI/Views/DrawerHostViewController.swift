@@ -342,6 +342,13 @@ final class DrawerHostViewController: NSViewController {
             directoryProvider(sessionID) ?? URL(fileURLWithPath: NSHomeDirectory())
         }
         addChild(controller)
+        // Redrawn but not persisted, unlike the browser's `onPageChange` beside it: a shell's
+        // name can move every second, the tab *list* has not changed, and the payload's copy of
+        // a terminal title is discarded on restore anyway.
+        controller.onTitleChange = { [weak self] in
+            guard let self, sessionID == self.currentSessionID else { return }
+            render()
+        }
         return controller
     }
 

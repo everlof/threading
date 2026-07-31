@@ -208,8 +208,8 @@ final class PaneTab {
       return "Review"
     case .info:
       return "Info"
-    case .terminal:
-      return "Terminal"
+    case .terminal(let terminal):
+      return terminal.currentTitle
     case .files:
       return "Files"
     case .attachments:

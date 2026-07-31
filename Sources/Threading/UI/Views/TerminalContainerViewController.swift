@@ -880,7 +880,7 @@ final class TerminalContainerViewController: NSViewController {
         applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "terminal",
-            title: L10n.format("%@ ended", terminal.displayTitle),
+            title: L10n.format("%@ ended", ProjectTerminalTitle.displayTitle(for: terminal)),
             detail: L10n.string("Start a fresh shell in its last working directory."),
             actionTitle: L10n.string("Start Again")
         )

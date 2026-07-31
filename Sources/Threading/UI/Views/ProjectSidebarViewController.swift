@@ -1162,7 +1162,8 @@ private extension ProjectSidebarViewController {
             promptRename(
                 title: L10n.string("Rename Terminal"),
                 current: terminal?.customTitle ?? "",
-                placeholder: terminal?.displayTitle ?? L10n.string("Terminal"),
+                placeholder: terminal.map { ProjectTerminalTitle.displayTitle(for: $0) }
+                    ?? L10n.string("Terminal"),
                 allowsEmpty: true
             ) { newTitle in
                 self.projectStore.renameTerminal(id: node.terminalID, to: newTitle)
@@ -1651,7 +1652,8 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             }
             cell.configure(
                 with: terminal,
-                running: ProjectTerminalRuntime.shared.isRunning(terminalID: terminal.id)
+                running: ProjectTerminalRuntime.shared.isRunning(terminalID: terminal.id),
+                projectRoot: terminalNode.displayProjectFolderPath
             )
             cell.onAction = { [weak self] terminalID, anchor in
                 self?.showTerminalActions(for: terminalID, from: anchor)

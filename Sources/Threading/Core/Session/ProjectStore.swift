@@ -422,16 +422,26 @@ final class ProjectStore {
     }
 
     /// Records a shell-reported title without displacing an explicit user rename.
-    func updateTerminalTitle(_ title: String, for terminalID: TerminalID) {
-        guard let location = locate(terminalID: terminalID) else { return }
-        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty,
-              projects[location.projectIndex].terminals[location.terminalIndex].title != cleaned
-        else { return }
+    ///
+    /// Nil retires the title. A program that names its own window — `vim`, `ssh`, `tmux` — has
+    /// no counterpart that unnames it when it exits, so the terminal's owner tells us when the
+    /// program that set one is gone (`TerminalSession.refreshForegroundProcess()`). Retiring it
+    /// drops the row back to its derived name instead of leaving it stuck on a file some
+    /// long-closed editor was showing.
+    /// Returns whether anything moved, so a caller that must repaint for a *different* reason
+    /// can tell whether this call has already done it.
+    @discardableResult
+    func updateTerminalTitle(_ title: String?, for terminalID: TerminalID) -> Bool {
+        guard let location = locate(terminalID: terminalID) else { return false }
+        let cleaned = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stored = cleaned.isEmpty ? TerminalNamingDefaults.fallback : cleaned
+        guard projects[location.projectIndex].terminals[location.terminalIndex].title != stored
+        else { return false }
 
-        projects[location.projectIndex].terminals[location.terminalIndex].title = cleaned
+        projects[location.projectIndex].terminals[location.terminalIndex].title = stored
         scheduleSave()
         notifyChanged(sidebarImpact: .terminalRow(terminalID))
+        return true
     }
 
     /// Moves the terminal's sidebar placement and branch whenever OSC 7 or process fallback

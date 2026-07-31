@@ -120,22 +120,39 @@ final class ProjectTerminalViewController: NSViewController {
 
     private func startDirectoryTracking() {
         directoryTimer?.invalidate()
-        refreshDirectoryFromProcess()
+        refreshFromProcess()
         directoryTimer = Timer.scheduledTimer(
             withTimeInterval: ProjectTerminalDefaults.directoryRefreshInterval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.refreshDirectoryFromProcess()
+                self?.refreshFromProcess()
             }
         }
     }
 
-    private func refreshDirectoryFromProcess() {
-        guard session.isRunning, session.shellPid > 0,
-              let directory = ProcessUtility.workingDirectory(forPid: session.shellPid)
-        else { return }
-        ProjectStore.shared.updateTerminalLocation(directory.path, for: terminalID)
+    /// The two things about a running shell that change without producing any output we are
+    /// told about: where it is, and what it is running. Both decide what the sidebar calls it.
+    private func refreshFromProcess() {
+        guard session.isRunning, session.shellPid > 0 else { return }
+
+        if let directory = ProcessUtility.workingDirectory(forPid: session.shellPid) {
+            ProjectStore.shared.updateTerminalLocation(directory.path, for: terminalID)
+        }
+
+        guard session.refreshForegroundProcess() else { return }
+        // Retiring a title the last program left behind is a store edit; picking up a new
+        // foreground command is not, since the derived name is computed rather than stored.
+        // Only the second case still needs the row told.
+        let titleChanged = ProjectStore.shared.updateTerminalTitle(
+            session.reportedTitle,
+            for: terminalID
+        )
+        if !titleChanged {
+            NotificationCenter.default.post(
+                ProjectsDidChange(sidebarImpact: .terminalRow(terminalID))
+            )
+        }
     }
 }
 

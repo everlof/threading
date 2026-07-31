@@ -950,7 +950,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         } else if let terminalID = containerViewController.currentTerminalID,
                   let terminal = ProjectStore.shared.terminal(withID: terminalID) {
             showPageTab(
-                title: terminal.displayTitle,
+                title: ProjectTerminalTitle.displayTitle(for: terminal),
                 symbolName: "terminal",
                 identity: terminalID,
                 toolTip: terminal.currentDirectory

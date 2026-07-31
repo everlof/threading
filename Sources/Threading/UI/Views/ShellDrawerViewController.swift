@@ -40,6 +40,20 @@ final class ShellDrawerViewController: NSViewController {
     /// shell than the one in the terminal beside it.
     private(set) var hasStarted = false
 
+    /// What the tab strip calls this shell.
+    ///
+    /// Every drawer tab used to be the literal word "Terminal", which is no name at all once a
+    /// session has two of them: the strip is the only thing telling one shell from another, and
+    /// it was telling the user nothing. Derived on the same rules a standalone terminal's row
+    /// uses (`TerminalNaming`), so both surfaces answer the same question the same way.
+    private(set) var currentTitle = TerminalNamingDefaults.fallback
+
+    /// Fired when `currentTitle` moves, so the host can persist and redraw the strip. The
+    /// browser tab's `onPageChange` is the same seam for the same reason.
+    var onTitleChange: (() -> Void)?
+
+    private var titleTimer: Timer?
+
     // MARK: - Initialization
 
     init(sessionID: SessionID, directory: @escaping () -> URL) {
@@ -86,6 +100,7 @@ final class ShellDrawerViewController: NSViewController {
     func startIfNeeded() {
         guard !hasStarted else { return }
         hasStarted = true
+        session.delegate = self
         session.startShell(initialDirectory: directory())
     }
 
@@ -104,6 +119,8 @@ final class ShellDrawerViewController: NSViewController {
 
     func terminate() {
         guard hasStarted else { return }
+        titleTimer?.invalidate()
+        titleTimer = nil
         session.terminate()
         hasStarted = false
     }
@@ -122,6 +139,75 @@ final class ShellDrawerViewController: NSViewController {
 
     private func applyBackground() {
         view.applyLayerBackground(session.terminalView.nativeBackgroundColor)
+    }
+
+    /// A shell changes directory and starts commands without producing anything the app is
+    /// otherwise told about, so the name has to be asked for rather than waited on. The
+    /// standalone terminal polls on the same interval for the same reason.
+    private func startTitleTracking() {
+        titleTimer?.invalidate()
+        refreshTitle()
+        titleTimer = Timer.scheduledTimer(
+            withTimeInterval: ProjectTerminalDefaults.directoryRefreshInterval,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshTitle()
+            }
+        }
+    }
+
+    private func refreshTitle() {
+        guard session.isRunning, session.shellPid > 0 else { return }
+        session.refreshForegroundProcess()
+
+        // OSC 7 first, then the process's own cwd — not every shell reports the former, which
+        // is the same fallback `TerminalSession.effectiveWorkingDirectory` makes.
+        let directory = session.currentDirectory?.path
+            ?? ProcessUtility.workingDirectory(forPid: session.shellPid)?.path
+            ?? directory().path
+
+        let title = TerminalNaming.displayTitle(
+            // A drawer tab has no rename of its own: it is a surface under a conversation
+            // rather than a record, and the conversation is what carries a chosen name.
+            custom: nil,
+            reported: session.reportedTitle,
+            directory: directory,
+            projectRoot: ProjectStore.shared.project(forSessionID: sessionID)?.folderPath,
+            foregroundProcess: session.foregroundProcessName,
+            shellPath: ProfileStorage.shared.defaultProfile.shellPath
+        )
+
+        guard title != currentTitle else { return }
+        currentTitle = title
+        onTitleChange?()
+    }
+}
+
+// MARK: - TerminalSessionDelegate
+
+extension ShellDrawerViewController: TerminalSessionDelegate {
+
+    /// Tracking begins here rather than beside `startShell` so the first reading is taken once
+    /// there is a pid to read: asked any earlier it finds no process and the tab keeps the
+    /// placeholder until the first tick.
+    func terminalSessionDidStart(_ session: TerminalSession) {
+        startTitleTracking()
+    }
+
+    /// A program's own OSC title outranks anything derived, so the strip should show it at once
+    /// rather than at the next poll.
+    func terminalSession(_ session: TerminalSession, titleChangedTo title: String) {
+        refreshTitle()
+    }
+
+    func terminalSession(_ session: TerminalSession, directoryChangedTo directory: URL?) {
+        refreshTitle()
+    }
+
+    func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {
+        titleTimer?.invalidate()
+        titleTimer = nil
     }
 }
 

@@ -43,8 +43,15 @@ final class SessionNode: NSObject {
 final class TerminalNode: NSObject {
     let terminalID: TerminalID
 
-    init(terminalID: TerminalID) {
+    /// The folder of the project this row is *shown* under, carried on the node because the
+    /// row's name is stated relative to it. Placement is resolved once here for the whole tree
+    /// and reads git metadata off disk for every project; a row that asked again would repeat
+    /// that per row, per reload.
+    let displayProjectFolderPath: String
+
+    init(terminalID: TerminalID, displayProjectFolderPath: String) {
         self.terminalID = terminalID
+        self.displayProjectFolderPath = displayProjectFolderPath
     }
 }
 
@@ -130,7 +137,9 @@ enum SidebarTreeBuilder {
                 .map(\.element)
             node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
             let terminals = terminalsByDisplayProject[project.id] ?? []
-            node.terminalNodes = terminals.map { TerminalNode(terminalID: $0.id) }
+            node.terminalNodes = terminals.map {
+                TerminalNode(terminalID: $0.id, displayProjectFolderPath: project.folderPath)
+            }
 
             // Side chats hang off the session they were forked from, so only what remains
             // at the project's own level is grouped by branch below.

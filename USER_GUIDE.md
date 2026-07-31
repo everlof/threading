@@ -659,6 +659,14 @@ first-prompt names.
 Rename via right-click in the sidebar, or right-click inside the terminal and choose
 **Rename Session…**.
 
+**Terminals name themselves after where they are and what they are doing.** A standalone
+terminal's row, and each shell tab in the drawer, shows the command currently running in it —
+`npm`, `ssh`, `vim` — and falls back to the directory when you are at a prompt: the path within
+the project (`Sources/Threading`), or your shell's name (`zsh`) at the project's own folder,
+where the project row above already says the folder name. A program that sets its own window
+title, like `ssh` or `tmux`, gets to keep it until it exits. Renaming a terminal pins your name
+over all of that, exactly as it does for a session.
+
 **Rename with Agent** sits just below it and hands the job to the agent running in the chat.
 Threading sends it one line asking it to name the conversation in a few words, and the name
 appears in the sidebar when it answers. This is worth reaching for because a chat is named

@@ -30,13 +30,16 @@ final class ProjectTerminalRowView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(with terminal: ProjectTerminal, running: Bool) {
+    /// `projectRoot` is the folder of the project this row sits under, which the name is stated
+    /// relative to: at the project's own folder the row above already says the folder's name.
+    func configure(with terminal: ProjectTerminal, running: Bool, projectRoot: String?) {
         let sameTerminal = terminalID == terminal.id
         terminalID = terminal.id
         isRunning = running
+        let title = ProjectTerminalTitle.displayTitle(for: terminal, projectRoot: projectRoot)
         titleLabel.setStringValue(
-            terminal.displayTitle,
-            animated: sameTerminal && titleLabel.stringValue != terminal.displayTitle
+            title,
+            animated: sameTerminal && titleLabel.stringValue != title
         )
         toolTip = terminal.currentDirectory
         applyColors()

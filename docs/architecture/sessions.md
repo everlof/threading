@@ -83,6 +83,51 @@ containing the cwd wins. An unrelated directory leaves the terminal in the proje
 was created. This makes moving into an added monorepo package move the row beneath that package
 and its branch heading without inventing projects from arbitrary directories.
 
+### What a terminal is called
+
+Both surfaces were born saying the literal word **"Terminal"** and stayed that way — a sidebar
+row per standalone terminal, a tab per drawer shell, none of them distinguishable from another.
+The reason nothing ever replaced it is worth writing down, because it looks like a bug in the
+plumbing and is not: **under Threading a stock `zsh` reports no title at all.** Apple's title
+hook lives in `/etc/zshrc_Apple_Terminal`, and `/etc/zshrc` sources it only when `TERM_PROGRAM`
+is `Apple_Terminal`; ours says `Threading`. Claiming Apple's value to inherit the hook is a lie
+every other tool that branches on `TERM_PROGRAM` would then act on.
+
+It would buy little anyway. Even inside Terminal.app that hook reports only the **directory**
+(OSC 7) — Terminal composes the tab's name itself, from the directory and whatever is running.
+`TerminalNaming` does the same, as a four-rung ladder:
+
+1. `customTitle` — a rename, which wins and stops following, as it does for a conversation.
+2. the **reported** title — OSC 0/2, from `vim`, `ssh`, `tmux`, anything that names its own
+   window. A program that has said what it is has said it better than we can.
+3. the **derived** name — the foreground command if one is running, else where the terminal is.
+4. `"Terminal"`, which now names only a record whose shell has never run.
+
+**A reported title has to be retired, or it goes stale.** Nothing resets a title here — the hook
+that rewrites one at each prompt is Terminal.app's — so quitting `vim` would otherwise leave a
+row named after the file forever. `TerminalSession` records *which foreground process group* set
+the title and drops it when that group is gone. A title set while the shell itself was in front
+is kept: a user whose `zsh` writes its own title at every prompt (oh-my-zsh does) has said what
+they want, and clearing it would fight their config once a second.
+
+**The derived name is stated relative to the project, not as the directory's last component.**
+A terminal's row sits directly beneath its project's row, which already carries the folder name,
+so a terminal at the project root would simply repeat the line above it. At the root it is the
+shell's own name (`zsh`); below it, the path within the project (`Sources/Threading`, not
+`Threading`, which is ambiguous the moment a project has two of them); outside any project, the
+last two components, or `~`. The codebase reached this conclusion once before from the other
+direction — `SessionNaming.isNoiseTitle` rejects an agent title equal to the project name or its
+folder basename.
+
+Three seams keep the cost off the hot paths. The foreground group is read with `tcgetpgrp` on
+the pty, one syscall on the poll `ProjectTerminalViewController` was already running for the
+cwd; `ProcessUtility.processName` — which copies the kernel's argument area — is called only
+when that group *changes*. The project a row is named against is resolved once per tree build
+and carried on `TerminalNode`, because `ProjectTerminalPlacement` reads git metadata off disk
+for every project and a row that asked again would pay it per row, per reload. And rung 3 is
+**computed, not stored**: a `cd` moves the name with no write, and a dormant record cannot show
+the name of a command that stopped running two launches ago.
+
 The drawer is a **tab host** (`DrawerHostViewController`) on the same model as the display
 panel — `PaneTab` lists per session, a `ThemedTabStripView` along its top, a `+` for another
 tab. The shell is its *default first tab*, auto-created the first time the drawer opens for a
@@ -93,6 +138,10 @@ swaps which list it shows and re-parents nothing — the per-switch detach the o
 what used to separate a shell from its scrollback view. Drawer tabs and the open flag persist
 in the session's panel payload (`PersistedTab.host == "drawer"`); the height persists app-wide
 (`ShellDrawerHeight`), because a drawer height is window geometry, not a fact about a session.
+`restoreIfNeeded` writes `PersistedTab.title` and then discards it on the way back in, rebuilding
+each tab's name from the live surface. That was harmless while every shell tab was the constant
+`"Terminal"` and is now the point: a restored tab has no process yet, and a name recovered from
+the payload would be whatever the last session's shell happened to be running.
 
 Three decisions worth keeping (they predate the tabs and survived them):
 

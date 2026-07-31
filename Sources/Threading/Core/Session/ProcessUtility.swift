@@ -246,6 +246,24 @@ enum ProcessUtility {
         return name.isEmpty ? nil : name
     }
 
+    /// The process group currently owning the terminal's input — the command a user is waiting
+    /// on, or the shell itself when they are back at a prompt.
+    ///
+    /// This is the question Terminal.app asks to call a tab `node` while a dev server runs and
+    /// put the directory back when it stops. `tcgetpgrp` answers it in one syscall against the
+    /// primary side of the pty; walking the process table for the shell's children would answer
+    /// a *different* question, since it also returns background jobs and anything a finished
+    /// command left running.
+    ///
+    /// Returns nil when there is no foreground group to name — a closed descriptor, or a shell
+    /// sitting at its own prompt.
+    static func foregroundProcessGroup(ofPTY descriptor: Int32, shellPid: pid_t) -> pid_t? {
+        guard descriptor >= 0 else { return nil }
+        let group = tcgetpgrp(descriptor)
+        guard group > 0, group != shellPid else { return nil }
+        return group
+    }
+
     // MARK: - Listening Sockets
 
     /// Every TCP port the process is listening on.

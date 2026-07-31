@@ -37,6 +37,36 @@ final class TerminalSession: NSObject {
     /// The PID of the shell process, captured after starting.
     private(set) var shellPid: pid_t = 0
 
+    // MARK: - Foreground Process
+
+    /// The command currently holding the terminal, or nil at the shell's own prompt.
+    ///
+    /// Refreshed by `refreshForegroundProcess()` rather than on a timer of its own: an agent's
+    /// terminal has no use for the answer, and only the owners that already poll — the
+    /// standalone terminal and the shell drawer — should pay for it.
+    private(set) var foregroundProcessName: String?
+
+    /// The title a program set over OSC 0/2, or nil when nothing has named this terminal.
+    ///
+    /// Kept apart from `title`, which starts as the shell path and only ever grows. A reported
+    /// title is dropped when the program that set it exits, because nothing else will correct
+    /// it: the hook that rewrites a title at every prompt belongs to Terminal.app and is not
+    /// loaded under our `TERM_PROGRAM`. Without this, quitting `vim` leaves a row named after
+    /// the file forever.
+    private(set) var reportedTitle: String?
+
+    /// Which foreground group set `reportedTitle`. Nil means the shell's own — a user whose
+    /// `zsh` writes a title at each prompt has said what they want this terminal called, and
+    /// that title outlives every command.
+    private var reportedTitleOwner: pid_t?
+
+    private var foregroundGroup: pid_t?
+
+    /// The primary side of the pty, which is what `tcgetpgrp` must be asked.
+    private var ptyDescriptor: Int32 {
+        terminalView.process?.childfd ?? -1
+    }
+
     /// The name of the profile used for this session.
     var profileName: String {
         profile.name
@@ -372,6 +402,51 @@ final class TerminalSession: NSObject {
         return (terminal.cols, terminal.rows)
     }
 
+    /// Re-reads which command owns the terminal, and retires a title whose owner has gone.
+    ///
+    /// Returns whether either answer moved, so a caller can repaint on the tick that changed
+    /// something instead of on every tick.
+    @discardableResult
+    func refreshForegroundProcess() -> Bool {
+        guard isRunning, shellPid > 0 else {
+            let changed = foregroundProcessName != nil || reportedTitle != nil
+            clearForegroundState()
+            return changed
+        }
+
+        var changed = false
+        let group = ProcessUtility.foregroundProcessGroup(ofPTY: ptyDescriptor, shellPid: shellPid)
+
+        if group != foregroundGroup {
+            foregroundGroup = group
+            // `processName` copies the kernel's argument area for the process, which is far
+            // more than a once-a-second poll should repeat — so it is read only when the group
+            // actually changes, and the name is held until it changes again.
+            let name = group.flatMap { ProcessUtility.processName(forPid: $0) }
+            if name != foregroundProcessName {
+                foregroundProcessName = name
+                changed = true
+            }
+        }
+
+        if let owner = reportedTitleOwner, owner != group {
+            reportedTitleOwner = nil
+            if reportedTitle != nil {
+                reportedTitle = nil
+                changed = true
+            }
+        }
+
+        return changed
+    }
+
+    private func clearForegroundState() {
+        foregroundProcessName = nil
+        reportedTitle = nil
+        reportedTitleOwner = nil
+        foregroundGroup = nil
+    }
+
 }
 
 // MARK: - LocalProcessTerminalViewDelegate
@@ -384,6 +459,13 @@ extension TerminalSession: @preconcurrency LocalProcessTerminalViewDelegate {
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
         self.title = title
+        self.reportedTitle = title
+        // Recorded at the moment of the report, not read back later: by the next poll the
+        // program may already have exited, and the title would then look like the shell's.
+        self.reportedTitleOwner = ProcessUtility.foregroundProcessGroup(
+            ofPTY: ptyDescriptor,
+            shellPid: shellPid
+        )
         delegate?.terminalSession(self, titleChangedTo: title)
     }
 
@@ -399,6 +481,9 @@ extension TerminalSession: @preconcurrency LocalProcessTerminalViewDelegate {
     func processTerminated(source: TerminalView, exitCode: Int32?) {
         isRunning = false
         shellPid = 0
+        // Nothing is in the foreground of a terminal with no process, and a title the dead
+        // program left behind must not outlive it into the next launch.
+        clearForegroundState()
 
         if let pendingLaunch {
             self.pendingLaunch = nil

@@ -1007,6 +1007,12 @@ final class DisplayPaneController: NSViewController {
       directory: { URL(fileURLWithPath: folder) }
     )
     addChild(controller)
+    // Redraw only — see the drawer host's copy: a shell renames itself far too often to write
+    // through to the payload, which discards a terminal's title on the way back in regardless.
+    controller.onTitleChange = { [weak self] in
+      guard let self, sessionID == self.currentSessionID else { return }
+      self.render()
+    }
     return controller
   }
 
