@@ -297,6 +297,13 @@ not from this reusable message.
 (A reply inside a running conversation is the other way round: Return sends it and
 Shift+Return breaks the line, because a reply is usually one line and the box says so.)
 
+**If you want one answer everywhere, say so** under **Settings ▸ Keyboard ▸ Composer**, at
+*When writing a prompt, press Return to*. The default — **Do What the Composer Expects** — is
+the split just described. **Send** makes Return send in the session brief too, and **Start a New
+Line** stops it sending in replies. Whichever you pick, three keys never change: **⌘Return**
+always sends, **Shift+Return** and **Option+Return** always break the line, and Return while
+an input method is still converting a word belongs to the input method rather than to the send.
+
 **Drop or paste a file** into it. An ordinary file has its path inserted, which is what the
 agent can act on. An image instead appears as a thumbnail above the text; use the **×** on its
 corner to remove it before sending, or click the image to open Threading's media inspector. With
@@ -2136,7 +2143,7 @@ sharing control.
 | Action | Shortcut |
 |--------|----------|
 | New Session (opens the composer) | Cmd+N |
-| Start the session being composed (Return breaks the line instead) | Cmd+Return |
+| Start the session being composed (Return breaks the line instead, unless you changed Settings ▸ Keyboard ▸ Composer) | Cmd+Return |
 | Add Existing Project | Cmd+Shift+N |
 | Open in External App (this checkout, in the app you last chose) | Cmd+O |
 | Close Tab (the focused drawer/panel tab, else the page on screen; never stops the agent) | Cmd+W |
@@ -2206,6 +2213,21 @@ Threading's own commands can be rebound. The system ones (Quit, Cut, Copy, Paste
 the like) are listed but fixed, so the page can answer "what already owns this key" without
 letting a rebinding leave you unable to quit or paste. A combination already in use is refused
 rather than taken from its current owner, and **Reset All** puts everything back.
+
+At the top of the same page, **Composer** holds the one key that is not a command: *When writing
+a prompt, press Return to*. It is here because "what is this key already doing" is most of why a
+shortcuts page gets opened, and Return is the key people most often mean.
+
+| Choice | Return in a new session's brief | Return in a conversation reply |
+|--------|--------------------------------|--------------------------------|
+| **Do What the Composer Expects** (default) | breaks the line | sends |
+| **Send** | sends | sends |
+| **Start a New Line** | breaks the line | breaks the line |
+
+**⌘Return sends under all three**, and **Shift+Return** (or Option+Return) always breaks the
+line, so neither action is ever more than one key away. Return also never sends while an input
+method is mid-conversion — with a Japanese, Chinese or Korean IME that press is how you accept
+the word you are typing, not how you send it.
 
 ## Data Storage
 

@@ -44,7 +44,8 @@ final class PromptView: NSView, ThemedComponent {
         didSet { textView.placeholder = placeholder }
     }
 
-    /// Where the control that sends this prompt lives — and therefore what Return does.
+    /// Where the control that sends this prompt lives — and therefore what Return does *by
+    /// default*, until `AppSettings.promptReturnKey` says otherwise.
     enum SubmitPlacement {
         /// The glyph inside the box. Return sends; Shift- or Option-Return breaks the line.
         /// The shape of a reply box, where a message is usually one line and sending it is
@@ -56,9 +57,11 @@ final class PromptView: NSView, ThemedComponent {
         ///
         /// For a composer whose prompt is a *brief* rather than a message: a task worth
         /// describing is several lines and a paragraph or two of context, and Return-sends
-        /// turns every one of those line breaks into an accidental launch. The button that
-        /// takes the glyph's place has room to name the chord, which the glyph never did —
-        /// the shortcut and the affordance move together on purpose.
+        /// turns every one of those line breaks into an accidental launch. Worse than in a
+        /// chat, where the same slip posts half a sentence: here it spawns an agent in a real
+        /// checkout against half a brief, and there is no unsend. The button that takes the
+        /// glyph's place has room to name the chord, which the glyph never did — the shortcut
+        /// and the affordance move together on purpose.
         case outside
     }
 
@@ -216,8 +219,24 @@ final class PromptView: NSView, ThemedComponent {
         submitButton.isHidden = !isInside
         contentTrailingBesideSubmit?.isActive = isInside
         contentTrailingToEdge?.isActive = !isInside
-        textView.submitsOnReturn = isInside
         needsLayout = true
+    }
+
+    /// Resolves the user's setting against this composer's own default, at the keystroke.
+    ///
+    /// Asked per Return rather than stored, because the Settings window is open *beside* the
+    /// composer while the choice is made: a flag written in `applySubmitPlacement` would leave
+    /// every already-built pane answering with whatever was true when it was built, and the one
+    /// pane the user is looking at is exactly the one that would be stale.
+    ///
+    /// The mapping lives here rather than on `PromptReturnKey` so the setting stays a Core type
+    /// that knows nothing about a view's submit affordance.
+    private func submitsOnReturn() -> Bool {
+        switch AppSettings.promptReturnKey {
+        case .sends: true
+        case .startsNewLine: false
+        case .matchesComposer: submitPlacement == .inside
+        }
     }
 
     private func setupAttachmentStrip() {
@@ -277,6 +296,7 @@ final class PromptView: NSView, ThemedComponent {
         textView.isAutomaticTextReplacementEnabled = false
 
         textView.onSubmit = { [weak self] in self?.submit() }
+        textView.submitsOnReturn = { [weak self] in self?.submitsOnReturn() ?? true }
         textView.onAttach = { [weak self] paths in self?.insertAttachments(paths) }
         textView.onFocusChange = { [weak self] focused in
             guard let self, self.isTextFocused != focused else { return }
@@ -921,9 +941,12 @@ private final class PromptTextView: ThemedTextView {
     /// Return, without a modifier — or ⌘Return, always.
     var onSubmit: (() -> Void)?
 
-    /// Whether a bare Return sends. `false` leaves Return to the editor and keeps ⌘Return as
-    /// the only way to send from the keyboard; see `PromptView.SubmitPlacement`.
-    var submitsOnReturn = true
+    /// Whether a bare Return sends, asked at the keystroke. Answering `false` leaves Return to
+    /// the editor and keeps ⌘Return as the only way to send from the keyboard.
+    ///
+    /// A closure rather than a flag because the answer is a user setting as well as a property
+    /// of the surface; see `PromptView.submitsOnReturn()`.
+    var submitsOnReturn: () -> Bool = { true }
 
     /// Paths for whatever was dropped or pasted, already written to disk.
     var onAttach: (([String]) -> Void)?
@@ -1001,17 +1024,29 @@ private final class PromptTextView: ThemedTextView {
 
     // MARK: - Key Handling
 
-    /// ⌘Return always submits. Beyond that it depends on where the send control is: with the
-    /// glyph inside the box, Return submits and Shift- or Option-Return breaks the line — the
-    /// shape every chat composer has, and the reason the field can be multi-line without
-    /// costing the one-key send. With the control outside, Return is a line break like it is
-    /// in any other editor.
+    /// Two rules hold whatever the surface and whatever the user has set, so there is always a
+    /// key that cannot surprise: **⌘Return sends**, and **Shift- or Option-Return breaks the
+    /// line**. What a bare Return does is the only part that varies, and `submitsOnReturn`
+    /// answers it — the composer's own default unless `AppSettings.promptReturnKey` overrides.
     ///
     /// ⌘Return is handled here as well as by whatever button names it, because a prompt is
     /// used without one — the chord belongs to the *field*, and only reaches a key equivalent
     /// when someone put one in the same window.
     override func keyDown(with event: NSEvent) {
         guard event.keyCode == PromptViewDefaults.returnKeyCode else {
+            super.keyDown(with: event)
+            return
+        }
+
+        // Return belongs to the input method for as long as one has marked text: with a
+        // Japanese, Chinese or Korean IME, Return is how a conversion candidate is *accepted*,
+        // and it arrives here long before the user has finished the word. Sending on it posts
+        // a half-written prompt — and worse, one missing the very characters still uncommitted,
+        // since marked text is not yet in `string`. This is the same bug filed against Claude
+        // Code, Copilot Chat, Cursor and JetBrains' AI assistant; the fix everywhere is to let
+        // the composition have the key. ⌘Return is included deliberately: a send that drops
+        // the uncommitted tail is the defect, not the modifier.
+        if hasMarkedText() {
             super.keyDown(with: event)
             return
         }
@@ -1023,7 +1058,7 @@ private final class PromptTextView: ThemedTextView {
             return
         }
 
-        let wantsNewline = !submitsOnReturn
+        let wantsNewline = !submitsOnReturn()
             || modifiers.contains(.shift)
             || modifiers.contains(.option)
 

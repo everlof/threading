@@ -366,6 +366,29 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Composer
+
+    /// Read at the keystroke rather than at setup: the Settings window sits *beside* the
+    /// composer being configured, and a value cached when the pane was built would keep
+    /// answering with whatever was true then. `UserDefaults` reads are cheap enough to do per
+    /// Return, and no observation has to be wired into a design-system component.
+    ///
+    /// An absent or unknown raw value reads as `.matchesComposer`, which is the documented
+    /// default, so nothing needs seeding.
+    nonisolated static var promptReturnKey: PromptReturnKey {
+        let raw = UserDefaults.standard.string(forKey: Keys.promptReturnKey)
+        return raw.flatMap(PromptReturnKey.init(rawValue:)) ?? .matchesComposer
+    }
+
+    /// What Return does in a prompt composer.
+    var promptReturnKey: PromptReturnKey {
+        get { Self.promptReturnKey }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.promptReturnKey)
+            notifyChanged()
+        }
+    }
+
     // MARK: - Fonts
 
     /// The family the whole chrome is set in, overriding whatever the theme states.
@@ -830,6 +853,7 @@ final class AppSettings {
         static let groupsLoneBranches = "groupsLoneBranches"
         static let followsCheckoutBranch = "followsCheckoutBranch"
         static let sidebarSessionOrder = "sidebarSessionOrder"
+        static let promptReturnKey = "promptReturnKey"
         static let discoversProjectIcons = "discoversProjectIcons"
         static let discoversAccountAvatars = "discoversAccountAvatars"
         static let harmonizesTerminalBackgrounds = "harmonizesTerminalBackgrounds"
@@ -933,6 +957,64 @@ enum ClaudeRemoteControl: String, CaseIterable {
         case .followClaude: L10n.string("Use Claude's Setting")
         case .enabled: L10n.string("Use Default (On)")
         case .disabled: L10n.string("Use Default (Off)")
+        }
+    }
+}
+
+// MARK: - Prompt Return Key
+
+/// What the Return key does in a prompt composer.
+///
+/// The most personal keystroke in the app, and the one every chat product has ended up making
+/// configurable — Slack, Zulip, Teams, Discord and (as of early 2026) Cursor all ship the same
+/// two-option preference, because the two camps are drawn by *what people write*, not by taste:
+/// a one-line reply wants Return to send it, and a paragraph of context wants Return to be a
+/// line break.
+///
+/// This app has both surfaces at once, which is why there is a third case rather than a
+/// two-value toggle. The default keeps each composer's own answer — a brief that launches a
+/// process treats Return as a line break, a reply into a live thread sends — and the option
+/// exists so a user who wants **one** answer everywhere can say so. Naming the split in the
+/// settings is itself the point: what people report hating is not either behaviour but
+/// discovering, mid-sentence, that this box disagreed with the last one.
+///
+/// Two rules hold under every case, so there is always a key that cannot surprise anyone:
+/// ⌘Return sends, and Shift- or Option-Return breaks the line. Zulip's is the version worth
+/// copying — Shift-Return is a newline whatever the setting says.
+///
+/// Raw values are stored in defaults, so a case rename is a silent reset to `matchesComposer`.
+enum PromptReturnKey: String, CaseIterable {
+
+    /// Each composer keeps the meaning that suits what it holds. The default.
+    case matchesComposer
+
+    /// Return sends everywhere, including the session brief.
+    case sends
+
+    /// Return is a line break everywhere; ⌘Return is the only send from the keyboard.
+    case startsNewLine
+
+    /// The settings wording, phrased to complete "When writing a prompt, press Return to…" —
+    /// Slack's framing, which reads as a sentence rather than as a flag.
+    var settingsTitle: String {
+        switch self {
+        case .matchesComposer: L10n.string("Do What the Composer Expects")
+        case .sends: L10n.string("Send")
+        case .startsNewLine: L10n.string("Start a New Line")
+        }
+    }
+
+    /// What the choice costs, said where it is made. The alternate chord is the whole content
+    /// of the answer: a setting that changes a key without naming its replacement is how people
+    /// end up unable to type a second line at all.
+    var settingsDetail: String {
+        switch self {
+        case .matchesComposer:
+            L10n.string("The brief for a new session takes a line break; a reply in a conversation sends.")
+        case .sends:
+            L10n.string("Shift-Return starts a new line.")
+        case .startsNewLine:
+            L10n.string("Command-Return sends.")
         }
     }
 }

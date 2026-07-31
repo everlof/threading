@@ -337,6 +337,37 @@ The two halves move together on purpose. A glyph cannot name a chord, so a compo
 the send away from Return had to put it somewhere with room to say `⌘↩` — which is exactly what
 `ThemedButton.shortcut` draws.
 
+**That is a default, not a rule** — `AppSettings.promptReturnKey` (`PromptReturnKey`, on the
+Keyboard settings page) can override it in either direction. This is the one keystroke in the
+app that every comparable product has ended up making configurable — Slack, Zulip, Teams,
+Discord and, since early 2026, Cursor all ship the same preference — because the two camps are
+drawn by *what people write*, not by taste: a one-line reply wants Return to send, a paragraph
+of context wants Return to be a line break. `matchesComposer` is the default and keeps the split
+above; `sends` and `startsNewLine` give one answer everywhere. Naming the split in the settings
+is itself the point — what people report hating is not either behaviour but discovering,
+mid-sentence, that this box disagreed with the last one.
+
+Three invariants hold under every setting, so there is always a key that cannot surprise:
+
+- **⌘Return sends.**
+- **Shift- or Option-Return breaks the line.** Zulip's rule, and the one worth copying: a
+  setting that changes a key without leaving a working replacement is how people end up unable
+  to type a second line at all.
+- **Return while an input method has marked text belongs to the input method.** With a Japanese,
+  Chinese or Korean IME, Return is how a conversion candidate is *accepted*, and it arrives at
+  `keyDown` long before the word is finished; sending on it posts a half-written prompt missing
+  the very characters still uncommitted, since marked text is not yet in `string`. The same bug
+  is filed against Claude Code, Copilot Chat, Cursor and JetBrains' AI assistant. `hasMarkedText()`
+  guards **every** Return including ⌘Return — a send that drops the uncommitted tail is the
+  defect, not the modifier.
+
+The setting is read **at the keystroke**, not cached in `applySubmitPlacement`. The Settings
+window is open *beside* the composer while the choice is made, so a value written at setup would
+leave the one composer the user is looking at as the only one still behaving the old way. A
+`UserDefaults` read per Return is cheap, and it keeps an observation out of a design-system
+component. The mapping from setting to surface lives in `PromptView.submitsOnReturn()` rather
+than on `PromptReturnKey`, so the Core type knows nothing about a view's submit affordance.
+
 Height is re-measured in `layout()`, not only when the text is set. Text height depends on
 the width the box was given, which is unknown at assignment — a draft restored before layout
 measured against a container of the wrong width and opened at the wrong height, showing the
@@ -478,6 +509,11 @@ primary, titled, naming `⌘↩` on its face — with **Import _n_ conversations
 secondary. Two buttons, one loud: which of them the screen is about is now visible rather than
 inferred. The chord is a `ThemedButton.shortcut` rather than a `keyEquivalent`, since a bare
 `"\r"` equivalent in this pane would take the Return back off the prompt it was just given to.
+
+That last point survives the setting: `PromptReturnKey.sends` moves the send back onto Return
+without touching the button, because the button answers `⌘Return` and never Return itself. The
+placement stays `.outside` under every setting — it is a layout decision about a pane with two
+actions in it, not a restatement of the keystroke.
 
 **A chip names the answer, not the setting.** The model chip said "Default model", which tells
 the user the one thing they already know — that they have not chosen — while the question it

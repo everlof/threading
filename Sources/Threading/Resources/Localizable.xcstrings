@@ -51,6 +51,71 @@
         "sv": { "stringUnit": { "state": "translated", "value": "Den förankrade ytan byter sida vid skärmkanter och följer temabyten direkt." } }
       }
     },
+    "composer": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "skrivfält" } }
+      }
+    },
+    "enter": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "enter" } }
+      }
+    },
+    "new line": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "ny rad" } }
+      }
+    },
+    "return": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "return" } }
+      }
+    },
+    "send": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "skicka" } }
+      }
+    },
+    "Command-Return sends.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Kommando-Return skickar." } }
+      }
+    },
+    "Composer": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Skrivfält" } }
+      }
+    },
+    "Do What the Composer Expects": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Göra det skrivfältet förväntar sig" } }
+      }
+    },
+    "Send": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Skicka" } }
+      }
+    },
+    "Shift-Return starts a new line.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Skift-Return börjar en ny rad." } }
+      }
+    },
+    "Start a New Line": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Börja en ny rad" } }
+      }
+    },
+    "The brief for a new session takes a line break; a reply in a conversation sends.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Uppdraget för en ny session får en radbrytning; ett svar i en konversation skickas." } }
+      }
+    },
+    "When writing a prompt, press Return to": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "När du skriver en prompt, tryck Return för att" } }
+      }
+    },
     "\n\nThe run's full output: Project Icon > Open Last Research Log.": {
       "extractionState": "stale",
       "localizations": {

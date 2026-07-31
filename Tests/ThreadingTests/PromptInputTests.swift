@@ -11,6 +11,32 @@ import XCTest
 @MainActor
 final class PromptInputTests: XCTestCase {
 
+    // MARK: - Setup
+
+    /// What the Return key does is now a setting, so every test below that presses Return is
+    /// asserting against a value the developer could have changed. The class pins it and puts
+    /// the old one back.
+    ///
+    /// Restoring is not tidiness. `AppSettings` is a behavioural store and therefore writes
+    /// `UserDefaults.standard`, which under a hosted test bundle is the developer's own
+    /// preferences — a value left behind here would change the app they are running next, which
+    /// is the exact shape of the bug `PreferenceStore` was written for.
+    private var savedReturnKey: PromptReturnKey?
+
+    override func setUp() {
+        super.setUp()
+        savedReturnKey = AppSettings.shared.promptReturnKey
+        AppSettings.shared.promptReturnKey = .matchesComposer
+    }
+
+    override func tearDown() {
+        if let savedReturnKey {
+            AppSettings.shared.promptReturnKey = savedReturnKey
+        }
+        savedReturnKey = nil
+        super.tearDown()
+    }
+
     // MARK: - Helpers
 
     /// Built, never shown: an unshown window still lays out and still takes a first responder,
@@ -814,6 +840,127 @@ final class PromptInputTests: XCTestCase {
             try inlineSubmitButton(in: prompt).isHidden,
             "the glyph and the button outside must not both offer the send"
         )
+    }
+
+    /// The setting overrides the surface's own answer, in the direction people ask for it most:
+    /// a brief that sends on Return.
+    func testTheSettingCanMakeReturnSendTheBriefAsWell() throws {
+        AppSettings.shared.promptReturnKey = .sends
+
+        let prompt = PromptView()
+        prompt.submitPlacement = .outside
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+
+        var submitted: [String] = []
+        prompt.onSubmit = { submitted.append($0) }
+        XCTAssertTrue(window.makeFirstResponder(textView))
+
+        type("one", in: window)
+        pressReturn(in: window)
+        XCTAssertEqual(submitted, ["one"], "the setting did not reach the composer")
+
+        // Sending does not empty the box — the owner does that once the prompt is away — so the
+        // next stretch starts from a cleared field rather than from the sent one.
+        prompt.stringValue = ""
+
+        // The escape hatch has to survive the setting, or the box cannot hold two lines at all.
+        type("two", in: window)
+        pressReturn(holding: .shift, in: window)
+        type("three", in: window)
+        XCTAssertEqual(prompt.stringValue, "two\nthree")
+        XCTAssertEqual(submitted, ["one"], "Shift-Return sent a prompt that was still being written")
+    }
+
+    /// And in the other direction: a reply box that stops sending on Return, for the user who
+    /// wants one answer everywhere rather than one per surface.
+    func testTheSettingCanGiveReturnBackToTheTextInAReplyBox() throws {
+        AppSettings.shared.promptReturnKey = .startsNewLine
+
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+
+        var submitted: [String] = []
+        prompt.onSubmit = { submitted.append($0) }
+        XCTAssertTrue(window.makeFirstResponder(textView))
+
+        type("one", in: window)
+        pressReturn(in: window)
+        type("two", in: window)
+        XCTAssertEqual(prompt.stringValue, "one\ntwo")
+        XCTAssertTrue(submitted.isEmpty, "Return sent a reply the setting said to keep editing")
+
+        pressReturn(holding: .command, in: window)
+        XCTAssertEqual(submitted, ["one\ntwo"], "⌘Return has to send under every setting")
+
+        XCTAssertFalse(
+            try inlineSubmitButton(in: prompt).isHidden,
+            "the setting decides the key, not where the send control lives"
+        )
+    }
+
+    /// The Settings window is open *beside* the composer while this is changed, so the answer
+    /// has to be read at the keystroke. A value cached when the pane was built would leave the
+    /// one composer the user is looking at as the only one still behaving the old way.
+    func testChangingTheSettingReachesAComposerThatIsAlreadyOnScreen() throws {
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+
+        var submitted: [String] = []
+        prompt.onSubmit = { submitted.append($0) }
+        XCTAssertTrue(window.makeFirstResponder(textView))
+
+        type("one", in: window)
+        pressReturn(in: window)
+        XCTAssertEqual(submitted, ["one"], "a reply box sends on Return by default")
+        prompt.stringValue = ""
+
+        AppSettings.shared.promptReturnKey = .startsNewLine
+
+        type("two", in: window)
+        pressReturn(in: window)
+        type("three", in: window)
+        XCTAssertEqual(
+            prompt.stringValue,
+            "two\nthree",
+            "the composer kept the meaning it was built with"
+        )
+        XCTAssertEqual(submitted, ["one"])
+    }
+
+    /// Return belongs to the input method for as long as one has marked text. With a Japanese,
+    /// Chinese or Korean IME it is how a conversion candidate is accepted, and sending on it
+    /// posts a half-written prompt missing the very characters still uncommitted — marked text
+    /// is not yet in `string`. Filed against Claude Code, Copilot Chat, Cursor and JetBrains'
+    /// AI assistant; this is the one composer here it must not happen in.
+    func testAnInputMethodKeepsReturnWhileItIsStillComposing() throws {
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+
+        var submitted: [String] = []
+        prompt.onSubmit = { submitted.append($0) }
+        XCTAssertTrue(window.makeFirstResponder(textView))
+
+        // Each press is given its own composition: the first Return is *accepted* by the input
+        // method, which is the whole point — it commits the candidate and leaves nothing marked,
+        // so a second press would be an ordinary Return rather than a second test of the guard.
+        for modifiers in [NSEvent.ModifierFlags(), .command] {
+            textView.setMarkedText(
+                "にほn",
+                selectedRange: NSRange(location: 3, length: 0),
+                replacementRange: NSRange(location: 0, length: 0)
+            )
+            XCTAssertTrue(textView.hasMarkedText(), "the fixture has to reach the composing state")
+
+            pressReturn(holding: modifiers, in: window)
+            XCTAssertTrue(
+                submitted.isEmpty,
+                "Return accepted a conversion and sent the half-written prompt with it"
+            )
+        }
     }
 
     /// ⌘Return belongs to the field, not to whatever button happens to be beside it: the same

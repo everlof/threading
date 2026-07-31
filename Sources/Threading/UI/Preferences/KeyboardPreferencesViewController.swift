@@ -18,6 +18,18 @@ final class KeyboardPreferencesViewController: NSViewController {
     /// page is both simpler and more correct than patching the row that changed.
     private var recorders: [String: ShortcutRecorderView] = [:]
 
+    /// The Return-key choice. Held across rebuilds rather than rebuilt with the rest of the
+    /// page: it is the one control here that is not a chord recorder, and re-adding the same
+    /// pop-up keeps its open menu and selection from being torn out underneath a click.
+    private lazy var returnKeyPopUp = SettingsUI.popUp(
+        target: self,
+        action: #selector(returnKeyChanged)
+    )
+
+    /// The line under that row, which names the chord the choice leaves behind. Re-captured on
+    /// every rebuild because the row builds a fresh label each time.
+    private var returnKeyDetail: NSTextField?
+
     // MARK: - Lifecycle
 
     override func loadView() {
@@ -36,7 +48,8 @@ final class KeyboardPreferencesViewController: NSViewController {
 
         var sections: [NSView] = [
             SettingsUI.heading(Strings.heading),
-            SettingsUI.note(Strings.note)
+            SettingsUI.note(Strings.note),
+            SettingsUI.section(Strings.composerSection, SettingsCard(rows: [makeReturnKeyRow()]))
         ]
 
         for (group, commands) in registry.grouped() {
@@ -87,6 +100,35 @@ final class KeyboardPreferencesViewController: NSViewController {
             subtitle: subtitle(for: command, shortcut: shortcut),
             control: recorder
         )
+    }
+
+    /// Return sits on this page rather than among the command chords because it is not one: it
+    /// is never unbound, never in conflict, and belongs to a field rather than to the menu bar.
+    /// It is here all the same, because "what is this key already doing" is what brings people
+    /// to a shortcuts page, and Return is the key they are most often asking about.
+    private func makeReturnKeyRow() -> NSView {
+        returnKeyPopUp.removeAllItems()
+        for value in PromptReturnKey.allCases {
+            returnKeyPopUp.addItem(
+                ThemedMenuItem(title: value.settingsTitle, representedValue: value)
+            )
+        }
+        returnKeyPopUp.selectItem(
+            at: PromptReturnKey.allCases.firstIndex(of: AppSettings.promptReturnKey) ?? 0
+        )
+
+        var detail: NSTextField?
+        let row = SettingsUI.row(
+            title: Strings.returnKeyTitle,
+            subtitle: AppSettings.promptReturnKey.settingsDetail,
+            control: returnKeyPopUp,
+            subtitleField: &detail,
+            // The detail is already localised by `PromptReturnKey`, and a second pass would ask
+            // the catalogue for a *translated* string as if it were a source key.
+            localizes: false
+        )
+        returnKeyDetail = detail
+        return row
     }
 
     private func rowTitle(_ command: AppCommand) -> String {
@@ -140,6 +182,17 @@ final class KeyboardPreferencesViewController: NSViewController {
         alert.runModal()
     }
 
+    /// Updates the line in place rather than rebuilding the page: the whole point of the detail
+    /// is to answer "then how do I get the other one", and it has to be readable in the moment
+    /// the choice is made, not after the row it belongs to has been replaced under the pointer.
+    @objc private func returnKeyChanged() {
+        guard let value = returnKeyPopUp.selectedItem?.representedValue as? PromptReturnKey else {
+            return
+        }
+        AppSettings.shared.promptReturnKey = value
+        returnKeyDetail?.stringValue = value.settingsDetail
+    }
+
     @objc private func resetAllClicked() {
         store.resetAll()
         rebuild()
@@ -156,6 +209,13 @@ private enum Strings {
                 + "Escape cancels, Delete removes the shortcut."
         )
     }
+
+    /// A source key, localised by `SettingsUI.section` like every other section caption.
+    static let composerSection = "Composer"
+
+    /// Localised here instead, because the row it titles is built with `localizes: false` —
+    /// its subtitle arrives from `PromptReturnKey` already translated.
+    static var returnKeyTitle: String { L10n.string("When writing a prompt, press Return to") }
 
     static let conflictFormat = "Already used by %@"
     static let defaultConflictFormat = "Default %@ is used by %@"

@@ -222,7 +222,10 @@ enum SettingsPages {
             hostPage: .keyboard,
             title: keyboardTitle,
             symbol: "keyboard",
-            searchTerms: terms("shortcuts", "keys", "bindings", "commands", "reset")
+            searchTerms: terms(
+                "shortcuts", "keys", "bindings", "commands", "reset",
+                "return", "enter", "send", "new line", "composer"
+            )
         ) { KeyboardPreferencesViewController() },
         Page(
             id: usageID,
