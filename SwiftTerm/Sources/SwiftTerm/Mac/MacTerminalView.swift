@@ -74,7 +74,19 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
      * The delegate that the TerminalView uses to interact with its hosting
      */
     public weak var terminalDelegate: TerminalViewDelegate?
-    
+
+    /**
+     * Gives a subclass a chance to keep the emulator on an explicitly managed grid, one that
+     * does not follow this view's pixel size.
+     *
+     * Called before the emulator is touched, so returning false suppresses the whole of the
+     * frame-driven resize: no reflow of the buffer, no soft reset, and no delegate
+     * notification. The default preserves SwiftTerm behaviour.
+     */
+    open func shouldApplyFrameSizeChange(newCols: Int, newRows: Int) -> Bool {
+        true
+    }
+
     /// If true, the caret view will show different shapes depending on the focus
     /// otherwise, it will behave like it is focused
     public var caretViewTracksFocus: Bool {

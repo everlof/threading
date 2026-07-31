@@ -102,7 +102,19 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
      * The delegate that the TerminalView uses to interact with its hosting
      */
     public weak var terminalDelegate: TerminalViewDelegate?
-    
+
+    /**
+     * Gives a subclass a chance to keep the emulator on an explicitly managed grid, one that
+     * does not follow this view's pixel size.
+     *
+     * Called before the emulator is touched, so returning false suppresses the whole of the
+     * frame-driven resize: no reflow of the buffer, no soft reset, and no delegate
+     * notification. The default preserves SwiftTerm behaviour.
+     */
+    open func shouldApplyFrameSizeChange(newCols: Int, newRows: Int) -> Bool {
+        true
+    }
+
     /**
      * If set, and the the client application has requested mouse events to be sent, this will
      * send the events.   If this value if false, then a secondary codepath is enabled that will

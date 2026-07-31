@@ -121,8 +121,16 @@ extension TerminalView {
     func processSizeChange (newSize: CGSize) -> Bool {
         let newRows = Int (newSize.height / cellDimension.height)
         let newCols = Int (getEffectiveWidth (size: newSize) / cellDimension.width)
-        
+
         if newCols != terminal.cols || newRows != terminal.rows {
+            // A subclass holding the emulator on a managed grid — a phone's viewport driving a
+            // Mac's PTY — gets asked before anything is touched. `terminal.resize` reflows the
+            // buffer and the resize path soft-resets it, so a view that is merely laid out at a
+            // different pixel size than its grid would otherwise lose the scrolling region of
+            // whatever full-screen program is running, on every single layout pass.
+            guard shouldApplyFrameSizeChange (newCols: newCols, newRows: newRows) else {
+                return false
+            }
             selection.active = false
             terminal.resize (cols: newCols, rows: newRows)
             
