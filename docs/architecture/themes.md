@@ -290,6 +290,22 @@ and a quiet surface role for the track, with the theme's radius. Ordinary scroll
 against chrome ink. SwiftTerm keeps its legacy column but installs the same component with
 backdrop ink, because the terminal palette — not the app theme — owns the ground beneath it.
 
+**A scroller standing outside a scroll view fades itself.** "Fades remain the platform's" holds
+only where a scroll view owns the scroller: it animates its scrollers, and while they are faded
+it does not call their drawing parts at all, so an authored thumb costs nothing at rest.
+SwiftTerm's scroller has no such owner — it is a bare `NSScroller` the terminal positions, sizes
+and drives itself — so `draw(_:)` runs on every display pass and calls both parts
+unconditionally. AppKit's own parts answer by painting nothing whatsoever: measured, a standalone
+`NSScroller` covers zero pixels in either style, whatever the user's scroll-bar preference. That
+is why the terminal had no visible scrollbar at all until the theme drew one, and why the one it
+drew then stayed up through every session. `ThemedScroller` therefore owns the fade wherever its
+superview is not an `NSScrollView`: down at rest, up when the *position* moves, held while the
+pointer is on it, and gone `Design.Motion.scrollerHold` later. Deliberately not on
+`knobProportion` — a terminal pinned to the bottom of a growing buffer reports the same position
+while its thumb shrinks on every line an agent prints, so revealing on the thumb would hold the
+bar up for the whole of a streaming answer. "Always show scroll bars" is honoured by never
+hiding, since for a standalone scroller this component is the only thing that reads it.
+
 Built-ins are immutable and use stable IDs. MCP exposes list/get/set/create/duplicate/update.
 `get_app_theme` returns `appearance` plus `variants.light`/`variants.dark` in the same snake-case
 `roles`, `material`, and `terminal_colors` vocabulary create/update accept, with resolved roles

@@ -573,6 +573,19 @@ final class AppEventObservations {
     ) {
         storage.tokens.append(storage.center.observe(type, using: handler))
     }
+
+    /// A notification AppKit posts, which carries no `AppEvent` value of ours. Same main-queue
+    /// delivery and the same lifetime, so an observer of a platform preference is torn down with
+    /// the view that cared about it rather than through a hand-held token.
+    func observe(
+        _ name: Notification.Name,
+        using handler: @escaping @MainActor @Sendable () -> Void
+    ) {
+        let token = storage.center.addObserver(forName: name, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { handler() }
+        }
+        storage.tokens.append(token)
+    }
 }
 
 /// NotificationCenter's token protocol predates Sendable. Mutation is main-actor confined by

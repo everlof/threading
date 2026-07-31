@@ -10,12 +10,18 @@ import AppKit
 /// The ink source matters for the terminal. Ordinary scroll views sit on app-owned chrome;
 /// SwiftTerm's scroller sits on the terminal palette that also paints the window backdrop. One
 /// component takes that difference as data rather than introducing a second scrollbar.
+///
+/// A scroller that stands alone — outside any `NSScrollView` — additionally owns its own fade;
+/// see `isUnmanaged`.
 final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
 
     let inkSource: InkSource
 
     private var themeRedraw: ThemeRedraw?
-    private let backdropEvents = AppEventObservations()
+    private let appEvents = AppEventObservations()
+    private var hoverTracking: NSTrackingArea?
+    private var isHovered = false
+    private var hideWork: DispatchWorkItem?
 
     override class var isCompatibleWithOverlayScrollers: Bool {
         self == ThemedScroller.self
@@ -45,15 +51,149 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
 
     private func observeAppearance() {
         themeRedraw = ThemeRedraw(self)
-        backdropEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in
+        appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in
             guard self?.inkSource == .backdrop else { return }
             self?.needsDisplay = true
+        }
+        appEvents.observe(NSScroller.preferredScrollerStyleDidChangeNotification) { [weak self] in
+            self?.settleVisibility()
         }
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
+    }
+
+    // MARK: - Standing Alone
+
+    /// Whether nothing but this view decides when the scrollbar is on screen.
+    ///
+    /// A scroll view owns its scrollers: it fades them, and while they are faded it does not
+    /// call their drawing parts at all — which is why every scroll surface in the app keeps
+    /// AppKit's overlay behaviour for free. SwiftTerm's scroller has no such owner. It is a bare
+    /// `NSScroller` the terminal positions, sizes and drives itself, so its `draw(_:)` runs on
+    /// every display pass and calls both parts unconditionally.
+    ///
+    /// AppKit's own parts answer that by painting nothing whatsoever — measured, a standalone
+    /// `NSScroller` covers zero pixels in either style, whatever the user's scroll-bar
+    /// preference. That is why the terminal had no visible scrollbar at all before this
+    /// component drew one, and why the one it drew stayed up forever: unconditional drawing is
+    /// correct only for a scroller somebody else is fading.
+    private var isUnmanaged: Bool {
+        guard let superview else { return false }
+        return !(superview is NSScrollView)
+    }
+
+    /// The user's own answer to the same question. "Always show scroll bars" asks for a
+    /// scrollbar that does not leave, and for a standalone scroller this is the only place that
+    /// preference is read.
+    private var neverHides: Bool { NSScroller.preferredScrollerStyle == .legacy }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        settleVisibility()
+        updateTrackingAreas()
+    }
+
+    /// The resting state, taken without animation: nothing has moved to animate from.
+    private func settleVisibility() {
+        hideWork?.cancel()
+        hideWork = nil
+        alphaValue = isUnmanaged && !neverHides ? 0 : 1
+    }
+
+    /// Brings the scrollbar up and starts the clock that takes it away again.
+    private func reveal() {
+        guard isUnmanaged, isEnabled else { return }
+        setRevealed(true)
+        scheduleHide()
+    }
+
+    private func scheduleHide() {
+        hideWork?.cancel()
+        hideWork = nil
+        guard isUnmanaged, !neverHides, !isHovered else { return }
+        let work = DispatchWorkItem { [weak self] in self?.setRevealed(false) }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Design.Motion.scrollerHold, execute: work)
+    }
+
+    /// The animator proxy writes the value through before it animates it, so a caller — or a
+    /// test — reads the state it asked for whether or not the fade is running.
+    private func setRevealed(_ revealed: Bool) {
+        let target: CGFloat = revealed ? 1 : 0
+        guard alphaValue != target else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = revealed ? Design.Motion.appear : Design.Motion.vanish
+            animator().alphaValue = target
+        }
+    }
+
+    /// Movement of the *position* is the only thing worth showing a scrollbar for.
+    ///
+    /// Deliberately not `knobProportion`: a terminal pinned to the bottom of a growing buffer
+    /// reports the same position — SwiftTerm's `scrollPosition` saturates at 1 — while its thumb
+    /// shrinks on every line an agent prints. Revealing on the thumb would hold the scrollbar up
+    /// for the whole of a streaming answer, which is the state this was reported in.
+    override var doubleValue: Double {
+        get { super.doubleValue }
+        set {
+            let moved = newValue != super.doubleValue
+            super.doubleValue = newValue
+            if moved { reveal() }
+        }
+    }
+
+    /// Nothing to scroll, nothing to show — a terminal that just handed its screen to a
+    /// full-screen program takes its scrollbar with it rather than leaving one behind.
+    override var isEnabled: Bool {
+        get { super.isEnabled }
+        set {
+            super.isEnabled = newValue
+            guard !newValue, isUnmanaged, !neverHides else { return }
+            hideWork?.cancel()
+            hideWork = nil
+            setRevealed(false)
+        }
+    }
+
+    /// Reaching for the scrollbar keeps it, which is what makes a revealed one grabbable. A
+    /// managed scroller is left alone: AppKit already tracks its own hover, and expands on it.
+    ///
+    /// The terminal's scroller is exactly the view `PointerTracking` describes — it is resized
+    /// under a stationary pointer on every window resize and every font change — so the hover
+    /// flag is re-derived here rather than waiting for a `mouseExited` that will not come.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if hoverIsStale(isHovered) {
+            isHovered = false
+            scheduleHide()
+        }
+        if let hoverTracking {
+            removeTrackingArea(hoverTracking)
+            self.hoverTracking = nil
+        }
+        guard isUnmanaged else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        isHovered = true
+        reveal()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        isHovered = false
+        scheduleHide()
     }
 
     override func drawKnob() {

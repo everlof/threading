@@ -13,7 +13,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     replace only the visible `NSScroller`; SwiftTerm immediately restates its target, action,
     geometry and current scroll position and continues updating that instance. Threading uses
     this to install `ThemedScroller` with backdrop ink while retaining SwiftTerm's legacy-style
-    column and all of its scrolling behavior.
+    column and all of its scrolling behavior. The scroller is a bare `NSScroller` in a plain
+    view rather than a scroll view's, so nothing upstream fades it — AppKit's own drawing
+    answers that by painting nothing at all, and a scrollbar that *does* draw has to hide
+    itself. `ThemedScroller` carries that fade; see
+    [`themes.md`](themes.md).
   - **The PTY seam is ours.** Local processes launch through `forkpty`; a `posix_spawn`-based
     wrapper cannot establish the child as the PTY's controlling terminal. The launch publishes
     the exact child PID synchronously, before its exit source is activated, and reaps that PID

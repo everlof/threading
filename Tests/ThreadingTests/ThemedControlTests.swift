@@ -2747,6 +2747,123 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertTrue(backdrop.needsDisplay)
     }
 
+    /// A scroller inside a scroll view is AppKit's to fade — it must not also be ours, or two
+    /// owners would fight over one alpha.
+    func testAScrollbarInsideAScrollViewIsLeftEntirelyToAppKit() throws {
+        let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 120, height: 180))
+        scroll.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 720))
+        scroll.hasVerticalScroller = true
+        scroll.layoutSubtreeIfNeeded()
+
+        let scroller = try XCTUnwrap(scroll.verticalScroller as? ThemedScroller)
+        XCTAssertEqual(scroller.alphaValue, 1)
+
+        scroller.doubleValue = 0.4
+        XCTAssertEqual(scroller.alphaValue, 1, "a managed scroller must not take its own fade")
+    }
+
+    /// The terminal's scrollbar: a bare `NSScroller` in an ordinary view, which AppKit neither
+    /// fades nor draws. Standing alone means owning both, and the resting state is down.
+    func testAStandaloneScrollbarRestsDownAndComesUpOnlyForMovement() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let scroller = standaloneScroller()
+        XCTAssertEqual(scroller.alphaValue, 0, "a standalone scrollbar starts out of the way")
+
+        // What a streaming agent produces: the buffer grows under a viewport pinned to the
+        // bottom, so the thumb shrinks while the position stays exactly where it was.
+        scroller.knobProportion = 0.05
+        scroller.knobProportion = 0.02
+        XCTAssertEqual(
+            scroller.alphaValue,
+            0,
+            "output arriving under a pinned viewport is not scrolling and must not raise the bar"
+        )
+
+        scroller.doubleValue = 0.6
+        XCTAssertEqual(scroller.alphaValue, 1, "scrolling raises it")
+    }
+
+    /// The bar goes away on its own, and waits while the pointer is on it — otherwise the thumb
+    /// that just appeared could not be grabbed.
+    func testAStandaloneScrollbarLeavesAfterItsHoldUnlessTheHandIsOnIt() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let scroller = standaloneScroller()
+        scroller.doubleValue = 0.6
+        XCTAssertEqual(scroller.alphaValue, 1)
+
+        waitForRunLoop(Design.Motion.scrollerHold + 0.2)
+        XCTAssertEqual(scroller.alphaValue, 0, "the bar leaves on its own after the hold")
+
+        scroller.mouseEntered(with: crossingEvent())
+        XCTAssertEqual(scroller.alphaValue, 1, "reaching for it brings it back")
+        waitForRunLoop(Design.Motion.scrollerHold + 0.2)
+        XCTAssertEqual(scroller.alphaValue, 1, "and it waits there while the pointer is on it")
+
+        scroller.mouseExited(with: crossingEvent())
+        waitForRunLoop(Design.Motion.scrollerHold + 0.2)
+        XCTAssertEqual(scroller.alphaValue, 0)
+    }
+
+    /// Nothing to scroll, nothing to show: a program that takes the alternate screen buffer
+    /// disables the scroller, and it must not leave a bar behind while its hold runs out.
+    func testAStandaloneScrollbarGoesWithTheScrollbackItReported() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let scroller = standaloneScroller()
+        scroller.doubleValue = 0.6
+        XCTAssertEqual(scroller.alphaValue, 1)
+
+        scroller.isEnabled = false
+        XCTAssertEqual(scroller.alphaValue, 0)
+
+        scroller.doubleValue = 0.2
+        XCTAssertEqual(scroller.alphaValue, 0, "a disabled scrollbar has nothing to report")
+    }
+
+    /// A scroller SwiftTerm's way: added to a plain view, enabled, with a position of its own.
+    private func standaloneScroller() -> ThemedScroller {
+        let scroller = ThemedScroller(
+            frame: NSRect(x: 0, y: 0, width: 17, height: 180),
+            inkSource: .backdrop
+        )
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 180))
+        host.addSubview(scroller)
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        scroller.isEnabled = true
+        return scroller
+    }
+
+    private func waitForRunLoop(_ interval: TimeInterval) {
+        let settled = expectation(description: "the run loop advanced")
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval) { settled.fulfill() }
+        wait(for: [settled], timeout: interval + 5)
+    }
+
+    private func crossingEvent() -> NSEvent {
+        NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        )!
+    }
+
     func testHorizontalOnlyScrollSurfaceHandsVerticalGestureToConversation() throws {
         let outer = ScrollWheelSpy(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
         let document = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 640))
