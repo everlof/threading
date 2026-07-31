@@ -148,6 +148,18 @@ the release, and now also lets go of the press when the drag leaves it, which `T
 from the start and this one did not: the press was decided at the release and shown nowhere, so a
 slip off a 20-point target cancelled silently and left the button drawn as though held.
 
+**The click that dismisses a menu lands on a sibling that opens one.** The dropdown's overlay
+swallows its dismissing click the way `NSMenu` does — a click on the terminal to let a menu go
+must not also type into it — with one exception it owes to hover. Hit testing is what the overlay
+takes over; hover is driven by tracking areas, which it cannot silence, so a chip under an open
+menu keeps its hover invitation and even widens to its full label. A control that invites the
+click must honour it: with the composer's account menu open, clicking the model chip closed one
+menu and opened nothing, a dead click on a control that was actively lit. The overlay therefore
+resolves what its dismissing click landed on, and when that is a `ThemedMenuOpening` control
+(`ChipView`, `ThemedPopUp`, a menu-presenting `ThemedIconButton`) — and not the very control whose
+menu is open, whose click stays a toggle-close — it hands the press over, drag and release
+included, so the menu moves between siblings the way menu-bar titles have always traded one click.
+
 **A surface role is translucent on purpose, and that purpose ends where live content begins.**
 `surface` is the base tone at 14%, which is what makes a pill read as a lift off the backdrop
 rather than as a patch stuck on it — right for a control on an empty stretch of chrome, wrong for

@@ -285,6 +285,76 @@ final class ChipViewTests: XCTestCase {
         )
     }
 
+    /// With one chip's menu open, a click on a sibling chip moves the menu there rather than
+    /// only closing. The overlay does not silence tracking areas, so the sibling has been
+    /// showing its hover invitation the whole time — a click it invited must land.
+    func testAClickOnASiblingChipMovesTheMenuThereInsteadOfOnlyClosing() throws {
+        let (first, second, root, window) = try twoChipsInAWindow()
+        defer { window.close() }
+
+        XCTAssertTrue(first.accessibilityPerformShowMenu())
+        let overlay = try XCTUnwrap(
+            root.subviews.first { !($0 is ChipView) },
+            "opening the menu should have added its overlay"
+        )
+
+        let target = second.convert(NSPoint(x: second.bounds.midX, y: second.bounds.midY), to: nil)
+        overlay.mouseDown(with: try mouseEvent(.leftMouseDown, at: target, in: window))
+
+        let menus = descendants(in: root).filter { $0.accessibilityRole() == .menu }
+        XCTAssertEqual(menus.count, 1, "exactly the sibling's menu should be open")
+        XCTAssertTrue(
+            descendants(in: root).contains {
+                $0.accessibilityRole() == .menuItem && $0.accessibilityTitle() == "Alpha"
+            },
+            "the open menu should be the sibling's"
+        )
+    }
+
+    /// The two clicks that must keep only closing: back on the chip whose menu is open — the
+    /// toggle — and anywhere that opens nothing, where the dismissing click is swallowed the
+    /// way `NSMenu` swallows it rather than passed to whatever content lies underneath.
+    func testAClickOnTheOpenChipOrOnEmptySpaceOnlyCloses() throws {
+        for pointOfDismissal in [NSPoint(x: 94, y: 193), NSPoint(x: 400, y: 250)] {
+            let (first, _, root, window) = try twoChipsInAWindow()
+            defer { window.close() }
+
+            XCTAssertTrue(first.accessibilityPerformShowMenu())
+            let overlay = try XCTUnwrap(root.subviews.first { !($0 is ChipView) })
+
+            overlay.mouseDown(with: try mouseEvent(.leftMouseDown, at: pointOfDismissal, in: window))
+
+            XCTAssertFalse(
+                descendants(in: root).contains { $0.accessibilityRole() == .menu },
+                "the click at \(pointOfDismissal) should have closed the menu and opened nothing"
+            )
+        }
+    }
+
+    /// Two chips side by side, the way a composer row carries them, with distinct menus so a
+    /// test can tell whose is open.
+    private func twoChipsInAWindow() throws -> (
+        first: ChipView, second: ChipView, root: NSView, window: NSWindow
+    ) {
+        let first = ChipView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        first.itemsProvider = { [self] in entries(titles: ["One", "Two"]) }
+        let second = ChipView(frame: NSRect(x: 220, y: 180, width: 140, height: 26))
+        second.itemsProvider = { [self] in entries(titles: ["Alpha", "Beta"]) }
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        root.addSubview(first)
+        root.addSubview(second)
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        return (first, second, root, window)
+    }
+
     func testFocusDrawsAnAccentRingAndResigningClearsIt() {
         let chip = ChipView(frame: NSRect(x: 10, y: 10, width: 120, height: 26))
         let window = NSWindow(

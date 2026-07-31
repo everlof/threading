@@ -139,6 +139,38 @@ enum ThemedMenuPresenter {
     }
 }
 
+// MARK: - Handoff
+
+/// A control whose press opens a `ThemedMenuPresenter` dropdown.
+///
+/// This roster is what lets the click that dismisses one menu *land* on a sibling that opens
+/// another. The overlay swallows its dismissing click the way `NSMenu` does — but hit testing
+/// is not what drives hover, so a chip under the overlay keeps its hover invitation (it even
+/// widens to its full label) while a click on it would silently vanish. A control that shows
+/// that invitation must honour the click: the overlay re-dispatches it, and the press behaves
+/// exactly as if no menu had been open. Everything else keeps the platform's swallow — a click
+/// on the terminal to let a menu go must not also type into it.
+@MainActor
+protocol ThemedMenuOpening: NSView {
+    /// Whether a press would open this control's menu right now — enabled, and for controls
+    /// that carry both gestures, configured to present one.
+    var opensMenuOnPress: Bool { get }
+}
+
+// Gathered here rather than spread across the adopters: who may take the handoff is the
+// presenter's contract, and one place states the whole roster.
+extension ChipView: ThemedMenuOpening {
+    var opensMenuOnPress: Bool { isEnabled }
+}
+
+extension ThemedPopUp: ThemedMenuOpening {
+    var opensMenuOnPress: Bool { isEnabled }
+}
+
+extension ThemedIconButton: ThemedMenuOpening {
+    var opensMenuOnPress: Bool { presentsMenu && isEnabled }
+}
+
 /// Where a press-drag-release ended, as the overlay reports it to the session.
 private enum ThemedMenuDragTarget {
     case row(Int, ThemedMenuItem)
@@ -246,6 +278,7 @@ private final class ThemedMenuSession: NSObject {
 
         super.init()
 
+        overlay.menuSource = source
         overlay.onDismiss = { [weak self] in self?.closeFromUser() }
         overlay.onChoose = { [weak self] index, item in self?.choose(index: index, item: item) }
         overlay.autoresizingMask = [.width, .height]
@@ -351,6 +384,14 @@ private final class ThemedMenuOverlayView: ThemedControl {
     var onChoose: ((Int, ThemedMenuItem) -> Void)?
     var onDismiss: (() -> Void)?
 
+    /// The control whose menu this overlay carries, so the dismissing-click handoff can tell a
+    /// sibling (open its menu) from the source itself (a toggle, which only closes).
+    weak var menuSource: NSView?
+
+    /// The sibling the dismissing press was handed to, kept so the rest of that press — its
+    /// drag and release — follows it there.
+    private weak var handoffTarget: NSView?
+
     private let menuSurface: ThemedMenuSurfaceView
     /// A plain chassis under the surface carrying the elevation shadow. Separate on purpose:
     /// the surface's own layer belongs to `applySurface`, whose theme glow clears and rewrites
@@ -436,7 +477,53 @@ private final class ThemedMenuOverlayView: ThemedControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        let window = self.window
+        let source = menuSource
         onDismiss?()
+
+        // The dismissing click is swallowed, as `NSMenu` swallows it — unless it landed on a
+        // sibling that opens a menu of its own. Hit testing is not what drives hover, so that
+        // sibling kept its hover invitation under this overlay the whole time; a control that
+        // invites the click must honour it. The teardown above has already taken this overlay
+        // out of hit testing, so the window's tree resolves to what the user was aiming at,
+        // and the press is handed to it as if no menu had been open. A click back on the
+        // control that opened *this* menu stays a plain toggle-close, and a click anywhere
+        // else keeps the platform's swallow — letting a menu go by clicking the terminal
+        // must not also type into it.
+        guard let window,
+              let target = Self.menuOpener(in: window, at: event.locationInWindow),
+              target !== source
+        else { return }
+        handoffTarget = target
+        target.mouseDown(with: event)
+    }
+
+    // The press that dismissed this menu may still be held while AppKit keeps routing its drag
+    // and release here, the mouse-down view. Forwarded to the control the press was handed to,
+    // so press-drag-release keeps choosing on the menu it opened — the same forwarding that
+    // control does for a press that began on it.
+    override func mouseDragged(with event: NSEvent) {
+        handoffTarget?.mouseDragged(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        handoffTarget?.mouseUp(with: event)
+    }
+
+    /// The menu-opening control under a window point, or nil where the swallow should stand.
+    /// Resolved by walking up from the deepest hit, because the pixel under a click on a chip
+    /// is usually its label.
+    private static func menuOpener(in window: NSWindow, at windowPoint: NSPoint) -> NSView? {
+        guard let root = window.contentView else { return nil }
+        let point = root.superview?.convert(windowPoint, from: nil) ?? windowPoint
+        var view = root.hitTest(point)
+        while let current = view {
+            if let opener = current as? ThemedMenuOpening {
+                return opener.opensMenuOnPress ? opener : nil
+            }
+            view = current.superview
+        }
+        return nil
     }
 
     // MARK: - Motion
