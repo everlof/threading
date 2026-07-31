@@ -7,7 +7,7 @@ import Foundation
 /// Claude and Codex adapters map their different JSONL shapes here. Only what the panel
 /// actually needs is modelled; anything unrecognised becomes `.unknown`, so a new provider event
 /// in a future release is ignored rather than fatal.
-enum StreamEvent {
+enum StreamEvent: Sendable {
 
     /// Session established. Carries the identifier the CLI settled on, which for a resume is
     /// not necessarily the one we asked for.
@@ -72,7 +72,7 @@ enum StreamEvent {
 /// `outputTokens` is deliberately output rather than total context: the down-arrow in the
 /// status line means "tokens the agent generated this turn". Input/context tokens can dwarf
 /// the answer on a resumed conversation and answer a different question.
-struct TurnMetrics: Equatable {
+struct TurnMetrics: Equatable, Sendable {
     var duration: TimeInterval?
     var outputTokens: Int?
     var effort: String?
@@ -117,7 +117,7 @@ struct TurnMetrics: Equatable {
 /// The tools whose behavior Threading understands, independent of the provider spelling that
 /// introduced them. Unknown and MCP tools keep their original name: they still render
 /// intelligibly, and a future tool cannot accidentally inherit the permissions of a known one.
-enum ToolIdentity: Hashable {
+enum ToolIdentity: Hashable, Sendable {
     case bash
     case read
     case write
@@ -216,15 +216,15 @@ enum ToolIdentity: Hashable {
 }
 
 /// One piece of an assistant message.
-enum ContentBlock {
+enum ContentBlock: Sendable {
     case text(String)
     case thinking(String)
-    case toolUse(id: String, tool: ToolIdentity, input: [String: Any])
+    case toolUse(id: String, tool: ToolIdentity, input: [String: JSONValue])
 }
 
 // MARK: - Tool Result
 
-struct ToolResult {
+struct ToolResult: Sendable {
     let toolUseID: String
     let text: String
     let isError: Bool
@@ -234,7 +234,7 @@ struct ToolResult {
 
 /// Arbitrary JSON retained inside typed provider envelopes, primarily for tool arguments and
 /// results whose schemas belong to the tool rather than to the stream protocol.
-enum JSONValue: Codable, Equatable {
+enum JSONValue: Codable, Equatable, Sendable {
     case object([String: JSONValue])
     case array([JSONValue])
     case string(String)
@@ -242,6 +242,48 @@ enum JSONValue: Codable, Equatable {
     case number(Double)
     case bool(Bool)
     case null
+
+    /// Bridges the one remaining Foundation-JSON boundary used by transcript replay.
+    ///
+    /// Conversion is all-or-nothing for containers: an unexpected non-JSON value rejects the
+    /// complete object instead of silently dropping the field that made it invalid.
+    init?(foundationValue value: Any) {
+        switch value {
+        case is NSNull:
+            self = .null
+        case let value as Bool:
+            self = .bool(value)
+        case let value as String:
+            self = .string(value)
+        case let value as NSNumber:
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                self = .bool(value.boolValue)
+            } else if value.doubleValue.rounded(.towardZero) == value.doubleValue {
+                self = .integer(value.int64Value)
+            } else {
+                self = .number(value.doubleValue)
+            }
+        case let value as [Any]:
+            let converted = value.compactMap(JSONValue.init(foundationValue:))
+            guard converted.count == value.count else { return nil }
+            self = .array(converted)
+        case let value as [String: Any]:
+            guard let converted = Self.object(from: value) else { return nil }
+            self = .object(converted)
+        default:
+            return nil
+        }
+    }
+
+    static func object(from value: [String: Any]) -> [String: JSONValue]? {
+        var converted: [String: JSONValue] = [:]
+        converted.reserveCapacity(value.count)
+        for (key, raw) in value {
+            guard let item = JSONValue(foundationValue: raw) else { return nil }
+            converted[key] = item
+        }
+        return converted
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -313,6 +355,38 @@ enum JSONValue: Codable, Equatable {
         if prettyPrinted { encoder.outputFormatting = [.prettyPrinted, .sortedKeys] }
         guard let data = try? encoder.encode(self) else { return "" }
         return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+
+extension JSONValue: ExpressibleByStringLiteral {
+    init(stringLiteral value: String) { self = .string(value) }
+}
+
+extension JSONValue: ExpressibleByIntegerLiteral {
+    init(integerLiteral value: Int64) { self = .integer(value) }
+}
+
+extension JSONValue: ExpressibleByFloatLiteral {
+    init(floatLiteral value: Double) { self = .number(value) }
+}
+
+extension JSONValue: ExpressibleByBooleanLiteral {
+    init(booleanLiteral value: Bool) { self = .bool(value) }
+}
+
+extension JSONValue: ExpressibleByNilLiteral {
+    init(nilLiteral: ()) { self = .null }
+}
+
+extension JSONValue: ExpressibleByArrayLiteral {
+    init(arrayLiteral elements: JSONValue...) { self = .array(elements) }
+}
+
+extension JSONValue: ExpressibleByDictionaryLiteral {
+    init(dictionaryLiteral elements: (String, JSONValue)...) {
+        var object: [String: JSONValue] = [:]
+        for (key, value) in elements { object[key] = value }
+        self = .object(object)
     }
 }
 
@@ -438,7 +512,7 @@ extension StreamEvent {
             return .toolUse(
                 id: id,
                 tool: ToolIdentity(name),
-                input: block.input?.foundationObject ?? [:]
+                input: block.input?.objectValue ?? [:]
             )
         default:
             return nil
@@ -478,10 +552,12 @@ extension StreamEvent {
             guard let id = block["id"] as? String, let name = block["name"] as? String else {
                 return nil
             }
+            let rawInput = block["input"] as? [String: Any] ?? [:]
+            guard let input = JSONValue.object(from: rawInput) else { return nil }
             return .toolUse(
                 id: id,
                 tool: ToolIdentity(name),
-                input: block["input"] as? [String: Any] ?? [:]
+                input: input
             )
         default:
             return nil

@@ -112,6 +112,10 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         baseURL.appendingPathComponent("api/notifications")
     }
 
+    public var diagnosticUploadURL: URL {
+        baseURL.appendingPathComponent("api/diagnostics")
+    }
+
     public var invitationAcceptanceURL: URL {
         baseURL.appendingPathComponent("api/invitations/accept")
     }

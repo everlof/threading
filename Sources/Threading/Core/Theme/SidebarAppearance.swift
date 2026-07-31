@@ -37,9 +37,11 @@ enum SidebarAppearance {
 
     /// What the current theme asks the sidebar's ground to draw, or nil for the plain surface
     /// every theme drew before this existed.
-    static func background(
-        for appearance: NSAppearance = NSApplication.shared.effectiveAppearance
-    ) -> Background? {
+    static func background() -> Background? {
+        background(for: NSApplication.shared.effectiveAppearance)
+    }
+
+    static func background(for appearance: NSAppearance) -> Background? {
         let theme = AppThemePalette.current
         guard let stated = theme.variant(for: appearance)?.sidebar?.background,
               !stated.isEmpty else { return nil }
@@ -85,9 +87,11 @@ enum SidebarAppearance {
     }
 
     /// Always answers: absence at every level means the Threading mark beside the app's name.
-    static func brand(
-        for appearance: NSAppearance = NSApplication.shared.effectiveAppearance
-    ) -> Brand {
+    static func brand() -> Brand {
+        brand(for: NSApplication.shared.effectiveAppearance)
+    }
+
+    static func brand(for appearance: NSAppearance) -> Brand {
         let theme = AppThemePalette.current
         let stated = theme.variant(for: appearance)?.sidebar?.brand
 

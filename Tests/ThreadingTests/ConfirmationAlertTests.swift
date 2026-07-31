@@ -146,21 +146,70 @@ final class ConfirmationAlertTests: XCTestCase {
     /// — so it may be switched off, and the sheet has to say that rather than leaving someone
     /// to guess whether Quit loses their work.
     func testTheQuitAlertSaysTheConversationsSurviveAndCanBeSwitchedOff() {
-        let request = AppDelegate.quitConfirmation(runningSessionCount: 3)
+        let request = AppDelegate.quitConfirmation(
+            runningSessionCount: 6,
+            inFlightTurnCount: 3
+        )
 
-        XCTAssertTrue(request.title.contains("3"), "the count is the reason it is asking")
+        XCTAssertTrue(request.title.contains("3"), "the turns are the reason it is asking")
         XCTAssertTrue(request.message.contains("resumed"))
         XCTAssertNotNil(ConfirmationPrompt.quitWithRunningAgents.suppression)
         XCTAssertTrue(ConfirmationAlert.makeAlert(request).showsSuppressionButton)
     }
 
-    /// "1 agents" is the kind of thing nobody notices until it ships, and the singular is the
-    /// common case: one chat working while you reach for Cmd+Q.
-    func testTheQuitAlertReadsProperlyForASingleAgent() {
-        let title = AppDelegate.quitConfirmation(runningSessionCount: 1).title
+    /// Six live sessions with nothing being written is the ordinary state of this app — an
+    /// agent sits idle at its prompt between turns — and the sheet used to call all six
+    /// "agents still running", which reads as six answers about to be destroyed. The count was
+    /// right and the noun was not: quitting them costs nothing but the processes.
+    func testTheQuitAlertNamesSessionsRatherThanAgentsWhenNothingIsInFlight() {
+        let request = AppDelegate.quitConfirmation(
+            runningSessionCount: 6,
+            inFlightTurnCount: 0
+        )
 
-        XCTAssertTrue(title.contains("one agent"), title)
-        XCTAssertFalse(title.contains("agents"), title)
+        XCTAssertTrue(request.title.contains("6 sessions open"), request.title)
+        XCTAssertFalse(request.title.contains("running"), request.title)
+        XCTAssertTrue(request.message.contains("Nothing is in flight"), request.message)
+    }
+
+    /// A turn being written is the one thing a quit actually destroys, so it leads the title
+    /// even when most of what is running is idle.
+    func testTheQuitAlertLeadsWithTheTurnsInFlight() {
+        let title = AppDelegate.quitConfirmation(
+            runningSessionCount: 6,
+            inFlightTurnCount: 2
+        ).title
+
+        XCTAssertTrue(title.contains("2 turns in flight"), title)
+        XCTAssertFalse(title.contains("6"), "the idle five are not what is being lost")
+    }
+
+    /// "1 turns" is the kind of thing nobody notices until it ships, and the singular is the
+    /// common case: one chat working while you reach for Cmd+Q.
+    func testTheQuitAlertReadsProperlyForASingleTurnAndASingleSession() {
+        let oneTurn = AppDelegate.quitConfirmation(
+            runningSessionCount: 4,
+            inFlightTurnCount: 1
+        ).title
+        let oneSession = AppDelegate.quitConfirmation(
+            runningSessionCount: 1,
+            inFlightTurnCount: 0
+        ).title
+
+        XCTAssertTrue(oneTurn.contains("one turn"), oneTurn)
+        XCTAssertFalse(oneTurn.contains("turns"), oneTurn)
+        XCTAssertTrue(oneSession.contains("one session"), oneSession)
+        XCTAssertFalse(oneSession.contains("sessions"), oneSession)
+    }
+
+    /// The count behind that title: a turn stopped on a question is as unfinished as one being
+    /// written, while a finished-but-unread session has nothing left to lose.
+    func testOnlyAnUnfinishedTurnCountsAsInFlight() {
+        XCTAssertTrue(SessionActivity.working.hasTurnInFlight)
+        XCTAssertTrue(SessionActivity.awaitingUser.hasTurnInFlight)
+        XCTAssertFalse(SessionActivity.idle.hasTurnInFlight)
+        XCTAssertFalse(SessionActivity.needsAttention.hasTurnInFlight)
+        XCTAssertFalse(SessionActivity.dormant.hasTurnInFlight)
     }
 
     /// The share sheet ships four buttons and the named modal responses stop at three, so its

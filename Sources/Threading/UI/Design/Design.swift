@@ -17,6 +17,7 @@ import CoreText
 ///   offering a single option hide rather than showing a dead menu.
 /// - **Content leads.** One element per view carries emphasis — usually the thing being
 ///   typed into or read. Everything else is secondary or tertiary label colour.
+@MainActor
 enum Design {
 
     // MARK: - Spacing
@@ -40,6 +41,7 @@ enum Design {
 
     // MARK: - Radius
 
+    @MainActor
     enum Radius {
         /// Panels, prompt boxes, anything holding content.
         ///
@@ -115,6 +117,16 @@ enum Design {
         /// Compact controls floating in the transparent window toolbar.
         static let toolbarButtonWidth: CGFloat = 30
         static let toolbarButtonHeight: CGFloat = 28
+        /// Height of a single-line text field — see `ThemedTextField`.
+        ///
+        /// Its own step rather than `chipHeight`, which it borrowed for as long as a field was
+        /// "a chip you can type in". A chip holds a word at rest; a field holds a *caret*, and
+        /// the theme's rule around it is two points thick on each side, so at 26 the twenty
+        /// points left inside were carrying a thirteen-point face with barely three points of
+        /// air above and below it — the text read as wedged against the border rather than set
+        /// in a box. 32 leaves the same air a row of the list has.
+        static let fieldHeight: CGFloat = 32
+
         /// Height of the prompt box and anything else that reads as a primary input.
         static let inputHeight: CGFloat = 44
 
@@ -156,6 +168,7 @@ enum Design {
     /// size. Keeping even code, counters, placeholders, and decorative emoji here prevents a
     /// screen assembled from individually reasonable but mutually inconsistent 10/11/12/13pt
     /// decisions.
+    @MainActor
     enum Typography {
 
         /// Which surface a font is being asked for, since two of them may be set differently.
@@ -447,6 +460,7 @@ enum Design {
 
     /// Fills and borders, all derived from system colours so light and dark both work and
     /// the accent colour is the user's own.
+    @MainActor
     enum Surface {
         /// A control at rest. Below full opacity so a row of them stays quiet.
         static var controlResting: NSColor {
@@ -493,6 +507,7 @@ enum Design {
     /// These exist because the app made 150 direct calls to `NSColor.secondaryLabelColor` and
     /// friends — more than ten times the number of surface tokens — so a theme that reached
     /// only the surfaces would have repainted the containers and left every word in them alone.
+    @MainActor
     enum Text {
         static var label: NSColor { AppThemePalette.color(.label) }
         static var secondary: NSColor { AppThemePalette.color(.secondaryLabel) }
@@ -561,6 +576,7 @@ enum Design {
     /// without being written twice. A tab in the display pane and the same tab in the toolbar
     /// differ in *where their colours come from* and in nothing else, so that is the only thing
     /// they state; see `InkSource`.
+    @MainActor
     struct Ink {
 
         /// The tone every derived value here is cut from: white over a dark ground, black over a
@@ -771,6 +787,7 @@ enum Design {
 
     // MARK: - Motion
 
+    @MainActor
     enum Motion {
         /// A deterministic seam for behavior and render tests. Production always follows the
         /// user's macOS accessibility preference.
@@ -839,6 +856,7 @@ enum Design {
     /// AppKit adapts its own controls automatically. Our controls deliberately replace that
     /// chrome, so these preferences are design inputs just like the active theme. Test
     /// overrides keep the behavior deterministic without changing the user's Mac settings.
+    @MainActor
     enum Accessibility {
         static var increaseContrastOverrideForTesting: Bool?
         static var differentiateWithoutColorOverrideForTesting: Bool?
@@ -936,6 +954,7 @@ extension NSAttributedString {
 /// radius — Swiss makes panel, control, and pill corners all zero — so recovering the role by
 /// comparing numbers loses information. Keeping the role lets a later theme resolve each one
 /// independently.
+@MainActor
 enum SurfaceRadius {
     case panel
     case control

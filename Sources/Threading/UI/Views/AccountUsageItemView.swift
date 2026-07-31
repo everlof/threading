@@ -33,7 +33,7 @@ final class AccountUsageItemView: BackdropOverlay {
 
     /// Re-asks the service on a short cadence; the service's own spacing decides whether a
     /// tick actually fetches, so the timer stays cheap.
-    private var refreshTimer: Timer?
+    nonisolated(unsafe) private var refreshTimer: Timer?
 
     private weak var popover: NSPopover?
 

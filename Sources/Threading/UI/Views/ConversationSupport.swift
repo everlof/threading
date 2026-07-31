@@ -2,6 +2,7 @@ import AppKit
 
 // MARK: - Delegate
 
+@MainActor
 protocol ConversationViewControllerDelegate: AnyObject {
     func conversation(_ controller: ConversationViewController, didExitWithCode code: Int32)
 

@@ -15,7 +15,7 @@ enum GitReviewReader {
 
     /// What to diff. The working-tree cases synthesize untracked files in; the others are
     /// exactly what git reports.
-    enum DiffRequest {
+    enum DiffRequest: Sendable {
         case uncommitted
         case unstaged
         case staged
@@ -44,7 +44,7 @@ enum GitReviewReader {
         _ request: DiffRequest,
         in root: URL,
         ignoringWhitespace: Bool = false,
-        completion: @escaping @MainActor (Result<[GitFileDiff], Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<[GitFileDiff], Failure>) -> Void
     ) {
         perform(completion) { try performDiff(request, in: root, ignoringWhitespace: ignoringWhitespace) }
     }
@@ -57,7 +57,7 @@ enum GitReviewReader {
         _ request: DiffRequest,
         in root: URL,
         ignoringWhitespace: Bool = false,
-        completion: @escaping @MainActor (Result<String, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<String, Failure>) -> Void
     ) {
         perform(completion) {
             GitDiffParser.decode(try rawDiffData(request, in: root, ignoringWhitespace: ignoringWhitespace))
@@ -68,7 +68,7 @@ enum GitReviewReader {
     static func log(
         skip: Int,
         in root: URL,
-        completion: @escaping @MainActor (Result<[GitCommitSummary], Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<[GitCommitSummary], Failure>) -> Void
     ) {
         perform(completion) {
             guard hasCommits(in: root) else { throw Failure.noCommits }
@@ -79,7 +79,7 @@ enum GitReviewReader {
     /// The checkout's tracked and non-ignored untracked files, sorted for a compact browser.
     static func repositoryFiles(
         in root: URL,
-        completion: @escaping @MainActor (Result<[String], Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
     ) {
         perform(completion) {
             try repositoryFilePaths(in: root)
@@ -92,7 +92,7 @@ enum GitReviewReader {
     static func repositoryFile(
         path: String,
         in root: URL,
-        completion: @escaping @MainActor (Result<GitRepositoryFile, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<GitRepositoryFile, Failure>) -> Void
     ) {
         perform(completion) {
             guard try repositoryFilePaths(in: root).contains(path) else {
@@ -144,7 +144,7 @@ enum GitReviewReader {
         path: String,
         request: DiffRequest,
         in root: URL,
-        completion: @escaping @MainActor (Result<GitEndpointFilePair, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<GitEndpointFilePair, Failure>) -> Void
     ) {
         perform(completion) {
             let (old, new) = try endpoints(for: request, in: root)
@@ -163,7 +163,7 @@ enum GitReviewReader {
     static func recentSubjects(
         count: Int,
         in root: URL,
-        completion: @escaping @MainActor (Result<[String], Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
     ) {
         perform(on: summaryQueue, completion) {
             guard hasCommits(in: root) else { return [] }
@@ -179,7 +179,7 @@ enum GitReviewReader {
     /// untracked line counts, without producing a single hunk. Completion arrives on main.
     static func uncommittedSummary(
         in root: URL,
-        completion: @escaping @MainActor (Result<GitChangeSummary, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<GitChangeSummary, Failure>) -> Void
     ) {
         perform(on: summaryQueue, completion) {
             // The same unborn-HEAD rule as the full uncommitted diff: with nothing to diff
@@ -203,7 +203,7 @@ enum GitReviewReader {
     /// Captures the checkout's current state as a Last Turn baseline. Completion arrives on main.
     static func createSnapshot(
         in root: URL,
-        completion: @escaping @MainActor (Result<GitTurnBaseline, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<GitTurnBaseline, Failure>) -> Void
     ) {
         perform(completion) {
             guard hasCommits(in: root) else { throw Failure.noCommits }
@@ -226,10 +226,10 @@ enum GitReviewReader {
 
     // MARK: - Private Methods
 
-    private static func perform<Value>(
+    private static func perform<Value: Sendable>(
         on queue: DispatchQueue = GitReviewReader.queue,
-        _ completion: @escaping @MainActor (Result<Value, Failure>) -> Void,
-        _ work: @escaping () throws -> Value
+        _ completion: @escaping @MainActor @Sendable (Result<Value, Failure>) -> Void,
+        _ work: @escaping @Sendable () throws -> Value
     ) {
         queue.async {
             let result: Result<Value, Failure>
@@ -240,8 +240,8 @@ enum GitReviewReader {
             } catch {
                 result = .failure(.gitFailed(error.localizedDescription))
             }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { completion(result) }
+            Task { @MainActor in
+                completion(result)
             }
         }
     }

@@ -26,12 +26,13 @@ import AppKit
 /// Drawing the plate and its shadow is not optional. `NSApplication.applicationIconImage` hands
 /// the Dock a bitmap and the Dock draws it unmasked — none of the rounding, and on macOS 26 none
 /// of the squircle, that a bundle icon gets for free.
+@MainActor
 enum GeneratedAppIcon {
 
     // MARK: - Properties
 
     /// The canvas every macOS app icon is authored on.
-    static let canvasSide: CGFloat = 1024
+    nonisolated static let canvasSide: CGFloat = 1024
 
     /// Keyed by the *inputs* rather than by the theme's id: a custom theme keeps its identity
     /// across an edit, so an id-keyed cache serves the colours the user just changed away from.

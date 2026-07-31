@@ -1,6 +1,40 @@
 import Foundation
 import Network
+import os
 import ThreadingRemoteKit
+
+typealias RemoteClientDiagnosticsReceiver = @Sendable (
+    _ records: [RemoteDiagnosticRecord],
+    _ source: RemoteDiagnosticSource,
+    _ deviceID: String
+) -> Bool
+
+/// Cross-executor dependencies have their own synchronization because tests and the main-actor
+/// coordinator configure them while the server reads them from its network queue.
+private final class RemoteAccessServerDependencies: @unchecked Sendable {
+    private let lock = NSLock()
+    private weak var authorizerStorage: (any RemoteAuthorizing)?
+    private weak var invitationRedeemerStorage: (any RemoteInvitationRedeeming)?
+    private var diagnosticsReceiverStorage: RemoteClientDiagnosticsReceiver = {
+        records, source, deviceID in
+        MacRemoteDiagnostics.receive(records, source: source, deviceID: deviceID)
+    }
+
+    var authorizer: (any RemoteAuthorizing)? {
+        get { lock.withLock { authorizerStorage } }
+        set { lock.withLock { authorizerStorage = newValue } }
+    }
+
+    var invitationRedeemer: (any RemoteInvitationRedeeming)? {
+        get { lock.withLock { invitationRedeemerStorage } }
+        set { lock.withLock { invitationRedeemerStorage = newValue } }
+    }
+
+    var diagnosticsReceiver: RemoteClientDiagnosticsReceiver {
+        get { lock.withLock { diagnosticsReceiverStorage } }
+        set { lock.withLock { diagnosticsReceiverStorage = newValue } }
+    }
+}
 
 /// The second loopback HTTP/WebSocket server — the one a tunnel forwards to. It is deliberately
 /// separate from `MCPServer` and `ExtensionHostService`: those broker tool permissions and host
@@ -8,37 +42,62 @@ import ThreadingRemoteKit
 ///
 /// The listener mirrors `MCPServer.start`: a loopback ephemeral port, a latched ready-or-failed
 /// completion, and a `queue.sync` stop that has cancelled everything by the time it returns.
-final class RemoteAccessServer {
+///
+/// Mutable listener, connection, and rate-limit state belongs to `queue`. The dependency and
+/// published-port values have separate locks. This queue ownership is why passing the server's
+/// identity into Network.framework callbacks is safe.
+final class RemoteAccessServer: @unchecked Sendable {
 
     // MARK: - Properties
 
     /// Resolves owner-device and exact-session guest bearer tokens. Read from the server queue,
     /// so the coordinator's authority store must be thread-safe.
-    weak var authorizer: RemoteAuthorizing?
-    weak var invitationRedeemer: (any RemoteInvitationRedeeming)?
+    var authorizer: (any RemoteAuthorizing)? {
+        get { dependencies.authorizer }
+        set { dependencies.authorizer = newValue }
+    }
+    var invitationRedeemer: (any RemoteInvitationRedeeming)? {
+        get { dependencies.invitationRedeemer }
+        set { dependencies.invitationRedeemer = newValue }
+    }
 
-    private(set) var port: UInt16?
+    /// Injectable so integration tests never append to the developer's real support journal.
+    var receiveClientDiagnostics: RemoteClientDiagnosticsReceiver {
+        get { dependencies.diagnosticsReceiver }
+        set { dependencies.diagnosticsReceiver = newValue }
+    }
+
+    var port: UInt16? {
+        portStorage.withLock { $0 }
+    }
 
     private var listener: NWListener?
     private var connectionsByID: [ObjectIdentifier: RemoteConnection] = [:]
     private var authLimiter = RemoteAuthRateLimiter()
 
+    private let dependencies = RemoteAccessServerDependencies()
+    private let portStorage = OSAllocatedUnfairLock<UInt16?>(initialState: nil)
     private let queue = DispatchQueue(label: RemoteAccessDefaults.queueLabel, qos: .userInitiated)
     private let router = RemoteRouter()
 
     // MARK: - Lifecycle
 
-    func start(completion: @escaping (_ port: UInt16?) -> Void) {
+    func start(completion: @escaping @MainActor @Sendable (_ port: UInt16?) -> Void) {
         guard listener == nil else {
-            completion(port)
+            let existingPort = port
+            Task { @MainActor in completion(existingPort) }
             return
         }
 
-        var hasCompleted = false
-        let finish: (UInt16?) -> Void = { resolvedPort in
-            guard !hasCompleted else { return }
-            hasCompleted = true
-            DispatchQueue.main.async { completion(resolvedPort) }
+        let completionState = OSAllocatedUnfairLock<Bool>(initialState: false)
+        let finish: @Sendable (UInt16?) -> Void = { resolvedPort in
+            let shouldFinish = completionState.withLock { hasCompleted in
+                guard !hasCompleted else { return false }
+                hasCompleted = true
+                return true
+            }
+            guard shouldFinish else { return }
+            Task { @MainActor in completion(resolvedPort) }
         }
 
         do {
@@ -56,13 +115,13 @@ final class RemoteAccessServer {
                 switch state {
                 case .ready:
                     let resolved = listener.port?.rawValue
-                    self?.port = resolved
+                    self?.portStorage.withLock { $0 = resolved }
                     ThreadingLogger.remote.info("Remote access server listening on port \(resolved ?? 0)")
                     finish(resolved)
                 case .failed(let error):
                     ThreadingLogger.remote.error("Remote access server failed: \(error.localizedDescription)")
                     if self?.listener === listener {
-                        self?.port = nil
+                        self?.portStorage.withLock { $0 = nil }
                         self?.listener = nil
                     }
                     listener.cancel()
@@ -93,7 +152,7 @@ final class RemoteAccessServer {
             for connection in connections { connection.cancel() }
             listener?.cancel()
             listener = nil
-            port = nil
+            portStorage.withLock { $0 = nil }
             authLimiter = RemoteAuthRateLimiter()
         }
     }
@@ -131,7 +190,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     func route(
         _ request: HTTPRequest,
         from connection: RemoteConnection,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         let path = RemoteRouter.normalizedPath(request.path)
 
@@ -164,6 +223,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         if request.method == "POST", path == RemoteRouter.notificationRegistrationPath {
             handleNotificationRegistration(request, respond: respond)
+            return
+        }
+
+        if request.method == "POST", path == RemoteRouter.diagnosticUploadPath {
+            handleDiagnosticUpload(request, respond: respond)
             return
         }
 
@@ -327,7 +391,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     // MARK: - REST
 
-    private func handleMe(_ request: HTTPRequest, respond: @escaping (RemoteRouteDecision) -> Void) {
+    private func handleMe(_ request: HTTPRequest, respond: @escaping @Sendable (RemoteRouteDecision) -> Void) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
 
         DispatchQueue.main.async {
@@ -339,7 +403,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleResume(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard authorization.capability == .interact else {
@@ -361,7 +425,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
 
             if !AgentRuntime.shared.isRunning(sessionID: sessionID) {
-                AppDelegate.shared.resumeRemoteSession(sessionID)
+                guard let appDelegate = AppDelegate.shared else {
+                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                    return
+                }
+                appDelegate.resumeRemoteSession(sessionID)
             }
             respond(.respond(RemoteRouter.json(
                 ["state": AgentRuntime.shared.isRunning(sessionID: sessionID) ? "ready" : "starting"],
@@ -373,7 +441,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func handleCreateSession(
         _ request: HTTPRequest,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard canManageSessions(authorization) else {
@@ -441,7 +509,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
 
-            guard let session = AppDelegate.shared.startRemoteSession(
+            guard let session = AppDelegate.shared?.startRemoteSession(
                 in: projectID,
                 kind: kind,
                 accountHandle: accountHandle,
@@ -467,7 +535,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func handleNotificationRegistration(
         _ request: HTTPRequest,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard let deviceID = RemoteInboundPolicy.normalizedDeviceID(
@@ -504,12 +572,62 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
+    /// Accepts only the content-free diagnostic vocabulary, and only from an interactive owner
+    /// device that explicitly enabled sharing. Raw client logs have no route into the Mac.
+    private func handleDiagnosticUpload(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard request.body.count <= RemoteDiagnosticUploadPolicy.maximumUploadBytes,
+              let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+                  request.header(RemoteRouter.deviceHeader)
+              ),
+              let upload = try? JSONDecoder().decode(
+                  RemoteDiagnosticUploadRequestDTO.self,
+                  from: request.body
+              ),
+              let expectedSource = Self.diagnosticSource(
+                  forClientHeader: request.header(RemoteRouter.clientHeader)
+              ),
+              upload.source == expectedSource,
+              RemoteDiagnosticUploadPolicy.accepts(upload),
+              receiveClientDiagnostics(upload.records, upload.source, deviceID) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        let peer = MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device")
+        EventLog.shared.record(.remote, "Remote diagnostics received", [
+            "source": upload.source.rawValue,
+            "records": String(upload.records.count),
+            "peer": peer,
+        ])
+        respond(.respond(RemoteRouter.json(
+            RemoteDiagnosticUploadResponseDTO(acceptedRecords: upload.records.count)
+        )))
+    }
+
+    private static func diagnosticSource(
+        forClientHeader header: String?
+    ) -> RemoteDiagnosticSource? {
+        switch header?.lowercased() {
+        case "threading-ios": return .iOSClient
+        case "threading-web": return .browserClient
+        default: return nil
+        }
+    }
+
     /// Exchanges a short-lived, single-use invitation for a device-bound membership bearer.
     /// Calling the same endpoint with an already accepted or owner bearer is idempotent, which
     /// lets clients use one connection flow for pairing and invitations.
     private func handleAcceptInvitation(
         _ request: HTTPRequest,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let token = RemoteRouter.bearerToken(from: request),
               RemoteInboundPolicy.acceptsBearerToken(token),
@@ -584,7 +702,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func handleAppTheme(
         _ request: HTTPRequest,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard canManageThemes(authorization) else {
@@ -618,7 +736,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleSessionTheme(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard canManageThemes(authorization) else {
@@ -663,7 +781,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleRenameSession(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeSessionManagement(
             request,
@@ -698,7 +816,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handlePinnedSession(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeSessionManagement(
             request,
@@ -720,7 +838,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             ProjectStore.shared.setPinned(choice.isPinned, for: sessionID)
-            AppDelegate.shared.refreshAfterRemoteSessionMutation(
+            AppDelegate.shared?.refreshAfterRemoteSessionMutation(
                 sessionID: sessionID,
                 archived: false
             )
@@ -733,7 +851,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleArchivedSession(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeSessionManagement(
             request,
@@ -758,7 +876,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 AgentRuntime.shared.discard(sessionID: sessionID)
             }
             ProjectStore.shared.setArchived(choice.isArchived, for: sessionID)
-            AppDelegate.shared.refreshAfterRemoteSessionMutation(
+            AppDelegate.shared?.refreshAfterRemoteSessionMutation(
                 sessionID: sessionID,
                 archived: choice.isArchived
             )
@@ -777,7 +895,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleSessionSurface(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeSessionManagement(
             request,
@@ -806,7 +924,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
             AgentRuntime.shared.discard(sessionID: sessionID)
             ProjectStore.shared.setUsesNativeUI(usesNativeUI, for: sessionID)
-            AppDelegate.shared.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+            AppDelegate.shared?.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
             EventLog.shared.record(.remote, "Session UI changed remotely", [
                 "session": sessionID.uuidString,
                 "surface": choice.surface,
@@ -821,7 +939,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleCreateShare(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeSessionManagement(
             request,
@@ -862,7 +980,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleRevokeShares(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeSessionManagement(
             request,
@@ -889,7 +1007,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
         mode: RemoteGitReviewMode,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let sessionID = authorizeOwnerSessionRead(
             request,
@@ -911,7 +1029,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleRepositoryFiles(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let sessionID = authorizeOwnerSessionRead(
             request,
@@ -934,7 +1052,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleRepositoryFile(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let sessionID = authorizeOwnerSessionRead(
             request,
@@ -965,7 +1083,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleAttachments(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let sessionID = authorizeOwnerSessionRead(
             request,
@@ -1006,7 +1124,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleWorkspace(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let sessionID = authorizeOwnerSessionRead(
             request,
@@ -1030,7 +1148,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleBrowserPreview(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let sessionID = authorizeOwnerSessionRead(
             request,
@@ -1058,7 +1176,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleAttachment(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let sessionID = authorizeOwnerSessionRead(
             request,
@@ -1117,7 +1235,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func authorizeOwnerSessionRead(
         _ request: HTTPRequest,
         rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) -> SessionID? {
         guard let authorization = authorizeREST(request, respond: respond) else { return nil }
         guard authorization.principal == .ownerDevice,
@@ -1136,7 +1254,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func authorizeSessionManagement(
         _ request: HTTPRequest,
         rawSessionID: String,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) -> RemoteAuthorization? {
         guard let authorization = authorizeREST(request, respond: respond) else { return nil }
         guard canManageSessions(authorization) else {
@@ -1153,7 +1271,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func authorizeREST(
         _ request: HTTPRequest,
-        respond: @escaping (RemoteRouteDecision) -> Void
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) -> RemoteAuthorization? {
         let rawDevice = request.header(RemoteRouter.deviceHeader)
         let authorization: RemoteAuthorization
@@ -1533,8 +1651,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     }
 
     private func encode<Value: Encodable>(_ value: Value) -> String {
-        guard let data = try? JSONEncoder().encode(value) else { return "{}" }
-        return String(decoding: data, as: UTF8.self)
+        do {
+            return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+        } catch {
+            ThreadingLogger.remote.error(
+                "Remote server encoding failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return #"{"type":"error","code":"encodingFailed"}"#
+        }
     }
 }
 

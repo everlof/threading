@@ -54,7 +54,8 @@ final class ConfirmationPromptTests: XCTestCase {
             "installUnsignedExtension",
             "updateExtensionCapabilities",
             "approveAgentExtensionInstall",
-            "shareChatLink"
+            "shareChatLink",
+            "approveSystemPermissionPrompt"
         ])
     }
 

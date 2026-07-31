@@ -142,7 +142,7 @@ enum LegacyApplicationSupportMigration {
 
         // Scoped so the handle is closed before anything copies over the file.
         do {
-            return try ProjectDatabase(url: database).isEmpty
+            return try ProjectDatabase(url: database).isEmpty()
         } catch {
             // An unreadable store is not evidence that the user has work here, but it is also
             // not something to overwrite on a guess. `StateManager` owns quarantining it.

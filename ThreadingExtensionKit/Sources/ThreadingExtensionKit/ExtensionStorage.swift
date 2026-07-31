@@ -271,6 +271,11 @@ public final class ExtensionKeyValueStore: @unchecked Sendable {
 #else
         try data.write(to: stateURL, options: .atomic)
 #endif
+        guard try Data(contentsOf: stateURL) == data else {
+            throw ExtensionStorageError.unreadable(
+                "the saved key-value state could not be verified"
+            )
+        }
         try? fileManager.setAttributes(
             [.posixPermissions: 0o600],
             ofItemAtPath: stateURL.path

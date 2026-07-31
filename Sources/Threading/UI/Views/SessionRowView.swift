@@ -71,11 +71,50 @@ final class SessionRowView: NSTableCellView {
     private let nativeIdentityContent = NSView()
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
-    private var identityContentContainer: ComponentContentContainer!
-    private var contentContainer: ComponentContentContainer!
-    private var rowContentStack: NSStackView!
-    private var identityCustomizationHost: ComponentCustomizationHost!
-    private var customizationHost: ComponentCustomizationHost!
+    private lazy var identityContentContainer = ComponentContentContainer(
+        defaultContent: nativeIdentityContent
+    )
+    private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeContent)
+    private lazy var rowContentStack = NSStackView(
+        views: [contentContainer, afterTitleSlot]
+    )
+    private lazy var identityCustomizationHost = ComponentCustomizationHost(
+        target: .sessionIdentity(),
+        contentContainer: identityContentContainer,
+        lookup: customizationLookup,
+        imageResolver: { [weak self] reference, extensionIdentifier in
+            self?.resolveCustomizationImage(
+                reference,
+                extensionIdentifier: extensionIdentifier
+            )
+        }
+    )
+    private lazy var customizationHost = ComponentCustomizationHost(
+        target: .init(
+            component: HostComponentContracts.sidebarSessionRow.id,
+            contractVersion: HostComponentContracts.sidebarSessionRow.version
+        ),
+        contentContainer: contentContainer,
+        slots: ["after-title": afterTitleSlot],
+        lookup: customizationLookup,
+        imageResolver: { [weak self] reference, extensionIdentifier in
+            self?.resolveCustomizationImage(
+                reference,
+                extensionIdentifier: extensionIdentifier
+            )
+        },
+        onAction: { [weak self] action in
+            guard let self else { return }
+            if let onCustomizationAction {
+                onCustomizationAction(action)
+            } else {
+                ComponentCustomizationProviderSlot.shared.perform(action)
+            }
+        },
+        onProperties: { [weak self] properties in
+            self?.applyCustomizationProperties(properties)
+        }
+    )
     private let customizationLookup: ComponentCustomizationHost.Lookup
 
     private var nativeTitle = ""
@@ -254,9 +293,6 @@ final class SessionRowView: NSTableCellView {
             )
         ])
 
-        identityContentContainer = ComponentContentContainer(
-            defaultContent: nativeIdentityContent
-        )
         identityContentContainer.setAccessibilityIdentifier(
             "sidebar.session.identity.content"
         )
@@ -281,7 +317,6 @@ final class SessionRowView: NSTableCellView {
         ])
 
         nativeContent.setAccessibilityIdentifier("sidebar.session.default-content")
-        contentContainer = ComponentContentContainer(defaultContent: nativeContent)
         contentContainer.setAccessibilityIdentifier("sidebar.session.content")
         contentContainer.setContentHuggingPriority(
             SidebarRowDefaults.stretchableHugging,
@@ -304,7 +339,6 @@ final class SessionRowView: NSTableCellView {
         // came to rest against the title — mid-row on some rows and at the edge on others, for a
         // reason nothing in the row could show. Pinned to the row it is always where the eye
         // looks for it, whatever the row is made of.
-        rowContentStack = NSStackView(views: [contentContainer, afterTitleSlot])
         rowContentStack.orientation = .horizontal
         rowContentStack.alignment = .centerY
         rowContentStack.spacing = SidebarRowDefaults.horizontalSpacing
@@ -312,44 +346,8 @@ final class SessionRowView: NSTableCellView {
         addSubview(rowContentStack)
         addSubview(trailingSlot)
 
-        identityCustomizationHost = ComponentCustomizationHost(
-            target: .sessionIdentity(),
-            contentContainer: identityContentContainer,
-            lookup: customizationLookup,
-            imageResolver: { [weak self] reference, extensionIdentifier in
-                self?.resolveCustomizationImage(
-                    reference,
-                    extensionIdentifier: extensionIdentifier
-                )
-            }
-        )
-
-        customizationHost = ComponentCustomizationHost(
-            target: .init(
-                component: HostComponentContracts.sidebarSessionRow.id,
-                contractVersion: HostComponentContracts.sidebarSessionRow.version
-            ),
-            contentContainer: contentContainer,
-            slots: ["after-title": afterTitleSlot],
-            lookup: customizationLookup,
-            imageResolver: { [weak self] reference, extensionIdentifier in
-                self?.resolveCustomizationImage(
-                    reference,
-                    extensionIdentifier: extensionIdentifier
-                )
-            },
-            onAction: { [weak self] action in
-                guard let self else { return }
-                if let onCustomizationAction {
-                    onCustomizationAction(action)
-                } else {
-                    ComponentCustomizationProviderSlot.shared.perform(action)
-                }
-            },
-            onProperties: { [weak self] properties in
-                self?.applyCustomizationProperties(properties)
-            }
-        )
+        _ = identityCustomizationHost
+        _ = customizationHost
     }
 
     /// The slot sits at the trailing edge, where it reads as status rather than as another
@@ -444,7 +442,9 @@ final class SessionRowView: NSTableCellView {
             withTimeInterval: SessionPopoverDefaults.hoverDelay,
             repeats: false
         ) { [weak self] _ in
-            self?.presentPopover()
+            MainActor.assumeIsolated {
+                self?.presentPopover()
+            }
         }
     }
 

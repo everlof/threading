@@ -10,6 +10,7 @@ import Foundation
 /// relaunch handoff. The lock is `flock`-based on purpose: advisory, released by the kernel
 /// the instant the process dies (no stale-lock cleanup), and independent of bundle
 /// identity, which an unbundled `swift build` binary does not have.
+@MainActor
 enum SingleInstanceLock {
 
     /// Held open for the process's lifetime; the kernel drops the lock with it.

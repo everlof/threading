@@ -1,18 +1,19 @@
-import AppKit
+@preconcurrency import AppKit
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: - Singleton
 
-    static var shared: AppDelegate {
-        NSApp.delegate as! AppDelegate
+    static var shared: AppDelegate? {
+        NSApp.delegate as? AppDelegate
     }
 
     // MARK: - Properties
 
-    private var mainWindowController: MainWindowController!
+    private var mainWindowController: MainWindowController?
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
 
@@ -59,7 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.isSystemInitiatedQuit = true
+            Task { @MainActor [weak self] in
+                self?.isSystemInitiatedQuit = true
+            }
         }
 
         // After the lock, so only the instance that owns the state writes the journal — and
@@ -101,7 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         ExtensionIdentityResolverProviderSlot.shared.provider =
             ExtensionIdentityResolverRegistry.shared
 
-        mainWindowController = MainWindowController()
+        let mainWindowController = MainWindowController()
+        self.mainWindowController = mainWindowController
         RemoteWorkspaceBridge.install(mainWindowController)
         mainWindowController.showWindow(nil)
 
@@ -162,8 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             AgentRuntime.shared.applyLifecycle(report)
         }
 
-        MCPServer.shared.start { [weak self] in
-            self?.mainWindowController.restoreSelectedSession()
+        MCPServer.shared.start { [weak mainWindowController] in
+            mainWindowController?.restoreSelectedSession()
         }
 
         // Remote access is a separate loopback server behind a tunnel, independent of the MCP
@@ -225,23 +229,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let running = AgentRuntime.shared.runningSessionCount
         guard running > 0 else { return true }
 
-        return ConfirmationAlert.ask(Self.quitConfirmation(runningSessionCount: running))
+        return ConfirmationAlert.ask(Self.quitConfirmation(
+            runningSessionCount: running,
+            inFlightTurnCount: AgentRuntime.shared.inFlightTurnCount
+        ))
     }
 
     /// Built separately from being asked, so a test can hold the wording to what quitting does
     /// without a modal — the seam `SessionCoordinator`'s lifecycle requests already offer.
-    static func quitConfirmation(runningSessionCount: Int) -> ConfirmationRequest {
+    ///
+    /// **The count and the noun are separate decisions**, and saying "6 agents still running"
+    /// got the first right and the second wrong. Every one of those six was a live process, and
+    /// the sidebar agreed — but four were idle at their prompt and two were merely unread, so
+    /// nothing was in flight and the sheet was announcing a loss that did not exist. A session
+    /// outliving its terminal is the premise here; what a quit actually costs is the turns being
+    /// written, which is what the title leads with when there are any.
+    static func quitConfirmation(
+        runningSessionCount: Int,
+        inFlightTurnCount: Int
+    ) -> ConfirmationRequest {
         ConfirmationRequest(
             prompt: .quitWithRunningAgents,
-            title: runningSessionCount == 1
-                ? L10n.string("Quit with one agent still running?")
-                : L10n.format("Quit with %lld agents still running?", Int64(runningSessionCount)),
-            message: L10n.string(
-                "Every running agent stops. The conversations are kept and can be resumed on "
-                    + "the next launch; only what an agent is working on right now is lost."
+            title: quitTitle(
+                runningSessionCount: runningSessionCount,
+                inFlightTurnCount: inFlightTurnCount
             ),
+            message: inFlightTurnCount == 0
+                ? L10n.string(
+                    "Nothing is in flight. The sessions close, and their conversations are kept "
+                        + "and can be resumed on the next launch."
+                )
+                : L10n.string(
+                    "Every open session closes. The conversations are kept and can be resumed "
+                        + "on the next launch; only work in flight is lost."
+                ),
             confirmTitle: L10n.string("Quit")
         )
+    }
+
+    /// Names the turns when there are any, and the sessions otherwise — the two facts cost the
+    /// user different things, so one title cannot carry both without overstating the quieter one.
+    private static func quitTitle(runningSessionCount: Int, inFlightTurnCount: Int) -> String {
+        if inFlightTurnCount > 0 {
+            return inFlightTurnCount == 1
+                ? L10n.string("Quit with one turn in flight?")
+                : L10n.format("Quit with %lld turns in flight?", Int64(inFlightTurnCount))
+        }
+
+        return runningSessionCount == 1
+            ? L10n.string("Quit with one session open?")
+            : L10n.format("Quit with %lld sessions open?", Int64(runningSessionCount))
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -293,7 +330,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @MainActor
     func resumeRemoteSession(_ sessionID: SessionID) {
         guard ownsSingleInstanceLock,
-              ProjectStore.shared.session(withID: sessionID) != nil else {
+              ProjectStore.shared.session(withID: sessionID) != nil,
+              let mainWindowController else {
             return
         }
         mainWindowController.resumeRemoteSession(sessionID)
@@ -309,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         usesNativeUI: Bool,
         prompt: String
     ) -> AgentSession? {
-        guard ownsSingleInstanceLock, mainWindowController != nil else { return nil }
+        guard ownsSingleInstanceLock, let mainWindowController else { return nil }
         return mainWindowController.startRemoteSession(
             in: projectID,
             kind: kind,
@@ -323,7 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @MainActor
     func refreshAfterRemoteSessionMutation(sessionID: SessionID, archived: Bool) {
-        guard ownsSingleInstanceLock, mainWindowController != nil else { return }
+        guard ownsSingleInstanceLock, let mainWindowController else { return }
         mainWindowController.refreshAfterRemoteSessionMutation(
             sessionID: sessionID,
             archived: archived
@@ -332,7 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @MainActor
     func refreshAfterRemoteSurfaceMutation(sessionID: SessionID) {
-        guard ownsSingleInstanceLock, mainWindowController != nil else { return }
+        guard ownsSingleInstanceLock, let mainWindowController else { return }
         mainWindowController.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
     }
 

@@ -22,20 +22,82 @@ final class ConversationViewController: NSViewController {
     var subagents: SubagentTimeline { subagentState.timeline }
     var selectedSubagentThreadID: String? { subagentState.selectedThreadID }
 
-    var scrollView: ThemedScrollView!
-    var stack: NSStackView!
+    lazy var stack: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.medium
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.inset,
+            left: Design.Spacing.inset,
+            bottom: Design.Spacing.inset,
+            right: Design.Spacing.inset
+        )
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
 
     /// Fills the scroll view so the column can be capped inside it rather than being the
     /// document itself.
-    private var documentView: NSView!
+    private lazy var documentView: NSView = {
+        let document = NSView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        return document
+    }()
+    lazy var scrollView: ThemedScrollView = {
+        let clip = FlippedClipView()
+        clip.drawsBackground = false
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.contentView = clip
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.documentView = documentView
+        return scroll
+    }()
 
     /// The turn rail in the gutter beside the column.
-    private var minimap: ConversationMinimapView!
-    private var minimapWidth: NSLayoutConstraint!
-    private var minimapLeading: NSLayoutConstraint!
-    private var promptView: PromptView!
-    private var promptContentContainer: ComponentContentContainer!
-    private var promptCustomizationHost: ComponentCustomizationHost!
+    private lazy var minimap: ConversationMinimapView = {
+        let minimap = ConversationMinimapView()
+        minimap.translatesAutoresizingMaskIntoConstraints = false
+        minimap.onSelect = { [weak self] rowIndex in self?.scrollToRow(rowIndex) }
+        return minimap
+    }()
+    private lazy var minimapWidth = minimap.widthAnchor.constraint(equalToConstant: 0)
+    private lazy var minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+    private lazy var promptView: PromptView = {
+        let prompt = PromptView()
+        prompt.translatesAutoresizingMaskIntoConstraints = false
+        prompt.fontSurface = .conversation
+        prompt.showsImageAttachments = true
+        prompt.placeholder = L10n.format("Reply to %@", agentSession.kind.displayName)
+        prompt.onSubmit = { [weak self] text in
+            _ = self?.submit(text)
+        }
+        return prompt
+    }()
+    private lazy var promptContentContainer: ComponentContentContainer = {
+        let container = ComponentContentContainer(defaultContent: promptView)
+        container.setAccessibilityIdentifier("composer.conversation-reply.content")
+        return container
+    }()
+    private lazy var promptCustomizationHost = ComponentCustomizationHost(
+        target: .conversationReplyComposer(
+            sessionID: agentSession.id.uuidString.lowercased()
+        ),
+        contentContainer: promptContentContainer,
+        lookup: customizationLookup,
+        imageResolver: ExtensionComponentResourceResolver.image,
+        onAction: { [weak self] action in
+            guard let self else { return }
+            if let onCustomizationAction {
+                onCustomizationAction(action)
+            } else {
+                ComponentCustomizationProviderSlot.shared.perform(action)
+            }
+        }
+    )
     private var selectedSubagentID: String?
     private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
     private var transcriptRecheckGeneration: [String: Int] = [:]
@@ -46,9 +108,29 @@ final class ConversationViewController: NSViewController {
 
     /// The status text and, ahead of it, the working orb — shown only while a
     /// turn is in flight (`showWorkingOrb`).
-    private var statusRow: NSStackView!
+    private lazy var statusRow: NSStackView = {
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let row = NSStackView(views: [
+            orbView, statusLabel, spacer, contextLabel, modelChip, effortChip, speedChip
+        ])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.tight
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }()
     let orbView = WorkingOrbView()
-    var statusLabel: NSTextField!
+    lazy var statusLabel: NSTextField = {
+        let label = NSTextField(labelWithString: L10n.string("Starting…"))
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.applyFont(.subheading)
+        label.textColor = Design.Text.tertiary
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }()
     private let modelChip = ChipView()
 
     /// Codex reasoning is model-specific catalog data: Sol and Terra currently reach Ultra,
@@ -81,7 +163,7 @@ final class ConversationViewController: NSViewController {
     var workingWords = WorkingWordCycle()
     private let account: AgentAccount?
     var workingStartedAt: TimeInterval?
-    var workingStatusTimer: Timer?
+    nonisolated(unsafe) var workingStatusTimer: Timer?
 
     /// The structured plan position most recently reported in this turn.
     var runProgress: RunProgress?
@@ -319,65 +401,13 @@ final class ConversationViewController: NSViewController {
     // MARK: - Setup
 
     private func setupViews() {
-        stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.medium
-        stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.inset,
-            left: Design.Spacing.inset,
-            bottom: Design.Spacing.inset,
-            right: Design.Spacing.inset
-        )
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        let clip = FlippedClipView()
-        clip.drawsBackground = false
-
         // The stack is centred inside a full-width document view rather than being the
         // document view itself, so the column can be capped while the scroll view still fills
         // the pane. The space this leaves is what the turn rail lives in.
-        let document = NSView()
-        document.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(stack)
-
-        scrollView = ThemedScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.contentView = clip
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.documentView = document
-        self.documentView = document
-
-        minimap = ConversationMinimapView()
-        minimap.translatesAutoresizingMaskIntoConstraints = false
-        minimap.onSelect = { [weak self] rowIndex in self?.scrollToRow(rowIndex) }
-
-        promptView = PromptView()
-        promptView.translatesAutoresizingMaskIntoConstraints = false
         // What is typed here becomes a bubble in the thread, so it is set in the thread's font.
-        promptView.fontSurface = .conversation
-        promptView.showsImageAttachments = true
-        promptView.placeholder = L10n.format(
-            "Reply to %@",
-            agentSession.kind.displayName
-        )
-        promptView.onSubmit = { [weak self] text in
-            _ = self?.submit(text)
-        }
         setupPromptCustomization()
 
-        statusLabel = NSTextField(labelWithString: L10n.string("Starting…"))
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.applyFont(.subheading)
-        statusLabel.textColor = Design.Text.tertiary
-        statusLabel.lineBreakMode = .byTruncatingTail
-        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
         wireConversationControls()
-        let statusSpacer = NSView()
-        statusSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        statusSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         contextLabel.applyFont(.subheading)
         contextLabel.textColor = Design.Text.tertiary
@@ -388,13 +418,6 @@ final class ConversationViewController: NSViewController {
         // flight. A stack detaches a hidden arranged view, so idle status sits
         // flush at the leading edge rather than behind a reserved orb-sized gap.
         orbView.isHidden = true
-        statusRow = NSStackView(views: [
-            orbView, statusLabel, statusSpacer, contextLabel, modelChip, effortChip, speedChip
-        ])
-        statusRow.orientation = .horizontal
-        statusRow.alignment = .centerY
-        statusRow.spacing = Design.Spacing.tight
-        statusRow.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(scrollView)
         view.addSubview(minimap)
@@ -412,26 +435,6 @@ final class ConversationViewController: NSViewController {
     /// submission stay on this controller and `PromptView`; hooks can add compact controls beside
     /// `.proceed` but cannot replace or overlay it.
     private func setupPromptCustomization() {
-        promptContentContainer = ComponentContentContainer(defaultContent: promptView)
-        promptContentContainer.setAccessibilityIdentifier(
-            "composer.conversation-reply.content"
-        )
-        promptCustomizationHost = ComponentCustomizationHost(
-            target: .conversationReplyComposer(
-                sessionID: agentSession.id.uuidString.lowercased()
-            ),
-            contentContainer: promptContentContainer,
-            lookup: customizationLookup,
-            imageResolver: ExtensionComponentResourceResolver.image,
-            onAction: { [weak self] action in
-                guard let self else { return }
-                if let onCustomizationAction {
-                    onCustomizationAction(action)
-                } else {
-                    ComponentCustomizationProviderSlot.shared.perform(action)
-                }
-            }
-        )
         promptCustomizationHost.refresh()
     }
 
@@ -536,7 +539,6 @@ final class ConversationViewController: NSViewController {
             minimap.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor)
         ])
 
-        minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
         minimapLeading.isActive = true
 
         // Beats the cap when the pane is wide, so the column reaches `readableWidth` rather
@@ -545,7 +547,6 @@ final class ConversationViewController: NSViewController {
         preferredWidth.priority = .defaultHigh
         preferredWidth.isActive = true
 
-        minimapWidth = minimap.widthAnchor.constraint(equalToConstant: 0)
         minimapWidth.isActive = true
     }
 
@@ -677,8 +678,11 @@ final class ConversationViewController: NSViewController {
             context.allowsImplicitAnimation = true
             scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: target))
         } completionHandler: { [weak self] in
-            self?.scrollView.reflectScrolledClipView(self?.scrollView.contentView ?? ThemedClipView())
-            self?.updateVisibleTurns()
+            Task { @MainActor in
+                guard let self else { return }
+                self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
+                self.updateVisibleTurns()
+            }
         }
     }
 
@@ -969,7 +973,8 @@ final class ConversationViewController: NSViewController {
             return
         }
 
-        let completion: ([StreamEvent], Bool) -> Void = { [weak self] events, isTruncated in
+        let completion: @MainActor @Sendable ([StreamEvent], Bool) -> Void = {
+            [weak self] events, isTruncated in
             guard let self else { return }
             switch self.subagentTranscriptLoads.finish(
                 threadID: threadID,
@@ -1300,7 +1305,7 @@ final class ConversationViewController: NSViewController {
         else { return }
 
         ProjectStore.shared.update(sessionID: agentSession.id) {
-            $0.reasoningEffort = effort
+            $0.setCodexReasoningEffort(effort)
         }
         refreshConversationControls()
     }
@@ -1334,7 +1339,7 @@ final class ConversationViewController: NSViewController {
                 if let effort = $0.reasoningEffort,
                    selectedOption?.reasoningLevels.isEmpty == false,
                    selectedOption?.supports(reasoningEffort: effort) != true {
-                    $0.reasoningEffort = nil
+                    $0.setCodexReasoningEffort(nil)
                 }
             }
             self.reportedModel = resolved

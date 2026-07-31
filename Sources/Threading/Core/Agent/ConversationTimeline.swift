@@ -337,19 +337,24 @@ struct ConversationTimeline {
             return [append(.thinking(text))]
 
         case .toolUse(let id, let tool, let input):
-            let request = PermissionRequest(sessionID: sessionID, tool: tool, input: input)
+            let foundationInput = input.mapValues(\.foundationValue)
+            let request = PermissionRequest(
+                sessionID: sessionID,
+                tool: tool,
+                input: input
+            )
             let call = ToolCall(
                 id: id,
                 tool: tool,
                 summary: request.oneLineSummary,
-                diff: EditDiff.lines(forTool: tool.rawName, input: input),
+                diff: EditDiff.lines(forTool: tool.rawName, input: foundationInput),
                 result: nil
             )
             let change = append(.toolCall(call))
             pendingToolRows[id] = rows.count - 1
             var changes = [change]
             append(
-                runProgressReducer.apply(toolUseID: id, tool: tool, input: input),
+                runProgressReducer.apply(toolUseID: id, tool: tool, input: foundationInput),
                 to: &changes
             )
             return changes

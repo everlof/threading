@@ -16,7 +16,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
     // MARK: - Geometry
 
     fileprivate enum Layout {
-        static let height: CGFloat = Design.Size.chipHeight
+        static let height: CGFloat = Design.Size.fieldHeight
         /// Clear of the border, and roughly where a stock field puts its own text.
         static let inset: CGFloat = Design.Spacing.small + 2
     }

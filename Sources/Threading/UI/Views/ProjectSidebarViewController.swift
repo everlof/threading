@@ -9,33 +9,109 @@ final class ProjectSidebarViewController: NSViewController {
 
     // MARK: - Properties
 
-    private var outlineView: NSOutlineView!
-    private var scrollView: NSScrollView!
-    private var emptyStateView: NSView!
+    private lazy var outlineView: NSOutlineView = {
+        let outline = ThemedOutlineView()
+        outline.style = .inset
+        outline.headerView = nil
+        outline.rowSizeStyle = .default
+        outline.floatsGroupRows = false
+        outline.indentationPerLevel = SidebarDefaults.indentationPerLevel
+        outline.dataSource = self
+        outline.delegate = self
+        outline.menu = makeContextMenu()
+        outline.registerForDraggedTypes([.fileURL])
+        let column = NSTableColumn(identifier: SidebarIdentifiers.mainColumn)
+        column.resizingMask = .autoresizingMask
+        outline.addTableColumn(column)
+        outline.outlineTableColumn = column
+        return outline
+    }()
+    private lazy var scrollView: NSScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.documentView = outlineView
+        scroll.hasVerticalScroller = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.automaticallyAdjustsContentInsets = false
+        return scroll
+    }()
+    private lazy var emptyStateView: NSView = {
+        let title = NSTextField(labelWithString: SidebarStrings.emptyTitle)
+        title.applyFont(.emphasizedBody)
+        title.textColor = Design.Text.secondary
+        title.alignment = .center
+        let subtitle = NSTextField(wrappingLabelWithString: SidebarStrings.emptySubtitle)
+        subtitle.applyFont(.detail())
+        subtitle.textColor = Design.Text.tertiary
+        subtitle.alignment = .center
+        let stack = NSStackView(views: [title, subtitle])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = SidebarDefaults.emptyStateSpacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
     private let appEvents = AppEventObservations()
 
     /// The footer's one control, retained so settings mode can mark it as the open page.
-    private var settingsButton: ThemedButton!
+    private lazy var settingsButton: ThemedButton = {
+        let button = ThemedButton()
+        button.title = L10n.string("Settings")
+        button.image = NSImage(
+            systemSymbolName: "gearshape",
+            accessibilityDescription: L10n.string("Settings")
+        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        button.isBordered = false
+        button.applyFont(.controlRegular)
+        button.target = self
+        button.action = #selector(settingsClicked)
+        return button
+    }()
     /// The band the footer controls live in; the list and the settings sidebar both end at
     /// its top rather than restating its height.
-    private var footer: PaneFooterView!
+    private lazy var footer = PaneFooterView(leading: [settingsButton], margin: .paneEdge)
 
     /// Where a receipt for something the list just did appears — above the footer, in the
     /// column the row left from. See `present(_:)`.
-    private var toasts: ToastPresenter!
+    private lazy var toasts = ToastPresenter(host: view, above: footer.topAnchor)
 
     /// The band above the list: the brand row at its leading edge, the list's own controls
     /// at its trailing one. The list starts at its bottom. In settings mode the *controls*
     /// hide — they act on the list, which is not on screen — while the band and the brand
     /// stay, because the brand is the window's, not the list's.
-    private var header: PaneHeaderView!
+    private lazy var header = PaneHeaderView(
+        leading: [brand],
+        trailing: [addButton, arrangeButton],
+        margin: .paneEdge
+    )
     /// The Threading mark and wordmark — or whatever the current chrome's sidebar brand says.
-    private var brand: SidebarBrandView!
+    private lazy var brand = SidebarBrandView()
     /// Adds a project — the `+` at the sidebar's top.
-    private var addButton: ThemedIconButton!
+    private lazy var addButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "plus",
+            accessibility: L10n.string("Add Project"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Add Project")
+        button.presentsMenu = true
+        button.onPress = { [weak self] in self?.presentAddProjectMenu() }
+        return button
+    }()
     /// Opens the grouping and sorting menu — the sidebar's own view options, kept beside
     /// the list they arrange rather than in Settings.
-    private var arrangeButton: ThemedIconButton!
+    private lazy var arrangeButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: SidebarDefaults.arrangementSymbol,
+            accessibility: SidebarStrings.arrangementOptions,
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = SidebarStrings.arrangementOptions
+        button.presentsMenu = true
+        button.onPress = { [weak self] in self?.showArrangementOptions() }
+        return button
+    }()
 
     /// The launch flourish plays once per app run, not once per window or per settings
     /// round-trip.
@@ -147,7 +223,6 @@ final class ProjectSidebarViewController: NSViewController {
 private extension ProjectSidebarViewController {
 
     private func setupOutlineView() {
-        outlineView = ThemedOutlineView()
         // `.inset`, not `.sourceList`, and the difference is a *material*.
         //
         // The two styles draw the same rows and the same inset selection capsule; what
@@ -160,25 +235,6 @@ private extension ProjectSidebarViewController {
         //
         // Proven by filling the ground with a flat red: everything the list covered stayed
         // grey-blue, everything it did not turned red.
-        outlineView.style = .inset
-        outlineView.headerView = nil
-        outlineView.rowSizeStyle = .default
-        outlineView.floatsGroupRows = false
-        outlineView.indentationPerLevel = SidebarDefaults.indentationPerLevel
-        outlineView.dataSource = self
-        outlineView.delegate = self
-        outlineView.menu = makeContextMenu()
-        outlineView.registerForDraggedTypes([.fileURL])
-
-        let column = NSTableColumn(identifier: SidebarIdentifiers.mainColumn)
-        column.resizingMask = .autoresizingMask
-        outlineView.addTableColumn(column)
-        outlineView.outlineTableColumn = column
-
-        scrollView = ThemedScrollView()
-        scrollView.documentView = outlineView
-        scrollView.hasVerticalScroller = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
         // The list already starts below the toolbar, because it is pinned to the safe area two
         // lines down. Left automatic, AppKit insets it a second time for the same titlebar —
         // and on macOS 26 it also installs a scroll-edge-effect material *inside* the scroll
@@ -186,8 +242,6 @@ private extension ProjectSidebarViewController {
         // material inside app-owned content is precisely what the theme boundary forbids, and
         // the audit caught it the moment the sidebar stopped being wrapped in a material of
         // its own. One pane, one answer about its own insets.
-        scrollView.automaticallyAdjustsContentInsets = false
-
         view.addSubview(scrollView)
 
         // The sidebar fills the window's full height; the list starts below the header band —
@@ -208,24 +262,8 @@ private extension ProjectSidebarViewController {
     /// Shown centred in the list area while no project has been added, pointing at the two
     /// ways to add one. Hidden the moment the list has content.
     private func setupEmptyState() {
-        let title = NSTextField(labelWithString: SidebarStrings.emptyTitle)
-        title.applyFont(.emphasizedBody)
-        title.textColor = Design.Text.secondary
-        title.alignment = .center
-
-        let subtitle = NSTextField(wrappingLabelWithString: SidebarStrings.emptySubtitle)
-        subtitle.applyFont(.detail())
-        subtitle.textColor = Design.Text.tertiary
-        subtitle.alignment = .center
-
-        let stack = NSStackView(views: [title, subtitle])
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = SidebarDefaults.emptyStateSpacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
+        let stack = emptyStateView
         view.addSubview(stack)
-        emptyStateView = stack
 
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
@@ -243,22 +281,14 @@ private extension ProjectSidebarViewController {
 
     /// Footer holding Settings at the leading edge — icon *and* word, because the footer's
     /// one remaining control names the destination the sidebar can reach rather than an
-    /// action on the list. The band itself — the hairline, the height, the corner-aware
-    /// insets — is `PaneFooterView`'s to state.
+    /// action on the list. The band itself — the hairline, the height, the insets — is
+    /// `PaneFooterView`'s to state.
+    ///
+    /// `.paneEdge`, because the sidebar's margin is the list's: the platform's corner
+    /// clearance is stated for the whole band's width, and Settings sits well above the
+    /// window's bottom curve, so taking it put the gear two steps inboard of every row above
+    /// it. See `PaneBandMargin`.
     private func setupFooter() {
-        settingsButton = ThemedButton()
-        settingsButton.title = L10n.string("Settings")
-        settingsButton.image = NSImage(
-            systemSymbolName: "gearshape",
-            accessibilityDescription: L10n.string("Settings")
-        )?
-            .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
-        settingsButton.isBordered = false
-        settingsButton.applyFont(.controlRegular)
-        settingsButton.target = self
-        settingsButton.action = #selector(settingsClicked)
-
-        footer = PaneFooterView(leading: [settingsButton])
         view.addSubview(footer)
 
         NSLayoutConstraint.activate([
@@ -266,13 +296,19 @@ private extension ProjectSidebarViewController {
             footer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             footer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+
+        _ = toasts
     }
 
     /// Header holding the brand row at the leading edge and the list's two controls — add,
     /// then arrangement — at the trailing one. The band itself — the hairline, the height,
-    /// the corner-aware insets — is `PaneHeaderView`'s to state.
-
-        toasts = ToastPresenter(host: view, above: footer.topAnchor)
+    /// the insets — is `PaneHeaderView`'s to state.
+    ///
+    /// `.paneEdge`, for the footer's reason and then some: the band runs the sidebar's full
+    /// width, so the platform reports the clearance the *traffic lights* need even though the
+    /// band begins below them at the safe area. Measured on the running window, the brand was
+    /// starting some eighty points in — under the toolbar's sidebar toggle rather than over
+    /// the list it names.
     ///
     /// The brand went here rather than staying absent (the band long said "no app-name label")
     /// because the top-left of the sidebar is now a *themed* surface: a chrome may restate the
@@ -280,31 +316,8 @@ private extension ProjectSidebarViewController {
     /// sign. Adding a project moved up with it — a `+` beside the list it adds to, in the slot
     /// every source-list app puts it.
     private func setupHeader() {
-        brand = SidebarBrandView()
-
-        addButton = ThemedIconButton(
-            symbolName: "plus",
-            accessibility: L10n.string("Add Project"),
-            target: .inline,
-            inkSource: .chrome
-        )
-        addButton.toolTip = L10n.string("Add Project")
         // The `+` opens its two ways in — existing folder or new — on the press, which is the
         // platform's menu gesture.
-        addButton.presentsMenu = true
-        addButton.onPress = { [weak self] in self?.presentAddProjectMenu() }
-
-        arrangeButton = ThemedIconButton(
-            symbolName: SidebarDefaults.arrangementSymbol,
-            accessibility: SidebarStrings.arrangementOptions,
-            target: .inline,
-            inkSource: .chrome
-        )
-        arrangeButton.toolTip = SidebarStrings.arrangementOptions
-        arrangeButton.presentsMenu = true
-        arrangeButton.onPress = { [weak self] in self?.showArrangementOptions() }
-
-        header = PaneHeaderView(leading: [brand], trailing: [addButton, arrangeButton])
         view.addSubview(header)
 
         NSLayoutConstraint.activate([
@@ -365,6 +378,18 @@ private extension ProjectSidebarViewController {
 
 extension ProjectSidebarViewController {
 
+    /// Shows a receipt for something the list just did, with the way back on it.
+    ///
+    /// It appears **here**, at the bottom of this column, because this is the column the change
+    /// happened in: an archived row leaves the sidebar and the undo puts it back into the
+    /// sidebar, so the eye is already on the pane the band arrives in. The other two placements
+    /// fail for the same reason from opposite ends — a band centred on the window covers the
+    /// composer, and one in the content pane's corner reports a sidebar change somewhere the
+    /// sidebar is not.
+    func presentToast(_ toast: ToastRequest) {
+        toasts.present(toast)
+    }
+
     /// Rebuilds the outline from the store, preserving expansion and selection.
     ///
     /// A change that leaves the tree's *shape* alone refreshes the rows in place instead.
@@ -380,18 +405,6 @@ extension ProjectSidebarViewController {
             // The existing nodes are kept deliberately: the outline identifies rows by
             // object identity, and replacing equivalent nodes would invalidate every row
             // for nothing. Content is read from the store at configure time anyway.
-    /// Shows a receipt for something the list just did, with the way back on it.
-    ///
-    /// It appears **here**, at the bottom of this column, because this is the column the change
-    /// happened in: an archived row leaves the sidebar and the undo puts it back into the
-    /// sidebar, so the eye is already on the pane the band arrives in. The other two placements
-    /// fail for the same reason from opposite ends — a band centred on the window covers the
-    /// composer, and one in the content pane's corner reports a sidebar change somewhere the
-    /// sidebar is not.
-    func presentToast(_ toast: ToastRequest) {
-        toasts.present(toast)
-    }
-
             refreshRows()
             return
         }
@@ -794,6 +807,12 @@ extension ProjectSidebarViewController {
     /// settings replaces the sidebar rather than adding a second one beside it.
     /// Highlights a settings row, for doors that land on a specific page rather than the
     /// first. A no-op outside settings mode, where there is no list to highlight.
+    /// Which settings page the list currently shows as chosen, so a search that is cleared can
+    /// put the pane back on it rather than on whichever page happened to be first.
+    var selectedSettingsPageID: String? {
+        settingsSidebar?.selectedID
+    }
+
     func selectSettingsPage(id: String) {
         settingsSidebar?.select(id: id)
     }
@@ -837,6 +856,10 @@ extension ProjectSidebarViewController {
         sidebar.onSelect = { [weak self] pageID in
             guard let self else { return }
             self.delegate?.projectSidebar(self, didSelectSettingsPage: pageID)
+        }
+        sidebar.onSearch = { [weak self] query in
+            guard let self else { return }
+            self.delegate?.projectSidebar(self, didSearchSettings: query)
         }
         view.addSubview(sidebar)
 
@@ -1782,6 +1805,7 @@ enum SidebarIdentifiers {
 
 // MARK: - ProjectSidebarViewControllerDelegate
 
+@MainActor
 protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID)
@@ -1822,6 +1846,9 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
+    /// The settings query changed. Empty means the search was cleared, and the pane goes back
+    /// to whichever page the list has selected.
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didSearchSettings query: String)
 }
 
 // MARK: - Arrangement Menu

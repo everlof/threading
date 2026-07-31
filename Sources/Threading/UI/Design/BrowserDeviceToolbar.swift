@@ -156,7 +156,7 @@ final class BrowserDeviceToolbar: NSView, ThemedComponent, NSTextFieldDelegate {
 
         for field in [widthField, heightField] {
             field.alignment = .center
-            field.font = Design.Typography.numericControl()
+            field.applyFont(.numericControl)
             field.delegate = self
             field.target = self
             field.action = #selector(applyDimensions)

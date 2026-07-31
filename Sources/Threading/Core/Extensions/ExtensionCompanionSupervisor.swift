@@ -156,7 +156,7 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
     let operationIDs: Set<String>
     let surfaces: [ExtensionRemoteSurface]
 
-    typealias OperationCompletion = (
+    typealias OperationCompletion = @MainActor @Sendable (
         Result<ExtensionCompanionOperationResponse, Error>
     ) -> Void
 
@@ -185,7 +185,7 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
 
     private var startupResult: Result<Void, Error>?
     private var terminalError: Error?
-    private var terminationObserver: ((Error) -> Void)?
+    private var terminationObserver: (@MainActor @Sendable (Error) -> Void)?
     private var isStopped = false
     private var diagnostic = Data()
     private var pendingOperations: [String: PendingOperation] = [:]
@@ -349,13 +349,14 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
         )
         do {
             try request.validate()
-            var data = try JSONEncoder().encode(request)
-            guard data.count <= Self.maximumLineBytes else {
+            var encoded = try JSONEncoder().encode(request)
+            guard encoded.count <= Self.maximumLineBytes else {
                 throw ExtensionCompanionSupervisorError.outputLineTooLarge(
                     maximum: Self.maximumLineBytes
                 )
             }
-            data.append(0x0A)
+            encoded.append(0x0A)
+            let data = encoded
             let timeoutItem = DispatchWorkItem { [weak self] in
                 self?.timeOutOperation(requestID: requestID)
             }
@@ -450,7 +451,7 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
         )
     }
 
-    func observeTermination(_ observer: @escaping (Error) -> Void) {
+    func observeTermination(_ observer: @escaping @MainActor @Sendable (Error) -> Void) {
         let completed: Error?
         lock.lock()
         if let terminalError {
@@ -462,7 +463,7 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
         lock.unlock()
 
         if let completed {
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 observer(completed)
             }
         }
@@ -493,8 +494,9 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
             type: .shutdown,
             generation: generation
         )
-        if var data = try? JSONEncoder().encode(message) {
-            data.append(0x0A)
+        if var encoded = try? JSONEncoder().encode(message) {
+            encoded.append(0x0A)
+            let data = encoded
             writeQueue.async { [stdin] in
                 try? stdin.fileHandleForWriting.write(contentsOf: data)
                 try? stdin.fileHandleForWriting.close()
@@ -672,7 +674,7 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
         _ result: Result<ExtensionCompanionOperationResponse, Error>,
         to completion: @escaping OperationCompletion
     ) {
-        DispatchQueue.main.async {
+        Task { @MainActor in
             completion(result)
         }
     }
@@ -749,7 +751,7 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
     }
 
     private func finish(with error: Error, terminate: Bool) {
-        let observer: ((Error) -> Void)?
+        let observer: (@MainActor @Sendable (Error) -> Void)?
         let mustSignalStartup: Bool
         let pending: [PendingOperation]
         lock.lock()
@@ -779,7 +781,7 @@ final class ExtensionCompanionSupervisor: @unchecked Sendable {
             deliver(.failure(error), to: operation.completion)
         }
         if let observer {
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 observer(error)
             }
         }

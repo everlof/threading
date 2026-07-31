@@ -48,6 +48,7 @@ enum ConversationRowPresentation {
 /// One factory rather than a method per row kind on the controller, because the controller was
 /// the only caller and every one of those methods was really a constructor. `addRow` still
 /// belongs to the controller — placement and spacing are its business, not the row's.
+@MainActor
 enum ConversationRowView {
 
     /// The view for a row, and whether it opens a new exchange.

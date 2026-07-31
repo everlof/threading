@@ -231,12 +231,14 @@ final class GitStagingTests: XCTestCase {
     }
 
     /// Runs an async writer call and fails the test if it reports an error.
-    private func perform(_ work: (@escaping @MainActor (Result<Void, GitFailure>) -> Void) -> Void) throws {
+    private func perform(
+        _ work: (@escaping @MainActor @Sendable (Result<Void, GitFailure>) -> Void) -> Void
+    ) throws {
         _ = try performValue(work)
     }
 
     private func performValue<Value>(
-        _ work: (@escaping @MainActor (Result<Value, GitFailure>) -> Void) -> Void
+        _ work: (@escaping @MainActor @Sendable (Result<Value, GitFailure>) -> Void) -> Void
     ) throws -> Value {
         let finished = expectation(description: "git")
         var outcome: Result<Value, GitFailure>?
@@ -253,7 +255,7 @@ final class GitStagingTests: XCTestCase {
     }
 
     private func performFailure<Value>(
-        _ work: (@escaping @MainActor (Result<Value, GitFailure>) -> Void) -> Void
+        _ work: (@escaping @MainActor @Sendable (Result<Value, GitFailure>) -> Void) -> Void
     ) throws -> GitFailure {
         do {
             _ = try performValue(work)

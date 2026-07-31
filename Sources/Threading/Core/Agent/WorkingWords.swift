@@ -183,9 +183,9 @@ enum TurnStatusText {
 /// Codex reports complete ordered snapshots. Claude can do the same through `TodoWrite`, while
 /// current releases build a task list incrementally with `TaskCreate` and `TaskUpdate`.
 /// `RunProgressReducer` reconciles those wire shapes; this value is only their presentation.
-struct RunProgress: Equatable {
-    struct Step: Equatable {
-        enum Status: Equatable {
+struct RunProgress: Equatable, Sendable {
+    struct Step: Equatable, Sendable {
+        enum Status: Equatable, Sendable {
             case pending
             case inProgress
             case completed
@@ -209,7 +209,7 @@ struct RunProgress: Equatable {
         let status: Status
     }
 
-    private enum Presentation: Equatable {
+    private enum Presentation: Equatable, Sendable {
         case step(Int)
         case tasks(completed: Int, active: Int)
     }

@@ -296,6 +296,12 @@
       "reason": "The draw-in threads Design.Motion tokens through one stroke builder, and playDrawIn returns before constructing any animation under Reduce Motion."
     },
     {
+      "path": "Sources/Threading/UI/Design/SidebarBrandView.swift",
+      "kind": "interactiveComponent",
+      "symbol": "SidebarBrandView",
+      "reason": "The press animates the mark and does nothing else — the brand names the window rather than opening anything. The rule is right that a view answering a click is usually a control, but the honest fix here is not to subclass ThemedControl: that would give the row a focus ring, an enabled state and an accessibility action for a press that has no effect, which is a worse lie than the one the rule is catching. It stays .staticText carrying the brand's name."
+    },
+    {
       "path": "Sources/Threading/UI/Design/SidebarBackdropView.swift",
       "kind": "frozenLayerColor",
       "symbol": "backgroundColor",

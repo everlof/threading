@@ -124,6 +124,15 @@ struct RemoteClient {
         try await postResponse(registration, to: link.notificationRegistrationURL)
     }
 
+    func uploadDiagnostics(
+        _ records: [RemoteDiagnosticRecord]
+    ) async throws -> RemoteDiagnosticUploadResponseDTO {
+        try await postResponse(
+            RemoteDiagnosticUploadRequestDTO(source: .iOSClient, records: records),
+            to: link.diagnosticUploadURL
+        )
+    }
+
     func createShare(
         sessionID: String,
         capability: String,

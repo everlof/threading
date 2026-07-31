@@ -7,6 +7,7 @@ import ThreadingExtensionKit
 /// the app's design language: grouped rounded cards of rows, quiet section captions, flat
 /// controls. The modern macOS-Settings shape, expressed in `Design` tokens rather than stock
 /// form chrome.
+@MainActor
 enum SettingsUI {
 
     /// A whole page: caption+card sections stacked in a flipped scroll view, top-aligned, so a

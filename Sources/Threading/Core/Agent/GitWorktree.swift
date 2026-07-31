@@ -106,7 +106,7 @@ enum GitWorktree {
         guard process.terminationStatus == 0 else {
             let message = String(data: errData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw Failure.gitFailed(message?.isEmpty == false ? message! : "git failed.")
+            throw Failure.gitFailed(message.flatMap { $0.isEmpty ? nil : $0 } ?? "git failed.")
         }
 
         return String(data: outData, encoding: .utf8) ?? ""

@@ -195,8 +195,10 @@ private struct SessionWorkspaceItemRow: View {
             return MobileL10n.string("No browser tabs are open on your Mac.")
         }
 
-        let active = workspace.browserTabs.first(where: { $0.isActive })
-            ?? workspace.browserTabs.first!
+        guard let active = workspace.browserTabs.first(where: { $0.isActive })
+            ?? workspace.browserTabs.first else {
+            return MobileL10n.string("No browser tabs are open on your Mac.")
+        }
         let detail: String
         if active.isPrivate {
             detail = MobileL10n.string("Private Browser")

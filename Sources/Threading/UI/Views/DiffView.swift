@@ -96,6 +96,7 @@ final class DiffView: DiffAppKitView {
     }
 }
 
+@MainActor
 private extension DiffAppKitTheme {
 
     /// The renderer's theme, with every colour that depends on the ground resolved against the

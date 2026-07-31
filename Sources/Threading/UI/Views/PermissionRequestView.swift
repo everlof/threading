@@ -14,17 +14,26 @@ final class PermissionRequestView: NSView {
 
     private let request: PermissionRequest
     private let remoteID = UUID().uuidString
-    private var onDecision: ((PermissionDecision) -> Void)?
+    private var onDecision: (@MainActor @Sendable (PermissionDecision) -> Void)?
     private lazy var safeRemoteRequest = makeRemoteRequest()
 
-    private var buttonRow: NSStackView!
-    private var resolvedLabel: NSTextField!
+    private lazy var buttonRow = makeButtonRow()
+    private lazy var resolvedLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.caption, in: .conversation)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.isHidden = true
+        return label
+    }()
 
     private var isResolved = false
 
     // MARK: - Initialization
 
-    init(request: PermissionRequest, onDecision: @escaping (PermissionDecision) -> Void) {
+    init(
+        request: PermissionRequest,
+        onDecision: @escaping @MainActor @Sendable (PermissionDecision) -> Void
+    ) {
         self.request = request
         self.onDecision = onDecision
         super.init(frame: .zero)
@@ -57,13 +66,6 @@ final class PermissionRequestView: NSView {
         detail.isSelectable = true
         detail.translatesAutoresizingMaskIntoConstraints = false
 
-        resolvedLabel = NSTextField(labelWithString: "")
-        resolvedLabel.applyFont(.caption, in: .conversation)
-        resolvedLabel.translatesAutoresizingMaskIntoConstraints = false
-        resolvedLabel.isHidden = true
-
-        buttonRow = makeButtonRow()
-
         let column = NSStackView(views: [title, detail])
         column.orientation = .vertical
         column.alignment = .leading
@@ -72,7 +74,7 @@ final class PermissionRequestView: NSView {
 
         // An edit is approved on what it changes, so its diff sits between the summary and the
         // buttons — the same view the tool row and the old sheet used.
-        if let diff = EditDiff.lines(forTool: request.toolName, input: request.input) {
+        if let diff = EditDiff.lines(forTool: request.toolName, input: request.foundationInput) {
             column.addArrangedSubview(makeDiffPreview(diff, path: request.filePath))
         }
 
@@ -156,7 +158,7 @@ final class PermissionRequestView: NSView {
     }
 
     private func makeRemoteRequest() -> RemotePermissionRequestDTO {
-        let diff = (EditDiff.lines(forTool: request.toolName, input: request.input) ?? [])
+        let diff = (EditDiff.lines(forTool: request.toolName, input: request.foundationInput) ?? [])
             .enumerated()
             .map { index, line in
                 let kind: String

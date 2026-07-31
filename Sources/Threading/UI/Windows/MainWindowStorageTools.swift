@@ -91,7 +91,7 @@ extension AgentToolCoordinator {
     /// so the app stays usable — including the session that asked.
     func proposeStorageCleanup(
         _ arguments: StorageCleanupArguments,
-        completion: @escaping (MCPToolResult) -> Void
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
         let vetted = ProjectStore.shared.projects.flatMap {
             ArtifactScanService.shared.artifacts(for: $0.id)
@@ -121,7 +121,7 @@ extension AgentToolCoordinator {
         _ artifacts: [ReclaimableArtifact],
         reason: String?,
         unknown: [String],
-        completion: @escaping (MCPToolResult) -> Void
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
         let bytes = artifacts.reduce(0) { $0 + $1.byteCount }
 

@@ -21,7 +21,13 @@ final class SidebarBrandView: NSView, ThemedComponent {
 
     private enum Layout {
         /// The logo slot, sized to the band it lives in.
-        static let logoSide: CGFloat = 20
+        ///
+        /// 24 rather than 20: the mark is six strands and a hexagonal rim inside its own box,
+        /// so it carries more detail per point than an SF Symbol does, and at 20 its strokes
+        /// came out barely a point wide — thin enough that the whole thing read as soft even
+        /// once it was rasterising at the right scale. Four points is the difference between
+        /// a logo and a smudge, and the band has the room.
+        static let logoSide: CGFloat = 24
     }
 
     private let mark = ThreadingMarkView()
@@ -30,6 +36,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
     private let wordmark = MorphingTitleLabel()
     private let stack = NSStackView()
     private let appEvents = AppEventObservations()
+    private var pointerTracking: NSTrackingArea?
 
     /// What the row currently shows, kept so a theme change that moves nothing skips the
     /// morph — `AppThemeDidChange` also fires for font-override sweeps, and a wordmark that
@@ -88,6 +95,40 @@ final class SidebarBrandView: NSView, ThemedComponent {
         // An adaptive theme may state different brands per appearance; a light/dark flip is
         // a brand change the theme notification never fires for.
         configure(animated: false)
+    }
+
+    // MARK: - Pointer
+
+    /// The whole row is the target, not the logo alone: a 24pt mark is a hard thing to put a
+    /// pointer on deliberately, and the name beside it is part of the same signature. The
+    /// tracking area is rebuilt on every layout because the row's width follows the sidebar's.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let pointerTracking {
+            removeTrackingArea(pointerTracking)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(tracking)
+        pointerTracking = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        mark.setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        mark.setHovered(false)
+    }
+
+    /// The press turns the mark and does nothing else. The brand is a signature, not a control:
+    /// it names the window rather than opening anything, and a logo that acknowledges being
+    /// pressed is the whole of what was asked of it.
+    override func mouseDown(with event: NSEvent) {
+        mark.playPress()
     }
 
     // MARK: - Public Methods

@@ -4,6 +4,7 @@ import AppKit
 ///
 /// Labels are right-aligned in a fixed column with controls aligned beside them, which is
 /// what an `NSGridView` gives for free and what hand-rolled stacks tend to get wrong.
+@MainActor
 final class PreferencesFormBuilder {
 
     // MARK: - Properties

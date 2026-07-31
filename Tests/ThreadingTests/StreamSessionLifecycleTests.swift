@@ -1,6 +1,7 @@
 import XCTest
 @testable import Threading
 
+@MainActor
 final class StreamSessionLifecycleTests: XCTestCase {
 
     func testClaudeSpawnFailureArrivesAsynchronouslyOnMain() {
@@ -1118,9 +1119,9 @@ final class StreamEventParserTests: XCTestCase {
         }
         XCTAssertEqual(id, "call-1")
         XCTAssertEqual(tool, .bash)
-        XCTAssertEqual(input["command"] as? String, "echo hi")
-        XCTAssertEqual((input["options"] as? [String: Any])?["quiet"] as? Bool, true)
-        XCTAssertEqual(input["retries"] as? Int, 2)
+        XCTAssertEqual(input["command"], .string("echo hi"))
+        XCTAssertEqual(input["options"]?.objectValue?["quiet"], .bool(true))
+        XCTAssertEqual(input["retries"], .integer(2))
 
         let result = try onlyEvent(StreamEvent.parse("""
             {"type":"user","message":{"content":[{
@@ -1142,7 +1143,7 @@ final class StreamEventParserTests: XCTestCase {
         }
         XCTAssertEqual(id, "call-2")
         XCTAssertEqual(tool, .mcp("mcp__web__query"))
-        XCTAssertEqual(input["selector"] as? String, "#main")
+        XCTAssertEqual(input["selector"], .string("#main"))
 
         let failed = try onlyEvent(CodexStreamEvent.parse("""
             {"type":"turn.failed","error":{"message":"sandbox denied","code":17}}
@@ -1314,7 +1315,7 @@ final class CodexAppServerEventTests: XCTestCase {
         }
         XCTAssertEqual(id, "command-1")
         XCTAssertEqual(tool, .bash)
-        XCTAssertEqual(input["command"] as? String, "swift test")
+        XCTAssertEqual(input["command"], .string("swift test"))
 
         let completed = CodexAppServerEvent.streamEvents(
             method: "item/completed",
@@ -1566,6 +1567,7 @@ final class CodexAppServerEventTests: XCTestCase {
     }
 }
 
+@MainActor
 final class AppEventTests: XCTestCase {
 
     func testTypedEventDeliversItsPayload() {

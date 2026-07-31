@@ -20,6 +20,16 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
     let firstInstalledAt: Date
     let lastUpdatedAt: Date
 
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion
+        case origin
+        case sourceName
+        case contentDigest
+        case sdkVersion
+        case firstInstalledAt
+        case lastUpdatedAt
+    }
+
     init(
         origin: Origin = .localImport,
         sourceName: String,
@@ -35,6 +45,64 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
         self.sdkVersion = sdkVersion
         self.firstInstalledAt = firstInstalledAt
         self.lastUpdatedAt = lastUpdatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try container.decode(Int.self, forKey: .formatVersion)
+        origin = try container.decode(Origin.self, forKey: .origin)
+        sourceName = try container.decode(String.self, forKey: .sourceName)
+        contentDigest = try container.decode(String.self, forKey: .contentDigest)
+        sdkVersion = try container.decodeIfPresent(String.self, forKey: .sdkVersion)
+        firstInstalledAt = try container.decode(Date.self, forKey: .firstInstalledAt)
+        lastUpdatedAt = try container.decode(Date.self, forKey: .lastUpdatedAt)
+
+        guard formatVersion == Self.currentFormatVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .formatVersion,
+                in: container,
+                debugDescription: "Unsupported provenance format version \(formatVersion)"
+            )
+        }
+        guard !sourceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              NSString(string: sourceName).lastPathComponent == sourceName,
+              sourceName != ".",
+              sourceName != ".." else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .sourceName,
+                in: container,
+                debugDescription: "Provenance source name must be a non-empty file name"
+            )
+        }
+        let digestScalars = contentDigest.unicodeScalars
+        guard digestScalars.count == 64,
+              digestScalars.allSatisfy({
+                  ("0"..."9").contains(Character(String($0)))
+                      || ("a"..."f").contains(Character(String($0)))
+              }) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .contentDigest,
+                in: container,
+                debugDescription: "Provenance digest must be a lowercase SHA-256 digest"
+            )
+        }
+        if let sdkVersion,
+           sdkVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw DecodingError.dataCorruptedError(
+                forKey: .sdkVersion,
+                in: container,
+                debugDescription: "Provenance SDK version must not be blank"
+            )
+        }
+        guard firstInstalledAt.timeIntervalSinceReferenceDate.isFinite,
+              lastUpdatedAt.timeIntervalSinceReferenceDate.isFinite,
+              firstInstalledAt <= lastUpdatedAt else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .lastUpdatedAt,
+                in: container,
+                debugDescription: "Provenance dates are invalid or out of order"
+            )
+        }
     }
 
     var presentation: String {

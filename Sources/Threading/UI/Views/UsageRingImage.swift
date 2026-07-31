@@ -10,6 +10,7 @@ import AppKit
 ///
 /// Drawn rather than built from views because a 14pt menu-row mark should be one reusable image,
 /// which is the same reason `ThemeSwatchImage` exists.
+@MainActor
 enum UsageRingImage {
 
     private enum Layout {

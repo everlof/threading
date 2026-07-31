@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 
 /// Manages terminal themes, including built-in themes, custom themes, and imports.
+@MainActor
 final class ThemeManager {
 
     // MARK: - Singleton
@@ -16,23 +17,16 @@ final class ThemeManager {
 
     // MARK: - Properties
 
-    /// The user's own palettes, so they are written through `PreferenceStore` — the hosted tests
-    /// run inside the shipping app and create palettes here.
-    private let defaults = PreferenceStore.shared
+    /// User-authored palettes use the same versioned, quarantine-before-replace contract as the
+    /// other document-like preference stores.
+    private let persistence: RecoverableDefaultsStore<[TerminalTheme]>
 
     /// Built-in themes that cannot be deleted
     let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean]
 
     /// Custom user themes (persisted). Kept in memory so a legacy document that receives an ID
     /// while decoding cannot receive a different identity on the next lookup.
-    private(set) var customThemes: [TerminalTheme] {
-        didSet {
-            if let data = try? JSONEncoder().encode(customThemes) {
-                defaults.set(data, forKey: Keys.customThemes)
-            }
-            NotificationCenter.default.post(ThemesDidChange())
-        }
-    }
+    private(set) var customThemes: [TerminalTheme]
 
     /// All available themes (built-in + custom)
     var allThemes: [TerminalTheme] {
@@ -41,18 +35,23 @@ final class ThemeManager {
 
     // MARK: - Initialization
 
-    private init() {
-        if let data = defaults.data(forKey: Keys.customThemes),
-           let themes = try? JSONDecoder().decode([TerminalTheme].self, from: data) {
-            let migratedThemes = Self.normaliseLegacyThemes(themes)
-            customThemes = migratedThemes
-            // Re-encode once so themes written before IDs existed finish their migration and
-            // old case-only name collisions become unambiguous without dropping a palette.
-            if let migrated = try? JSONEncoder().encode(migratedThemes), migrated != data {
-                defaults.set(migrated, forKey: Keys.customThemes)
-            }
-        } else {
-            customThemes = []
+    init(defaults: UserDefaults = PreferenceStore.shared) {
+        let persistence = RecoverableDefaultsStore<[TerminalTheme]>(
+            defaults: defaults,
+            key: Keys.customThemes,
+            criticality: .userAuthored
+        )
+        self.persistence = persistence
+
+        let outcome = persistence.load(defaultValue: [])
+        let decoded = outcome.value
+        let normalized = Self.normaliseLegacyThemes(decoded)
+        self.customThemes = normalized
+
+        // A successful legacy decode is version zero. Persist its normalized identities now so
+        // a later lookup cannot assign the same legacy palette a different identity.
+        if case .loaded = outcome, normalized != decoded {
+            _ = persistence.save(normalized)
         }
     }
 
@@ -81,7 +80,7 @@ final class ThemeManager {
         } else {
             themes.append(theme)
         }
-        customThemes = themes
+        commit(themes)
     }
 
     /// Delete a custom theme (cannot delete built-in themes)
@@ -91,8 +90,7 @@ final class ThemeManager {
         let oldCount = themes.count
         themes.removeAll { $0.id == theme.id }
         guard themes.count != oldCount else { return false }
-        customThemes = themes
-        return true
+        return commit(themes)
     }
 
     /// Rename a custom theme
@@ -105,8 +103,7 @@ final class ThemeManager {
         var themes = customThemes
         if let index = themes.firstIndex(where: { $0.id == theme.id }) {
             themes[index].name = newName
-            customThemes = themes
-            return true
+            return commit(themes)
         }
         return false
     }
@@ -210,6 +207,14 @@ final class ThemeManager {
 
     private func namesEqual(_ first: String, _ second: String) -> Bool {
         first.caseInsensitiveCompare(second) == .orderedSame
+    }
+
+    @discardableResult
+    private func commit(_ themes: [TerminalTheme]) -> Bool {
+        guard persistence.save(themes) else { return false }
+        customThemes = themes
+        NotificationCenter.default.post(ThemesDidChange())
+        return true
     }
 
     static func normaliseLegacyThemes(_ themes: [TerminalTheme]) -> [TerminalTheme] {

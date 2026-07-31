@@ -1,5 +1,21 @@
 import Foundation
 
+/// A row exists, but it cannot be trusted as an authoritative model record.
+///
+/// Loading the project graph is deliberately all-or-nothing. Returning a partial graph would
+/// make the next whole-state save delete every row that was skipped while decoding it.
+enum ProjectDatabaseLoadError: LocalizedError {
+    case corruptRow(table: String, id: String?, reason: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .corruptRow(let table, let id, let reason):
+            let identity = id.map { " '\($0)'" } ?? ""
+            return "Corrupt \(table) row\(identity): \(reason)"
+        }
+    }
+}
+
 /// The projects and sessions store, in SQLite.
 ///
 /// **Thin rows, JSON payloads** — opencode's own shape, and taken for a practical reason as
@@ -51,8 +67,8 @@ final class ProjectDatabase {
 
     /// Whether anything has been stored yet — the question that decides whether a legacy
     /// `projects.json` should be imported.
-    var isEmpty: Bool {
-        ((try? database.scalar("SELECT COUNT(*) FROM project")) ?? 0) == 0
+    func isEmpty() throws -> Bool {
+        try database.scalar("SELECT COUNT(*) FROM project") == 0
     }
 
     func load() throws -> ProjectsState {
@@ -60,29 +76,152 @@ final class ProjectDatabase {
         var sessionsByProject: [ProjectID: [AgentSession]] = [:]
 
         let sessions = try database.prepare(
-            "SELECT project_id, data FROM session ORDER BY project_id, position"
+            """
+            SELECT id, project_id, kind, last_active_at, data
+            FROM session
+            ORDER BY project_id, position
+            """
         )
         defer { sessions.finalize() }
         while try sessions.step() {
-            guard let rawProjectID = sessions.text(0),
-                  let projectID = ProjectID(uuidString: rawProjectID),
-                  let payload = sessions.text(1),
-                  let session = try? Self.decoder.decode(AgentSession.self, from: Data(payload.utf8))
-            else { continue }
+            let rawID = sessions.text(0)
+            guard let rawID, let rowID = SessionID(uuidString: rawID) else {
+                throw corruptRow("session", id: rawID, reason: "invalid row identifier")
+            }
+            guard let rawProjectID = sessions.text(1),
+                  let projectID = ProjectID(uuidString: rawProjectID) else {
+                throw corruptRow(
+                    "session",
+                    id: rawID,
+                    reason: "invalid project identifier '\(sessions.text(1) ?? "NULL")'"
+                )
+            }
+            guard let storedKind = sessions.text(2) else {
+                throw corruptRow("session", id: rawID, reason: "missing indexed provider kind")
+            }
+            let storedLastActiveAt = sessions.double(3)
+            guard let payload = sessions.text(4) else {
+                throw corruptRow("session", id: rawID, reason: "missing JSON payload")
+            }
+
+            let session: AgentSession
+            do {
+                session = try Self.decoder.decode(
+                    AgentSession.self,
+                    from: Data(payload.utf8)
+                )
+            } catch {
+                throw corruptRow(
+                    "session",
+                    id: rawID,
+                    reason: "invalid JSON payload: \(error.localizedDescription)"
+                )
+            }
+            guard session.id == rowID else {
+                throw corruptRow(
+                    "session",
+                    id: rawID,
+                    reason: "payload identifier is '\(session.id.uuidString)'"
+                )
+            }
+            guard session.kind.rawValue == storedKind else {
+                throw corruptRow(
+                    "session",
+                    id: rawID,
+                    reason: "indexed provider '\(storedKind)' disagrees with payload '\(session.kind.rawValue)'"
+                )
+            }
+            guard abs(session.lastActiveAt.timeIntervalSince1970 - storedLastActiveAt) < 0.000_001 else {
+                throw corruptRow(
+                    "session",
+                    id: rawID,
+                    reason: "indexed last-active time disagrees with payload"
+                )
+            }
             sessionsByProject[projectID, default: []].append(session)
         }
 
-        let rows = try database.prepare("SELECT id, data FROM project ORDER BY position")
+        let rows = try database.prepare(
+            "SELECT id, name, folder_path, data FROM project ORDER BY position"
+        )
         defer { rows.finalize() }
+        var loadedProjectIDs: Set<ProjectID> = []
         while try rows.step() {
-            guard let rawID = rows.text(0),
-                  let id = ProjectID(uuidString: rawID),
-                  let payload = rows.text(1),
-                  var project = try? Self.decoder.decode(Project.self, from: Data(payload.utf8))
-            else { continue }
+            let rawID = rows.text(0)
+            guard let rawID, let id = ProjectID(uuidString: rawID) else {
+                throw corruptRow("project", id: rawID, reason: "invalid row identifier")
+            }
+            guard let storedName = rows.text(1) else {
+                throw corruptRow("project", id: rawID, reason: "missing indexed name")
+            }
+            guard let storedPath = rows.text(2) else {
+                throw corruptRow("project", id: rawID, reason: "missing indexed path")
+            }
+            guard let payload = rows.text(3) else {
+                throw corruptRow("project", id: rawID, reason: "missing JSON payload")
+            }
+
+            var project: Project
+            do {
+                project = try Self.decoder.decode(Project.self, from: Data(payload.utf8))
+            } catch {
+                throw corruptRow(
+                    "project",
+                    id: rawID,
+                    reason: "invalid JSON payload: \(error.localizedDescription)"
+                )
+            }
+            guard project.id == id else {
+                throw corruptRow(
+                    "project",
+                    id: rawID,
+                    reason: "payload identifier is '\(project.id.uuidString)'"
+                )
+            }
+            guard project.name == storedName else {
+                throw corruptRow(
+                    "project",
+                    id: rawID,
+                    reason: "indexed name disagrees with payload"
+                )
+            }
+            guard project.folderPath == storedPath else {
+                throw corruptRow(
+                    "project",
+                    id: rawID,
+                    reason: "indexed path disagrees with payload"
+                )
+            }
+            guard project.sessions.isEmpty else {
+                throw corruptRow(
+                    "project",
+                    id: rawID,
+                    reason: "payload duplicates session rows"
+                )
+            }
             project.sessions = sessionsByProject[id] ?? []
             projects.append(project)
+            loadedProjectIDs.insert(id)
         }
+
+        if let orphanedProjectID = sessionsByProject.keys.first(where: {
+            !loadedProjectIDs.contains($0)
+        }) {
+            throw corruptRow(
+                "session",
+                id: nil,
+                reason: "references missing project '\(orphanedProjectID.uuidString)'"
+            )
+        }
+
+        try validateAuxiliaryRows(
+            table: "panel_layout",
+            as: PersistedPanel.self
+        )
+        try validateAuxiliaryRows(
+            table: "session_attachments",
+            as: PersistedSessionAttachments.self
+        )
 
         return ProjectsState(
             projects: projects,
@@ -156,10 +295,6 @@ final class ProjectDatabase {
         try deleteRows(in: "panel_layout", column: "session_id", keeping: Set(sessionIDs.map(\.uuidString)))
     }
 
-    var hasPanelLayouts: Bool {
-        ((try? database.scalar("SELECT COUNT(*) FROM panel_layout")) ?? 0) > 0
-    }
-
     // MARK: - Public Methods — Session Attachments
 
     /// The attachment references a session has surfaced, as one `Codable` payload per session —
@@ -202,7 +337,7 @@ final class ProjectDatabase {
             .bind(2, position)
             .bind(3, project.name)
             .bind(4, project.folderPath)
-            .bind(5, try Self.encode(payload))
+            .bind(5, try Self.encodeValidated(payload))
             .run()
     }
 
@@ -213,7 +348,7 @@ final class ProjectDatabase {
             .bind(3, position)
             .bind(4, session.kind.rawValue)
             .bind(5, session.lastActiveAt.timeIntervalSince1970)
-            .bind(6, try Self.encode(session))
+            .bind(6, try Self.encodeValidated(session))
             .run()
     }
 
@@ -230,13 +365,49 @@ final class ProjectDatabase {
 
     // MARK: - Private Methods — App State
 
+    /// Auxiliary rows are part of the same authoritative database and therefore participate in
+    /// its all-or-nothing load. Otherwise a malformed panel or attachment document would look
+    /// missing to its feature and the next ordinary edit would overwrite the only copy.
+    private func validateAuxiliaryRows<Value: Decodable>(
+        table: String,
+        as type: Value.Type
+    ) throws {
+        let statement = try database.prepare("SELECT session_id, data FROM \(table)")
+        defer { statement.finalize() }
+        while try statement.step() {
+            let rawID = statement.text(0)
+            guard let rawID, SessionID(uuidString: rawID) != nil else {
+                throw corruptRow(table, id: rawID, reason: "invalid session identifier")
+            }
+            guard let payload = statement.text(1) else {
+                throw corruptRow(table, id: rawID, reason: "missing JSON payload")
+            }
+            do {
+                _ = try Self.decoder.decode(type, from: Data(payload.utf8))
+            } catch {
+                throw corruptRow(
+                    table,
+                    id: rawID,
+                    reason: "invalid JSON payload: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
     private func selectedSessionID() throws -> SessionID? {
         let statement = try database.prepare("SELECT value FROM app_state WHERE key = ?")
         defer { statement.finalize() }
         statement.bind(1, ProjectDatabaseSchema.selectedSessionKey)
 
         guard try statement.step(), let raw = statement.text(0) else { return nil }
-        return SessionID(uuidString: raw)
+        guard let id = SessionID(uuidString: raw) else {
+            throw corruptRow(
+                "app_state",
+                id: ProjectDatabaseSchema.selectedSessionKey,
+                reason: "invalid session identifier '\(raw)'"
+            )
+        }
+        return id
     }
 
     private func setSelectedSessionID(_ id: SessionID?) throws {
@@ -261,8 +432,21 @@ final class ProjectDatabase {
     private static let encoder = JSONEncoder()
     private static let decoder = JSONDecoder()
 
-    private static func encode<Value: Encodable>(_ value: Value) throws -> String {
-        String(decoding: try encoder.encode(value), as: UTF8.self)
+    /// Runs the persisted representation back through its decoder before it reaches SQLite.
+    /// The decoder owns schema invariants (provider-specific options, absolute project paths,
+    /// identity presence), so the write boundary enforces the same rules as the read boundary.
+    private static func encodeValidated<Value: Codable>(_ value: Value) throws -> String {
+        let data = try encoder.encode(value)
+        _ = try decoder.decode(Value.self, from: data)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func corruptRow(
+        _ table: String,
+        id: String?,
+        reason: String
+    ) -> ProjectDatabaseLoadError {
+        .corruptRow(table: table, id: id, reason: reason)
     }
 }
 

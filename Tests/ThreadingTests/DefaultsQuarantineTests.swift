@@ -102,4 +102,123 @@ final class DefaultsQuarantineTests: XCTestCase {
         let reopened = ShortcutOverrideStore(defaults: defaults)
         XCTAssertEqual(reopened.shortcut(for: command), shortcut)
     }
+
+    // MARK: - Shared recoverable stores
+
+    func testFutureEnvelopeIsUnreadableUntilAnExplicitMigrationExists() {
+        let future = Data(#"{"formatVersion":99,"value":{"old":"state"}}"#.utf8)
+        defaults.set(future, forKey: "versioned")
+        let store = RecoverableDefaultsStore<[String: String]>(
+            defaults: defaults,
+            key: "versioned",
+            criticality: .preference
+        )
+
+        let outcome = store.load(defaultValue: [:])
+        guard case .unreadable(let fallback, let recovery) = outcome else {
+            return XCTFail("A future format must not be guessed at")
+        }
+        XCTAssertEqual(fallback, [:])
+        XCTAssertEqual(
+            recovery,
+            .defaultsKey(DefaultsQuarantine.quarantineKey(for: "versioned"))
+        )
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: "versioned")),
+            future
+        )
+    }
+
+    func testUnreadableProfilesArePreservedBeforeAnEdit() {
+        let corrupt = Data("{".utf8)
+        defaults.set(corrupt, forKey: "terminalProfiles")
+        let storage = ProfileStorage(defaults: defaults)
+
+        XCTAssertEqual(storage.profiles, [.default])
+
+        var replacement = TerminalProfile.default
+        replacement.shellPath = "/bin/zsh"
+        storage.save(replacement)
+
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: "terminalProfiles")),
+            corrupt
+        )
+        XCTAssertEqual(
+            ProfileStorage(defaults: defaults).defaultProfile.shellPath,
+            "/bin/zsh"
+        )
+    }
+
+    func testUnreadableAISettingsArePreservedBeforeAnEdit() {
+        let corrupt = Data(#"{"providerType":"future-provider"}"#.utf8)
+        defaults.set(corrupt, forKey: "aiSettings")
+        let storage = AISettingsStorage(defaults: defaults)
+
+        XCTAssertEqual(storage.settings, .default)
+
+        var replacement = AISettings.default
+        replacement.providerType = .ollama
+        storage.settings = replacement
+
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: "aiSettings")),
+            corrupt
+        )
+        XCTAssertEqual(
+            AISettingsStorage(defaults: defaults).settings.providerType,
+            .ollama
+        )
+    }
+
+    func testUnreadableTokenUsageIsPreservedAndNewCountsRoundTrip() async {
+        let corrupt = Data("{".utf8)
+        defaults.set(corrupt, forKey: "tokenUsage")
+        let manager = TokenUsageManager(defaults: defaults)
+
+        await manager.record(model: "safe-model", inputTokens: 3, outputTokens: 5)
+
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: "tokenUsage")),
+            corrupt
+        )
+        let reopened = TokenUsageManager(defaults: defaults)
+        let total = await reopened.total(for: "safe-model")
+        XCTAssertEqual(total, TokenUsage(inputTokens: 3, outputTokens: 5))
+    }
+
+    func testUnreadableTerminalThemesArePreservedBeforeCreatingAPalette() {
+        let corrupt = Data("{".utf8)
+        defaults.set(corrupt, forKey: "customTerminalThemes")
+        let manager = ThemeManager(defaults: defaults)
+        let theme = TerminalTheme.ocean.duplicated(named: "Recovered Ocean")
+
+        manager.addTheme(theme)
+
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: "customTerminalThemes")),
+            corrupt
+        )
+        XCTAssertEqual(
+            ThemeManager(defaults: defaults).customThemes.map(\.id),
+            [theme.id]
+        )
+    }
+
+    func testUnreadableAppThemesArePreservedBeforeCreatingATheme() {
+        let corrupt = Data("{".utf8)
+        defaults.set(corrupt, forKey: "customAppThemes")
+        let store = AppThemeStore(defaults: defaults)
+
+        store.insert(AppThemeStyles.cyberpunk)
+
+        XCTAssertEqual(
+            defaults.data(forKey: DefaultsQuarantine.quarantineKey(for: "customAppThemes")),
+            corrupt
+        )
+        XCTAssertEqual(
+            AppThemeStore(defaults: defaults).themes.map(\.id),
+            [AppThemeStyles.cyberpunk.id]
+        )
+    }
 }

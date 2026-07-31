@@ -29,7 +29,10 @@ struct TextPromptRequest {
 
 enum TextPromptDefaults {
     static let fieldWidth: CGFloat = 240
-    static let fieldHeight: CGFloat = 24
+    /// An accessory view is given a frame rather than asked for its intrinsic size, so the
+    /// field's own height has to be restated here — from the same token, or the one field the
+    /// app puts in front of a decision is the tightest one it draws.
+    static let fieldHeight: CGFloat = Design.Size.fieldHeight
 }
 
 // MARK: - Text Prompt Alert

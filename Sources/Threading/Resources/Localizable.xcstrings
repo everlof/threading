@@ -1,6 +1,437 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ background · %@ text": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ bakgrund · %@ text"
+          }
+        }
+      }
+    },
+    "%@ color, locked": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@-färg, låst"
+          }
+        }
+      }
+    },
+    "%@ · Viewing the %@ colors.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · Visar %@-färgerna."
+          }
+        }
+      }
+    },
+    "Accent": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accentfärg"
+          }
+        }
+      }
+    },
+    "Active theme": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktivt tema"
+          }
+        }
+      }
+    },
+    "Adaptive": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adaptivt"
+          }
+        }
+      }
+    },
+    "Borders": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kantlinjer"
+          }
+        }
+      }
+    },
+    "Built-in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbyggt"
+          }
+        }
+      }
+    },
+    "Built-in theme · Locked. Duplicate it to edit a copy.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbyggt tema · Låst. Duplicera det för att redigera en kopia."
+          }
+        }
+      }
+    },
+    "Current Theme": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktuellt tema"
+          }
+        }
+      }
+    },
+    "Custom": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anpassat"
+          }
+        }
+      }
+    },
+    "Custom theme · Editable. Color changes apply immediately.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anpassat tema · Redigerbart. Färgändringar tillämpas direkt."
+          }
+        }
+      }
+    },
+    "Describe what looks wrong": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beskriv vad som ser fel ut"
+          }
+        }
+      }
+    },
+    "Duplicate to Edit": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Duplicera för att redigera"
+          }
+        }
+      }
+    },
+    "Edit %@ color": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redigera färgen %@"
+          }
+        }
+      }
+    },
+    "Edit with an Agent": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redigera med en agent"
+          }
+        }
+      }
+    },
+    "Extension “%@” · Locked. Duplicate it to edit a copy.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillägget ”%@” · Låst. Duplicera det för att redigera en kopia."
+          }
+        }
+      }
+    },
+    "Fixed dark": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast mörkt"
+          }
+        }
+      }
+    },
+    "Fixed light": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast ljust"
+          }
+        }
+      }
+    },
+    "Keywords": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyckelord"
+          }
+        }
+      }
+    },
+    "Material": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Material"
+          }
+        }
+      }
+    },
+    "Monospaced": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast bredd"
+          }
+        }
+      }
+    },
+    "Negative": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Negativ"
+          }
+        }
+      }
+    },
+    "Numbers": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tal"
+          }
+        }
+      }
+    },
+    "Paired terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Matchande terminal"
+          }
+        }
+      }
+    },
+    "Plain themed surface with the default Threading brand.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enfärgad temayta med Threadings standardvarumärke."
+          }
+        }
+      }
+    },
+    "Positive": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Positiv"
+          }
+        }
+      }
+    },
+    "Rounded": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rundad"
+          }
+        }
+      }
+    },
+    "Serif": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serif"
+          }
+        }
+      }
+    },
+    "Sidebar": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sidofält"
+          }
+        }
+      }
+    },
+    "Sidebar and panes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sidofält och paneler"
+          }
+        }
+      }
+    },
+    "Source": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Källa"
+          }
+        }
+      }
+    },
+    "Strings": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strängar"
+          }
+        }
+      }
+    },
+    "System sans": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Systemets sans-serif"
+          }
+        }
+      }
+    },
+    "The app-wide chrome shown in this window.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appens globala utseende som visas i det här fönstret."
+          }
+        }
+      }
+    },
+    "Try: “Use Threading’s app-theme MCP tools to make my current theme warmer and soften the sidebar.” The agent can inspect it with get_app_theme, duplicate a locked theme with duplicate_app_theme (apply: true), and make live changes with update_app_theme.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prova: ”Använd Threadings MCP-verktyg för appteman för att göra mitt aktuella tema varmare och tona ned sidofältet.” Agenten kan inspektera det med get_app_theme, duplicera ett låst tema med duplicate_app_theme (apply: true) och göra ändringar direkt med update_app_theme."
+          }
+        }
+      }
+    },
+    "Types": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Typer"
+          }
+        }
+      }
+    },
+    "Warning": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Varning"
+          }
+        }
+      }
+    },
+    "Window ground": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fönstergrund"
+          }
+        }
+      }
+    },
+    "custom brand": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "anpassat varumärke"
+          }
+        }
+      }
+    },
+    "gradient": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "toning"
+          }
+        }
+      }
+    },
+    "image": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "bild"
+          }
+        }
+      }
+    },
+    "%@ needs macOS %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ kräver macOS %@"
+          }
+        }
+      }
+    },
     "%lld annotations": {
       "localizations": {
         "sv": {
@@ -52,6 +483,17 @@
         }
       }
     },
+    "An agent": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En agent"
+          }
+        }
+      }
+    },
     "Appended once after the task you write. It is not sent again when an existing chat resumes.": {
       "localizations": {
         "sv": {
@@ -73,12 +515,67 @@
         }
       }
     },
+    "Every open session closes. The conversations are kept and can be resumed on the next launch; only work in flight is lost.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alla öppna sessioner stängs. Konversationerna sparas och kan återupptas vid nästa start; bara det som pågår just nu går förlorat."
+          }
+        }
+      }
+    },
     "For example: Rename this chat to a ONE-WORD, ALL-CAPS name that represents it.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Till exempel: Byt namn på konversationen till ETT ORD MED VERSALER som representerar den."
+          }
+        }
+      }
+    },
+    "macOS will ask next, and its prompt will say Threading rather than %@: a program Threading launches is approved against Threading's own grant. Nothing is granted by continuing — the system asks separately, and you can refuse it there too.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS frågar härnäst, och dess dialog säger Threading i stället för %@: ett program som Threading startar godkänns mot Threadings egen behörighet. Ingenting beviljas genom att fortsätta – systemet frågar separat, och du kan neka även där."
+          }
+        }
+      }
+    },
+    "Matches for “%@”": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Träffar för ”%@”"
+          }
+        }
+      }
+    },
+    "Nothing is in flight. The sessions close, and their conversations are kept and can be resumed on the next launch.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingenting pågår. Sessionerna stängs, och deras konversationer sparas och kan återupptas vid nästa start."
+          }
+        }
+      }
+    },
+    "Open %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna %@"
           }
         }
       }
@@ -179,6 +676,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Redigera anteckning %lld"
+          }
+        }
+      }
+    },
+    "Quit with %lld sessions open?": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avsluta med %lld sessioner öppna?"
+          }
+        }
+      }
+    },
+    "Quit with %lld turns in flight?": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avsluta med %lld turer som pågår?"
+          }
+        }
+      }
+    },
+    "Quit with one session open?": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avsluta med en session öppen?"
+          }
+        }
+      }
+    },
+    "Quit with one turn in flight?": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avsluta med en tur som pågår?"
           }
         }
       }
@@ -5781,6 +6322,47 @@
         }
       }
     },
+    "Extension enablement could not be saved without risking its recovery copy.": {
+      "extractionState": "stale",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tilläggsaktivering kunde inte sparas utan att riskera dess återställningskopia."
+          }
+        }
+      }
+    },
+    "Extension %@ data version could not be saved and verified.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dataversionen för tillägget %@ kunde inte sparas och verifieras."
+          }
+        }
+      }
+    },
+    "Extension %@ has invalid stored data version %lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillägget %@ har den ogiltiga lagrade dataversionen %lld."
+          }
+        }
+      }
+    },
+    "Extension %@ uses unsupported data-version format %lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillägget %@ använder det ej stödda dataversionsformatet %lld."
+          }
+        }
+      }
+    },
     "Extension Installed": {
       "extractionState": "stale",
       "localizations": {
@@ -5979,6 +6561,16 @@
         }
       }
     },
+    "Extension settings could not be saved without risking their recovery copy.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tilläggsinställningar kunde inte sparas utan att riskera deras återställningskopia."
+          }
+        }
+      }
+    },
     "Extension settings use unsupported format version %lld.": {
       "extractionState": "stale",
       "localizations": {
@@ -6008,6 +6600,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tillägg"
+          }
+        }
+      }
+    },
+    "Extensions could not be read": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillägg kunde inte läsas"
           }
         }
       }
@@ -7287,6 +7889,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ogiltig komponentpatch “%@”: %@"
+          }
+        }
+      }
+    },
+    "Invalid extension identifier: %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ogiltig tilläggsidentifierare: %@."
           }
         }
       }
@@ -10253,6 +10865,16 @@
         }
       }
     },
+    "Read page annotations": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läs sidanteckningar"
+          }
+        }
+      }
+    },
     "Read supported emulation and automation limits before choosing a backend.": {
       "extractionState": "stale",
       "localizations": {
@@ -10282,6 +10904,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Läs Chrome-teman och se vilket som är aktivt."
+          }
+        }
+      }
+    },
+    "Read user-authored notes anchored to the current page.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läs användarskrivna anteckningar förankrade på den aktuella sidan."
           }
         }
       }
@@ -12330,6 +12962,16 @@
         }
       }
     },
+    "Threading could not restore extension setting “%@” after it was refused: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading kunde inte återställa tilläggsinställningen “%@” efter att den avvisades: %@"
+          }
+        }
+      }
+    },
     "Threading could not prepare the remote diagnostics file.": {
       "extractionState": "stale",
       "localizations": {
@@ -13449,6 +14091,16 @@
         }
       }
     },
+    "The extension manager closed before the settings update finished.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tilläggshanteraren stängdes innan inställningsuppdateringen slutfördes."
+          }
+        }
+      }
+    },
     "The extension package for %@ could not be read completely.": {
       "extractionState": "stale",
       "localizations": {
@@ -13456,6 +14108,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tilläggsförpackningen för %@ kunde inte läsas helt."
+          }
+        }
+      }
+    },
+    "The extension was stopped because Threading could not confirm its settings update: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillägget stoppades eftersom Threading inte kunde bekräfta dess inställningsuppdatering: %@"
           }
         }
       }

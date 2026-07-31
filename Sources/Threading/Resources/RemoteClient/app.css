@@ -136,6 +136,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  flex: 1;
 }
 
 .device-status {
@@ -153,12 +155,69 @@ body {
   background: currentColor;
 }
 
+.diagnostic-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 270px;
+  text-align: right;
+}
+
+.diagnostic-controls button {
+  appearance: none;
+  padding: 7px 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--control-resting);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  cursor: pointer;
+}
+
+.diagnostic-controls button:hover,
+.diagnostic-controls button:active {
+  background: var(--panel-hover);
+}
+
+.diagnostic-controls button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.diagnostic-controls button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.diagnostic-controls span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 #sessions .section-heading {
   display: flex;
   justify-content: space-between;
   margin: 0 8px 14px;
   color: var(--muted);
   font-size: 14px;
+}
+
+@media (max-width: 560px) {
+  #sessions .device {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .diagnostic-controls {
+    align-items: stretch;
+    width: 100%;
+    max-width: none;
+    margin-left: 58px;
+    text-align: left;
+  }
 }
 
 #sessions .section-heading span:first-child {

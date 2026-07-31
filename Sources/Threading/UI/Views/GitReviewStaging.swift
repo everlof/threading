@@ -16,7 +16,8 @@ extension GitReviewViewController {
         var paths = [file.path]
         if case .renamed(let from) = file.change { paths.append(from) }
 
-        let finish: @MainActor (Result<Void, GitFailure>) -> Void = { [weak self] result in
+        let finish: @MainActor @Sendable (Result<Void, GitFailure>) -> Void = {
+            [weak self] result in
             self?.finishWrite(result)
         }
         switch staging.action {

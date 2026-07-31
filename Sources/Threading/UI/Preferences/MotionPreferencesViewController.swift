@@ -208,7 +208,9 @@ final class MotionPreferencesViewController: NSViewController {
     private func scheduleNextLeg(after delay: TimeInterval) {
         demonstrationTimer?.invalidate()
         let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
-            self?.stepDemonstration()
+            Task { @MainActor [weak self] in
+                self?.stepDemonstration()
+            }
         }
         demonstrationTimer = timer
         // `.common`, because a press held on the control that opened the menu runs the

@@ -480,12 +480,14 @@ private final class ThemedMenuOverlayView: ThemedControl {
         menuSurface.setAccessibilityRole(nil)
 
         let duration = Design.Motion.vanish
-        let fadeOut = {
+        let fadeOut: @MainActor @Sendable () -> Void = {
             NSAnimationContext.runAnimationGroup({ context in
                 context.duration = Design.Motion.vanish
                 self.animator().alphaValue = 0
-            }, completionHandler: {
-                self.removeFromSuperview()
+            }, completionHandler: { [weak self] in
+                Task { @MainActor in
+                    self?.removeFromSuperview()
+                }
             })
         }
 
@@ -631,6 +633,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
 /// The dropdown's column geometry. Internal rather than file-private so the columns can be
 /// pinned by a test: a preview hosted in a row and a title drawn in one have to start at the
 /// same place, and that is an arithmetic claim rather than something a render shows.
+@MainActor
 enum ThemedMenuMetrics {
     /// Between the panel's edge and its rows, so a highlighted row's capsule floats inside
     /// the panel instead of grazing its border.

@@ -8,7 +8,7 @@ import ThreadingRemoteKit
 ///
 /// Owner pairing and exact-session guest links are all launch-scoped today. A future persisted
 /// device/share store can replace this in-memory authority without changing server routing.
-final class RemoteAuthorityStore: RemoteAuthorizing {
+final class RemoteAuthorityStore: RemoteAuthorizing, @unchecked Sendable {
     private let lock = NSLock()
     private var byToken: [String: RemoteAuthorization] = [:]
 
@@ -33,13 +33,13 @@ final class RemoteAuthorityStore: RemoteAuthorizing {
     }
 }
 
-struct RemoteInvitationRedemption {
+struct RemoteInvitationRedemption: Sendable {
     let accessToken: String
     let authorization: RemoteAuthorization
 }
 
 @MainActor
-protocol RemoteInvitationRedeeming: AnyObject {
+protocol RemoteInvitationRedeeming: AnyObject, Sendable {
     func redeemInvitation(
         token: String,
         deviceID: String,
@@ -301,14 +301,15 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     }
 
     private func expireInvitation(token: String, sessionID: SessionID) {
-        guard let index = sessionShares[sessionID]?.firstIndex(where: {
+        guard var shares = sessionShares[sessionID],
+              let index = shares.firstIndex(where: {
             $0.invitationToken == token
         })
         else { return }
         // A consumed invitation has already been cleared and its membership intentionally
         // survives the invitation timer.
-        let share = sessionShares[sessionID]!.remove(at: index)
-        if sessionShares[sessionID]?.isEmpty == true { sessionShares[sessionID] = nil }
+        let share = shares.remove(at: index)
+        sessionShares[sessionID] = shares.isEmpty ? nil : shares
         for member in share.members.values {
             authority.set(nil, forToken: member.token)
             RemoteNotificationService.shared.revoke(

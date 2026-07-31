@@ -596,6 +596,7 @@ final class ExtensionRendererTests: XCTestCase {
             identifier: identifier,
             name: "Chain Probe",
             version: "0.1.0",
+            runtime: .native,
             executable: "bin/extension",
             capabilities: [.keyValueStorage]
         )).write(to: package.appendingPathComponent(ExtensionBundleInspector.manifestName))
@@ -694,6 +695,7 @@ final class ExtensionRendererTests: XCTestCase {
                     identifier: "com.example.kv",
                     name: "KV",
                     version: "1.0.0",
+                    runtime: .native,
                     executable: "bin/kv",
                     capabilities: [.keyValueStorage, .cacheStorage]
                 ),
@@ -4732,7 +4734,9 @@ private final class TestExtensionServiceRouter: ExtensionServiceRouting {
         serviceVersion: Int,
         callerExtensionIdentifier: String,
         arguments: ExtensionJSONValue,
-        completion: @escaping (Result<ExtensionServiceResponse, Error>) -> Void
+        completion: @escaping @MainActor @Sendable (
+            Result<ExtensionServiceResponse, Error>
+        ) -> Void
     ) {
         calls.append(.init(
             provider: providerIdentifier,
@@ -4834,7 +4838,10 @@ private final class TestExtensionPanelRouter: ExtensionPanelRouting {
     }
 }
 
-private final class TestExtensionSecretStore: ExtensionSecretStoring {
+private final class TestExtensionSecretStore:
+    ExtensionSecretStoring,
+    @unchecked Sendable
+{
     private var values: [String: [String: Data]] = [:]
 
     func data(extensionIdentifier: String, key: String) throws -> Data? {

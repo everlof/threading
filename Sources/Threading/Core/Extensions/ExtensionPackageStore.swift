@@ -27,6 +27,7 @@ enum ExtensionPackageStoreError: LocalizedError {
     case updateChangedUnderneath(String)
     case packageCouldNotBeDigested(String)
     case dataVersionRollback(identifier: String, installed: Int, candidate: Int)
+    case enablementStateCouldNotBeSaved
 
     var errorDescription: String? {
         switch self {
@@ -67,6 +68,10 @@ enum ExtensionPackageStoreError: LocalizedError {
                 Int64(candidate),
                 Int64(installed)
             )
+        case .enablementStateCouldNotBeSaved:
+            return L10n.string(
+                "Extension enablement could not be saved without risking its recovery copy."
+            )
         }
     }
 }
@@ -94,9 +99,12 @@ final class ExtensionPackageStore: @unchecked Sendable {
     let provenanceURL: URL
     let storageStore: ExtensionStorageStore
 
-    private let stateURL: URL
     private let fileManager: FileManager
+    private let statePersistence: RecoverableFileStore<State>
     private let lock = NSLock()
+    private var provenancePersistence: [
+        String: RecoverableFileStore<ExtensionInstallProvenance?>
+    ] = [:]
 
     init(
         rootURL: URL = FileManager.default
@@ -110,48 +118,53 @@ final class ExtensionPackageStore: @unchecked Sendable {
         self.removedURL = rootURL.appendingPathComponent("Removed", isDirectory: true)
         self.provenanceURL = rootURL.appendingPathComponent("Provenance", isDirectory: true)
         self.storageStore = ExtensionStorageStore(rootURL: rootURL, fileManager: fileManager)
-        self.stateURL = rootURL.appendingPathComponent("state.json", isDirectory: false)
         self.fileManager = fileManager
+        self.statePersistence = RecoverableFileStore(
+            url: rootURL.appendingPathComponent("state.json", isDirectory: false),
+            fileManager: fileManager,
+            criticality: .preference
+        )
     }
 
-    func inventory() -> [InstalledExtensionPackage] {
+    /// Reads the complete installed-package directory.
+    ///
+    /// Individual invalid packages remain as inventory entries with a `problem`. Failure to
+    /// read the directory itself is different: returning `[]` would falsely tell the product
+    /// that every extension had been removed, so the caller must surface or retain that error.
+    func inventory() throws -> [InstalledExtensionPackage] {
         lock.lock()
         defer { lock.unlock() }
 
-        do {
-            try ensureDirectories()
-            return try fileManager.contentsOfDirectory(
-                at: packagesURL,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            )
-            .filter { $0.pathExtension == Self.packageExtension }
-            .map { url in
-                do {
-                    return InstalledExtensionPackage(
-                        packageURL: url,
-                        bundle: try ExtensionBundleInspector.inspect(at: url),
-                        provenance: loadProvenance(
-                            identifier: url.deletingPathExtension().lastPathComponent
-                        ),
-                        problem: nil
-                    )
-                } catch {
-                    return InstalledExtensionPackage(
-                        packageURL: url,
-                        bundle: nil,
-                        provenance: loadProvenance(
-                            identifier: url.deletingPathExtension().lastPathComponent
-                        ),
-                        problem: error.localizedDescription
-                    )
-                }
+        try ensureDirectories()
+        return try fileManager.contentsOfDirectory(
+            at: packagesURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+        .filter { $0.pathExtension == Self.packageExtension }
+        .map { url in
+            do {
+                return InstalledExtensionPackage(
+                    packageURL: url,
+                    bundle: try ExtensionBundleInspector.inspect(at: url),
+                    provenance: loadProvenance(
+                        identifier: url.deletingPathExtension().lastPathComponent
+                    ),
+                    problem: nil
+                )
+            } catch {
+                return InstalledExtensionPackage(
+                    packageURL: url,
+                    bundle: nil,
+                    provenance: loadProvenance(
+                        identifier: url.deletingPathExtension().lastPathComponent
+                    ),
+                    problem: error.localizedDescription
+                )
             }
-            .sorted {
-                $0.identifier.localizedCaseInsensitiveCompare($1.identifier) == .orderedAscending
-            }
-        } catch {
-            return []
+        }
+        .sorted {
+            $0.identifier.localizedCaseInsensitiveCompare($1.identifier) == .orderedAscending
         }
     }
 
@@ -165,6 +178,11 @@ final class ExtensionPackageStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        guard ExtensionIdentifierRules.isReverseDNSIdentifier(identifier) else {
+            throw ExtensionValidationError(issues: [
+                .init(path: "identifier", message: "must be a lowercase reverse-DNS identifier")
+            ])
+        }
         var state = loadState()
         if enabled {
             state.enabledIdentifiers.insert(identifier)
@@ -294,7 +312,6 @@ final class ExtensionPackageStore: @unchecked Sendable {
         )
         defer {
             try? fileManager.removeItem(at: staging)
-            try? fileManager.removeItem(at: outgoing)
         }
 
         // The staged copy is the security boundary: it is the exact tree inspected, digested,
@@ -338,17 +355,40 @@ final class ExtensionPackageStore: @unchecked Sendable {
         try fileManager.moveItem(at: target, to: outgoing)
         do {
             try fileManager.moveItem(at: staging, to: target)
+            let installed = try ExtensionBundleInspector.inspect(at: target)
+            recordProvenance(
+                for: installed,
+                sourceName: sourceURL.lastPathComponent,
+                preserving: loadProvenance(identifier: identifier)
+            )
+            do {
+                try fileManager.removeItem(at: outgoing)
+            } catch {
+                ThreadingLogger.extensions.error(
+                    "Updated \(identifier, privacy: .public), but its replaced package could not be removed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            return installed
         } catch {
-            try? fileManager.moveItem(at: outgoing, to: target)
-            throw error
+            let updateError = error
+            do {
+                // If the new tree reached its destination but post-move validation failed, move
+                // it back to staging first. The deferred staging cleanup may discard that
+                // rejected candidate; it must never discard the known-good outgoing package.
+                if fileManager.fileExists(atPath: target.path) {
+                    try fileManager.moveItem(at: target, to: staging)
+                }
+                try fileManager.moveItem(at: outgoing, to: target)
+            } catch {
+                throw ExtensionPackageStoreError.installedCopyInvalid(
+                    "the update failed and the previous package could not be restored "
+                        + "automatically; it remains recoverable at \(outgoing.path). "
+                        + "Update error: \(updateError.localizedDescription). "
+                        + "Restore error: \(error.localizedDescription)"
+                )
+            }
+            throw updateError
         }
-        let installed = try ExtensionBundleInspector.inspect(at: target)
-        recordProvenance(
-            for: installed,
-            sourceName: sourceURL.lastPathComponent,
-            preserving: loadProvenance(identifier: identifier)
-        )
-        return installed
     }
 
     private func installedManifest(for identifier: String) throws -> ExtensionManifest {
@@ -462,21 +502,32 @@ final class ExtensionPackageStore: @unchecked Sendable {
             firstInstalledAt: existing?.firstInstalledAt ?? now,
             lastUpdatedAt: now
         )
-        try? JSONEncoder().encode(record).write(
-            to: provenanceFileURL(identifier: bundle.manifest.identifier),
-            options: .atomic
-        )
+        _ = provenanceStore(identifier: bundle.manifest.identifier).save(record)
     }
 
     private func loadProvenance(identifier: String) -> ExtensionInstallProvenance? {
-        try? JSONDecoder().decode(
-            ExtensionInstallProvenance.self,
-            from: Data(contentsOf: provenanceFileURL(identifier: identifier))
-        )
+        provenanceStore(identifier: identifier).load(defaultValue: nil).value
     }
 
     private func provenanceFileURL(identifier: String) -> URL {
         provenanceURL.appendingPathComponent("\(identifier).json", isDirectory: false)
+    }
+
+    /// Must be called while `lock` is held. Keeping one instance per identifier preserves the
+    /// store's write-disable latch if a recovery copy or a later write cannot be verified.
+    private func provenanceStore(
+        identifier: String
+    ) -> RecoverableFileStore<ExtensionInstallProvenance?> {
+        if let existing = provenancePersistence[identifier] {
+            return existing
+        }
+        let store = RecoverableFileStore<ExtensionInstallProvenance?>(
+            url: provenanceFileURL(identifier: identifier),
+            fileManager: fileManager,
+            criticality: .primary
+        )
+        provenancePersistence[identifier] = store
+        return store
     }
 
     private func validatePackageShape(at root: URL) throws {
@@ -533,18 +584,29 @@ final class ExtensionPackageStore: @unchecked Sendable {
     }
 
     private func loadState() -> State {
-        guard let data = try? Data(contentsOf: stateURL),
-              let state = try? JSONDecoder().decode(State.self, from: data),
-              state.formatVersion == State.currentFormatVersion else {
-            return State()
-        }
-        return state
+        statePersistence.load(defaultValue: State()) { state in
+            guard state.formatVersion == State.currentFormatVersion else {
+                throw ExtensionSettingsValueStoreError.incompatibleFormat(
+                    state.formatVersion
+                )
+            }
+            guard state.enabledIdentifiers.allSatisfy(
+                ExtensionIdentifierRules.isReverseDNSIdentifier
+            ) else {
+                throw ExtensionValidationError(issues: [
+                    .init(
+                        path: "enabledIdentifiers",
+                        message: "contains an invalid extension identifier"
+                    )
+                ])
+            }
+        }.value
     }
 
     private func saveState(_ state: State) throws {
         try ensureDirectories()
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(state).write(to: stateURL, options: .atomic)
+        guard statePersistence.save(state) else {
+            throw ExtensionPackageStoreError.enablementStateCouldNotBeSaved
+        }
     }
 }

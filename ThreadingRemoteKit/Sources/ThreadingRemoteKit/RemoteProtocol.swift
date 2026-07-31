@@ -17,7 +17,7 @@ public enum RemoteProtocol {
 }
 
 /// A version pair, as it crosses the wire in both directions.
-public struct RemoteProtocolInfo: Codable, Equatable {
+public struct RemoteProtocolInfo: Codable, Equatable, Sendable {
     public let version: Int
     public let minimumSupported: Int
 
@@ -30,7 +30,7 @@ public struct RemoteProtocolInfo: Codable, Equatable {
 /// The outcome of comparing a peer's version pair against this build. It names *which* side is
 /// behind, because that decides what the user is told: refresh/update the client, or update the
 /// Mac app.
-public enum RemoteProtocolCompatibility: String, Codable, Equatable {
+public enum RemoteProtocolCompatibility: String, Codable, Equatable, Sendable {
     case compatible
     /// The peer is older than we support — it should update.
     case peerTooOld
@@ -51,7 +51,7 @@ public enum RemoteProtocolCompatibility: String, Codable, Equatable {
 
 /// Where a `RemoteProtocolCompatibility` mismatch, seen by the server, says the fix lives — so
 /// the client can render the right sentence without re-deriving the direction.
-public enum RemoteUpdateTarget: String, Codable, Equatable {
+public enum RemoteUpdateTarget: String, Codable, Equatable, Sendable {
     /// The connecting client (web tab or app) is behind and should update or reload.
     case client
     /// The Mac running Threading is behind and should update.

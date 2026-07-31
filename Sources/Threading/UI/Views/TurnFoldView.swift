@@ -14,8 +14,28 @@ final class TurnFoldView: NSView {
     private let label: String
     private let foldedViews: [NSView]
 
-    private var chevron: NSImageView!
-    private var titleLabel: NSTextField!
+    private lazy var chevron: NSImageView = {
+        let image = NSImageView()
+        image.translatesAutoresizingMaskIntoConstraints = false
+        image.image = NSImage(
+            systemSymbolName: "chevron.right",
+            accessibilityDescription: nil
+        )
+        image.contentTintColor = Design.Text.quaternary
+        image.symbolConfiguration = Design.Symbol.configuration(
+            Design.Symbol.chevron,
+            weight: .semibold
+        )
+        return image
+    }()
+    private lazy var titleLabel: NSTextField = {
+        let title = NSTextField(labelWithString: label)
+        title.applyFont(.caption, in: .conversation)
+        title.textColor = Design.Text.tertiary
+        title.translatesAutoresizingMaskIntoConstraints = false
+        title.maximumNumberOfLines = 1
+        return title
+    }()
 
     private var isExpanded = false
     private var isHovered = false
@@ -50,21 +70,6 @@ final class TurnFoldView: NSView {
     private func setupViews() {
         translatesAutoresizingMaskIntoConstraints = false
         applySurface(fill: Design.Chat.toolRowResting, radius: .control)
-
-        chevron = NSImageView()
-        chevron.translatesAutoresizingMaskIntoConstraints = false
-        chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
-        chevron.contentTintColor = Design.Text.quaternary
-        chevron.symbolConfiguration = Design.Symbol.configuration(
-            Design.Symbol.chevron,
-            weight: .semibold
-        )
-
-        titleLabel = NSTextField(labelWithString: label)
-        titleLabel.applyFont(.caption, in: .conversation)
-        titleLabel.textColor = Design.Text.tertiary
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.maximumNumberOfLines = 1
 
         addSubview(chevron)
         addSubview(titleLabel)

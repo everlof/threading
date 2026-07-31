@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Rebuilds a past conversation from the transcript its agent keeps on disk.
 ///
@@ -219,21 +220,30 @@ enum TranscriptReplay {
     /// depending on version.
     private static func timestamp(of record: [String: Any]) -> Date? {
         guard let raw = record["timestamp"] as? String else { return nil }
-        return fractionalTimestampParser.date(from: raw)
-            ?? plainTimestampParser.date(from: raw)
+        return timestampParsers.withLock { parsers in
+            parsers.fractional.date(from: raw) ?? parsers.plain.date(from: raw)
+        }
     }
 
-    private static let fractionalTimestampParser: ISO8601DateFormatter = {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return parser
-    }()
+    /// Foundation formatters are reference types with mutable configuration and lack an
+    /// available Sendable conformance on the app's deployment target. The wrapper's only escape
+    /// is as the state of `timestampParsers`; every read is therefore protected by that lock.
+    private final class TimestampParsers: @unchecked Sendable {
+        let fractional: ISO8601DateFormatter = {
+            let parser = ISO8601DateFormatter()
+            parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return parser
+        }()
+        let plain: ISO8601DateFormatter = {
+            let parser = ISO8601DateFormatter()
+            parser.formatOptions = [.withInternetDateTime]
+            return parser
+        }()
+    }
 
-    private static let plainTimestampParser: ISO8601DateFormatter = {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime]
-        return parser
-    }()
+    private static let timestampParsers = OSAllocatedUnfairLock(
+        initialState: TimestampParsers()
+    )
 
     /// Maps one transcript record to something worth drawing, or nil to skip it.
     private static func event(from record: [String: Any], kind: AgentKind) -> StreamEvent? {
@@ -317,9 +327,10 @@ enum TranscriptReplay {
 
             let rawInput = payload["input"] ?? payload["arguments"]
             let input = codexToolInput(persistedName: persistedName, value: rawInput)
+            guard let typedInput = JSONValue.object(from: input) else { return nil }
             let name = codexToolName(persistedName: persistedName, value: rawInput)
             return .assistantMessage(blocks: [
-                .toolUse(id: id, tool: ToolIdentity(name), input: input)
+                .toolUse(id: id, tool: ToolIdentity(name), input: typedInput)
             ])
 
         case "custom_tool_call_output", "function_call_output":

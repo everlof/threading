@@ -98,6 +98,24 @@ final class PaneFooterTests: XCTestCase {
         XCTAssertEqual(second.frame.minX - first.frame.maxX, Design.Spacing.small)
     }
 
+    // MARK: - Margin
+
+    /// `.paneEdge` measures from the band itself — see `PaneBandMargin`, and `PaneHeaderTests`
+    /// for the measurement that made it necessary.
+    func testAPaneEdgeBandMeasuresFromItsOwnEdges() {
+        let leading = plainButton()
+        let footer = PaneFooterView(leading: [leading], margin: .paneEdge)
+        let host = host(footer, width: 600)
+
+        XCTAssertEqual(footer.contentGuide.frame.minX, 0)
+        XCTAssertEqual(footer.contentGuide.frame.width, host.bounds.width)
+        XCTAssertEqual(
+            leading.frame.minX + leading.opticalHorizontalInset,
+            contentInset,
+            accuracy: 0.5
+        )
+    }
+
     // MARK: - Optical insets
 
     /// The values the design-system controls report: the bordered button's title inset, the

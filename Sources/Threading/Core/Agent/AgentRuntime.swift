@@ -64,14 +64,30 @@ final class AgentRuntime {
         controllers[sessionID]?.isRunning ?? conversations[sessionID]?.isRunning ?? false
     }
 
-    /// How many sessions have a live agent, for the quit confirmation to name.
+    /// Every session holding a live agent, from either renderer.
     ///
     /// Asks `isRunning` per session rather than filtering the two caches separately, so it
     /// cannot answer differently from the check every other caller makes — a session with both
-    /// a terminal and a rendered conversation counts once, and counts by the same rule.
-    var runningSessionCount: Int {
+    /// a terminal and a rendered conversation appears once, and appears by the same rule.
+    private var runningSessionIDs: Set<SessionID> {
         Set(controllers.keys).union(conversations.keys)
             .filter { isRunning(sessionID: $0) }
+    }
+
+    /// How many sessions have a live agent, for the quit confirmation to name.
+    var runningSessionCount: Int {
+        runningSessionIDs.count
+    }
+
+    /// How many of those are mid-turn — the subset a quit actually costs something.
+    ///
+    /// Counted apart from `runningSessionCount` because the two are usually far apart: a
+    /// session sits alive and idle at its prompt for hours between turns, so most of what is
+    /// "running" at any moment is waiting on the user, not working. The quit sheet names both,
+    /// and leads with this one.
+    var inFlightTurnCount: Int {
+        runningSessionIDs
+            .filter { activity(sessionID: $0).hasTurnInFlight }
             .count
     }
 

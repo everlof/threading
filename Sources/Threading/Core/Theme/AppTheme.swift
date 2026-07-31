@@ -66,6 +66,7 @@ struct AppTheme: Codable, Equatable {
     /// drawing appearance is whatever AppKit last had in hand rather than what the window
     /// wears. Resolving there chose a dark terminal in a light app. A caller resolving for a
     /// specific appearance — a preview, the remote bridge — says so with `terminalPalette(for:)`.
+    @MainActor
     var terminalPalette: TerminalTheme {
         terminalPalette(for: NSApplication.shared.effectiveAppearance)
     }

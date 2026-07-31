@@ -1,5 +1,18 @@
 import AppKit
 
+// MARK: - Defaults
+
+enum PrivacyPageDefaults {
+    /// How often an open page re-reads the grants it can read without prompting.
+    ///
+    /// A grant is changed in another application, and macOS posts nothing when it happens — so
+    /// the only way for the page to stay true while it is on screen is to look again. Three
+    /// seconds is chosen against the two calls it costs: `AXIsProcessTrusted` and
+    /// `CGPreflightScreenCaptureAccess` are local, and `getNotificationSettings` is one XPC
+    /// round trip. It only ticks while the page is the one on screen.
+    static let refreshInterval: TimeInterval = 3
+}
+
 /// What the operating system lets Threading do, and who ends up using each grant.
 ///
 /// This page exists because the honest answer was previously spread across three places that
@@ -24,18 +37,34 @@ final class PrivacyPreferencesViewController: NSViewController {
     // MARK: - Properties
 
     private let reader: SystemPrivacyStatusReader
+    private let refreshInterval: TimeInterval
     private var rows: [SystemPrivacyPermission: PermissionRow] = [:]
+    private var shown: [SystemPrivacyPermission: SystemPrivacyStatus] = [:]
+
+    /// Live while the page is on screen. Nil is the whole of "not watching" — the notification
+    /// observer is added and removed alongside it, so there is one state rather than two that
+    /// can disagree.
+    nonisolated(unsafe) private var refreshTimer: Timer?
 
     // MARK: - Initialization
 
-    init(reader: SystemPrivacyStatusReader = SystemPrivacyStatusReader()) {
+    init(
+        reader: SystemPrivacyStatusReader = SystemPrivacyStatusReader(),
+        refreshInterval: TimeInterval = PrivacyPageDefaults.refreshInterval
+    ) {
         self.reader = reader
+        self.refreshInterval = refreshInterval
         super.init(nibName: nil, bundle: nil)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        refreshTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: - Lifecycle
@@ -50,6 +79,71 @@ final class PrivacyPreferencesViewController: NSViewController {
         super.viewWillAppear()
         // A grant can be changed in System Settings while this page is open, and returning to
         // it is exactly when the user expects the new answer.
+        refresh()
+    }
+
+    /// The page's whole job is to report a live fact, and it used to stop reporting the moment
+    /// it was on screen: `refresh` ran when the page was built and when it was navigated back
+    /// to, and neither of those is when the answer changes. The page *invites* the change — the
+    /// row says "You allow Threading in System Settings", the button opens the pane — and the
+    /// user then comes back to a word that still reads "Not allowed". So the page watches while
+    /// it is visible.
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        startWatching()
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        stopWatching()
+    }
+
+    // MARK: - Watching
+
+    private func startWatching() {
+        guard refreshTimer == nil else { return }
+
+        // Coming back from System Settings is the common path and the one worth answering
+        // immediately: a poll would leave the old word up for up to an interval, right at the
+        // moment the user is looking for the new one.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+
+        // …and the poll covers what activation does not. A TCC prompt is presented by another
+        // process, so an approval given to one raised by an agent can land without Threading
+        // ever having resigned active.
+        refreshTimer = Timer.scheduledTimer(
+            withTimeInterval: refreshInterval,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refreshIfOnScreen() }
+        }
+    }
+
+    private func stopWatching() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        refreshIfOnScreen()
+    }
+
+    /// A cached page is kept alive after being navigated away from, so "in a window" is what
+    /// says this one is the page on screen. Deliberately not `isVisible`: an unshown window
+    /// answers no to that, and every test here builds one rather than ordering a real window
+    /// in front of the developer.
+    private func refreshIfOnScreen() {
+        guard view.window != nil else { return }
         refresh()
     }
 
@@ -278,8 +372,12 @@ final class PrivacyPreferencesViewController: NSViewController {
         }
     }
 
+    /// Rewriting a label that has not changed is what a poll would otherwise do twenty times a
+    /// minute: it re-announces the row to VoiceOver and marks the text field dirty for nothing.
+    /// The page only touches a row when its answer is new.
     private func apply(_ status: SystemPrivacyStatus, to permission: SystemPrivacyPermission) {
-        guard let row = rows[permission] else { return }
+        guard let row = rows[permission], shown[permission] != status else { return }
+        shown[permission] = status
 
         row.statusLabel.stringValue = status.label
         row.statusGlyph.textColor = Self.color(for: status)

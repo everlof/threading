@@ -165,6 +165,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         return rows
     }
 
+    @MainActor
     private enum Emphasis {
         case secondary, muted
 

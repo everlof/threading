@@ -3182,6 +3182,96 @@
           }
         }
       }
+    },
+    "Couldn’t share diagnostics": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att dela diagnostik"
+          }
+        }
+      }
+    },
+    "Mac diagnostics": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac-diagnostik"
+          }
+        }
+      }
+    },
+    "Sends only the connection events listed in this report to your paired Mac. Messages, prompts, terminal output, paths and credentials are never sent.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skickar endast anslutningshändelserna i denna rapport till din parkopplade Mac. Meddelanden, prompter, terminalutdata, sökvägar och inloggningsuppgifter skickas aldrig."
+          }
+        }
+      }
+    },
+    "Share diagnostics for 30 minutes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela diagnostik i 30 minuter"
+          }
+        }
+      }
+    },
+    "Sharing": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delar"
+          }
+        }
+      }
+    },
+    "Starting diagnostics sharing…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startar diagnostikdelning…"
+          }
+        }
+      }
+    },
+    "Stop sharing diagnostics": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sluta dela diagnostik"
+          }
+        }
+      }
+    },
+    "The Mac could not accept diagnostics.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac-datorn kunde inte ta emot diagnostik."
+          }
+        }
+      }
+    },
+    "Until %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Till %@"
+          }
+        }
+      }
     }
   },
   "version": "1.2"

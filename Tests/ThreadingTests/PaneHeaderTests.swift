@@ -95,4 +95,57 @@ final class PaneHeaderTests: XCTestCase {
 
         XCTAssertEqual(second.frame.minX - first.frame.maxX, Design.Spacing.small)
     }
+
+    // MARK: - Margin
+
+    /// The reason `PaneBandMargin` exists, stated as a number.
+    ///
+    /// The platform's corner-adapted region is not a corner allowance. Measured inside a real
+    /// window it holds the whole **window-controls** width clear, across the band's entire
+    /// height, whether or not the traffic lights are anywhere near it — so a band that takes it
+    /// while sitting *below* them starts some eighty points in. The sidebar's did, and the brand
+    /// ended up under the toolbar rather than over the list it names.
+    ///
+    /// The window is built and never shown, which is all this needs: an unshown window still
+    /// lays out, and the inset is a property of being in one.
+    func testTheCornerAdaptedRegionHoldsTheWindowControlsClear() {
+        let header = PaneHeaderView(leading: [inlineButton()])
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        let content = NSView(frame: window.contentLayoutRect)
+        window.contentView = content
+        content.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            header.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor)
+        ])
+        content.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(
+            header.contentGuide.frame.minX,
+            Design.Spacing.pane,
+            "if the platform ever stops reserving the window controls here, .paneEdge's reason "
+                + "has gone with it and the sidebar can go back to the default"
+        )
+    }
+
+    /// `.paneEdge` measures from the band itself, so its ink lands on the pane's own margin.
+    func testAPaneEdgeBandMeasuresFromItsOwnEdges() {
+        let leading = inlineButton()
+        let header = PaneHeaderView(leading: [leading], margin: .paneEdge)
+        let host = host(header, width: 600)
+
+        XCTAssertEqual(header.contentGuide.frame.minX, 0)
+        XCTAssertEqual(header.contentGuide.frame.width, host.bounds.width)
+        XCTAssertEqual(
+            leading.frame.minX + leading.opticalHorizontalInset,
+            contentInset,
+            accuracy: 0.5
+        )
+    }
 }

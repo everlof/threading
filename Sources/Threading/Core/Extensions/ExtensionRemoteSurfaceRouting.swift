@@ -23,13 +23,13 @@ final class ExtensionRemoteSurfaceSubscription {
 
     private var viewportHandler: ((ExtensionRemoteSurfaceViewport) -> Void)?
     private var inputHandler: ((ExtensionRemoteSurfaceInput) -> Void)?
-    private var cancellation: (() -> Void)?
+    private var cancellation: (@MainActor @Sendable () -> Void)?
 
     init(
         presentationID: String,
         viewport: @escaping (ExtensionRemoteSurfaceViewport) -> Void,
         input: @escaping (ExtensionRemoteSurfaceInput) -> Void,
-        cancellation: @escaping () -> Void
+        cancellation: @escaping @MainActor @Sendable () -> Void
     ) {
         self.presentationID = presentationID
         viewportHandler = viewport
@@ -38,7 +38,10 @@ final class ExtensionRemoteSurfaceSubscription {
     }
 
     deinit {
-        cancellation?()
+        let cancellation = cancellation
+        Task { @MainActor in
+            cancellation?()
+        }
     }
 
     func updateViewport(

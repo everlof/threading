@@ -37,8 +37,8 @@ private final class RecordedSurface {
     }
 }
 
-private var recordedSurfaceKey: UInt8 = 0
-private var recordedLayerColorsKey: UInt8 = 0
+@MainActor private var recordedSurfaceKey: UInt8 = 0
+@MainActor private var recordedLayerColorsKey: UInt8 = 0
 
 /// Layer colours that were assigned outside `applySurface`.
 ///

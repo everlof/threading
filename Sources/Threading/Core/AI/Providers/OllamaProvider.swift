@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 /// AI provider implementation for Ollama (local LLM).
-final class OllamaProvider: AIProvider {
+final class OllamaProvider: AIProvider, @unchecked Sendable {
 
     // MARK: - Properties
 
@@ -79,7 +79,7 @@ final class OllamaProvider: AIProvider {
 
         switch httpResponse.statusCode {
         case 200:
-            return try parseResponse(data, duration: duration)
+            return try await parseResponse(data, duration: duration)
         case 404:
             ThreadingLogger.aiResponse.error("Ollama response: model '\(self.model)' not found")
             throw AIError.serverError(statusCode: 404, message: "Model '\(model)' not found. Run 'ollama pull \(model)' first.")
@@ -90,7 +90,7 @@ final class OllamaProvider: AIProvider {
         }
     }
 
-    private func parseResponse(_ data: Data, duration: TimeInterval) throws -> String {
+    private func parseResponse(_ data: Data, duration: TimeInterval) async throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let response = json["response"] as? String else {
             ThreadingLogger.aiResponse.error("Ollama response: failed to parse JSON")
@@ -103,7 +103,11 @@ final class OllamaProvider: AIProvider {
         ThreadingLogger.aiResponse.info("Ollama response - duration: \(String(format: "%.2f", duration))s, prompt_eval_count: \(promptEvalCount), eval_count: \(evalCount)")
 
         // Record token usage
-        TokenUsageManager.shared.record(model: model, inputTokens: promptEvalCount, outputTokens: evalCount)
+        await TokenUsageManager.shared.record(
+            model: model,
+            inputTokens: promptEvalCount,
+            outputTokens: evalCount
+        )
 
         ThreadingLogger.aiResponse.debug("Ollama response text: \(response)")
         return response

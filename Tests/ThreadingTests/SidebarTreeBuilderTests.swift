@@ -30,9 +30,15 @@ final class SidebarTreeBuilderTests: XCTestCase {
         forkedFrom parent: SessionID? = nil,
         isArchived: Bool = false,
         isPinned: Bool = false,
-        lastActiveAt: Date? = nil
+        lastActiveAt: Date? = nil,
+        id: SessionID = SessionID()
     ) -> AgentSession {
-        var session = AgentSession(kind: .claude, title: title, forkedFrom: parent)
+        let origin = parent.map(ClaudeSessionOrigin.forked(from:)) ?? .original
+        var session = AgentSession(
+            configuration: .claude(remoteControl: nil, origin: origin),
+            title: title,
+            id: id
+        )
         session.branch = branch
         session.isArchived = isArchived
         session.isPinned = isPinned
@@ -198,10 +204,10 @@ final class SidebarTreeBuilderTests: XCTestCase {
     /// from the other. The outline view asks for children lazily, so a tree that accepted this
     /// would recurse until the app died. Both must surface at the top level instead.
     func testMutuallyForkedSessionsDoNotRecurse() throws {
-        var first = session("first")
-        var second = session("second")
-        first.forkedFrom = second.id
-        second.forkedFrom = first.id
+        let firstID = SessionID()
+        let secondID = SessionID()
+        let first = session("first", forkedFrom: secondID, id: firstID)
+        let second = session("second", forkedFrom: firstID, id: secondID)
 
         let roots = SidebarTreeBuilder.rootNodes(
             from: [project("p", sessions: [first, second])]
@@ -220,15 +226,20 @@ final class SidebarTreeBuilderTests: XCTestCase {
         )
     }
 
-    /// A session forked from itself is the smallest cycle there is.
-    func testASelfForkedSessionStaysAtTheTopLevel() throws {
-        var loop = session("loop")
-        loop.forkedFrom = loop.id
-
-        let roots = SidebarTreeBuilder.rootNodes(from: [project("p", sessions: [loop])])
-        let node = try XCTUnwrap(roots.first as? ProjectNode)
-
-        XCTAssertEqual(sessionNodes(in: node.childNodes).map(\.sessionID), [loop.id])
+    /// A session forked from itself is refused before it can reach the tree.
+    func testASelfForkedSessionIsRefusedAtTheModelBoundary() {
+        let id = SessionID()
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AgentSession.self,
+                from: Data(
+                    """
+                    {"id":"\(id.uuidString)","kind":"claude","title":"loop",\
+                    "forkParent":"\(id.uuidString)"}
+                    """.utf8
+                )
+            )
+        )
     }
 
     // MARK: - Reaching a row

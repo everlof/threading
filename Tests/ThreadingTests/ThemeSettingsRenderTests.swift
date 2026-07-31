@@ -145,7 +145,245 @@ final class ThemeSettingsRenderTests: XCTestCase {
         XCTAssertEqual(written.count, Render.widths.count * 2)
     }
 
+    // MARK: - Current App Theme
+
+    @MainActor
+    func testSettingsSidebarExposesTheCurrentThemeDocument() throws {
+        let item = try XCTUnwrap(
+            SettingsPages.sidebarItems.first { $0.id == SettingsPages.currentThemeID }
+        )
+        XCTAssertEqual(item.title, L10n.string("Current Theme"))
+        let page = try XCTUnwrap(SettingsPages.page(id: SettingsPages.currentThemeID))
+        XCTAssertTrue(page.make() is CurrentThemePreferencesViewController)
+    }
+
+    @MainActor
+    func testABuiltInThemeIsLockedAndDuplicatesStraightIntoEditing() throws {
+        let previous = AppThemeLibrary.current
+        var created: AppTheme?
+        defer {
+            AppThemeLibrary.apply(previous)
+            if let created { _ = AppThemeLibrary.delete(created) }
+        }
+
+        AppThemeLibrary.apply(AppThemeStyles.swissMinimalist)
+        let controller = CurrentThemePreferencesViewController()
+        _ = laidOut(controller.view, width: Render.widths[1], height: Render.height)
+
+        let duplicate = try XCTUnwrap(
+            descendant(
+                in: controller.view,
+                accessibilityIdentifier: "settings.current-theme.duplicate"
+            ) as? ThemedButton
+        )
+        let accent = try XCTUnwrap(
+            descendant(
+                in: controller.view,
+                accessibilityIdentifier: "settings.current-theme.color.accent"
+            ) as? ThemeSwatchView
+        )
+
+        XCTAssertFalse(duplicate.isHidden)
+        XCTAssertEqual(duplicate.title, L10n.string("Duplicate to Edit"))
+        XCTAssertFalse(accent.isEditable, "a built-in theme exposed an editable color well")
+
+        duplicate.performClick()
+        created = AppThemeLibrary.current
+
+        XCTAssertTrue(AppThemeLibrary.isCustom(try XCTUnwrap(created)))
+        XCTAssertTrue(duplicate.isHidden, "the duplicate action survived on the editable copy")
+        XCTAssertTrue(accent.isEditable, "the duplicate did not unlock the editor")
+    }
+
+    @MainActor
+    func testAColorEditAppliesToTheActiveThemeImmediately() throws {
+        let previous = AppThemeLibrary.current
+        let copy = try AppThemeLibrary.duplicate(
+            AppThemeStyles.swissMinimalist,
+            name: "Live Editor \(UUID().uuidString)"
+        )
+        defer {
+            AppThemeLibrary.apply(previous)
+            _ = AppThemeLibrary.delete(copy)
+        }
+        AppThemeLibrary.apply(copy)
+
+        let controller = CurrentThemePreferencesViewController()
+        _ = laidOut(controller.view, width: Render.widths[1], height: Render.height)
+        let accent = try XCTUnwrap(
+            descendant(
+                in: controller.view,
+                accessibilityIdentifier: "settings.current-theme.color.accent"
+            ) as? ThemeSwatchView
+        )
+        let changed = try XCTUnwrap(NSColor(hex: "#0055BB"))
+
+        accent.onChange?(changed)
+
+        XCTAssertEqual(
+            AppThemeLibrary.current.resolved(.accent).hexString,
+            changed.hexString,
+            "the color editor stored a value without applying the active theme"
+        )
+        XCTAssertEqual(accent.color.hexString, changed.hexString)
+    }
+
+    @MainActor
+    func testAnExternalUpdateAppearsInTheOpenCurrentThemePage() throws {
+        let previous = AppThemeLibrary.current
+        let copy = try AppThemeLibrary.duplicate(
+            AppThemeStyles.swissMinimalist,
+            name: "Agent Update \(UUID().uuidString)"
+        )
+        defer {
+            AppThemeLibrary.apply(previous)
+            _ = AppThemeLibrary.delete(copy)
+        }
+        AppThemeLibrary.apply(copy)
+
+        let controller = CurrentThemePreferencesViewController()
+        _ = laidOut(controller.view, width: Render.widths[1], height: Render.height)
+        let positive = try XCTUnwrap(
+            descendant(
+                in: controller.view,
+                accessibilityIdentifier: "settings.current-theme.color.status_positive"
+            ) as? ThemeSwatchView
+        )
+        let changed = try XCTUnwrap(NSColor(hex: "#006B3C"))
+
+        let updated = try replacing(
+            .statusPositive,
+            with: changed,
+            in: copy,
+            variant: .light
+        )
+        try AppThemeLibrary.update(updated)
+
+        XCTAssertEqual(
+            positive.color.hexString,
+            changed.hexString,
+            "the open page kept the value from before the agent-style update"
+        )
+    }
+
+    @MainActor
+    func testRendersCurrentThemePageInLockedAndEditableStates() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let previous = AppThemeLibrary.current
+        let custom = try AppThemeLibrary.duplicate(
+            AppThemeStyles.swissMinimalist,
+            name: "Editable Render \(UUID().uuidString)"
+        )
+        defer {
+            AppThemeLibrary.apply(previous)
+            _ = AppThemeLibrary.delete(custom)
+        }
+
+        let fixtures: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light-locked", .system, .aqua),
+            ("system-dark-locked", .system, .darkAqua),
+            ("cyberpunk-locked", AppThemeStyles.cyberpunk, .darkAqua),
+            ("custom-editable", custom, .aqua)
+        ]
+        var written: [String] = []
+        for (name, theme, appearanceName) in fixtures {
+            AppThemeLibrary.apply(theme)
+            let controller = CurrentThemePreferencesViewController()
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            controller.view.appearance = appearance
+            let host = laidOut(
+                controller.view,
+                width: SettingsUIDefaults.pageWidth,
+                height: Render.height
+            )
+            host.appearance = appearance
+            var topData: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+                AppThemeRefresh.repaint(host)
+                host.layoutSubtreeIfNeeded()
+                topData = png(of: host)
+            }
+
+            let topURL = directory.appendingPathComponent("current-theme-\(name)-top.png")
+            try XCTUnwrap(
+                topData,
+                "Failed to render the top of the current-theme page for \(name)"
+            ).write(to: topURL)
+            written.append(topURL.lastPathComponent)
+
+            let scroll = try XCTUnwrap(
+                controller.view.subviews.first { $0 is NSScrollView } as? NSScrollView
+            )
+            let document = try XCTUnwrap(scroll.documentView)
+            XCTAssertGreaterThan(
+                document.bounds.height,
+                scroll.contentView.bounds.height,
+                "\(name) did not expose the lower theme roles through scrolling"
+            )
+            scroll.contentView.scroll(
+                to: NSPoint(
+                    x: 0,
+                    y: max(0, document.bounds.height - scroll.contentView.bounds.height)
+                )
+            )
+            scroll.reflectScrolledClipView(scroll.contentView)
+            host.layoutSubtreeIfNeeded()
+
+            var bottomData: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                bottomData = png(of: host)
+            }
+            let bottomURL = directory.appendingPathComponent("current-theme-\(name)-bottom.png")
+            try XCTUnwrap(
+                bottomData,
+                "Failed to render the bottom of the current-theme page for \(name)"
+            ).write(to: bottomURL)
+            written.append(bottomURL.lastPathComponent)
+        }
+        XCTAssertEqual(written.count, fixtures.count * 2)
+    }
+
     // MARK: - Helpers
+
+    @MainActor
+    private func replacing(
+        _ role: AppThemeRole,
+        with color: NSColor,
+        in theme: AppTheme,
+        variant kind: AppTheme.VariantKind
+    ) throws -> AppTheme {
+        let source = try XCTUnwrap(theme.variant(kind))
+        var roles = source.roles
+        roles[role] = color
+        var variants = theme.variants
+        variants[kind] = AppTheme.Variant(
+            roles: roles,
+            terminalPalette: source.terminalPalette,
+            material: source.material,
+            sidebar: source.sidebar
+        )
+        return try AppThemeEditing.assemble(
+            id: theme.id,
+            name: theme.name,
+            mode: theme.mode,
+            summary: theme.summary,
+            variants: variants
+        )
+    }
+
+    @MainActor
+    private func descendant(
+        in view: NSView,
+        accessibilityIdentifier: String
+    ) -> NSView? {
+        if view.accessibilityIdentifier() == accessibilityIdentifier { return view }
+        return view.subviews.lazy.compactMap {
+            self.descendant(in: $0, accessibilityIdentifier: accessibilityIdentifier)
+        }.first
+    }
 
     @MainActor
     private func pageImage(width: CGFloat, appearance name: NSAppearance.Name) -> Data? {

@@ -255,6 +255,9 @@ final class ExtensionManager:
     ] = [:]
     private var companionStartTokens: [CompanionKey: String] = [:]
     private var generations: [String: Int] = [:]
+    /// A directory-level inventory failure is not the same state as "no extensions installed."
+    /// Keep the last valid snapshot and expose the failure so Settings can say what happened.
+    private(set) var inventoryErrorDescription: String?
     /// Package replacement is asynchronous, but every conflicting lifecycle action is
     /// main-actor isolated. This set makes that interval an explicit transition rather than a
     /// window in which old code can be restarted underneath the replacement.
@@ -419,33 +422,78 @@ final class ExtensionManager:
         }
 
         process.updateSettings(values: [settingID: value]) { [weak self] result in
-            guard let self else { return }
+            guard let self else {
+                completion(.failure(ExtensionSettingsManagerError.managerUnavailable))
+                return
+            }
             switch result {
             case .success(let response) where response.error == nil:
                 NotificationCenter.default.post(ExtensionSettingsValuesDidChange())
                 completion(.success(()))
             case .success(let response):
-                try? self.settingsStore.set(
+                let rejection = ExtensionSettingsManagerError.rejected(
+                    response.error ?? "The extension rejected the value."
+                )
+                let reported = self.restoreSetting(
                     oldValue,
                     field: field,
-                    extensionIdentifier: extensionIdentifier
+                    extensionIdentifier: extensionIdentifier,
+                    after: rejection,
+                    runtimeStateIsUncertain: false
                 )
                 NotificationCenter.default.post(ExtensionSettingsValuesDidChange())
-                completion(.failure(
-                    ExtensionSettingsManagerError.rejected(
-                        response.error ?? "The extension rejected the value."
-                    )
-                ))
+                completion(.failure(reported))
             case .failure(let error):
-                try? self.settingsStore.set(
+                let reported = self.restoreSetting(
                     oldValue,
                     field: field,
-                    extensionIdentifier: extensionIdentifier
+                    extensionIdentifier: extensionIdentifier,
+                    after: error,
+                    runtimeStateIsUncertain: true
                 )
                 NotificationCenter.default.post(ExtensionSettingsValuesDidChange())
-                completion(.failure(error))
+                completion(.failure(reported))
             }
         }
+    }
+
+    /// Restores the last value both sides agreed on. A transport failure leaves it unknowable
+    /// whether the process applied the new value before disconnecting, so that process is
+    /// stopped after persistence is restored. If persistence itself cannot be restored, the
+    /// process is also stopped and the rollback failure replaces the less actionable first
+    /// error — continuing would knowingly leave disk and runtime on different configurations.
+    private func restoreSetting(
+        _ oldValue: ExtensionJSONValue,
+        field: ExtensionSettingField,
+        extensionIdentifier: String,
+        after originalError: Error,
+        runtimeStateIsUncertain: Bool
+    ) -> Error {
+        do {
+            try settingsStore.set(
+                oldValue,
+                field: field,
+                extensionIdentifier: extensionIdentifier
+            )
+        } catch {
+            let failure = ExtensionSettingsManagerError.rollbackFailed(
+                settingID: field.id,
+                reason: error.localizedDescription
+            )
+            stop(extensionIdentifier, status: .failed(failure.localizedDescription))
+            EventLog.shared.record(.extensions, "Extension setting rollback failed", [
+                "extension": extensionIdentifier,
+                "setting": field.id
+            ])
+            return failure
+        }
+
+        guard runtimeStateIsUncertain else { return originalError }
+        let failure = ExtensionSettingsManagerError.runtimeStateUncertain(
+            originalError.localizedDescription
+        )
+        stop(extensionIdentifier, status: .failed(failure.localizedDescription))
+        return failure
     }
 
     /// Resolves a package-owned image without letting a publication escape its installed
@@ -859,7 +907,9 @@ final class ExtensionManager:
         arguments: ExtensionJSONValue,
         for sessionID: SessionID,
         requestID: String = UUID().uuidString.lowercased(),
-        completion: @escaping (Result<ExtensionMCPToolResponse, Error>) -> Void
+        completion: @escaping @MainActor @Sendable (
+            Result<ExtensionMCPToolResponse, Error>
+        ) -> Void
     ) -> Bool {
         guard let owner = mcpToolInventory.first(where: { inventory in
             inventory.declaredTools.contains {
@@ -901,7 +951,9 @@ final class ExtensionManager:
         serviceVersion: Int,
         callerExtensionIdentifier: String,
         arguments: ExtensionJSONValue,
-        completion: @escaping (Result<ExtensionServiceResponse, Error>) -> Void
+        completion: @escaping @MainActor @Sendable (
+            Result<ExtensionServiceResponse, Error>
+        ) -> Void
     ) {
         guard let process = sessions[providerIdentifier] else {
             completion(.failure(
@@ -935,7 +987,7 @@ final class ExtensionManager:
         companionID: String,
         operationID: String,
         arguments: ExtensionJSONValue,
-        completion: @escaping (
+        completion: @escaping @MainActor @Sendable (
             Result<ExtensionCompanionOperationResponse, Error>
         ) -> Void
     ) {
@@ -975,7 +1027,7 @@ final class ExtensionManager:
             extensionIdentifier: extensionIdentifier,
             companionID: companionID
         )
-        let invoke: () -> Void = { [weak self] in
+        let invoke: @MainActor @Sendable () -> Void = { [weak self] in
             guard let self,
                   let supervisor = self.companionSupervisors[key] else {
                 completion(.failure(
@@ -1684,7 +1736,21 @@ final class ExtensionManager:
     }
 
     private func refreshInventory(postChange: Bool) {
-        let inventory = store.inventory()
+        let inventory: [InstalledExtensionPackage]
+        do {
+            inventory = try store.inventory()
+            inventoryErrorDescription = nil
+        } catch {
+            inventoryErrorDescription = error.localizedDescription
+            ThreadingLogger.extensions.error(
+                "Could not read extension inventory: \(error.localizedDescription)"
+            )
+            EventLog.shared.record(.extensions, "Extension inventory read failed")
+            if postChange {
+                notifyChange()
+            }
+            return
+        }
         packages = Dictionary(
             inventory.map { ($0.identifier, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -1826,6 +1892,9 @@ private enum ExtensionSettingsManagerError: LocalizedError {
     case unknownSetting(String)
     case invalidValue(String)
     case rejected(String)
+    case rollbackFailed(settingID: String, reason: String)
+    case runtimeStateUncertain(String)
+    case managerUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -1835,6 +1904,19 @@ private enum ExtensionSettingsManagerError: LocalizedError {
             return L10n.format("The value does not match extension setting “%@”.", id)
         case .rejected(let message):
             return message
+        case .rollbackFailed(let settingID, let reason):
+            return L10n.format(
+                "Threading could not restore extension setting “%@” after it was refused: %@",
+                settingID,
+                reason
+            )
+        case .runtimeStateUncertain(let reason):
+            return L10n.format(
+                "The extension was stopped because Threading could not confirm its settings update: %@",
+                reason
+            )
+        case .managerUnavailable:
+            return L10n.string("The extension manager closed before the settings update finished.")
         }
     }
 }

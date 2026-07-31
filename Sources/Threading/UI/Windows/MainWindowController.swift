@@ -8,16 +8,26 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     // MARK: - Properties
 
     /// Not private: the toolbar delegate needs the split view for its tracking separator.
-    private(set) var splitViewController: SidebarSplitViewController!
-    private var sidebarViewController: ProjectSidebarViewController!
-    private var containerViewController: TerminalContainerViewController!
-    private var extensionHookViewController: ExtensionComponentHookViewController!
+    private(set) lazy var splitViewController = SidebarSplitViewController()
+    private lazy var sidebarViewController = ProjectSidebarViewController()
+    private lazy var containerViewController = TerminalContainerViewController()
+    private lazy var extensionHookViewController = ExtensionComponentHookViewController(
+        target: .init(component: .applicationMainWindow, contractVersion: 1),
+        child: splitViewController,
+        customSurfaceResolver: { [weak self] surface, extensionIdentifier in
+            self?.renderCustomSurface(surface, extensionIdentifier: extensionIdentifier)
+        }
+    )
 
     /// Retained so the sidebar can be collapsed and restored directly.
-    private var sidebarItem: NSSplitViewItem!
+    private lazy var sidebarItem = NSSplitViewItem(viewController: sidebarViewController)
 
     /// Owns session creation, import, worktree targeting, surface switches, and closing.
-    private var sessionCoordinator: SessionCoordinator!
+    private lazy var sessionCoordinator = SessionCoordinator(
+        sidebar: sidebarViewController,
+        container: containerViewController,
+        onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() }
+    )
 
     /// The page that was on screen before Settings opened, restored when it closes.
     ///
@@ -38,11 +48,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// revealed when content arrives.
     ///
     /// Not private: the MCP tool handlers put content into it. See `MainWindowMCPTools`.
-    private(set) var displayPaneController: DisplayPaneController!
-    private var displayItem: NSSplitViewItem!
+    private(set) lazy var displayPaneController = DisplayPaneController()
+    private lazy var displayItem = NSSplitViewItem(viewController: displayPaneController)
 
     /// Owns agent-originated browser, display, storage, and theme requests.
-    private(set) var agentToolCoordinator: AgentToolCoordinator!
+    private(set) lazy var agentToolCoordinator = AgentToolCoordinator(
+        displayPaneController: displayPaneController,
+        visibleSessionID: { [weak self] in self?.currentSessionID },
+        setPaneVisible: { [weak self] visible in self?.setDisplayPaneVisible(visible) },
+        windowProvider: { [weak self] in self?.window }
+    )
 
     /// Suppresses width recording while the panel is being revealed, so the transient
     /// thickness that pass produces is not mistaken for a width the user chose.
@@ -181,9 +196,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     // MARK: - Setup
 
     private func setupSplitViewController() {
-        splitViewController = SidebarSplitViewController()
-
-        sidebarViewController = ProjectSidebarViewController()
         sidebarViewController.delegate = self
 
         // A **plain** item, not `sidebarWithViewController:`, and that is the whole of the
@@ -203,7 +215,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // and the split view's hairline as the only seam. What the behaviour gave that has to
         // be replaced by hand is exactly two things — the material, and the collapse animation
         // (`SidebarSplitViewController.toggleSidebar`) — and the app already owned the second.
-        sidebarItem = NSSplitViewItem(viewController: sidebarViewController)
         // A floor, not the floor: `updateSidebarMinimumThickness` raises it to clear the window
         // controls floating over the column as soon as they can be measured.
         sidebarItem.minimumThickness = SidebarDefaults.minWidth
@@ -216,14 +227,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarItem.holdingPriority = SidebarDefaults.holdingPriority
         splitViewController.addSplitViewItem(sidebarItem)
 
-        containerViewController = TerminalContainerViewController()
         containerViewController.delegate = self
 
-        sessionCoordinator = SessionCoordinator(
-            sidebar: sidebarViewController,
-            container: containerViewController,
-            onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() }
-        )
         containerViewController.composerViewController.delegate = sessionCoordinator
         pageTabView.onClose = { [weak self] in self?.closeActivePageTab() }
         pageTabView.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
@@ -238,19 +243,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         setupDisplayPane()
         setupAgentToolCoordinator()
 
-        extensionHookViewController = ExtensionComponentHookViewController(
-            target: .init(
-                component: .applicationMainWindow,
-                contractVersion: 1
-            ),
-            child: splitViewController,
-            customSurfaceResolver: { [weak self] surface, extensionIdentifier in
-                self?.renderCustomSurface(
-                    surface,
-                    extensionIdentifier: extensionIdentifier
-                )
-            }
-        )
         window?.contentViewController = extensionHookViewController
 
         // Installed after the split view exists: the tracking separator item needs it.
@@ -327,12 +319,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     private func setupAgentToolCoordinator() {
-        agentToolCoordinator = AgentToolCoordinator(
-            displayPaneController: displayPaneController,
-            visibleSessionID: { [weak self] in self?.currentSessionID },
-            setPaneVisible: { [weak self] visible in self?.setDisplayPaneVisible(visible) },
-            windowProvider: { [weak self] in self?.window }
-        )
+        _ = agentToolCoordinator
     }
 
     /// Adds the panel agents display content in, collapsed until something arrives.
@@ -340,7 +327,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Appended last, so it takes divider index 1 and leaves the toolbar's tracking separator
     /// — which is bound to divider 0, between sidebar and terminal — undisturbed.
     private func setupDisplayPane() {
-        displayPaneController = DisplayPaneController()
         displayPaneController.onClose = { [weak self] in
             self?.setDisplayPaneVisible(false)
         }
@@ -362,7 +348,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self?.containerViewController.shellRootPid(for: sessionID)
         }
 
-        displayItem = NSSplitViewItem(viewController: displayPaneController)
         displayItem.canCollapse = true
 
         // The pane's own chrome, not the width it opens at: a split item's minimum is required,
@@ -412,7 +397,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// The broker receives only a root chosen by Threading for a known session. It never receives
     /// the terminal container or a way to query arbitrary processes.
     func extensionShellRootPid(for sessionID: SessionID) -> pid_t? {
-        containerViewController?.shellRootPid(for: sessionID)
+        containerViewController.shellRootPid(for: sessionID)
     }
 
     @objc private func splitViewDidResize(_ notification: Notification) {
@@ -423,7 +408,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // toolbar's controls have a frame to measure.
         updateSidebarMinimumThickness()
 
-        guard let displayItem, !displayItem.isCollapsed, !isRestoringDisplayPaneWidth else {
+        guard !displayItem.isCollapsed, !isRestoringDisplayPaneWidth else {
             return
         }
 
@@ -447,8 +432,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// simply where the toggle ends. One value per collapse, not a feedback loop — the strip's
     /// contents do not move while the sidebar is out.
     private func updateHeaderInset(sidebarIsCollapsed: Bool? = nil) {
-        guard let sidebarItem, let containerViewController else { return }
-
         guard sidebarIsCollapsed ?? sidebarItem.isCollapsed else {
             containerViewController.headerLeadingInset = PaneHeaderDefaults.inset
             return
@@ -506,8 +489,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// controls are AppKit's to place, and an item added to the toolbar has to move this floor
     /// with it. Idempotent — the value only ever changes when the toolbar's contents do.
     private func updateSidebarMinimumThickness() {
-        guard let sidebarItem else { return }
-
         let target = max(
             SidebarDefaults.minWidth,
             windowControlsTrailingEdge() + Design.Spacing.medium
@@ -835,7 +816,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             dragSpring.openedDrawer = true
             containerViewController.openShellDrawer()
         case .displayPanel:
-            guard displayItem?.isCollapsed == true else { return }
+            guard displayItem.isCollapsed else { return }
             dragSpring.revealedPanel = true
             displayPaneController.showSession(sessionID)
             setDisplayPaneVisible(true)
@@ -885,7 +866,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                     .dropBandContains(windowPoint: windowPoint)
         case .drawer:
             destinationID = .displayPanel
-            bandHit = displayItem?.isCollapsed == false
+            bandHit = !displayItem.isCollapsed
                 && displayPaneController.dropBandContains(windowPoint: windowPoint)
         }
 
@@ -1377,15 +1358,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// user is looking at into a strip they are not.
     private func focusedTabHost() -> TabHosting? {
         guard let responder = window?.firstResponder as? NSView else { return nil }
-        if let drawerHost = containerViewController.drawerHostController,
-           containerViewController.isShellDrawerOpen,
+        let drawerHost = containerViewController.drawerHostController
+        if containerViewController.isShellDrawerOpen,
            responder.isDescendant(of: drawerHost.view) {
             return drawerHost
         }
-        if let panel = displayPaneController, panel.isViewLoaded,
-           displayItem?.isCollapsed == false,
-           responder.isDescendant(of: panel.view) {
-            return panel
+        if displayPaneController.isViewLoaded,
+           !displayItem.isCollapsed,
+           responder.isDescendant(of: displayPaneController.view) {
+            return displayPaneController
         }
         return nil
     }
@@ -1559,13 +1540,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
             contentView.addSubview(bar)
 
-            findBarTopConstraint = bar.topAnchor.constraint(
+            let topConstraint = bar.topAnchor.constraint(
                 equalTo: contentView.topAnchor,
                 constant: -FindBarDefaults.height
             )
+            findBarTopConstraint = topConstraint
 
             NSLayoutConstraint.activate([
-                findBarTopConstraint!,
+                topConstraint,
                 bar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
                 bar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
             ])
@@ -1592,9 +1574,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             context.duration = Design.Motion.standard
             contentView.layoutSubtreeIfNeeded()
         }, completionHandler: { [weak self] in
-            self?.findBar?.removeFromSuperview()
-            self?.findBar = nil
-            self?.currentAgentController()?.focusTerminal()
+            Task { @MainActor [weak self] in
+                self?.findBar?.removeFromSuperview()
+                self?.findBar = nil
+                self?.currentAgentController()?.focusTerminal()
+            }
         })
     }
 
@@ -1792,6 +1776,29 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         containerViewController.showSettingsPage(id: pageID)
         updateSessionTitleItem()
         recordVisit(.settings(pageID))
+    }
+
+    /// A query puts the results in the pane; clearing it puts the chosen page back.
+    ///
+    /// Deliberately no `recordVisit`: the results are a view of the search field's current
+    /// contents, and a back button that returned to a search that is no longer being made would
+    /// be navigating to a moment rather than to a place.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        didSearchSettings query: String
+    ) {
+        if query.isEmpty {
+            containerViewController.showSettingsPage(
+                id: sidebar.selectedSettingsPageID ?? SettingsPages.generalID
+            )
+        } else {
+            containerViewController.showSettingsSearchResults(query: query) { [weak self] pageID in
+                guard let self else { return }
+                self.sidebarViewController.selectSettingsPage(id: pageID)
+                self.projectSidebar(self.sidebarViewController, didSelectSettingsPage: pageID)
+            }
+        }
+        updateSessionTitleItem()
     }
 }
 

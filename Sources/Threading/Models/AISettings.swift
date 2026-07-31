@@ -71,6 +71,7 @@ struct AISettings: Codable, Equatable {
 
 // MARK: - AI Settings Storage
 
+@MainActor
 final class AISettingsStorage {
 
     // MARK: - Keys
@@ -83,23 +84,25 @@ final class AISettingsStorage {
 
     static let shared = AISettingsStorage()
 
-    private init() {}
-
     // MARK: - Storage
 
-    private let defaults = UserDefaults.standard
+    private let persistence: RecoverableDefaultsStore<AISettings>
+    private var storedSettings: AISettings
+
+    init(defaults: UserDefaults = .standard) {
+        self.persistence = RecoverableDefaultsStore(
+            defaults: defaults,
+            key: Keys.settings,
+            criticality: .preference
+        )
+        self.storedSettings = persistence.load(defaultValue: .default).value
+    }
 
     var settings: AISettings {
-        get {
-            guard let data = defaults.data(forKey: Keys.settings),
-                  let settings = try? JSONDecoder().decode(AISettings.self, from: data) else {
-                return .default
-            }
-            return settings
-        }
+        get { storedSettings }
         set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                defaults.set(data, forKey: Keys.settings)
+            if persistence.save(newValue) {
+                storedSettings = newValue
             }
         }
     }

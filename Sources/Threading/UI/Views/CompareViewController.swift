@@ -26,9 +26,42 @@ final class CompareViewController: NSViewController {
     /// Feeds the tab's loading affordance, same contract as Review's.
     var onLoadingChange: ((Bool) -> Void)?
 
-    private var scrollView: ThemedScrollView!
-    private var stack: NSStackView!
-    private var placeholderLabel: NSTextField!
+    private lazy var stack: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.inset,
+            left: Design.Spacing.inset,
+            bottom: Design.Spacing.inset,
+            right: Design.Spacing.inset
+        )
+        return stack
+    }()
+    private lazy var scrollView: ThemedScrollView = {
+        let clipView = FlippedClipView()
+        clipView.drawsBackground = false
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.contentView = clipView
+        scroll.documentView = stack
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        return scroll
+    }()
+    private lazy var placeholderLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.applyFont(.body)
+        label.textColor = Design.Text.tertiary
+        label.alignment = .center
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        label.isHidden = true
+        return label
+    }()
     private var compareView: ImageCompareView?
 
     /// The canvas's height, which is a function of the pane's width and so is recomputed
@@ -49,8 +82,8 @@ final class CompareViewController: NSViewController {
     private static let queue = DispatchQueue(label: "codes.threading.compare", qos: .userInitiated)
 
     /// What the two files turned out to be.
-    enum Comparison {
-        case images(old: NSImage?, new: NSImage?)
+    enum Comparison: @unchecked Sendable {
+        case images(old: Data?, new: Data?)
         case text([GitFileDiff])
         case message(String)
     }
@@ -88,37 +121,6 @@ final class CompareViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-
-        stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.inset,
-            left: Design.Spacing.inset,
-            bottom: Design.Spacing.inset,
-            right: Design.Spacing.inset
-        )
-
-        let clipView = FlippedClipView()
-        clipView.drawsBackground = false
-
-        scrollView = ThemedScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.contentView = clipView
-        scrollView.documentView = stack
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-
-        placeholderLabel = NSTextField(labelWithString: "")
-        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
-        placeholderLabel.applyFont(.body)
-        placeholderLabel.textColor = Design.Text.tertiary
-        placeholderLabel.alignment = .center
-        placeholderLabel.lineBreakMode = .byWordWrapping
-        placeholderLabel.maximumNumberOfLines = 0
-        placeholderLabel.isHidden = true
 
         view.addSubview(scrollView)
         view.addSubview(placeholderLabel)
@@ -180,9 +182,9 @@ final class CompareViewController: NSViewController {
 
         let oldPath = oldPath
         let newPath = newPath
-        Self.queue.async { [weak self] in
+        Self.queue.async {
             let comparison = Self.compare(oldPath: oldPath, newPath: newPath)
-            DispatchQueue.main.async {
+            Task { @MainActor [weak self] in
                 guard let self, expected == self.generation else { return }
                 self.isLoading = false
                 self.render(comparison)
@@ -191,8 +193,8 @@ final class CompareViewController: NSViewController {
     }
 
     /// Classifies and reads the pair. On the comparison queue; everything returned is value
-    /// data plus images, which are safe to build off the main thread.
-    static func compare(oldPath: String, newPath: String) -> Comparison {
+    /// data, which is safe to carry back to the main actor where AppKit images are built.
+    nonisolated static func compare(oldPath: String, newPath: String) -> Comparison {
         let oldKind = CompareFileClassifier.classify(path: oldPath)
         let newKind = CompareFileClassifier.classify(path: newPath)
 
@@ -216,8 +218,8 @@ final class CompareViewController: NSViewController {
             )
         case (.image, .image):
             return .images(
-                old: NSImage(contentsOf: URL(fileURLWithPath: oldPath)),
-                new: NSImage(contentsOf: URL(fileURLWithPath: newPath))
+                old: try? Data(contentsOf: URL(fileURLWithPath: oldPath)),
+                new: try? Data(contentsOf: URL(fileURLWithPath: newPath))
             )
         case (.text, .text):
             return textComparison(oldPath: oldPath, newPath: newPath)
@@ -234,7 +236,10 @@ final class CompareViewController: NSViewController {
         }
     }
 
-    private static func textComparison(oldPath: String, newPath: String) -> Comparison {
+    nonisolated private static func textComparison(
+        oldPath: String,
+        newPath: String
+    ) -> Comparison {
         do {
             let data = try GitProcess.run(
                 GitReviewCommands.compareFiles(oldPath: oldPath, newPath: newPath),
@@ -268,7 +273,9 @@ final class CompareViewController: NSViewController {
             placeholderLabel.stringValue = text
 
         case .images(let old, let new):
-            guard old != nil || new != nil else {
+            let oldImage = old.flatMap(NSImage.init(data:))
+            let newImage = new.flatMap(NSImage.init(data:))
+            guard oldImage != nil || newImage != nil else {
                 scrollView.isHidden = true
                 placeholderLabel.isHidden = false
                 placeholderLabel.stringValue = L10n.string(
@@ -280,8 +287,8 @@ final class CompareViewController: NSViewController {
             compare.translatesAutoresizingMaskIntoConstraints = false
             compare.mode = compareMode
             compare.configure(
-                old: old.map { .init(image: $0, title: oldTitle) },
-                new: new.map { .init(image: $0, title: newTitle) }
+                old: oldImage.map { .init(image: $0, title: oldTitle) },
+                new: newImage.map { .init(image: $0, title: newTitle) }
             )
             compare.onModeChange = { [weak self] mode in
                 self?.compareMode = mode

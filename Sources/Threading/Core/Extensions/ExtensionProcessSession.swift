@@ -93,11 +93,21 @@ final class ExtensionProcessSession: @unchecked Sendable {
         let registration: ExtensionRegistration
     }
 
-    typealias ActionCompletion = (Result<ExtensionActionResponse, Error>) -> Void
-    typealias CommandCompletion = (Result<ExtensionCommandResponse, Error>) -> Void
-    typealias SettingsCompletion = (Result<ExtensionSettingsUpdateResponse, Error>) -> Void
-    typealias ServiceCompletion = (Result<ExtensionServiceResponse, Error>) -> Void
-    typealias ToolCompletion = (Result<ExtensionMCPToolResponse, Error>) -> Void
+    typealias ActionCompletion = @MainActor @Sendable (
+        Result<ExtensionActionResponse, Error>
+    ) -> Void
+    typealias CommandCompletion = @MainActor @Sendable (
+        Result<ExtensionCommandResponse, Error>
+    ) -> Void
+    typealias SettingsCompletion = @MainActor @Sendable (
+        Result<ExtensionSettingsUpdateResponse, Error>
+    ) -> Void
+    typealias ServiceCompletion = @MainActor @Sendable (
+        Result<ExtensionServiceResponse, Error>
+    ) -> Void
+    typealias ToolCompletion = @MainActor @Sendable (
+        Result<ExtensionMCPToolResponse, Error>
+    ) -> Void
 
     private struct PendingAction {
         let actionID: String
@@ -160,7 +170,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
     private var pendingTools: [String: PendingTool] = [:]
     private var isStopped = false
     private var terminalError: Error?
-    private var terminationObserver: ((Error) -> Void)?
+    private var terminationObserver: (@MainActor @Sendable (Error) -> Void)?
 
     /// Spawning in the initializer is what makes `child` a `let`: a supervisor that could
     /// exist without a running child would need every member to answer "not started yet",
@@ -265,8 +275,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
 
         do {
             try request.validate()
-            var data = try JSONEncoder().encode(request)
-            data.append(0x0A)
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let data = encoded
 
             let timeoutItem = DispatchWorkItem { [weak self] in
                 self?.timeOut(requestID: requestID)
@@ -329,8 +340,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
 
         do {
             try request.validate()
-            var data = try JSONEncoder().encode(request)
-            data.append(0x0A)
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let data = encoded
 
             let timeoutItem = DispatchWorkItem { [weak self] in
                 self?.timeOut(requestID: requestID)
@@ -393,8 +405,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
 
         do {
             try request.validate()
-            var data = try JSONEncoder().encode(request)
-            data.append(0x0A)
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let data = encoded
 
             let timeoutItem = DispatchWorkItem { [weak self] in
                 self?.timeOutCommand(requestID: requestID)
@@ -458,8 +471,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
 
         do {
             try request.validate()
-            var data = try JSONEncoder().encode(request)
-            data.append(0x0A)
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let data = encoded
 
             let timeoutItem = DispatchWorkItem { [weak self] in
                 self?.timeOutTool(requestID: requestID)
@@ -532,8 +546,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
                     "service “\(serviceID)” v\(serviceVersion) is not declared"
                 )
             }
-            var data = try JSONEncoder().encode(request)
-            data.append(0x0A)
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let data = encoded
 
             let timeoutItem = DispatchWorkItem { [weak self] in
                 self?.timeOutService(requestID: requestID)
@@ -594,8 +609,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
 
         do {
             try request.validate(against: bundle.manifest.settings)
-            var data = try JSONEncoder().encode(request)
-            data.append(0x0A)
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let data = encoded
 
             let timeoutItem = DispatchWorkItem { [weak self] in
                 self?.timeOutSettings(requestID: requestID)
@@ -652,7 +668,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
     /// outcome is delivered immediately on the main queue. The observer is intentionally
     /// one-shot so a manager cannot accidentally turn repeated pipe failures into repeated
     /// state transitions.
-    func observeTermination(_ observer: @escaping (Error) -> Void) {
+    func observeTermination(_ observer: @escaping @MainActor @Sendable (Error) -> Void) {
         let completed: Error?
         lock.lock()
         if let terminalError {
@@ -664,7 +680,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         lock.unlock()
 
         if let completed {
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 observer(completed)
             }
         }
@@ -1047,7 +1063,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         let settings: [PendingSettings]
         let services: [PendingService]
         let tools: [PendingTool]
-        let observer: ((Error) -> Void)?
+        let observer: (@MainActor @Sendable (Error) -> Void)?
         var shouldSignalStartup = false
 
         lock.lock()
@@ -1102,7 +1118,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
             stopProcess()
         }
         if let observer {
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 observer(error)
             }
         }
@@ -1122,7 +1138,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         _ result: Result<ExtensionActionResponse, Error>,
         to completion: @escaping ActionCompletion
     ) {
-        DispatchQueue.main.async {
+        Task { @MainActor in
             completion(result)
         }
     }
@@ -1131,7 +1147,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         _ result: Result<ExtensionMCPToolResponse, Error>,
         to completion: @escaping ToolCompletion
     ) {
-        DispatchQueue.main.async {
+        Task { @MainActor in
             completion(result)
         }
     }
@@ -1140,7 +1156,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         _ result: Result<ExtensionCommandResponse, Error>,
         to completion: @escaping CommandCompletion
     ) {
-        DispatchQueue.main.async {
+        Task { @MainActor in
             completion(result)
         }
     }
@@ -1149,7 +1165,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         _ result: Result<ExtensionSettingsUpdateResponse, Error>,
         to completion: @escaping SettingsCompletion
     ) {
-        DispatchQueue.main.async {
+        Task { @MainActor in
             completion(result)
         }
     }
@@ -1158,7 +1174,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         _ result: Result<ExtensionServiceResponse, Error>,
         to completion: @escaping ServiceCompletion
     ) {
-        DispatchQueue.main.async {
+        Task { @MainActor in
             completion(result)
         }
     }

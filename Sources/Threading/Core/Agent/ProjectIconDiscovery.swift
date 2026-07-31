@@ -13,6 +13,7 @@ import Foundation
 ///
 /// Automatic discovery only ever fills an *empty* slot — a custom, agent-set, or previously
 /// discovered icon is never replaced except by an explicit "Find Project Icon" request.
+@MainActor
 final class ProjectIconDiscovery {
 
     // MARK: - Singleton
@@ -124,7 +125,7 @@ final class ProjectIconDiscovery {
 
     // MARK: - Candidate Search
 
-    private static func findIcon(for folder: URL) -> (data: Data, source: ProjectIconSource)? {
+    nonisolated private static func findIcon(for folder: URL) -> (data: Data, source: ProjectIconSource)? {
         if let data = repoFileIcon(in: folder) {
             return (data, .repoFile)
         }
@@ -138,7 +139,7 @@ final class ProjectIconDiscovery {
     }
 
     /// Probes the conventional icon locations a project owns, then its Xcode app icon set.
-    private static func repoFileIcon(in folder: URL) -> Data? {
+    nonisolated private static func repoFileIcon(in folder: URL) -> Data? {
         let roots = [folder] + ProjectIconDefaults.candidateSubdirectories.map {
             folder.appendingPathComponent($0)
         }
@@ -156,7 +157,7 @@ final class ProjectIconDiscovery {
     }
 
     /// A bounded walk for `AppIcon.appiconset` — the one candidate without a fixed path.
-    private static func appIconSetImage(in folder: URL) -> Data? {
+    nonisolated private static func appIconSetImage(in folder: URL) -> Data? {
         let fileManager = FileManager.default
         guard let enumerator = fileManager.enumerator(
             at: folder,
@@ -189,7 +190,7 @@ final class ProjectIconDiscovery {
 
     /// The set's largest rendition, by file size — a faithful proxy for pixel size here,
     /// and far cheaper than decoding every entry.
-    private static func largestImage(in directory: URL) -> Data? {
+    nonisolated private static func largestImage(in directory: URL) -> Data? {
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.fileSizeKey]
@@ -204,7 +205,7 @@ final class ProjectIconDiscovery {
         return best.flatMap { usableImageData(at: $0) }
     }
 
-    private static func fileSize(_ url: URL) -> Int {
+    nonisolated private static func fileSize(_ url: URL) -> Int {
         (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
     }
 
@@ -213,7 +214,7 @@ final class ProjectIconDiscovery {
     /// shares the one face, which distinguishes nothing between their projects — and a face
     /// is a person's mark, not a project's. Person-owned repos fall through to the
     /// generated tile instead.
-    private static func gitHubAvatar(for folder: URL) -> Data? {
+    nonisolated private static func gitHubAvatar(for folder: URL) -> Data? {
         guard let remote = GitInfo.remoteOriginURL(for: folder.path),
               let owner = gitHubOwner(fromRemote: remote),
               isOrganization(owner),
@@ -225,7 +226,7 @@ final class ProjectIconDiscovery {
     /// Asks the GitHub API what kind of account the owner is. Anything but a definite
     /// "Organization" — a person, an API error, a rate limit — refuses the avatar: the
     /// failure mode of guessing wrong is a face on every project.
-    private static func isOrganization(_ owner: String) -> Bool {
+    nonisolated private static func isOrganization(_ owner: String) -> Bool {
         guard let url = ProjectIconDefaults.gitHubAccountURL(owner: owner),
               let data = fetch(url),
               let account = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -238,7 +239,7 @@ final class ProjectIconDiscovery {
     /// Extracts the owner from any of the forms a GitHub remote takes:
     /// `git@github.com:owner/repo.git`, `https://github.com/owner/repo`,
     /// `ssh://git@github.com/owner/repo`.
-    private static func gitHubOwner(fromRemote remote: String) -> String? {
+    nonisolated private static func gitHubOwner(fromRemote remote: String) -> String? {
         let host = ProjectIconDefaults.gitHubHost
         guard let range = remote.range(of: host + ":") ?? remote.range(of: host + "/")
         else { return nil }
@@ -252,7 +253,7 @@ final class ProjectIconDiscovery {
     }
 
     /// The favicon of the homepage the project's `package.json` declares.
-    private static func homepageIcon(in folder: URL) -> Data? {
+    nonisolated private static func homepageIcon(in folder: URL) -> Data? {
         let manifestURL = folder.appendingPathComponent(ProjectIconDefaults.packageManifestName)
         guard let manifestData = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
@@ -264,7 +265,7 @@ final class ProjectIconDiscovery {
 
     /// The probe origin for a site named by a person or a manifest — `sonda.io` and
     /// `https://sonda.io/deep/path` both become `https://sonda.io`.
-    static func origin(fromWebsite input: String) -> URL? {
+    nonisolated static func origin(fromWebsite input: String) -> URL? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -283,7 +284,7 @@ final class ProjectIconDiscovery {
     /// A site's icon by convention — its touch icon, else its favicon. Shared by homepage
     /// discovery and the sidebar's explicit "Use Website Favicon…". Synchronous; call off
     /// the main thread.
-    static func websiteIcon(atOrigin origin: URL) -> Data? {
+    nonisolated static func websiteIcon(atOrigin origin: URL) -> Data? {
         for probe in ProjectIconDefaults.homepageProbes {
             if let data = fetchImage(origin.appendingPathComponent(probe)) {
                 return data
@@ -295,7 +296,7 @@ final class ProjectIconDiscovery {
     // MARK: - Data Loading
 
     /// Reads a local candidate, admitting it only when it decodes as an icon-sized image.
-    private static func usableImageData(at url: URL) -> Data? {
+    nonisolated private static func usableImageData(at url: URL) -> Data? {
         guard fileSize(url) <= ProjectIconDefaults.maximumSourceBytes,
               let data = try? Data(contentsOf: url),
               ProjectIconStore.isUsableImage(data) else { return nil }
@@ -306,30 +307,47 @@ final class ProjectIconDiscovery {
     /// with the decode gate on top, so an HTML error page served with 200 is not mistaken
     /// for an icon. Shared with icon research and the MCP tool, which admit images by the
     /// same rules.
-    static func fetchImage(_ url: URL) -> Data? {
+    nonisolated static func fetchImage(_ url: URL) -> Data? {
         guard let data = fetch(url), ProjectIconStore.isUsableImage(data) else { return nil }
         return data
     }
 
     /// A bare synchronous GET, for callers that want JSON rather than pixels — the GitHub
     /// account-type gate here, and `AccountAvatarStore`'s email search.
-    static func fetch(_ url: URL) -> Data? {
+    nonisolated static func fetch(_ url: URL) -> Data? {
         var request = URLRequest(url: url)
         request.timeoutInterval = ProjectIconDefaults.requestTimeout
 
-        var result: Data?
+        let result = ProjectIconFetchResult()
         let semaphore = DispatchSemaphore(value: 0)
 
         URLSession.shared.dataTask(with: request) { data, response, _ in
             if let http = response as? HTTPURLResponse,
                (200..<300).contains(http.statusCode),
                let data, !data.isEmpty {
-                result = data
+                result.store(data)
             }
             semaphore.signal()
         }.resume()
 
         _ = semaphore.wait(timeout: .now() + ProjectIconDefaults.requestTimeout + 1)
-        return result
+        return result.value
+    }
+}
+
+private final class ProjectIconFetchResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data: Data?
+
+    var value: Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+
+    func store(_ data: Data) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
     }
 }

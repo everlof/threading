@@ -79,6 +79,26 @@ project has already had once, where it hid the terminal's first rows. The sideba
 `TerminalContainerViewController.contentTopAnchor`, which is the header's bottom, so the header
 is the only place that knows how tall it is.
 
+**A collapsed pane's divider is hidden, because at the window's edge it is not a seam but a bar.**
+`NSSplitViewController` keeps a collapsed item's divider so it can be dragged back open — right
+in the middle of a window, wrong at its edge, which is where both of this window's collapsible
+panes live. The display panel starts collapsed (`displayItem.isCollapsed = true`), so its
+divider sat hard against the window's **trailing** edge; the sidebar's lands on the leading one
+the moment it is toggled shut. Measured off the running window that seam is `Design.Radius.border`
+thick in the theme's rule ink — two to three points of RGB (16, 16, 16) down the full height,
+byte for byte the same ink as the sidebar's own divider, and provably drawn rather than shadowed
+(it stayed exactly that value over a bright wallpaper and a dark one). It also does not stop at
+the corner: a straight dark bar ran through the window's rounded corners, which is how it was
+reported — the top-right "isn't really rounded, it's cut off and turns black".
+
+`SidebarSplitViewController.splitView(_:shouldHideDividerAt:)` hides any divider whose neighbour
+is collapsed. *Hidden*, not merely undrawn: a divider that is only unpainted still takes its
+thickness out of the layout, and the window's own background shows through the gap — the same
+bar in the system's colour instead of the theme's. Neither pane loses a way back, because
+neither is opened by dragging. `WindowEdgeTests` asserts it where the bug lived, on the pixels
+of a real unshown window, and was checked against a stubbed-out fix to confirm the seam
+reappears without it.
+
 `SidebarSplitViewController` overrides `toggleSidebar(_:)` to set `isCollapsed` directly.
 The stock implementation collapses but does not restore here, which left no way back to the
 sidebar. Overriding it fixes the toolbar button and the View menu together, since both route
@@ -132,6 +152,27 @@ source-list app puts its `+`. The footer now holds one control: **Settings**, ic
 word, at the leading margin. In settings mode the list's controls hide with the list they
 act on, but the band and the brand stay — a header that vanished took the logo with it —
 and the settings section list starts below the band rather than at the safe area.
+
+**Both sidebar bands measure their margins from the pane, not from the platform's safe area.**
+`PaneHeaderView`/`PaneFooterView` default to `layoutGuide(for: .safeArea(cornerAdaptation:))`,
+which is right for a band whose ink can meet the window's curve — and wrong for these two, for a
+reason the name hides: measured inside a real window on macOS 26, that region holds the whole
+**window-controls width** clear (≈81pt at the leading edge of a `.fullSizeContentView` window
+with a toolbar), for the band's entire height, whether or not the traffic lights are anywhere
+near it. The sidebar's bands begin *below* the titlebar, so both were paying an allowance
+neither needed: the brand started under the toolbar's sidebar toggle and Settings sat two steps
+inboard of every row between them, and one column read as three. `PaneBandMargin.paneEdge` says
+to measure from the band's own edges instead; `PaneHeaderTests` pins the platform measurement
+that makes it necessary, so if the OS ever stops reserving that width the reason is gone with it.
+
+The brand row is also the mark's pointer target. `SidebarBrandView` tracks the whole row — a
+24pt logo is too small to ask a pointer to find deliberately — and drives `ThreadingMarkView`:
+a held lift on enter, and on press a turn of exactly one strand-step, which the mark's six-fold
+symmetry makes free (the model value never moves, so nothing is left rotated). The press is the
+whole action: the brand names the window and opens nothing, which is why the row stays
+`.staticText` and carries a documented `interactiveComponent` exception in
+`config/theme-boundary.json` rather than becoming a `ThemedControl` with a focus ring and an
+accessibility action for a press that does nothing.
 
 Sidebar rows deliberately leave `NSTableCellView.textField` unset. Assigning it lets the table
 restyle the label on selection, which tints an unemphasized source-list row with the accent

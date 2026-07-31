@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import os
 import UniformTypeIdentifiers
 
 // MARK: - Project Icon Store
@@ -14,9 +15,15 @@ enum ProjectIconStore {
 
     // MARK: - Properties
 
-    /// In-memory cache of decoded icons, keyed by file name. Emptied for a file when it is
-    /// rewritten, so a replaced icon never shows its predecessor.
-    private static let cache = NSCache<NSString, NSImage>()
+    /// `NSCache` is documented thread-safe. The derived luminance map is not, so it shares
+    /// this explicitly synchronized owner with the two image caches.
+    private final class Caches: @unchecked Sendable {
+        let source = NSCache<NSString, NSImage>()
+        let display = NSCache<NSString, NSImage>()
+        let luminance = OSAllocatedUnfairLock(initialState: [String: CGFloat]())
+    }
+
+    private static let caches = Caches()
 
     private static var directory: URL {
         let appSupport = FileManager.default.urls(
@@ -55,21 +62,21 @@ enum ProjectIconStore {
             return nil
         }
 
-        cache.removeObject(forKey: fileName as NSString)
+        caches.source.removeObject(forKey: fileName as NSString)
         invalidateDerived(fileName: fileName)
         return fileName
     }
 
     /// The decoded icon, cached across the sidebar's frequent row reconfigures.
     static func image(for icon: ProjectIcon) -> NSImage? {
-        if let cached = cache.object(forKey: icon.fileName as NSString) {
+        if let cached = caches.source.object(forKey: icon.fileName as NSString) {
             return cached
         }
 
         guard let image = NSImage(contentsOf: directory.appendingPathComponent(icon.fileName)),
               image.isValid else { return nil }
 
-        cache.setObject(image, forKey: icon.fileName as NSString)
+        caches.source.setObject(image, forKey: icon.fileName as NSString)
         return image
     }
 
@@ -81,7 +88,7 @@ enum ProjectIconStore {
 
     static func remove(fileName: String) {
         invalidateDerived(fileName: fileName)
-        cache.removeObject(forKey: fileName as NSString)
+        caches.source.removeObject(forKey: fileName as NSString)
         try? FileManager.default.removeItem(at: directory.appendingPathComponent(fileName))
     }
 
@@ -93,7 +100,7 @@ enum ProjectIconStore {
     /// on the light sidebar gets a dark one. Cached per file and appearance.
     static func displayImage(for icon: ProjectIcon, darkAppearance: Bool) -> NSImage? {
         let key = displayKey(icon.fileName, darkAppearance: darkAppearance)
-        if let cached = displayCache.object(forKey: key) {
+        if let cached = caches.display.object(forKey: key) {
             return cached
         }
 
@@ -104,7 +111,7 @@ enum ProjectIconStore {
             darkAppearance: darkAppearance
         )
         let composed = compose(base, plated: plated, darkAppearance: darkAppearance)
-        displayCache.setObject(composed, forKey: key)
+        caches.display.setObject(composed, forKey: key)
         return composed
     }
 
@@ -128,19 +135,16 @@ enum ProjectIconStore {
     /// (white). Transparent regions carry no weight, so a small dark glyph on a clear
     /// background reads as dark, not as mostly-nothing.
     static func luminance(for icon: ProjectIcon) -> CGFloat? {
-        if let cached = luminanceByFile[icon.fileName] {
+        if let cached = caches.luminance.withLock({ $0[icon.fileName] }) {
             return cached
         }
 
         guard let image = image(for: icon),
               let luminance = meanVisibleLuminance(of: image) else { return nil }
 
-        luminanceByFile[icon.fileName] = luminance
+        caches.luminance.withLock { $0[icon.fileName] = luminance }
         return luminance
     }
-
-    private static let displayCache = NSCache<NSString, NSImage>()
-    private static var luminanceByFile: [String: CGFloat] = [:]
 
     private static func displayKey(_ fileName: String, darkAppearance: Bool) -> NSString {
         (fileName + (darkAppearance ? "|dark" : "|light")) as NSString
@@ -148,9 +152,9 @@ enum ProjectIconStore {
 
     /// Drops everything derived from a file's pixels, for when the file is rewritten.
     private static func invalidateDerived(fileName: String) {
-        displayCache.removeObject(forKey: displayKey(fileName, darkAppearance: true))
-        displayCache.removeObject(forKey: displayKey(fileName, darkAppearance: false))
-        luminanceByFile.removeValue(forKey: fileName)
+        caches.display.removeObject(forKey: displayKey(fileName, darkAppearance: true))
+        caches.display.removeObject(forKey: displayKey(fileName, darkAppearance: false))
+        _ = caches.luminance.withLock { $0.removeValue(forKey: fileName) }
     }
 
     /// Draws the composite at the sidebar's display size. The drawing-handler image

@@ -71,7 +71,7 @@ Components so far:
 | `ThemedToggle` | A drop-in `NSSwitch` whose on-track is the theme's accent. |
 | `ThemedPopUp` | A drop-in `NSPopUpButton`, button included and dropdown excepted. |
 | `ThemedButton` | A drop-in `NSButton`: bordered, plain, or accent-filled — `emphasis` names those three as primary/secondary/tertiary, and `shortcut` draws the chord it answers to on its own face. |
-| `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. |
+| `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. `Design.Size.fieldHeight`, its own step: it borrowed `chipHeight` for as long as a field was "a chip you can type in", and a chip holds a word at rest where a field holds a caret. With a 2pt rule on each side, 26 left twenty points inside for a 13pt face — about three points of air — and the text read as wedged against the border. The two fields placed by frame rather than by intrinsic size (`TextPromptDefaults.fieldHeight`, `SidebarDefaults.renameFieldHeight`) restate the same token. |
 | `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
 | `ThemedSpinner` / `ThemedProgressBar` | `NSProgressIndicator`, in the theme's accent. |
 | `ThemedScroller` | AppKit's scrollbar behavior, geometry, hit testing and overlay/legacy preference, with its thumb and track drawn from the correct ink source under authored themes. System delegates both draw hooks back to AppKit. |

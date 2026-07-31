@@ -14,6 +14,7 @@ import AppKit
 /// overwrites in place and deleting a theme is `removeAll(for:)` — no orphan sweep.
 /// Contributed (extension) themes never touch this store; their bytes come from the package
 /// via `ExtensionAppearanceRegistry`, read at inspection time.
+@MainActor
 enum ThemeAssetStore {
 
     // MARK: - Properties

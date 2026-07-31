@@ -29,6 +29,7 @@ extension Design {
     ///
     /// It is a recipe rather than a category because re-deriving needs the whole call: a
     /// `detail(weight: .medium)` has to come back medium.
+    @MainActor
     enum FontRole: Equatable {
 
         // Prose — follows the theme's typeface.
@@ -124,9 +125,9 @@ extension Design {
 /// declaring how it takes a font — not by remembering to observe a notification. The failure
 /// mode of the latter is one label in the corner still set in the previous theme, which is the
 /// kind of bug nobody notices until a screenshot.
-/// Deliberately not `@MainActor`: the assignment it replaces was not, and `PreferencesFormBuilder`
-/// builds its labels from nonisolated methods. Annotating the protocol would push the isolation
-/// out to those call sites, which is a concurrency change rather than a typeface one.
+/// AppKit view state is main-actor state. Keeping that in the protocol means a new conformer
+/// cannot accidentally make font application callable from a worker task.
+@MainActor
 protocol FontRoleApplying: NSView {
     /// The font currently in force, so the sweep can skip an assignment that changes nothing.
     var appliedRoleFont: NSFont? { get }
@@ -164,7 +165,7 @@ extension ThemedButton: FontRoleApplying {
     func applyRoleFont(_ font: NSFont) { self.font = font }
 }
 
-private var recordedFontRoleKey: UInt8 = 0
+@MainActor private var recordedFontRoleKey: UInt8 = 0
 
 extension NSView {
 

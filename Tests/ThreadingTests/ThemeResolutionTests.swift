@@ -311,13 +311,19 @@ final class TerminalThemeIdentityTests: XCTestCase {
     }
 
     func testLegacySessionAndProjectNamesDecodeButOnlyIDsAreReencoded() throws {
+        let sessionID = SessionID()
+        let projectID = ProjectID()
         let session = try JSONDecoder().decode(
             AgentSession.self,
-            from: Data(#"{"kind":"claude","themeName":"Ocean"}"#.utf8)
+            from: Data(
+                #"{"id":"\#(sessionID.uuidString)","kind":"claude","themeName":"Ocean"}"#.utf8
+            )
         )
         let project = try JSONDecoder().decode(
             Project.self,
-            from: Data(#"{"folderPath":"/tmp/theme-probe","themeName":"Homebrew"}"#.utf8)
+            from: Data(
+                #"{"id":"\#(projectID.uuidString)","folderPath":"/tmp/theme-probe","themeName":"Homebrew"}"#.utf8
+            )
         )
 
         XCTAssertEqual(session.themeID, .ocean)

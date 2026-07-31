@@ -487,6 +487,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
 
 // MARK: - AgentSessionViewControllerDelegate
 
+@MainActor
 protocol AgentSessionViewControllerDelegate: AnyObject {
     func agentSession(_ controller: AgentSessionViewController, titleChangedTo title: String)
     func agentSession(_ controller: AgentSessionViewController, didExitWithCode exitCode: Int32?)

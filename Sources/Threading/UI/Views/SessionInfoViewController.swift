@@ -33,19 +33,70 @@ final class SessionInfoViewController: NSViewController {
     var onOpenURL: ((URL) -> Void)?
 
     private let reader = SessionInfoReader()
-    private var pollTimer: Timer?
+    nonisolated(unsafe) private var pollTimer: Timer?
 
     /// What the rows currently on screen are drawn from. A reading with the same shape updates
     /// them in place; a different one rebuilds.
     private var renderedShape: String?
     private var processRows: [pid_t: SessionInfoRowView] = [:]
 
-    private var directoryLabel: NSTextField!
-    private var metaLabel: NSTextField!
-    private var revealButton: ThemedButton!
-    private var copyButton: ThemedButton!
-    private var scrollView: ThemedScrollView!
-    private var stack: NSStackView!
+    private lazy var directoryLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.compactCode)
+        label.textColor = Design.Text.label
+        label.lineBreakMode = .byTruncatingMiddle
+        return label
+    }()
+    private lazy var metaLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.caption)
+        label.textColor = Design.Text.tertiary
+        label.lineBreakMode = .byTruncatingTail
+        return label
+    }()
+    private lazy var revealButton: ThemedButton = {
+        let button = ThemedButton(
+            title: L10n.string("Finder"),
+            target: self,
+            action: #selector(revealInFinder)
+        )
+        button.toolTip = L10n.string("Show this folder in Finder")
+        return button
+    }()
+    private lazy var copyButton: ThemedButton = {
+        let button = ThemedButton(
+            title: L10n.string("Copy"),
+            target: self,
+            action: #selector(copyDirectory)
+        )
+        button.toolTip = L10n.string("Copy the folder path")
+        return button
+    }()
+    private lazy var stack: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.hairline
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.small,
+            left: Design.Spacing.small,
+            bottom: Design.Spacing.inset,
+            right: Design.Spacing.small
+        )
+        return stack
+    }()
+    private lazy var scrollView: ThemedScrollView = {
+        let clipView = FlippedClipView()
+        clipView.drawsBackground = false
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.contentView = clipView
+        scroll.documentView = stack
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        return scroll
+    }()
 
     // MARK: - Initialization
 
@@ -85,30 +136,6 @@ final class SessionInfoViewController: NSViewController {
     // MARK: - Setup
 
     private func setupHeader() {
-        directoryLabel = NSTextField(labelWithString: "")
-        directoryLabel.applyFont(.compactCode)
-        directoryLabel.textColor = Design.Text.label
-        // The interesting end of a long path is the last component, so the middle gives way.
-        directoryLabel.lineBreakMode = .byTruncatingMiddle
-
-        metaLabel = NSTextField(labelWithString: "")
-        metaLabel.applyFont(.caption)
-        metaLabel.textColor = Design.Text.tertiary
-        metaLabel.lineBreakMode = .byTruncatingTail
-
-        revealButton = ThemedButton(
-            title: L10n.string("Finder"),
-            target: self,
-            action: #selector(revealInFinder)
-        )
-        copyButton = ThemedButton(
-            title: L10n.string("Copy"),
-            target: self,
-            action: #selector(copyDirectory)
-        )
-        revealButton.toolTip = L10n.string("Show this folder in Finder")
-        copyButton.toolTip = L10n.string("Copy the folder path")
-
         [directoryLabel, metaLabel, revealButton, copyButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview($0)
@@ -116,28 +143,6 @@ final class SessionInfoViewController: NSViewController {
     }
 
     private func setupBody() {
-        stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.hairline
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.small,
-            left: Design.Spacing.small,
-            bottom: Design.Spacing.inset,
-            right: Design.Spacing.small
-        )
-
-        let clipView = FlippedClipView()
-        clipView.drawsBackground = false
-
-        scrollView = ThemedScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.contentView = clipView
-        scrollView.documentView = stack
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-
         view.addSubview(scrollView)
     }
 
@@ -206,7 +211,9 @@ final class SessionInfoViewController: NSViewController {
         refresh()
 
         let timer = Timer(timeInterval: SessionInfoDefaults.refreshInterval, repeats: true) { [weak self] _ in
-            self?.refresh()
+            MainActor.assumeIsolated {
+                self?.refresh()
+            }
         }
         // `.common`, or the panel stops updating for as long as a menu is open or a scroll is
         // in progress — which is exactly when someone is reading it.

@@ -56,8 +56,21 @@ final class SessionComposerViewController: NSViewController {
     /// Experimental, and offered only for agents with a structured headless transport.
     private var usesNativeUI = false
     private let promptView = PromptView()
-    private var promptContentContainer: ComponentContentContainer!
-    private var promptCustomizationHost: ComponentCustomizationHost!
+    private lazy var promptContentContainer = ComponentContentContainer(defaultContent: promptView)
+    private lazy var promptCustomizationHost = ComponentCustomizationHost(
+        target: .sessionStartComposer(),
+        contentContainer: promptContentContainer,
+        lookup: customizationLookup,
+        imageResolver: ExtensionComponentResourceResolver.image,
+        onAction: { [weak self] action in
+            guard let self else { return }
+            if let onCustomizationAction {
+                onCustomizationAction(action)
+            } else {
+                ComponentCustomizationProviderSlot.shared.perform(action)
+            }
+        }
+    )
     private let customizationLookup: ComponentCustomizationHost.Lookup
 
     /// Invoked for semantic actions in extension-provided prompt accessories.
@@ -189,22 +202,7 @@ final class SessionComposerViewController: NSViewController {
     /// container entirely — an extension cannot reach the action row at all, which is a stronger
     /// guarantee than the one the `.proceed` rule gives the field.
     private func setupPromptCustomization() {
-        promptContentContainer = ComponentContentContainer(defaultContent: promptView)
         promptContentContainer.setAccessibilityIdentifier("composer.session-start.content")
-        promptCustomizationHost = ComponentCustomizationHost(
-            target: .sessionStartComposer(),
-            contentContainer: promptContentContainer,
-            lookup: customizationLookup,
-            imageResolver: ExtensionComponentResourceResolver.image,
-            onAction: { [weak self] action in
-                guard let self else { return }
-                if let onCustomizationAction {
-                    onCustomizationAction(action)
-                } else {
-                    ComponentCustomizationProviderSlot.shared.perform(action)
-                }
-            }
-        )
         // A family-wide patch must not appear before the composer has a real project context.
         promptCustomizationHost.deactivate()
     }
@@ -347,10 +345,10 @@ final class SessionComposerViewController: NSViewController {
     /// `show(projectID:)`.
     func updatePromptCustomization(for projectID: ProjectID?) {
         guard let projectID else {
-            promptCustomizationHost?.deactivate()
+            promptCustomizationHost.deactivate()
             return
         }
-        promptCustomizationHost?.updateTarget(
+        promptCustomizationHost.updateTarget(
             .sessionStartComposer(projectID: projectID.uuidString.lowercased())
         )
     }

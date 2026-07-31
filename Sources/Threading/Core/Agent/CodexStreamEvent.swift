@@ -74,7 +74,7 @@ enum CodexStreamEvent {
             return .toolUse(
                 id: id,
                 tool: .bash,
-                input: ["command": item.string("command") ?? ""]
+                input: ["command": .string(item.string("command") ?? "")]
             )
 
         case "mcp_tool_call":
@@ -90,14 +90,14 @@ enum CodexStreamEvent {
             return .toolUse(
                 id: id,
                 tool: .webSearch,
-                input: ["query": item.string("query") ?? ""]
+                input: ["query": .string(item.string("query") ?? "")]
             )
 
         case "file_change":
-            return .toolUse(id: id, tool: .edit, input: item.foundationObject)
+            return .toolUse(id: id, tool: .edit, input: item.values)
 
         case "plan_update":
-            return .toolUse(id: id, tool: .plan, input: item.foundationObject)
+            return .toolUse(id: id, tool: .plan, input: item.values)
 
         default:
             return nil
@@ -136,13 +136,13 @@ enum CodexStreamEvent {
 
     // MARK: - Values
 
-    private static func arguments(from value: JSONValue?) -> [String: Any] {
-        if let object = value?.foundationObject { return object }
+    private static func arguments(from value: JSONValue?) -> [String: JSONValue] {
+        if let object = value?.objectValue { return object }
         guard let text = value?.stringValue,
               let data = text.data(using: .utf8),
               let decoded = try? JSONDecoder().decode(JSONValue.self, from: data)
         else { return [:] }
-        return decoded.foundationObject ?? [:]
+        return decoded.objectValue ?? [:]
     }
 
     private static func resultText(_ value: JSONValue?) -> String {

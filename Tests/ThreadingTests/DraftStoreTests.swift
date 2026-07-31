@@ -1,9 +1,10 @@
 import XCTest
 @testable import Threading
 
+@MainActor
 final class DraftStoreTests: XCTestCase {
 
-    private var testDirectory: URL!
+    nonisolated(unsafe) private var testDirectory: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -78,6 +79,45 @@ final class DraftStoreTests: XCTestCase {
         makeStore().setDraft("  indented, and unfinished ", for: projectID)
 
         XCTAssertEqual(makeStore().draft(for: projectID), "  indented, and unfinished ")
+    }
+
+    func testUnreadableDraftFileIsPreservedBeforeNewTypingIsSaved() throws {
+        let original = Data("{ damaged".utf8)
+        let liveURL = testDirectory.appendingPathComponent(DraftDefaults.fileName)
+        try original.write(to: liveURL)
+
+        let store = makeStore()
+        let projectID = ProjectID()
+        XCTAssertEqual(store.draft(for: projectID), "")
+
+        let quarantine = try XCTUnwrap(
+            try FileManager.default.contentsOfDirectory(
+                at: testDirectory,
+                includingPropertiesForKeys: nil
+            ).first { $0.lastPathComponent.hasPrefix("\(DraftDefaults.fileName).unreadable-") }
+        )
+        XCTAssertEqual(try Data(contentsOf: quarantine), original)
+
+        store.setDraft("new work", for: projectID)
+        XCTAssertEqual(try Data(contentsOf: quarantine), original)
+        XCTAssertEqual(makeStore().draft(for: projectID), "new work")
+    }
+
+    func testInvalidProjectIdentifierFailsTheWholeDraftLoad() throws {
+        let original = Data(#"{"drafts":{"not-a-project-id":"do not silently skip me"}}"#.utf8)
+        let liveURL = testDirectory.appendingPathComponent(DraftDefaults.fileName)
+        try original.write(to: liveURL)
+
+        _ = makeStore()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL.path))
+        let quarantine = try XCTUnwrap(
+            try FileManager.default.contentsOfDirectory(
+                at: testDirectory,
+                includingPropertiesForKeys: nil
+            ).first { $0.lastPathComponent.hasPrefix("\(DraftDefaults.fileName).unreadable-") }
+        )
+        XCTAssertEqual(try Data(contentsOf: quarantine), original)
     }
 
     // MARK: - Helpers

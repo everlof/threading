@@ -146,8 +146,9 @@ Rules:
 - `identifier` is lowercase reverse DNS with at least two components.
 - `dataVersion` is the monotonic schema version of settings/KV/cache interpretation. Omission
   means 1. Never decrease it, including on an app-version rollback.
-- New safe extensions use `"runtime": "webAssembly"`. Omission means legacy native
-  compatibility, not the recommended default.
+- `runtime` is required. New safe extensions use `"runtime": "webAssembly"`. Threading refuses
+  manifests that omit the execution boundary; legacy native packages must opt in explicitly
+  with `"runtime": "native"`.
 - `executable` is relative to the installed extension directory.
 - A WebAssembly executable ends in `.wasm` and does not need a POSIX executable bit.
 - `executable` must not contain `.` or `..` path components.

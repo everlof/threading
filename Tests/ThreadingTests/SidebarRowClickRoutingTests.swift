@@ -59,6 +59,7 @@ final class SidebarRowClickRoutingTests: XCTestCase {
     }
 
     /// The single row the fixture vends, kept alive by the test through the data source.
+    @MainActor
     final class RowSource: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         let item = NSString("session")

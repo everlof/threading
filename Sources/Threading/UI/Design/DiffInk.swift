@@ -27,6 +27,7 @@ extension Design {
 
 // MARK: - Derivation
 
+@MainActor
 extension Design.Diff {
 
     /// The diff palette for the ground it will be drawn on.

@@ -11,6 +11,7 @@ struct CommandRegistryDidChange: AppEvent {
 ///
 /// Extensions register semantic values. AppKit menu items, shortcut conflict handling and
 /// invocation remain host-owned, so disabling a process removes every entry point at once.
+@MainActor
 final class CommandRegistry {
     static let shared = CommandRegistry()
 

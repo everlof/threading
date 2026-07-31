@@ -19,7 +19,7 @@ import Foundation
 /// registry that does exist is `CheckoutBranchFollower`'s, which keeps a single *branch-scoped*
 /// watcher per checkout for the app's lifetime — cheap enough to, because that scope watches
 /// one file.
-final class GitCheckoutWatcher {
+final class GitCheckoutWatcher: @unchecked Sendable {
 
     /// What the watcher listens for.
     enum Scope {
@@ -43,7 +43,7 @@ final class GitCheckoutWatcher {
 
     private let scope: Scope
 
-    private let onChange: @MainActor () -> Void
+    private let onChange: @MainActor @Sendable () -> Void
 
     private var stream: FSEventStreamRef?
     private var coalesceItem: DispatchWorkItem?
@@ -54,7 +54,11 @@ final class GitCheckoutWatcher {
 
     /// Fails when the path is not inside a repository — there is then nothing a review pane
     /// could refresh to.
-    init?(root: URL, scope: Scope = .checkout, onChange: @escaping @MainActor () -> Void) {
+    init?(
+        root: URL,
+        scope: Scope = .checkout,
+        onChange: @escaping @MainActor @Sendable () -> Void
+    ) {
         guard let location = GitInfo.worktreeLocation(for: root.path) else { return nil }
         self.scope = scope
 

@@ -5,6 +5,7 @@ import XCTest
 /// This is where the isolation invariant is pinned: the tunnel-facing server must not route any
 /// MCP, permission or lifecycle path — those belong to a different server the tunnel never
 /// reaches — and an unauthenticated API call must be refused.
+@MainActor
 final class RemoteServerIntegrationTests: XCTestCase {
 
     private var server: RemoteAccessServer!
@@ -20,6 +21,7 @@ final class RemoteServerIntegrationTests: XCTestCase {
         )
         server = RemoteAccessServer()
         server.authorizer = authority
+        server.receiveClientDiagnostics = { _, _, _ in true }
 
         let ready = expectation(description: "listening")
         server.start { resolved in
@@ -61,13 +63,19 @@ final class RemoteServerIntegrationTests: XCTestCase {
     }
 
     @discardableResult
-    private func post(_ path: String, bearer: String, body: Data) -> Probe? {
+    private func post(
+        _ path: String,
+        bearer: String,
+        body: Data,
+        headers: [String: String] = [:]
+    ) -> Probe? {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port!)\(path)")!)
         request.httpMethod = "POST"
         request.httpBody = body
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         request.setValue("test-device", forHTTPHeaderField: "X-Threading-Device")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
 
         var probe: Probe?
         let done = expectation(description: "POST \(path)")
@@ -145,6 +153,17 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("maxCols: 240"))
         XCTAssertTrue(script.contains("minRows: 4"))
         XCTAssertTrue(script.contains("maxRows: 160"))
+    }
+
+    func testTheClientOffersExplicitTimeBoundedSanitizedDiagnosticSharing() throws {
+        let script = String(decoding: try XCTUnwrap(get("/app.js")).body, as: UTF8.self)
+
+        XCTAssertTrue(script.contains("Share diagnostics for 30 min"))
+        XCTAssertTrue(script.contains("fetch(\"/api/diagnostics\""))
+        XCTAssertTrue(script.contains("sharingMS: 30 * 60 * 1000"))
+        XCTAssertTrue(script.contains("source: \"browserClient\""))
+        XCTAssertFalse(script.contains("console.log ="))
+        XCTAssertFalse(script.contains("console.error ="))
     }
 
     func testUnknownPathIs404() throws {
@@ -491,6 +510,105 @@ final class RemoteServerIntegrationTests: XCTestCase {
                 body: invalid
             )).status,
             422
+        )
+    }
+
+    func testDiagnosticUploadIsOwnerOnlyTypedAndBounded() throws {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let record = RemoteDiagnosticRecord(
+            timestamp: timestamp,
+            source: .iOSClient,
+            level: .error,
+            event: .socketFailed,
+            fields: ["code": "url.-1009"]
+        )
+        let valid = try JSONEncoder().encode(
+            RemoteDiagnosticUploadRequestDTO(source: .iOSClient, records: [record])
+        )
+        var receivedSource: RemoteDiagnosticSource?
+        var receivedDevice: String?
+        server.receiveClientDiagnostics = { records, source, device in
+            receivedSource = source
+            receivedDevice = device
+            return records == [record]
+        }
+
+        let accepted = try XCTUnwrap(post(
+            RemoteRouter.diagnosticUploadPath,
+            bearer: "goodtoken",
+            body: valid,
+            headers: ["X-Threading-Client": "Threading-iOS"]
+        ))
+        XCTAssertEqual(accepted.status, 200)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteDiagnosticUploadResponseDTO.self,
+                from: accepted.body
+            ).acceptedRecords,
+            1
+        )
+        XCTAssertEqual(receivedSource, .iOSClient)
+        XCTAssertEqual(receivedDevice, "test-device")
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                RemoteRouter.diagnosticUploadPath,
+                bearer: "goodtoken",
+                body: valid,
+                headers: ["X-Threading-Client": "Threading-Web"]
+            )).status,
+            400,
+            "the shipping client header must agree with the record source"
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                RemoteRouter.diagnosticUploadPath,
+                bearer: "goodtoken",
+                body: valid
+            )).status,
+            400,
+            "a source must be tied to a known shipping client"
+        )
+
+        authority.set(
+            RemoteAuthorization(
+                shareID: "guest",
+                capability: .interact,
+                scope: .session(SessionID())
+            ),
+            forToken: "guesttoken"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                RemoteRouter.diagnosticUploadPath,
+                bearer: "guesttoken",
+                body: valid,
+                headers: ["X-Threading-Client": "Threading-iOS"]
+            )).status,
+            403
+        )
+
+        let rawField = RemoteDiagnosticRecord(
+            timestamp: timestamp,
+            source: .iOSClient,
+            level: .error,
+            event: .socketFailed,
+            fields: ["message": "terminal contents"]
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                RemoteRouter.diagnosticUploadPath,
+                bearer: "goodtoken",
+                body: try JSONEncoder().encode(
+                    RemoteDiagnosticUploadRequestDTO(
+                        source: .iOSClient,
+                        records: [rawField]
+                    )
+                ),
+                headers: ["X-Threading-Client": "Threading-iOS"]
+            )).status,
+            400
         )
     }
 

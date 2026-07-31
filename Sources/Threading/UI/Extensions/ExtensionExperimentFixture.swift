@@ -11,6 +11,7 @@ enum ExtensionExperimentFixture {
         identifier: "codes.threading.hello-status",
         name: "Hello Status",
         version: "0.1.0",
+        runtime: .native,
         executable: "bin/hello-status",
         capabilities: [.commands, .panels]
     )

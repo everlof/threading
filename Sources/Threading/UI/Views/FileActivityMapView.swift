@@ -46,7 +46,7 @@ final class FileActivityMapView: NSView {
         }
     }
 
-    private var glowTimer: Timer?
+    nonisolated(unsafe) private var glowTimer: Timer?
     private var themeRedraw: ThemeRedraw?
 
     // MARK: - Initialization
@@ -230,15 +230,19 @@ final class FileActivityMapView: NSView {
         guard glowTimer == nil, map.hasActiveGlow(now: clock()) else { return }
 
         glowTimer = Timer.scheduledTimer(
-            withTimeInterval: Metrics.glowRefreshInterval,
+            timeInterval: Metrics.glowRefreshInterval,
+            target: self,
+            selector: #selector(refreshGlow),
+            userInfo: nil,
             repeats: true
-        ) { [weak self] _ in
-            guard let self else { return }
-            needsDisplay = true
-            if !map.hasActiveGlow(now: clock()) {
-                glowTimer?.invalidate()
-                glowTimer = nil
-            }
+        )
+    }
+
+    @objc private func refreshGlow() {
+        needsDisplay = true
+        if !map.hasActiveGlow(now: clock()) {
+            glowTimer?.invalidate()
+            glowTimer = nil
         }
     }
 

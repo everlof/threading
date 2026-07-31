@@ -111,7 +111,7 @@ enum ClaudeStatusLineCoverage {
     static func resolve(
         account: AgentAccount?,
         facts: Facts,
-        completion: @escaping @MainActor (Coverage) -> Void
+        completion: @escaping @MainActor @Sendable (Coverage) -> Void
     ) {
         guard let account else { return completion(.none) }
 

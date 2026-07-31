@@ -10,7 +10,7 @@ import Foundation
 ///
 /// Closing this connection is how a revoked generation learns it is revoked — the child's next
 /// read returns end-of-file instead of a status code it might mistake for a transient failure.
-final class ExtensionHostDescriptorConnection {
+final class ExtensionHostDescriptorConnection: @unchecked Sendable {
     /// The descriptor number the child sees. Fixed by convention so the extension SDK needs no
     /// negotiation: stdin, stdout and stderr are the JSONL protocol, and the broker is next.
     static let childDescriptorNumber: Int32 = 3
@@ -21,8 +21,11 @@ final class ExtensionHostDescriptorConnection {
 
     private let descriptor: Int32
     private let queue: DispatchQueue
-    private let handler: (HTTPRequest, @escaping (HTTPResponse) -> Void) -> Void
-    private let onClose: (ExtensionHostDescriptorConnection) -> Void
+    private let handler: @Sendable (
+        HTTPRequest,
+        @escaping @Sendable (HTTPResponse) -> Void
+    ) -> Void
+    private let onClose: @Sendable (ExtensionHostDescriptorConnection) -> Void
 
     private var channel: DispatchIO?
     private var buffer = Data()
@@ -35,8 +38,11 @@ final class ExtensionHostDescriptorConnection {
     init(
         descriptor: Int32,
         queue: DispatchQueue,
-        handler: @escaping (HTTPRequest, @escaping (HTTPResponse) -> Void) -> Void,
-        onClose: @escaping (ExtensionHostDescriptorConnection) -> Void
+        handler: @escaping @Sendable (
+            HTTPRequest,
+            @escaping @Sendable (HTTPResponse) -> Void
+        ) -> Void,
+        onClose: @escaping @Sendable (ExtensionHostDescriptorConnection) -> Void
     ) {
         self.descriptor = descriptor
         self.queue = queue
@@ -51,8 +57,11 @@ final class ExtensionHostDescriptorConnection {
     /// it; leaving it open in the host means the child's exit never reaches end-of-file here.
     static func makePair(
         queue: DispatchQueue,
-        handler: @escaping (HTTPRequest, @escaping (HTTPResponse) -> Void) -> Void,
-        onClose: @escaping (ExtensionHostDescriptorConnection) -> Void
+        handler: @escaping @Sendable (
+            HTTPRequest,
+            @escaping @Sendable (HTTPResponse) -> Void
+        ) -> Void,
+        onClose: @escaping @Sendable (ExtensionHostDescriptorConnection) -> Void
     ) -> (connection: ExtensionHostDescriptorConnection, childDescriptor: Int32)? {
         var descriptors: [Int32] = [-1, -1]
         guard socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else { return nil }

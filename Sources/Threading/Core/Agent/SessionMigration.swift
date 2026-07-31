@@ -414,7 +414,7 @@ enum ConversationHistoryPage {
                         // Private reasoning is neither visible dialogue nor portable context.
                         return []
                     case .toolUse(_, let tool, let input):
-                        let rendered = jsonString(input)
+                        let rendered = jsonString(input.mapValues(\.foundationValue))
                         return segments(
                             label: "[ASSISTANT TOOL CALL: \(tool.rawName)]",
                             content: bounded(rendered, limit: toolInputCharacterLimit)

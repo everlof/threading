@@ -1,72 +1,5 @@
 import AppKit
 
-// MARK: - Persisted Panel
-
-/// The on-disk form of a session's display panel — enough to rebuild its tabs after a relaunch,
-/// plus the signature the agent last observed so a resume only re-states the panel when it changed.
-struct PersistedPanel: Codable {
-    var tabs: [PersistedTab]
-    var activeTabID: String?
-
-    /// The `signature` the agent was last known to be aware of. Compared at `initialize`: equal
-    /// means the agent's own transcript already reflects the panel, so it is not re-described.
-    var observedSignature: String?
-
-    /// The drawer host's selection and open state, beside the panel's. Optional so every
-    /// pre-drawer layout still decodes; the drawer's *tabs* ride in `tabs` with
-    /// `host == PersistedTab.drawerHost`.
-    var drawerActiveTabID: String? = nil
-    var drawerOpen: Bool? = nil
-
-    var panelTabs: [PersistedTab] { tabs.filter { $0.host == nil } }
-    var drawerTabs: [PersistedTab] { tabs.filter { $0.host == PersistedTab.drawerHost } }
-}
-
-/// One tab, reduced to what survives a restart. Images are cached as PNGs (`cacheFile`) so a
-/// generated screenshot — which has no file behind it — comes back too.
-struct PersistedTab: Codable {
-    enum Kind: String, Codable {
-        case browser
-        case html
-        case image
-        case review
-        case info
-        case terminal
-        case files
-        case attachments
-        case extensionPanel
-        case compare
-    }
-
-    var id: String
-    var kind: Kind
-    var title: String?
-    var subtitle: String
-    /// Browser: the current URL. Image: the original file or page URL, kept for the panel's actions.
-    var url: String?
-    /// HTML: the document itself.
-    var html: String?
-    /// Image: the PNG filename in the session's cache directory.
-    var cacheFile: String?
-    /// Review: the selected `GitReviewMode` raw value. Optional so older layouts still decode;
-    /// defaulted so the other kinds' call sites need not mention it.
-    var mode: String? = nil
-    /// Extension panel: stable contribution owner and local panel identifier.
-    var extensionIdentifier: String? = nil
-    var extensionPanelID: String? = nil
-    /// Compare: the two absolute paths and the optional per-side captions. `mode` above carries
-    /// the `ImageCompareMode` raw value the way it carries review's.
-    var compareOldPath: String? = nil
-    var compareNewPath: String? = nil
-    var compareOldTitle: String? = nil
-    var compareNewTitle: String? = nil
-    /// Which pane hosts the tab. Nil is the display panel — the value every layout written
-    /// before the drawer became a host implicitly carries, which is the whole migration.
-    var host: String? = nil
-
-    static let drawerHost = "drawer"
-}
-
 extension PersistedPanel {
 
     /// A compact, order-sensitive fingerprint of the panel, used to decide whether the agent needs
@@ -150,6 +83,7 @@ extension PersistedPanel {
 ///
 /// All access is on the main queue (the pane controller drives it, and the informing path hops to
 /// main), so it needs no locking of its own.
+@MainActor
 final class DisplayPaneStore {
 
     static let shared = DisplayPaneStore()

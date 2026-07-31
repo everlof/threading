@@ -5,6 +5,7 @@ import XCTest
 
 /// The shortcut model: how a chord is written, what counts as a legal one, and how an override
 /// resolves over a default. All of it is pure, and none of it is visible in a screenshot.
+@MainActor
 final class KeyboardShortcutTests: XCTestCase {
 
     // MARK: - Display
@@ -54,6 +55,7 @@ final class KeyboardShortcutTests: XCTestCase {
 
 // MARK: - Override Store
 
+@MainActor
 final class ShortcutOverrideStoreTests: XCTestCase {
 
     private var store: ShortcutOverrideStore!
@@ -150,6 +152,7 @@ final class ShortcutOverrideStoreTests: XCTestCase {
 
 // MARK: - Command Table
 
+@MainActor
 final class AppCommandTests: XCTestCase {
 
     /// An id is what an override is stored under, so a duplicate would make two commands share
@@ -188,6 +191,7 @@ final class AppCommandTests: XCTestCase {
 
 // MARK: - Dynamic Registry
 
+@MainActor
 final class CommandRegistryTests: XCTestCase {
     func testExtensionCommandsJoinTheSameNamespaceAsBuiltIns() throws {
         let builtIn = AppCommand(

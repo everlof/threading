@@ -7,6 +7,7 @@ import AppKit
 /// offers only its name, and a name says nothing about what the theme looks like. Drawn rather
 /// than composed from views so the same compact preview can be painted by a themed dropdown row
 /// or a list without either rebuilding a miniature terminal hierarchy.
+@MainActor
 enum ThemeSwatchImage {
 
     private enum Layout {
@@ -31,6 +32,7 @@ enum ThemeSwatchImage {
     }
 
     static func make(for theme: TerminalTheme, size: NSSize, showsPrompt: Bool) -> NSImage {
+        let border = Design.Surface.border
         let image = NSImage(size: size, flipped: false) { rect in
             let radius = rect.height * Layout.radiusFraction
             let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
@@ -71,7 +73,7 @@ enum ThemeSwatchImage {
                 ))
             }
 
-            Design.Surface.border.setStroke()
+            border.setStroke()
             path.lineWidth = 1
             path.stroke()
 

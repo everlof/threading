@@ -19,7 +19,7 @@ import Foundation
 /// is lifecycle — a handful of records a minute — and the record that matters most is always
 /// the one written immediately before the process died, which an asynchronous hand-off is
 /// exactly what would lose.
-final class EventLog {
+final class EventLog: @unchecked Sendable {
 
     // MARK: - Types
 
@@ -29,6 +29,8 @@ final class EventLog {
         case session
         case composer
         case mcp
+        /// Extension installation and host/runtime state transitions.
+        case extensions
 
         /// Agent hooks. Its own category because a hook is invisible by construction — a curl
         /// in a subprocess whose output is discarded — so when one stops working there is
@@ -52,7 +54,7 @@ final class EventLog {
 
     /// Today's journal, which is what the menu item reveals.
     var currentJournalURL: URL {
-        journalURL(forDay: dayStamp(Date()))
+        queue.sync { journalURL(forDay: dayStamp(Date())) }
     }
 
     /// Serialises appends and guards the cached handle. Everything below `record` runs here.
@@ -75,8 +77,9 @@ final class EventLog {
     /// Appends one record. Never throws and never traps: a journal that cannot be written
     /// must not take the app down with it.
     func record(_ category: Category, _ message: String, _ detail: [String: String] = [:]) {
-        let line = line(category: category, message: message, detail: detail)
-        queue.sync { append(line) }
+        queue.sync {
+            append(line(category: category, message: message, detail: detail))
+        }
     }
 
     /// Opens a launch: drops expired journals, says how the *previous* launch ended, and
@@ -86,7 +89,11 @@ final class EventLog {
     ///
     /// Read at `beginLaunch` and kept, because the marker it is derived from is overwritten a
     /// few lines later. A support report wants this exact fact and cannot recover it afterwards.
-    private(set) var previousLaunchEndedCleanly: Bool?
+    var previousLaunchEndedCleanly: Bool? {
+        queue.sync { previousLaunchEndedCleanlyStorage }
+    }
+
+    private var previousLaunchEndedCleanlyStorage: Bool?
 
     func beginLaunch() {
         queue.sync {
@@ -97,7 +104,7 @@ final class EventLog {
             // A missing marker means either "exited cleanly" or "never ran". Only an existing
             // journal separates the two, and it has to be asked before this launch appends one.
             let previous = previousLaunch()
-            previousLaunchEndedCleanly = journalExists() ? previous == nil : nil
+            previousLaunchEndedCleanlyStorage = journalExists() ? previous == nil : nil
 
             if let previous {
                 append(line(

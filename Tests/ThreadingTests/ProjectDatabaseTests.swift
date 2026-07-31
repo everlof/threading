@@ -9,7 +9,7 @@ import XCTest
 @MainActor
 final class ProjectDatabaseTests: XCTestCase {
 
-    private var directory: URL!
+    private nonisolated(unsafe) var directory: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -38,7 +38,7 @@ final class ProjectDatabaseTests: XCTestCase {
 
     func testEmptyDatabaseIsEmpty() throws {
         let database = try makeDatabase()
-        XCTAssertTrue(database.isEmpty)
+        XCTAssertTrue(try database.isEmpty())
         XCTAssertTrue(try database.load().projects.isEmpty)
     }
 
@@ -58,7 +58,7 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.projects[0].sessions.map(\.id), [session.id])
         XCTAssertEqual(restored.projects[0].sessions[0].title, "Chat")
         XCTAssertEqual(restored.selectedSessionID, selected)
-        XCTAssertFalse(database.isEmpty)
+        XCTAssertFalse(try database.isEmpty())
     }
 
     func testSessionsAreRowsAndNotAlsoPayload() throws {
@@ -113,7 +113,7 @@ final class ProjectDatabaseTests: XCTestCase {
         ]))
         try database.save(ProjectsState(projects: []))
 
-        XCTAssertTrue(database.isEmpty)
+        XCTAssertTrue(try database.isEmpty())
         // The cascade is a foreign key, which only holds because `PRAGMA foreign_keys` is on.
         XCTAssertEqual(try rowCount("session"), 0, "sessions should cascade with their project")
     }
@@ -156,6 +156,157 @@ final class ProjectDatabaseTests: XCTestCase {
         let restored = try database.load()
         XCTAssertEqual(restored.selectedSessionID, selected)
         XCTAssertEqual(restored.projects.map(\.name), ["Persisted"])
+    }
+
+    // MARK: - Fail-Closed Loading
+
+    func testMalformedSessionPayloadFailsTheWholeLoadWithoutDeletingRows() throws {
+        let database = try makeDatabase()
+        let first = AgentSession(kind: .claude, title: "First")
+        let second = AgentSession(kind: .codex, title: "Second")
+        try database.save(ProjectsState(projects: [
+            makeProject("alpha", sessions: [first, second])
+        ]))
+
+        try updatePayload(
+            table: "session",
+            id: second.id.uuidString,
+            payload: "{ not-json"
+        )
+
+        XCTAssertThrowsError(try database.load()) { error in
+            guard let loadError = error as? ProjectDatabaseLoadError,
+                  case .corruptRow(let table, let id, _) = loadError else {
+                return XCTFail("Expected a corrupt-row error, got \(error)")
+            }
+            XCTAssertEqual(table, "session")
+            XCTAssertEqual(id, second.id.uuidString)
+        }
+        XCTAssertEqual(try rowCount("project"), 1)
+        XCTAssertEqual(
+            try rowCount("session"),
+            2,
+            "a failed load must not turn an undecodable row into an implicit deletion"
+        )
+    }
+
+    func testPayloadIdentityMustMatchItsAuthoritativeRow() throws {
+        let database = try makeDatabase()
+        let project = makeProject("alpha")
+        try database.save(ProjectsState(projects: [project]))
+
+        let payload = try XCTUnwrap(rawProjectPayload(id: project.id))
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
+        )
+        object["id"] = ProjectID().uuidString
+        let mismatched = String(
+            decoding: try JSONSerialization.data(withJSONObject: object),
+            as: UTF8.self
+        )
+        try updatePayload(
+            table: "project",
+            id: project.id.uuidString,
+            payload: mismatched
+        )
+
+        XCTAssertThrowsError(try database.load()) { error in
+            guard let loadError = error as? ProjectDatabaseLoadError,
+                  case .corruptRow(let table, let id, let reason) = loadError else {
+                return XCTFail("Expected a corrupt-row error, got \(error)")
+            }
+            XCTAssertEqual(table, "project")
+            XCTAssertEqual(id, project.id.uuidString)
+            XCTAssertTrue(reason.contains("payload identifier"))
+        }
+        XCTAssertEqual(try rowCount("project"), 1)
+    }
+
+    func testIndexedMetadataMustMatchThePayload() throws {
+        let database = try makeDatabase()
+        let project = makeProject("alpha")
+        try database.save(ProjectsState(projects: [project]))
+
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        try raw.prepare("UPDATE project SET name = ? WHERE id = ?")
+            .bind(1, "different")
+            .bind(2, project.id.uuidString)
+            .run()
+
+        XCTAssertThrowsError(try database.load()) { error in
+            guard let loadError = error as? ProjectDatabaseLoadError,
+                  case .corruptRow(_, _, let reason) = loadError else {
+                return XCTFail("Expected a corrupt-row error, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("indexed name"))
+        }
+    }
+
+    func testInvalidSelectedSessionIdentifierFailsRatherThanBecomingNoSelection() throws {
+        let database = try makeDatabase()
+        try database.save(ProjectsState(projects: [makeProject("alpha")]))
+
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        try raw.prepare(ProjectDatabaseSchema.upsertAppState)
+            .bind(1, ProjectDatabaseSchema.selectedSessionKey)
+            .bind(2, "not-a-session-id")
+            .run()
+
+        XCTAssertThrowsError(try database.load()) { error in
+            guard let loadError = error as? ProjectDatabaseLoadError,
+                  case .corruptRow(let table, _, _) = loadError else {
+                return XCTFail("Expected a corrupt-row error, got \(error)")
+            }
+            XCTAssertEqual(table, "app_state")
+        }
+    }
+
+    func testMalformedPanelFailsTheAuthoritativeDatabaseLoad() throws {
+        let database = try makeDatabase()
+        let sessionID = SessionID()
+        try database.save(ProjectsState(projects: [makeProject("alpha")]))
+        try database.savePanelPayload("{", for: sessionID)
+
+        XCTAssertThrowsError(try database.load()) { error in
+            guard let loadError = error as? ProjectDatabaseLoadError,
+                  case .corruptRow(let table, let id, _) = loadError else {
+                return XCTFail("Expected a corrupt-row error, got \(error)")
+            }
+            XCTAssertEqual(table, "panel_layout")
+            XCTAssertEqual(id, sessionID.uuidString)
+        }
+        XCTAssertEqual(try rowCount("panel_layout"), 1)
+    }
+
+    func testFutureAttachmentDocumentIsRefusedWithoutDeletingIt() throws {
+        let database = try makeDatabase()
+        let sessionID = SessionID()
+        try database.save(ProjectsState(projects: [makeProject("alpha")]))
+        try database.saveAttachmentsPayload(
+            #"{"formatVersion":99,"entries":[]}"#,
+            for: sessionID
+        )
+
+        XCTAssertThrowsError(try database.load()) { error in
+            guard let loadError = error as? ProjectDatabaseLoadError,
+                  case .corruptRow(let table, let id, _) = loadError else {
+                return XCTFail("Expected a corrupt-row error, got \(error)")
+            }
+            XCTAssertEqual(table, "session_attachments")
+            XCTAssertEqual(id, sessionID.uuidString)
+        }
+        XCTAssertEqual(try rowCount("session_attachments"), 1)
+    }
+
+    func testProviderSpecificMutationCannotCreateAnImpossibleWrite() throws {
+        let database = try makeDatabase()
+        var session = AgentSession(kind: .claude, title: "Invalid")
+        XCTAssertFalse(session.setCodexReasoningEffort("high"))
+
+        try database.save(
+            ProjectsState(projects: [makeProject("alpha", sessions: [session])])
+        )
+        XCTAssertNil(try database.load().projects[0].sessions[0].reasoningEffort)
     }
 
     // MARK: - Model Fidelity
@@ -252,5 +403,13 @@ final class ProjectDatabaseTests: XCTestCase {
         defer { statement.finalize() }
         statement.bind(1, id.uuidString)
         return try statement.step() ? statement.text(0) : nil
+    }
+
+    private func updatePayload(table: String, id: String, payload: String) throws {
+        let database = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        try database.prepare("UPDATE \(table) SET data = ? WHERE id = ?")
+            .bind(1, payload)
+            .bind(2, id)
+            .run()
     }
 }

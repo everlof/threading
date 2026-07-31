@@ -65,6 +65,11 @@
       "permission.reviewOnMac": "Review this request on the Mac.",
       "permission.deny": "Deny",
       "permission.allow": "Allow",
+      "diagnostics.share": "Share diagnostics for 30 min",
+      "diagnostics.stop": "Stop diagnostics sharing",
+      "diagnostics.sharingUntil": "Sharing until {time}",
+      "diagnostics.failed": "The Mac could not accept diagnostics.",
+      "diagnostics.privacy": "Connection events only — never messages, terminal output, paths, or credentials.",
       "guest.browser": "browser",
       "guest.defaultName": "Browser guest",
       "app.code": "Code",
@@ -126,6 +131,11 @@
       "permission.reviewOnMac": "Granska begäran på Mac-datorn.",
       "permission.deny": "Neka",
       "permission.allow": "Tillåt",
+      "diagnostics.share": "Dela diagnostik i 30 min",
+      "diagnostics.stop": "Sluta dela diagnostik",
+      "diagnostics.sharingUntil": "Delar till {time}",
+      "diagnostics.failed": "Mac-datorn kunde inte ta emot diagnostiken.",
+      "diagnostics.privacy": "Endast anslutningshändelser — aldrig meddelanden, terminalutdata, sökvägar eller inloggningsuppgifter.",
       "guest.browser": "webbläsare",
       "guest.defaultName": "Webbläsargäst",
       "app.code": "Kod",
@@ -236,6 +246,15 @@
   var activeTerminalTheme = null;
   var leasedGrid = null;
   var fitTimer = null;
+  var socketDiagnosticConnected = false;
+  var diagnosticSharingUntil = 0;
+  var diagnosticSharingStarting = false;
+  var diagnosticStartingRecords = [];
+  var diagnosticExpiryTimer = null;
+  var diagnosticButton = null;
+  var diagnosticStatus = null;
+  var lastRefreshDiagnostic = null;
+  var diagnosticMemoryRecords = [];
 
   // The Mac owns the character grid and pushes it here, so a browser narrower than that grid
   // paints past its own frame and leaves the rest behind a scrollbar. Two answers, because a
@@ -368,7 +387,245 @@
       "X-Threading-Device": deviceID,
       "X-Threading-Protocol": String(PROTOCOL.version),
       "X-Threading-Protocol-Min": String(PROTOCOL.minimum),
+      "X-Threading-Client": "Threading-Web",
     };
+  }
+
+  // --- Privacy-bounded diagnostics --------------------------------------
+
+  var DIAGNOSTICS = {
+    storageKey: "threading.remote-diagnostics",
+    retentionMS: 7 * 24 * 60 * 60 * 1000,
+    maximumRecords: 500,
+    maximumBatch: 250,
+    sharingMS: 30 * 60 * 1000,
+    events: {
+      appLaunched: true,
+      hostPairingStarted: true,
+      hostPairingSucceeded: true,
+      hostPairingFailed: true,
+      hostRefreshSucceeded: true,
+      hostRefreshFailed: true,
+      socketConnecting: true,
+      socketConnected: true,
+      socketEnded: true,
+      socketFailed: true,
+      diagnosticSharingStarted: true,
+      diagnosticSharingStopped: true,
+    },
+    fields: {
+      kind: true,
+      transport: true,
+      result: true,
+      code: true,
+      status: true,
+      protocolVersion: true,
+      minimumProtocolVersion: true,
+      capability: true,
+      surface: true,
+      reason: true,
+    },
+  };
+
+  function safeDiagnosticValue(value) {
+    var safe = String(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+      .replace(/\s+/g, " ");
+    while (new TextEncoder().encode(safe).length > 160) {
+      safe = safe.slice(0, -1);
+    }
+    return safe;
+  }
+
+  function diagnosticRecords() {
+    try {
+      var decoded = JSON.parse(localStorage.getItem(DIAGNOSTICS.storageKey) || "[]");
+      if (!Array.isArray(decoded)) { return []; }
+      var cutoff = Date.now() - DIAGNOSTICS.retentionMS;
+      diagnosticMemoryRecords = decoded.filter(function (record) {
+        return record && DIAGNOSTICS.events[record.event] &&
+          Date.parse(record.timestamp) >= cutoff;
+      }).slice(-DIAGNOSTICS.maximumRecords);
+      return diagnosticMemoryRecords;
+    } catch (error) {
+      return diagnosticMemoryRecords;
+    }
+  }
+
+  function storeDiagnosticRecords(records) {
+    diagnosticMemoryRecords = records.slice(-DIAGNOSTICS.maximumRecords);
+    try {
+      localStorage.setItem(
+        DIAGNOSTICS.storageKey,
+        JSON.stringify(diagnosticMemoryRecords)
+      );
+    } catch (error) {
+      // A storage-blocked browser still keeps live diagnostics for this page load.
+    }
+  }
+
+  function recordDiagnostic(event, level, fields, forward) {
+    if (!DIAGNOSTICS.events[event]) { return null; }
+    var safeFields = {};
+    Object.keys(fields || {}).forEach(function (key) {
+      if (DIAGNOSTICS.fields[key]) {
+        safeFields[key] = safeDiagnosticValue(fields[key]);
+      }
+    });
+    var record = {
+      timestamp: new Date().toISOString(),
+      source: "browserClient",
+      level: level || "info",
+      event: event,
+      fields: safeFields,
+    };
+    var records = diagnosticRecords();
+    records.push(record);
+    storeDiagnosticRecords(records);
+
+    if (forward !== false && token) {
+      if (diagnosticSharingStarting) {
+        diagnosticStartingRecords.push(record);
+        diagnosticStartingRecords = diagnosticStartingRecords.slice(
+          -DIAGNOSTICS.maximumRecords
+        );
+      } else if (diagnosticSharingUntil > Date.now()) {
+        uploadDiagnosticRecords([record]).catch(function () {
+          // The durable local copy remains available if the Mac became unreachable.
+        });
+      }
+    }
+    return record;
+  }
+
+  function uploadDiagnosticRecords(records) {
+    var offset = 0;
+    function sendNext() {
+      if (offset >= records.length) { return Promise.resolve(); }
+      var batch = records.slice(offset, offset + DIAGNOSTICS.maximumBatch);
+      return fetch("/api/diagnostics", {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+        body: JSON.stringify({
+          schemaVersion: 1,
+          source: "browserClient",
+          records: batch,
+        }),
+      }).then(function (response) {
+        if (!response.ok) { throw new Error("diagnosticUpload"); }
+        return response.json();
+      }).then(function (body) {
+        if (!body || body.acceptedRecords !== batch.length) {
+          throw new Error("diagnosticUpload");
+        }
+        offset += batch.length;
+        return sendNext();
+      });
+    }
+    return sendNext();
+  }
+
+  function refreshDiagnosticControl() {
+    if (!diagnosticButton || !diagnosticStatus) { return; }
+    var sharing = diagnosticSharingUntil > Date.now();
+    diagnosticButton.disabled = diagnosticSharingStarting;
+    diagnosticButton.textContent = t(sharing ? "diagnostics.stop" : "diagnostics.share");
+    diagnosticStatus.textContent = diagnosticSharingStarting
+      ? t("status.connecting")
+      : sharing
+      ? t("diagnostics.sharingUntil", {
+          time: new Intl.DateTimeFormat(locale, {
+            hour: "numeric",
+            minute: "2-digit",
+          }).format(new Date(diagnosticSharingUntil)),
+        })
+      : t("diagnostics.privacy");
+  }
+
+  function stopDiagnosticSharing(reason) {
+    if (diagnosticSharingUntil > Date.now()) {
+      recordDiagnostic("diagnosticSharingStopped", "info", {
+        reason: reason || "user",
+      });
+    }
+    diagnosticSharingUntil = 0;
+    if (diagnosticExpiryTimer !== null) {
+      clearTimeout(diagnosticExpiryTimer);
+      diagnosticExpiryTimer = null;
+    }
+    refreshDiagnosticControl();
+  }
+
+  function uploadStartingDiagnosticRecords() {
+    if (diagnosticStartingRecords.length === 0) { return Promise.resolve(); }
+    var records = diagnosticStartingRecords.splice(
+      0,
+      DIAGNOSTICS.maximumRecords
+    );
+    return uploadDiagnosticRecords(records).then(uploadStartingDiagnosticRecords);
+  }
+
+  function startDiagnosticSharing() {
+    if (!diagnosticButton || diagnosticSharingStarting) { return; }
+    diagnosticSharingStarting = true;
+    diagnosticStartingRecords = [];
+    refreshDiagnosticControl();
+    recordDiagnostic("diagnosticSharingStarted", "info", { reason: "user" }, false);
+    uploadDiagnosticRecords(diagnosticRecords())
+      .then(uploadStartingDiagnosticRecords)
+      .then(function () {
+        diagnosticSharingStarting = false;
+        diagnosticSharingUntil = Date.now() + DIAGNOSTICS.sharingMS;
+        diagnosticExpiryTimer = setTimeout(function () {
+          stopDiagnosticSharing("expired");
+        }, DIAGNOSTICS.sharingMS);
+        refreshDiagnosticControl();
+      }).catch(function () {
+        diagnosticSharingStarting = false;
+        diagnosticStartingRecords = [];
+        diagnosticSharingUntil = 0;
+        recordDiagnostic(
+          "diagnosticSharingStopped",
+          "warning",
+          { reason: "uploadFailed" },
+          false
+        );
+        refreshDiagnosticControl();
+        diagnosticStatus.textContent = t("diagnostics.failed");
+      });
+  }
+
+  function addDiagnosticControl(container, me) {
+    diagnosticButton = null;
+    diagnosticStatus = null;
+    if (!me.share || me.share.scope !== "all" || me.share.capability !== "interact") {
+      return;
+    }
+    var controls = document.createElement("div");
+    controls.className = "diagnostic-controls";
+    diagnosticButton = document.createElement("button");
+    diagnosticButton.type = "button";
+    diagnosticButton.addEventListener("click", function () {
+      if (diagnosticSharingUntil > Date.now()) {
+        stopDiagnosticSharing("user");
+      } else {
+        startDiagnosticSharing();
+      }
+    });
+    diagnosticStatus = document.createElement("span");
+    controls.appendChild(diagnosticButton);
+    controls.appendChild(diagnosticStatus);
+    container.appendChild(controls);
+    refreshDiagnosticControl();
+  }
+
+  function recordRefreshDiagnostic(result, level, fields) {
+    if (lastRefreshDiagnostic === result) { return; }
+    lastRefreshDiagnostic = result;
+    recordDiagnostic(
+      result === "success" ? "hostRefreshSucceeded" : "hostRefreshFailed",
+      level,
+      fields
+    );
   }
 
   function reportTyping(typing) {
@@ -397,6 +654,7 @@
       setStatus(t("link.missingToken"));
       return;
     }
+    recordDiagnostic("hostPairingStarted");
     setStatus(t("invitation.accepting"));
     fetch("/api/invitations/accept", {
       method: "POST",
@@ -413,10 +671,14 @@
         });
       }
       if (res.status === 401) {
+        recordDiagnostic("hostPairingFailed", "error", { code: "remote.http.401" });
         setStatus(t("invitation.invalid"));
         return;
       }
       if (!res.ok) {
+        recordDiagnostic("hostPairingFailed", "error", {
+          code: "remote.http." + String(res.status),
+        });
         setStatus(t("invitation.failed"));
         return;
       }
@@ -435,9 +697,13 @@
         } catch (error) {
           // The accepted bearer remains valid for this page load.
         }
+        recordDiagnostic("hostPairingSucceeded", "info", {
+          capability: body.me && body.me.share ? body.me.share.capability : "unknown",
+        });
         beginSessionList();
       });
     }).catch(function () {
+      recordDiagnostic("hostPairingFailed", "error", { code: "network" });
       setStatus(t("mac.retry"));
       els.status.style.cursor = "pointer";
       els.status.setAttribute("tabindex", "0");
@@ -527,6 +793,7 @@
         });
       }
       if (res.status === 401) {
+        recordRefreshDiagnostic("failure", "error", { code: "remote.http.401" });
         setStatus(t("link.invalid"));
         return;
       }
@@ -542,15 +809,25 @@
         });
       }
       if (!res.ok) {
+        recordRefreshDiagnostic("failure", "error", {
+          code: "remote.http." + String(res.status),
+        });
         setStatus(t("mac.retrying"));
         scheduleSessionLoad(generation, 3000);
         return;
       }
       return res.json().then(function (body) {
-        if (generation === sessionListGeneration) { renderSessions(body); }
+        if (generation === sessionListGeneration) {
+          recordRefreshDiagnostic("success", "info", {
+            protocolVersion: String(body.serverProtocol.version),
+            minimumProtocolVersion: String(body.serverProtocol.minimumSupported),
+          });
+          renderSessions(body);
+        }
       });
     }).catch(function () {
       if (generation !== sessionListGeneration) { return; }
+      recordRefreshDiagnostic("failure", "error", { code: "network" });
       setStatus(t("mac.retrying"));
       scheduleSessionLoad(generation, 3000);
     });
@@ -584,6 +861,7 @@
     deviceCopy.appendChild(deviceStatus);
     device.appendChild(deviceIcon);
     device.appendChild(deviceCopy);
+    addDiagnosticControl(device, me);
     els.sessions.appendChild(device);
 
     var sessionHeading = document.createElement("li");
@@ -729,6 +1007,13 @@
     applyTheme(hostTheme, session.terminalTheme || null);
     els.title.textContent = session.title || t("session.defaultName");
     activateSurface(session.surface || "terminal");
+    socketDiagnosticConnected = false;
+    recordDiagnostic("socketConnecting", "info", {
+      transport: "websocket",
+      surface: session.surface || "terminal",
+      protocolVersion: String(PROTOCOL.version),
+      minimumProtocolVersion: String(PROTOCOL.minimum),
+    });
 
     var scheme = location.protocol === "https:" ? "wss:" : "ws:";
     var openedSocket = new WebSocket(
@@ -763,6 +1048,15 @@
     openedSocket.onclose = function () {
       if (socket !== openedSocket) { return; }
       socket = null;
+      recordDiagnostic(
+        socketDiagnosticConnected ? "socketEnded" : "socketFailed",
+        socketDiagnosticConnected ? "info" : "error",
+        {
+          transport: "websocket",
+          reason: socketDiagnosticConnected ? "connectionClosed" : "beforeHello",
+        }
+      );
+      socketDiagnosticConnected = false;
       setBadge(t("badge.disconnected"), "disconnected");
       if (term) {
         term.write("\r\n\x1b[2m" + t("terminal.disconnected") + "\x1b[0m\r\n");
@@ -898,6 +1192,12 @@
   function handleServerMessage(msg, openedSocket) {
     switch (msg.type) {
       case "hello":
+        socketDiagnosticConnected = true;
+        recordDiagnostic("socketConnected", "info", {
+          transport: "websocket",
+          surface: msg.surface || "terminal",
+          capability: msg.capability || "view",
+        });
         if (msg.theme) { hostTheme = msg.theme; }
         applyTheme(msg.theme || hostTheme, msg.terminalTheme || activeTerminalTheme);
         activateSurface(msg.surface);
@@ -930,6 +1230,11 @@
         }
         break;
       case "ended":
+        recordDiagnostic("socketEnded", "info", {
+          transport: "websocket",
+          reason: msg.reason || "host",
+        });
+        socketDiagnosticConnected = false;
         closeSocket();
         if (msg.reason === "protocolMismatch") {
           disposeTerminal();
@@ -1279,6 +1584,13 @@
   }
 
   els.back.addEventListener("click", function () {
+    if (socketDiagnosticConnected) {
+      recordDiagnostic("socketEnded", "info", {
+        transport: "websocket",
+        reason: "user",
+      });
+      socketDiagnosticConnected = false;
+    }
     closeSocket();
     disposeTerminal();
     resetConversation();
@@ -1296,5 +1608,6 @@
     closeThemeEvents();
   });
 
+  recordDiagnostic("appLaunched");
   acceptConnection();
 })();

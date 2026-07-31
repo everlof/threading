@@ -1,6 +1,6 @@
 import AppKit
 import ThreadingExtensionKit
-import WebKit
+@preconcurrency import WebKit
 
 // MARK: - Display Pane Controller
 
@@ -15,21 +15,114 @@ final class DisplayPaneController: NSViewController {
 
     // MARK: - Properties
 
-    private var headerView: NSView!
+    private lazy var headerView: NSView = {
+        let header = NSView()
+        header.translatesAutoresizingMaskIntoConstraints = false
+        return header
+    }()
 
     /// Opens a new tab. It sits at the trailing edge of the tab row rather than inside the
     /// scrolling strip, so a pane full of tabs scrolls sideways *under* it instead of carrying
     /// the one control that adds another off the edge with them.
-    private var newTabButton: ThemedButton!
-    private var headerCustomizationView: DisplayPaneHeaderCustomizationView!
+    private lazy var newTabButton: ThemedButton = {
+        let button = ThemedButton(
+            symbol: "plus",
+            accessibility: L10n.string("New tab"),
+            target: self,
+            action: #selector(newTabButtonClicked(_:))
+        )
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isBordered = false
+        button.toolTip = L10n.string("New tab")
+        return button
+    }()
+    private lazy var headerCustomizationView = DisplayPaneHeaderCustomizationView(
+        lookup: customizationLookup,
+        onAction: { [weak self] action in
+            guard let self else { return }
+            if let onCustomizationAction {
+                onCustomizationAction(action)
+            } else {
+                ComponentCustomizationProviderSlot.shared.perform(action)
+            }
+        }
+    )
     private var newTabMenuSession: AnyObject?
-    private var tabBar: DisplayTabBar!
-    private var imageView: ThemedImagePreview!
-    private var webView: WKWebView!
-    private var hostedView: NSView!
-    private var captionLabel: NSTextField!
-    private var contentMenuButton: ThemedButton!
-    private var placeholderLabel: NSTextField!
+    private lazy var tabBar: DisplayTabBar = {
+        let bar = DisplayTabBar(
+            frame: .zero,
+            customizationLookup: customizationLookup
+        )
+        bar.onSelect = { [weak self] id in self?.userActivatedTab(id) }
+        bar.onClose = { [weak self] id in self?.userClosedTab(id) }
+        bar.onReorder = { [weak self] id, index in
+            guard let self, let sessionID = self.currentSessionID else { return }
+            self.moveTab(id: id, toIndex: index, for: sessionID)
+        }
+        bar.contextEntries = { [weak self] id in
+            self?.tabContextEntries(for: id) ?? []
+        }
+        bar.externalDropTarget = { [weak self] id, windowPoint in
+            self?.dragOutDestination?(id, windowPoint) ?? false
+        }
+        bar.onDropOut = { [weak self] id, windowPoint in
+            self?.performDragOut?(id, windowPoint)
+        }
+        bar.onDragEnded = { [weak self] id in
+            self?.dragOutEnded?(id)
+        }
+        return bar
+    }()
+    private lazy var imageView = ThemedImagePreview()
+    private lazy var webView: WKWebView = {
+        let webView = WKWebView()
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        webView.navigationDelegate = self
+        webView.underPageBackgroundColor = Design.Surface.ground
+        return webView
+    }()
+    private lazy var hostedView: NSView = {
+        let hosted = NSView()
+        hosted.translatesAutoresizingMaskIntoConstraints = false
+        hosted.wantsLayer = true
+        hosted.isHidden = true
+        return hosted
+    }()
+    private lazy var captionLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.applyFont(.compactCode)
+        label.textColor = Design.Text.tertiary
+        label.lineBreakMode = .byTruncatingMiddle
+        label.alignment = .right
+        label.setContentCompressionResistancePriority(Self.truncatingPriority, for: .horizontal)
+        return label
+    }()
+    private lazy var contentMenuButton: ThemedButton = {
+        let button = ThemedButton(
+            symbol: "ellipsis.circle",
+            accessibility: L10n.string("Content actions"),
+            target: self,
+            action: #selector(contentMenuButtonClicked)
+        )
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isBordered = false
+        button.toolTip = L10n.string("Actions")
+        return button
+    }()
+    private lazy var placeholderLabel: NSTextField = {
+        let label = NSTextField(labelWithString: L10n.string("Nothing to show yet."))
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.applyFont(.detail())
+        label.textColor = Design.Text.tertiary
+        label.alignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(Self.truncatingPriority, for: .horizontal)
+        return label
+    }()
+    private static let truncatingPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1
+    )
     private let appEvents = AppEventObservations()
 
     /// The live tab's view controller currently parented into `hostedView` — the browser or a
@@ -151,31 +244,6 @@ final class DisplayPaneController: NSViewController {
     /// tabs *are* the header now, with `+` at the trailing edge where a browser puts it, which
     /// is also what closes the gap between this pane and the rest of the window's chrome.
     private func setupHeader() {
-        headerView = NSView()
-        headerView.translatesAutoresizingMaskIntoConstraints = false
-
-        newTabButton = ThemedButton(
-            symbol: "plus",
-            accessibility: L10n.string("New tab"),
-            target: self,
-            action: #selector(newTabButtonClicked(_:))
-        )
-        newTabButton.translatesAutoresizingMaskIntoConstraints = false
-        newTabButton.isBordered = false
-        newTabButton.toolTip = L10n.string("New tab")
-
-        headerCustomizationView = DisplayPaneHeaderCustomizationView(
-            lookup: customizationLookup,
-            onAction: { [weak self] action in
-                guard let self else { return }
-                if let onCustomizationAction {
-                    onCustomizationAction(action)
-                } else {
-                    ComponentCustomizationProviderSlot.shared.perform(action)
-                }
-            }
-        )
-
         headerView.addSubview(headerCustomizationView)
         headerView.addSubview(newTabButton)
 
@@ -266,28 +334,6 @@ final class DisplayPaneController: NSViewController {
     }
 
     private func setupTabBar() {
-        tabBar = DisplayTabBar(
-            frame: .zero,
-            customizationLookup: customizationLookup
-        )
-        tabBar.onSelect = { [weak self] id in self?.userActivatedTab(id) }
-        tabBar.onClose = { [weak self] id in self?.userClosedTab(id) }
-        tabBar.onReorder = { [weak self] id, index in
-            guard let self, let sessionID = self.currentSessionID else { return }
-            self.moveTab(id: id, toIndex: index, for: sessionID)
-        }
-        tabBar.contextEntries = { [weak self] id in
-            self?.tabContextEntries(for: id) ?? []
-        }
-        tabBar.externalDropTarget = { [weak self] id, windowPoint in
-            self?.dragOutDestination?(id, windowPoint) ?? false
-        }
-        tabBar.onDropOut = { [weak self] id, windowPoint in
-            self?.performDragOut?(id, windowPoint)
-        }
-        tabBar.onDragEnded = { [weak self] id in
-            self?.dragOutEnded?(id)
-        }
         headerView.addSubview(tabBar)
     }
 
@@ -297,48 +343,9 @@ final class DisplayPaneController: NSViewController {
         // does, and flooring its priorities only stopped that from *winning* — the size stayed
         // in the layout and stayed what `fittingSize` answered), and the picture is the thing
         // the user wants to open properly, which is Quick Look. See the type's own note.
-        imageView = ThemedImagePreview()
-
-        webView = WKWebView()
-        webView.translatesAutoresizingMaskIntoConstraints = false
-        webView.navigationDelegate = self
-
-        // Overscroll and the gap before the page paints match the panel rather than flashing
-        // white, which is jarring against a dark terminal.
-        webView.underPageBackgroundColor = Design.Surface.ground
-
-        // A live tab's full view controller — browser or review — is parented into this on
-        // activation; empty and hidden otherwise.
-        hostedView = NSView()
-        hostedView.translatesAutoresizingMaskIntoConstraints = false
-        hostedView.wantsLayer = true
-        hostedView.isHidden = true
-
-        captionLabel = NSTextField(labelWithString: "")
-        captionLabel.translatesAutoresizingMaskIntoConstraints = false
-        captionLabel.applyFont(.compactCode)
-        captionLabel.textColor = Design.Text.tertiary
-        captionLabel.lineBreakMode = .byTruncatingMiddle
-        captionLabel.alignment = .right
-
         // An explicit button beside the caption rather than a click target on the text or the
         // image: nothing about a caption advertises that it is clickable, and a button is the
         // only one of the three that can be seen before it is tried.
-        contentMenuButton = ThemedButton(symbol: "ellipsis.circle", accessibility: L10n.string("Content actions"), target: self, action: #selector(contentMenuButtonClicked)
-        )
-        contentMenuButton.translatesAutoresizingMaskIntoConstraints = false
-        contentMenuButton.isBordered = false
-        contentMenuButton.toolTip = L10n.string("Actions")
-
-        placeholderLabel = NSTextField(
-            labelWithString: L10n.string("Nothing to show yet.")
-        )
-        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
-        placeholderLabel.applyFont(.detail())
-        placeholderLabel.textColor = Design.Text.tertiary
-        placeholderLabel.alignment = .center
-        placeholderLabel.lineBreakMode = .byTruncatingTail
-
         // **Neither label is a measurement.** Both are held inside the pane with a `>=` — the
         // caption off the leading edge, the placeholder either side of the centre — and a label
         // like that still charges the pane its whole text, through the compression resistance
@@ -348,12 +355,6 @@ final class DisplayPaneController: NSViewController {
         // both line-break modes here already say may be shortened. Below
         // `.fittingSizeCompression` they truncate instead of pushing, and the panel goes on
         // costing the window its own chrome and nothing else.
-        let mayTruncate = NSLayoutConstraint.Priority(
-            NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1
-        )
-        captionLabel.setContentCompressionResistancePriority(mayTruncate, for: .horizontal)
-        placeholderLabel.setContentCompressionResistancePriority(mayTruncate, for: .horizontal)
-
         view.addSubview(imageView)
         view.addSubview(webView)
         view.addSubview(captionLabel)
@@ -577,12 +578,13 @@ final class DisplayPaneController: NSViewController {
             activeBrowserTabIDBySession[sessionID] = activeID
             return active
         }
-        if let existing = tabs.first(where: { $0.browser != nil }) {
+        if let existing = tabs.first(where: { $0.browser != nil }),
+           let browser = existing.browser {
             activeTabIDBySession[sessionID] = existing.id
             activeBrowserTabIDBySession[sessionID] = existing.id
             persist(sessionID)
             if sessionID == currentSessionID { render() }
-            return existing.browser!
+            return browser
         }
 
         let controller = makeBrowser(for: sessionID)
@@ -1196,7 +1198,7 @@ final class DisplayPaneController: NSViewController {
     /// Whether a window point lands where a dropped tab would join this pane — the header
     /// band, full width, since an emptier strip is narrower than the drop it invites.
     func dropBandContains(windowPoint: NSPoint) -> Bool {
-        guard isViewLoaded, view.window != nil, let headerView else { return false }
+        guard isViewLoaded, view.window != nil else { return false }
         return headerView.bounds.contains(headerView.convert(windowPoint, from: nil))
     }
 
@@ -1727,7 +1729,7 @@ extension DisplayPaneController: WKNavigationDelegate {
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
         guard navigationAction.navigationType == .linkActivated,
               let url = navigationAction.request.url else {

@@ -43,8 +43,7 @@ final class CodeStatsService {
     private var inFlight: Set<ProjectID> = []
     private var tool: Tool = .unresolved
 
-    private let storeURL: URL
-    private let fileManager: FileManager
+    private let persistence: RecoverableFileStore<[ProjectID: ProjectReading]>
 
     /// `.utility`, not `.background`: a count finishes in the time a hover dwell takes, so
     /// it is allowed to be prompt — it is just never allowed to be waited on.
@@ -55,15 +54,18 @@ final class CodeStatsService {
     // MARK: - Initialization
 
     init(directory: URL? = nil, fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-
         let root = directory ?? fileManager
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
 
-        self.storeURL = root.appendingPathComponent(CodeStatsDefaults.fileName)
-
-        load()
+        self.persistence = RecoverableFileStore(
+            url: root.appendingPathComponent(CodeStatsDefaults.fileName),
+            fileManager: fileManager,
+            criticality: .rebuildableCache,
+            dateEncodingStrategy: .iso8601,
+            dateDecodingStrategy: .iso8601
+        )
+        self.readings = persistence.load(defaultValue: [:]).value
     }
 
     // MARK: - Reading
@@ -112,7 +114,7 @@ final class CodeStatsService {
         let now = Date()
         for project in ProjectStore.shared.projects {
             let age = readings[project.id].map { now.timeIntervalSince($0.measuredAt) }
-            guard age == nil || age! > CodeStatsDefaults.staleAfter else { continue }
+            guard age.map({ $0 > CodeStatsDefaults.staleAfter }) ?? true else { continue }
             refresh(project)
         }
     }
@@ -121,7 +123,7 @@ final class CodeStatsService {
     /// entry point, which must not launch a process per pointer crossing.
     func refreshIfAged(_ project: Project) {
         let age = readings[project.id].map { Date().timeIntervalSince($0.measuredAt) }
-        guard age == nil || age! > CodeStatsDefaults.hoverRefreshAfter else { return }
+        guard age.map({ $0 > CodeStatsDefaults.hoverRefreshAfter }) ?? true else { return }
         refresh(project)
     }
 
@@ -203,30 +205,9 @@ final class CodeStatsService {
 
     // MARK: - Persistence
 
-    private func load() {
-        guard let data = try? Data(contentsOf: storeURL) else { return }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        readings = (try? decoder.decode([ProjectID: ProjectReading].self, from: data)) ?? [:]
-    }
-
     /// Written whole, on every change — one summary line per language per project.
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-
-        do {
-            try fileManager.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try encoder.encode(readings).write(to: storeURL, options: .atomic)
-        } catch {
-            ThreadingLogger.agent.error(
-                "Could not save code stats: \(error.localizedDescription, privacy: .public)"
-            )
-        }
+        _ = persistence.save(readings)
     }
 }
 

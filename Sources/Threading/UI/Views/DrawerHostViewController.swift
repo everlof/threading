@@ -33,8 +33,27 @@ final class DrawerHostViewController: NSViewController {
     private(set) var currentSessionID: SessionID?
 
     private let strip = ThemedTabStripView(inkSource: .chrome)
-    private var newTabButton: ThemedIconButton!
-    private var contentView: NSView!
+    private lazy var newTabButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "plus",
+            accessibility: L10n.string("New drawer tab"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("New Drawer Tab")
+        button.presentsMenu = true
+        button.onPress = { [weak self, weak button] in
+            guard let self, let button else { return }
+            presentNewTabMenu(from: button)
+        }
+        return button
+    }()
+    private lazy var contentView: NSView = {
+        let content = NSView()
+        content.wantsLayer = true
+        content.translatesAutoresizingMaskIntoConstraints = false
+        return content
+    }()
     private weak var installedController: NSViewController?
     private var newTabMenuSession: AnyObject?
 
@@ -158,28 +177,12 @@ final class DrawerHostViewController: NSViewController {
         }
         view.addSubview(strip)
 
-        let newTab = ThemedIconButton(
-            symbolName: "plus",
-            accessibility: L10n.string("New drawer tab"),
-            target: .inline,
-            inkSource: .chrome
-        )
-        newTab.toolTip = L10n.string("New Drawer Tab")
-        newTab.presentsMenu = true
-        newTab.onPress = { [weak self, weak newTab] in
-            guard let self, let newTab else { return }
-            presentNewTabMenu(from: newTab)
-        }
-        newTabButton = newTab
-        view.addSubview(newTab)
+        view.addSubview(newTabButton)
 
         // The pane's own fold under the strip, edge to edge like every pane header's.
         let separator = SeparatorView()
         view.addSubview(separator)
 
-        contentView = NSView()
-        contentView.wantsLayer = true
-        contentView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(contentView)
 
         NSLayoutConstraint.activate([
@@ -187,12 +190,12 @@ final class DrawerHostViewController: NSViewController {
             strip.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             strip.heightAnchor.constraint(equalToConstant: ThemedTabStripView.bandHeight),
 
-            newTab.centerYAnchor.constraint(equalTo: strip.centerYAnchor),
-            newTab.leadingAnchor.constraint(
+            newTabButton.centerYAnchor.constraint(equalTo: strip.centerYAnchor),
+            newTabButton.leadingAnchor.constraint(
                 equalTo: strip.trailingAnchor,
                 constant: Design.Spacing.tight
             ),
-            newTab.trailingAnchor.constraint(
+            newTabButton.trailingAnchor.constraint(
                 lessThanOrEqualTo: view.trailingAnchor,
                 constant: -Design.Spacing.small
             ),

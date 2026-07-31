@@ -18,7 +18,7 @@ enum ExtensionSecretStoreError: Error, LocalizedError {
 }
 
 /// Host-side persistence seam. Tests use an in-memory implementation; production uses Keychain.
-protocol ExtensionSecretStoring: AnyObject {
+protocol ExtensionSecretStoring: AnyObject, Sendable {
     func data(extensionIdentifier: String, key: String) throws -> Data?
     func setData(_ data: Data, extensionIdentifier: String, key: String) throws
     func remove(extensionIdentifier: String, key: String) throws
@@ -26,7 +26,7 @@ protocol ExtensionSecretStoring: AnyObject {
 }
 
 /// Keeps extension credentials outside packages, ordinary KV JSON, backups, and sandbox grants.
-final class KeychainExtensionSecretStore: ExtensionSecretStoring {
+final class KeychainExtensionSecretStore: ExtensionSecretStoring, Sendable {
     static let shared = KeychainExtensionSecretStore()
 
     /// Internal so the containment probe can target the exact namespace production uses.

@@ -6,7 +6,7 @@ import ThreadingRemoteKit
 // stay here.
 
 /// Which sessions a share reaches.
-enum RemoteScope: Equatable {
+enum RemoteScope: Equatable, Sendable {
     /// The owner's own devices: every live session in the app.
     case allSessions
     /// A guest share of exactly one session.
@@ -25,7 +25,7 @@ enum RemoteScope: Equatable {
 /// Scope answers *which chats* a link reaches; principal answers *whose device* it represents.
 /// Keeping the two separate is the important permission boundary: a collaborator may interact
 /// with one shared chat without becoming an owner who can approve tools or manage the Mac.
-enum RemotePrincipal: Equatable {
+enum RemotePrincipal: Equatable, Sendable {
     case ownerDevice
     case guest
 }
@@ -35,7 +35,7 @@ enum RemotePrincipal: Equatable {
 /// The invitation bearer is deliberately not an identity: it may be copied through any share
 /// sheet and exists only until first acceptance. The resulting membership gets its own id,
 /// device-bound bearer, and human label for turn attribution, presence, and notifications.
-struct RemoteMember: Equatable {
+struct RemoteMember: Equatable, Sendable {
     let id: String
     let displayName: String
     let deviceID: String
@@ -46,7 +46,7 @@ struct RemoteMember: Equatable {
 /// A value type deliberately: it is resolved once against the share store's current state and
 /// then carried on the connection, so a per-frame authorization check never has to hop to the
 /// main queue where the store lives.
-struct RemoteAuthorization: Equatable {
+struct RemoteAuthorization: Equatable, Sendable {
     let shareID: String
     let capability: RemoteCapability
     let scope: RemoteScope
@@ -99,12 +99,12 @@ struct RemoteAuthorization: Equatable {
 /// Supplies authorizations to the server. Implemented by the coordinator's owner-device token
 /// plus its exact-session guest capabilities. Callable from the server queue, so implementations
 /// must be thread-safe (an immutable snapshot behind a lock, not a hop to main).
-protocol RemoteAuthorizing: AnyObject {
+protocol RemoteAuthorizing: AnyObject, Sendable {
     func authorization(forToken token: String) -> RemoteAuthorization?
 }
 
 /// What the router decided an HTTP request should become.
-enum RemoteRouteDecision {
+enum RemoteRouteDecision: Sendable {
     /// A plain HTTP answer (static asset, REST result, or an error).
     case respond(HTTPResponse)
     /// Upgrade to a WebSocket bound to this session id. The token is validated on the first

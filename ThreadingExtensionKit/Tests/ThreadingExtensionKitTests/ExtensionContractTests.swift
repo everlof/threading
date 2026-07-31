@@ -168,6 +168,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "codes.threading.example",
             name: "Example",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/example",
             capabilities: [.commands, .init(rawValue: "future.capability")]
         )
@@ -186,6 +187,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "codes.threading.example",
             name: "Example",
             version: "1.0.0",
+            runtime: .native,
             executable: "../example"
         )
 
@@ -195,20 +197,20 @@ final class ExtensionContractTests: XCTestCase {
         }
     }
 
-    func testManifestRuntimeDefaultsToNativeAndWebAssemblyRequiresAWasmArtifact() throws {
-        let legacyJSON = Data("""
+    func testManifestRequiresRuntimeAndWebAssemblyRequiresAWasmArtifact() throws {
+        let ambiguousJSON = Data("""
         {
           "formatVersion": 1,
-          "identifier": "codes.threading.legacy",
-          "name": "Legacy",
+          "identifier": "codes.threading.ambiguous",
+          "name": "Ambiguous",
           "version": "1.0.0",
-          "executable": "bin/legacy",
+          "executable": "bin/ambiguous",
           "capabilities": []
         }
         """.utf8)
-        let legacy = try JSONDecoder().decode(ExtensionManifest.self, from: legacyJSON)
-        XCTAssertEqual(legacy.runtime, .native)
-        XCTAssertEqual(legacy.dataVersion, 1)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ExtensionManifest.self, from: ambiguousJSON)
+        )
 
         let invalid = ExtensionManifest(
             identifier: "codes.threading.wasm",
@@ -508,6 +510,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "codes.threading.advanced",
             name: "Advanced",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/native",
             companions: [
                 duplicate,
@@ -582,6 +585,7 @@ final class ExtensionContractTests: XCTestCase {
             name: "Data Version",
             version: "1.0.0",
             dataVersion: 0,
+            runtime: .native,
             executable: "bin/extension"
         )
         XCTAssertThrowsError(try invalid.validate()) { error in
@@ -937,6 +941,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "codes.threading.example",
             name: "Example",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/example"
         )
         let registration = ExtensionRegistration(
@@ -986,6 +991,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "codes.threading.example",
             name: "Example",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/example",
             capabilities: [.panels]
         )
@@ -1162,6 +1168,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.settings",
             name: "Settings",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/settings",
             capabilities: [.settings],
             settings: settings
@@ -1259,6 +1266,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.invalid-settings",
             name: "Invalid",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/invalid",
             settings: settings
         )
@@ -1439,6 +1447,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "codes.threading.example",
             name: "Example",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/example",
             capabilities: [.mcpTools],
             mcpTools: [tool]
@@ -1475,6 +1484,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "codes.threading.example",
             name: "Example",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/example",
             capabilities: [.mcpTools],
             mcpTools: [declared]
@@ -1535,6 +1545,7 @@ final class ExtensionContractTests: XCTestCase {
                 identifier: "com.example.profile",
                 name: "Profile",
                 version: "1.0.0",
+                runtime: .native,
                 executable: "bin/profile",
                 capabilities: capabilities
             )
@@ -1588,6 +1599,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.ci",
             name: "CI",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/ci",
             capabilities: [.servicesProvide],
             services: [definition]
@@ -1596,6 +1608,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.dashboard",
             name: "Dashboard",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/dashboard",
             capabilities: [.servicesConsume],
             serviceDependencies: [dependency]
@@ -1659,6 +1672,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.provider",
             name: "Provider",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/provider",
             services: [definition]
         )
@@ -1668,6 +1682,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.consumer",
             name: "Consumer",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/consumer",
             capabilities: [.servicesConsume],
             serviceDependencies: [
@@ -1683,6 +1698,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.consumer",
             name: "Consumer",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/consumer",
             capabilities: [.servicesConsume],
             serviceDependencies: [
@@ -1704,6 +1720,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.provider",
             name: "Provider",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/provider",
             capabilities: [.servicesProvide],
             services: [definition]
@@ -2992,6 +3009,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.localized",
             name: "Localized",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/extension",
             localizations: [
                 .init(locale: "sv-SE", resource: "Localizations/sv-SE.json"),
@@ -3010,6 +3028,7 @@ final class ExtensionContractTests: XCTestCase {
             identifier: "com.example.localized",
             name: "Localized",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/extension",
             localizations: [
                 .init(locale: "not_a_tag", resource: "../outside.json"),

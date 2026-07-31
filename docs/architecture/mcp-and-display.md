@@ -51,6 +51,33 @@ undocumented question of what Claude Code does with an image returned from a too
 returns a standard MCP image block as well as caching and optionally displaying the PNG. See
 [`agent-browser.md`](agent-browser.md).
 
+## Command contract
+
+Built-in tool identity is closed in `MCPBuiltInTool`; its exhaustive `Family` mapping is the
+single source for capability ownership. Wire names, the catalog, schemas, launch preapproval,
+decoding and dispatch all derive from that identity rather than maintaining parallel string
+lists. `MCPToolCatalog.catalogIssues` and `MCPToolDefinitions.definitionIssues` enforce the
+load-bearing invariant: every built-in has exactly one catalog row and exactly one schema, and
+the row's family agrees with the type. A broken declaration is omitted instead of being
+advertised ambiguously.
+
+The catalog is also the runtime admission policy. `tools/list`, launch preapproval and
+`MCPServer` dispatch consume the same enabled definitions. A valid built-in command whose group
+is disabled still decodes for diagnostics, but `MCPToolCatalog.admits` refuses it before the
+application handler runs. External extension tools use a separate open-world path and are
+omitted when their names are blank, duplicate another enabled external tool, or collide with a
+built-in.
+
+`AgentCommand` is the application-layer command enum; `MCPToolCall` remains only as a
+compatibility alias at the transport boundary. `AgentToolCoordinator` owns routing and common
+workspace policy, while capability extensions own project, display, panel, extension-authoring,
+browser-interaction and browser-inspection behavior. This keeps a new command from requiring
+edits to an untyped transport switch spread across one window-controller file.
+
+MCP behavior annotations are emitted from the typed identity as conservative promises to
+clients. Unknown or state-changing behavior is not marked read-only or idempotent. Tools that
+can affect resources beyond Threading's local process are marked open-world.
+
 ## Display Panel
 
 `DisplayContent.Body` is an enum, so the panel shows either a `ThemedImagePreview` or a

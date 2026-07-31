@@ -33,7 +33,7 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
         _ request: HTTPRequest,
         path: String,
         extensionIdentifier: String,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         lock.lock()
         let store = keyValueStore
@@ -61,7 +61,7 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
         path: String,
         extensionIdentifier: String,
         maximumRequestBytes: Int,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         lock.lock()
         let store = cacheStore

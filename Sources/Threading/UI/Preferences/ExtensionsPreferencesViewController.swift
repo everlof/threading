@@ -103,8 +103,22 @@ final class ExtensionsPreferencesViewController: NSViewController {
             sections.append(identitySection)
         }
 
+        if let problem = manager.inventoryErrorDescription {
+            sections.append(
+                SettingsUI.section(
+                    "Installed",
+                    SettingsCard(rows: [
+                        SettingsUI.row(
+                            title: "Extensions could not be read",
+                            subtitle: problem
+                        )
+                    ])
+                )
+            )
+        }
+
         let installed = manager.installedExtensions
-        if installed.isEmpty {
+        if installed.isEmpty, manager.inventoryErrorDescription == nil {
             sections.append(
                 SettingsUI.section(
                     "Installed",
@@ -500,11 +514,11 @@ final class ExtensionsPreferencesViewController: NSViewController {
     /// an extension cannot receive a quieter install path merely because it came through a file
     /// picker instead of an agent proposal.
     private func reviewAndInstall(from source: URL) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        DispatchQueue.global(qos: .userInitiated).async {
             let inspection = Result {
                 try ExtensionBundleInspector.inspect(at: source)
             }
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch inspection {
                 case .failure(let error):

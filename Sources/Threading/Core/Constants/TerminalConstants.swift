@@ -435,7 +435,8 @@ enum SidebarDefaults {
     )
 
     static let renameFieldWidth: CGFloat = 260
-    static let renameFieldHeight: CGFloat = 24
+    /// The same height every other single-line field draws — see `Design.Size.fieldHeight`.
+    static let renameFieldHeight: CGFloat = Design.Size.fieldHeight
 
     /// Hint shown in the list area while no project has been added.
     static let emptyTitleFontSize: CGFloat = 13
@@ -533,7 +534,7 @@ enum SidebarRowDefaults {
 
 /// A notification whose concrete value is also its payload. Callers can no longer pair a name
 /// with the wrong `object` type, and observers receive the value they asked for without casts.
-protocol AppEvent {
+protocol AppEvent: Sendable {
     static var name: Notification.Name { get }
 }
 
@@ -543,36 +544,50 @@ extension NotificationCenter {
     }
 
     @discardableResult
+    @MainActor
     func observe<Event: AppEvent>(
         _ type: Event.Type,
-        queue: OperationQueue? = nil,
-        using handler: @escaping (Event) -> Void
+        using handler: @escaping @MainActor @Sendable (Event) -> Void
     ) -> NSObjectProtocol {
-        addObserver(forName: Event.name, object: nil, queue: queue) { notification in
+        addObserver(forName: Event.name, object: nil, queue: .main) { notification in
             guard let event = notification.object as? Event else { return }
-            handler(event)
+            MainActor.assumeIsolated {
+                handler(event)
+            }
         }
     }
 }
 
 /// Owns block-observer tokens and unregisters them with its own lifetime.
+@MainActor
 final class AppEventObservations {
-    private let center: NotificationCenter
-    private var tokens: [NSObjectProtocol] = []
+    private let storage: AppEventObservationStorage
 
     init(center: NotificationCenter = .default) {
+        storage = AppEventObservationStorage(center: center)
+    }
+
+    func observe<Event: AppEvent>(
+        _ type: Event.Type,
+        using handler: @escaping @MainActor @Sendable (Event) -> Void
+    ) {
+        storage.tokens.append(storage.center.observe(type, using: handler))
+    }
+}
+
+/// NotificationCenter's token protocol predates Sendable. Mutation is main-actor confined by
+/// `AppEventObservations`; teardown may run from a nonisolated deinitializer, where the object
+/// is uniquely owned and only removes its immutable snapshot of tokens.
+private final class AppEventObservationStorage: @unchecked Sendable {
+    let center: NotificationCenter
+    var tokens: [NSObjectProtocol] = []
+
+    init(center: NotificationCenter) {
         self.center = center
     }
 
     deinit {
         tokens.forEach(center.removeObserver)
-    }
-
-    func observe<Event: AppEvent>(
-        _ type: Event.Type,
-        using handler: @escaping (Event) -> Void
-    ) {
-        tokens.append(center.observe(type, using: handler))
     }
 }
 

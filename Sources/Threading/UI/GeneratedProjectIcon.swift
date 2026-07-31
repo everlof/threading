@@ -18,6 +18,7 @@ import AppKit
 /// The fill comes from a fixed-saturation HSB ramp rather than a system colour — like an
 /// account emoji, it is content identifying a thing, not chrome — at a mid brightness
 /// that carries the white initial in both appearances.
+@MainActor
 enum GeneratedProjectIcon {
 
     // MARK: - Properties

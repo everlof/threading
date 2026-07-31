@@ -182,9 +182,11 @@ final class RemoteNotificationService {
             predicate = { _ in true }
             label = "everyone in this chat"
         default:
-            let memberID = normalized?.hasPrefix("member:") == true
-                ? String(normalized!.dropFirst("member:".count))
-                : nil
+            let memberID = normalized.flatMap { normalized in
+                normalized.hasPrefix("member:")
+                    ? String(normalized.dropFirst("member:".count))
+                    : nil
+            }
             let matches = available.filter {
                 if let memberID {
                     return $0.authorization.member?.id.lowercased() == memberID

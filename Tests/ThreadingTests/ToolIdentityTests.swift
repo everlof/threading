@@ -72,7 +72,7 @@ final class ToolIdentityTests: XCTestCase {
 
     // MARK: - Subjects Survive The Mapping
 
-    private func summary(toolName: String, input: [String: Any]) -> String {
+    private func summary(toolName: String, input: [String: JSONValue]) -> String {
         PermissionRequest(sessionID: SessionID(), toolName: toolName, input: input).summary
     }
 

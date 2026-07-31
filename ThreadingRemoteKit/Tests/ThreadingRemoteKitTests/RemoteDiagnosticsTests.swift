@@ -93,4 +93,110 @@ final class RemoteDiagnosticsTests: XCTestCase {
         XCTAssertNil(report.additionalDetails?["deviceName"])
         XCTAssertNil(report.additionalDetails?["message"])
     }
+
+    func testExplicitUploadImportsClientRecordsWithTheirSourceAndTimestamp() {
+        let journal = RemoteDiagnosticJournal(directory: directory, source: .macOSHost)
+        let host = journal.record(.appLaunched)
+        let timestamp = ISO8601DateFormatter().string(
+            from: Date().addingTimeInterval(-60)
+        )
+        let record = RemoteDiagnosticRecord(
+            timestamp: timestamp,
+            source: .iOSClient,
+            level: .warning,
+            event: .socketFailed,
+            fields: ["code": "url.-1009"]
+        )
+
+        XCTAssertTrue(journal.importRecords([record], from: .iOSClient))
+        XCTAssertEqual(journal.records().first, record)
+        XCTAssertEqual(journal.records().last, host)
+    }
+
+    func testUploadPolicyRejectsRawFieldsWrongSourcesAndUnboundedBatches() {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        func record(
+            source: RemoteDiagnosticSource = .iOSClient,
+            fields: [String: String] = ["code": "url.-1009"]
+        ) -> RemoteDiagnosticRecord {
+            RemoteDiagnosticRecord(
+                timestamp: timestamp,
+                source: source,
+                level: .error,
+                event: .socketFailed,
+                fields: fields
+            )
+        }
+
+        XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(
+            RemoteDiagnosticUploadRequestDTO(
+                source: .browserClient,
+                records: [
+                    RemoteDiagnosticRecord(
+                        timestamp: timestamp,
+                        source: .browserClient,
+                        level: .info,
+                        event: .socketConnecting,
+                        fields: [
+                            "transport": "websocket",
+                            "protocolVersion": "7",
+                        ]
+                    )
+                ]
+            )
+        ))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(
+            RemoteDiagnosticUploadRequestDTO(
+                source: .iOSClient,
+                records: [record(fields: ["message": "a prompt must not become a log"])]
+            )
+        ))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(
+            RemoteDiagnosticUploadRequestDTO(
+                source: .iOSClient,
+                records: [record(fields: ["reason": "/Users/person/private-project"])]
+            )
+        ))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(
+            RemoteDiagnosticUploadRequestDTO(
+                source: .iOSClient,
+                records: [record(fields: ["code": "terminal contents"])]
+            )
+        ))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(
+            RemoteDiagnosticUploadRequestDTO(
+                source: .iOSClient,
+                records: [record(source: .browserClient)]
+            )
+        ))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(
+            RemoteDiagnosticUploadRequestDTO(
+                source: .macOSHost,
+                records: [record(source: .macOSHost)]
+            )
+        ))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(
+            RemoteDiagnosticUploadRequestDTO(
+                source: .iOSClient,
+                records: Array(
+                    repeating: record(),
+                    count: RemoteDiagnosticUploadPolicy.maximumRecordsPerUpload + 1
+                )
+            )
+        ))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(
+            RemoteDiagnosticUploadRequestDTO(
+                source: .iOSClient,
+                records: [
+                    RemoteDiagnosticRecord(
+                        timestamp: timestamp,
+                        source: .iOSClient,
+                        level: .info,
+                        event: .diagnosticUploadReceived,
+                        fields: [:]
+                    )
+                ]
+            )
+        ))
+    }
 }

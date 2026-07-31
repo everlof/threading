@@ -28,9 +28,9 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 .resolvingSymlinksInPath()
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
-        XCTAssertEqual(store.inventory().map(\.identifier), ["com.example.installed-test"])
+        XCTAssertEqual(try store.inventory().map(\.identifier), ["com.example.installed-test"])
         XCTAssertEqual(store.enabledIdentifiers(), [])
-        let provenance = try XCTUnwrap(store.inventory().first?.provenance)
+        let provenance = try XCTUnwrap(try store.inventory().first?.provenance)
         XCTAssertEqual(provenance.origin, .localImport)
         XCTAssertEqual(provenance.sourceName, source.lastPathComponent)
         XCTAssertEqual(provenance.contentDigest.count, 64)
@@ -47,7 +47,114 @@ final class ExtensionPackageStoreTests: XCTestCase {
 
         let reopened = ExtensionPackageStore(rootURL: root)
         XCTAssertEqual(reopened.enabledIdentifiers(), ["com.example.installed-test"])
-        XCTAssertEqual(reopened.inventory().count, 1)
+        XCTAssertEqual(try reopened.inventory().count, 1)
+    }
+
+    func testInventoryReportsTopLevelStorageFailureInsteadOfPretendingItIsEmpty() throws {
+        let root = temporaryDirectory("inventory-root-is-file")
+        let sentinel = Data("not a directory".utf8)
+        try sentinel.write(to: root)
+        let store = ExtensionPackageStore(rootURL: root)
+
+        XCTAssertThrowsError(try store.inventory())
+        XCTAssertEqual(
+            try Data(contentsOf: root),
+            sentinel,
+            "inventory must not replace unreadable storage to manufacture an empty result"
+        )
+    }
+
+    func testUnreadableEnablementIsRecoveredBeforeAReplacementIsWritten() throws {
+        let root = temporaryDirectory("corrupt-state")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let stateURL = root.appendingPathComponent("state.json")
+        let corrupt = Data("{".utf8)
+        try corrupt.write(to: stateURL)
+        let store = ExtensionPackageStore(rootURL: root)
+
+        XCTAssertEqual(store.enabledIdentifiers(), [])
+        try store.setEnabled(true, identifier: "com.example.recovered")
+
+        let recovery = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        ).first { $0.lastPathComponent.hasPrefix("state.json.unreadable-") }
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(recovery)), corrupt)
+        XCTAssertEqual(
+            ExtensionPackageStore(rootURL: root).enabledIdentifiers(),
+            ["com.example.recovered"]
+        )
+    }
+
+    func testLegacySelfVersionedEnablementMigratesWithoutBeingMistakenForAnEnvelope() throws {
+        let root = temporaryDirectory("legacy-state")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data(
+            #"{"formatVersion":1,"enabledIdentifiers":["com.example.legacy"]}"#.utf8
+        ).write(to: root.appendingPathComponent("state.json"))
+
+        XCTAssertEqual(
+            ExtensionPackageStore(rootURL: root).enabledIdentifiers(),
+            ["com.example.legacy"]
+        )
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            ).contains { $0.lastPathComponent.hasPrefix("state.json.unreadable-") }
+        )
+    }
+
+    func testInvalidIdentifierInEnablementStateIsQuarantined() throws {
+        let root = temporaryDirectory("invalid-state-identifier")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let stateURL = root.appendingPathComponent("state.json")
+        let invalid = Data(
+            #"{"formatVersion":1,"enabledIdentifiers":["../../outside"]}"#.utf8
+        )
+        try invalid.write(to: stateURL)
+
+        XCTAssertEqual(ExtensionPackageStore(rootURL: root).enabledIdentifiers(), [])
+        let recovery = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            ).first { $0.lastPathComponent.hasPrefix("state.json.unreadable-") }
+        )
+        XCTAssertEqual(try Data(contentsOf: recovery), invalid)
+    }
+
+    func testSetEnabledRejectsAnIdentifierThatCannotBeAStorageKey() {
+        let root = temporaryDirectory("invalid-set-identifier")
+        let store = ExtensionPackageStore(rootURL: root)
+
+        XCTAssertThrowsError(try store.setEnabled(true, identifier: "../../outside"))
+        XCTAssertEqual(store.enabledIdentifiers(), [])
+    }
+
+    func testUnreadableProvenanceIsQuarantinedAndNeverPresentedAsTrustedFact() throws {
+        let source = try makePackage()
+        let root = temporaryDirectory("corrupt-provenance")
+        let store = ExtensionPackageStore(rootURL: root)
+        _ = try store.install(from: source)
+        let provenanceURL = store.provenanceURL.appendingPathComponent(
+            "com.example.installed-test.json"
+        )
+        let future = Data(#"{"formatVersion":99,"value":{}}"#.utf8)
+        try future.write(to: provenanceURL)
+
+        let package = try XCTUnwrap(try store.inventory().first)
+        XCTAssertNotNil(package.bundle, "audit metadata must not make a valid package disappear")
+        XCTAssertNil(package.provenance, "future metadata must never be interpreted as valid")
+        let recovery = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(
+                at: store.provenanceURL,
+                includingPropertiesForKeys: nil
+            ).first { $0.lastPathComponent.hasPrefix(
+                "com.example.installed-test.json.unreadable-"
+            ) }
+        )
+        XCTAssertEqual(try Data(contentsOf: recovery), future)
     }
 
     func testDuplicateIdentifierNeverOverwritesTheInstalledPackage() throws {
@@ -102,7 +209,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 .appendingPathExtension("provenance.json")
                 .path
         ))
-        XCTAssertEqual(store.inventory().count, 0)
+        XCTAssertEqual(try store.inventory().count, 0)
         XCTAssertEqual(store.enabledIdentifiers(), [])
     }
 
@@ -154,12 +261,14 @@ final class ExtensionPackageStoreTests: XCTestCase {
             identifier: "com.example.plain",
             name: "Plain",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/plain"
         )
         let persistent = ExtensionManifest(
             identifier: "com.example.persistent",
             name: "Persistent",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/persistent",
             capabilities: [.keyValueStorage]
         )
@@ -205,12 +314,42 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: recoveredMetadata.path))
     }
 
+    func testFutureDataVersionMetadataIsRefusedWithoutBeingOverwritten() throws {
+        let root = temporaryDirectory("future-data-version")
+        let storage = ExtensionStorageStore(rootURL: root)
+        let identifier = "com.example.future-data"
+        let directory = storage.dataDirectory(for: identifier)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let stateURL = directory.appendingPathComponent("data-version.json")
+        let future = Data(#"{"formatVersion":99,"dataVersion":7}"#.utf8)
+        try future.write(to: stateURL)
+
+        XCTAssertThrowsError(try storage.committedDataVersion(identifier: identifier))
+        XCTAssertThrowsError(try storage.commitDataVersion(8, identifier: identifier))
+        XCTAssertEqual(try Data(contentsOf: stateURL), future)
+    }
+
+    func testDataVersionStorageRejectsInvalidIdentifiersAndVersions() {
+        let storage = ExtensionStorageStore(rootURL: temporaryDirectory("invalid-data-version"))
+
+        XCTAssertThrowsError(
+            try storage.committedDataVersion(identifier: "../../outside")
+        )
+        XCTAssertThrowsError(
+            try storage.commitDataVersion(0, identifier: "com.example.invalid-version")
+        )
+    }
+
     func testOversizedCacheIsRecreatedBeforeTheExtensionStarts() throws {
         let store = ExtensionPackageStore(rootURL: temporaryDirectory("cache-quota"))
         let manifest = ExtensionManifest(
             identifier: "com.example.cache-quota",
             name: "Cache Quota",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/cache-quota",
             capabilities: [.cacheStorage]
         )
@@ -1051,6 +1190,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             identifier: "com.example.settings-test",
             name: "Settings Test",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/settings",
             capabilities: [.settings],
             settings: settings
@@ -1115,6 +1255,65 @@ final class ExtensionPackageStoreTests: XCTestCase {
         )
     }
 
+    func testUnreadableExtensionSettingsAreRecoveredBeforeAnEdit() throws {
+        let root = temporaryDirectory("corrupt-extension-settings")
+        let identifier = "com.example.settings-recovery"
+        let directory = root.appendingPathComponent(identifier, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let valuesURL = directory.appendingPathComponent("values.json")
+        let corrupt = Data("{".utf8)
+        try corrupt.write(to: valuesURL)
+        let field = ExtensionSettingField(
+            id: "show-status",
+            title: "Show status",
+            control: .toggle(defaultValue: true)
+        )
+        let store = ExtensionSettingsValueStore(rootURL: root)
+
+        XCTAssertEqual(
+            try store.value(extensionIdentifier: identifier, field: field),
+            .bool(true)
+        )
+        try store.set(.bool(false), field: field, extensionIdentifier: identifier)
+
+        let recovery = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            ).first { $0.lastPathComponent.hasPrefix("values.json.unreadable-") }
+        )
+        XCTAssertEqual(try Data(contentsOf: recovery), corrupt)
+        XCTAssertEqual(
+            try ExtensionSettingsValueStore(rootURL: root).value(
+                extensionIdentifier: identifier,
+                field: field
+            ),
+            .bool(false)
+        )
+    }
+
+    func testExtensionSettingsRejectPathLikeIdentifiers() throws {
+        let root = temporaryDirectory("invalid-settings-identifier")
+        let field = ExtensionSettingField(
+            id: "show-status",
+            title: "Show status",
+            control: .toggle(defaultValue: true)
+        )
+        let store = ExtensionSettingsValueStore(rootURL: root)
+
+        XCTAssertThrowsError(
+            try store.set(
+                .bool(false),
+                field: field,
+                extensionIdentifier: "../../outside"
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
     func testMCPCoreDependsOnlyOnTheExternalProviderBoundary() throws {
         let sourceRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -1176,6 +1375,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             identifier: "com.example.packaged",
             name: "Packaged",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/packaged",
             capabilities: [.panels]
         )).write(to: manifestURL)
@@ -1543,7 +1743,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertEqual(installed.manifest.identifier, scaffold.manifest.identifier)
         XCTAssertEqual(installed.manifest.runtime, .webAssembly)
         XCTAssertEqual(store.enabledIdentifiers(), [])
-        XCTAssertEqual(store.inventory().first?.provenance?.sdkVersion, "1")
+        XCTAssertEqual(try store.inventory().first?.provenance?.sdkVersion, "1")
 
         let registration = try ExtensionRegistrationLoader.load(from: installed)
         XCTAssertEqual(registration.panels.map(\.id), ["welcome"])
@@ -1605,6 +1805,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 identifier: "com.example.refusals",
                 name: "Refusals",
                 version: "1.0.0",
+                runtime: .native,
                 executable: executable,
                 capabilities: []
             )).write(to: url)
@@ -1677,7 +1878,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 return XCTFail("unexpected error: \(error)")
             }
         }
-        XCTAssertEqual(store.inventory().first?.bundle?.manifest.version, "1.0.0")
+        XCTAssertEqual(try store.inventory().first?.bundle?.manifest.version, "1.0.0")
     }
 
     func testUpdateRefusesADataSchemaRollbackBeforeReplacingAnything() throws {
@@ -1701,7 +1902,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             }
         }
         XCTAssertEqual(
-            store.inventory().first?.bundle?.manifest.dataVersion,
+            try store.inventory().first?.bundle?.manifest.dataVersion,
             3
         )
     }
@@ -1744,6 +1945,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 identifier: "com.example.confirm",
                 name: "Confirm",
                 version: version,
+                runtime: .native,
                 executable: "bin/extension",
                 capabilities: capabilities
             )
@@ -1780,6 +1982,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 name: "Confirm",
                 version: "1.0.0",
                 dataVersion: 1,
+                runtime: .native,
                 executable: "bin/extension"
             ),
             candidate: ExtensionManifest(
@@ -1787,6 +1990,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 name: "Confirm",
                 version: "1.1.0",
                 dataVersion: 2,
+                runtime: .native,
                 executable: "bin/extension"
             )
         ).confirmation(name: "CI Status")
@@ -1902,7 +2106,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             XCTAssertEqual(snapshot.identifier, "com.example.versioned")
         }
         XCTAssertEqual(
-            store.inventory().first?.bundle?.manifest.version,
+            try store.inventory().first?.bundle?.manifest.version,
             "2.0.0"
         )
 
@@ -1949,7 +2153,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
         await fulfillment(of: [finished], timeout: 10)
 
         XCTAssertNotNil(failure)
-        XCTAssertEqual(store.inventory().first?.bundle?.manifest.version, "1.0.0")
+        XCTAssertEqual(try store.inventory().first?.bundle?.manifest.version, "1.0.0")
         let stillRunning = await waitUntil {
             manager.installedExtensions.first?.status
                 == .running(commands: 0, panels: 0, tools: 0)
@@ -2045,6 +2249,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 identifier: "com.example.updates",
                 name: "Updates",
                 version: version,
+                runtime: .native,
                 executable: "bin/extension",
                 capabilities: capabilities
             )
@@ -2111,7 +2316,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
 
         let updated = try store.update(from: second, approving: plan)
         XCTAssertEqual(updated.manifest.version, "1.1.0")
-        XCTAssertEqual(store.inventory().count, 1, "an update replaces rather than accumulates")
+        XCTAssertEqual(try store.inventory().count, 1, "an update replaces rather than accumulates")
         XCTAssertEqual(
             try store.storageStore.keyValues(
                 extensionIdentifier: "com.example.versioned"
@@ -2144,12 +2349,13 @@ final class ExtensionPackageStoreTests: XCTestCase {
             }
         }
         XCTAssertEqual(
-            store.inventory().first?.bundle?.manifest.version,
+            try store.inventory().first?.bundle?.manifest.version,
             "1.0.0",
             "a refused update must leave the installed copy untouched"
         )
     }
 
+    @MainActor
     private final class RecordingCompanionRouter: ExtensionCompanionRouting {
         private(set) var extensionIdentifier: String?
         private(set) var companionID: String?
@@ -2161,7 +2367,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             companionID: String,
             operationID: String,
             arguments: ExtensionJSONValue,
-            completion: @escaping (
+            completion: @escaping @MainActor @Sendable (
                 Result<ExtensionCompanionOperationResponse, Error>
             ) -> Void
         ) {
@@ -2235,6 +2441,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             name: "Versioned",
             version: version,
             dataVersion: dataVersion,
+            runtime: .native,
             executable: "bin/extension",
             capabilities: capabilities
         )).write(to: root.appendingPathComponent(ExtensionBundleInspector.manifestName))
@@ -2290,6 +2497,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             identifier: "com.example.installed-test",
             name: "Installed Test",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/extension",
             capabilities: capabilities,
             mcpTools: tools,

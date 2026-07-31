@@ -24,19 +24,116 @@ final class GitReviewViewController: NSViewController {
 
     /// Feeds the selected sidebar row. It stays true through main-thread view construction,
     /// not merely through the background git read.
-    var onLoadingChange: ((Bool) -> Void)?
+    var onLoadingChange: (@MainActor @Sendable (Bool) -> Void)?
 
-    var modeChip: ChipView!
-    var backButton: ThemedButton!
-    private var headerCluster: NSStackView!
-    var counterLabel: NSTextField!
-    private var menuButton: ThemedButton!
-    var scrollView: NSScrollView!
-    var stack: NSStackView!
-    var placeholderLabel: NSTextField!
-    var summaryPill: GitReviewSummaryPill!
-    var jumpToEndButton: ThemedButton!
-    private var scrollObserver: NSObjectProtocol?
+    lazy var backButton: ThemedButton = {
+        let button = ThemedButton(
+            symbol: "chevron.left",
+            accessibility: L10n.string("Back"),
+            target: self,
+            action: #selector(backToCommits)
+        )
+        button.isBordered = false
+        button.toolTip = L10n.string("Back to history")
+        button.isHidden = true
+        return button
+    }()
+    lazy var modeChip: ChipView = {
+        let chip = ChipView()
+        chip.configure(symbolName: GitReviewUIDefaults.modeSymbol, title: mode.title)
+        chip.itemsProvider = { [weak self] in self?.modeItems() ?? [] }
+        chip.onSelect = { [weak self] item in
+            guard let raw = item.representedValue as? String,
+                  let mode = GitReviewMode(rawValue: raw) else { return }
+            self?.switchMode(to: mode)
+        }
+        return chip
+    }()
+    private lazy var headerCluster: NSStackView = {
+        let cluster = NSStackView(views: [backButton, modeChip])
+        cluster.orientation = .horizontal
+        cluster.alignment = .centerY
+        cluster.spacing = Design.Spacing.tight
+        cluster.translatesAutoresizingMaskIntoConstraints = false
+        return cluster
+    }()
+    lazy var counterLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.caption)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        return label
+    }()
+    private lazy var menuButton: ThemedButton = {
+        let button = ThemedButton(
+            symbol: "ellipsis",
+            accessibility: L10n.string("Diff options"),
+            target: self,
+            action: #selector(showOverflowMenu(_:))
+        )
+        button.isBordered = false
+        button.toolTip = L10n.string("Diff options")
+        return button
+    }()
+    lazy var stack: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.small,
+            left: Design.Spacing.inset,
+            bottom: Design.Spacing.inset,
+            right: Design.Spacing.inset
+        )
+        return stack
+    }()
+    private let clipView = FlippedClipView()
+    lazy var scrollView: NSScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.contentView = clipView
+        scroll.documentView = stack
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        return scroll
+    }()
+    lazy var placeholderLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.applyFont(.body)
+        label.textColor = Design.Text.tertiary
+        label.alignment = .center
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        return label
+    }()
+    lazy var summaryPill: GitReviewSummaryPill = {
+        let pill = GitReviewSummaryPill()
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        pill.isHidden = true
+        return pill
+    }()
+    lazy var jumpToEndButton: ThemedButton = {
+        let button = ThemedButton(
+            symbol: "arrow.down",
+            accessibility: L10n.string("Scroll to the end of the diff"),
+            target: self,
+            action: #selector(scrollToDiffEnd)
+        )
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isBordered = false
+        button.toolTip = L10n.string("Scroll to end")
+        button.applySurface(
+            fill: Design.Surface.elevated,
+            radius: .fixed(20),
+            border: Design.Surface.border,
+            glow: true
+        )
+        button.isHidden = true
+        return button
+    }()
+    nonisolated(unsafe) private var scrollObserver: NSObjectProtocol?
     private let appEvents = AppEventObservations()
 
     /// What the body is currently showing. Commit mode is two phases deep: the history list,
@@ -146,7 +243,12 @@ final class GitReviewViewController: NSViewController {
     }
 
     deinit {
-        if isLoading { onLoadingChange?(false) }
+        if isLoading {
+            let onLoadingChange = onLoadingChange
+            Task { @MainActor in
+                onLoadingChange?(false)
+            }
+        }
         watcher?.stop()
         if let scrollObserver {
             NotificationCenter.default.removeObserver(scrollObserver)
@@ -156,47 +258,14 @@ final class GitReviewViewController: NSViewController {
     // MARK: - Setup
 
     private func setupHeader() {
-        backButton = ThemedButton(symbol: "chevron.left", accessibility: L10n.string("Back"), target: self, action: #selector(backToCommits)
-        )
-        backButton.isBordered = false
-        backButton.toolTip = L10n.string("Back to history")
-        backButton.isHidden = true
-
-        modeChip = ChipView()
-        modeChip.configure(symbolName: GitReviewUIDefaults.modeSymbol, title: mode.title)
-        modeChip.itemsProvider = { [weak self] in self?.modeItems() ?? [] }
-        modeChip.onSelect = { [weak self] item in
-            guard let raw = item.representedValue as? String,
-                  let mode = GitReviewMode(rawValue: raw) else { return }
-            self?.switchMode(to: mode)
-        }
-
-        counterLabel = NSTextField(labelWithString: "")
-        counterLabel.applyFont(.caption)
-        counterLabel.setContentHuggingPriority(.required, for: .horizontal)
-
         // One overflow rather than a row of icons: refreshing, collapsing, wrapping and the
         // whitespace fold are all things asked of the diff occasionally, and a header of five
         // glyphs would compete with the mode chip, which is the control that matters here.
-        menuButton = ThemedButton(
-            symbol: "ellipsis",
-            accessibility: L10n.string("Diff options"),
-            target: self,
-            action: #selector(showOverflowMenu(_:))
-        )
-        menuButton.isBordered = false
-        menuButton.toolTip = L10n.string("Diff options")
-
         // A stack rather than individual constraints, because the back button is usually
         // hidden: a hidden view keeps the frame its constraints give it, so the chip sat
         // indented past a ghost button and read as floating in the pane rather than starting
         // where the row does. A stack detaches hidden views, so the chip's leading is the
         // row's inset whenever there is nothing to go back to.
-        headerCluster = NSStackView(views: [backButton, modeChip])
-        headerCluster.orientation = .horizontal
-        headerCluster.alignment = .centerY
-        headerCluster.spacing = Design.Spacing.tight
-        headerCluster.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(headerCluster)
 
         [counterLabel, menuButton].forEach {
@@ -206,64 +275,17 @@ final class GitReviewViewController: NSViewController {
     }
 
     private func setupBody() {
-        stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.small,
-            left: Design.Spacing.inset,
-            bottom: Design.Spacing.inset,
-            right: Design.Spacing.inset
-        )
-
-        let clipView = FlippedClipView()
         clipView.drawsBackground = false
-
-        scrollView = ThemedScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.contentView = clipView
-        scrollView.documentView = stack
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
         clipView.postsBoundsChangedNotifications = true
         scrollObserver = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
             object: clipView,
             queue: .main
         ) { [weak self] _ in
-            self?.updateScrollControls()
+            MainActor.assumeIsolated {
+                self?.updateScrollControls()
+            }
         }
-
-        placeholderLabel = NSTextField(labelWithString: "")
-        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
-        placeholderLabel.applyFont(.body)
-        placeholderLabel.textColor = Design.Text.tertiary
-        placeholderLabel.alignment = .center
-        placeholderLabel.lineBreakMode = .byWordWrapping
-        placeholderLabel.maximumNumberOfLines = 0
-
-        summaryPill = GitReviewSummaryPill()
-        summaryPill.translatesAutoresizingMaskIntoConstraints = false
-        summaryPill.isHidden = true
-
-        jumpToEndButton = ThemedButton(
-            symbol: "arrow.down",
-            accessibility: L10n.string("Scroll to the end of the diff"),
-            target: self,
-            action: #selector(scrollToDiffEnd)
-        )
-        jumpToEndButton.translatesAutoresizingMaskIntoConstraints = false
-        jumpToEndButton.isBordered = false
-        jumpToEndButton.toolTip = L10n.string("Scroll to end")
-        jumpToEndButton.applySurface(
-            fill: Design.Surface.elevated,
-            radius: .fixed(20),
-            border: Design.Surface.border,
-            glow: true
-        )
-        jumpToEndButton.isHidden = true
 
         view.addSubview(scrollView)
         view.addSubview(placeholderLabel)
@@ -332,8 +354,8 @@ final class GitReviewViewController: NSViewController {
     }
 
     func updateScrollControls() {
-        guard isViewLoaded, summaryPill != nil, !summaryPill.isHidden else {
-            jumpToEndButton?.isHidden = true
+        guard isViewLoaded, !summaryPill.isHidden else {
+            if isViewLoaded { jumpToEndButton.isHidden = true }
             return
         }
         let overflow = max(

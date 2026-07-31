@@ -9,6 +9,7 @@ import Foundation
 /// delegated command, its output, and the parent's own work indistinguishable. The optional
 /// capability keeps the ordinary conversation transport provider-neutral while letting Codex's
 /// app-server and Claude's forwarded Task stream expose the hierarchies they already own.
+@MainActor
 protocol SubagentReportingConversation: AnyObject {
     var onSubagentEvent: ((SubagentEvent) -> Void)? { get set }
 }
@@ -19,16 +20,21 @@ protocol SubagentReportingConversation: AnyObject {
 /// only the latter, while Claude persists one independently resumable JSONL file per child.
 /// Callbacks arrive on the main queue so the conversation controller can fold them through the
 /// same timeline used for live events.
+@MainActor
 protocol SubagentHistoryConversation: AnyObject {
-    func loadSubagentHistory(completion: @escaping ([SubagentEvent]) -> Void)
+    func loadSubagentHistory(
+        completion: @escaping @MainActor @Sendable ([SubagentEvent]) -> Void
+    )
     func loadSubagentTranscript(
         for descriptor: SubagentDescriptor,
-        completion: @escaping (_ events: [StreamEvent], _ isTruncated: Bool) -> Void
+        completion: @escaping @MainActor @Sendable (
+            _ events: [StreamEvent], _ isTruncated: Bool
+        ) -> Void
     )
 }
 
 /// Provider-neutral lifecycle for one delegated agent.
-enum SubagentStatus: String, Codable, Equatable {
+enum SubagentStatus: String, Codable, Equatable, Sendable {
     case pending
     case working
     case completed
@@ -55,7 +61,7 @@ enum SubagentStatus: String, Codable, Equatable {
 /// Claude reports these fields over several independent messages (`task_progress`,
 /// `tool_progress`, and `task_updated`). Optional properties let the timeline merge whichever
 /// facts a given CLI release supplies without erasing earlier values.
-struct SubagentProgress: Codable, Equatable {
+struct SubagentProgress: Codable, Equatable, Sendable {
     var taskID: String?
     var summary: String?
     var currentTool: String?
@@ -121,7 +127,7 @@ struct SubagentProgress: Codable, Equatable {
 }
 
 /// Identity and launch context that remain stable while a child runs.
-struct SubagentDescriptor: Codable, Equatable {
+struct SubagentDescriptor: Codable, Equatable, Sendable {
     let threadID: String
     /// Other provider-issued identities for this same child.
     ///
@@ -234,7 +240,7 @@ enum SubagentChildAdmission {
 }
 
 /// One child-agent fact emitted by a provider adapter.
-enum SubagentEvent {
+enum SubagentEvent: Sendable {
     case discovered(SubagentDescriptor)
     case state(threadID: String, status: SubagentStatus, message: String?)
     case progress(threadID: String, progress: SubagentProgress)
@@ -887,7 +893,10 @@ enum SubagentTranscriptLoader {
     static func load(
         descriptor: SubagentDescriptor,
         kind: AgentKind,
-        completion: @escaping (_ events: [StreamEvent], _ isTruncated: Bool) -> Void
+        completion: @escaping @MainActor @Sendable (
+            _ events: [StreamEvent],
+            _ isTruncated: Bool
+        ) -> Void
     ) {
         guard let url = transcriptURL(for: descriptor) else {
             completion([], false)
@@ -979,7 +988,7 @@ enum SubagentUsageReader {
     static func load(
         path: String,
         kind: AgentKind,
-        completion: @escaping (Int?) -> Void
+        completion: @escaping @MainActor @Sendable (Int?) -> Void
     ) {
         let url = URL(fileURLWithPath: path)
         DispatchQueue.global(qos: .utility).async {

@@ -9,6 +9,7 @@
     "identifier",
     "name",
     "version",
+    "runtime",
     "executable",
     "capabilities"
   ],
@@ -41,8 +42,7 @@
         "native",
         "webAssembly"
       ],
-      "default": "native",
-      "description": "Execution boundary. New distributable Swift extensions should use webAssembly; native is retained for format-1 compatibility."
+      "description": "Required execution boundary. New distributable Swift extensions should use webAssembly; native must be selected explicitly and is retained only for deprecated compatibility."
     },
     "executable": {
       "type": "string",

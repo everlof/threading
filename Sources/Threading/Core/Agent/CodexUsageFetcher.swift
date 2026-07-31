@@ -65,7 +65,10 @@ enum CodexUsageFetcher {
     static func fetch(account: AgentAccount) async throws -> AccountUsage {
         let auth = try readAuthFile(account: account)
 
-        var request = URLRequest(url: URL(string: CodexUsageDefaults.usageEndpoint)!)
+        guard let endpoint = URL(string: CodexUsageDefaults.usageEndpoint) else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: endpoint)
         request.setValue("Bearer \(auth.token)", forHTTPHeaderField: "Authorization")
         request.setValue(auth.accountID, forHTTPHeaderField: "ChatGPT-Account-ID")
         request.setValue(CodexUsageDefaults.originator, forHTTPHeaderField: "originator")

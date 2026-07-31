@@ -15,19 +15,105 @@ final class SessionAttachmentsViewController: NSViewController {
     private var attachments: [SessionAttachment] = []
     private var selectedRelativePath: String?
 
-    private var countLabel: NSTextField!
-    private var tableView: ThemedTableView!
-    private var scrollView: ThemedScrollView!
-    private var previewHost: NSView!
-    private var imageView: NSImageView!
-    private var pdfView: PDFView!
-    private var previewMessage: NSTextField!
-    private var fileLabel: NSTextField!
-    private var pathLabel: NSTextField!
-    private var openButton: ThemedButton!
-    private var revealButton: ThemedButton!
-    private var copyButton: ThemedButton!
-    private var emptyLabel: NSTextField!
+    private lazy var countLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.caption)
+        label.textColor = Design.Text.quaternary
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    private lazy var tableView: ThemedTableView = {
+        let table = ThemedTableView()
+        table.headerView = nil
+        table.rowSizeStyle = .default
+        table.dataSource = self
+        table.delegate = self
+        table.target = self
+        table.doubleAction = #selector(openSelected)
+        table.allowsEmptySelection = false
+        let column = NSTableColumn(identifier: SessionAttachmentsDefaults.columnIdentifier)
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        return table
+    }()
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.documentView = tableView
+        scroll.hasVerticalScroller = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        return scroll
+    }()
+    private lazy var previewHost: NSView = {
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.wantsLayer = true
+        return host
+    }()
+    private lazy var imageView: NSImageView = {
+        let image = NSImageView()
+        image.imageAlignment = .alignCenter
+        image.imageScaling = .scaleProportionallyUpOrDown
+        image.translatesAutoresizingMaskIntoConstraints = false
+        return image
+    }()
+    private lazy var pdfView: PDFView = {
+        let pdf = PDFView()
+        pdf.autoScales = true
+        pdf.displayMode = .singlePageContinuous
+        pdf.displayDirection = .vertical
+        pdf.displaysPageBreaks = true
+        pdf.translatesAutoresizingMaskIntoConstraints = false
+        return pdf
+    }()
+    private lazy var previewMessage: NSTextField = {
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.applyFont(.detail())
+        label.textColor = Design.Text.tertiary
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    private lazy var fileLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.subheading)
+        label.textColor = Design.Text.label
+        label.lineBreakMode = .byTruncatingMiddle
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    private lazy var pathLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.compactCode)
+        label.textColor = Design.Text.tertiary
+        label.lineBreakMode = .byTruncatingMiddle
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    private lazy var openButton = ThemedButton(
+        title: L10n.string("Open"),
+        target: self,
+        action: #selector(openSelected)
+    )
+    private lazy var revealButton = ThemedButton(
+        title: L10n.string("Finder"),
+        target: self,
+        action: #selector(revealSelected)
+    )
+    private lazy var copyButton = ThemedButton(
+        title: L10n.string("Copy Path"),
+        target: self,
+        action: #selector(copySelectedPath)
+    )
+    private lazy var emptyLabel: NSTextField = {
+        let label = NSTextField(wrappingLabelWithString:
+            L10n.string("Images and PDFs mentioned by this session will appear here.")
+        )
+        label.applyFont(.detail())
+        label.textColor = Design.Text.tertiary
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
 
     // MARK: - Initialization
 
@@ -78,65 +164,12 @@ final class SessionAttachmentsViewController: NSViewController {
     // MARK: - Setup
 
     private func setupList() {
-        countLabel = NSTextField(labelWithString: "")
-        countLabel.applyFont(.caption)
-        countLabel.textColor = Design.Text.quaternary
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        tableView = ThemedTableView()
-        tableView.headerView = nil
-        tableView.rowSizeStyle = .default
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.target = self
-        tableView.doubleAction = #selector(openSelected)
-        tableView.allowsEmptySelection = false
-
-        let column = NSTableColumn(identifier: SessionAttachmentsDefaults.columnIdentifier)
-        column.resizingMask = .autoresizingMask
-        tableView.addTableColumn(column)
-
-        scrollView = ThemedScrollView()
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-        emptyLabel = NSTextField(wrappingLabelWithString:
-            L10n.string("Images and PDFs mentioned by this session will appear here.")
-        )
-        emptyLabel.applyFont(.detail())
-        emptyLabel.textColor = Design.Text.tertiary
-        emptyLabel.alignment = .center
-        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-
         view.addSubview(countLabel)
         view.addSubview(scrollView)
         view.addSubview(emptyLabel)
     }
 
     private func setupPreview() {
-        previewHost = NSView()
-        previewHost.translatesAutoresizingMaskIntoConstraints = false
-        previewHost.wantsLayer = true
-
-        imageView = NSImageView()
-        imageView.imageAlignment = .alignCenter
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-
-        pdfView = PDFView()
-        pdfView.autoScales = true
-        pdfView.displayMode = .singlePageContinuous
-        pdfView.displayDirection = .vertical
-        pdfView.displaysPageBreaks = true
-        pdfView.translatesAutoresizingMaskIntoConstraints = false
-
-        previewMessage = NSTextField(wrappingLabelWithString: "")
-        previewMessage.applyFont(.detail())
-        previewMessage.textColor = Design.Text.tertiary
-        previewMessage.alignment = .center
-        previewMessage.translatesAutoresizingMaskIntoConstraints = false
-
         previewHost.addSubview(imageView)
         previewHost.addSubview(pdfView)
         previewHost.addSubview(previewMessage)
@@ -146,37 +179,9 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func setupActions() {
-        fileLabel = NSTextField(labelWithString: "")
-        fileLabel.applyFont(.subheading)
-        fileLabel.textColor = Design.Text.label
-        fileLabel.lineBreakMode = .byTruncatingMiddle
-        fileLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        pathLabel = NSTextField(labelWithString: "")
-        pathLabel.applyFont(.compactCode)
-        pathLabel.textColor = Design.Text.tertiary
-        pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        openButton = ThemedButton(
-            title: L10n.string("Open"),
-            target: self,
-            action: #selector(openSelected)
-        )
-        revealButton = ThemedButton(
-            title: L10n.string("Finder"),
-            target: self,
-            action: #selector(revealSelected)
-        )
-        copyButton = ThemedButton(
-            title: L10n.string("Copy Path"),
-            target: self,
-            action: #selector(copySelectedPath)
-        )
-
         for control in [openButton, revealButton, copyButton] {
-            control?.translatesAutoresizingMaskIntoConstraints = false
-            view.addSubview(control!)
+            control.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(control)
         }
         view.addSubview(fileLabel)
         view.addSubview(pathLabel)
@@ -328,7 +333,7 @@ final class SessionAttachmentsViewController: NSViewController {
     // MARK: - Preview
 
     private var selectedAttachment: SessionAttachment? {
-        let row = tableView?.selectedRow ?? -1
+        let row = tableView.selectedRow
         guard row >= 0, attachments.indices.contains(row) else { return nil }
         return attachments[row]
     }
@@ -377,14 +382,14 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func clearPreview() {
-        imageView?.image = nil
-        imageView?.isHidden = true
-        pdfView?.document = nil
-        pdfView?.isHidden = true
-        previewMessage?.stringValue = ""
-        previewMessage?.isHidden = true
-        fileLabel?.stringValue = ""
-        pathLabel?.stringValue = ""
+        imageView.image = nil
+        imageView.isHidden = true
+        pdfView.document = nil
+        pdfView.isHidden = true
+        previewMessage.stringValue = ""
+        previewMessage.isHidden = true
+        fileLabel.stringValue = ""
+        pathLabel.stringValue = ""
     }
 
     private func showPreviewMessage(_ message: String) {

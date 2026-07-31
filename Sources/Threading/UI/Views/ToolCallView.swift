@@ -15,15 +15,33 @@ final class ToolCallView: NSView {
 
     private let tool: ToolIdentity
     private let diffLines: [DiffLine]?
+    private let summary: String
 
-    private var glyphLabel: NSTextField!
-    private var titleLabel: NSTextField!
-    private var detailLabel: NSTextField!
-    private var metaLabel: NSTextField!
-    private var chevron: NSImageView!
+    private lazy var glyphLabel = makeLabel(
+        ToolGlyph.forTool(tool).symbol,
+        role: .code(weight: .medium)
+    )
+    private lazy var titleLabel = makeLabel(ToolGlyph.forTool(tool).label, role: .caption)
+    private lazy var detailLabel = makeLabel(summary, role: .code())
+    private lazy var metaLabel = makeLabel("running…", role: .caption)
+    private lazy var chevron: NSImageView = {
+        let image = NSImageView()
+        image.translatesAutoresizingMaskIntoConstraints = false
+        image.image = NSImage(
+            systemSymbolName: "chevron.right",
+            accessibilityDescription: nil
+        )
+        image.contentTintColor = Design.Text.quaternary
+        image.symbolConfiguration = Design.Symbol.configuration(
+            Design.Symbol.chevron,
+            weight: .semibold
+        )
+        image.isHidden = true
+        return image
+    }()
 
     /// Whichever body this row expands to show — a diff for an edit, plain text otherwise.
-    private var bodyView: NSView!
+    private lazy var bodyView = makeBody(summary: summary)
     private var textBody: NSTextField?
 
     private var isExpanded = false
@@ -35,6 +53,7 @@ final class ToolCallView: NSView {
     init(tool: ToolIdentity, summary: String, diff: [DiffLine]? = nil) {
         self.tool = tool
         self.diffLines = diff
+        self.summary = summary
         super.init(frame: .zero)
         setupViews(summary: summary)
     }
@@ -49,16 +68,11 @@ final class ToolCallView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         applySurface(fill: Design.Chat.toolRowResting, radius: .control)
 
-        let glyph = ToolGlyph.forTool(tool)
-
-        glyphLabel = makeLabel(glyph.symbol, role: .code(weight: .medium))
         glyphLabel.textColor = Design.Text.secondary
         glyphLabel.alignment = .center
 
-        titleLabel = makeLabel(glyph.label, role: .caption)
         titleLabel.textColor = Design.Text.secondary
 
-        detailLabel = makeLabel(summary, role: .code())
         detailLabel.textColor = Design.Text.tertiary
         detailLabel.lineBreakMode = .byTruncatingMiddle
         // The subject arrives already flattened, but a label that *can* grow on a newline is a
@@ -68,17 +82,7 @@ final class ToolCallView: NSView {
         detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Reads while a call is still running, so the row is not blank until the result lands.
-        metaLabel = makeLabel("running…", role: .caption)
         metaLabel.textColor = Design.Text.tertiary
-
-        chevron = NSImageView()
-        chevron.translatesAutoresizingMaskIntoConstraints = false
-        chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
-        chevron.contentTintColor = Design.Text.quaternary
-        chevron.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold)
-        chevron.isHidden = true
-
-        bodyView = makeBody(summary: summary)
         bodyView.isHidden = true
 
         [glyphLabel, titleLabel, detailLabel, metaLabel, chevron, bodyView].forEach(addSubview)
@@ -129,14 +133,18 @@ final class ToolCallView: NSView {
         return label
     }
 
-    private var headerBottom: NSLayoutConstraint!
-    private var bodyBottom: NSLayoutConstraint!
+    private lazy var headerBottom = titleLabel.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -Design.Spacing.small
+    )
+    private lazy var bodyBottom = bodyView.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -Design.Spacing.small
+    )
 
     private func setupConstraints() {
         let inset = Design.Spacing.small
-        headerBottom = titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
         headerBottom.isActive = true
-        bodyBottom = bodyView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
 
         NSLayoutConstraint.activate([
             glyphLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),

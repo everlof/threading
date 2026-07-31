@@ -14,6 +14,8 @@
 # Usage:
 #   scripts/release.sh                 # build, export, verify (no upload)
 #   scripts/release.sh --notarize      # also submit to Apple, staple, and Gatekeeper-check
+#   THREADING_SKIP_RELEASE_CHECKS=1 scripts/release.sh
+#                                      # explicit emergency escape hatch for the quality gate
 #
 # --notarize uses the `mjukis-notary` credential profile, which already exists on the release
 # machine because claudex ships with it — same Apple ID, same team. Override with NOTARY_PROFILE.
@@ -37,13 +39,45 @@ readonly ARCHIVE="$BUILD_DIR/$SCHEME.xcarchive"
 readonly EXPORT_DIR="$BUILD_DIR/export"
 readonly APP="$EXPORT_DIR/$SCHEME.app"
 
-NOTARIZE=0
-[[ "${1:-}" == "--notarize" ]] && NOTARIZE=1
-
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 
+NOTARIZE=0
+for argument in "$@"; do
+    case "$argument" in
+        --notarize) NOTARIZE=1 ;;
+        *) fail "unknown argument '$argument'" ;;
+    esac
+done
+
+run_xcodebuild() {
+    local phase="$1"
+    local log_file="$2"
+    shift 2
+
+    if ! xcodebuild "$@" >"$log_file" 2>&1; then
+        rg '(^|: )(error|warning): |\\*\\* (ARCHIVE|EXPORT)' "$log_file" \
+            || tail -80 "$log_file"
+        fail "$phase failed; full output is in $log_file"
+    fi
+    rg '(^|: )(error|warning): |\\*\\* (ARCHIVE|EXPORT)' "$log_file" || true
+}
+
 # MARK: - Preflight
+
+[[ "$ROOT" != "/" && "$BUILD_DIR" == "$ROOT/build/release" ]] \
+    || fail "refusing an unsafe build directory: $BUILD_DIR"
+
+if [[ $NOTARIZE -eq 1 && -n "$(git -C "$ROOT" status --porcelain)" ]]; then
+    fail "notarized releases require a clean worktree"
+fi
+
+if [[ "${THREADING_SKIP_RELEASE_CHECKS:-0}" != "1" ]]; then
+    say "Running the release quality gate"
+    "$ROOT/scripts/ci.sh"
+else
+    echo "warning: release quality gate skipped by THREADING_SKIP_RELEASE_CHECKS=1" >&2
+fi
 
 say "Checking the signing identity"
 if ! security find-identity -v -p codesigning | grep -q "Developer ID Application.*($TEAM_ID)"; then
@@ -92,15 +126,14 @@ fi
 say "Archiving $SCHEME"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
-xcodebuild archive \
+run_xcodebuild "archive" "$BUILD_DIR/archive.log" archive \
     -project "$ROOT/$PROJECT" \
     -scheme "$SCHEME" \
     -configuration Release \
     -destination 'generic/platform=macOS' \
     MARKETING_VERSION="$VERSION" \
     CURRENT_PROJECT_VERSION="$VERSION" \
-    -archivePath "$ARCHIVE" \
-    | grep -E "^\S+\.swift:[0-9]+:[0-9]+: (error|warning)|error: |\*\* ARCHIVE" || true
+    -archivePath "$ARCHIVE"
 
 [[ -d "$ARCHIVE" ]] || fail "the archive was not produced"
 
@@ -122,11 +155,10 @@ cat > "$BUILD_DIR/ExportOptions.plist" <<PLIST
 </plist>
 PLIST
 
-xcodebuild -exportArchive \
+run_xcodebuild "export" "$BUILD_DIR/export.log" -exportArchive \
     -archivePath "$ARCHIVE" \
     -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
-    -exportPath "$EXPORT_DIR" \
-    | grep -E "error: |\*\* EXPORT" || true
+    -exportPath "$EXPORT_DIR"
 
 [[ -d "$APP" ]] || fail "the export produced no app bundle"
 

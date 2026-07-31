@@ -116,10 +116,12 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
       AppKit callers are SDK-annotated `@MainActor`
       already, so most call sites compile unchanged; the ones that don't are exactly the
       bugs this catches.
-- [x] Enable strict concurrency `targeted` for the app and test targets in the Xcode project
-      (there is no root `Package.swift`); move to `complete` later.
-- Main-thread store isolation is now compiler-enforced; targeted checking is the baseline
-  while the remaining boundaries are prepared for `complete` checking.
+- [x] Enable strict concurrency `complete` for every app and test configuration in the Xcode
+      project (there is no root `Package.swift`). Queue-owned callbacks are `@Sendable`, UI and
+      state owners are actor-isolated, immutable wire/domain values are `Sendable`, and the
+      remaining teardown-only cross-actor handles document their synchronization explicitly.
+- Main-thread store isolation and queue crossings are now compiler-checked in the same mode CI
+  and the release preflight use.
 
 ### 2.2 Typed identifiers
 - [x] `SessionID` / `ProjectID` wrappers over `UUID` (single-value-container `Codable`, so
@@ -201,7 +203,7 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
       indexes into `SettingsPages.all` any more, and the sidebar and container both route by id.
 
 ### 3.2 Retire the IUO init-order contracts
-- [ ] ~46 implicitly-unwrapped declarations whose safety hangs on `setupSplitViewController()`
+- [x] ~46 implicitly-unwrapped declarations whose safety hangs on `setupSplitViewController()`
       running first. Convert to `let` built in init, or a single lazy view-tree builder per
       controller. **The `AppDelegate` half is done**: the named `applicationShouldHandleReopen`
       crash is guarded, and all twenty window-scoped *menu actions* now route through
@@ -210,11 +212,12 @@ call sites `SessionRowView.swift:264`, `AgentLauncher.swift:220`,
       command arriving in either has nothing to act on and doing nothing is the answer.
       `AppDelegateTests` performs every one of them by selector on a window-less delegate. The
       launch path deliberately keeps its force-unwraps: there, a silent no-op would hide a real
-      failure.
+      failure. All stored IUOs under `Sources/Threading` are now gone; required view trees are
+      lazy non-optionals and genuinely optional state stays optional. The architecture boundary
+      script rejects reintroduction.
 
 ### 3.3 Tests where the code is already pure
-Currently: 3 tests (TranscriptReplay). The architecture has already extracted its logic —
-these need no UI harness:
+The architecture has already extracted this logic, so it is covered without a UI harness:
 - [x] Persistence: round-trip, corrupt-file quarantine, old-schema fixtures (locks in 1.1).
 - [x] `AgentLauncher` hostile-string tests (`AgentLaunchQuotingTests`), locking in 2.6 two ways:
       the quoter's output is tokenized by **`/bin/sh` itself** and must give back the same words
@@ -223,7 +226,9 @@ these need no UI harness:
       project, session, model and prompt strings must leave nothing but `&&` when its quoted
       spans are removed. The residue parser has its own test, having been wrong once: it read
       the quoter's `'\''` escape as syntax.
-- [ ] Stream-event golden files from real Claude/Codex transcripts (locks in 2.4).
+- [x] Stream-event golden files from real Claude/Codex transcripts (locks in 2.4): four scrubbed
+      real-session fixtures cover Claude thinking/tools/edits and Codex reasoning/exec/patch
+      timelines, with replay and row-shape assertions.
 - [x] `SessionImporter.belongs` worktree fixtures (`SessionImportBelongingTests`), built with
       **git itself**: a main checkout, a linked worktree nested inside it, and one beside it. A
       fixture assembled by hand from what the layout is believed to be would prove the belief;
@@ -253,8 +258,11 @@ these need no UI harness:
       not a heading), quote reads before list so `> - item` is a quote, blank lines are not
       blocks, soft-wrapped lines flow into one paragraph, and an unterminated fence — which
       agents produce constantly by being cut off — ends at the document instead of looping.
-- [ ] Pin a `.swiftlint.yml` (unconfigured runs are noisy and crash mid-lint) and add CI:
-      `swift build && swift test && swiftlint`.
+- [x] Pin a narrowly-scoped `.swiftlint.yml` and add CI. `scripts/ci.sh` runs the architecture,
+      localization and theme boundaries, strict SwiftLint, all three local Swift package suites,
+      and the app's off-screen Xcode test plan under complete concurrency checking. Releases run
+      the same gate before archiving, and CI invokes that one script rather than maintaining a
+      second list.
 
 - [x] `PermissionBroker`'s defaults are pinned (`PermissionBrokerTests`). The decision that
       lets an agent's tool call run unasked had no test on any of its *unsure* answers: an

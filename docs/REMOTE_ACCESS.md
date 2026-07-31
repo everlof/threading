@@ -118,6 +118,21 @@ Use **Open Locally** to test the browser client without leaving the Mac. The own
 can also be copied from the pairing sheet, but it is intentionally not presented as a general
 sharing action.
 
+## Diagnostics sharing
+
+iOS and the browser keep a small seven-day journal of typed connection events on that client.
+They do not send it to the Mac by default. A paired interactive owner can open **Diagnostics** on
+iPhone, or use the control beside the Mac in the browser session list, and choose **Share
+diagnostics for 30 minutes**. The existing bounded history is sent first and new events follow
+until the timer expires or **Stop sharing diagnostics** is chosen. Consent is memory-only, so
+closing or reloading the client ends it early.
+
+The receiver accepts no raw log strings. It permits only the versioned event vocabulary and
+compact structural tokens, applies strict request/record/time bounds, replaces the authenticated
+device id with a pseudonym, and appends the result to the Mac's separate share-safe support
+journal. Messages, prompts, terminal output, paths, URLs, notification text and credentials are
+never eligible. Guest and view-only links cannot upload diagnostics.
+
 ## Notifications
 
 After pairing or accepting a shared chat, the iPhone dashboard explains what notifications do

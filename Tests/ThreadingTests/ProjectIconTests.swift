@@ -4,6 +4,7 @@ import ImageIO
 import UniformTypeIdentifiers
 @testable import Threading
 
+@MainActor
 final class ProjectIconTests: XCTestCase {
 
     // MARK: - Fixtures

@@ -23,7 +23,7 @@ final class PermissionBrokerTests: XCTestCase {
 
     private func decision(
         tool: String,
-        input: [String: Any] = [:],
+        input: [String: JSONValue] = [:],
         session: SessionID? = nil
     ) -> PermissionDecision {
         var result: PermissionDecision?

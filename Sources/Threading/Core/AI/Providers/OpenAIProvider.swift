@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 /// AI provider implementation for OpenAI's API.
-final class OpenAIProvider: AIProvider {
+final class OpenAIProvider: AIProvider, @unchecked Sendable {
 
     // MARK: - Constants
 
@@ -95,7 +95,7 @@ final class OpenAIProvider: AIProvider {
 
         switch httpResponse.statusCode {
         case 200:
-            return try parseResponse(data, duration: duration)
+            return try await parseResponse(data, duration: duration)
         case 429:
             ThreadingLogger.aiResponse.error("OpenAI response: rate limited")
             throw AIError.rateLimited
@@ -109,7 +109,7 @@ final class OpenAIProvider: AIProvider {
         }
     }
 
-    private func parseResponse(_ data: Data, duration: TimeInterval) throws -> String {
+    private func parseResponse(_ data: Data, duration: TimeInterval) async throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
               let firstChoice = choices.first,
@@ -126,7 +126,11 @@ final class OpenAIProvider: AIProvider {
             ThreadingLogger.aiResponse.info("OpenAI response - duration: \(String(format: "%.2f", duration))s, prompt_tokens: \(promptTokens), completion_tokens: \(completionTokens)")
 
             // Record token usage
-            TokenUsageManager.shared.record(model: model, inputTokens: promptTokens, outputTokens: completionTokens)
+            await TokenUsageManager.shared.record(
+                model: model,
+                inputTokens: promptTokens,
+                outputTokens: completionTokens
+            )
         }
 
         ThreadingLogger.aiResponse.debug("OpenAI response text: \(content)")

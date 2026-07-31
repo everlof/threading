@@ -1,11 +1,12 @@
 import Foundation
 import Network
+import os
 
 // MARK: - JSON-RPC Wire Types
 
 /// JSON-RPC permits integer, string, and explicit null identifiers. A missing identifier is
 /// represented separately by `JSONRPCRequest.id == nil`, because it marks a notification.
-enum RequestID: Codable, Equatable {
+enum RequestID: Codable, Equatable, Sendable {
     case integer(Int64)
     case string(String)
     case null
@@ -31,8 +32,8 @@ enum RequestID: Codable, Equatable {
     }
 }
 
-struct JSONRPCRequest: Decodable {
-    enum Parameters {
+struct JSONRPCRequest: Decodable, Sendable {
+    enum Parameters: Sendable {
         case initialize(InitializeParameters)
         case toolCall(MCPToolCall)
         case invalid
@@ -73,18 +74,18 @@ struct JSONRPCRequest: Decodable {
     }
 }
 
-struct InitializeParameters: Decodable {
+struct InitializeParameters: Decodable, Sendable {
     let protocolVersion: String?
 }
 
-struct EmptyJSONObject: Encodable {}
+struct EmptyJSONObject: Encodable, Sendable {}
 
-struct InitializeResult: Encodable {
-    struct Capabilities: Encodable {
+struct InitializeResult: Encodable, Sendable {
+    struct Capabilities: Encodable, Sendable {
         let tools = EmptyJSONObject()
     }
 
-    struct ServerInfo: Encodable {
+    struct ServerInfo: Encodable, Sendable {
         let name: String
         let version: String
     }
@@ -95,16 +96,16 @@ struct InitializeResult: Encodable {
     let instructions: String
 }
 
-struct ToolsListResult: Encodable {
+struct ToolsListResult: Encodable, Sendable {
     let tools: [MCPToolDefinition]
 }
 
-struct JSONRPCError: Encodable, Equatable {
+struct JSONRPCError: Encodable, Equatable, Sendable {
     let code: Int
     let message: String
 }
 
-enum JSONRPCResult: Encodable {
+enum JSONRPCResult: Encodable, Sendable {
     case initialize(InitializeResult)
     case empty(EmptyJSONObject)
     case toolsList(ToolsListResult)
@@ -121,7 +122,7 @@ enum JSONRPCResult: Encodable {
     }
 }
 
-struct JSONRPCResponse: Encodable {
+struct JSONRPCResponse: Encodable, Sendable {
     let jsonrpc = "2.0"
     let id: RequestID
     let result: JSONRPCResult?
@@ -149,7 +150,9 @@ struct JSONRPCResponse: Encodable {
 ///
 /// Every session gets its own endpoint URL (see `MCPSessionRegistry`), so a call arrives
 /// already attributed to the session that made it.
-final class MCPServer {
+/// `listener` and `connectionsByID` are confined to `queue`; the handler is touched only after
+/// hopping to main, and the one cross-queue value (`port`) has its own lock.
+final class MCPServer: @unchecked Sendable {
 
     // MARK: - Singleton
 
@@ -159,11 +162,15 @@ final class MCPServer {
     // MARK: - Properties
 
     /// Handles tool calls. Set by the app delegate once the window exists.
-    weak var handler: MCPToolHandling?
+    @MainActor weak var handler: AgentCommandHandling?
 
     /// The listening port, or nil until the listener is ready. Launches read this to decide
     /// whether to register the server at all.
-    private(set) var port: UInt16?
+    var port: UInt16? {
+        portStorage.withLock { $0 }
+    }
+
+    private let portStorage = OSAllocatedUnfairLock<UInt16?>(initialState: nil)
 
     private var listener: NWListener?
     private var connectionsByID: [ObjectIdentifier: MCPConnection] = [:]
@@ -177,17 +184,22 @@ final class MCPServer {
     /// `completion` runs once the outcome is known, ready or failed, so startup can proceed
     /// either way — a session launched without a port simply gets no MCP server, rather than
     /// not launching.
-    func start(completion: @escaping () -> Void) {
+    @MainActor
+    func start(completion: @escaping @MainActor @Sendable () -> Void) {
         guard listener == nil else {
             completion()
             return
         }
 
-        var hasCompleted = false
-        let finish = {
-            guard !hasCompleted else { return }
-            hasCompleted = true
-            DispatchQueue.main.async(execute: completion)
+        let completionState = OSAllocatedUnfairLock<Bool>(initialState: false)
+        let finish: @Sendable () -> Void = {
+            let shouldFinish = completionState.withLock { hasCompleted in
+                guard !hasCompleted else { return false }
+                hasCompleted = true
+                return true
+            }
+            guard shouldFinish else { return }
+            Task { @MainActor in completion() }
         }
 
         do {
@@ -206,13 +218,13 @@ final class MCPServer {
             listener.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .ready:
-                    self?.port = listener.port?.rawValue
+                    self?.portStorage.withLock { $0 = listener.port?.rawValue }
                     ThreadingLogger.mcp.info("MCP server listening on port \(listener.port?.rawValue ?? 0)")
                     finish()
 
                 case .failed(let error):
                     ThreadingLogger.mcp.error("MCP server failed: \(error.localizedDescription)")
-                    self?.port = nil
+                    self?.portStorage.withLock { $0 = nil }
                     finish()
 
                 default:
@@ -231,6 +243,7 @@ final class MCPServer {
         }
     }
 
+    @MainActor
     func stop() {
         // Connections are accepted and removed on `queue`; perform shutdown there as well.
         // Synchronous dispatch preserves the app-termination contract: when this returns, the
@@ -243,7 +256,7 @@ final class MCPServer {
 
             listener?.cancel()
             listener = nil
-            port = nil
+            portStorage.withLock { $0 = nil }
         }
     }
 
@@ -266,7 +279,10 @@ final class MCPServer {
     }
 
     /// Resolves the request's session and hands the JSON-RPC message on.
-    private func route(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+    private func route(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (HTTPResponse) -> Void
+    ) {
         guard request.method == "POST" else {
             // GET opens the optional server-to-client SSE stream, which this server does not
             // offer. The spec allows refusing it outright.
@@ -335,9 +351,9 @@ final class MCPServer {
     private func routePermission(
         _ request: HTTPRequest,
         token: String,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
-        func reply(_ decision: PermissionDecision) {
+        @Sendable func reply(_ decision: PermissionDecision) {
             let data = (try? JSONSerialization.data(withJSONObject: decision.hookResponse)) ?? Data()
             respond(.json(data))
         }
@@ -353,10 +369,17 @@ final class MCPServer {
             return
         }
 
+        let rawInput = hook["tool_input"] ?? [String: Any]()
+        guard let foundationInput = rawInput as? [String: Any],
+              let input = JSONValue.object(from: foundationInput) else {
+            reply(.deny(reason: "Threading refused malformed tool arguments."))
+            return
+        }
+
         let permissionRequest = PermissionRequest(
             sessionID: sessionID,
             toolName: toolName,
-            input: hook["tool_input"] as? [String: Any] ?? [:]
+            input: input
         )
 
         DispatchQueue.main.async {
@@ -373,7 +396,7 @@ final class MCPServer {
     private func handle(
         _ message: JSONRPCRequest,
         for sessionID: SessionID,
-        completion: @escaping (JSONRPCResponse?) -> Void
+        completion: @escaping @Sendable (JSONRPCResponse?) -> Void
     ) {
         // No id means a notification: acknowledged at the transport level, never answered.
         guard let id = message.id else {
@@ -438,13 +461,22 @@ final class MCPServer {
     }
 
     private func callTool(
-        _ call: MCPToolCall,
+        _ call: AgentCommand,
         id: RequestID,
         for sessionID: SessionID,
-        completion: @escaping (JSONRPCResponse?) -> Void
+        completion: @escaping @Sendable (JSONRPCResponse?) -> Void
     ) {
         // The handler touches AppKit and the model layer, neither of which is thread-safe.
         DispatchQueue.main.async { [weak self] in
+            guard MCPToolCatalog.admits(call) else {
+                completion(Self.result(
+                    id: id,
+                    .tool(.failure(
+                        "Tool \(call.name) is unavailable or disabled in Threading."
+                    ))
+                ))
+                return
+            }
             guard let handler = self?.handler else {
                 completion(Self.result(
                     id: id,

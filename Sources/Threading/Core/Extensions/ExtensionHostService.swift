@@ -62,7 +62,9 @@ protocol ExtensionServiceRouting: AnyObject {
         serviceVersion: Int,
         callerExtensionIdentifier: String,
         arguments: ExtensionJSONValue,
-        completion: @escaping (Result<ExtensionServiceResponse, Error>) -> Void
+        completion: @escaping @MainActor @Sendable (
+            Result<ExtensionServiceResponse, Error>
+        ) -> Void
     )
 }
 
@@ -77,7 +79,7 @@ protocol ExtensionCompanionRouting: AnyObject {
         companionID: String,
         operationID: String,
         arguments: ExtensionJSONValue,
-        completion: @escaping (
+        completion: @escaping @MainActor @Sendable (
             Result<ExtensionCompanionOperationResponse, Error>
         ) -> Void
     )
@@ -451,7 +453,7 @@ final class ExtensionHostService {
     /// Internal for focused host tests; network connections call the same method.
     func route(
         _ request: HTTPRequest,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         guard let components = URLComponents(
             string: "http://localhost\(request.path)"
@@ -837,7 +839,7 @@ final class ExtensionHostService {
         _ request: HTTPRequest,
         path: String,
         authority: Authority,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         guard require(.keyValueStorage, for: authority, respond: respond) else { return }
         guard let keyValueStore else {
@@ -947,7 +949,7 @@ final class ExtensionHostService {
         _ request: HTTPRequest,
         path: String,
         authority: Authority,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         guard require(.cacheStorage, for: authority, respond: respond) else { return }
         guard let cacheStore else {
@@ -1135,7 +1137,7 @@ final class ExtensionHostService {
         _ request: HTTPRequest,
         path: String,
         authority: Authority,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         guard require(.companionOperations, for: authority, respond: respond) else { return }
         guard request.header("content-type")?
@@ -1259,7 +1261,7 @@ final class ExtensionHostService {
     private func routeBrokeredFetch(
         _ request: HTTPRequest,
         authority: Authority,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         guard require(.networkBrokered, for: authority, respond: respond) else { return }
         guard request.header("content-type")?
@@ -1346,7 +1348,7 @@ final class ExtensionHostService {
         _ request: HTTPRequest,
         path: String,
         authority: Authority,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         guard require(.servicesConsume, for: authority, respond: respond) else { return }
         guard request.header("content-type")?
@@ -1573,7 +1575,7 @@ final class ExtensionHostService {
     private func routeComponentPublication(
         _ request: HTTPRequest,
         authority: Authority,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         let hasGeneralComponentAuthority = authority.capabilities.contains(
             .componentCustomization
@@ -1721,7 +1723,7 @@ final class ExtensionHostService {
     private func routeIdentityPublication(
         _ request: HTTPRequest,
         authority: Authority,
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         guard request.header("content-type")?
             .lowercased()
@@ -1801,7 +1803,7 @@ final class ExtensionHostService {
 
     private func routeEvents(
         queryItems: [URLQueryItem],
-        respond: @escaping (HTTPResponse) -> Void
+        respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
         let values = Dictionary(
             queryItems.map { ($0.name, $0.value ?? "") },

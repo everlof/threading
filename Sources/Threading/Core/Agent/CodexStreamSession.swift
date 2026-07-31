@@ -25,6 +25,7 @@ struct CodexTurnConfiguration {
 /// delegated work into the parent and could not observe child threads. App-server keeps one
 /// process subscribed to the thread graph, which gives Threading both a reusable conversation
 /// channel and structured subagent lifecycle events.
+@MainActor
 final class CodexStreamSession: ConversationStreamSession, SubagentReportingConversation {
 
     // MARK: - Properties
@@ -128,7 +129,7 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            DispatchQueue.main.async {
+            Task { @MainActor [weak self] in
                 self?.received(chunk)
             }
         }
@@ -136,14 +137,15 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
         errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            DispatchQueue.main.async {
+            Task { @MainActor [weak self] in
                 self?.receivedError(chunk)
             }
         }
 
         process.terminationHandler = { [weak self] child in
-            DispatchQueue.main.async {
-                self?.handleTermination(status: child.terminationStatus)
+            let status = child.terminationStatus
+            Task { @MainActor [weak self] in
+                self?.handleTermination(status: status)
             }
         }
 
@@ -155,7 +157,7 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
             )
             output.fileHandleForReading.readabilityHandler = nil
             errorPipe.fileHandleForReading.readabilityHandler = nil
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
                 self?.onExit?(-1)
             }
             return
@@ -514,31 +516,40 @@ final class CodexStreamSession: ConversationStreamSession, SubagentReportingConv
 
         switch method {
         case "item/commandExecution/requestApproval":
+            let input: [String: JSONValue] = [
+                "command": .string(parameters["command"] as? String ?? ""),
+                "cwd": .string(parameters["cwd"] as? String ?? ""),
+                "reason": .string(parameters["reason"] as? String ?? "")
+            ]
             request = PermissionRequest(
                 sessionID: sessionID,
                 tool: .bash,
-                input: [
-                    "command": parameters["command"] as? String ?? "",
-                    "cwd": parameters["cwd"] as? String ?? "",
-                    "reason": parameters["reason"] as? String ?? ""
-                ]
+                input: input
             )
 
         case "item/fileChange/requestApproval":
+            let input: [String: JSONValue] = [
+                "file_path": .string(parameters["grantRoot"] as? String ?? ""),
+                "reason": .string(parameters["reason"] as? String ?? "")
+            ]
             request = PermissionRequest(
                 sessionID: sessionID,
                 tool: .edit,
-                input: [
-                    "file_path": parameters["grantRoot"] as? String ?? "",
-                    "reason": parameters["reason"] as? String ?? ""
-                ]
+                input: input
             )
 
         case "item/permissions/requestApproval":
+            guard let input = JSONValue.object(from: parameters) else {
+                sendResponse(
+                    id: id,
+                    error: ["code": -32602, "message": "Permission arguments were not valid JSON."]
+                )
+                return
+            }
             request = PermissionRequest(
                 sessionID: sessionID,
                 tool: .unknown("permissions"),
-                input: parameters
+                input: input
             )
 
         default:

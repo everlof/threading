@@ -13,6 +13,25 @@ protocol OpticalInsetProviding {
     var opticalHorizontalInset: CGFloat { get }
 }
 
+/// Where a band measures its margins from.
+///
+/// The platform's clearance is stated per *edge*, not per point: a view spanning the sidebar's
+/// full width is told to keep clear of the window's curve and of the controls floating over the
+/// column, whether or not the band's own content comes anywhere near either. For a band that
+/// does — one drawn hard against the window's corner — that is exactly right. For the sidebar's
+/// two bands it is not: both sit a clear ten points inboard of the traffic lights above and the
+/// curve below, and taking the clearance anyway indented the brand and Settings some eighty
+/// points past the list they head and foot, so the column read as three columns.
+enum PaneBandMargin {
+    /// The corner-adapted safe area. The default, and right wherever the band's ink can meet
+    /// the window's curve or its floating controls.
+    case cornerAdapted
+    /// The band's own edges. For a band stacked directly above or below content that starts at
+    /// the pane's edge, where the platform's clearance would indent the chrome away from the
+    /// column it belongs to.
+    case paneEdge
+}
+
 /// The bottom band of a pane: a hairline above, its controls centred in the band, leading
 /// actions at one edge and trailing ones at the other.
 ///
@@ -49,9 +68,10 @@ final class PaneFooterView: NSView {
     // MARK: - Properties
 
     /// The region the content insets from: the corner-adapted safe area where the platform can
-    /// state one, the band's own edges elsewhere. Exposed so a test can assert the margin
-    /// against what the content is actually measured from.
-    private(set) var contentGuide: NSLayoutGuide!
+    /// state one and the band asks for it, the band's own edges otherwise. Exposed so a test can
+    /// assert the margin against what the content is actually measured from.
+    private let margin: PaneBandMargin
+    private(set) lazy var contentGuide: NSLayoutGuide = makeContentGuide(margin)
 
     private let separator = SeparatorView()
 
@@ -59,11 +79,16 @@ final class PaneFooterView: NSView {
 
     /// Both arrays run leading-to-trailing; the first leading view and the last trailing view
     /// touch their margins and are the ones aligned by ink.
-    init(leading: [NSView] = [], trailing: [NSView] = []) {
+    init(
+        leading: [NSView] = [],
+        trailing: [NSView] = [],
+        margin: PaneBandMargin = .cornerAdapted
+    ) {
+        self.margin = margin
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: Design.Size.footerHeight).isActive = true
-        contentGuide = makeContentGuide()
+        _ = contentGuide
         installSeparator()
         install(leading: leading, trailing: trailing)
     }
@@ -75,8 +100,8 @@ final class PaneFooterView: NSView {
 
     // MARK: - Private Methods
 
-    private func makeContentGuide() -> NSLayoutGuide {
-        if #available(macOS 26.0, *) {
+    private func makeContentGuide(_ margin: PaneBandMargin) -> NSLayoutGuide {
+        if #available(macOS 26.0, *), margin == .cornerAdapted {
             return layoutGuide(for: .safeArea(cornerAdaptation: .horizontal))
         }
         let guide = NSLayoutGuide()

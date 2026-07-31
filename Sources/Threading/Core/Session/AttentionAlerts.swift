@@ -1,6 +1,6 @@
 import AppKit
 import UniformTypeIdentifiers
-import UserNotifications
+@preconcurrency import UserNotifications
 
 // MARK: - Attention Alert
 
@@ -375,6 +375,7 @@ extension AttentionAlertCenter: UNUserNotificationCenterDelegate {
     ) {
         let raw = response.notification.request.content
             .userInfo[AttentionAlertDefaults.sessionKey] as? String
+        completionHandler()
         Task { @MainActor in
             if let raw, let sessionID = SessionID(uuidString: raw) {
                 NSApp.activate(ignoringOtherApps: true)
@@ -382,7 +383,6 @@ extension AttentionAlertCenter: UNUserNotificationCenterDelegate {
                     SessionNotificationOpened(sessionID: sessionID)
                 )
             }
-            completionHandler()
         }
     }
 }

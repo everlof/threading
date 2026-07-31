@@ -11,6 +11,7 @@ import AppKit
 /// and it leaves the window's own layout and hit-testing untouched. It is also what keeps
 /// the snapshot clean — the overlay was never in the captured view tree, so the marker is
 /// drawn onto the bitmap instead of erased from it.
+@MainActor
 final class ElementInspector {
 
     // MARK: - Properties
@@ -82,12 +83,16 @@ final class ElementInspector {
         observers.append(NotificationCenter.default.addObserver(
             forName: NSWindow.didResizeNotification, object: window, queue: .main
         ) { [weak self] _ in
-            guard let self, let host = self.host else { return }
-            self.overlay?.setFrame(host.frame, display: true)
+            Task { @MainActor [weak self] in
+                guard let self, let host = self.host else { return }
+                self.overlay?.setFrame(host.frame, display: true)
+            }
         })
         observers.append(NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: window, queue: .main
-        ) { [weak self] _ in self?.cancel() })
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.cancel() }
+        })
 
         self.overlay = overlay
         isActive = true
@@ -285,6 +290,7 @@ final class InspectorOverlayWindow: NSWindow {
 /// An element carries its whole chain rather than one rectangle, because the modifiers decide
 /// how much of it is drawn and they are free to change between one pointer move and the next —
 /// re-walking the view tree on every key press would answer a question already answered.
+@MainActor
 enum InspectorIndicator {
     case element(levels: [InspectorLevel], layers: InspectorLayers)
     case point(NSPoint, label: String)
@@ -379,6 +385,7 @@ final class InspectorOverlayView: NSView {
 
 /// One drawing for both surfaces the indicator appears on: the live overlay while hovering,
 /// and the captured bitmap the report keeps.
+@MainActor
 enum InspectorIndicatorDrawing {
 
     static func draw(_ indicator: InspectorIndicator, within bounds: NSRect) {

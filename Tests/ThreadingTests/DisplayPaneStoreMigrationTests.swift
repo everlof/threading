@@ -35,6 +35,35 @@ final class DisplayPaneStoreMigrationTests: XCTestCase {
         XCTAssertEqual(panel.activeTabID, "11111111-1111-1111-1111-111111111111")
     }
 
+    func testReencodingALegacyLayoutMakesItsVersionExplicit() throws {
+        let panel = try JSONDecoder().decode(
+            PersistedPanel.self,
+            from: Data(legacyJSON.utf8)
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(panel))
+                as? [String: Any]
+        )
+
+        XCTAssertEqual(
+            object["formatVersion"] as? Int,
+            PersistedPanel.currentFormatVersion
+        )
+    }
+
+    func testFutureLayoutVersionIsRefused() throws {
+        let future = legacyJSON.replacingOccurrences(
+            of: "{",
+            with: #"{"formatVersion":99,"#,
+            options: [],
+            range: legacyJSON.range(of: "{")
+        )
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(PersistedPanel.self, from: Data(future.utf8))
+        )
+    }
+
     func testTheSignatureOfALegacyLayoutIsUnchangedByTheSchema() throws {
         let panel = try JSONDecoder().decode(
             PersistedPanel.self,

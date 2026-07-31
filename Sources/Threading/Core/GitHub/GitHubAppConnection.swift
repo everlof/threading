@@ -82,7 +82,7 @@ final class GitHubAppConnection {
             : .connected(login: defaults.string(forKey: DefaultsKeys.login))
     }
 
-    static let liveTransport: Transport = { request in
+    nonisolated static let liveTransport: Transport = { request in
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
@@ -218,8 +218,12 @@ final class GitHubAppConnection {
 
     private func refreshLogin() async {
         guard let token = store.token(.access) else { return }
+        guard let endpoint = URL(string: "https://\(GitHubDefaults.apiHost)/user") else {
+            ThreadingLogger.github.error("GitHub API endpoint is invalid")
+            return
+        }
         var request = URLRequest(
-            url: URL(string: "https://\(GitHubDefaults.apiHost)/user")!,
+            url: endpoint,
             timeoutInterval: GitHubDefaults.requestTimeout
         )
         request.setValue(GitHubDefaults.acceptHeader, forHTTPHeaderField: "Accept")

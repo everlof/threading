@@ -16,6 +16,7 @@ enum AppThemeEditingError: LocalizedError {
 /// documents instead materialise the authored vocabulary at creation time. That keeps them
 /// independent of a later stock-theme change and prevents a fixed dark ground from falling
 /// through to a dynamic light system label.
+@MainActor
 enum AppThemeEditing {
 
     static func make(
@@ -173,7 +174,7 @@ enum AppThemeEditing {
         )
     }
 
-    static func validate(_ theme: AppTheme) throws {
+    nonisolated static func validate(_ theme: AppTheme) throws {
         if theme.isSystem {
             guard theme.mode == .system, theme.variants.isEmpty else {
                 throw AppThemeEditingError.invalid(
@@ -211,7 +212,7 @@ enum AppThemeEditing {
         }
     }
 
-    private static func validate(
+    nonisolated private static func validate(
         _ variant: AppTheme.Variant,
         kind: AppTheme.VariantKind,
         theme: AppTheme
@@ -376,7 +377,7 @@ enum AppThemeEditing {
     /// its labels locks the user out of the rest of the app as surely as an unreadable
     /// terminal would. An image cannot be measured this way (its pixels are arbitrary), so its
     /// gates are bounds, and legibility stays the author's to check by looking.
-    private static func validate(
+    nonisolated private static func validate(
         _ sidebar: SidebarStyle,
         kind: AppTheme.VariantKind,
         resolved: AppTheme,
@@ -455,14 +456,17 @@ enum AppThemeEditing {
         }
     }
 
-    private static func formatted(_ value: CGFloat) -> String {
+    nonisolated private static func formatted(_ value: CGFloat) -> String {
         String(format: "%.1f", Double(value))
     }
 
     /// Resolves translucency the way the themed views do before measuring contrast. Measuring
     /// the RGB components of a 10%-opaque white label directly would call it white-on-black
     /// with 21:1 contrast even though the user actually sees a near-black grey.
-    private static func composite(_ foreground: NSColor, over background: NSColor) -> NSColor {
+    nonisolated private static func composite(
+        _ foreground: NSColor,
+        over background: NSColor
+    ) -> NSColor {
         guard let foreground = foreground.usingColorSpace(.sRGB),
               let background = background.usingColorSpace(.sRGB) else {
             return foreground

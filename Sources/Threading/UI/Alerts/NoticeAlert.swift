@@ -38,10 +38,14 @@ enum NoticeAlert {
     ///
     /// `settings` is injectable so the silent path — the one that returns without putting a
     /// modal up — can be tested at all.
+    static func show(_ request: NoticeRequest, in window: NSWindow?) {
+        show(request, in: window, settings: .shared)
+    }
+
     static func show(
         _ request: NoticeRequest,
         in window: NSWindow?,
-        settings: AppSettings = .shared
+        settings: AppSettings
     ) {
         guard isShown(request, settings: settings) else { return }
 
@@ -64,7 +68,11 @@ enum NoticeAlert {
 
     /// Whether the statement is put up at all. Split from `show` so the guard is assertable
     /// without a modal.
-    static func isShown(_ request: NoticeRequest, settings: AppSettings = .shared) -> Bool {
+    static func isShown(_ request: NoticeRequest) -> Bool {
+        isShown(request, settings: .shared)
+    }
+
+    static func isShown(_ request: NoticeRequest, settings: AppSettings) -> Bool {
         guard let notice = request.notice else { return true }
         return settings.shows(notice)
     }

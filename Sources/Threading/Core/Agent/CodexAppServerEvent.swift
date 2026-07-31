@@ -204,7 +204,7 @@ enum CodexAppServerEvent {
             return .toolUse(
                 id: id,
                 tool: .bash,
-                input: ["command": item["command"] as? String ?? ""]
+                input: ["command": .string(item["command"] as? String ?? "")]
             )
 
         case "mcpToolCall":
@@ -225,10 +225,12 @@ enum CodexAppServerEvent {
             )
 
         case "fileChange":
-            return .toolUse(id: id, tool: .edit, input: item)
+            guard let input = JSONValue.object(from: item) else { return nil }
+            return .toolUse(id: id, tool: .edit, input: input)
 
         case "plan":
-            return .toolUse(id: id, tool: .plan, input: item)
+            guard let input = JSONValue.object(from: item) else { return nil }
+            return .toolUse(id: id, tool: .plan, input: input)
 
         default:
             return nil
@@ -267,13 +269,15 @@ enum CodexAppServerEvent {
         "commandExecution", "mcpToolCall", "dynamicToolCall", "fileChange", "plan"
     ]
 
-    private static func dictionary(_ value: Any?) -> [String: Any] {
-        if let object = value as? [String: Any] { return object }
+    private static func dictionary(_ value: Any?) -> [String: JSONValue] {
+        if let object = value as? [String: Any] {
+            return JSONValue.object(from: object) ?? [:]
+        }
         guard let text = value as? String,
               let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return [:] }
-        return object
+        return JSONValue.object(from: object) ?? [:]
     }
 
     private static func integer(_ value: Any?) -> Int? {

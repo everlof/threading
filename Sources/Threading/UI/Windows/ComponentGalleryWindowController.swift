@@ -142,7 +142,7 @@ final class ComponentGalleryViewController: NSViewController {
         labelWithString: L10n.string("Ready — interact with any story.")
     )
     private let spinner = ThemedSpinner()
-    private let workingOrbs = OrbState.allCases.map(WorkingOrbView.init(state:))
+    private let workingOrbs = OrbState.allCases.map { WorkingOrbView(state: $0) }
     private let morphingTitle = MorphingTitleLabel()
 
     /// The tab strip's live model, so its story can be driven rather than looked at: closing

@@ -69,6 +69,7 @@ struct InspectorLevel: Equatable {
 
 // MARK: - Hierarchy
 
+@MainActor
 enum InspectorHierarchy {
 
     /// The target and every ancestor above it, leaf first, coincident levels coalesced.

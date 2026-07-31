@@ -14,6 +14,7 @@ import XCTest
 ///
 /// The reply is a contract with a program that is already running, so these assert on the exact
 /// bytes rather than on any state the app can read back.
+@MainActor
 final class TerminalColorQueryTests: XCTestCase {
 
     // MARK: - Harness

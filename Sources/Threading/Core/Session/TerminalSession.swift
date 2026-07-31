@@ -1,7 +1,8 @@
 import AppKit
-import SwiftTerm
+@preconcurrency import SwiftTerm
 
 /// Manages a single terminal session including the terminal view, shell process, and session state.
+@MainActor
 final class TerminalSession: NSObject {
 
     // MARK: - Properties
@@ -369,7 +370,7 @@ final class TerminalSession: NSObject {
 
 // MARK: - LocalProcessTerminalViewDelegate
 
-extension TerminalSession: LocalProcessTerminalViewDelegate {
+extension TerminalSession: @preconcurrency LocalProcessTerminalViewDelegate {
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
         delegate?.terminalSession(self, sizeChangedTo: newCols, rows: newRows)
@@ -410,6 +411,7 @@ extension TerminalSession: LocalProcessTerminalViewDelegate {
 
 // MARK: - TerminalSessionDelegate
 
+@MainActor
 protocol TerminalSessionDelegate: AnyObject {
     func terminalSessionDidStart(_ session: TerminalSession)
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String)

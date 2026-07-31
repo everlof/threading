@@ -5,6 +5,7 @@ import AppKit
 /// The pieces both the plain outline and the hierarchy overlay draw with, in one place so the
 /// two surfaces the inspector renders on — the live overlay and the captured bitmap — cannot
 /// drift apart.
+@MainActor
 enum InspectorDrawing {
 
     /// Resolved before any alpha is applied: `withAlphaComponent` *replaces* alpha, and a
@@ -114,6 +115,7 @@ enum InspectorDrawing {
 ///   legend row carries.
 /// - **A measure is drawn in the *parent's* hue**, because it starts at the parent's edge and
 ///   the layout that chose it almost always lives there.
+@MainActor
 enum InspectorHierarchyDrawing {
 
     // MARK: - Public Methods

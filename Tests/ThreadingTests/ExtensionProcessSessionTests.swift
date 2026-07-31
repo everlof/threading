@@ -587,6 +587,7 @@ final class ExtensionProcessSessionTests: XCTestCase {
             identifier: "com.example.process-test",
             name: "Process Test",
             version: "0.1.0",
+            runtime: .native,
             executable: "bin/extension",
             capabilities: capabilities,
             mcpTools: registration.mcpTools,

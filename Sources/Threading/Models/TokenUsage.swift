@@ -28,7 +28,7 @@ struct TokenUsage: Codable, Equatable {
 }
 
 /// Manages persistent storage of token usage statistics per model.
-final class TokenUsageManager {
+actor TokenUsageManager {
 
     // MARK: - Singleton
 
@@ -42,27 +42,19 @@ final class TokenUsageManager {
 
     // MARK: - Properties
 
-    private let defaults = UserDefaults.standard
-
-    /// Current usage by model name.
-    private(set) var usageByModel: [String: TokenUsage] {
-        get {
-            guard let data = defaults.data(forKey: Keys.tokenUsage),
-                  let usage = try? JSONDecoder().decode([String: TokenUsage].self, from: data) else {
-                return [:]
-            }
-            return usage
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                defaults.set(data, forKey: Keys.tokenUsage)
-            }
-        }
-    }
+    private let persistence: RecoverableDefaultsStore<[String: TokenUsage]>
+    private(set) var usageByModel: [String: TokenUsage]
 
     // MARK: - Initialization
 
-    private init() {}
+    init(defaults: UserDefaults = .standard) {
+        self.persistence = RecoverableDefaultsStore(
+            defaults: defaults,
+            key: Keys.tokenUsage,
+            criticality: .userAuthored
+        )
+        self.usageByModel = persistence.load(defaultValue: [:]).value
+    }
 
     // MARK: - Public Methods
 
@@ -72,7 +64,9 @@ final class TokenUsageManager {
         var modelUsage = usage[model] ?? TokenUsage()
         modelUsage.add(input: inputTokens, output: outputTokens)
         usage[model] = modelUsage
-        usageByModel = usage
+        if persistence.save(usage) {
+            usageByModel = usage
+        }
     }
 
     /// Returns the total usage for a specific model.
@@ -89,12 +83,16 @@ final class TokenUsageManager {
     func reset(model: String) {
         var usage = usageByModel
         usage.removeValue(forKey: model)
-        usageByModel = usage
+        if persistence.save(usage) {
+            usageByModel = usage
+        }
     }
 
     /// Resets all token usage data.
     func resetAll() {
-        usageByModel = [:]
+        if persistence.save([:]) {
+            usageByModel = [:]
+        }
     }
 
     /// Returns total tokens across all models.

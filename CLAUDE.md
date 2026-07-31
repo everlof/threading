@@ -135,6 +135,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Entitlements, the TCC grants and who inherits them, the Privacy settings page, Info.plist usage strings | [`permissions.md`](docs/architecture/permissions.md) |
 | Developer ID signing, notarization, `scripts/release.sh`, and the Sparkle automatic-update plan | [`releasing.md`](docs/architecture/releasing.md) |
 | Reclaimable build output, the two deletion gates, `scc` code stats | [`storage-and-stats.md`](docs/architecture/storage-and-stats.md) |
+| Persistence/wire failure semantics, dependency direction, strict concurrency, bounded work, CI and release gates | [`reliability-and-type-safety.md`](docs/architecture/reliability-and-type-safety.md) |
 | Any UI at all: the component vocabulary, themed controls, tabs, the composer, motion previews | [`design-system.md`](docs/architecture/design-system.md) |
 | The three forked packages and the seams that are ours | [`dependencies.md`](docs/architecture/dependencies.md) |
 

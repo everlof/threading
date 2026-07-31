@@ -5,7 +5,7 @@ import Foundation
 /// This is the fact a port number alone cannot state, and it is the one worth showing: `3000`
 /// on `127.0.0.1` is a private dev server, while the same `3000` on `0.0.0.0` is answering on
 /// every interface the machine has — the same number, two very different exposures.
-enum PortInterface: Equatable {
+enum PortInterface: Equatable, Sendable {
 
     /// Bound to every interface — `0.0.0.0` or `::`.
     case allInterfaces
@@ -78,7 +78,7 @@ enum PortInterface: Equatable {
 }
 
 /// One TCP socket a process is listening on.
-struct ListeningPort: Equatable {
+struct ListeningPort: Equatable, Sendable {
 
     // MARK: - Properties
 

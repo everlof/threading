@@ -30,9 +30,10 @@ final class PaneHeaderView: NSView {
     // MARK: - Properties
 
     /// The region the content insets from: the corner-adapted safe area where the platform can
-    /// state one, the band's own edges elsewhere. Exposed so a test can assert the margin
-    /// against what the content is actually measured from.
-    private(set) var contentGuide: NSLayoutGuide!
+    /// state one and the band asks for it, the band's own edges otherwise. Exposed so a test can
+    /// assert the margin against what the content is actually measured from.
+    private let margin: PaneBandMargin
+    private(set) lazy var contentGuide: NSLayoutGuide = makeContentGuide(margin)
 
     private let separator = SeparatorView()
 
@@ -40,11 +41,16 @@ final class PaneHeaderView: NSView {
 
     /// Both arrays run leading-to-trailing; the first leading view and the last trailing view
     /// touch their margins and are the ones aligned by ink.
-    init(leading: [NSView] = [], trailing: [NSView] = []) {
+    init(
+        leading: [NSView] = [],
+        trailing: [NSView] = [],
+        margin: PaneBandMargin = .cornerAdapted
+    ) {
+        self.margin = margin
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: Self.bandHeight).isActive = true
-        contentGuide = makeContentGuide()
+        _ = contentGuide
         installSeparator()
         install(leading: leading, trailing: trailing)
     }
@@ -56,8 +62,8 @@ final class PaneHeaderView: NSView {
 
     // MARK: - Private Methods
 
-    private func makeContentGuide() -> NSLayoutGuide {
-        if #available(macOS 26.0, *) {
+    private func makeContentGuide(_ margin: PaneBandMargin) -> NSLayoutGuide {
+        if #available(macOS 26.0, *), margin == .cornerAdapted {
             return layoutGuide(for: .safeArea(cornerAdaptation: .horizontal))
         }
         let guide = NSLayoutGuide()

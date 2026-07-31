@@ -87,6 +87,14 @@ local-network gate, and the phone arrives over an **outbound** relay connection 
 across the LAN. The `0.0.0.0` handling in `ListeningPort.swift` is about detecting what a
 *user's* dev server binds to — a feature, not one of our own binds.
 
+**That claim is about Threading's own binds, and only those.** A Local Network prompt naming
+Threading has been seen in the wild, and the attribution rule is why: an agent that curls a LAN
+address, resolves a `.local` name, or starts a dev server the network reaches trips the gate as
+a child of Threading, and macOS names the parent. So the usage string still does not belong in
+the Info.plist — Threading requests nothing — while the prompt remains something a user can
+meet. It is not forecast either: unlike `screencapture` there is no command that means it (any
+`curl` might), and macOS 13 and 14 have no Local Network list for a status row to point at.
+
 ## Reporting a grant must not cost a prompt
 
 `SystemPrivacyStatusReader` reads Accessibility with `AXIsProcessTrusted()` — the option-free
@@ -102,6 +110,86 @@ That case exists for this reason and is not a fallback for "unknown".
 The system calls are injected into the reader, following
 `SystemExtensionCompanionPermissionAuthorizer`, so a test asserts on stated inputs rather than
 on whatever the developer's machine happens to have approved.
+
+`immediateStatus(of:)` is the same readings without the callback, and returns nil for the two
+that cannot answer synchronously — the folder grant, which has no non-prompting API at all, and
+notifications, which has one but only through `getNotificationSettings`. It exists because the
+forecast below runs inside a permission decision, which is holding a CLI blocked while it thinks.
+
+## The page has to keep reading, because nothing tells it
+
+`refresh()` ran on `loadView` and on `viewWillAppear`, and neither of those is when the answer
+changes. macOS posts nothing when a TCC grant is flipped, and the page *invites* the flip: the
+row reads "You allow Threading in System Settings", the button opens that exact pane, and coming
+back left the word still saying "Not allowed" until the page was navigated away from and back —
+`viewWillAppear` does not fire for a page that never left.
+
+So `viewDidAppear` starts watching and `viewWillDisappear` stops, and watching is two things
+because one does not cover the other:
+
+- `NSApplication.didBecomeActiveNotification` answers the common path immediately. A poll alone
+  would leave the stale word up for an interval at exactly the moment the user came back to read
+  the new one.
+- A 3-second poll covers the rest. A TCC dialog is put up by another process, so an approval
+  given to one an *agent* raised can land without Threading ever having resigned active.
+
+Both are torn down together — a settings page is cached and kept alive after being navigated
+away from (`TerminalContainerViewController.showSettingsPage`), so a timer left running is one
+that runs for the rest of the app's life. `refreshIfVisible` guards on `view.window != nil`
+rather than `isVisible`, because every test in this target builds an *unshown* window.
+
+The page also only writes a row whose answer has changed. Rewriting four identical labels twenty
+times a minute re-announces each one to VoiceOver for nothing.
+
+## A prompt the user did not ask for, from an app that is not doing the thing
+
+The most-reported surprise in this app is not on the Privacy page at all. An agent runs
+`screencapture`, and because of the attribution rule above macOS puts up **"Threading.app would
+like to record this computer's screen and audio."** The dialog names the wrong program, does not
+say which of six open sessions caused it, and does not say what it was trying to do.
+
+Threading cannot intercept a TCC prompt — it is raised by another process, after the child has
+already made the call. The only place to explain it is *before* the command runs, which is where
+`PermissionBroker` is already standing with every tool call held open by `PreToolUse`.
+
+`SystemGrantForecast` reads the command and names the grant it is about to need.
+`PermissionBroker.decide` consults it **ahead of every other rule, including the modes that
+promise not to interrupt**: no mode Threading offers can promise macOS stays quiet, so none of
+them is a reason to let that dialog arrive unexplained. `MainWindowPermissions` presents the
+sheet — a window sheet rather than an inline card, because the grant belongs to the application
+and the dialog it is warning about is itself application-modal.
+
+Four rules keep it from becoming the nuisance it is meant to remove:
+
+- **Only grants that can be read without prompting.** Screen Recording and Accessibility are
+  forecast; Files & Folders is not, and its absence from `SystemGrantForecast` is deliberate. A
+  folder forecast could only be a guess, and a wrong guess is a card in front of a grant given
+  two years ago — the same unearned interruption, wearing our badge instead of the system's.
+- **Only when the grant is missing.** The status read is what turns a forecast into a certainty.
+- **Once per grant per run.** `briefedGrants` matters in exactly one case: the user let the
+  command run and then pressed Deny on the *system* dialog. macOS remembers that and never asks
+  again, so without the set the next `screencapture` would be briefed forever for a prompt that
+  can no longer appear. Approving at the system prompt needs no bookkeeping — the status read
+  then says `.allowed`. A *declined* briefing is not recorded, because the command never ran and
+  so macOS was never asked.
+- **Not in `dontAsk`.** Approving a briefing *is* the tool's approval — the sheet already shows
+  the command, the session and the agent, which is strictly more than the ordinary card, and a
+  second sheet behind the first is how people learn to click through both. That makes the mode
+  matter: briefing a `dontAsk` session would turn the one mode that promises to refuse rather
+  than interrupt into an allow. `briefingApplies(in:)` is pure so the matrix is testable without
+  a store or a sheet.
+
+The matching is naive on purpose, the way `ShellCommandPolicy`'s is — segments split at
+operators, wrappers like `sudo` stepped over, the executable's directory stripped — but it is
+*not* a security decision, and being wrong costs one unnecessary card or one unexplained prompt.
+`osascript` is the one case read further in: it is how an agent inspects a window as readily as
+how it clicks a button, and only the second needs Accessibility. Driving System Events without
+one of those verbs asks macOS for **Automation** instead — a different gate, with no readable
+status, and so not one this forecasts.
+
+Terminal sessions are outside all of this. `brokersPermissions` is false for them
+(`AgentLauncher`), so there is no `PreToolUse` hook and no call to see coming; a terminal agent's
+system prompt still arrives the way it always did.
 
 ## The page is an inventory, not a checklist
 

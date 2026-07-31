@@ -45,11 +45,31 @@ final class TerminalContainerViewController: NSViewController {
     /// feature, and a shell that forgot its directory on every session switch would be worse
     /// than useless. One host controller serves every session; switching swaps which list it
     /// shows, exactly as the display panel does.
-    private(set) var drawerHostController: DrawerHostViewController!
+    private(set) lazy var drawerHostController = DrawerHostViewController(
+        directoryProvider: { sessionID in
+            guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+                return nil
+            }
+            return AgentRuntime.shared.controller(for: sessionID)?.session
+                .effectiveWorkingDirectory()
+                ?? URL(fileURLWithPath: project.folderPath)
+        }
+    )
 
-    private var drawerHost: NSView!
-    private var drawerDivider: ShellDrawerDivider!
-    private var drawerHeight: NSLayoutConstraint!
+    private lazy var drawerHost: NSView = {
+        let host = NSView()
+        host.wantsLayer = true
+        host.translatesAutoresizingMaskIntoConstraints = false
+        return host
+    }()
+    private lazy var drawerDivider: ShellDrawerDivider = {
+        let divider = ShellDrawerDivider()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.isHidden = true
+        divider.onDrag = { [weak self] delta in self?.resizeDrawer(by: delta) }
+        return divider
+    }()
+    private lazy var drawerHeight = drawerHost.heightAnchor.constraint(equalToConstant: 0)
 
     /// Window geometry, like the display panel's width: a drawer height is a working
     /// preference for a window, not a fact about the session — so it persists app-wide.
@@ -57,6 +77,9 @@ final class TerminalContainerViewController: NSViewController {
 
     private var settingsPage: NSViewController?
     private var settingsPageCache: [String: NSViewController] = [:]
+    /// The results page, kept across a typing run and dropped the moment a real page is shown.
+    /// Not in `settingsPageCache`: it has no page ID, and nothing routes to it.
+    private var searchResultsPage: SettingsSearchResultsViewController?
 
     /// Whether settings is the surface currently on screen, so the window can title the pane.
     var isShowingSettings: Bool { settingsPage != nil }
@@ -296,8 +319,47 @@ final class TerminalContainerViewController: NSViewController {
     func showSettingsPage(id: String) {
         guard let definition = SettingsPages.page(id: id) else { return }
 
-        currentComposerProjectID = nil
         currentSettingsPageID = id
+        searchResultsPage = nil
+
+        let cached = settingsPageCache[id]
+        let page = cached ?? {
+            let made = definition.make()
+            settingsPageCache[id] = made
+            return made
+        }()
+
+        install(settings: page, repaint: cached != nil)
+    }
+
+    /// Shows what a settings search found, in the pane the reader is already looking at.
+    ///
+    /// One controller for a whole typing run — `update` restates it rather than a new page
+    /// arriving per keystroke, which would throw away the scroll position and flash the pane
+    /// on every letter. `currentSettingsPageID` is deliberately left alone: the results are not
+    /// a page, and clearing the query has to be able to put the chosen one back.
+    func showSettingsSearchResults(query: String, onOpen: @escaping (String) -> Void) {
+        let matches = SettingsPages.search(query)
+
+        if let existing = searchResultsPage {
+            existing.onOpen = onOpen
+            existing.update(query: query, matches: matches)
+            guard settingsPage !== existing else { return }
+            install(settings: existing, repaint: true)
+            return
+        }
+
+        let results = SettingsSearchResultsViewController(query: query, matches: matches)
+        results.onOpen = onOpen
+        searchResultsPage = results
+        install(settings: results, repaint: false)
+    }
+
+    /// Puts a settings-shaped child in the pane: centred, capped at a readable width, floored by
+    /// margins — pinned straight to the pane rather than through an intermediate container,
+    /// which did not size its child.
+    private func install(settings page: NSViewController, repaint: Bool) {
+        currentComposerProjectID = nil
 
         if settingsPage == nil {
             detachCurrentChild()
@@ -312,13 +374,6 @@ final class TerminalContainerViewController: NSViewController {
             current.removeFromParent()
         }
 
-        let cached = settingsPageCache[id]
-        let page = cached ?? {
-            let made = definition.make()
-            settingsPageCache[id] = made
-            return made
-        }()
-
         addChild(page)
         let content = page.view
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -328,7 +383,7 @@ final class TerminalContainerViewController: NSViewController {
         // never reached this tree. Re-resolve it here rather than dropping the cache: rebuilding
         // would cost the page its scroll position and its controls' state to fix colours and
         // fonts that one walk can simply take again.
-        if cached != nil { AppThemeRefresh.repaint(content) }
+        if repaint { AppThemeRefresh.repaint(content) }
 
         // The cap is the readable measure plus the glow gutters the page pads itself with,
         // so the cards inside keep the readable width.
@@ -365,18 +420,9 @@ final class TerminalContainerViewController: NSViewController {
     /// closed. Every session surface pins its bottom to the drawer's top rather than to the
     /// pane, so opening one is a change of constant rather than a rebuild of the layout.
     private func setupDrawer() {
-        drawerHost = NSView()
-        drawerHost.wantsLayer = true
-        drawerHost.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(drawerHost)
 
-        drawerDivider = ShellDrawerDivider()
-        drawerDivider.translatesAutoresizingMaskIntoConstraints = false
-        drawerDivider.isHidden = true
-        drawerDivider.onDrag = { [weak self] delta in self?.resizeDrawer(by: delta) }
         view.addSubview(drawerDivider)
-
-        drawerHeight = drawerHost.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
             drawerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -393,17 +439,6 @@ final class TerminalContainerViewController: NSViewController {
         // Installed once and never re-parented: the zero-high band hides it when closed, and a
         // session switch swaps which tab list it shows rather than which child sits here —
         // detaching per switch is what used to separate shells from their scrollback views.
-        drawerHostController = DrawerHostViewController(directoryProvider: { sessionID in
-            guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
-                return nil
-            }
-            // Where the agent *is*, asked at the moment the shell starts: a running terminal
-            // session reports its directory over OSC 7. A conversation has no PTY to ask, and
-            // was launched in the project's folder, which is what the fallback is.
-            return AgentRuntime.shared.controller(for: sessionID)?.session
-                .effectiveWorkingDirectory()
-                ?? URL(fileURLWithPath: project.folderPath)
-        })
         addChild(drawerHostController)
         drawerHostController.view.translatesAutoresizingMaskIntoConstraints = false
         drawerHost.addSubview(drawerHostController.view)
@@ -1207,6 +1242,7 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
 
 // MARK: - TerminalContainerViewControllerDelegate
 
+@MainActor
 protocol TerminalContainerViewControllerDelegate: AnyObject {
     func terminalContainer(
         _ container: TerminalContainerViewController,

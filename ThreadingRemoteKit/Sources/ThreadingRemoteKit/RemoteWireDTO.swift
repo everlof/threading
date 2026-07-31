@@ -15,9 +15,9 @@ import Foundation
 /// `label`, and `accent`) mapped to RGB/RGBA hex values. Sending resolved values rather than a
 /// theme identifier means custom themes and the System theme work on clients that do not have
 /// the Mac's theme library.
-public struct RemoteThemeDTO: Codable, Equatable {
-    public struct Material: Codable, Equatable {
-        public struct Glow: Codable, Equatable {
+public struct RemoteThemeDTO: Codable, Equatable, Sendable {
+    public struct Material: Codable, Equatable, Sendable {
+        public struct Glow: Codable, Equatable, Sendable {
             public let color: String
             public let radius: Double
             public let opacity: Double
@@ -98,7 +98,7 @@ public struct RemoteThemeDTO: Codable, Equatable {
 /// A session's fully resolved terminal palette. This remains separate from app chrome because
 /// terminal themes can be assigned at session/project scope even when the rest of the app uses
 /// one global style.
-public struct RemoteTerminalThemeDTO: Codable, Equatable {
+public struct RemoteTerminalThemeDTO: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let foreground: String
@@ -129,7 +129,7 @@ public struct RemoteTerminalThemeDTO: Codable, Equatable {
 
 /// The choices an owner can select remotely. Every entry carries its resolved colours so a
 /// client can preview a choice immediately while the Mac persists the authoritative setting.
-public struct RemoteThemeCatalogDTO: Codable, Equatable {
+public struct RemoteThemeCatalogDTO: Codable, Equatable, Sendable {
     public let appThemes: [RemoteThemeDTO]
     public let terminalThemes: [RemoteTerminalThemeDTO]
 
@@ -143,7 +143,7 @@ public struct RemoteThemeCatalogDTO: Codable, Equatable {
 }
 
 /// One session as it appears to a remote client's session list.
-public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable {
+public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let title: String
     public let agentKind: String
@@ -247,7 +247,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable {
 
 /// One added checkout a new remote session can run in. A branch is offered only when an added
 /// checkout already stands on it, matching the Mac composer's safety rule.
-public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable {
+public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let branch: String?
@@ -261,7 +261,7 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable {
     }
 }
 
-public struct RemoteReasoningChoiceDTO: Codable, Equatable, Identifiable {
+public struct RemoteReasoningChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
 
@@ -271,7 +271,7 @@ public struct RemoteReasoningChoiceDTO: Codable, Equatable, Identifiable {
     }
 }
 
-public struct RemoteModelChoiceDTO: Codable, Equatable, Identifiable {
+public struct RemoteModelChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let reasoning: [RemoteReasoningChoiceDTO]
@@ -292,7 +292,7 @@ public struct RemoteModelChoiceDTO: Codable, Equatable, Identifiable {
 
 /// One login available to an agent on the Mac. Only presentation-safe identity and the latest
 /// normalized usage reading cross the wire; config paths and credentials never leave the host.
-public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable {
+public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let emoji: String?
@@ -325,7 +325,7 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable {
     }
 }
 
-public struct RemoteAgentChoiceDTO: Codable, Equatable, Identifiable {
+public struct RemoteAgentChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
     /// Nil when decoded from a host predating remote account selection.
@@ -353,7 +353,7 @@ public struct RemoteAgentChoiceDTO: Codable, Equatable, Identifiable {
 
 /// Choices exposed only to the interactive owner. Guest shares never learn the project list,
 /// checkout paths, accounts, or launch configuration.
-public struct RemoteNewSessionCatalogDTO: Codable, Equatable {
+public struct RemoteNewSessionCatalogDTO: Codable, Equatable, Sendable {
     public let projects: [RemoteProjectChoiceDTO]
     public let agents: [RemoteAgentChoiceDTO]
 
@@ -365,7 +365,7 @@ public struct RemoteNewSessionCatalogDTO: Codable, Equatable {
 
 /// The Mac serving a share. Its stable id lets an iOS client replace the existing paired-device
 /// record when the user rescans a short-lived relay URL after a later launch.
-public struct RemoteHostDTO: Codable, Equatable {
+public struct RemoteHostDTO: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let platform: String
@@ -380,8 +380,8 @@ public struct RemoteHostDTO: Codable, Equatable {
 /// The `GET /api/me` payload: the protocol the server speaks, what this share is, and the
 /// sessions it reaches. The protocol pair is included so a client can verify compatibility even
 /// on a request the server chose to answer.
-public struct RemoteMeDTO: Codable, Equatable {
-    public struct Share: Codable, Equatable {
+public struct RemoteMeDTO: Codable, Equatable, Sendable {
+    public struct Share: Codable, Equatable, Sendable {
         public let label: String
         /// "all" for a My Devices share, "session" for a guest share of one session.
         public let scope: String
@@ -467,7 +467,7 @@ public struct RemoteMeDTO: Codable, Equatable {
 }
 
 /// Selects the app chrome shared by the Mac and its paired devices.
-public struct RemoteSetAppThemeRequestDTO: Codable, Equatable {
+public struct RemoteSetAppThemeRequestDTO: Codable, Equatable, Sendable {
     public let themeID: String
 
     public init(themeID: String) {
@@ -476,7 +476,7 @@ public struct RemoteSetAppThemeRequestDTO: Codable, Equatable {
 }
 
 /// Selects one session's terminal palette. Nil clears the session override so it inherits.
-public struct RemoteSetTerminalThemeRequestDTO: Codable, Equatable {
+public struct RemoteSetTerminalThemeRequestDTO: Codable, Equatable, Sendable {
     public let themeID: String?
 
     public init(themeID: String?) {
@@ -484,7 +484,7 @@ public struct RemoteSetTerminalThemeRequestDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteCreateShareRequestDTO: Codable, Equatable {
+public struct RemoteCreateShareRequestDTO: Codable, Equatable, Sendable {
     /// "view" or "interact".
     public let capability: String
     /// An independent, chat-scoped right. Ignored unless capability is `interact`.
@@ -509,7 +509,7 @@ public struct RemoteCreateShareRequestDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteCreateShareResponseDTO: Codable, Equatable {
+public struct RemoteCreateShareResponseDTO: Codable, Equatable, Sendable {
     public let url: String
     public let capability: String
     public let canApprovePermissions: Bool
@@ -532,7 +532,7 @@ public struct RemoteCreateShareResponseDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteAcceptInvitationRequestDTO: Codable, Equatable {
+public struct RemoteAcceptInvitationRequestDTO: Codable, Equatable, Sendable {
     public let displayName: String
 
     public init(displayName: String) {
@@ -540,7 +540,7 @@ public struct RemoteAcceptInvitationRequestDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteAcceptInvitationResponseDTO: Codable, Equatable {
+public struct RemoteAcceptInvitationResponseDTO: Codable, Equatable, Sendable {
     /// A fresh device-bound membership bearer. It replaces the single-use invite fragment.
     public let accessToken: String
     public let me: RemoteMeDTO
@@ -551,11 +551,11 @@ public struct RemoteAcceptInvitationResponseDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteRevokeSharesRequestDTO: Codable, Equatable {
+public struct RemoteRevokeSharesRequestDTO: Codable, Equatable, Sendable {
     public init() {}
 }
 
-public struct RemoteCreateSessionRequestDTO: Codable, Equatable {
+public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     public let projectID: String
     public let agentKind: String
     /// `default`, an alternate account handle, or nil for older clients.
@@ -585,7 +585,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteCreateSessionResponseDTO: Codable, Equatable {
+public struct RemoteCreateSessionResponseDTO: Codable, Equatable, Sendable {
     public let sessionID: String
     public let me: RemoteMeDTO
 
@@ -595,7 +595,7 @@ public struct RemoteCreateSessionResponseDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteRenameSessionRequestDTO: Codable, Equatable {
+public struct RemoteRenameSessionRequestDTO: Codable, Equatable, Sendable {
     public let title: String
 
     public init(title: String) {
@@ -603,7 +603,7 @@ public struct RemoteRenameSessionRequestDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteSetSessionPinnedRequestDTO: Codable, Equatable {
+public struct RemoteSetSessionPinnedRequestDTO: Codable, Equatable, Sendable {
     public let isPinned: Bool
 
     public init(isPinned: Bool) {
@@ -611,7 +611,7 @@ public struct RemoteSetSessionPinnedRequestDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteSetSessionArchivedRequestDTO: Codable, Equatable {
+public struct RemoteSetSessionArchivedRequestDTO: Codable, Equatable, Sendable {
     public let isArchived: Bool
 
     public init(isArchived: Bool) {
@@ -619,7 +619,7 @@ public struct RemoteSetSessionArchivedRequestDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteSetSessionSurfaceRequestDTO: Codable, Equatable {
+public struct RemoteSetSessionSurfaceRequestDTO: Codable, Equatable, Sendable {
     /// `terminal` is the agent's original UI; `conversation` is Threading's Native UI.
     public let surface: String
 
@@ -634,14 +634,14 @@ public struct RemoteSetSessionSurfaceRequestDTO: Codable, Equatable {
 ///
 /// The Mac owns the git checkout and resolves these modes. A phone receives only the bounded,
 /// parsed result, never a path it can use to reach the host filesystem directly.
-public enum RemoteGitReviewMode: String, Codable, Equatable, CaseIterable {
+public enum RemoteGitReviewMode: String, Codable, Equatable, CaseIterable, Sendable {
     case unstaged
     case staged
     case branch
     case lastTurn
 }
 
-public struct RemoteGitDiffLineDTO: Codable, Equatable {
+public struct RemoteGitDiffLineDTO: Codable, Equatable, Sendable {
     /// `context`, `addition`, or `removal`.
     public let kind: String
     public let text: String
@@ -661,7 +661,7 @@ public struct RemoteGitDiffLineDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteGitHunkDTO: Codable, Equatable {
+public struct RemoteGitHunkDTO: Codable, Equatable, Sendable {
     public let header: String
     public let lines: [RemoteGitDiffLineDTO]
 
@@ -671,7 +671,7 @@ public struct RemoteGitHunkDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteGitFileDiffDTO: Codable, Equatable, Identifiable {
+public struct RemoteGitFileDiffDTO: Codable, Equatable, Identifiable, Sendable {
     public let path: String
     /// `modified`, `added`, `deleted`, `untracked`, `renamed`, or `binary`.
     public let change: String
@@ -707,7 +707,7 @@ public struct RemoteGitFileDiffDTO: Codable, Equatable, Identifiable {
 ///
 /// `message` carries an empty state or a recoverable git failure. Returning that state as the
 /// same successful wire shape lets the sheet keep its mode picker and retry affordance visible.
-public struct RemoteGitReviewSnapshotDTO: Codable, Equatable {
+public struct RemoteGitReviewSnapshotDTO: Codable, Equatable, Sendable {
     public let mode: RemoteGitReviewMode
     public let files: [RemoteGitFileDiffDTO]
     public let message: String?
@@ -730,7 +730,7 @@ public struct RemoteGitReviewSnapshotDTO: Codable, Equatable {
 }
 
 /// Repository-relative paths tracked by git or present as non-ignored untracked files.
-public struct RemoteRepositoryFilesDTO: Codable, Equatable {
+public struct RemoteRepositoryFilesDTO: Codable, Equatable, Sendable {
     public let paths: [String]
     public let isTruncated: Bool
 
@@ -741,7 +741,7 @@ public struct RemoteRepositoryFilesDTO: Codable, Equatable {
 }
 
 /// A bounded source-file projection for the mobile file browser.
-public struct RemoteRepositoryFileDTO: Codable, Equatable, Identifiable {
+public struct RemoteRepositoryFileDTO: Codable, Equatable, Identifiable, Sendable {
     public let path: String
     public let content: String?
     public let isBinary: Bool
@@ -766,7 +766,7 @@ public struct RemoteRepositoryFileDTO: Codable, Equatable, Identifiable {
 ///
 /// The path is checkout-relative. File bytes are fetched separately so the list remains cheap
 /// and the phone never receives visual files it has not chosen to preview.
-public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable {
+public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let path: String
     public let name: String
     /// `image` or `pdf`.
@@ -792,7 +792,7 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable {
 }
 
 /// The current bounded attachment list for a session.
-public struct RemoteAttachmentsDTO: Codable, Equatable {
+public struct RemoteAttachmentsDTO: Codable, Equatable, Sendable {
     public let attachments: [RemoteAttachmentDTO]
 
     public init(attachments: [RemoteAttachmentDTO]) {
@@ -805,7 +805,7 @@ public struct RemoteAttachmentsDTO: Codable, Equatable {
 /// The phone deliberately receives display state rather than a URL it should load itself:
 /// cookies, authentication, history, permission grants, and MCP automation all remain in the
 /// Mac's existing browser.
-public struct RemoteBrowserTabDTO: Codable, Equatable, Identifiable {
+public struct RemoteBrowserTabDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let title: String
     public let displayURL: String?
@@ -831,7 +831,7 @@ public struct RemoteBrowserTabDTO: Codable, Equatable, Identifiable {
 }
 
 /// Authoritative session Workspace state fetched after a live invalidation.
-public struct RemoteWorkspaceDTO: Codable, Equatable {
+public struct RemoteWorkspaceDTO: Codable, Equatable, Sendable {
     public let browserTabs: [RemoteBrowserTabDTO]
     public let latestActivityID: String?
 
@@ -842,7 +842,7 @@ public struct RemoteWorkspaceDTO: Codable, Equatable {
 }
 
 /// The state a device is in while it awaits approval or after denial, returned as a 403 body.
-public struct RemoteDeviceStateDTO: Codable, Equatable {
+public struct RemoteDeviceStateDTO: Codable, Equatable, Sendable {
     /// "pendingApproval" or "denied".
     public let state: String
     /// Seconds the client should wait before polling `/api/me` again.
@@ -856,7 +856,7 @@ public struct RemoteDeviceStateDTO: Codable, Equatable {
 
 /// The body of a `426 Upgrade Required`: the server refused a client whose protocol it cannot
 /// serve, and says which side is behind so the client shows the right message.
-public struct RemoteUpgradeRequiredDTO: Codable, Equatable {
+public struct RemoteUpgradeRequiredDTO: Codable, Equatable, Sendable {
     public let error: String
     public let update: RemoteUpdateTarget
     public let serverProtocol: RemoteProtocolInfo
@@ -873,7 +873,7 @@ public struct RemoteUpgradeRequiredDTO: Codable, Equatable {
 // MARK: - WebSocket (server → client)
 
 /// Sent once, immediately after a socket authenticates, describing the surface it is watching.
-public struct RemoteHelloDTO: Codable, Equatable {
+public struct RemoteHelloDTO: Codable, Equatable, Sendable {
     public let type: String        // "hello"
     public let surface: String     // "terminal" | "conversation"
     public let capability: String  // "view" | "interact"
@@ -904,7 +904,7 @@ public struct RemoteHelloDTO: Codable, Equatable {
 }
 
 /// A live theme change while a session is already open.
-public struct RemoteThemeUpdateDTO: Codable, Equatable {
+public struct RemoteThemeUpdateDTO: Codable, Equatable, Sendable {
     public let type: String
     public let theme: RemoteThemeDTO
     public let terminalTheme: RemoteTerminalThemeDTO
@@ -917,7 +917,7 @@ public struct RemoteThemeUpdateDTO: Codable, Equatable {
 }
 
 /// A live app-chrome change for clients on the session dashboard.
-public struct RemoteAppThemeUpdateDTO: Codable, Equatable {
+public struct RemoteAppThemeUpdateDTO: Codable, Equatable, Sendable {
     public let type: String
     public let theme: RemoteThemeDTO
 
@@ -930,7 +930,7 @@ public struct RemoteAppThemeUpdateDTO: Codable, Equatable {
 /// A hint that the session catalogue changed. The event deliberately carries no sessions:
 /// every subscriber may have a different share scope, so each client re-fetches its own
 /// authorised `/api/me` snapshot instead of receiving somebody else's catalogue.
-public struct RemoteSessionsChangedDTO: Codable, Equatable {
+public struct RemoteSessionsChangedDTO: Codable, Equatable, Sendable {
     public let type: String
 
     public init() {
@@ -943,11 +943,11 @@ public struct RemoteSessionsChangedDTO: Codable, Equatable {
 /// `activityID` is present only for a meaningful new surface the phone may want to hint. A nil
 /// value refreshes an already-visible Follow view without manufacturing unread attention for
 /// every browser click, scroll, or form fill.
-public enum RemoteWorkspaceKind: String, Codable, Equatable {
+public enum RemoteWorkspaceKind: String, Codable, Equatable, Sendable {
     case browser
 }
 
-public struct RemoteWorkspaceChangedDTO: Codable, Equatable {
+public struct RemoteWorkspaceChangedDTO: Codable, Equatable, Sendable {
     public let type: String
     public let kind: RemoteWorkspaceKind
     public let activityID: String?
@@ -966,7 +966,7 @@ public struct RemoteWorkspaceChangedDTO: Codable, Equatable {
 }
 
 /// Ephemeral participant activity. Presence is advisory, never a write lock or authority.
-public struct RemotePresenceDTO: Codable, Equatable, Identifiable {
+public struct RemotePresenceDTO: Codable, Equatable, Identifiable, Sendable {
     public let type: String
     public let memberID: String
     public let displayName: String
@@ -992,7 +992,7 @@ public struct RemotePresenceDTO: Codable, Equatable, Identifiable {
 
 /// The active PTY size. An interactive phone owns this grid while its terminal is visible;
 /// view-only clients follow it, just as they follow the Mac's grid when no controller is active.
-public struct RemoteResizeDTO: Codable, Equatable {
+public struct RemoteResizeDTO: Codable, Equatable, Sendable {
     public let type: String        // "resize"
     public let cols: Int
     public let rows: Int
@@ -1005,7 +1005,7 @@ public struct RemoteResizeDTO: Codable, Equatable {
 }
 
 /// The terminal title changed after the initial hello (usually through OSC 0/2).
-public struct RemoteTitleDTO: Codable, Equatable {
+public struct RemoteTitleDTO: Codable, Equatable, Sendable {
     public let type: String        // "title"
     public let title: String
 
@@ -1017,7 +1017,7 @@ public struct RemoteTitleDTO: Codable, Equatable {
 
 // MARK: - Notifications
 
-public enum RemoteNotificationKind: String, Codable, CaseIterable {
+public enum RemoteNotificationKind: String, Codable, CaseIterable, Sendable {
     case sharedSession
     case permissionRequest
     case agentMessage
@@ -1028,7 +1028,7 @@ public enum RemoteNotificationKind: String, Codable, CaseIterable {
 /// The fallback remains in the event for older clients and for notification kinds whose text is
 /// user-authored. APNs and current live clients use this key when it is present, so the receiving
 /// iPhone — rather than the sending Mac — chooses the display language.
-public struct RemoteLocalizedTextDTO: Codable, Equatable {
+public struct RemoteLocalizedTextDTO: Codable, Equatable, Sendable {
     public let key: String
     public let arguments: [String]
 
@@ -1041,7 +1041,7 @@ public struct RemoteLocalizedTextDTO: Codable, Equatable {
 /// The provider-neutral payload used both on the live events socket and inside an APNs push.
 /// It carries no bearer, project path, tool arguments, or diff: lock-screen content stays
 /// intentionally smaller than the authenticated session view it opens.
-public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable {
+public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Sendable {
     public let type: String
     public let id: String
     public let kind: RemoteNotificationKind
@@ -1077,7 +1077,7 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable {
     }
 }
 
-public struct RemoteNotificationRegistrationDTO: Codable, Equatable {
+public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     public let deviceToken: String
     /// "sandbox" for a development build, "production" for TestFlight/App Store.
     public let environment: String
@@ -1094,7 +1094,7 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable {
     }
 }
 
-public struct RemoteNotificationRegistrationResponseDTO: Codable, Equatable {
+public struct RemoteNotificationRegistrationResponseDTO: Codable, Equatable, Sendable {
     /// "push" when this Mac can reach APNs, otherwise "live".
     public let delivery: String
 
@@ -1104,7 +1104,7 @@ public struct RemoteNotificationRegistrationResponseDTO: Codable, Equatable {
 }
 
 /// An in-band error, e.g. an interact action attempted on a view-only share.
-public struct RemoteErrorDTO: Codable, Equatable {
+public struct RemoteErrorDTO: Codable, Equatable, Sendable {
     public let type: String        // "error"
     public let code: String
 
@@ -1116,7 +1116,7 @@ public struct RemoteErrorDTO: Codable, Equatable {
 
 /// The session's mirror is ending. `update` is set only when the reason is a protocol mismatch,
 /// naming the side that must update.
-public struct RemoteEndedDTO: Codable, Equatable {
+public struct RemoteEndedDTO: Codable, Equatable, Sendable {
     public let type: String        // "ended"
     public let reason: String
     public let update: RemoteUpdateTarget?
@@ -1132,7 +1132,7 @@ public struct RemoteEndedDTO: Codable, Equatable {
 
 /// A provider-neutral row in the native conversation surface. The Mac has already normalised
 /// Claude and Codex into this vocabulary, so mobile clients do not need either provider parser.
-public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable {
+public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     /// "user", "assistant", "thinking", "tool", or "notice".
     public let kind: String
@@ -1164,7 +1164,7 @@ public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable {
 /// The authoritative conversation snapshot. Native turns are modest in row count and snapshots
 /// make reconnect, replay, tool-result attachment, and streamed-placeholder replacement one
 /// idempotent operation for every client.
-public struct RemoteConversationSnapshotDTO: Codable, Equatable {
+public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
     public let type: String
     public let rows: [RemoteConversationRowDTO]
     public let streamingText: String
@@ -1222,7 +1222,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable {
 /// Timeline rows only append or gain a result while a process is alive, so the wire can name
 /// those two operations directly. Full snapshots remain the recovery path when a client's base
 /// revision no longer matches.
-public struct RemoteConversationDeltaDTO: Codable, Equatable {
+public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
     public let type: String
     public let baseRevision: Int
     public let revision: Int
@@ -1258,7 +1258,7 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable {
 
 /// An older, prepend-only page. Page rows use the same stable ids as live rows, so a page
 /// arriving across a live update can be merged idempotently.
-public struct RemoteConversationPageDTO: Codable, Equatable {
+public struct RemoteConversationPageDTO: Codable, Equatable, Sendable {
     public let type: String
     public let rows: [RemoteConversationRowDTO]
     public let beforeRowID: String?
@@ -1277,7 +1277,7 @@ public struct RemoteConversationPageDTO: Codable, Equatable {
 }
 
 /// A line in the edit preview attached to a permission request.
-public struct RemotePermissionDiffLineDTO: Codable, Equatable, Identifiable {
+public struct RemotePermissionDiffLineDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     /// "context", "addition", or "removal".
     public let kind: String
@@ -1291,7 +1291,7 @@ public struct RemotePermissionDiffLineDTO: Codable, Equatable, Identifiable {
 }
 
 /// The one permission decision currently awaiting the user in a native conversation.
-public struct RemotePermissionRequestDTO: Codable, Equatable, Identifiable {
+public struct RemotePermissionRequestDTO: Codable, Equatable, Identifiable, Sendable {
     public let type: String
     public let id: String
     public let toolName: String
@@ -1347,7 +1347,7 @@ public struct RemotePermissionRequestDTO: Codable, Equatable, Identifiable {
 /// The union of everything a client can send, decoded permissively: `type` discriminates and
 /// the rest are optional so one struct covers auth, input, submit and permission answers. The
 /// `auth` frame carries the client's protocol pair for negotiation.
-public struct RemoteClientMessage: Codable, Equatable {
+public struct RemoteClientMessage: Codable, Equatable, Sendable {
     public let type: String
     public let token: String?
     public let device: String?

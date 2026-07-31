@@ -25,6 +25,22 @@ enum SessionActivity {
 
     /// Finished working while the session was not on screen.
     case needsAttention
+
+    /// Whether a turn is unfinished: the agent is mid-answer, or stopped on a question it
+    /// cannot get past.
+    ///
+    /// This is the line an interruption costs something across. A session that is `idle` or
+    /// merely unread has already finished its turn and loses only its process, which resumes;
+    /// these two lose the answer being written. Copy that counts "running agents" counts both
+    /// sides of that line and reads as the worse one.
+    var hasTurnInFlight: Bool {
+        switch self {
+        case .working, .awaitingUser:
+            return true
+        case .dormant, .idle, .needsAttention:
+            return false
+        }
+    }
 }
 
 // MARK: - Session Activity Tracker

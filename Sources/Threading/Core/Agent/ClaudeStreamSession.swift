@@ -19,6 +19,7 @@ import Foundation
 /// carries the fast-mode flag. Codex's per-turn `exec` has no equivalent live channel, so the
 /// capability protocols below are Claude-only and the UI offers the control only when the cast
 /// succeeds.
+@MainActor
 final class ClaudeStreamSession:
     ConversationStreamSession,
     ModelSwitchableConversation,
@@ -116,7 +117,7 @@ final class ClaudeStreamSession:
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            DispatchQueue.main.async {
+            Task { @MainActor [weak self] in
                 self?.received(chunk)
             }
         }
@@ -124,14 +125,15 @@ final class ClaudeStreamSession:
         error.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            DispatchQueue.main.async {
+            Task { @MainActor [weak self] in
                 self?.receivedError(chunk)
             }
         }
 
         process.terminationHandler = { [weak self] process in
-            DispatchQueue.main.async {
-                self?.handleTermination(status: process.terminationStatus)
+            let status = process.terminationStatus
+            Task { @MainActor [weak self] in
+                self?.handleTermination(status: status)
             }
         }
 
@@ -141,7 +143,7 @@ final class ClaudeStreamSession:
             ThreadingLogger.agent.error("Stream session failed to start: \(error.localizedDescription)")
             output.fileHandleForReading.readabilityHandler = nil
             (process.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
                 self?.onExit?(-1)
             }
             return
@@ -207,7 +209,9 @@ final class ClaudeStreamSession:
 
     // MARK: - Child Transcript History
 
-    func loadSubagentHistory(completion: @escaping ([SubagentEvent]) -> Void) {
+    func loadSubagentHistory(
+        completion: @escaping @MainActor @Sendable ([SubagentEvent]) -> Void
+    ) {
         guard let plan = subagentTranscriptPlan() else {
             DispatchQueue.main.async { completion([]) }
             return
@@ -217,7 +221,7 @@ final class ClaudeStreamSession:
 
     func loadSubagentTranscript(
         for descriptor: SubagentDescriptor,
-        completion: @escaping ([StreamEvent], Bool) -> Void
+        completion: @escaping @MainActor @Sendable ([StreamEvent], Bool) -> Void
     ) {
         guard let path = descriptor.path, !path.isEmpty else {
             DispatchQueue.main.async { completion([], false) }
@@ -418,6 +422,7 @@ enum ClaudeStreamDefaults {
 /// Claude's stream-json control channel supports this; Codex's per-turn `exec` does not (yet), so
 /// it deliberately does not conform and the UI offers the control only when the cast succeeds —
 /// the same shape as `AgentKind.supportsForking` and its kin.
+@MainActor
 protocol ModelSwitchableConversation: AnyObject {
     /// `nil` resets to the session default. The completion reports the CLI's own verdict, so a
     /// rejected model id surfaces rather than reading as success.
@@ -426,6 +431,7 @@ protocol ModelSwitchableConversation: AnyObject {
 
 /// A conversation transport that can toggle Claude Code's fast mode mid-conversation. Claude-only,
 /// for the same reason as `ModelSwitchableConversation`.
+@MainActor
 protocol FastModeConversation: AnyObject {
     func setFastMode(_ enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void)
 }

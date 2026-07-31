@@ -1,6 +1,6 @@
 import AppKit
 import UniformTypeIdentifiers
-import WebKit
+@preconcurrency import WebKit
 
 enum BrowserColorScheme: String {
     case auto
@@ -490,9 +490,23 @@ final class BrowserViewController: NSViewController {
 
     // MARK: - Web View
 
-    private(set) var webView: WKWebView!
-    private var viewportScrollView: NSScrollView!
-    private var webViewHost: NSView!
+    private(set) lazy var webView = makePrimaryWebView()
+    private lazy var webViewHost: NSView = {
+        let host = BrowserViewportCanvasView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        return host
+    }()
+    private lazy var viewportScrollView: NSScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+        scroll.hasHorizontalScroller = true
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = webViewHost
+        return scroll
+    }()
     private var webViewStack: [WKWebView] = []
     private var documentSequences: [ObjectIdentifier: Int] = [:]
     private var passwordFocusedFrameTokens: [ObjectIdentifier: Set<String>] = [:]
@@ -571,7 +585,7 @@ final class BrowserViewController: NSViewController {
     override func loadView() {
         view = NSView()
         view.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
-        setupWebView()
+        webViewStack = [webView]
         setupChrome()
         observeWebView()
     }
@@ -591,7 +605,7 @@ final class BrowserViewController: NSViewController {
 
     // MARK: - Setup
 
-    private func setupWebView() {
+    private func makePrimaryWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         // Shared contexts carry the user's authenticated state. A private context receives its
         // own non-persistent store at controller creation and cannot see another tab's cookies.
@@ -663,8 +677,7 @@ final class BrowserViewController: NSViewController {
         )
         configuration.userContentController = contentController
 
-        webView = makeWebView(configuration: configuration)
-        webViewStack = [webView]
+        return makeWebView(configuration: configuration)
     }
 
     private func setupChrome() {
@@ -724,17 +737,6 @@ final class BrowserViewController: NSViewController {
         progressBar.translatesAutoresizingMaskIntoConstraints = false
 
         let separator = SeparatorView()
-        viewportScrollView = ThemedScrollView()
-        viewportScrollView.translatesAutoresizingMaskIntoConstraints = false
-        viewportScrollView.borderType = .noBorder
-        viewportScrollView.drawsBackground = false
-        viewportScrollView.hasHorizontalScroller = true
-        viewportScrollView.hasVerticalScroller = true
-        viewportScrollView.autohidesScrollers = true
-
-        webViewHost = BrowserViewportCanvasView()
-        viewportScrollView.documentView = webViewHost
-
         view.addSubview(chromeBar)
         view.addSubview(progressBar)
         view.addSubview(separator)
@@ -836,28 +838,44 @@ final class BrowserViewController: NSViewController {
     private func observeWebView() {
         observations.forEach { $0.invalidate() }
         observations = [
-            webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
-                guard let self else { return }
-                self.syncAddress()
-                self.updateAnnotationOverlay()
-                self.onPageChange?()
-                // pushState/hash/history moves do not produce a document-load callback. Their
-                // URL change is authoritative, and completing here keeps agent history actions
-                // from sitting on the general navigation timeout.
-                if !webView.isLoading {
-                    self.finishLoad(true, "")
+            webView.observe(\.url, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.syncAddress()
+                    self.updateAnnotationOverlay()
+                    self.onPageChange?()
+                    // pushState/hash/history moves do not produce a document-load callback. Their
+                    // URL change is authoritative, and completing here keeps agent history actions
+                    // from sitting on the general navigation timeout.
+                    if !self.webView.isLoading {
+                        self.finishLoad(true, "")
+                    }
                 }
             },
-            webView.observe(\.title) { [weak self] _, _ in self?.onPageChange?() },
-            webView.observe(\.canGoBack) { [weak self] _, _ in self?.updateNavButtons() },
-            webView.observe(\.canGoForward) { [weak self] _, _ in self?.updateNavButtons() },
-            webView.observe(\.estimatedProgress) { [weak self] webView, _ in
-                self?.updateProgress(webView.estimatedProgress)
+            webView.observe(\.title) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.onPageChange?() }
             },
-            webView.observe(\.isLoading) { [weak self] webView, _ in
-                self?.updateProgress(
-                    webView.isLoading ? max(webView.estimatedProgress, 0.01) : 1
-                )
+            webView.observe(\.canGoBack) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.updateNavButtons() }
+            },
+            webView.observe(\.canGoForward) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.updateNavButtons() }
+            },
+            webView.observe(\.estimatedProgress) { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.updateProgress(self.webView.estimatedProgress)
+                }
+            },
+            webView.observe(\.isLoading) { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.updateProgress(
+                        self.webView.isLoading
+                            ? max(self.webView.estimatedProgress, 0.01)
+                            : 1
+                    )
+                }
             }
         ]
     }
@@ -904,8 +922,6 @@ final class BrowserViewController: NSViewController {
     /// see the requested CSS dimensions, while the user can pan a desktop-sized test surface
     /// inside a narrow panel without the app window being resized under them.
     private func layoutWebViews(resetScrollPosition: Bool = false) {
-        guard viewportScrollView != nil, webViewHost != nil else { return }
-
         let visible = viewportScrollView.contentView.bounds.size
         let viewport = agentViewportSize ?? visible
         guard viewport.width > 0, viewport.height > 0 else { return }
@@ -1953,7 +1969,7 @@ final class BrowserViewController: NSViewController {
         var rect: CGRect?
         var captureSize = webView.bounds.size
         if fullPage, let dimensions = try? await pageDimensions() {
-            rect = CGRect(
+            let captureRect = CGRect(
                 x: 0,
                 y: 0,
                 width: max(1, min(CGFloat(dimensions.width), webView.bounds.width)),
@@ -1965,7 +1981,8 @@ final class BrowserViewController: NSViewController {
                     )
                 )
             )
-            captureSize = rect!.size
+            rect = captureRect
+            captureSize = captureRect.size
         }
         return await captureScreenshot(rect: rect, captureSize: captureSize)
     }
@@ -2916,7 +2933,7 @@ extension BrowserViewController: WKNavigationDelegate {
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
         if navigationAction.navigationType == .formSubmitted
             || navigationAction.navigationType == .formResubmitted,
@@ -2946,7 +2963,7 @@ extension BrowserViewController: WKNavigationDelegate {
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
-        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
     ) {
         if let url = navigationResponse.response.url?.absoluteString {
             let started = pendingNavigationStarts.removeValue(forKey: url)
@@ -3130,7 +3147,7 @@ extension BrowserViewController: WKUIDelegate {
         _ webView: WKWebView,
         runOpenPanelWith parameters: WKOpenPanelParameters,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping ([URL]?) -> Void
+        completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
     ) {
         let agentRequest: BrowserAgentFileSelectionRequest?
         if webView === self.webView,
@@ -3211,7 +3228,7 @@ extension BrowserViewController: WKUIDelegate {
         _ webView: WKWebView,
         runJavaScriptAlertPanelWithMessage message: String,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping () -> Void
+        completionHandler: @escaping @MainActor @Sendable () -> Void
     ) {
         let alert = websiteAlert(
             message: frame.request.url?.host ?? L10n.string("Website message"),
@@ -3225,7 +3242,7 @@ extension BrowserViewController: WKUIDelegate {
         _ webView: WKWebView,
         runJavaScriptConfirmPanelWithMessage message: String,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping (Bool) -> Void
+        completionHandler: @escaping @MainActor @Sendable (Bool) -> Void
     ) {
         let alert = websiteAlert(
             message: frame.request.url?.host ?? L10n.string("Website confirmation"),
@@ -3243,7 +3260,7 @@ extension BrowserViewController: WKUIDelegate {
         runJavaScriptTextInputPanelWithPrompt prompt: String,
         defaultText: String?,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping (String?) -> Void
+        completionHandler: @escaping @MainActor @Sendable (String?) -> Void
     ) {
         let field = ThemedTextField()
         field.stringValue = defaultText ?? ""
@@ -3288,7 +3305,7 @@ extension BrowserViewController: WKDownloadDelegate {
         _ download: WKDownload,
         decideDestinationUsing response: URLResponse,
         suggestedFilename: String,
-        completionHandler: @escaping (URL?) -> Void
+        completionHandler: @escaping @MainActor @Sendable (URL?) -> Void
     ) {
         let identifier = ObjectIdentifier(download)
         let agentRequest = agentDownloadRequests[identifier]

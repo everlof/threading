@@ -186,6 +186,7 @@ class ThemedControl: NSControl, ThemedComponent {
 /// The draw-time counterpart of `applySurface`, and the reason both exist: `applySurface` sets a
 /// `cgColor` on a layer, which resolves once and freezes — fine for a container rebuilt on a
 /// theme change, wrong for a control that must survive a live switch.
+@MainActor
 enum ThemedSurface {
 
     /// The silhouette a surface was drawn as: a rect and the corner it was given.
@@ -251,6 +252,7 @@ enum ThemedSurface {
 /// Held separately from `ThemedControl` because not every themed control can inherit from it:
 /// `ThemedTextField` has to subclass `NSTextField` for the field editor, the formatter and the
 /// whole of text editing. One description of what "follows the theme" means, two bases.
+@MainActor
 final class ThemeRedraw {
 
     private let appEvents = AppEventObservations()

@@ -286,4 +286,148 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertTrue(terms.contains("Server used for synchronization"))
         XCTAssertTrue(terms.contains("https://example.test"))
     }
+
+    // MARK: - What a search found
+
+    /// A page qualifies on **all** tokens; a term is worth showing if **any** token touched it.
+    /// The two rules are deliberately different — see `SettingsSearch.terms(in:touchedBy:)`.
+    func testATermIsShownWhenAnyTokenTouchesItEvenThoughThePageNeedsAll() {
+        let terms = ["Notifications", "Mute", "Sound", "Startup"]
+
+        XCTAssertEqual(
+            SettingsSearch.terms(in: terms, touchedBy: "mute sound"),
+            ["Mute", "Sound"]
+        )
+        XCTAssertEqual(SettingsSearch.terms(in: terms, touchedBy: "notif"), ["Notifications"])
+        XCTAssertEqual(SettingsSearch.terms(in: terms, touchedBy: "nothing"), [])
+    }
+
+    /// The raw term lists hold every localised spelling of one concept, so a page carries
+    /// "sessions", "Sessions" and the translation. Three rows saying one thing is worse than
+    /// none: the first spelling wins, capitalised so a row reads as a label.
+    func testTermsAreCollapsedToOneRowPerConcept() {
+        XCTAssertEqual(
+            SettingsSearch.presentable(["sessions", "Sessions", "  ", "shell", "SESSIONS"]),
+            ["Sessions", "Shell"]
+        )
+    }
+
+    func testAMatchNeverShowsMoreTermsThanItCanSummarise() {
+        let many = (0..<20).map { "Term \($0)" }
+        XCTAssertEqual(
+            SettingsSearch.terms(in: many, touchedBy: "term").count,
+            SettingsSearch.maximumTermsShown
+        )
+    }
+
+    /// The catalogue's own answer, so a page whose terms stop matching is caught here rather
+    /// than by a reader who searched for a feature and was shown its section with nothing said.
+    func testTheCatalogueReportsWhichTermsAQueryLandedOn() throws {
+        let match = try XCTUnwrap(
+            SettingsPages.search("mute").first { $0.pageID == SettingsPages.generalID }
+        )
+        XCTAssertEqual(match.terms, ["Mute"])
+        XCTAssertTrue(SettingsPages.search("").isEmpty, "an empty query is not a search")
+    }
+
+    /// The list shows the matches under the page they belong to. The page rows stay the list's
+    /// selectable items — a match opens a page, it is never one.
+    func testTheListShowsMatchesUnderTheirPageWhileSearching() {
+        let sidebar = SettingsSidebar(items: [
+            .init(
+                id: "general",
+                title: "General",
+                symbol: "gearshape",
+                searchText: "General notifications mute sound",
+                terms: ["Notifications", "Mute", "Sound"]
+            ),
+            .init(
+                id: "themes",
+                title: "Themes",
+                symbol: "paintpalette",
+                searchText: "Themes appearance font",
+                terms: ["Appearance", "Font"]
+            )
+        ])
+
+        sidebar.updateSearchQuery("mute")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["general"])
+        XCTAssertEqual(rowTitles(in: sidebar), ["General", "Mute"])
+
+        // Cleared, the list is pages again — a term row outliving its query would be a
+        // permanent second copy of the catalogue.
+        sidebar.updateSearchQuery("")
+        XCTAssertEqual(rowTitles(in: sidebar), ["General", "Themes"])
+    }
+
+    // MARK: - The results page
+
+    /// The pane's half of the answer. A search that only narrowed the sidebar left the one
+    /// surface the reader is looking at showing the page they had open before they typed.
+    func testTheResultsPageListsEverySectionTheQueryFound() {
+        let results = SettingsSearchResultsViewController(
+            query: "mute",
+            matches: [
+                .init(pageID: "general", title: "General", symbol: "gearshape", terms: ["Mute"]),
+                .init(pageID: "motion", title: "Motion", symbol: "sparkles", terms: [])
+            ]
+        )
+        results.loadView()
+
+        let titles = labels(in: results.view)
+        XCTAssertTrue(titles.contains("General"))
+        XCTAssertTrue(titles.contains("Motion"))
+        XCTAssertTrue(titles.contains("Mute"), "the row never said what the query landed on")
+        // The caption is set in the design's uppercase, so the query comes back shouted.
+        XCTAssertTrue(
+            titles.contains { $0.localizedCaseInsensitiveContains("mute") },
+            "the page never repeated the query it is answering"
+        )
+    }
+
+    func testTheResultsPageSaysSoWhenNothingMatched() {
+        let results = SettingsSearchResultsViewController(query: "zzzz", matches: [])
+        results.loadView()
+        XCTAssertTrue(labels(in: results.view).contains(L10n.string("No settings found.")))
+    }
+
+    /// The tag indexes the rows this page built, never `SettingsPages.all` — an extension
+    /// starting between the build and the click would re-number the catalogue under it.
+    func testOpeningAResultReportsThePageBehindIt() throws {
+        let results = SettingsSearchResultsViewController(
+            query: "font",
+            matches: [
+                .init(pageID: "profiles", title: "Profiles", symbol: "person", terms: ["Font"]),
+                .init(pageID: "themes", title: "Themes", symbol: "paintpalette", terms: ["Font"])
+            ]
+        )
+        var opened: String?
+        results.onOpen = { opened = $0 }
+        results.loadView()
+
+        let buttons = descendants(of: results.view)
+            .compactMap { $0 as? ThemedButton }
+            .filter { $0.title == L10n.string("Open") }
+        XCTAssertEqual(buttons.count, 2)
+
+        let second = try XCTUnwrap(buttons.last)
+        _ = NSApp.sendAction(try XCTUnwrap(second.action), to: second.target, from: second)
+        XCTAssertEqual(opened, "themes")
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    private func labels(in view: NSView) -> [String] {
+        descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
+    }
+
+    /// Pre-order, so the titles come back in the order they are read down the list.
+    private func rowTitles(in view: NSView) -> [String] {
+        func descendants(_ view: NSView) -> [NSView] {
+            view.subviews.flatMap { [$0] + descendants($0) }
+        }
+        return descendants(view).compactMap { ($0 as? ThemedTabItemView)?.accessibilityTitle() }
+    }
 }

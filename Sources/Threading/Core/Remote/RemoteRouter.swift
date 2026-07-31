@@ -71,6 +71,7 @@ struct RemoteRouter {
     static let apiSessionsPath = "/api/me"
     static let createSessionPath = "/api/session"
     static let notificationRegistrationPath = "/api/notifications"
+    static let diagnosticUploadPath = "/api/diagnostics"
     static let invitationAcceptancePath = "/api/invitations/accept"
     static let appThemePath = "/api/theme"
     static let themeEventsPath = "/ws/events"
@@ -198,6 +199,7 @@ struct RemoteRouter {
     }
 
     static let deviceHeader = "x-threading-device"
+    static let clientHeader = "x-threading-client"
 
     /// Headers a client uses to declare the protocol version pair it speaks, so the server can
     /// answer a mismatch with a clear "please update" rather than a broken response.
@@ -233,7 +235,23 @@ struct RemoteRouter {
     }
 
     static func json<Value: Encodable>(_ value: Value, status: Int = 200, reason: String = "OK") -> HTTPResponse {
-        let body = (try? JSONEncoder().encode(value)) ?? Data()
+        let body: Data
+        do {
+            body = try JSONEncoder().encode(value)
+        } catch {
+            ThreadingLogger.remote.error(
+                "Remote JSON response encoding failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return harden(
+                HTTPResponse(
+                    status: 500,
+                    reason: "Internal Server Error",
+                    contentType: "application/json",
+                    body: Data(#"{"error":"Response encoding failed."}"#.utf8)
+                ),
+                isDocument: false
+            )
+        }
         return harden(
             HTTPResponse(status: status, reason: reason, contentType: "application/json", body: body),
             isDocument: false

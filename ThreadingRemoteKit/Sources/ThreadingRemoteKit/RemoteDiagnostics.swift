@@ -40,6 +40,9 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     case pushProviderRefused
     case issueReportOpened
     case issueReportExported
+    case diagnosticSharingStarted
+    case diagnosticSharingStopped
+    case diagnosticUploadReceived
 }
 
 public enum RemoteDiagnosticLevel: String, Codable, Sendable {
@@ -58,7 +61,7 @@ public enum RemoteDiagnosticSource: String, Codable, Sendable {
 ///
 /// `trace` is an opaque event/request identifier minted for correlation, never an auth token.
 /// `peer` and `session` must be locally pseudonymised before they are passed here.
-public enum RemoteDiagnosticField: String, Sendable {
+public enum RemoteDiagnosticField: String, CaseIterable, Sendable {
     case trace
     case providerTrace
     case peer
@@ -74,6 +77,7 @@ public enum RemoteDiagnosticField: String, Sendable {
     case capability
     case surface
     case enabledKindCount
+    case recordCount
     case reason
 }
 
@@ -125,6 +129,20 @@ public struct RemoteDiagnosticRecord: Codable, Equatable, Sendable {
     public let level: RemoteDiagnosticLevel
     public let event: RemoteDiagnosticEvent
     public let fields: [String: String]
+
+    public init(
+        timestamp: String,
+        source: RemoteDiagnosticSource,
+        level: RemoteDiagnosticLevel,
+        event: RemoteDiagnosticEvent,
+        fields: [String: String]
+    ) {
+        self.timestamp = timestamp
+        self.source = source
+        self.level = level
+        self.event = event
+        self.fields = fields
+    }
 }
 
 public struct RemoteDiagnosticReport: Codable, Equatable, Sendable {
@@ -140,6 +158,148 @@ public struct RemoteDiagnosticReport: Codable, Equatable, Sendable {
     public let minimumProtocolVersion: Int
     public let additionalDetails: [String: String]?
     public let records: [RemoteDiagnosticRecord]
+}
+
+/// The only payload a remote client may add to the Mac's share-safe diagnostics journal.
+///
+/// It intentionally carries records rather than a log string. The receiver validates every
+/// source, timestamp and allowlisted field before appending anything.
+public struct RemoteDiagnosticUploadRequestDTO: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let source: RemoteDiagnosticSource
+    public let records: [RemoteDiagnosticRecord]
+
+    public init(
+        schemaVersion: Int = RemoteDiagnosticReport.currentSchemaVersion,
+        source: RemoteDiagnosticSource,
+        records: [RemoteDiagnosticRecord]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.source = source
+        self.records = records
+    }
+}
+
+public struct RemoteDiagnosticUploadResponseDTO: Codable, Equatable, Sendable {
+    public let acceptedRecords: Int
+
+    public init(acceptedRecords: Int) {
+        self.acceptedRecords = acceptedRecords
+    }
+}
+
+/// Bounds for an explicitly enabled client-to-Mac diagnostic upload.
+///
+/// The ordinary HTTP request ceiling remains defence in depth. These smaller limits make the
+/// diagnostics route auditable on its own and keep an authenticated but faulty client from
+/// turning a support journal into bulk storage.
+public enum RemoteDiagnosticUploadPolicy {
+    public static let sharingDuration: TimeInterval = 30 * 60
+    public static let maximumRecordsPerUpload = 250
+    public static let maximumUploadBytes = 256 * 1024
+
+    public static func accepts(
+        _ request: RemoteDiagnosticUploadRequestDTO,
+        now: Date = Date()
+    ) -> Bool {
+        guard request.schemaVersion == RemoteDiagnosticReport.currentSchemaVersion,
+              request.source == .iOSClient || request.source == .browserClient,
+              !request.records.isEmpty,
+              request.records.count <= maximumRecordsPerUpload else {
+            return false
+        }
+
+        let allowedFields = Set(RemoteDiagnosticField.allCases.map(\.rawValue))
+        let oldest = now.addingTimeInterval(-(8 * 24 * 60 * 60))
+        let newest = now.addingTimeInterval(5 * 60)
+        let timestampFormatter = ISO8601DateFormatter()
+        timestampFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackFormatter = ISO8601DateFormatter()
+        fallbackFormatter.formatOptions = [.withInternetDateTime]
+
+        return request.records.allSatisfy { record in
+            guard record.source == request.source,
+                  source(request.source, allows: record.event),
+                  record.timestamp.utf8.count <= 64,
+                  let timestamp = timestampFormatter.date(from: record.timestamp)
+                    ?? fallbackFormatter.date(from: record.timestamp),
+                  timestamp >= oldest, timestamp <= newest,
+                  Set(record.fields.keys).isSubset(of: allowedFields) else {
+                return false
+            }
+            return record.fields.allSatisfy { key, value in
+                allowedFieldValue(value, for: key)
+            }
+        }
+    }
+
+    /// Imported values are machine tokens, never prose. Constraining the alphabet at the trust
+    /// boundary prevents a compromised or buggy client from putting a prompt, path, URL or
+    /// terminal line under an otherwise legitimate field name.
+    private static func allowedFieldValue(_ value: String, for key: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 160,
+              value.utf8.allSatisfy({ byte in
+                  (byte >= 48 && byte <= 57)
+                    || (byte >= 65 && byte <= 90)
+                    || (byte >= 97 && byte <= 122)
+                    || byte == 45 || byte == 46 || byte == 58 || byte == 95
+              }) else {
+            return false
+        }
+
+        switch RemoteDiagnosticField(rawValue: key) {
+        case .enabledKindCount, .recordCount, .protocolVersion, .minimumProtocolVersion:
+            return value.allSatisfy(\.isNumber)
+        case .peer:
+            return value.hasPrefix("peer-") || value.hasPrefix("device-")
+        case .session:
+            return value.hasPrefix("session-")
+        case .none:
+            return false
+        default:
+            return true
+        }
+    }
+
+    private static func source(
+        _ source: RemoteDiagnosticSource,
+        allows event: RemoteDiagnosticEvent
+    ) -> Bool {
+        switch source {
+        case .macOSHost:
+            return false
+        case .browserClient:
+            switch event {
+            case .appLaunched,
+                 .hostPairingStarted, .hostPairingSucceeded, .hostPairingFailed,
+                 .hostRefreshSucceeded, .hostRefreshFailed,
+                 .socketConnecting, .socketConnected, .socketEnded, .socketFailed,
+                 .diagnosticSharingStarted, .diagnosticSharingStopped:
+                return true
+            default:
+                return false
+            }
+        case .iOSClient:
+            switch event {
+            case .appLaunched, .appBecameActive,
+                 .hostPairingStarted, .hostPairingSucceeded, .hostPairingFailed, .hostRemoved,
+                 .hostRefreshSucceeded, .hostRefreshFailed,
+                 .socketConnecting, .socketConnected, .socketEnded, .socketFailed,
+                 .permissionDecisionSent,
+                 .notificationAuthorization,
+                 .apnsRegistrationSucceeded, .apnsRegistrationFailed,
+                 .notificationRegistrationStarted, .notificationRegistrationSucceeded,
+                 .notificationRegistrationFailed,
+                 .notificationReceived, .notificationSuppressed, .notificationPresented,
+                 .notificationOpened,
+                 .issueReportOpened, .issueReportExported,
+                 .diagnosticSharingStarted, .diagnosticSharingStopped:
+                return true
+            default:
+                return false
+            }
+        }
+    }
 }
 
 /// A small synchronous journal for post-mortem support reports.
@@ -163,6 +323,12 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         return formatter
     }()
 
+    private lazy var fallbackTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
     private lazy var dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -182,11 +348,12 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         self.maximumReportRecords = maximumReportRecords
     }
 
+    @discardableResult
     public func record(
         _ event: RemoteDiagnosticEvent,
         level: RemoteDiagnosticLevel = .info,
         fields: [RemoteDiagnosticField: String] = [:]
-    ) {
+    ) -> RemoteDiagnosticRecord {
         queue.sync {
             if !didPrune {
                 pruneExpiredJournals()
@@ -202,7 +369,34 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
                 })
             )
             append(record)
+            return record
         }
+    }
+
+    /// Adds already-sanitized records from a remote client while preserving its timestamps.
+    ///
+    /// Imported events share the Mac report's file so the report is already a joined timeline.
+    /// Validation is repeated here even when the HTTP boundary checked first; this public method
+    /// must remain safe if another transport uses it later.
+    @discardableResult
+    public func importRecords(
+        _ records: [RemoteDiagnosticRecord],
+        from source: RemoteDiagnosticSource,
+        now: Date = Date()
+    ) -> Bool {
+        let request = RemoteDiagnosticUploadRequestDTO(source: source, records: records)
+        guard RemoteDiagnosticUploadPolicy.accepts(request, now: now) else { return false }
+
+        queue.sync {
+            if !didPrune {
+                pruneExpiredJournals()
+                didPrune = true
+            }
+            for record in records {
+                append(record)
+            }
+        }
+        return true
     }
 
     public func records() -> [RemoteDiagnosticRecord] {
@@ -214,7 +408,15 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
                     try? JSONDecoder().decode(RemoteDiagnosticRecord.self, from: Data($0))
                 }
             }
-            return Array(decoded.suffix(maximumReportRecords))
+            let ordered = decoded.enumerated().sorted { lhs, rhs in
+                let lhsDate = timestampFormatter.date(from: lhs.element.timestamp)
+                    ?? fallbackTimestampFormatter.date(from: lhs.element.timestamp)
+                let rhsDate = timestampFormatter.date(from: rhs.element.timestamp)
+                    ?? fallbackTimestampFormatter.date(from: rhs.element.timestamp)
+                if lhsDate == rhsDate { return lhs.offset < rhs.offset }
+                return (lhsDate ?? .distantPast) < (rhsDate ?? .distantPast)
+            }.map(\.element)
+            return Array(ordered.suffix(maximumReportRecords))
         }
     }
 

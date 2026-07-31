@@ -5,6 +5,7 @@ import Foundation
 /// Claude and Codex expose different wire protocols, but the view only needs this common
 /// conversation-shaped surface. Provider capabilities that do not belong in the parent
 /// transcript, such as child-agent reporting, are separate optional protocols.
+@MainActor
 protocol ConversationStreamSession: AnyObject {
     var onEvent: ((StreamEvent) -> Void)? { get set }
     var onExit: ((Int32) -> Void)? { get set }

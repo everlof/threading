@@ -9,16 +9,18 @@ final class SidebarStyleTests: XCTestCase {
 
     private var previousTheme: AppTheme!
 
-    @MainActor
     override func setUp() {
         super.setUp()
-        previousTheme = AppThemeLibrary.current
+        MainActor.assumeIsolated {
+            previousTheme = AppThemeLibrary.current
+        }
     }
 
-    @MainActor
     override func tearDown() {
-        AppThemeLibrary.apply(previousTheme)
-        ThemeAssetStore.removeAll(for: Self.scratchThemeID)
+        MainActor.assumeIsolated {
+            AppThemeLibrary.apply(previousTheme)
+            ThemeAssetStore.removeAll(for: Self.scratchThemeID)
+        }
         super.tearDown()
     }
 

@@ -31,7 +31,7 @@ enum GitIndexWriter {
         patch: String,
         reverse: Bool,
         in root: URL,
-        completion: @escaping @MainActor (Result<Void, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<Void, Failure>) -> Void
     ) {
         perform(completion) {
             ThreadingLogger.git.info("applying \(reverse ? "reverse" : "forward", privacy: .public) hunk patch")
@@ -48,7 +48,7 @@ enum GitIndexWriter {
     static func stage(
         paths: [String],
         in root: URL,
-        completion: @escaping @MainActor (Result<Void, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<Void, Failure>) -> Void
     ) {
         perform(completion) {
             guard !paths.isEmpty else { return }
@@ -61,7 +61,7 @@ enum GitIndexWriter {
     static func unstage(
         paths: [String],
         in root: URL,
-        completion: @escaping @MainActor (Result<Void, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<Void, Failure>) -> Void
     ) {
         perform(completion) {
             guard !paths.isEmpty else { return }
@@ -79,7 +79,7 @@ enum GitIndexWriter {
     static func commit(
         message: String,
         in root: URL,
-        completion: @escaping @MainActor (Result<String, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<String, Failure>) -> Void
     ) {
         perform(completion) {
             let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -101,9 +101,9 @@ enum GitIndexWriter {
 
     // MARK: - Private Methods
 
-    private static func perform<Value>(
-        _ completion: @escaping @MainActor (Result<Value, Failure>) -> Void,
-        _ work: @escaping () throws -> Value
+    private static func perform<Value: Sendable>(
+        _ completion: @escaping @MainActor @Sendable (Result<Value, Failure>) -> Void,
+        _ work: @escaping @Sendable () throws -> Value
     ) {
         queue.async {
             let result: Result<Value, Failure>
@@ -114,8 +114,8 @@ enum GitIndexWriter {
             } catch {
                 result = .failure(.gitFailed(error.localizedDescription))
             }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { completion(result) }
+            Task { @MainActor in
+                completion(result)
             }
         }
     }

@@ -3,6 +3,7 @@ import ThreadingExtensionKit
 
 // MARK: - Defaults
 
+@MainActor
 enum GitStatusOverlayDefaults {
     /// One line of the card, and the whole card when the checkout is clean and the session has
     /// no children. Every further fact adds a row beneath it rather than words beside it.
@@ -201,7 +202,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         subagentsButton.target = self
         subagentsButton.action = #selector(openSubagents)
         subagentsButton.emphasis = .tertiary
-        subagentsButton.font = Design.Typography.numericDetail(weight: .medium)
+        subagentsButton.applyFont(.numericDetail(weight: .medium))
         // No hoverFill here: this is a BackdropOverlay, and `applyInk` states it from the
         // ink measured against the terminal's backdrop — a chrome role would be wrong by
         // exactly the amount the two palettes differ.

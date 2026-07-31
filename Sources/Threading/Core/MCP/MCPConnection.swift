@@ -3,7 +3,7 @@ import Network
 
 // MARK: - HTTP Request
 
-struct HTTPRequest {
+struct HTTPRequest: Sendable {
     let method: String
     let path: String
     let headers: [String: String]
@@ -17,7 +17,7 @@ struct HTTPRequest {
 
 // MARK: - HTTP Response
 
-struct HTTPResponse {
+struct HTTPResponse: Sendable {
     let status: Int
     let reason: String
     let contentType: String?
@@ -63,14 +63,19 @@ struct HTTPResponse {
 /// and gets its response in the same exchange. The optional SSE stream, which exists so a
 /// server can push messages the client did not ask for, is refused — Threading never originates
 /// traffic, it only answers.
-final class MCPConnection {
+/// Mutable parser and socket state is confined to `queue`; passing the connection as an
+/// identity is safe because every asynchronous response returns to that queue before mutation.
+final class MCPConnection: @unchecked Sendable {
 
     // MARK: - Properties
 
     private let connection: NWConnection
     private let queue: DispatchQueue
-    private let handler: (HTTPRequest, @escaping (HTTPResponse) -> Void) -> Void
-    private let onClose: (MCPConnection) -> Void
+    private let handler: @Sendable (
+        HTTPRequest,
+        @escaping @Sendable (HTTPResponse) -> Void
+    ) -> Void
+    private let onClose: @Sendable (MCPConnection) -> Void
 
     private var buffer = Data()
 
@@ -84,8 +89,11 @@ final class MCPConnection {
     init(
         connection: NWConnection,
         queue: DispatchQueue,
-        handler: @escaping (HTTPRequest, @escaping (HTTPResponse) -> Void) -> Void,
-        onClose: @escaping (MCPConnection) -> Void
+        handler: @escaping @Sendable (
+            HTTPRequest,
+            @escaping @Sendable (HTTPResponse) -> Void
+        ) -> Void,
+        onClose: @escaping @Sendable (MCPConnection) -> Void
     ) {
         self.connection = connection
         self.queue = queue

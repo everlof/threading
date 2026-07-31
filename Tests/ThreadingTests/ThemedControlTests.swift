@@ -2203,6 +2203,32 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertFalse(field.isBezeled, "init(string:) bypassed the themed setup")
     }
 
+    /// A field is not a chip you can type in.
+    ///
+    /// It borrowed `chipHeight` for as long as it was treated as one, and the theme's rule is
+    /// two points thick on each side: at 26 the twenty points left inside carried a 13pt face
+    /// with about three points of air, and the text read as wedged against the border. Pinned
+    /// with the air stated, so the next change to the scale has to mean it.
+    func testAFieldLeavesRealAirAroundItsText() {
+        let field = ThemedTextField(string: "claudedb")
+        let line = ceil((field.font ?? Design.Typography.body()).boundingRectForFont.height)
+
+        XCTAssertEqual(field.intrinsicContentSize.height, Design.Size.fieldHeight)
+        XCTAssertGreaterThanOrEqual(
+            (Design.Size.fieldHeight - line) / 2,
+            Design.Spacing.small,
+            "the field is back to holding its text against the border"
+        )
+    }
+
+    /// The two fields given a frame rather than asked for their size — an alert's accessory and
+    /// the rename prompt — restate the same height, or the one field the app puts in front of a
+    /// decision is the tightest one it draws.
+    func testFieldsPlacedByFrameUseTheSameHeight() {
+        XCTAssertEqual(TextPromptDefaults.fieldHeight, Design.Size.fieldHeight)
+        XCTAssertEqual(SidebarDefaults.renameFieldHeight, Design.Size.fieldHeight)
+    }
+
     // MARK: - Backdrop Overlays
 
     /// The second ground, and the rule that keeps it straight: **a `BackdropOverlay` may not read

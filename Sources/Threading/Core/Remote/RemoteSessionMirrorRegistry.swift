@@ -350,8 +350,7 @@ final class RemoteSessionMirrorRegistry {
                 // pending broadcast look like a no-op and strand existing phones one revision
                 // behind until some later event happened to expose the gap.
                 broadcastConversation(sessionID)
-            } else {
-                var mirror = mirrors[sessionID]!
+            } else if var mirror = mirrors[sessionID] {
                 mirror.conversationSnapshot = current
                 mirror.conversationRevision &+= 1
                 mirrors[sessionID] = mirror
@@ -830,7 +829,13 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func encode<Value: Encodable>(_ value: Value) -> String {
-        guard let data = try? JSONEncoder().encode(value) else { return "{}" }
-        return String(decoding: data, as: UTF8.self)
+        do {
+            return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+        } catch {
+            ThreadingLogger.remote.error(
+                "Remote mirror encoding failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return #"{"type":"error","code":"encodingFailed"}"#
+        }
     }
 }

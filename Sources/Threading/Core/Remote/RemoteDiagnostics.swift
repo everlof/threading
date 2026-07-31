@@ -44,4 +44,37 @@ enum MacRemoteDiagnostics {
             additionalDetails: additionalDetails
         )
     }
+
+    /// Imports one explicitly shared client batch into the Mac's already share-safe journal.
+    ///
+    /// The authenticated device id replaces any client-supplied peer value. That both prevents
+    /// spoofed grouping and makes the imported half join the Mac events that already pseudonymise
+    /// this same remote device.
+    static func receive(
+        _ records: [RemoteDiagnosticRecord],
+        source: RemoteDiagnosticSource,
+        deviceID: String
+    ) -> Bool {
+        let peer = pseudonym(deviceID, prefix: "device")
+        let attributed = records.map { record in
+            var fields = record.fields
+            fields[RemoteDiagnosticField.peer.rawValue] = peer
+            return RemoteDiagnosticRecord(
+                timestamp: record.timestamp,
+                source: record.source,
+                level: record.level,
+                event: record.event,
+                fields: fields
+            )
+        }
+        guard journal.importRecords(attributed, from: source) else {
+            return false
+        }
+        record(.diagnosticUploadReceived, fields: [
+            .peer: peer,
+            .surface: source.rawValue,
+            .recordCount: String(records.count),
+        ])
+        return true
+    }
 }

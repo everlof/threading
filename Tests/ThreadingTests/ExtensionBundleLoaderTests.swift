@@ -64,6 +64,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             identifier: "com.example.loader-test",
             name: "Loader Test",
             version: "0.1.0",
+            runtime: .native,
             executable: "bin/extension",
             localizations: [
                 .init(locale: "sv", resource: "Localizations/sv.json")
@@ -153,6 +154,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             identifier: "com.example.loader-test",
             name: "Loader Test",
             version: "0.1.0",
+            runtime: .native,
             executable: "bin/extension",
             localizations: [
                 .init(locale: "sv", resource: "Localizations/sv.json")
@@ -195,6 +197,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             identifier: "com.example.loader-test",
             name: "Loader Test",
             version: "0.1.0",
+            runtime: .native,
             executable: "bin/extension",
             localizations: [
                 .init(locale: "sv", resource: "Localizations/sv.json")
@@ -2098,6 +2101,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             identifier: "codes.threading.tests.helper",
             name: "Helper Probe",
             version: "0.1.0",
+            runtime: .native,
             executable: "bin/extension",
             capabilities: []
         )
@@ -2228,6 +2232,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             identifier: "codes.threading.tests.probe",
             name: "Denial Probe",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/extension",
             capabilities: [.panels]
         )).write(to: package.appendingPathComponent(ExtensionBundleInspector.manifestName))
@@ -2348,6 +2353,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             identifier: "codes.threading.tests.probe",
             name: "Adversarial Keychain Probe",
             version: "1.0.0",
+            runtime: .native,
             executable: "bin/extension",
             capabilities: [.panels]
         )).write(to: package.appendingPathComponent(ExtensionBundleInspector.manifestName))
@@ -2998,6 +3004,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             identifier: "com.example.loader-test",
             name: "Loader Test",
             version: "0.1.0",
+            runtime: .native,
             executable: "bin/extension",
             capabilities: capabilities
         )

@@ -59,8 +59,8 @@ final class ExtensionDisclosureNodeView: NSView {
     private let row = NSStackView()
     private let mark = NSImageView()
     private var popover: NSPopover?
-    private var hoverTimer: Timer?
-    private var closeWorkItem: DispatchWorkItem?
+    nonisolated(unsafe) private var hoverTimer: Timer?
+    nonisolated(unsafe) private var closeWorkItem: DispatchWorkItem?
     private var isHovered = false {
         didSet {
             guard isHovered != oldValue else { return }

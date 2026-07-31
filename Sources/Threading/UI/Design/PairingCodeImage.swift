@@ -24,6 +24,7 @@ import CoreImage.CIFilterBuiltins
 /// looking like a barcode. Inverting it (light modules on the theme's dark ground) cost 23% and
 /// was rejected. Punching a logo hole forces correction level H and jumps the symbol from 41 to
 /// 57 modules, which is a real cost to buy an ornament; it was rejected too.
+@MainActor
 enum PairingCodeImage {
 
     /// The side the Remote Access card gives the code.
@@ -225,6 +226,7 @@ enum PairingCodeImage {
 /// encoding a URL is expensive enough that repeating it on every repaint — and a live theme
 /// switch repaints everything — would be felt.
 struct PairingCodeMatrix {
+    private static let locatorModules = 7
 
     /// Modules per side, excluding any quiet zone. 41 for the pairing URLs this app produces.
     let size: Int
@@ -238,12 +240,12 @@ struct PairingCodeMatrix {
 
     /// The three 7×7 finder patterns, by their top-left module. A QR symbol has no fourth.
     var locatorOrigins: [(x: Int, y: Int)] {
-        let last = size - PairingCodeImage.locatorModules
+        let last = size - Self.locatorModules
         return [(0, 0), (last, 0), (0, last)]
     }
 
     func isLocator(_ x: Int, _ y: Int) -> Bool {
-        let span = PairingCodeImage.locatorModules
+        let span = Self.locatorModules
         return locatorOrigins.contains { origin in
             x >= origin.x && x < origin.x + span && y >= origin.y && y < origin.y + span
         }

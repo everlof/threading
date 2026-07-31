@@ -50,7 +50,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
         AppSettings.shared.claudeRemoteControl = .enabled
 
         var session = AgentSession(kind: .claude, title: "Quiet")
-        session.remoteControl = false
+        XCTAssertTrue(session.setClaudeRemoteControl(false))
 
         XCTAssertEqual(AgentLauncher.remoteControlAtStartup(for: session), false)
     }
@@ -60,18 +60,17 @@ final class ClaudeRemoteControlTests: XCTestCase {
         AppSettings.shared.claudeRemoteControl = .followClaude
 
         var session = AgentSession(kind: .claude, title: "Loud")
-        session.remoteControl = true
+        XCTAssertTrue(session.setClaudeRemoteControl(true))
 
         XCTAssertEqual(AgentLauncher.remoteControlAtStartup(for: session), true)
     }
 
-    /// Codex has no comparable bridge, so its launches must never carry Claude's key — not even
-    /// when a record somehow holds a value, which a session moved between agents could.
+    /// Codex has no comparable bridge, so its typed state refuses Claude's setting.
     func testCodexSessionsNeverCarryTheKey() {
         AppSettings.shared.claudeRemoteControl = .enabled
 
         var session = AgentSession(kind: .codex, title: "Codex")
-        session.remoteControl = true
+        XCTAssertFalse(session.setClaudeRemoteControl(true))
 
         XCTAssertNil(AgentLauncher.remoteControlAtStartup(for: session))
     }
@@ -240,7 +239,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
     func testTheChoiceSurvivesAnEncodeDecodeRound() throws {
         for value in [true, false] {
             var session = AgentSession(kind: .claude, title: "Chat")
-            session.remoteControl = value
+            XCTAssertTrue(session.setClaudeRemoteControl(value))
 
             let data = try JSONEncoder().encode(session)
             let decoded = try JSONDecoder().decode(AgentSession.self, from: data)
@@ -253,7 +252,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
     /// asked for — the same rule `fastMode` follows, and the reason both are optional.
     func testARecordWrittenBeforeThisFeatureDecodesAsNoChoice() throws {
         var session = AgentSession(kind: .claude, title: "Chat")
-        session.remoteControl = nil
+        XCTAssertTrue(session.setClaudeRemoteControl(nil))
 
         let data = try JSONEncoder().encode(session)
         let json = try XCTUnwrap(
@@ -269,10 +268,10 @@ final class ClaudeRemoteControlTests: XCTestCase {
         AppSettings.shared.claudeRemoteControl = .disabled
 
         var session = AgentSession(kind: .claude, title: "Chat")
-        session.remoteControl = true
+        XCTAssertTrue(session.setClaudeRemoteControl(true))
         XCTAssertEqual(AgentLauncher.remoteControlAtStartup(for: session), true)
 
-        session.remoteControl = nil
+        XCTAssertTrue(session.setClaudeRemoteControl(nil))
         XCTAssertEqual(AgentLauncher.remoteControlAtStartup(for: session), false)
     }
 
@@ -325,11 +324,11 @@ final class ClaudeRemoteControlTests: XCTestCase {
         XCTAssertEqual(ticked.count, 1)
         XCTAssertEqual(ticked.first, submenuTitles.inherit)
 
-        session.remoteControl = false
+        XCTAssertTrue(session.setClaudeRemoteControl(false))
         ticked = try tickedTitles(for: session)
         XCTAssertEqual(ticked, ["Always Off"])
 
-        session.remoteControl = true
+        XCTAssertTrue(session.setClaudeRemoteControl(true))
         ticked = try tickedTitles(for: session)
         XCTAssertEqual(ticked, ["Always On"])
     }

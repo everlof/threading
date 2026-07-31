@@ -101,10 +101,6 @@ enum AgentKind: String, Codable, CaseIterable {
 // MARK: - Resume State
 
 /// Whether a session can identify a conversation to resume.
-///
-/// These are deliberately separate states rather than one optional transcript identifier:
-/// a shell will never have a conversation, while a fresh agent session is waiting for an
-/// identifier to be minted or discovered. Only `.resumable` names an existing conversation.
 enum ResumeState: Equatable {
     /// This kind of session has no resumable conversation, as with a shell.
     case unavailable
@@ -135,6 +131,47 @@ enum ResumeState: Equatable {
     }
 }
 
+// MARK: - Provider Configuration
+
+/// How a Claude session was created.
+///
+/// Forking is deliberately absent from the Codex configuration below: Codex has no provider
+/// operation with those semantics. Cross-provider continuation also names its source provider
+/// in the case itself, so a destination cannot claim it continued from its own provider.
+enum ClaudeSessionOrigin: Equatable {
+    case original
+    case forked(from: SessionID)
+    case continuedFromCodex(SessionID)
+}
+
+/// Provider-specific session state.
+///
+/// This replaces five independent optionals (`kind`, reasoning effort, Remote Control, fork
+/// parent, and continuation kind) whose Cartesian product admitted states neither provider
+/// could execute. Pattern matching now has to account only for states the product supports.
+enum AgentSessionConfiguration: Equatable {
+    case claude(remoteControl: Bool?, origin: ClaudeSessionOrigin)
+    case codex(reasoningEffort: String?, continuedFromClaude: SessionID?)
+
+    var kind: AgentKind {
+        switch self {
+        case .claude: return .claude
+        case .codex: return .codex
+        }
+    }
+
+    fileprivate var derivedSessionID: SessionID? {
+        switch self {
+        case .claude(_, .forked(let source)),
+             .claude(_, .continuedFromCodex(let source)),
+             .codex(_, .some(let source)):
+            return source
+        case .claude, .codex:
+            return nil
+        }
+    }
+}
+
 // MARK: - Agent Session
 
 /// A single agent conversation or shell belonging to a project.
@@ -143,7 +180,9 @@ enum ResumeState: Equatable {
 /// this record remains so the conversation can be resumed through `resumeState` later.
 struct AgentSession: Codable, Identifiable {
     let id: SessionID
-    var kind: AgentKind
+    private var configuration: AgentSessionConfiguration
+
+    var kind: AgentKind { configuration.kind }
 
     /// The name derived from the session's first prompt — set at creation when the composer
     /// has the prompt, or by the first `UserPromptSubmit` report for a prompt typed straight
@@ -196,7 +235,10 @@ struct AgentSession: Codable, Identifiable {
     /// Nil inherits the routed account when that value is supported by the selected model,
     /// otherwise the model catalog's own default. The value stays a string because the catalog
     /// is authoritative and may add levels without a Threading release.
-    var reasoningEffort: String?
+    var reasoningEffort: String? {
+        guard case .codex(let value, _) = configuration else { return nil }
+        return value
+    }
 
     /// A per-conversation Fast-mode override.
     ///
@@ -221,7 +263,10 @@ struct AgentSession: Codable, Identifiable {
     /// already passes as `--settings`; see `MCPSessionRegistry.writeHookSettings`. Claude reads
     /// merged settings ahead of its global config, so a value here wins. Claude only — Codex has
     /// no equivalent bridge.
-    var remoteControl: Bool?
+    var remoteControl: Bool? {
+        guard case .claude(let value, _) = configuration else { return nil }
+        return value
+    }
 
     /// How much this conversation may do before it has to ask.
     ///
@@ -259,7 +304,10 @@ struct AgentSession: Codable, Identifiable {
     /// It is read at *launch* rather than being a lasting mode: the fork happens once, when
     /// the child first runs, and afterwards this is lineage rather than behaviour. See
     /// `AgentLauncher.claudeForkCommand`.
-    var forkedFrom: SessionID?
+    var forkedFrom: SessionID? {
+        guard case .claude(_, .forked(let parent)) = configuration else { return nil }
+        return parent
+    }
 
     /// Whether this session began as a fork of another.
     var isSideChat: Bool { forkedFrom != nil }
@@ -270,13 +318,31 @@ struct AgentSession: Codable, Identifiable {
     /// snapshots the source transcript, normalises it through `TranscriptReplay`, and exposes
     /// only that snapshot to this session through the scoped `conversation_history` MCP tool.
     /// The destination then starts a genuinely new provider-native conversation.
-    var continuedFrom: SessionID?
+    var continuedFrom: SessionID? {
+        switch configuration {
+        case .claude(_, .continuedFromCodex(let source)):
+            return source
+        case .codex(_, .some(let source)):
+            return source
+        case .claude, .codex:
+            return nil
+        }
+    }
 
     /// The format of the frozen handoff transcript.
     ///
     /// Kept beside the lineage rather than recovered from the source record so the handoff
     /// remains readable if that original row is later deleted from Threading.
-    var continuationSourceKind: AgentKind?
+    var continuationSourceKind: AgentKind? {
+        switch configuration {
+        case .claude(_, .continuedFromCodex):
+            return .codex
+        case .codex(_, .some):
+            return .claude
+        case .claude, .codex:
+            return nil
+        }
+    }
 
     /// Whether this session began as a cross-provider continuation.
     var isCrossProviderContinuation: Bool {
@@ -328,36 +394,55 @@ struct AgentSession: Codable, Identifiable {
         title: String,
         accountHandle: AccountHandle = .standard,
         model: String? = nil,
-        reasoningEffort: String? = nil,
         usesNativeUI: Bool = false,
-        forkedFrom: SessionID? = nil,
-        continuedFrom: SessionID? = nil,
-        continuationSourceKind: AgentKind? = nil,
         id: SessionID = SessionID()
     ) {
+        let configuration: AgentSessionConfiguration = switch kind {
+        case .claude:
+            .claude(remoteControl: nil, origin: .original)
+        case .codex:
+            .codex(reasoningEffort: nil, continuedFromClaude: nil)
+        }
+        self.init(
+            configuration: configuration,
+            title: title,
+            accountHandle: accountHandle,
+            model: model,
+            usesNativeUI: usesNativeUI,
+            id: id
+        )
+    }
+
+    init(
+        configuration: AgentSessionConfiguration,
+        title: String,
+        accountHandle: AccountHandle = .standard,
+        model: String? = nil,
+        usesNativeUI: Bool = false,
+        id: SessionID = SessionID()
+    ) {
+        precondition(
+            configuration.derivedSessionID != id,
+            "A session cannot derive from itself"
+        )
         self.id = id
-        self.kind = kind
+        self.configuration = configuration
         self.title = title
         self.customTitle = nil
         self.agentTitle = nil
         self.createdAt = Date()
         self.lastActiveAt = Date()
-        self.resumeState = ResumeState.initial(for: kind)
+        self.resumeState = ResumeState.initial(for: configuration.kind)
         self.hasLaunched = false
         self.lastExitCode = nil
         self.accountHandle = accountHandle
         self.model = model
-        self.reasoningEffort = reasoningEffort
         self.fastMode = nil
-        self.remoteControl = nil
         self.permissionMode = nil
         self.branch = nil
         self.isArchived = false
         self.isPinned = false
         self.usesNativeUI = usesNativeUI
-        self.forkedFrom = forkedFrom
-        self.continuedFrom = continuedFrom
-        self.continuationSourceKind = continuationSourceKind
         self.themeID = nil
         self.notificationsMuted = nil
     }
@@ -375,9 +460,11 @@ struct AgentSession: Codable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedCreatedAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
 
-        id = try container.decodeIfPresent(SessionID.self, forKey: .id) ?? SessionID()
-        kind = try container.decodeIfPresent(AgentKind.self, forKey: .kind)
-            ?? AgentDefaults.defaultKind
+        // Identity and provider are not migration defaults. Inventing either while decoding
+        // changes which conversation a row means and can make a later save overwrite or launch
+        // the wrong provider.
+        id = try container.decode(SessionID.self, forKey: .id)
+        let decodedKind = try container.decode(AgentKind.self, forKey: .kind)
         title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
         customTitle = try container.decodeIfPresent(String.self, forKey: .customTitle)
         agentTitle = try container.decodeIfPresent(String.self, forKey: .agentTitle)
@@ -386,7 +473,7 @@ struct AgentSession: Codable, Identifiable {
             ?? createdAt
         resumeState = ResumeState.restoring(
             try container.decodeIfPresent(TranscriptID.self, forKey: .agentSessionID),
-            for: kind
+            for: decodedKind
         )
         hasLaunched = try container.decodeIfPresent(Bool.self, forKey: .hasLaunched) ?? false
         lastExitCode = try container.decodeIfPresent(Int32.self, forKey: .lastExitCode)
@@ -394,9 +481,15 @@ struct AgentSession: Codable, Identifiable {
             storedName: try container.decodeIfPresent(String.self, forKey: .accountHandle)
         )
         model = try container.decodeIfPresent(String.self, forKey: .model)
-        reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
+        let decodedReasoningEffort = try container.decodeIfPresent(
+            String.self,
+            forKey: .reasoningEffort
+        )
         fastMode = try container.decodeIfPresent(Bool.self, forKey: .fastMode)
-        remoteControl = try container.decodeIfPresent(Bool.self, forKey: .remoteControl)
+        let decodedRemoteControl = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .remoteControl
+        )
         permissionMode = try container.decodeIfPresent(
             AgentPermissionMode.self,
             forKey: .permissionMode
@@ -405,15 +498,97 @@ struct AgentSession: Codable, Identifiable {
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
         usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
-        forkedFrom = try container.decodeIfPresent(SessionID.self, forKey: .forkParent)
-        continuedFrom = try container.decodeIfPresent(
+        let decodedForkParent = try container.decodeIfPresent(
+            SessionID.self,
+            forKey: .forkParent
+        )
+        let decodedContinuationSource = try container.decodeIfPresent(
             SessionID.self,
             forKey: .continuationSource
         )
-        continuationSourceKind = try container.decodeIfPresent(
+        let decodedContinuationKind = try container.decodeIfPresent(
             AgentKind.self,
             forKey: .continuationSourceKind
         )
+        if decodedReasoningEffort != nil, decodedKind != .codex {
+            throw DecodingError.dataCorruptedError(
+                forKey: .reasoningEffort,
+                in: container,
+                debugDescription: "Reasoning effort is only valid for Codex sessions"
+            )
+        }
+        if decodedRemoteControl != nil, decodedKind != .claude {
+            throw DecodingError.dataCorruptedError(
+                forKey: .remoteControl,
+                in: container,
+                debugDescription: "Remote Control is only valid for Claude sessions"
+            )
+        }
+        if (decodedContinuationSource == nil) != (decodedContinuationKind == nil) {
+            throw DecodingError.dataCorruptedError(
+                forKey: decodedContinuationSource == nil
+                    ? .continuationSourceKind
+                    : .continuationSource,
+                in: container,
+                debugDescription: "Continuation source and provider must be present together"
+            )
+        }
+        if decodedForkParent != nil, decodedContinuationSource != nil {
+            throw DecodingError.dataCorruptedError(
+                forKey: .forkParent,
+                in: container,
+                debugDescription: "A session cannot be both forked and continued"
+            )
+        }
+        if decodedForkParent == id || decodedContinuationSource == id {
+            throw DecodingError.dataCorruptedError(
+                forKey: decodedForkParent == id ? .forkParent : .continuationSource,
+                in: container,
+                debugDescription: "A session cannot derive from itself"
+            )
+        }
+        switch decodedKind {
+        case .claude:
+            let origin: ClaudeSessionOrigin
+            if let decodedForkParent {
+                origin = .forked(from: decodedForkParent)
+            } else if let decodedContinuationSource {
+                guard decodedContinuationKind == .codex else {
+                    throw DecodingError.dataCorruptedError(
+                        forKey: .continuationSourceKind,
+                        in: container,
+                        debugDescription: "Claude can only continue a Codex conversation"
+                    )
+                }
+                origin = .continuedFromCodex(decodedContinuationSource)
+            } else {
+                origin = .original
+            }
+            configuration = .claude(
+                remoteControl: decodedRemoteControl,
+                origin: origin
+            )
+        case .codex:
+            guard decodedForkParent == nil else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .forkParent,
+                    in: container,
+                    debugDescription: "Codex sessions cannot be provider forks"
+                )
+            }
+            if decodedContinuationSource != nil,
+               decodedContinuationKind != .claude {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .continuationSourceKind,
+                    in: container,
+                    debugDescription: "Codex can only continue a Claude conversation"
+                )
+            }
+            configuration = .codex(
+                reasoningEffort: decodedReasoningEffort,
+                continuedFromClaude: decodedContinuationSource
+            )
+        }
         themeID = try container.decodeIfPresent(TerminalThemeID.self, forKey: .themeID)
         if themeID == nil,
            let legacyName = try container.decodeIfPresent(String.self, forKey: .themeName) {
@@ -455,6 +630,25 @@ struct AgentSession: Codable, Identifiable {
         )
         try container.encodeIfPresent(themeID, forKey: .themeID)
         try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
+    }
+
+    /// Changes a Codex-only option without admitting it into Claude's state space.
+    @discardableResult
+    mutating func setCodexReasoningEffort(_ effort: String?) -> Bool {
+        guard case .codex(_, let source) = configuration else { return false }
+        configuration = .codex(
+            reasoningEffort: effort,
+            continuedFromClaude: source
+        )
+        return true
+    }
+
+    /// Changes a Claude-only option without admitting it into Codex's state space.
+    @discardableResult
+    mutating func setClaudeRemoteControl(_ remoteControl: Bool?) -> Bool {
+        guard case .claude(_, let origin) = configuration else { return false }
+        configuration = .claude(remoteControl: remoteControl, origin: origin)
+        return true
     }
 
     /// Whether a previous conversation exists that can be resumed.
@@ -582,13 +776,19 @@ struct Project: Codable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let decodedFolderPath = try container.decodeIfPresent(String.self, forKey: .folderPath)
-            ?? ""
+        let decodedFolderPath = try container.decode(String.self, forKey: .folderPath)
 
-        id = try container.decodeIfPresent(ProjectID.self, forKey: .id) ?? ProjectID()
+        id = try container.decode(ProjectID.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name)
             ?? URL(fileURLWithPath: decodedFolderPath).lastPathComponent
         folderPath = decodedFolderPath
+        guard folderPath.hasPrefix("/"), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw DecodingError.dataCorruptedError(
+                forKey: folderPath.hasPrefix("/") ? .name : .folderPath,
+                in: container,
+                debugDescription: "A project requires an absolute folder path and a non-empty name"
+            )
+        }
         sessions = try container.decodeIfPresent([AgentSession].self, forKey: .sessions) ?? []
         isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
@@ -646,5 +846,200 @@ struct ProjectsState: Codable {
         self.projects = projects
         self.selectedSessionID = selectedSessionID
         self.savedAt = savedAt
+    }
+}
+
+// MARK: - Session Auxiliary Documents
+
+/// The persisted form of a session's display panel.
+///
+/// `formatVersion` is decoded explicitly rather than defaulted by synthesis: absence means the
+/// legacy version-zero document, while a value newer than this app is refused. That keeps a
+/// future layout from being partially interpreted and then replaced by today's narrower model.
+struct PersistedPanel: Codable {
+    static let currentFormatVersion = 1
+
+    var tabs: [PersistedTab]
+    var activeTabID: String?
+    var observedSignature: String?
+    var drawerActiveTabID: String? = nil
+    var drawerOpen: Bool? = nil
+
+    var panelTabs: [PersistedTab] { tabs.filter { $0.host == nil } }
+    var drawerTabs: [PersistedTab] { tabs.filter { $0.host == PersistedTab.drawerHost } }
+
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion
+        case tabs
+        case activeTabID
+        case observedSignature
+        case drawerActiveTabID
+        case drawerOpen
+    }
+}
+
+extension PersistedPanel {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try container.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 0
+        guard version <= Self.currentFormatVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .formatVersion,
+                in: container,
+                debugDescription: "Unsupported panel format version \(version)"
+            )
+        }
+
+        tabs = try container.decode([PersistedTab].self, forKey: .tabs)
+        activeTabID = try container.decodeIfPresent(String.self, forKey: .activeTabID)
+        observedSignature = try container.decodeIfPresent(String.self, forKey: .observedSignature)
+        drawerActiveTabID = try container.decodeIfPresent(String.self, forKey: .drawerActiveTabID)
+        drawerOpen = try container.decodeIfPresent(Bool.self, forKey: .drawerOpen)
+
+        let ids = tabs.map(\.id)
+        guard ids.allSatisfy({ !$0.isEmpty }), Set(ids).count == ids.count else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .tabs,
+                in: container,
+                debugDescription: "Panel tab identifiers must be non-empty and unique"
+            )
+        }
+        guard tabs.allSatisfy({ $0.host == nil || $0.host == PersistedTab.drawerHost }) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .tabs,
+                in: container,
+                debugDescription: "Panel tab has an unknown host"
+            )
+        }
+        if let activeTabID,
+           !panelTabs.contains(where: { $0.id == activeTabID }) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .activeTabID,
+                in: container,
+                debugDescription: "Active panel tab does not exist in the panel host"
+            )
+        }
+        if let drawerActiveTabID,
+           !drawerTabs.contains(where: { $0.id == drawerActiveTabID }) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .drawerActiveTabID,
+                in: container,
+                debugDescription: "Active drawer tab does not exist in the drawer host"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(Self.currentFormatVersion, forKey: .formatVersion)
+        try container.encode(tabs, forKey: .tabs)
+        try container.encodeIfPresent(activeTabID, forKey: .activeTabID)
+        try container.encodeIfPresent(observedSignature, forKey: .observedSignature)
+        try container.encodeIfPresent(drawerActiveTabID, forKey: .drawerActiveTabID)
+        try container.encodeIfPresent(drawerOpen, forKey: .drawerOpen)
+    }
+}
+
+/// One display tab reduced to the state needed to restore it.
+struct PersistedTab: Codable {
+    enum Kind: String, Codable {
+        case browser
+        case html
+        case image
+        case review
+        case info
+        case terminal
+        case files
+        case attachments
+        case extensionPanel
+        case compare
+    }
+
+    var id: String
+    var kind: Kind
+    var title: String?
+    var subtitle: String
+    var url: String?
+    var html: String?
+    var cacheFile: String?
+    var mode: String? = nil
+    var extensionIdentifier: String? = nil
+    var extensionPanelID: String? = nil
+    var compareOldPath: String? = nil
+    var compareNewPath: String? = nil
+    var compareOldTitle: String? = nil
+    var compareNewTitle: String? = nil
+    var host: String? = nil
+
+    static let drawerHost = "drawer"
+}
+
+/// One attachment reference in the persisted session document.
+struct PersistedSessionAttachment: Codable {
+    let projectRoot: String
+    let relativePath: String
+    let kind: SessionAttachment.Kind
+    let referencedAt: Date
+}
+
+/// A versioned attachment document with an explicit legacy-array migration.
+struct PersistedSessionAttachments: Codable {
+    static let currentFormatVersion = 1
+
+    var entries: [PersistedSessionAttachment]
+
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion
+        case entries
+    }
+
+    init(entries: [PersistedSessionAttachment]) {
+        self.entries = entries
+    }
+
+    init(from decoder: Decoder) throws {
+        if let legacy = try? decoder.singleValueContainer()
+            .decode([PersistedSessionAttachment].self) {
+            entries = legacy
+            try Self.validate(entries, codingPath: decoder.codingPath)
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try container.decode(Int.self, forKey: .formatVersion)
+        guard version == Self.currentFormatVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .formatVersion,
+                in: container,
+                debugDescription: "Unsupported attachments format version \(version)"
+            )
+        }
+        entries = try container.decode([PersistedSessionAttachment].self, forKey: .entries)
+        try Self.validate(entries, codingPath: container.codingPath + [CodingKeys.entries])
+    }
+
+    private static func validate(
+        _ entries: [PersistedSessionAttachment],
+        codingPath: [CodingKey]
+    ) throws {
+        guard entries.allSatisfy({
+            !$0.projectRoot.isEmpty
+                && !$0.relativePath.isEmpty
+                && !$0.relativePath.hasPrefix("/")
+                && !$0.relativePath.split(separator: "/").contains("..")
+        }) else {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: codingPath,
+                    debugDescription: "Attachment paths must be non-empty and relative"
+                )
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(Self.currentFormatVersion, forKey: .formatVersion)
+        try container.encode(entries, forKey: .entries)
     }
 }

@@ -8,16 +8,19 @@ import Network
 /// Everything here runs on the server's single serial queue, which is why there are no locks:
 /// the PTY tap and the store live on main and hop *to* this queue to send, and this connection
 /// hops to main to reach them.
-final class RemoteConnection {
+/// `RemoteConnection` is safe to pass between executors only as an identity. All of its mutable
+/// socket and parser state is owned by `queue`; public send operations immediately enqueue there.
+/// The server never reads queue-owned properties from another executor.
+final class RemoteConnection: @unchecked Sendable {
 
     // MARK: - Delegate
 
-    protocol Delegate: AnyObject {
+    protocol Delegate: AnyObject, Sendable {
         /// Route one HTTP request. `respond` may be called later (after a main-queue hop).
         func route(
             _ request: HTTPRequest,
             from connection: RemoteConnection,
-            respond: @escaping (RemoteRouteDecision) -> Void
+            respond: @escaping @Sendable (RemoteRouteDecision) -> Void
         )
         /// A reassembled, non-control client message arrived on an upgraded socket.
         func handleMessage(_ message: RemoteWebSocket.Message, from connection: RemoteConnection)

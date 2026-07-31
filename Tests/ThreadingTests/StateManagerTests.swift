@@ -1,9 +1,10 @@
 import XCTest
 @testable import Threading
 
+@MainActor
 final class StateManagerTests: XCTestCase {
 
-    private var testDirectory: URL!
+    private nonisolated(unsafe) var testDirectory: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -76,14 +77,21 @@ final class StateManagerTests: XCTestCase {
 
     func testLegacyResumeIdentifierDecodesIntoExplicitStates() throws {
         let decoder = JSONDecoder()
+        let pendingID = SessionID()
+        let resumableID = SessionID()
         let pending = try decoder.decode(
             AgentSession.self,
-            from: Data(#"{"kind":"codex","title":"Pending"}"#.utf8)
+            from: Data(
+                #"{"id":"\#(pendingID.uuidString)","kind":"codex","title":"Pending"}"#.utf8
+            )
         )
         let resumable = try decoder.decode(
             AgentSession.self,
             from: Data(
-                #"{"kind":"claude","title":"Ready","agentSessionID":"legacy-thread"}"#.utf8
+                """
+                {"id":"\(resumableID.uuidString)","kind":"claude","title":"Ready",\
+                "agentSessionID":"legacy-thread"}
+                """.utf8
             )
         )
         XCTAssertEqual(pending.resumeState, .awaitingIdentifier)
@@ -95,27 +103,94 @@ final class StateManagerTests: XCTestCase {
         XCTAssertThrowsError(
             try decoder.decode(
                 AgentSession.self,
-                from: Data(#"{"kind":"shell","title":"Shell"}"#.utf8)
+                from: Data(
+                    #"{"id":"\#(SessionID().uuidString)","kind":"shell","title":"Shell"}"#.utf8
+                )
             )
         )
+    }
+
+    func testIdentityProviderAndProjectPathAreRequiredRatherThanInvented() {
+        let decoder = JSONDecoder()
+
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AgentSession.self,
+                from: Data(#"{"kind":"claude","title":"No identity"}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try decoder.decode(
+                AgentSession.self,
+                from: Data(
+                    #"{"id":"\#(SessionID().uuidString)","title":"No provider"}"#.utf8
+                )
+            )
+        )
+        XCTAssertThrowsError(
+            try decoder.decode(
+                Project.self,
+                from: Data(
+                    #"{"id":"\#(ProjectID().uuidString)","name":"No path"}"#.utf8
+                )
+            )
+        )
+    }
+
+    func testProviderSpecificSessionStateRejectsImpossibleCombinations() {
+        let id = SessionID().uuidString
+        let other = SessionID().uuidString
+        let impossible = [
+            """
+            {"id":"\(id)","kind":"claude","title":"Wrong option",\
+            "reasoningEffort":"high"}
+            """,
+            """
+            {"id":"\(id)","kind":"codex","title":"Wrong option",\
+            "remoteControl":true}
+            """,
+            """
+            {"id":"\(id)","kind":"codex","title":"Wrong lineage",\
+            "forkParent":"\(other)"}
+            """,
+            """
+            {"id":"\(id)","kind":"codex","title":"Unpaired lineage",\
+            "continuationSource":"\(other)"}
+            """,
+            """
+            {"id":"\(id)","kind":"codex","title":"Same provider",\
+            "continuationSource":"\(other)","continuationSourceKind":"codex"}
+            """
+        ]
+
+        for json in impossible {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    AgentSession.self,
+                    from: Data(json.utf8)
+                ),
+                json
+            )
+        }
     }
 
     func testExplicitModelEncodingPreservesNonDefaultFields() throws {
         let parentID = SessionID()
         var session = AgentSession(
-            kind: .codex,
+            configuration: .codex(
+                reasoningEffort: "ultra",
+                continuedFromClaude: parentID
+            ),
             title: "Original",
             accountHandle: .named("codex-work"),
             model: "gpt-test",
-            usesNativeUI: true,
-            forkedFrom: parentID
+            usesNativeUI: true
         )
         session.customTitle = "Renamed"
         session.agentTitle = "Terminal title"
         session.resumeState = .resumable(TranscriptID("thread-test"))
         session.hasLaunched = true
         session.lastExitCode = 7
-        session.reasoningEffort = "ultra"
         session.fastMode = true
         session.branch = "feature/test"
         session.isPinned = true
@@ -159,7 +234,8 @@ final class StateManagerTests: XCTestCase {
         XCTAssertEqual(restoredSession.branch, "feature/test")
         XCTAssertTrue(restoredSession.isPinned)
         XCTAssertEqual(restoredSession.lastExitCode, 7)
-        XCTAssertEqual(restoredSession.forkedFrom, parentID)
+        XCTAssertEqual(restoredSession.continuedFrom, parentID)
+        XCTAssertEqual(restoredSession.continuationSourceKind, .claude)
         XCTAssertTrue(restoredSession.hasLaunched)
         XCTAssertTrue(restoredSession.isArchived)
         XCTAssertTrue(restoredSession.usesNativeUI)
@@ -300,7 +376,7 @@ final class StateManagerTests: XCTestCase {
     }
 
     @MainActor
-    func testCorruptStateIsQuarantinedAndFreshStateDoesNotOverwriteIt() throws {
+    func testCorruptLegacyStateIsQuarantinedAndWritesStayDisabledForTheLaunch() throws {
         let corruptData = Data("{ definitely-not-json".utf8)
         let liveURL = testDirectory.appendingPathComponent("projects.json")
         try corruptData.write(to: liveURL)
@@ -326,17 +402,75 @@ final class StateManagerTests: XCTestCase {
         )
         store.addProject(folderURL: projectDirectory)
 
-        // The quarantined document is never touched again — the new state went to the database,
-        // and the unreadable file stays exactly as it was for whoever wants to look at it.
+        // A successful quarantine preserves the unreadable bytes, but does not make the empty
+        // in-memory store authoritative. This launch remains read-only until recovery/restart.
+        XCTAssertEqual(store.projects.count, 1, "the attempted edit may remain visible in memory")
         XCTAssertEqual(try Data(contentsOf: quarantineURL), corruptData)
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: liveURL.path),
-            "a fresh save must not resurrect the document that was moved aside"
+            "a failed load must not resurrect the document that was moved aside"
         )
-        guard case .loaded(let freshState) = manager.loadProjectsState() else {
-            return XCTFail("Expected a fresh state after an explicit structural change")
+        guard case .failed(let repeatedQuarantineURL) = manager.loadProjectsState() else {
+            return XCTFail("Expected persistence recovery to remain latched")
         }
-        XCTAssertEqual(freshState.projects.count, 1)
+        XCTAssertEqual(
+            repeatedQuarantineURL?.resolvingSymlinksInPath(),
+            quarantineURL.resolvingSymlinksInPath()
+        )
+
+        let database = try ProjectDatabase(
+            url: testDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
+        )
+        XCTAssertTrue(try database.isEmpty(), "the attempted edit must not become replacement state")
+    }
+
+    func testCorruptDatabaseRowIsQuarantinedAndCannotBeOverwrittenInTheSameLaunch() throws {
+        let databaseURL = testDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
+        let project = Project(
+            name: "Preserve me",
+            folderURL: URL(fileURLWithPath: "/tmp/preserve-me")
+        )
+
+        do {
+            let database = try ProjectDatabase(url: databaseURL)
+            try database.save(ProjectsState(projects: [project]))
+        }
+        do {
+            let raw = try SQLiteDatabase(path: databaseURL.path)
+            try raw.prepare("UPDATE project SET data = ? WHERE id = ?")
+                .bind(1, "{ damaged-json")
+                .bind(2, project.id.uuidString)
+                .run()
+        }
+
+        let manager = makeManager()
+        guard case .failed(let quarantinedAt) = manager.loadProjectsState() else {
+            return XCTFail("Expected an invalid row to fail the authoritative load")
+        }
+        let quarantineURL = try XCTUnwrap(quarantinedAt)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
+
+        let replacement = ProjectsState(projects: [
+            Project(name: "Replacement", folderURL: URL(fileURLWithPath: "/tmp/replacement"))
+        ])
+        XCTAssertFalse(manager.saveProjectsState(replacement))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: databaseURL.path),
+            "a write after failed load must not create replacement state"
+        )
+
+        let preserved = try SQLiteDatabase(path: quarantineURL.path)
+        XCTAssertEqual(try preserved.scalar("SELECT COUNT(*) FROM project"), 1)
+        let payload = try preserved.prepare("SELECT data FROM project WHERE id = ?")
+        defer { payload.finalize() }
+        payload.bind(1, project.id.uuidString)
+        XCTAssertTrue(try payload.step())
+        XCTAssertEqual(payload.text(0), "{ damaged-json")
+
+        guard case .recoveryRequired(let recordedURL) = manager.persistenceHealth else {
+            return XCTFail("Expected persistence recovery to remain latched")
+        }
+        XCTAssertEqual(recordedURL, quarantineURL)
     }
 
     /// Version 2 removed `AgentKind.shell`. A version-1 document naming that kind must still
@@ -390,6 +524,54 @@ final class StateManagerTests: XCTestCase {
         XCTAssertNotNil(quarantineURL)
         XCTAssertFalse(FileManager.default.fileExists(atPath: liveURL.path))
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(quarantineURL)), data)
+    }
+
+    // MARK: - Display Panel Migration
+
+    func testLegacyPanelsStillImportWhenTheDatabaseAlreadyContainsAnotherPanel() throws {
+        let manager = makeManager()
+        let existingID = SessionID()
+        let legacyID = SessionID()
+        manager.savePanelPayload(#"{"source":"database"}"#, for: existingID)
+
+        let panels = testDirectory.appendingPathComponent(
+            DisplayPaneStoreDefaults.rootDirectory,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: panels, withIntermediateDirectories: true)
+        let legacy = panels
+            .appendingPathComponent(legacyID.uuidString)
+            .appendingPathExtension(DisplayPaneStoreDefaults.layoutExtension)
+        try #"{"source":"legacy"}"#.write(to: legacy, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(manager.loadPanelPayload(for: legacyID), #"{"source":"legacy"}"#)
+        XCTAssertEqual(manager.loadPanelPayload(for: existingID), #"{"source":"database"}"#)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: legacy.appendingPathExtension(SQLiteDefaults.migratedSuffix).path
+            )
+        )
+    }
+
+    func testUnreadableLegacyPanelIsPreservedAndClosesPersistence() throws {
+        let manager = makeManager()
+        let sessionID = SessionID()
+        let panels = testDirectory.appendingPathComponent(
+            DisplayPaneStoreDefaults.rootDirectory,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: panels, withIntermediateDirectories: true)
+        let legacy = panels
+            .appendingPathComponent(sessionID.uuidString)
+            .appendingPathExtension(DisplayPaneStoreDefaults.layoutExtension)
+        try Data([0xFF, 0xFE]).write(to: legacy)
+
+        XCTAssertNil(manager.loadPanelPayload(for: sessionID))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path))
+        guard case .recoveryRequired = manager.persistenceHealth else {
+            return XCTFail("Unreadable legacy state must disable later persistence writes")
+        }
     }
 
     // MARK: - Session Attachments

@@ -14,7 +14,7 @@ typealias GitDiffLine = NativeDiffCore.DiffLine
 
 /// What the review pane is comparing. Raw values are persisted with the tab, so they are
 /// stable names, not display strings.
-enum GitReviewMode: String, Codable, CaseIterable {
+enum GitReviewMode: String, Codable, CaseIterable, Sendable {
     case uncommitted
     case unstaged
     case staged
@@ -37,7 +37,7 @@ enum GitReviewMode: String, Codable, CaseIterable {
 // MARK: - Staging
 
 /// Which way a control moves a change.
-enum GitStagingAction {
+enum GitStagingAction: Sendable {
     case stage
     case unstage
 
@@ -60,7 +60,7 @@ enum GitStagingAction {
 /// Uncommitted (HEAD → worktree) can only speak about whole files, since its hunks describe a
 /// baseline the index may already have moved past. The remaining modes compare things that are
 /// not the index at all and stay read-only, which is what the pane was before this existed.
-struct GitStaging {
+struct GitStaging: Sendable {
     let action: GitStagingAction
     let allowsHunks: Bool
 
@@ -77,7 +77,7 @@ struct GitStaging {
 // MARK: - Commit Summary
 
 /// One row of the history list.
-struct GitCommitSummary {
+struct GitCommitSummary: Sendable {
     let hash: String
     let shortHash: String
     let subject: String
@@ -98,7 +98,7 @@ struct GitCommitSummary {
 
 /// A diff reduced to its totals — what the floating status card draws, and all it needs:
 /// producing the hunks to throw them away would spend the parse on every checkout write.
-struct GitChangeSummary: Equatable {
+struct GitChangeSummary: Equatable, Sendable {
     let files: Int
     let added: Int
     let removed: Int
@@ -112,8 +112,8 @@ struct GitChangeSummary: Equatable {
 
 /// The checkout's `git status`, reduced to what the review pane needs: which paths changed
 /// where, and which are untracked.
-struct GitStatus {
-    struct Entry {
+struct GitStatus: Sendable {
+    struct Entry: Sendable {
         let path: String
         let renamedFrom: String?
         let staged: Bool
@@ -127,7 +127,7 @@ struct GitStatus {
 // MARK: - Repository Files
 
 /// One bounded source file read for a remote repository browser.
-struct GitRepositoryFile {
+struct GitRepositoryFile: Sendable {
     let path: String
     let content: String?
     let isBinary: Bool
@@ -143,7 +143,7 @@ struct GitRepositoryFile {
 /// no index and no worktree. Untracked files are recorded separately because a stash commit
 /// does not include them: a file untracked at capture and still untracked now is not the
 /// turn's work.
-struct GitTurnBaseline {
+struct GitTurnBaseline: Sendable {
     let snapshotHash: String
     let capturedAt: Date
     let untrackedPaths: Set<String>
@@ -152,7 +152,7 @@ struct GitTurnBaseline {
 /// One file's bytes at a review request's two endpoints, with what each endpoint is called —
 /// what an image row compares. A side the endpoint does not hold (an added, deleted, or
 /// untracked file) is nil rather than an error: half a pair is still worth showing.
-struct GitEndpointFilePair {
+struct GitEndpointFilePair: Sendable {
     let old: Data?
     let new: Data?
     let oldTitle: String

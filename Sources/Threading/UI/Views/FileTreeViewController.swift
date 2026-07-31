@@ -69,9 +69,34 @@ final class FileTreeViewController: NSViewController {
 
     let folderPath: String
 
-    private var outlineView: NSOutlineView!
-    private var scrollView: NSScrollView!
-    private var root: FileNode!
+    private lazy var root = FileNode(
+        url: URL(fileURLWithPath: folderPath),
+        isDirectory: true
+    )
+    private lazy var outlineView: NSOutlineView = {
+        let outline = ThemedOutlineView()
+        outline.headerView = nil
+        outline.rowSizeStyle = .default
+        outline.indentationPerLevel = FileTreeDefaults.indentationPerLevel
+        outline.dataSource = self
+        outline.delegate = self
+        outline.target = self
+        outline.doubleAction = #selector(rowDoubleClicked)
+        outline.menu = makeContextMenu()
+
+        let column = NSTableColumn(identifier: FileTreeDefaults.columnIdentifier)
+        column.resizingMask = .autoresizingMask
+        outline.addTableColumn(column)
+        outline.outlineTableColumn = column
+        return outline
+    }()
+    private lazy var scrollView: NSScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.documentView = outlineView
+        scroll.hasVerticalScroller = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        return scroll
+    }()
     private var hasLoaded = false
 
     // MARK: - Initialization
@@ -94,32 +119,12 @@ final class FileTreeViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        root = FileNode(url: URL(fileURLWithPath: folderPath), isDirectory: true)
         setupOutlineView()
     }
 
     // MARK: - Setup
 
     private func setupOutlineView() {
-        outlineView = ThemedOutlineView()
-        outlineView.headerView = nil
-        outlineView.rowSizeStyle = .default
-        outlineView.indentationPerLevel = FileTreeDefaults.indentationPerLevel
-        outlineView.dataSource = self
-        outlineView.delegate = self
-        outlineView.target = self
-        outlineView.doubleAction = #selector(rowDoubleClicked)
-        outlineView.menu = makeContextMenu()
-
-        let column = NSTableColumn(identifier: FileTreeDefaults.columnIdentifier)
-        column.resizingMask = .autoresizingMask
-        outlineView.addTableColumn(column)
-        outlineView.outlineTableColumn = column
-
-        scrollView = ThemedScrollView()
-        scrollView.documentView = outlineView
-        scrollView.hasVerticalScroller = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
 
         NSLayoutConstraint.activate([

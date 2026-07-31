@@ -4,8 +4,8 @@ import Foundation
 ///
 /// Keeping reconciliation in the Foundation-only wire package makes revision recovery,
 /// idempotent history pages, and row updates testable without mounting either AppKit or UIKit.
-public struct RemoteConversationState: Equatable {
-    public enum ApplyResult: Equatable {
+public struct RemoteConversationState: Equatable, Sendable {
+    public enum ApplyResult: Equatable, Sendable {
         case replaced
         case changed(inserted: [String], updated: [String])
         case prepended([String])

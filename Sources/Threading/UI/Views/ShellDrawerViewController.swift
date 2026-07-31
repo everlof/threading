@@ -30,7 +30,9 @@ final class ShellDrawerViewController: NSViewController {
     /// would put it somewhere the conversation above it left long ago.
     private let directory: () -> URL
 
-    private var session: TerminalSession!
+    private lazy var session = TerminalSession(
+        profile: ThemeAssignments.profile(for: sessionID)
+    )
     private let appEvents = AppEventObservations()
 
     /// Kept so a session's shell survives being switched away from and back: the process is the
@@ -62,7 +64,6 @@ final class ShellDrawerViewController: NSViewController {
 
         // The session's own theme, not the app default: a drawer under a themed terminal that
         // ignored the theme would read as a different application.
-        session = TerminalSession(profile: ThemeAssignments.profile(for: sessionID))
         session.terminalView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(session.terminalView)
 
@@ -97,7 +98,7 @@ final class ShellDrawerViewController: NSViewController {
     /// Nil until the drawer has actually been revealed: a shell nobody opened has no process, and
     /// the panel should then say the session has one origin rather than an empty second one.
     var shellRootPid: pid_t? {
-        guard hasStarted, isViewLoaded, let session, session.shellPid > 0 else { return nil }
+        guard hasStarted, isViewLoaded, session.shellPid > 0 else { return nil }
         return session.shellPid
     }
 
@@ -108,7 +109,8 @@ final class ShellDrawerViewController: NSViewController {
     }
 
     var backgroundColor: NSColor {
-        session?.terminalView.nativeBackgroundColor ?? Design.Surface.ground
+        guard isViewLoaded else { return Design.Surface.ground }
+        return session.terminalView.nativeBackgroundColor
     }
 
     // MARK: - Private Methods

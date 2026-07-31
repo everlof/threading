@@ -27,8 +27,12 @@ class ThemedTableView: NSTableView, ThemedComponent {
         _ responder: NSResponder,
         for event: NSEvent?
     ) -> Bool {
-        RowControls.takesItsOwnClick(responder)
-            || super.validateProposedFirstResponder(responder, for: event)
+        if MainActor.assumeIsolated({
+            RowControls.takesItsOwnClick(responder)
+        }) {
+            return true
+        }
+        return super.validateProposedFirstResponder(responder, for: event)
     }
 }
 
@@ -55,6 +59,7 @@ class ThemedTableView: NSTableView, ThemedComponent {
 /// view inserts. A label, an image or the row's ground is none of these, so clicking a row
 /// anywhere else still selects it — "anywhere else" meaning outside every such control, the glyphs
 /// and labels *inside* one included, for the reason `takesItsOwnClick` states.
+@MainActor
 enum RowControls {
 
     /// Whether the click that landed on `responder` belongs to a control rather than to the row.
@@ -120,8 +125,12 @@ class ThemedOutlineView: NSOutlineView, ThemedComponent, SystemChromeBoundary {
         _ responder: NSResponder,
         for event: NSEvent?
     ) -> Bool {
-        RowControls.takesItsOwnClick(responder)
-            || super.validateProposedFirstResponder(responder, for: event)
+        if MainActor.assumeIsolated({
+            RowControls.takesItsOwnClick(responder)
+        }) {
+            return true
+        }
+        return super.validateProposedFirstResponder(responder, for: event)
     }
 }
 

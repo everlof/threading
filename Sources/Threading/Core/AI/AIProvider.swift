@@ -62,7 +62,7 @@ enum AIError: LocalizedError {
 // MARK: - AI Provider Protocol
 
 /// Protocol for AI service providers.
-protocol AIProvider {
+protocol AIProvider: Sendable {
     /// Display name of the provider.
     var name: String { get }
 

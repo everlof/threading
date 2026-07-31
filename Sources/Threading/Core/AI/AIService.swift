@@ -1,6 +1,7 @@
 import Foundation
 
 /// Manages AI provider configuration and requests.
+@MainActor
 final class AIService {
 
     // MARK: - Singleton

@@ -4,7 +4,7 @@ import Foundation
 
 /// What a git invocation can fail with, shared by the reads and the writes so one vocabulary
 /// reaches the pane.
-enum GitFailure: LocalizedError, Equatable {
+enum GitFailure: LocalizedError, Equatable, Sendable {
     case launchFailed(String)
     case gitFailed(String)
     case timedOut
@@ -100,11 +100,11 @@ enum GitProcess {
 
         // One reader per pipe, so neither can fill while the other blocks: stderr drains on a
         // global queue while the caller's queue reads stdout to EOF.
-        var errorData = Data()
+        let errorCapture = GitProcessDataCapture()
         let stderrDrained = DispatchGroup()
         stderrDrained.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+            errorCapture.replace(with: stderr.fileHandleForReading.readDataToEndOfFile())
             stderrDrained.leave()
         }
 
@@ -144,7 +144,7 @@ enum GitProcess {
         if interrupted.oversized { throw GitFailure.outputTooLarge }
 
         guard acceptedExitCodes.contains(process.terminationStatus) else {
-            let message = String(data: errorData, encoding: .utf8)?
+            let message = String(data: errorCapture.value, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             ThreadingLogger.git.error(
                 "git \(arguments.joined(separator: " "), privacy: .public) failed: \(message ?? "", privacy: .public)"
@@ -175,5 +175,24 @@ enum GitProcess {
         func markOversized() { lock.lock(); oversizedValue = true; lock.unlock() }
         var timedOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOutValue }
         var oversized: Bool { lock.lock(); defer { lock.unlock() }; return oversizedValue }
+    }
+}
+
+/// One cross-queue stderr handoff. The dispatch group establishes ordering for the caller;
+/// the lock makes the ownership legible to Swift's concurrency checker as well.
+private final class GitProcessDataCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    var value: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+
+    func replace(with data: Data) {
+        lock.lock()
+        self.data = data
+        lock.unlock()
     }
 }

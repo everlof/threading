@@ -3,7 +3,12 @@ import ThreadingExtensionKit
 
 enum ExtensionStorageStoreError: LocalizedError {
     case persistentStoreTooLarge(identifier: String, maximum: Int)
+    case invalidIdentifier(String)
+    case incompatibleDataVersionFormat(identifier: String, found: Int)
+    case invalidDataVersion(identifier: String, found: Int)
     case dataVersionRollback(identifier: String, stored: Int, requested: Int)
+    case dataVersionCouldNotBeSaved(String)
+    case cacheDirectoryUnreadable(String)
 
     var errorDescription: String? {
         switch self {
@@ -13,9 +18,30 @@ enum ExtensionStorageStoreError: LocalizedError {
                 countStyle: .file
             )
             return "Extension \(identifier) has a key-value store larger than its \(size) quota."
+        case .invalidIdentifier(let identifier):
+            return L10n.format("Invalid extension identifier: %@.", identifier)
+        case .incompatibleDataVersionFormat(let identifier, let found):
+            return L10n.format(
+                "Extension %@ uses unsupported data-version format %lld.",
+                identifier,
+                Int64(found)
+            )
+        case .invalidDataVersion(let identifier, let found):
+            return L10n.format(
+                "Extension %@ has invalid stored data version %lld.",
+                identifier,
+                Int64(found)
+            )
         case .dataVersionRollback(let identifier, let stored, let requested):
             return "Extension \(identifier) cannot move stored data from version \(stored) "
                 + "back to version \(requested)."
+        case .dataVersionCouldNotBeSaved(let identifier):
+            return L10n.format(
+                "Extension %@ data version could not be saved and verified.",
+                identifier
+            )
+        case .cacheDirectoryUnreadable(let path):
+            return "The extension cache at \(path) could not be measured safely."
         }
     }
 }
@@ -25,7 +51,7 @@ enum ExtensionStorageStoreError: LocalizedError {
 /// A protocol so `ExtensionHostService` can be tested without a real Application Support tree,
 /// and so the storage that answers a brokered request is visibly the same storage the
 /// experimental launcher grants as a directory.
-protocol ExtensionKeyValueStoring: AnyObject {
+protocol ExtensionKeyValueStoring: AnyObject, Sendable {
     func keyValues(extensionIdentifier: String) throws -> [String: ExtensionJSONValue]
     func setKeyValue(
         _ value: ExtensionJSONValue,
@@ -36,7 +62,7 @@ protocol ExtensionKeyValueStoring: AnyObject {
 }
 
 /// The host's side of brokered cache storage.
-protocol ExtensionCacheStoring: AnyObject {
+protocol ExtensionCacheStoring: AnyObject, Sendable {
     func cacheNames(extensionIdentifier: String) throws -> [String]
     func cacheData(extensionIdentifier: String, name: String) throws -> Data?
     func setCacheData(_ value: Data, extensionIdentifier: String, name: String) throws
@@ -134,12 +160,14 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
         lock.lock()
         defer { lock.unlock() }
 
+        try validate(identifier: identifier)
         let url = dataVersionURL(for: identifier)
         guard fileManager.fileExists(atPath: url.path) else { return 0 }
-        return try JSONDecoder().decode(
+        return try decodeDataVersion(
             DataVersionState.self,
-            from: Data(contentsOf: url)
-        ).dataVersion
+            from: Data(contentsOf: url),
+            identifier: identifier
+        )
     }
 
     /// Records a successful migration/startup atomically.
@@ -151,13 +179,21 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
         lock.lock()
         defer { lock.unlock() }
 
+        try validate(identifier: identifier)
+        guard (1...1_000_000).contains(version) else {
+            throw ExtensionStorageStoreError.invalidDataVersion(
+                identifier: identifier,
+                found: version
+            )
+        }
         let current: Int
         let url = dataVersionURL(for: identifier)
         if fileManager.fileExists(atPath: url.path) {
-            current = try JSONDecoder().decode(
+            current = try decodeDataVersion(
                 DataVersionState.self,
-                from: Data(contentsOf: url)
-            ).dataVersion
+                from: Data(contentsOf: url),
+                identifier: identifier
+            )
         } else {
             current = 0
         }
@@ -168,11 +204,15 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
                 requested: version
             )
         }
+        guard version != current else { return }
 
         let directory = dataDirectory(for: identifier)
         try ensurePrivateDirectory(directory)
         let data = try JSONEncoder().encode(DataVersionState(dataVersion: version))
         try data.write(to: url, options: .atomic)
+        guard try Data(contentsOf: url) == data else {
+            throw ExtensionStorageStoreError.dataVersionCouldNotBeSaved(identifier)
+        }
     }
 
     // MARK: - ExtensionKeyValueStoring
@@ -233,7 +273,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
         // The 100 MiB ceiling is checked per write, not only at launch. A brokered extension
         // never restarts to have its cache reclaimed, so a launch-time sweep alone would let it
         // grow without bound for as long as the app stays open.
-        let replaced = ((try? store.data(forName: name)) ?? nil)?.count ?? 0
+        let replaced = try store.data(forName: name)?.count ?? 0
         let projected = try directorySize(directory) - Int64(replaced) + Int64(value.count)
         guard projected <= Self.maximumCacheBytes else {
             throw ExtensionStorageError.quotaExceeded(
@@ -274,6 +314,33 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
     private func dataVersionURL(for identifier: String) -> URL {
         dataDirectory(for: identifier)
             .appendingPathComponent("data-version.json", isDirectory: false)
+    }
+
+    private func decodeDataVersion(
+        _ type: DataVersionState.Type,
+        from data: Data,
+        identifier: String
+    ) throws -> Int {
+        let state = try JSONDecoder().decode(type, from: data)
+        guard state.formatVersion == DataVersionState.currentFormatVersion else {
+            throw ExtensionStorageStoreError.incompatibleDataVersionFormat(
+                identifier: identifier,
+                found: state.formatVersion
+            )
+        }
+        guard (1...1_000_000).contains(state.dataVersion) else {
+            throw ExtensionStorageStoreError.invalidDataVersion(
+                identifier: identifier,
+                found: state.dataVersion
+            )
+        }
+        return state.dataVersion
+    }
+
+    private func validate(identifier: String) throws {
+        guard ExtensionIdentifierRules.isReverseDNSIdentifier(identifier) else {
+            throw ExtensionStorageStoreError.invalidIdentifier(identifier)
+        }
     }
 
     func cacheDirectory(for identifier: String) -> URL {
@@ -335,7 +402,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        try? fileManager.setAttributes(
+        try fileManager.setAttributes(
             [.posixPermissions: 0o700],
             ofItemAtPath: url.path
         )
@@ -348,7 +415,7 @@ final class ExtensionStorageStore: ExtensionKeyValueStoring, ExtensionCacheStori
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
             options: []
         ) else {
-            return 0
+            throw ExtensionStorageStoreError.cacheDirectoryUnreadable(directory.path)
         }
 
         var total: Int64 = 0

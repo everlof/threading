@@ -23,6 +23,7 @@ struct KeyboardShortcutsDidChange: AppEvent {
 /// All access is on the main queue — the settings page writes it and the menu bar reads it, both
 /// on main — so it needs no locking, and no isolation either: the menu is built from
 /// `AppDelegate`, which is not itself actor-isolated. This is `DisplayPaneStore`'s arrangement.
+@MainActor
 final class ShortcutOverrideStore {
 
     static let shared = ShortcutOverrideStore()
@@ -32,13 +33,8 @@ final class ShortcutOverrideStore {
         var cleared: [String] = []
     }
 
-    private var payload = Payload()
-
-    /// False only when a stored value could not be decoded *and* could not be kept aside. A
-    /// write then has nowhere to put what it would destroy, so it does not happen.
-    private var writesAllowed = true
-
-    private let defaults: UserDefaults
+    private var payload: Payload
+    private let persistence: RecoverableDefaultsStore<Payload>
     private let registry: CommandRegistry
 
     /// The defaults are injectable so tests can exercise the resolution and conflict rules
@@ -47,9 +43,13 @@ final class ShortcutOverrideStore {
         defaults: UserDefaults = .standard,
         registry: CommandRegistry = .shared
     ) {
-        self.defaults = defaults
         self.registry = registry
-        load()
+        self.persistence = RecoverableDefaultsStore(
+            defaults: defaults,
+            key: Keys.overrides,
+            criticality: .preference
+        )
+        self.payload = persistence.load(defaultValue: Payload()).value
     }
 
     // MARK: - Reading
@@ -66,7 +66,8 @@ final class ShortcutOverrideStore {
         // moving or clearing the owner in Keyboard settings.
         if command.origin.extensionIdentifier != nil,
            registry.all.contains(where: { other in
-               other.id != command.id && unsuppressedShortcut(for: other) == candidate
+               other.id != command.id
+                    && unsuppressedShortcut(for: other, payload: payload) == candidate
            }) {
             return nil
         }
@@ -93,29 +94,31 @@ final class ShortcutOverrideStore {
     func setShortcut(_ shortcut: KeyboardShortcut?, for command: AppCommand) {
         guard command.isEditable else { return }
 
-        payload.bound.removeValue(forKey: command.id)
-        payload.cleared.removeAll { $0 == command.id }
+        var candidate = payload
+        candidate.bound.removeValue(forKey: command.id)
+        candidate.cleared.removeAll { $0 == command.id }
 
         if let shortcut {
-            if shortcut != command.defaultShortcut || defaultConflict(for: command) != nil {
-                payload.bound[command.id] = shortcut
+            if shortcut != command.defaultShortcut
+                || defaultConflict(for: command, payload: candidate) != nil {
+                candidate.bound[command.id] = shortcut
             }
         } else if command.defaultShortcut != nil {
-            payload.cleared.append(command.id)
+            candidate.cleared.append(command.id)
         }
 
-        save()
+        commit(candidate)
     }
 
     func reset(_ command: AppCommand) {
-        payload.bound.removeValue(forKey: command.id)
-        payload.cleared.removeAll { $0 == command.id }
-        save()
+        var candidate = payload
+        candidate.bound.removeValue(forKey: command.id)
+        candidate.cleared.removeAll { $0 == command.id }
+        commit(candidate)
     }
 
     func resetAll() {
-        payload = Payload()
-        save()
+        commit(Payload())
     }
 
     // MARK: - Conflicts
@@ -132,6 +135,13 @@ final class ShortcutOverrideStore {
 
     /// Why an extension's declared default is currently unbound, if it is.
     func defaultConflict(for command: AppCommand) -> AppCommand? {
+        defaultConflict(for: command, payload: payload)
+    }
+
+    private func defaultConflict(
+        for command: AppCommand,
+        payload: Payload
+    ) -> AppCommand? {
         guard command.origin.extensionIdentifier != nil,
               payload.bound[command.id] == nil,
               !payload.cleared.contains(command.id),
@@ -139,11 +149,15 @@ final class ShortcutOverrideStore {
             return nil
         }
         return registry.all.first { other in
-            other.id != command.id && unsuppressedShortcut(for: other) == candidate
+            other.id != command.id
+                && unsuppressedShortcut(for: other, payload: payload) == candidate
         }
     }
 
-    private func unsuppressedShortcut(for command: AppCommand) -> KeyboardShortcut? {
+    private func unsuppressedShortcut(
+        for command: AppCommand,
+        payload: Payload
+    ) -> KeyboardShortcut? {
         guard command.isEditable else { return command.defaultShortcut }
         if payload.cleared.contains(command.id) { return nil }
         return payload.bound[command.id] ?? command.defaultShortcut
@@ -151,41 +165,11 @@ final class ShortcutOverrideStore {
 
     // MARK: - Persistence
 
-    private func save() {
-        guard writesAllowed else {
-            ThreadingLogger.session.error(
-                "Refusing to save shortcut overrides: the unreadable previous value is still there"
-            )
-            return
-        }
-
-        do {
-            defaults.set(try JSONEncoder().encode(payload), forKey: Keys.overrides)
+    private func commit(_ candidate: Payload) {
+        if persistence.save(candidate) {
+            payload = candidate
             NotificationCenter.default.post(KeyboardShortcutsDidChange())
-        } catch {
-            ThreadingLogger.session.error("Could not save shortcut overrides: \(error.localizedDescription)")
         }
-    }
-
-    /// Missing and unreadable are different answers.
-    ///
-    /// Both used to fall through to the default payload, and the next rebinding then wrote that
-    /// default straight over the stored blob — so a user whose overrides failed to decode lost
-    /// every one of them, permanently, the first time they touched a shortcut. The unreadable
-    /// case is now kept aside and only then overwritten; see `DefaultsQuarantine`.
-    private func load() {
-        guard let data = defaults.data(forKey: Keys.overrides) else { return }
-
-        guard let decoded = try? JSONDecoder().decode(Payload.self, from: data) else {
-            writesAllowed = DefaultsQuarantine.quarantine(
-                data,
-                forKey: Keys.overrides,
-                in: defaults
-            )
-            return
-        }
-
-        payload = decoded
     }
 
     private enum Keys {

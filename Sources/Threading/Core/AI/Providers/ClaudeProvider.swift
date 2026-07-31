@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 /// AI provider implementation for Anthropic's Claude API.
-final class ClaudeProvider: AIProvider {
+final class ClaudeProvider: AIProvider, @unchecked Sendable {
 
     // MARK: - Constants
 
@@ -97,7 +97,7 @@ final class ClaudeProvider: AIProvider {
 
         switch httpResponse.statusCode {
         case 200:
-            let result = try parseResponse(data, duration: duration)
+            let result = try await parseResponse(data, duration: duration)
             return result
         case 429:
             ThreadingLogger.aiResponse.error("Claude response: rate limited")
@@ -112,7 +112,7 @@ final class ClaudeProvider: AIProvider {
         }
     }
 
-    private func parseResponse(_ data: Data, duration: TimeInterval) throws -> String {
+    private func parseResponse(_ data: Data, duration: TimeInterval) async throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = json["content"] as? [[String: Any]],
               let firstBlock = content.first,
@@ -128,7 +128,11 @@ final class ClaudeProvider: AIProvider {
             ThreadingLogger.aiResponse.info("Claude response - duration: \(String(format: "%.2f", duration))s, input_tokens: \(inputTokens), output_tokens: \(outputTokens)")
 
             // Record token usage
-            TokenUsageManager.shared.record(model: model, inputTokens: inputTokens, outputTokens: outputTokens)
+            await TokenUsageManager.shared.record(
+                model: model,
+                inputTokens: inputTokens,
+                outputTokens: outputTokens
+            )
         }
 
         ThreadingLogger.aiResponse.debug("Claude response text: \(text)")

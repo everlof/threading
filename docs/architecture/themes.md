@@ -361,6 +361,30 @@ the sweep across the whole catalogue is `ThemedIndicatorsTests`
 (`testEveryStockThemeRulesAtOneWeightThroughoutTheWindow`), entering each style from the heaviest
 one so a stale rule has somewhere to show.
 
+## 2026-07-30 — the active app theme is a living settings document
+
+Settings now gives the app theme its own **Current Theme** destination, separate from the
+terminal-theme editor. That split follows the model rather than the word “theme”: the app chrome
+has one active value for the whole window, while a terminal palette resolves through session,
+project, and default scopes.
+
+The page reads `AppThemeLibrary.current` every time it refreshes and exposes the theme's source,
+available appearance variants, material, sidebar treatment, paired terminal colours, and the
+thirteen authored semantic colour roles. Stock and contributed themes keep their swatches at full
+strength but hide the contained colour wells; their direct **Duplicate to Edit** action goes
+through `AppThemeLibrary.duplicate`, applies the copy, and leaves the same page unlocked. A custom
+swatch change rebuilds only that variant, then goes through `AppThemeEditing.assemble` and
+`AppThemeLibrary.update`, so the ordinary contrast gates, persistence, repaint, and notifications
+remain the only write path.
+
+The inverse flow is equally important. The page observes both `AppThemeDidChange` and
+`AppThemeLibraryDidChange`, so an active document replaced through `update_app_theme`, or a
+contributed document replaced by `ExtensionThemeWatcher`, re-reads into the open controls. An
+appearance-observing root handles the one change with no library event: macOS moving an adaptive
+theme between its light and dark variants. The short agent note on the page names the same
+`get_app_theme` → `duplicate_app_theme (apply: true)` → `update_app_theme` vocabulary the tools
+advertise; it teaches the door without adding a second authoring protocol.
+
 The exception, and it is structural: the browser's device toolbar and find bar hide by dropping
 their rule's height to **zero**, so those two weights are constraint constants rather than
 intrinsic sizes — an intrinsic size cannot also mean "nothing". A constant is whatever it was last

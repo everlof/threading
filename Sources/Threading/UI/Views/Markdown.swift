@@ -26,6 +26,7 @@ struct MarkdownStyle {
     /// `.conversation` rather than `.chrome`: this is the transcript, which the reader may want
     /// set differently from the app around it — the same say the terminal has always had through
     /// `TerminalProfile`. `codeFont` stays code, here as everywhere.
+    @MainActor
     static var assistant: MarkdownStyle {
         MarkdownStyle(
             font: Design.Typography.body(surface: .conversation),
@@ -69,11 +70,12 @@ struct MarkdownTable {
 ///
 /// Written by hand rather than pulled in, because the project depends only on SwiftTerm and a
 /// hundred lines of well-understood scanning is cheaper to own than a package to track.
+@MainActor
 enum Markdown {
 
     /// Reads one block starting at `index`, returning it and the line after it — or nil if the
     /// line does not begin this kind of block, so the next reader gets a turn.
-    private typealias Reader = (_ lines: [String], _ index: Int, _ style: MarkdownStyle)
+    private typealias Reader = @MainActor (_ lines: [String], _ index: Int, _ style: MarkdownStyle)
         -> (MarkdownBlock, Int)?
 
     /// Ordered by precedence: a `> - item` is a quote, not a list, because quote reads first.

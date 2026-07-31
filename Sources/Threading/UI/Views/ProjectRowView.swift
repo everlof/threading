@@ -24,9 +24,33 @@ final class ProjectRowView: NSTableCellView {
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
     private let trailingSlot = NSView()
-    private var contentContainer: ComponentContentContainer!
-    private var rowContentStack: NSStackView!
-    private var customizationHost: ComponentCustomizationHost!
+    private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeContent)
+    private lazy var rowContentStack = NSStackView(
+        views: [contentContainer, afterTitleSlot, trailingSlot]
+    )
+    private lazy var customizationHost = ComponentCustomizationHost(
+        target: .init(
+            component: HostComponentContracts.sidebarProjectRow.id,
+            contractVersion: HostComponentContracts.sidebarProjectRow.version
+        ),
+        contentContainer: contentContainer,
+        slots: ["after-title": afterTitleSlot],
+        lookup: customizationLookup,
+        imageResolver: { [weak self] reference, _ in
+            self?.resolveCustomizationImage(reference)
+        },
+        onAction: { [weak self] action in
+            guard let self else { return }
+            if let onCustomizationAction {
+                onCustomizationAction(action)
+            } else {
+                ComponentCustomizationProviderSlot.shared.perform(action)
+            }
+        },
+        onProperties: { [weak self] properties in
+            self?.applyCustomizationProperties(properties)
+        }
+    )
     private let customizationLookup: ComponentCustomizationHost.Lookup
     private let projectHoverContentProvider: ProjectHoverContentProvider
 
@@ -321,7 +345,6 @@ final class ProjectRowView: NSTableCellView {
         ])
 
         nativeContent.setAccessibilityIdentifier("sidebar.project.default-content")
-        contentContainer = ComponentContentContainer(defaultContent: nativeContent)
         contentContainer.setAccessibilityIdentifier("sidebar.project.content")
         contentContainer.setContentHuggingPriority(
             SidebarRowDefaults.stretchableHugging,
@@ -335,36 +358,13 @@ final class ProjectRowView: NSTableCellView {
         afterTitleSlot.isHidden = true
         afterTitleSlot.setAccessibilityIdentifier("sidebar.project.slot.after-title")
 
-        rowContentStack = NSStackView(views: [contentContainer, afterTitleSlot, trailingSlot])
         rowContentStack.orientation = .horizontal
         rowContentStack.alignment = .centerY
         rowContentStack.spacing = SidebarRowDefaults.horizontalSpacing
         rowContentStack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(rowContentStack)
 
-        customizationHost = ComponentCustomizationHost(
-            target: .init(
-                component: HostComponentContracts.sidebarProjectRow.id,
-                contractVersion: HostComponentContracts.sidebarProjectRow.version
-            ),
-            contentContainer: contentContainer,
-            slots: ["after-title": afterTitleSlot],
-            lookup: customizationLookup,
-            imageResolver: { [weak self] reference, _ in
-                self?.resolveCustomizationImage(reference)
-            },
-            onAction: { [weak self] action in
-                guard let self else { return }
-                if let onCustomizationAction {
-                    onCustomizationAction(action)
-                } else {
-                    ComponentCustomizationProviderSlot.shared.perform(action)
-                }
-            },
-            onProperties: { [weak self] properties in
-                self?.applyCustomizationProperties(properties)
-            }
-        )
+        _ = customizationHost
     }
 
     /// Shows the project's stored icon, or the folder symbol while it has none.
@@ -405,7 +405,7 @@ final class ProjectRowView: NSTableCellView {
         super.viewDidChangeEffectiveAppearance()
         guard shownProjectIcon != nil else { return }
         applyIconImage()
-        customizationHost?.refresh()
+        customizationHost.refresh()
     }
 
     /// Records what the row would show with no extension in play. The name is deliberately
@@ -546,7 +546,9 @@ final class ProjectRowView: NSTableCellView {
             withTimeInterval: SessionPopoverDefaults.hoverDelay,
             repeats: false
         ) { [weak self] _ in
-            self?.presentPopover()
+            MainActor.assumeIsolated {
+                self?.presentPopover()
+            }
         }
     }
 

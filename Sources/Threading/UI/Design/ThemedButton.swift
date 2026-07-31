@@ -201,7 +201,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     /// The release, watched at the application rather than waited for at this view — AppKit
     /// delivers no mouse-up at all to a view detached between the two. See `ThemedIconButton`.
-    private var releaseWatch: Any?
+    nonisolated(unsafe) private var releaseWatch: Any?
 
     // MARK: - Initialization
 

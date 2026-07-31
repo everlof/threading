@@ -74,6 +74,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case updateExtensionCapabilities
     case approveAgentExtensionInstall
     case shareChatLink
+    case approveSystemPermissionPrompt
 
     // MARK: - Policy
 
@@ -202,7 +203,13 @@ enum ConfirmationPrompt: String, CaseIterable {
              .installUnsignedExtension,
              .updateExtensionCapabilities,
              .approveAgentExtensionInstall,
-             .shareChatLink:
+             .shareChatLink,
+             // The capability here is macOS's to give, not Threading's — but the thing being
+             // handed out is the same: a program gets to reach past the app for something the
+             // user has not agreed to yet. It cannot be switched off for a reason the other
+             // grants only share by choice: switching it off would restore the unexplained
+             // system dialog, which is the bug rather than the quieter setting.
+             .approveSystemPermissionPrompt:
             return .alwaysAsks(.securityGrant)
         }
     }

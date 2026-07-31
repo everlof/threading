@@ -31,7 +31,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         name: String,
         version: String,
         dataVersion: Int = 1,
-        runtime: ExtensionRuntime = .native,
+        runtime: ExtensionRuntime,
         executable: String,
         capabilities: Set<ExtensionCapability> = [],
         mcpTools: [ExtensionMCPTool] = [],
@@ -75,10 +75,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         name = try container.decode(String.self, forKey: .name)
         version = try container.decode(String.self, forKey: .version)
         dataVersion = try container.decodeIfPresent(Int.self, forKey: .dataVersion) ?? 1
-        runtime = try container.decodeIfPresent(
-            ExtensionRuntime.self,
-            forKey: .runtime
-        ) ?? .native
+        runtime = try container.decode(ExtensionRuntime.self, forKey: .runtime)
         executable = try container.decode(String.self, forKey: .executable)
         capabilities = try container.decode(Set<ExtensionCapability>.self, forKey: .capabilities)
         mcpTools = try container.decodeIfPresent([ExtensionMCPTool].self, forKey: .mcpTools) ?? []
@@ -542,11 +539,11 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
     public static let networkBrokered = Self(rawValue: "network.brokered")
 }
 
-enum ExtensionIdentifierRules {
-    static let contributionMessage =
+public enum ExtensionIdentifierRules {
+    public static let contributionMessage =
         "must start with a lowercase letter and contain only lowercase letters, digits, '-', or '.'"
 
-    static func isReverseDNSIdentifier(_ value: String) -> Bool {
+    public static func isReverseDNSIdentifier(_ value: String) -> Bool {
         let parts = value.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count >= 2 else { return false }
         return parts.allSatisfy { part in
@@ -555,14 +552,14 @@ enum ExtensionIdentifierRules {
         }
     }
 
-    static func isContributionIdentifier(_ value: String) -> Bool {
+    public static func isContributionIdentifier(_ value: String) -> Bool {
         guard let first = value.first, first.isLowercaseASCII else { return false }
         return value.allSatisfy {
             $0.isLowercaseASCII || $0.isASCIINumber || $0 == "-" || $0 == "."
         }
     }
 
-    static func isSafeRelativePath(_ value: String) -> Bool {
+    public static func isSafeRelativePath(_ value: String) -> Bool {
         guard !value.isEmpty, !NSString(string: value).isAbsolutePath else { return false }
         let components = NSString(string: value).pathComponents
         return components.allSatisfy { $0 != "." && $0 != ".." && $0 != "/" }

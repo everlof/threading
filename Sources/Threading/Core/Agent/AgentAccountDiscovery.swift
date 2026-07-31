@@ -3,7 +3,7 @@ import os
 
 /// Short-lived discovery results, separated from presentation preferences so editing an
 /// account name or emoji is reflected immediately without forcing another filesystem scan.
-final class AgentAccountDiscoveryCache {
+final class AgentAccountDiscoveryCache: @unchecked Sendable {
 
     private struct Entry {
         let accounts: [AgentAccount]

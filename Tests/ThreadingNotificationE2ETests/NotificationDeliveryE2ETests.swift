@@ -232,7 +232,7 @@ private final class NotificationE2EHandler: MCPToolHandling {
     func handle(
         _ call: MCPToolCall,
         for sessionID: SessionID,
-        completion: @escaping (MCPToolResult) -> Void
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
         guard case .notifyUser(let arguments) = call,
               let title = arguments.title,

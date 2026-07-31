@@ -123,9 +123,14 @@ The grouping can be toggled from wherever you notice it, not only from Settings:
 The band at the top of the sidebar carries the app's brand at its left — the Threading mark,
 which stitches itself in when the app launches (skipped under Reduce Motion), beside the
 app's name — and two quiet controls at its right: **+** to add a project, and the
-arrangement control described below. A theme can restyle the whole row — its own logo, its
-own wordmark, even a gradient or image behind the list — see
-[Themes](#themes). **Settings** sits at the sidebar's bottom-left, icon and word.
+arrangement control described below. Both the brand and **Settings**, at the sidebar's
+bottom-left, sit on the same left margin as the rows between them, icon and word.
+
+The mark answers the pointer: it lifts while the pointer is anywhere over the brand row, and
+a click turns it one sixth of a turn — the mark has six strands, so it lands back on itself.
+Nothing is opened by the click; the brand names the window rather than pointing anywhere.
+Both are skipped under Reduce Motion. A theme can restyle the whole row — its own logo, its
+own wordmark, even a gradient or image behind the list — see [Themes](#themes).
 
 ### Arranging the sidebar
 The arrangement control at the sidebar's top opens the sidebar's view
@@ -518,7 +523,9 @@ there is always a way back:
 Quitting only asks when an agent is actually running, and never when the Mac is logging out,
 restarting or shutting down — a dialog there would stall the system rather than help. The
 conversations are kept either way and resume on the next launch; only the turn in flight is
-lost.
+lost. The alert says which of the two you are about to do: it counts the **turns in flight**
+when any agent is mid-answer or stopped on a question, and otherwise counts the **sessions
+open**, because closing a row of idle agents costs you nothing but their processes.
 
 Nothing else offers the checkbox. Anything that deletes for good — removing a project,
 **deleting a session**, deleting an archived session or a theme, reclaiming build directories,
@@ -1005,6 +1012,13 @@ wrote the current turn; an explicit request can instead target the owner, everyo
 or a named member. Open Native chats also show live **Name is typing…** presence without locking
 anyone out of the composer.
 
+The iPhone and browser keep their own bounded, content-free connection history; it is not sent to
+the Mac by default. From **Diagnostics** on iPhone, or beside the Mac on the browser dashboard, a
+paired owner can choose **Share diagnostics for 30 minutes**. Existing and new connection events
+then join the Mac's share-safe support timeline until the timer expires, you stop sharing, or the
+client closes. Raw logs, messages, prompts, terminal output, paths, URLs, notification text and
+credentials are never sent, and one-chat guest links do not get this control.
+
 Every link is a password, but an owner pairing code is much more powerful than a one-chat guest
 link. Each Threading launch creates a fresh owner link. Turning Remote Access off, or quitting the
 app, closes the local listener and secure relay and revokes the links immediately. Remote
@@ -1416,7 +1430,20 @@ process draws — a web page in the display panel — may appear blank in it.
 - **Cmd+Ctrl+F**: toggle full screen
 
 ### Themes
-Configure in **Settings > Themes**:
+
+Open **Settings > Current Theme** to inspect the app chrome that is active now. The page shows
+its light/dark variants, material, sidebar treatment, paired terminal colours, and the semantic
+colour roles the app actually reads. Built-in and extension themes are shown at full strength but
+locked; **Duplicate to Edit** creates and applies a custom copy in one step. A custom theme's
+colour changes repaint the open window immediately.
+
+The page stays live while an agent works too. You can say, for example, “Use Threading's
+app-theme MCP tools to make my current theme warmer and soften the sidebar.” The agent can inspect
+the active document with `get_app_theme`, duplicate and activate a locked source with
+`duplicate_app_theme` and `apply: true`, then patch the editable copy with `update_app_theme`;
+accepted changes appear in the open editor as they happen.
+
+Configure terminal palettes in **Settings > Themes**:
 - 16 ANSI colors (8 normal + 8 bright)
 - Foreground, background, cursor, and selection colors
 - Import themes from Terminal.app (.terminal files)
@@ -1589,6 +1616,12 @@ case; every word must match. Extension-provided pages and sections participate w
 localized titles, descriptions, choices, and placeholders, and the query stays in place when
 an extension is enabled or disabled.
 
+**A search says what it found, not only where.** Each matching section lists the settings the
+query landed on beneath it, indented — searching *mute* shows **General** with *Mute* under it —
+and picking either the section or one of its matches opens the page. The pane fills with the
+same answer as a results page: every matching section, the terms it matched, and an **Open**
+button for each. Clearing the field puts the selected page back.
+
 Threading follows the language macOS selects for the app, with English as the per-string fallback.
 Menus, built-in Settings navigation, commands, and Settings components use the app string
 catalog. Extensions carry their own translations and choose the closest language the app
@@ -1691,7 +1724,8 @@ and says so plainly for the one that cannot.
 | **Screen Recording** | An extension companion that captures the screen | The same. Inspect Mode draws from Threading's own view tree and needs nothing. |
 
 Each row has an **Open Settings** button that goes to that exact pane rather than to the top of
-System Settings.
+System Settings. The page keeps reading while it is open, so allowing something over in System
+Settings and switching back shows the new answer without reopening anything.
 
 **The part worth knowing: agents inherit what you grant Threading.** macOS attributes a directly
 launched child process to the app that launched it, and Claude and Codex are launched by
@@ -1705,6 +1739,23 @@ Extensions are the exception, and deliberately so. A safe extension is sandboxed
 Foundation-only. A companion executable declares each capability it wants at install time, and
 Threading requests only the grants its reviewed capabilities actually cover — so a companion that
 never asked for `inputControl` cannot cause an Accessibility prompt.
+
+**Threading warns you before macOS asks.** The consequence of the paragraph above is that a
+system prompt can appear out of nowhere: an agent runs `screencapture`, and macOS puts up a
+dialog saying *Threading* would like to record your screen — no session named, no command shown,
+no reason given. When Threading can see that coming, it says so first, in a sheet that names the
+agent, the chat and project it belongs to, and the exact command about to run. **Continue** lets
+the command run and macOS ask; **Deny** stops the command, and the agent is told why rather than
+being left with an unexplained failure.
+
+This applies to Screen Recording and Accessibility — the two grants Threading can check without
+asking macOS for anything — in chats it renders itself. You see it at most once per grant, since
+after the first time macOS has an answer of its own. It is not offered as a setting to switch
+off: switching it off would restore the unexplained dialog, which is the problem rather than the
+noisier version of it. A chat in **Don't Ask** never sees it, because the command it was about to
+warn you about is refused anyway. The Files & Folders prompt is deliberately *not* forecast —
+macOS offers no way to check that grant without requesting it, so a warning there could only be
+a guess, and a wrong guess is an interruption about a folder you approved years ago.
 
 **Software updates.** Threading checks a release feed on GitHub once a day and installs updates
 through **Sparkle**, only after you agree to each one. The request carries the version you are on
@@ -1923,6 +1974,10 @@ A launch that never reaches its quit leaves its marker behind, and the next laun
 `Previous launch did not quit cleanly`, pointing at the macOS crash report from that run in
 `~/Library/Logs/DiagnosticReports/`. That pair — what Threading was doing, and what macOS
 recorded about it dying — is what a crash needs explaining.
+
+This owner-local log is different from the share-safe remote diagnostics timeline. It can contain
+prompts, commands and paths, so it is never populated by or attached through the iPhone/browser
+sharing control.
 
 ## Keyboard Shortcuts
 

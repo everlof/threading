@@ -11,6 +11,7 @@ struct BrowserAnnotationMarker: Equatable {
 
 final class BrowserAnnotationOverlay: ThemedControl {
 
+    @MainActor
     private enum Layout {
         static let markerDiameter: CGFloat = Design.Size.chipHeight
         /// Computed, not stored: a `static let` resolves once and keeps the weight of whichever

@@ -125,7 +125,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// application, outlives this view, and completes the gesture the user actually made whether
     /// or not the row survived it. Every action button gets this by construction — a button a row
     /// grows later, ours or an extension's, is not one more call site that has to know.
-    private var releaseWatch: Any?
+    nonisolated(unsafe) private var releaseWatch: Any?
 
     init(
         symbolName: String,

@@ -104,6 +104,7 @@ enum UsageFormat {
 
 // MARK: - Severity Colours
 
+@MainActor
 extension UsageSeverity {
 
     /// Tint for the ring, percent text and bars. Normal stays monochrome in glyph contexts

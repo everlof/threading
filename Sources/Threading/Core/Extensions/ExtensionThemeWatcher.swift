@@ -18,12 +18,12 @@ import Foundation
 /// no-op — so a filter would only be a list of paths to forget to update. The debounce is the
 /// same trailing-edge idea as the git watcher's: a JSON writer is mid-write on the first
 /// event, and the interesting moment is the quiet after it.
-final class ExtensionThemeWatcher {
+final class ExtensionThemeWatcher: @unchecked Sendable {
 
     // MARK: - Properties
 
     private let root: String
-    private let onChange: @MainActor () -> Void
+    private let onChange: @MainActor @Sendable () -> Void
 
     private var stream: FSEventStreamRef?
     private var coalesceItem: DispatchWorkItem?
@@ -32,7 +32,7 @@ final class ExtensionThemeWatcher {
 
     // MARK: - Initialization
 
-    init(root: URL, onChange: @escaping @MainActor () -> Void) {
+    init(root: URL, onChange: @escaping @MainActor @Sendable () -> Void) {
         self.root = root.path
         self.onChange = onChange
     }

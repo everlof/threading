@@ -10,9 +10,37 @@ final class SubagentTranscriptViewController: NSViewController {
     // MARK: - Properties
 
     private let summaryView = SubagentSummaryView()
-    private var scrollView: ThemedScrollView!
-    private var documentView: NSView!
-    private var stack: NSStackView!
+    private lazy var stack: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.medium
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.inset,
+            left: Design.Spacing.inset,
+            bottom: Design.Spacing.inset,
+            right: Design.Spacing.inset
+        )
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+    private lazy var documentView: NSView = {
+        let document = NSView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        return document
+    }()
+    private lazy var scrollView: ThemedScrollView = {
+        let clip = FlippedClipView()
+        clip.drawsBackground = false
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.contentView = clip
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.documentView = documentView
+        return scroll
+    }()
     private var agents: [SubagentTimeline.Agent] = []
     private var workingCount = 0
     private var doneCount = 0
@@ -44,31 +72,6 @@ final class SubagentTranscriptViewController: NSViewController {
             self.select(threadID, notify: true)
         }
 
-        stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.medium
-        stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.inset,
-            left: Design.Spacing.inset,
-            bottom: Design.Spacing.inset,
-            right: Design.Spacing.inset
-        )
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        documentView = NSView()
-        documentView.translatesAutoresizingMaskIntoConstraints = false
-        documentView.addSubview(stack)
-
-        let clip = FlippedClipView()
-        clip.drawsBackground = false
-
-        scrollView = ThemedScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.contentView = clip
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.documentView = documentView
         view.addSubview(scrollView)
 
         NSLayoutConstraint.activate([

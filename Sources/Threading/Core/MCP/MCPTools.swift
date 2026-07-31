@@ -1,18 +1,171 @@
 import Foundation
 
+// MARK: - Built-In Tool Identity
+
+/// A built-in command understood by the application.
+///
+/// The wire spelling is part of the protocol, but callers inside the app carry this closed enum.
+/// A newly added case must therefore be classified below before it can join a settings group or be
+/// advertised. Provider tools remain open-ended and use `MCPJSONValue` through `.unknown`.
+enum MCPBuiltInTool: String, CaseIterable, Sendable {
+    case displayImage = "display_image"
+    case displayHTML = "display_html"
+    case displayCompareFiles = "display_compare_files"
+    case conversationHistory = "conversation_history"
+    case browserNavigate = "browser_navigate"
+    case browserHistory = "browser_history"
+    case browserStop = "browser_stop"
+    case browserTabs = "browser_tabs"
+    case browserStorage = "browser_storage"
+    case browserTrace = "browser_trace"
+    case browserUpload = "browser_upload"
+    case browserDownload = "browser_download"
+    case browserResize = "browser_resize"
+    case browserEmulate = "browser_emulate"
+    case browserCapabilities = "browser_capabilities"
+    case browserRunIsolated = "browser_run_isolated"
+    case browserSnapshot = "browser_snapshot"
+    case browserAnnotations = "browser_annotations"
+    case browserScreenshot = "browser_screenshot"
+    case browserVisualCompare = "browser_visual_compare"
+    case browserQuery = "browser_query"
+    case browserClick = "browser_click"
+    case browserHover = "browser_hover"
+    case browserDrag = "browser_drag"
+    case browserType = "browser_type"
+    case browserFillForm = "browser_fill_form"
+    case browserSelect = "browser_select"
+    case browserSetChecked = "browser_set_checked"
+    case browserPressKey = "browser_press_key"
+    case browserScroll = "browser_scroll"
+    case browserWait = "browser_wait"
+    case browserConsole = "browser_console"
+    case browserNetwork = "browser_network"
+    case browserPerformance = "browser_performance"
+    case browserAccessibilityAudit = "browser_accessibility_audit"
+    case panelListTabs = "panel_list_tabs"
+    case panelActivateTab = "panel_activate_tab"
+    case setProjectIcon = "set_project_icon"
+    case listReclaimableStorage = "list_reclaimable_storage"
+    case proposeStorageCleanup = "propose_storage_cleanup"
+    case notifyUser = "notify_user"
+    case listThemes = "list_themes"
+    case setTheme = "set_theme"
+    case createTheme = "create_theme"
+    case listAppThemes = "list_app_themes"
+    case getAppTheme = "get_app_theme"
+    case setAppTheme = "set_app_theme"
+    case createAppTheme = "create_app_theme"
+    case duplicateAppTheme = "duplicate_app_theme"
+    case updateAppTheme = "update_app_theme"
+    case extensionListComponents = "extension_list_components"
+    case extensionScaffoldProject = "extension_scaffold_project"
+    case extensionProposeInstall = "extension_propose_install"
+    case extensionDescribeComponent = "extension_describe_component"
+    case extensionValidateComponentPatch = "extension_validate_component_patch"
+    case extensionPreviewComponentPatch = "extension_preview_component_patch"
+
+    enum Family: String, CaseIterable, Sendable {
+        case continuation
+        case display
+        case browser
+        case panel
+        case project
+        case storage
+        case notifications
+        case appearance
+        case extensionAuthoring
+    }
+
+    /// Drives both capability availability and catalog validation.
+    var family: Family {
+        switch self {
+        case .conversationHistory:
+            return .continuation
+        case .displayImage, .displayHTML, .displayCompareFiles:
+            return .display
+        case .browserNavigate, .browserHistory, .browserStop, .browserTabs, .browserStorage,
+             .browserTrace, .browserUpload, .browserDownload, .browserResize, .browserEmulate,
+             .browserCapabilities, .browserRunIsolated, .browserSnapshot, .browserAnnotations,
+             .browserScreenshot, .browserVisualCompare, .browserQuery, .browserClick,
+             .browserHover, .browserDrag, .browserType, .browserFillForm, .browserSelect,
+             .browserSetChecked, .browserPressKey, .browserScroll, .browserWait, .browserConsole,
+             .browserNetwork, .browserPerformance, .browserAccessibilityAudit:
+            return .browser
+        case .panelListTabs, .panelActivateTab:
+            return .panel
+        case .setProjectIcon:
+            return .project
+        case .listReclaimableStorage, .proposeStorageCleanup:
+            return .storage
+        case .notifyUser:
+            return .notifications
+        case .listThemes, .setTheme, .createTheme, .listAppThemes, .getAppTheme, .setAppTheme,
+             .createAppTheme, .duplicateAppTheme, .updateAppTheme:
+            return .appearance
+        case .extensionListComponents, .extensionScaffoldProject, .extensionProposeInstall,
+             .extensionDescribeComponent, .extensionValidateComponentPatch,
+             .extensionPreviewComponentPatch:
+            return .extensionAuthoring
+        }
+    }
+
+    /// Conservative MCP behavior hints. Any tool with an action-dependent write is classified as
+    /// mutating; clients must never infer safety from the least consequential action it supports.
+    var annotations: MCPToolAnnotations {
+        switch self {
+        case .conversationHistory, .browserCapabilities, .browserSnapshot, .browserAnnotations,
+             .browserScreenshot, .browserVisualCompare, .browserQuery, .browserConsole,
+             .browserNetwork, .browserPerformance, .browserAccessibilityAudit, .panelListTabs,
+             .listReclaimableStorage, .listThemes, .listAppThemes, .getAppTheme,
+             .extensionListComponents, .extensionDescribeComponent,
+             .extensionValidateComponentPatch:
+            return MCPToolAnnotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: family == .browser
+            )
+
+        case .browserStorage, .browserTrace, .proposeStorageCleanup, .extensionProposeInstall:
+            return MCPToolAnnotations(
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+                openWorldHint: family == .browser
+            )
+
+        case .displayImage, .displayHTML, .displayCompareFiles, .browserNavigate, .browserHistory,
+             .browserStop, .browserTabs, .browserUpload, .browserDownload, .browserResize,
+             .browserEmulate, .browserRunIsolated, .browserClick, .browserHover, .browserDrag,
+             .browserType, .browserFillForm, .browserSelect, .browserSetChecked,
+             .browserPressKey, .browserScroll, .browserWait, .panelActivateTab, .setProjectIcon,
+             .notifyUser, .setTheme, .createTheme, .setAppTheme, .createAppTheme,
+             .duplicateAppTheme, .updateAppTheme, .extensionScaffoldProject,
+             .extensionPreviewComponentPatch:
+            return MCPToolAnnotations(
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: family == .browser || self == .notifyUser
+            )
+        }
+    }
+}
+
 // MARK: - Tool Call
 
-struct DisplayImageArguments: Decodable {
+struct DisplayImageArguments: Decodable, Sendable {
     let path: String?
     let title: String?
 }
 
-struct DisplayHTMLArguments: Decodable {
+struct DisplayHTMLArguments: Decodable, Sendable {
     let html: String?
     let title: String?
 }
 
-struct DisplayCompareFilesArguments: Decodable {
+struct DisplayCompareFilesArguments: Decodable, Sendable {
     let oldPath: String?
     let newPath: String?
     let oldTitle: String?
@@ -38,7 +191,7 @@ struct DisplayCompareFilesArguments: Decodable {
     }
 }
 
-struct BrowserNavigateArguments: Decodable {
+struct BrowserNavigateArguments: Decodable, Sendable {
     let url: String?
     let waitUntil: String?
 
@@ -53,7 +206,7 @@ struct BrowserNavigateArguments: Decodable {
     }
 }
 
-struct BrowserHistoryArguments: Decodable {
+struct BrowserHistoryArguments: Decodable, Sendable {
     let action: String?
     let waitUntil: String?
 
@@ -68,39 +221,39 @@ struct BrowserHistoryArguments: Decodable {
     }
 }
 
-struct BrowserTabsArguments: Decodable {
+struct BrowserTabsArguments: Decodable, Sendable {
     let action: String?
     let tab: PanelTabReference?
     var context: String? = nil
 }
 
-struct BrowserStorageArguments: Decodable {
+struct BrowserStorageArguments: Decodable, Sendable {
     let action: String?
 }
 
-struct BrowserTraceArguments: Decodable {
+struct BrowserTraceArguments: Decodable, Sendable {
     let action: String?
 }
 
-struct BrowserUploadArguments: Decodable {
+struct BrowserUploadArguments: Decodable, Sendable {
     let paths: [String]?
     let ref: String?
     let selector: String?
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserDownloadArguments: Decodable {
+struct BrowserDownloadArguments: Decodable, Sendable {
     let ref: String?
     let selector: String?
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserResizeArguments: Decodable {
+struct BrowserResizeArguments: Decodable, Sendable {
     let width: Int?
     let height: Int?
 }
 
-struct BrowserEmulateArguments: Decodable {
+struct BrowserEmulateArguments: Decodable, Sendable {
     let colorScheme: String?
     let userAgent: String?
     let mediaType: String?
@@ -122,7 +275,7 @@ struct BrowserEmulateArguments: Decodable {
     }
 }
 
-struct BrowserIsolatedStep: Codable {
+struct BrowserIsolatedStep: Codable, Sendable {
     let action: String?
     let url: String?
     let waitUntil: String?
@@ -152,7 +305,7 @@ struct BrowserIsolatedStep: Codable {
     }
 }
 
-struct BrowserIsolatedRunArguments: Codable {
+struct BrowserIsolatedRunArguments: Codable, Sendable {
     let engine: String?
     let headless: Bool?
     let timeoutMS: Int?
@@ -202,7 +355,7 @@ struct BrowserIsolatedRunArguments: Codable {
     }
 }
 
-struct BrowserSnapshotArguments: Decodable {
+struct BrowserSnapshotArguments: Decodable, Sendable {
     let maximumNodes: Int?
     let ref: String?
     let selector: String?
@@ -213,14 +366,14 @@ struct BrowserSnapshotArguments: Decodable {
     }
 }
 
-struct BrowserSelectorArguments: Decodable {
+struct BrowserSelectorArguments: Decodable, Sendable {
     let selector: String?
 }
 
 /// A rerender-safe target description resolved from the live accessibility semantics instead of
 /// from one DOM node identity. Exactly one of role, label, or testID is the locator's primary key;
 /// name may refine a role. Exact matching is the deterministic default.
-struct BrowserSemanticLocator: Decodable, Equatable {
+struct BrowserSemanticLocator: Decodable, Equatable, Sendable {
     let role: String?
     let name: String?
     let label: String?
@@ -256,13 +409,13 @@ struct BrowserSemanticLocator: Decodable, Equatable {
     }
 }
 
-struct BrowserTargetArguments: Decodable {
+struct BrowserTargetArguments: Decodable, Sendable {
     let ref: String?
     let selector: String?
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserClickArguments: Decodable {
+struct BrowserClickArguments: Decodable, Sendable {
     let ref: String?
     let selector: String?
     let x: Double?
@@ -277,7 +430,7 @@ struct BrowserClickArguments: Decodable {
     }
 }
 
-struct BrowserDragArguments: Decodable {
+struct BrowserDragArguments: Decodable, Sendable {
     let sourceRef: String?
     let sourceSelector: String?
     let targetRef: String?
@@ -295,7 +448,7 @@ struct BrowserDragArguments: Decodable {
     }
 }
 
-struct BrowserTypeArguments: Decodable {
+struct BrowserTypeArguments: Decodable, Sendable {
     let ref: String?
     let selector: String?
     let text: String?
@@ -304,11 +457,11 @@ struct BrowserTypeArguments: Decodable {
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserFillFormArguments: Decodable {
+struct BrowserFillFormArguments: Decodable, Sendable {
     let fields: [BrowserFormFieldArguments]?
 }
 
-struct BrowserFormFieldArguments: Decodable {
+struct BrowserFormFieldArguments: Decodable, Sendable {
     let ref: String?
     let selector: String?
     let value: String?
@@ -317,7 +470,7 @@ struct BrowserFormFieldArguments: Decodable {
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserSelectArguments: Decodable {
+struct BrowserSelectArguments: Decodable, Sendable {
     let ref: String?
     let selector: String?
     let value: String?
@@ -325,14 +478,14 @@ struct BrowserSelectArguments: Decodable {
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserSetCheckedArguments: Decodable {
+struct BrowserSetCheckedArguments: Decodable, Sendable {
     let ref: String?
     let selector: String?
     let checked: Bool?
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserKeyArguments: Decodable {
+struct BrowserKeyArguments: Decodable, Sendable {
     let key: String?
     let ref: String?
     let selector: String?
@@ -343,7 +496,7 @@ struct BrowserKeyArguments: Decodable {
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserScrollArguments: Decodable {
+struct BrowserScrollArguments: Decodable, Sendable {
     let direction: String?
     let amount: Double?
     let ref: String?
@@ -351,7 +504,7 @@ struct BrowserScrollArguments: Decodable {
     var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserWaitArguments: Decodable {
+struct BrowserWaitArguments: Decodable, Sendable {
     let time: Double?
     let text: String?
     let textGone: String?
@@ -389,12 +542,12 @@ struct BrowserWaitArguments: Decodable {
     }
 }
 
-struct BrowserConsoleArguments: Decodable {
+struct BrowserConsoleArguments: Decodable, Sendable {
     let level: String?
     let clear: Bool?
 }
 
-struct BrowserNetworkArguments: Decodable {
+struct BrowserNetworkArguments: Decodable, Sendable {
     let kind: String?
     let errorsOnly: Bool?
     let clear: Bool?
@@ -405,7 +558,7 @@ struct BrowserNetworkArguments: Decodable {
     }
 }
 
-struct BrowserPerformanceArguments: Decodable {
+struct BrowserPerformanceArguments: Decodable, Sendable {
     let maximumResources: Int?
 
     private enum CodingKeys: String, CodingKey {
@@ -413,7 +566,7 @@ struct BrowserPerformanceArguments: Decodable {
     }
 }
 
-struct BrowserAccessibilityAuditArguments: Decodable {
+struct BrowserAccessibilityAuditArguments: Decodable, Sendable {
     let maximumIssues: Int?
 
     private enum CodingKeys: String, CodingKey {
@@ -421,7 +574,7 @@ struct BrowserAccessibilityAuditArguments: Decodable {
     }
 }
 
-struct BrowserScreenshotArguments: Decodable {
+struct BrowserScreenshotArguments: Decodable, Sendable {
     let fullPage: Bool?
     let ref: String?
     let selector: String?
@@ -436,7 +589,7 @@ struct BrowserScreenshotArguments: Decodable {
     }
 }
 
-struct BrowserVisualCompareArguments: Decodable {
+struct BrowserVisualCompareArguments: Decodable, Sendable {
     let baselinePath: String?
     let fullPage: Bool?
     let ref: String?
@@ -457,14 +610,14 @@ struct BrowserVisualCompareArguments: Decodable {
     }
 }
 
-struct SetProjectIconArguments: Decodable {
+struct SetProjectIconArguments: Decodable, Sendable {
     let path: String?
     let url: String?
 }
 
-struct ListThemesArguments: Decodable {}
+struct ListThemesArguments: Decodable, Sendable {}
 
-struct SetThemeArguments: Decodable {
+struct SetThemeArguments: Decodable, Sendable {
     let themeID: String?
     /// Accepted for clients launched against the pre-ID schema.
     let theme: String?
@@ -476,7 +629,7 @@ struct SetThemeArguments: Decodable {
     }
 }
 
-struct CreateThemeArguments: Decodable {
+struct CreateThemeArguments: Decodable, Sendable {
     let name: String?
     let baseID: String?
     /// Accepted for clients launched against the pre-ID schema.
@@ -491,7 +644,7 @@ struct CreateThemeArguments: Decodable {
     }
 }
 
-struct AppThemeReferenceArguments: Decodable {
+struct AppThemeReferenceArguments: Decodable, Sendable {
     let themeID: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -499,7 +652,7 @@ struct AppThemeReferenceArguments: Decodable {
     }
 }
 
-struct SetAppThemeArguments: Decodable {
+struct SetAppThemeArguments: Decodable, Sendable {
     let themeID: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -507,7 +660,7 @@ struct SetAppThemeArguments: Decodable {
     }
 }
 
-struct AppThemeGlowArguments: Decodable {
+struct AppThemeGlowArguments: Decodable, Sendable {
     let role: String?
     let radius: Double?
     let opacity: Double?
@@ -521,7 +674,7 @@ struct AppThemeGlowArguments: Decodable {
     }
 }
 
-struct AppThemeMaterialArguments: Decodable {
+struct AppThemeMaterialArguments: Decodable, Sendable {
     let panelRadius: Double?
     let controlRadius: Double?
     let borderWidth: Double?
@@ -544,17 +697,17 @@ struct AppThemeMaterialArguments: Decodable {
 }
 
 /// An image handed to a theme tool: a file path the host reads, or the bytes inline.
-struct AppThemeImageArguments: Decodable {
+struct AppThemeImageArguments: Decodable, Sendable {
     let path: String?
     let base64: String?
 }
 
-struct AppThemeGradientStopArguments: Decodable {
+struct AppThemeGradientStopArguments: Decodable, Sendable {
     let color: String?
     let position: Double?
 }
 
-struct AppThemeGradientArguments: Decodable {
+struct AppThemeGradientArguments: Decodable, Sendable {
     let angleDegrees: Double?
     let stops: [AppThemeGradientStopArguments]?
 
@@ -564,13 +717,13 @@ struct AppThemeGradientArguments: Decodable {
     }
 }
 
-struct AppThemeSidebarImageArguments: Decodable {
+struct AppThemeSidebarImageArguments: Decodable, Sendable {
     let source: AppThemeImageArguments?
     let mode: String?
     let opacity: Double?
 }
 
-struct AppThemeSidebarTitleArguments: Decodable {
+struct AppThemeSidebarTitleArguments: Decodable, Sendable {
     let text: String?
     let fontFamily: String?
     let fontSize: Double?
@@ -587,7 +740,7 @@ struct AppThemeSidebarTitleArguments: Decodable {
 
 /// The sidebar block of a variant patch. `logo` is `"mark"`, `"hidden"`, or an image object;
 /// each `remove_*` takes one stated half back to its default, and `remove` clears the block.
-struct AppThemeSidebarArguments: Decodable {
+struct AppThemeSidebarArguments: Decodable, Sendable {
     let gradient: AppThemeGradientArguments?
     let removeGradient: Bool?
     let image: AppThemeSidebarImageArguments?
@@ -609,7 +762,7 @@ struct AppThemeSidebarArguments: Decodable {
 }
 
 /// `"mark"`, `"hidden"`, or `{path|base64}` — mirroring the document's own logo spelling.
-enum AppThemeSidebarLogoArguments: Decodable {
+enum AppThemeSidebarLogoArguments: Decodable, Sendable {
     case mark
     case hidden
     case image(AppThemeImageArguments)
@@ -632,7 +785,7 @@ enum AppThemeSidebarLogoArguments: Decodable {
     }
 }
 
-struct AppThemeVariantArguments: Decodable {
+struct AppThemeVariantArguments: Decodable, Sendable {
     let roles: [String: String]?
     let material: AppThemeMaterialArguments?
     let terminalColors: [String: String]?
@@ -659,7 +812,7 @@ struct AppThemeVariantArguments: Decodable {
     }
 }
 
-struct CreateAppThemeArguments: Decodable {
+struct CreateAppThemeArguments: Decodable, Sendable {
     let name: String?
     let baseID: String?
     let appearance: String?
@@ -682,7 +835,7 @@ struct CreateAppThemeArguments: Decodable {
     }
 }
 
-struct DuplicateAppThemeArguments: Decodable {
+struct DuplicateAppThemeArguments: Decodable, Sendable {
     let themeID: String?
     let name: String?
     let apply: Bool?
@@ -693,7 +846,7 @@ struct DuplicateAppThemeArguments: Decodable {
     }
 }
 
-struct UpdateAppThemeArguments: Decodable {
+struct UpdateAppThemeArguments: Decodable, Sendable {
     let themeID: String?
     let name: String?
     let appearance: String?
@@ -720,12 +873,12 @@ struct UpdateAppThemeArguments: Decodable {
 /// Paths arrive as one absolute path per line, since the schema this server speaks has no
 /// array type. Whatever arrives is only ever *matched against* the current findings — see
 /// `MainWindowController.proposeStorageCleanup`.
-struct StorageCleanupArguments: Decodable {
+struct StorageCleanupArguments: Decodable, Sendable {
     let paths: String?
     let reason: String?
 }
 
-struct NotifyUserArguments: Decodable {
+struct NotifyUserArguments: Decodable, Sendable {
     let title: String?
     let message: String?
     let recipient: String?
@@ -737,7 +890,7 @@ struct NotifyUserArguments: Decodable {
     }
 }
 
-enum PanelTabReference: Decodable, Equatable {
+enum PanelTabReference: Decodable, Equatable, Sendable {
     case index(Int)
     case identifier(String)
 
@@ -751,37 +904,40 @@ enum PanelTabReference: Decodable, Equatable {
     }
 }
 
-struct PanelActivateTabArguments: Decodable {
+struct PanelActivateTabArguments: Decodable, Sendable {
     let tab: PanelTabReference?
 }
 
-struct EmptyToolArguments: Decodable {}
+struct EmptyToolArguments: Decodable, Sendable {}
 
-struct ConversationHistoryArguments: Decodable {
+struct ConversationHistoryArguments: Decodable, Sendable {
     let cursor: String?
 }
 
-struct ExtensionComponentReferenceArguments: Decodable {
+struct ExtensionComponentReferenceArguments: Decodable, Sendable {
     let component: String?
     let version: Int?
 }
 
-struct ExtensionComponentPatchArguments: Decodable {
+struct ExtensionComponentPatchArguments: Decodable, Sendable {
     let patch: String?
 }
 
-struct ExtensionScaffoldProjectArguments: Decodable {
+struct ExtensionScaffoldProjectArguments: Decodable, Sendable {
     let name: String?
     let identifier: String?
     let directory: String?
 }
 
-struct ExtensionProposeInstallArguments: Decodable {
+struct ExtensionProposeInstallArguments: Decodable, Sendable {
     let directory: String?
 }
 
-/// A `tools/call` request whose argument payload has been decoded for the named tool.
-enum MCPToolCall {
+/// A transport-decoded application command.
+///
+/// MCP owns decoding and schemas; the application layer receives this typed value and never
+/// switches on wire names or raw JSON for built-ins.
+enum AgentCommand: Sendable {
     case displayImage(DisplayImageArguments)
     case displayHTML(DisplayHTMLArguments)
     case displayCompareFiles(DisplayCompareFilesArguments)
@@ -840,74 +996,84 @@ enum MCPToolCall {
     case extensionPreviewComponentPatch(ExtensionComponentPatchArguments)
     case unknown(name: String, arguments: MCPJSONValue)
 
+    /// The application identity of a built-in command. Exhaustive on purpose: adding a call
+    /// payload without classifying it is a compiler error instead of an unadvertised behavior.
+    var builtInTool: MCPBuiltInTool? {
+        switch self {
+        case .displayImage: return .displayImage
+        case .displayHTML: return .displayHTML
+        case .displayCompareFiles: return .displayCompareFiles
+        case .conversationHistory: return .conversationHistory
+        case .browserNavigate: return .browserNavigate
+        case .browserHistory: return .browserHistory
+        case .browserStop: return .browserStop
+        case .browserTabs: return .browserTabs
+        case .browserStorage: return .browserStorage
+        case .browserTrace: return .browserTrace
+        case .browserUpload: return .browserUpload
+        case .browserDownload: return .browserDownload
+        case .browserResize: return .browserResize
+        case .browserEmulate: return .browserEmulate
+        case .browserCapabilities: return .browserCapabilities
+        case .browserRunIsolated: return .browserRunIsolated
+        case .browserSnapshot: return .browserSnapshot
+        case .browserAnnotations: return .browserAnnotations
+        case .browserScreenshot: return .browserScreenshot
+        case .browserVisualCompare: return .browserVisualCompare
+        case .browserQuery: return .browserQuery
+        case .browserClick: return .browserClick
+        case .browserHover: return .browserHover
+        case .browserDrag: return .browserDrag
+        case .browserType: return .browserType
+        case .browserFillForm: return .browserFillForm
+        case .browserSelect: return .browserSelect
+        case .browserSetChecked: return .browserSetChecked
+        case .browserPressKey: return .browserPressKey
+        case .browserScroll: return .browserScroll
+        case .browserWait: return .browserWait
+        case .browserConsole: return .browserConsole
+        case .browserNetwork: return .browserNetwork
+        case .browserPerformance: return .browserPerformance
+        case .browserAccessibilityAudit: return .browserAccessibilityAudit
+        case .panelListTabs: return .panelListTabs
+        case .panelActivateTab: return .panelActivateTab
+        case .setProjectIcon: return .setProjectIcon
+        case .listReclaimableStorage: return .listReclaimableStorage
+        case .proposeStorageCleanup: return .proposeStorageCleanup
+        case .notifyUser: return .notifyUser
+        case .listThemes: return .listThemes
+        case .setTheme: return .setTheme
+        case .createTheme: return .createTheme
+        case .listAppThemes: return .listAppThemes
+        case .getAppTheme: return .getAppTheme
+        case .setAppTheme: return .setAppTheme
+        case .createAppTheme: return .createAppTheme
+        case .duplicateAppTheme: return .duplicateAppTheme
+        case .updateAppTheme: return .updateAppTheme
+        case .extensionListComponents: return .extensionListComponents
+        case .extensionScaffoldProject: return .extensionScaffoldProject
+        case .extensionProposeInstall: return .extensionProposeInstall
+        case .extensionDescribeComponent: return .extensionDescribeComponent
+        case .extensionValidateComponentPatch: return .extensionValidateComponentPatch
+        case .extensionPreviewComponentPatch: return .extensionPreviewComponentPatch
+        case .unknown: return nil
+        }
+    }
+
     var name: String {
         switch self {
-        case .displayImage: return MCPTools.displayImage
-        case .displayHTML: return MCPTools.displayHTML
-        case .displayCompareFiles: return MCPTools.displayCompareFiles
-        case .conversationHistory: return MCPTools.conversationHistory
-        case .browserNavigate: return MCPTools.browserNavigate
-        case .browserHistory: return MCPTools.browserHistory
-        case .browserStop: return MCPTools.browserStop
-        case .browserTabs: return MCPTools.browserTabs
-        case .browserStorage: return MCPTools.browserStorage
-        case .browserTrace: return MCPTools.browserTrace
-        case .browserUpload: return MCPTools.browserUpload
-        case .browserDownload: return MCPTools.browserDownload
-        case .browserResize: return MCPTools.browserResize
-        case .browserEmulate: return MCPTools.browserEmulate
-        case .browserCapabilities: return MCPTools.browserCapabilities
-        case .browserRunIsolated: return MCPTools.browserRunIsolated
-        case .browserSnapshot: return MCPTools.browserSnapshot
-        case .browserAnnotations: return MCPTools.browserAnnotations
-        case .browserScreenshot: return MCPTools.browserScreenshot
-        case .browserVisualCompare: return MCPTools.browserVisualCompare
-        case .browserQuery: return MCPTools.browserQuery
-        case .browserClick: return MCPTools.browserClick
-        case .browserHover: return MCPTools.browserHover
-        case .browserDrag: return MCPTools.browserDrag
-        case .browserType: return MCPTools.browserType
-        case .browserFillForm: return MCPTools.browserFillForm
-        case .browserSelect: return MCPTools.browserSelect
-        case .browserSetChecked: return MCPTools.browserSetChecked
-        case .browserPressKey: return MCPTools.browserPressKey
-        case .browserScroll: return MCPTools.browserScroll
-        case .browserWait: return MCPTools.browserWait
-        case .browserConsole: return MCPTools.browserConsole
-        case .browserNetwork: return MCPTools.browserNetwork
-        case .browserPerformance: return MCPTools.browserPerformance
-        case .browserAccessibilityAudit: return MCPTools.browserAccessibilityAudit
-        case .panelListTabs: return MCPTools.panelListTabs
-        case .panelActivateTab: return MCPTools.panelActivateTab
-        case .setProjectIcon: return MCPTools.setProjectIcon
-        case .listReclaimableStorage: return MCPTools.listReclaimableStorage
-        case .proposeStorageCleanup: return MCPTools.proposeStorageCleanup
-        case .notifyUser: return MCPTools.notifyUser
-        case .listThemes: return MCPTools.listThemes
-        case .setTheme: return MCPTools.setTheme
-        case .createTheme: return MCPTools.createTheme
-        case .listAppThemes: return MCPTools.listAppThemes
-        case .getAppTheme: return MCPTools.getAppTheme
-        case .setAppTheme: return MCPTools.setAppTheme
-        case .createAppTheme: return MCPTools.createAppTheme
-        case .duplicateAppTheme: return MCPTools.duplicateAppTheme
-        case .updateAppTheme: return MCPTools.updateAppTheme
-        case .extensionListComponents: return MCPTools.extensionListComponents
-        case .extensionScaffoldProject: return MCPTools.extensionScaffoldProject
-        case .extensionProposeInstall: return MCPTools.extensionProposeInstall
-        case .extensionDescribeComponent: return MCPTools.extensionDescribeComponent
-        case .extensionValidateComponentPatch:
-            return MCPTools.extensionValidateComponentPatch
-        case .extensionPreviewComponentPatch:
-            return MCPTools.extensionPreviewComponentPatch
         case .unknown(let name, _): return name
+        default: return builtInTool?.rawValue ?? ""
         }
     }
 }
 
+/// Compatibility spelling for tests and integrations that still construct a tool call directly.
+typealias MCPToolCall = AgentCommand
+
 /// Decodes `arguments` only after `name` identifies its concrete schema.
-struct MCPToolCallParameters: Decodable {
-    let call: MCPToolCall
+struct MCPToolCallParameters: Decodable, Sendable {
+    let call: AgentCommand
 
     private enum CodingKeys: String, CodingKey {
         case name, arguments
@@ -916,100 +1082,110 @@ struct MCPToolCallParameters: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let name = try container.decode(String.self, forKey: .name)
+        guard let tool = MCPBuiltInTool(rawValue: name) else {
+            call = .unknown(
+                name: name,
+                arguments: try container.decodeIfPresent(
+                    MCPJSONValue.self,
+                    forKey: .arguments
+                ) ?? .emptyObject
+            )
+            return
+        }
 
-        switch name {
-        case MCPTools.displayImage:
+        switch tool {
+        case .displayImage:
             call = .displayImage(
                 try container.decodeIfPresent(DisplayImageArguments.self, forKey: .arguments)
                     ?? DisplayImageArguments(path: nil, title: nil)
             )
-        case MCPTools.displayHTML:
+        case .displayHTML:
             call = .displayHTML(
                 try container.decodeIfPresent(DisplayHTMLArguments.self, forKey: .arguments)
                     ?? DisplayHTMLArguments(html: nil, title: nil)
             )
-        case MCPTools.displayCompareFiles:
+        case .displayCompareFiles:
             call = .displayCompareFiles(
                 try container.decodeIfPresent(DisplayCompareFilesArguments.self, forKey: .arguments)
                     ?? DisplayCompareFilesArguments()
             )
-        case MCPTools.conversationHistory:
+        case .conversationHistory:
             call = .conversationHistory(
                 try container.decodeIfPresent(
                     ConversationHistoryArguments.self,
                     forKey: .arguments
                 ) ?? ConversationHistoryArguments(cursor: nil)
             )
-        case MCPTools.browserNavigate:
+        case .browserNavigate:
             call = .browserNavigate(
                 try container.decodeIfPresent(BrowserNavigateArguments.self, forKey: .arguments)
                     ?? BrowserNavigateArguments()
             )
-        case MCPTools.browserHistory:
+        case .browserHistory:
             call = .browserHistory(
                 try container.decodeIfPresent(BrowserHistoryArguments.self, forKey: .arguments)
                     ?? BrowserHistoryArguments()
             )
-        case MCPTools.browserStop:
+        case .browserStop:
             call = .browserStop(
                 try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
                     ?? EmptyToolArguments()
             )
-        case MCPTools.browserTabs:
+        case .browserTabs:
             call = .browserTabs(
                 try container.decodeIfPresent(BrowserTabsArguments.self, forKey: .arguments)
                     ?? BrowserTabsArguments(action: nil, tab: nil)
             )
-        case MCPTools.browserStorage:
+        case .browserStorage:
             call = .browserStorage(
                 try container.decodeIfPresent(BrowserStorageArguments.self, forKey: .arguments)
                     ?? BrowserStorageArguments(action: nil)
             )
-        case MCPTools.browserTrace:
+        case .browserTrace:
             call = .browserTrace(
                 try container.decodeIfPresent(BrowserTraceArguments.self, forKey: .arguments)
                     ?? BrowserTraceArguments(action: nil)
             )
-        case MCPTools.browserUpload:
+        case .browserUpload:
             call = .browserUpload(
                 try container.decodeIfPresent(BrowserUploadArguments.self, forKey: .arguments)
                     ?? BrowserUploadArguments(paths: nil, ref: nil, selector: nil)
             )
-        case MCPTools.browserDownload:
+        case .browserDownload:
             call = .browserDownload(
                 try container.decodeIfPresent(BrowserDownloadArguments.self, forKey: .arguments)
                     ?? BrowserDownloadArguments(ref: nil, selector: nil)
             )
-        case MCPTools.browserResize:
+        case .browserResize:
             call = .browserResize(
                 try container.decodeIfPresent(BrowserResizeArguments.self, forKey: .arguments)
                     ?? BrowserResizeArguments(width: nil, height: nil)
             )
-        case MCPTools.browserEmulate:
+        case .browserEmulate:
             call = .browserEmulate(
                 try container.decodeIfPresent(BrowserEmulateArguments.self, forKey: .arguments)
                     ?? BrowserEmulateArguments()
             )
-        case MCPTools.browserCapabilities:
+        case .browserCapabilities:
             call = .browserCapabilities(
                 try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
                     ?? EmptyToolArguments()
             )
-        case MCPTools.browserRunIsolated:
+        case .browserRunIsolated:
             call = .browserRunIsolated(
                 try container.decode(BrowserIsolatedRunArguments.self, forKey: .arguments)
             )
-        case MCPTools.browserSnapshot:
+        case .browserSnapshot:
             call = .browserSnapshot(
                 try container.decodeIfPresent(BrowserSnapshotArguments.self, forKey: .arguments)
                     ?? BrowserSnapshotArguments(maximumNodes: nil, ref: nil, selector: nil)
             )
-        case MCPTools.browserAnnotations:
+        case .browserAnnotations:
             call = .browserAnnotations(
                 try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
                     ?? EmptyToolArguments()
             )
-        case MCPTools.browserScreenshot:
+        case .browserScreenshot:
             call = .browserScreenshot(
                 try container.decodeIfPresent(BrowserScreenshotArguments.self, forKey: .arguments)
                     ?? BrowserScreenshotArguments(
@@ -1020,7 +1196,7 @@ struct MCPToolCallParameters: Decodable {
                         includeImage: nil
                     )
             )
-        case MCPTools.browserVisualCompare:
+        case .browserVisualCompare:
             call = .browserVisualCompare(
                 try container.decodeIfPresent(
                     BrowserVisualCompareArguments.self,
@@ -1036,12 +1212,12 @@ struct MCPToolCallParameters: Decodable {
                     includeImage: nil
                 )
             )
-        case MCPTools.browserQuery:
+        case .browserQuery:
             call = .browserQuery(
                 try container.decodeIfPresent(BrowserSelectorArguments.self, forKey: .arguments)
                     ?? BrowserSelectorArguments(selector: nil)
             )
-        case MCPTools.browserClick:
+        case .browserClick:
             call = .browserClick(
                 try container.decodeIfPresent(BrowserClickArguments.self, forKey: .arguments)
                     ?? BrowserClickArguments(
@@ -1053,12 +1229,12 @@ struct MCPToolCallParameters: Decodable {
                         clickCount: nil
                     )
             )
-        case MCPTools.browserHover:
+        case .browserHover:
             call = .browserHover(
                 try container.decodeIfPresent(BrowserTargetArguments.self, forKey: .arguments)
                     ?? BrowserTargetArguments(ref: nil, selector: nil)
             )
-        case MCPTools.browserDrag:
+        case .browserDrag:
             call = .browserDrag(
                 try container.decodeIfPresent(BrowserDragArguments.self, forKey: .arguments)
                     ?? BrowserDragArguments(
@@ -1068,7 +1244,7 @@ struct MCPToolCallParameters: Decodable {
                         targetSelector: nil
                     )
             )
-        case MCPTools.browserType:
+        case .browserType:
             call = .browserType(
                 try container.decodeIfPresent(BrowserTypeArguments.self, forKey: .arguments)
                     ?? BrowserTypeArguments(
@@ -1079,12 +1255,12 @@ struct MCPToolCallParameters: Decodable {
                         submit: nil
                     )
             )
-        case MCPTools.browserFillForm:
+        case .browserFillForm:
             call = .browserFillForm(
                 try container.decodeIfPresent(BrowserFillFormArguments.self, forKey: .arguments)
                     ?? BrowserFillFormArguments(fields: nil)
             )
-        case MCPTools.browserSelect:
+        case .browserSelect:
             call = .browserSelect(
                 try container.decodeIfPresent(BrowserSelectArguments.self, forKey: .arguments)
                     ?? BrowserSelectArguments(
@@ -1094,12 +1270,12 @@ struct MCPToolCallParameters: Decodable {
                         label: nil
                     )
             )
-        case MCPTools.browserSetChecked:
+        case .browserSetChecked:
             call = .browserSetChecked(
                 try container.decodeIfPresent(BrowserSetCheckedArguments.self, forKey: .arguments)
                     ?? BrowserSetCheckedArguments(ref: nil, selector: nil, checked: nil)
             )
-        case MCPTools.browserPressKey:
+        case .browserPressKey:
             call = .browserPressKey(
                 try container.decodeIfPresent(BrowserKeyArguments.self, forKey: .arguments)
                     ?? BrowserKeyArguments(
@@ -1112,7 +1288,7 @@ struct MCPToolCallParameters: Decodable {
                         command: nil
                     )
             )
-        case MCPTools.browserScroll:
+        case .browserScroll:
             call = .browserScroll(
                 try container.decodeIfPresent(BrowserScrollArguments.self, forKey: .arguments)
                     ?? BrowserScrollArguments(
@@ -1122,7 +1298,7 @@ struct MCPToolCallParameters: Decodable {
                         selector: nil
                     )
             )
-        case MCPTools.browserWait:
+        case .browserWait:
             call = .browserWait(
                 try container.decodeIfPresent(BrowserWaitArguments.self, forKey: .arguments)
                     ?? BrowserWaitArguments(
@@ -1136,69 +1312,69 @@ struct MCPToolCallParameters: Decodable {
                         timeout: nil
                     )
             )
-        case MCPTools.browserConsole:
+        case .browserConsole:
             call = .browserConsole(
                 try container.decodeIfPresent(BrowserConsoleArguments.self, forKey: .arguments)
                     ?? BrowserConsoleArguments(level: nil, clear: nil)
             )
-        case MCPTools.browserNetwork:
+        case .browserNetwork:
             call = .browserNetwork(
                 try container.decodeIfPresent(BrowserNetworkArguments.self, forKey: .arguments)
                     ?? BrowserNetworkArguments(kind: nil, errorsOnly: nil, clear: nil)
             )
-        case MCPTools.browserPerformance:
+        case .browserPerformance:
             call = .browserPerformance(
                 try container.decodeIfPresent(BrowserPerformanceArguments.self, forKey: .arguments)
                     ?? BrowserPerformanceArguments(maximumResources: nil)
             )
-        case MCPTools.browserAccessibilityAudit:
+        case .browserAccessibilityAudit:
             call = .browserAccessibilityAudit(
                 try container.decodeIfPresent(
                     BrowserAccessibilityAuditArguments.self,
                     forKey: .arguments
                 ) ?? BrowserAccessibilityAuditArguments(maximumIssues: nil)
             )
-        case MCPTools.panelListTabs:
+        case .panelListTabs:
             call = .panelListTabs(
                 try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
                     ?? EmptyToolArguments()
             )
-        case MCPTools.panelActivateTab:
+        case .panelActivateTab:
             call = .panelActivateTab(
                 try container.decodeIfPresent(PanelActivateTabArguments.self, forKey: .arguments)
                     ?? PanelActivateTabArguments(tab: nil)
             )
-        case MCPTools.setProjectIcon:
+        case .setProjectIcon:
             call = .setProjectIcon(
                 try container.decodeIfPresent(SetProjectIconArguments.self, forKey: .arguments)
                     ?? SetProjectIconArguments(path: nil, url: nil)
             )
-        case MCPTools.listReclaimableStorage:
+        case .listReclaimableStorage:
             call = .listReclaimableStorage(
                 try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
                     ?? EmptyToolArguments()
             )
-        case MCPTools.proposeStorageCleanup:
+        case .proposeStorageCleanup:
             call = .proposeStorageCleanup(
                 try container.decodeIfPresent(StorageCleanupArguments.self, forKey: .arguments)
                     ?? StorageCleanupArguments(paths: nil, reason: nil)
             )
-        case MCPTools.notifyUser:
+        case .notifyUser:
             call = .notifyUser(
                 try container.decodeIfPresent(NotifyUserArguments.self, forKey: .arguments)
                     ?? NotifyUserArguments(title: nil, message: nil)
             )
-        case MCPTools.listThemes:
+        case .listThemes:
             call = .listThemes(
                 try container.decodeIfPresent(ListThemesArguments.self, forKey: .arguments)
                     ?? ListThemesArguments()
             )
-        case MCPTools.setTheme:
+        case .setTheme:
             call = .setTheme(
                 try container.decodeIfPresent(SetThemeArguments.self, forKey: .arguments)
                     ?? SetThemeArguments(themeID: nil, theme: nil, scope: nil)
             )
-        case MCPTools.createTheme:
+        case .createTheme:
             call = .createTheme(
                 try container.decodeIfPresent(CreateThemeArguments.self, forKey: .arguments)
                     ?? CreateThemeArguments(
@@ -1209,22 +1385,22 @@ struct MCPToolCallParameters: Decodable {
                         apply: nil
                     )
             )
-        case MCPTools.listAppThemes:
+        case .listAppThemes:
             call = .listAppThemes(
                 try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
                     ?? EmptyToolArguments()
             )
-        case MCPTools.getAppTheme:
+        case .getAppTheme:
             call = .getAppTheme(
                 try container.decodeIfPresent(AppThemeReferenceArguments.self, forKey: .arguments)
                     ?? AppThemeReferenceArguments(themeID: nil)
             )
-        case MCPTools.setAppTheme:
+        case .setAppTheme:
             call = .setAppTheme(
                 try container.decodeIfPresent(SetAppThemeArguments.self, forKey: .arguments)
                     ?? SetAppThemeArguments(themeID: nil)
             )
-        case MCPTools.createAppTheme:
+        case .createAppTheme:
             call = .createAppTheme(
                 try container.decodeIfPresent(CreateAppThemeArguments.self, forKey: .arguments)
                     ?? CreateAppThemeArguments(
@@ -1240,12 +1416,12 @@ struct MCPToolCallParameters: Decodable {
                         apply: nil
                     )
             )
-        case MCPTools.duplicateAppTheme:
+        case .duplicateAppTheme:
             call = .duplicateAppTheme(
                 try container.decodeIfPresent(DuplicateAppThemeArguments.self, forKey: .arguments)
                     ?? DuplicateAppThemeArguments(themeID: nil, name: nil, apply: nil)
             )
-        case MCPTools.updateAppTheme:
+        case .updateAppTheme:
             call = .updateAppTheme(
                 try container.decodeIfPresent(UpdateAppThemeArguments.self, forKey: .arguments)
                     ?? UpdateAppThemeArguments(
@@ -1261,12 +1437,12 @@ struct MCPToolCallParameters: Decodable {
                         apply: nil
                     )
             )
-        case MCPTools.extensionListComponents:
+        case .extensionListComponents:
             call = .extensionListComponents(
                 try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
                     ?? EmptyToolArguments()
             )
-        case MCPTools.extensionScaffoldProject:
+        case .extensionScaffoldProject:
             call = .extensionScaffoldProject(
                 try container.decodeIfPresent(
                     ExtensionScaffoldProjectArguments.self,
@@ -1277,41 +1453,33 @@ struct MCPToolCallParameters: Decodable {
                     directory: nil
                 )
             )
-        case MCPTools.extensionProposeInstall:
+        case .extensionProposeInstall:
             call = .extensionProposeInstall(
                 try container.decodeIfPresent(
                     ExtensionProposeInstallArguments.self,
                     forKey: .arguments
                 ) ?? ExtensionProposeInstallArguments(directory: nil)
             )
-        case MCPTools.extensionDescribeComponent:
+        case .extensionDescribeComponent:
             call = .extensionDescribeComponent(
                 try container.decodeIfPresent(
                     ExtensionComponentReferenceArguments.self,
                     forKey: .arguments
                 ) ?? ExtensionComponentReferenceArguments(component: nil, version: nil)
             )
-        case MCPTools.extensionValidateComponentPatch:
+        case .extensionValidateComponentPatch:
             call = .extensionValidateComponentPatch(
                 try container.decodeIfPresent(
                     ExtensionComponentPatchArguments.self,
                     forKey: .arguments
                 ) ?? ExtensionComponentPatchArguments(patch: nil)
             )
-        case MCPTools.extensionPreviewComponentPatch:
+        case .extensionPreviewComponentPatch:
             call = .extensionPreviewComponentPatch(
                 try container.decodeIfPresent(
                     ExtensionComponentPatchArguments.self,
                     forKey: .arguments
                 ) ?? ExtensionComponentPatchArguments(patch: nil)
-            )
-        default:
-            call = .unknown(
-                name: name,
-                arguments: try container.decodeIfPresent(
-                    MCPJSONValue.self,
-                    forKey: .arguments
-                ) ?? .emptyObject
             )
         }
     }
@@ -1323,8 +1491,8 @@ struct MCPToolCallParameters: Decodable {
 ///
 /// Most results are plain text. A screenshot call can deliberately include image content because
 /// visual inspection is its purpose; display-only images continue to cost the transcript a sentence.
-struct MCPToolResult: Encodable {
-    private enum Content: Encodable {
+struct MCPToolResult: Encodable, Sendable {
+    private enum Content: Encodable, Sendable {
         case text(String)
         case image(data: String, mimeType: String)
 
@@ -1390,16 +1558,21 @@ struct MCPToolResult: Encodable {
 
 // MARK: - Tool Handling
 
-/// Implemented by whatever can actually show the content — in practice the main window.
+/// Application boundary implemented by whatever can execute agent commands — in practice the
+/// window-owned coordinator.
 ///
 /// Called on the main queue, since the model layer and AppKit both require it.
 @MainActor
-protocol MCPToolHandling: AnyObject {
-    func handle(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult
+protocol AgentCommandHandling: AnyObject {
+    func handle(_ command: AgentCommand, for sessionID: SessionID) -> MCPToolResult
 
     /// Async variant, for tools whose answer is not ready synchronously — a page load, a DOM
     /// query, a screenshot. Defaults to the synchronous form for handlers that need nothing.
-    func handle(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void)
+    func handle(
+        _ command: AgentCommand,
+        for sessionID: SessionID,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    )
 
     /// Text appended to the `initialize` instructions describing the session's current display
     /// panel — but only when it changed while the agent was away, so a resume does not re-state a
@@ -1407,35 +1580,69 @@ protocol MCPToolHandling: AnyObject {
     func panelState(for sessionID: SessionID) -> String
 }
 
-extension MCPToolHandling {
-    func handle(_ call: MCPToolCall, for sessionID: SessionID, completion: @escaping (MCPToolResult) -> Void) {
-        completion(handle(call, for: sessionID))
+extension AgentCommandHandling {
+    func handle(
+        _ command: AgentCommand,
+        for sessionID: SessionID,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        completion(handle(command, for: sessionID))
     }
 
     func panelState(for sessionID: SessionID) -> String { "" }
 }
 
+typealias MCPToolHandling = AgentCommandHandling
+
 // MARK: - Tool Schema
 
-struct MCPToolDefinition: Encodable {
+struct MCPToolDefinition: Encodable, Sendable {
+    let tool: MCPBuiltInTool?
     let name: String
     let description: String
     let inputSchema: MCPToolInputSchema
+    let annotations: MCPToolAnnotations?
 
-    init(name: String, description: String, inputSchema: MCPInputSchema) {
-        self.name = name
+    init(tool: MCPBuiltInTool, description: String, inputSchema: MCPInputSchema) {
+        self.tool = tool
+        self.name = tool.rawValue
         self.description = description
         self.inputSchema = .builtIn(inputSchema)
+        self.annotations = tool.annotations
     }
 
     init(name: String, description: String, externalSchema: MCPJSONValue) {
+        self.tool = nil
         self.name = name
         self.description = description
         self.inputSchema = .externalJSON(externalSchema)
+        self.annotations = nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, description, inputSchema, annotations
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(inputSchema, forKey: .inputSchema)
+        try container.encodeIfPresent(annotations, forKey: .annotations)
     }
 }
 
-enum MCPToolInputSchema: Encodable {
+/// Standard MCP behavior hints, derived from the closed built-in identity rather than maintained
+/// alongside the wire schema. They are conservative signals, not an authorization boundary:
+/// Threading still enforces browser grants and explicit destructive confirmations itself.
+struct MCPToolAnnotations: Encodable, Equatable, Sendable {
+    let readOnlyHint: Bool
+    let destructiveHint: Bool
+    let idempotentHint: Bool
+    let openWorldHint: Bool
+}
+
+enum MCPToolInputSchema: Encodable, Sendable {
     case builtIn(MCPInputSchema)
     case externalJSON(MCPJSONValue)
 
@@ -1470,13 +1677,13 @@ enum MCPToolInputSchema: Encodable {
     }
 }
 
-struct MCPInputSchema: Encodable {
+struct MCPInputSchema: Encodable, Sendable {
     let type = "object"
     let properties: [String: MCPPropertySchema]
     let required: [String]
 }
 
-struct MCPPropertySchema: Encodable {
+struct MCPPropertySchema: Encodable, Sendable {
     let type: MCPPropertyType
     let description: String
 
@@ -1488,14 +1695,14 @@ struct MCPPropertySchema: Encodable {
     var items: MCPArrayItemSchema?
 }
 
-struct MCPArrayItemSchema: Encodable {
+struct MCPArrayItemSchema: Encodable, Sendable {
     let type: MCPPropertyType
     var description: String?
     var properties: [String: MCPPropertySchema]?
     var required: [String]?
 }
 
-enum MCPPropertyType: Encodable {
+enum MCPPropertyType: Encodable, Sendable {
     case string
     case number
     case boolean
@@ -1532,127 +1739,99 @@ enum MCPPropertyType: Encodable {
 /// The tools this server advertises, and the guidance that makes an agent reach for them.
 enum MCPTools {
 
-    static let displayImage = "display_image"
-    static let displayHTML = "display_html"
-    static let displayCompareFiles = "display_compare_files"
-    static let displayTools = [displayImage, displayHTML, displayCompareFiles]
+    static let displayImage = MCPBuiltInTool.displayImage.rawValue
+    static let displayHTML = MCPBuiltInTool.displayHTML.rawValue
+    static let displayCompareFiles = MCPBuiltInTool.displayCompareFiles.rawValue
 
-    static let conversationHistory = "conversation_history"
-    static let continuationTools = [conversationHistory]
+    static let conversationHistory = MCPBuiltInTool.conversationHistory.rawValue
 
-    static let browserNavigate = "browser_navigate"
-    static let browserHistory = "browser_history"
-    static let browserStop = "browser_stop"
-    static let browserTabs = "browser_tabs"
-    static let browserStorage = "browser_storage"
-    static let browserTrace = "browser_trace"
-    static let browserUpload = "browser_upload"
-    static let browserDownload = "browser_download"
-    static let browserResize = "browser_resize"
-    static let browserEmulate = "browser_emulate"
-    static let browserCapabilities = "browser_capabilities"
-    static let browserRunIsolated = "browser_run_isolated"
-    static let browserSnapshot = "browser_snapshot"
-    static let browserAnnotations = "browser_annotations"
-    static let browserScreenshot = "browser_screenshot"
-    static let browserVisualCompare = "browser_visual_compare"
-    static let browserQuery = "browser_query"
-    static let browserClick = "browser_click"
-    static let browserHover = "browser_hover"
-    static let browserDrag = "browser_drag"
-    static let browserType = "browser_type"
-    static let browserFillForm = "browser_fill_form"
-    static let browserSelect = "browser_select"
-    static let browserSetChecked = "browser_set_checked"
-    static let browserPressKey = "browser_press_key"
-    static let browserScroll = "browser_scroll"
-    static let browserWait = "browser_wait"
-    static let browserConsole = "browser_console"
-    static let browserNetwork = "browser_network"
-    static let browserPerformance = "browser_performance"
-    static let browserAccessibilityAudit = "browser_accessibility_audit"
-    static let browserTools = [
-        browserNavigate,
-        browserHistory,
-        browserStop,
-        browserTabs,
-        browserStorage,
-        browserTrace,
-        browserUpload,
-        browserDownload,
-        browserResize,
-        browserEmulate,
-        browserCapabilities,
-        browserRunIsolated,
-        browserSnapshot,
-        browserAnnotations,
-        browserClick,
-        browserHover,
-        browserDrag,
-        browserType,
-        browserFillForm,
-        browserSelect,
-        browserSetChecked,
-        browserPressKey,
-        browserScroll,
-        browserWait,
-        browserScreenshot,
-        browserVisualCompare,
-        browserConsole,
-        browserNetwork,
-        browserPerformance,
-        browserAccessibilityAudit,
-        browserQuery
-    ]
+    static let browserNavigate = MCPBuiltInTool.browserNavigate.rawValue
+    static let browserHistory = MCPBuiltInTool.browserHistory.rawValue
+    static let browserStop = MCPBuiltInTool.browserStop.rawValue
+    static let browserTabs = MCPBuiltInTool.browserTabs.rawValue
+    static let browserStorage = MCPBuiltInTool.browserStorage.rawValue
+    static let browserTrace = MCPBuiltInTool.browserTrace.rawValue
+    static let browserUpload = MCPBuiltInTool.browserUpload.rawValue
+    static let browserDownload = MCPBuiltInTool.browserDownload.rawValue
+    static let browserResize = MCPBuiltInTool.browserResize.rawValue
+    static let browserEmulate = MCPBuiltInTool.browserEmulate.rawValue
+    static let browserCapabilities = MCPBuiltInTool.browserCapabilities.rawValue
+    static let browserRunIsolated = MCPBuiltInTool.browserRunIsolated.rawValue
+    static let browserSnapshot = MCPBuiltInTool.browserSnapshot.rawValue
+    static let browserAnnotations = MCPBuiltInTool.browserAnnotations.rawValue
+    static let browserScreenshot = MCPBuiltInTool.browserScreenshot.rawValue
+    static let browserVisualCompare = MCPBuiltInTool.browserVisualCompare.rawValue
+    static let browserQuery = MCPBuiltInTool.browserQuery.rawValue
+    static let browserClick = MCPBuiltInTool.browserClick.rawValue
+    static let browserHover = MCPBuiltInTool.browserHover.rawValue
+    static let browserDrag = MCPBuiltInTool.browserDrag.rawValue
+    static let browserType = MCPBuiltInTool.browserType.rawValue
+    static let browserFillForm = MCPBuiltInTool.browserFillForm.rawValue
+    static let browserSelect = MCPBuiltInTool.browserSelect.rawValue
+    static let browserSetChecked = MCPBuiltInTool.browserSetChecked.rawValue
+    static let browserPressKey = MCPBuiltInTool.browserPressKey.rawValue
+    static let browserScroll = MCPBuiltInTool.browserScroll.rawValue
+    static let browserWait = MCPBuiltInTool.browserWait.rawValue
+    static let browserConsole = MCPBuiltInTool.browserConsole.rawValue
+    static let browserNetwork = MCPBuiltInTool.browserNetwork.rawValue
+    static let browserPerformance = MCPBuiltInTool.browserPerformance.rawValue
+    static let browserAccessibilityAudit = MCPBuiltInTool.browserAccessibilityAudit.rawValue
 
-    static let panelListTabs = "panel_list_tabs"
-    static let panelActivateTab = "panel_activate_tab"
-    static let panelTools = [panelListTabs, panelActivateTab]
+    static let panelListTabs = MCPBuiltInTool.panelListTabs.rawValue
+    static let panelActivateTab = MCPBuiltInTool.panelActivateTab.rawValue
 
-    static let setProjectIcon = "set_project_icon"
-    static let projectTools = [setProjectIcon]
+    static let setProjectIcon = MCPBuiltInTool.setProjectIcon.rawValue
 
-    static let listReclaimableStorage = "list_reclaimable_storage"
-    static let proposeStorageCleanup = "propose_storage_cleanup"
-    static let storageTools = [listReclaimableStorage, proposeStorageCleanup]
+    static let listReclaimableStorage = MCPBuiltInTool.listReclaimableStorage.rawValue
+    static let proposeStorageCleanup = MCPBuiltInTool.proposeStorageCleanup.rawValue
 
-    static let notifyUser = "notify_user"
-    static let notificationTools = [notifyUser]
+    static let notifyUser = MCPBuiltInTool.notifyUser.rawValue
 
-    static let listThemes = "list_themes"
-    static let setTheme = "set_theme"
-    static let createTheme = "create_theme"
-    static let themeTools = [listThemes, setTheme, createTheme]
+    static let listThemes = MCPBuiltInTool.listThemes.rawValue
+    static let setTheme = MCPBuiltInTool.setTheme.rawValue
+    static let createTheme = MCPBuiltInTool.createTheme.rawValue
 
-    static let listAppThemes = "list_app_themes"
-    static let getAppTheme = "get_app_theme"
-    static let setAppTheme = "set_app_theme"
-    static let createAppTheme = "create_app_theme"
-    static let duplicateAppTheme = "duplicate_app_theme"
-    static let updateAppTheme = "update_app_theme"
+    static let listAppThemes = MCPBuiltInTool.listAppThemes.rawValue
+    static let getAppTheme = MCPBuiltInTool.getAppTheme.rawValue
+    static let setAppTheme = MCPBuiltInTool.setAppTheme.rawValue
+    static let createAppTheme = MCPBuiltInTool.createAppTheme.rawValue
+    static let duplicateAppTheme = MCPBuiltInTool.duplicateAppTheme.rawValue
+    static let updateAppTheme = MCPBuiltInTool.updateAppTheme.rawValue
+
+    static let extensionListComponents = MCPBuiltInTool.extensionListComponents.rawValue
+    static let extensionScaffoldProject = MCPBuiltInTool.extensionScaffoldProject.rawValue
+    static let extensionProposeInstall = MCPBuiltInTool.extensionProposeInstall.rawValue
+    static let extensionDescribeComponent = MCPBuiltInTool.extensionDescribeComponent.rawValue
+    static let extensionValidateComponentPatch =
+        MCPBuiltInTool.extensionValidateComponentPatch.rawValue
+    static let extensionPreviewComponentPatch =
+        MCPBuiltInTool.extensionPreviewComponentPatch.rawValue
+
+    static let continuationTools = names(in: .continuation)
+    static let displayTools = names(in: .display)
+    static let browserTools = names(in: .browser)
+    static let panelTools = names(in: .panel)
+    static let projectTools = names(in: .project)
+    static let storageTools = names(in: .storage)
+    static let notificationTools = names(in: .notifications)
+    static let themeTools = [
+        MCPBuiltInTool.listThemes,
+        .setTheme,
+        .createTheme
+    ].map(\.rawValue)
     static let appThemeTools = [
-        listAppThemes,
-        getAppTheme,
-        setAppTheme,
-        createAppTheme,
-        duplicateAppTheme,
-        updateAppTheme
-    ]
+        MCPBuiltInTool.listAppThemes,
+        .getAppTheme,
+        .setAppTheme,
+        .createAppTheme,
+        .duplicateAppTheme,
+        .updateAppTheme
+    ].map(\.rawValue)
+    static let extensionAuthoringTools = names(in: .extensionAuthoring)
 
-    static let extensionListComponents = "extension_list_components"
-    static let extensionScaffoldProject = "extension_scaffold_project"
-    static let extensionProposeInstall = "extension_propose_install"
-    static let extensionDescribeComponent = "extension_describe_component"
-    static let extensionValidateComponentPatch = "extension_validate_component_patch"
-    static let extensionPreviewComponentPatch = "extension_preview_component_patch"
-    static let extensionAuthoringTools = [
-        extensionListComponents,
-        extensionScaffoldProject,
-        extensionProposeInstall,
-        extensionDescribeComponent,
-        extensionValidateComponentPatch,
-        extensionPreviewComponentPatch
-    ]
+    private static func names(in family: MCPBuiltInTool.Family) -> [String] {
+        MCPBuiltInTool.allCases.filter { $0.family == family }.map(\.rawValue)
+    }
 
     private static var browserSemanticLocatorSchema: MCPPropertySchema {
         MCPPropertySchema(
@@ -1696,14 +1875,14 @@ enum MCPTools {
     /// Every tool the server serves. Clients pre-approve this MCP server as one app capability;
     /// browser tools then enforce origin and consequential-action approval inside Threading, where
     /// the app can account for cookies and the page the user is actually looking at.
-    static let allTools = continuationTools + displayTools + browserTools + panelTools + projectTools
-        + storageTools + notificationTools + themeTools + appThemeTools + extensionAuthoringTools
+    static let allTools = MCPBuiltInTool.allCases.map(\.rawValue)
 
-    /// The full `tools/list` payload. `MCPToolCatalog.enabledDefinitions` filters this to the
-    /// groups the user has switched on before it is served.
-    static let definitions: [MCPToolDefinition] = [
+    /// Schema declarations are typed, then validated into `definitions` below. Keeping the
+    /// declaration list private means a missing or duplicate identity is excluded rather than
+    /// becoming an ambiguously routed protocol surface.
+    private static let declaredDefinitions: [MCPToolDefinition] = [
         MCPToolDefinition(
-            name: displayImage,
+            tool: .displayImage,
             description: """
                 Display an image to the user in Threading's side panel, beside this terminal. \
                 Use this for screenshots, generated charts and diagrams, or any image file \
@@ -1731,7 +1910,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: conversationHistory,
+            tool: .conversationHistory,
             description: """
                 Read the frozen conversation snapshot that created this cross-provider \
                 continuation. The tool is scoped to this session: it cannot select another \
@@ -1754,7 +1933,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: notifyUser,
+            tool: .notifyUser,
             description: """
                 Send a notification about this session. By default it reaches the participant \
                 who wrote the current turn, so “notify me” follows the speaker rather than \
@@ -1786,7 +1965,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: displayHTML,
+            tool: .displayHTML,
             description: """
                 Render an HTML document in Threading's side panel, beside this terminal. Use \
                 this when structure carries the meaning and plain text would destroy it: \
@@ -1823,7 +2002,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: displayCompareFiles,
+            tool: .displayCompareFiles,
             description: """
                 Compare two files in Threading's side panel. Two images open an interactive \
                 comparison the user can wipe, crossfade, or difference — use it whenever you \
@@ -1862,7 +2041,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserNavigate,
+            tool: .browserNavigate,
             description: """
                 Open a URL in Threading's browser (a full pane beside this terminal), or run a \
                 search if the text is not a URL. By default it waits for the full load event; \
@@ -1890,7 +2069,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserHistory,
+            tool: .browserHistory,
             description: """
                 Navigate the shared browser backward or forward, reload the current page, or use \
                 reload_from_origin to make WebKit revalidate content with its origin server using \
@@ -1922,7 +2101,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserStop,
+            tool: .browserStop,
             description: """
                 Stop all outstanding resource loads in the active shared browser page, then \
                 return a fresh semantic snapshot of the content that rendered before cancellation. \
@@ -1934,7 +2113,7 @@ enum MCPTools {
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
         MCPToolDefinition(
-            name: browserTabs,
+            tool: .browserTabs,
             description: """
                 List, create, activate, or close independent browser tabs in this session. Each \
                 browser tab keeps its own page, history, pop-ups, responsive viewport, emulated \
@@ -1971,7 +2150,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserStorage,
+            tool: .browserStorage,
             description: """
                 Clear cookies, caches, local storage, IndexedDB, service workers, and other WebKit \
                 website data for the active browser site. This is destructive and always requires \
@@ -1992,7 +2171,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserTrace,
+            tool: .browserTrace,
             description: """
                 Record and export a bounded, metadata-only trace for the active browser tab. The \
                 trace contains agent tool names, success/error outcomes, durations, navigation \
@@ -2012,7 +2191,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserUpload,
+            tool: .browserUpload,
             description: """
                 Suggest one or more existing local paths to one exact file input, then open \
                 WebKit's native file chooser. The chooser displays the suggestions and the user \
@@ -2044,7 +2223,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserDownload,
+            tool: .browserDownload,
             description: """
                 Activate one exact semantic control and wait for the resulting WebKit download. \
                 The user chooses or cancels the destination in a native save panel that explicitly \
@@ -2068,7 +2247,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserResize,
+            tool: .browserResize,
             description: """
                 Give the active browser tab an exact responsive-test viewport without resizing \
                 Threading's window. The user sees the same live page inside a pannable frame, and \
@@ -2097,7 +2276,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserEmulate,
+            tool: .browserEmulate,
             description: """
                 Change one or more runtime-only test conditions in the active browser tab. \
                 color_scheme accepts dark, light, or auto; CSS prefers-color-scheme, matchMedia, \
@@ -2132,7 +2311,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserCapabilities,
+            tool: .browserCapabilities,
             description: """
                 Report the available browser automation backends and an explicit machine-readable \
                 capability matrix. Use this before assuming that a test condition can be emulated. \
@@ -2146,7 +2325,7 @@ enum MCPTools {
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
         MCPToolDefinition(
-            name: browserRunIsolated,
+            tool: .browserRunIsolated,
             description: """
                 Run one bounded end-to-end scenario in a fresh, non-persistent Playwright browser \
                 context, then close the browser. This backend never imports cookies, credentials, \
@@ -2349,7 +2528,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserSnapshot,
+            tool: .browserSnapshot,
             description: """
                 Read the current page as a compact accessibility-oriented tree. Interactive \
                 elements carry stable refs such as e12; pass those refs to browser_click, \
@@ -2390,7 +2569,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserQuery,
+            tool: .browserQuery,
             description: """
                 Return the elements in the current page matching a CSS selector — their tag, \
                 id, classes, visible text, key attributes (href, src, value, aria-label), and \
@@ -2409,7 +2588,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserClick,
+            tool: .browserClick,
             description: """
                 Click an interactive element in the current page, preferably by a ref returned \
                 from browser_snapshot. It sends the pointer and mouse sequence application-style \
@@ -2467,7 +2646,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserHover,
+            tool: .browserHover,
             description: """
                 Hover a page element, preferably by a ref returned from browser_snapshot. This \
                 triggers pointer and mouse handlers and mirrors page-readable CSS hover rules \
@@ -2490,7 +2669,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserDrag,
+            tool: .browserDrag,
             description: """
                 Drag one page element onto another, preferably using two refs returned by \
                 browser_snapshot. Sends pointer, mouse, and HTML drag/drop events without moving \
@@ -2528,7 +2707,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserType,
+            tool: .browserType,
             description: """
                 Enter text into an editable element, preferably by a browser_snapshot ref. \
                 Password fields are never filled by the agent; the user must type secrets in the \
@@ -2568,7 +2747,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserFillForm,
+            tool: .browserFillForm,
             description: """
                 Fill several text fields, native selects, checkboxes, radios, or switches in one \
                 call. All targets and requested value kinds are checked before the first field is \
@@ -2631,7 +2810,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserSelect,
+            tool: .browserSelect,
             description: """
                 Select one option in a native select control, preferably by a browser_snapshot \
                 ref. Match exactly one option by its submitted value or visible label; available \
@@ -2666,7 +2845,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserSetChecked,
+            tool: .browserSetChecked,
             description: """
                 Put a checkbox, radio button, or switch into an exact checked state, preferably \
                 by a browser_snapshot ref. Unlike clicking, this is idempotent: an already-correct \
@@ -2696,7 +2875,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserPressKey,
+            tool: .browserPressKey,
             description: """
                 Press a keyboard key on a referenced element or the page's focused element. Page \
                 handlers receive cancellable keyboard events first; when they do not handle the \
@@ -2741,7 +2920,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserScroll,
+            tool: .browserScroll,
             description: """
                 Scroll the page or a referenced scrollable element. The result includes a fresh \
                 page snapshot describing the newly visible content.
@@ -2770,7 +2949,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserWait,
+            tool: .browserWait,
             description: """
                 Wait for text, a URL change, or an element state, or pause for a short fixed \
                 duration, then return a fresh page snapshot. For an element, provide ref or \
@@ -2887,7 +3066,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserAnnotations,
+            tool: .browserAnnotations,
             description: """
                 Read the user's native annotations for the active browser page. Each note includes \
                 its numbered pin and document-space CSS-pixel coordinates. These notes were \
@@ -2899,7 +3078,7 @@ enum MCPTools {
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
         MCPToolDefinition(
-            name: browserScreenshot,
+            tool: .browserScreenshot,
             description: """
                 Capture the current browser page as PNG. By default the image is returned to you \
                 for visual inspection and shown to the user as a persistent image tab. It can \
@@ -2951,7 +3130,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserVisualCompare,
+            tool: .browserVisualCompare,
             description: """
                 Capture the active page and compare its rendered pixels with a PNG baseline. The \
                 viewport, full-page, or strict element target follows browser_screenshot semantics. \
@@ -3011,7 +3190,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserConsole,
+            tool: .browserConsole,
             description: """
                 Read console messages, uncaught errors, and unhandled promise rejections captured \
                 from the current page. Use level=error for a focused debugging pass.
@@ -3031,7 +3210,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserNetwork,
+            tool: .browserNetwork,
             description: """
                 Read bounded network metadata captured from the current page: method, redacted \
                 URL, resource type, status, and duration. Request and response bodies, headers, \
@@ -3060,7 +3239,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserPerformance,
+            tool: .browserPerformance,
             description: """
                 Summarize performance measurements from the current document using WebKit's Web \
                 Performance APIs: navigation milestones, paint timing, observed LCP and layout \
@@ -3084,7 +3263,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: browserAccessibilityAudit,
+            tool: .browserAccessibilityAudit,
             description: """
                 Run bounded, deterministic accessibility checks against the current WebKit \
                 document, its open shadow roots, and accessible same-origin frames. Reports \
@@ -3109,7 +3288,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: panelListTabs,
+            tool: .panelListTabs,
             description: """
                 List the tabs open in this session's display panel — their index, id, kind \
                 (image, document, browser, compare, and so on), title, and which one is \
@@ -3120,7 +3299,7 @@ enum MCPTools {
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
         MCPToolDefinition(
-            name: setProjectIcon,
+            tool: .setProjectIcon,
             description: """
                 Set the icon Threading shows for this session's project in its sidebar. Use \
                 the project's own mark — a favicon or logo file from the repository, or an \
@@ -3145,7 +3324,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: panelActivateTab,
+            tool: .panelActivateTab,
             description: """
                 Bring one of the display panel's tabs to the front, so the user is looking at it. \
                 Identify the tab by its index (from panel_list_tabs) or its id.
@@ -3161,7 +3340,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: listReclaimableStorage,
+            tool: .listReclaimableStorage,
             description: """
                 List build output across the user's projects that can be deleted and rebuilt — \
                 Rust and Swift build directories, node_modules, caches — with the size of each, \
@@ -3174,7 +3353,7 @@ enum MCPTools {
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
         MCPToolDefinition(
-            name: proposeStorageCleanup,
+            tool: .proposeStorageCleanup,
             description: """
                 Propose deleting some of what list_reclaimable_storage returned. This does not \
                 delete anything: it shows the user exactly what you are proposing and why, and \
@@ -3203,7 +3382,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: listThemes,
+            tool: .listThemes,
             description: """
                 List the terminal colour themes available in Threading — each one's stable ID, name, \
                 whether it is built in, custom, or dynamically follows the app chrome, and its \
@@ -3215,7 +3394,7 @@ enum MCPTools {
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
         MCPToolDefinition(
-            name: setTheme,
+            tool: .setTheme,
             description: """
                 Set the terminal colour theme, for this session, for its whole project, or as \
                 the app-wide default. Takes effect immediately — the terminal you are running \
@@ -3252,7 +3431,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: createTheme,
+            tool: .createTheme,
             description: """
                 Create a new terminal theme and, unless told otherwise, apply it to this \
                 session. Use it when the user describes colours they want rather than naming a \
@@ -3300,7 +3479,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: listAppThemes,
+            tool: .listAppThemes,
             description: """
                 List Threading's app-chrome themes, their stable IDs, whether each is built in or \
                 custom, and which one is active. These style the window, sidebar, panels, text \
@@ -3310,7 +3489,7 @@ enum MCPTools {
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
         MCPToolDefinition(
-            name: getAppTheme,
+            tool: .getAppTheme,
             description: """
                 Read one complete app-chrome theme document in the same snake-case vocabulary \
                 accepted by create_app_theme and update_app_theme. Each available light/dark \
@@ -3329,7 +3508,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: setAppTheme,
+            tool: .setAppTheme,
             description: """
                 Apply an app-chrome theme immediately and app-wide. There is one window chrome, \
                 so unlike terminal themes this has no session or project scope. Do not change it \
@@ -3347,7 +3526,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: createAppTheme,
+            tool: .createAppTheme,
             description: """
                 Create a custom app-chrome theme from partial light and/or dark variant patches. \
                 One variant makes a fixed light or dark theme; both variants with appearance \
@@ -3411,7 +3590,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: duplicateAppTheme,
+            tool: .duplicateAppTheme,
             description: """
                 Duplicate any app-chrome theme into an editable custom theme. Returns the copy's \
                 stable ID. Every available light/dark variant is copied; an adaptive theme stays \
@@ -3436,7 +3615,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: updateAppTheme,
+            tool: .updateAppTheme,
             description: """
                 Patch an existing custom app-chrome theme in place while keeping its stable ID. \
                 Built-in themes are immutable. Only supplied variants and fields change; this can \
@@ -3493,7 +3672,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: extensionListComponents,
+            tool: .extensionListComponents,
             description: """
                 List every versioned Threading UI component an extension may customize. Returns \
                 stable component IDs, versions, context kinds and summaries. Use this before \
@@ -3502,7 +3681,7 @@ enum MCPTools {
             inputSchema: MCPInputSchema(properties: [:], required: [])
         ),
         MCPToolDefinition(
-            name: extensionScaffoldProject,
+            tool: .extensionScaffoldProject,
             description: """
                 Create a new, separate Swift WebAssembly extension project at an absolute path. \
                 It vendors the exact SDK snapshot shipped by this Threading build and creates a \
@@ -3529,7 +3708,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: extensionProposeInstall,
+            tool: .extensionProposeInstall,
             description: """
                 Inspect a built .threadingextension package or unpacked package directory, show \
                 its runtime and complete capability request to the user, and install it only \
@@ -3553,7 +3732,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: extensionDescribeComponent,
+            tool: .extensionDescribeComponent,
             description: """
                 Describe one public extension component in full: properties, slots, replacement \
                 limits, host-owned behavior, contextual image assets, an example patch and a \
@@ -3574,7 +3753,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: extensionValidateComponentPatch,
+            tool: .extensionValidateComponentPatch,
             description: """
                 Decode and validate one component-patch JSON object with exactly the same SDK \
                 validator Threading uses before accepting a running extension's publication. \
@@ -3591,7 +3770,7 @@ enum MCPTools {
             )
         ),
         MCPToolDefinition(
-            name: extensionPreviewComponentPatch,
+            tool: .extensionPreviewComponentPatch,
             description: """
                 Validate and render a component patch through Threading's native semantic-node \
                 renderer, then show the result in this session's display panel. The preview uses \
@@ -3608,6 +3787,32 @@ enum MCPTools {
             )
         )
     ]
+
+    /// The complete, deterministic built-in registry. Only identities with exactly one schema are
+    /// admitted; a partial or duplicated declaration therefore fails closed in `tools/list`.
+    static let definitions: [MCPToolDefinition] = {
+        let grouped = Dictionary(grouping: declaredDefinitions) { definition in
+            definition.tool
+        }
+        return MCPBuiltInTool.allCases.compactMap { tool in
+            guard let matches = grouped[tool], matches.count == 1 else { return nil }
+            return matches[0]
+        }
+    }()
+
+    static func definition(for tool: MCPBuiltInTool) -> MCPToolDefinition? {
+        definitions.first { $0.tool == tool }
+    }
+
+    /// Diagnostics used by tests and startup logging. Empty is the only healthy registry state.
+    static let definitionIssues: [String] = {
+        let grouped = Dictionary(grouping: declaredDefinitions.compactMap(\.tool)) { $0 }
+        return MCPBuiltInTool.allCases.compactMap { tool in
+            let count = grouped[tool]?.count ?? 0
+            guard count != 1 else { return nil }
+            return "\(tool.rawValue) has \(count) schema declarations; expected exactly one"
+        }
+    }()
 
     /// The twenty named colours of a palette, described once for `create_theme`.
     ///

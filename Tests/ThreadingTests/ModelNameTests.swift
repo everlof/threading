@@ -178,7 +178,7 @@ final class ModelNameTests: XCTestCase {
             "medium"
         )
 
-        session.reasoningEffort = "max"
+        XCTAssertTrue(session.setCodexReasoningEffort("max"))
         XCTAssertEqual(
             AgentModels.effectiveEffort(
                 for: session,

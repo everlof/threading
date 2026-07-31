@@ -37,9 +37,10 @@ final class GitReviewFileRow: NSView {
     ///
     /// A row restored expanded builds its body during `init`, before the pane has wired this —
     /// the assignment kicks the fetch that was waiting on it.
-    var imagePairProvider: (
-        (GitFileDiff, @escaping (Result<GitEndpointFilePair, GitFailure>) -> Void) -> Void
-    )? {
+    var imagePairProvider: (@MainActor @Sendable (
+        GitFileDiff,
+        @escaping @MainActor @Sendable (Result<GitEndpointFilePair, GitFailure>) -> Void
+    ) -> Void)? {
         didSet {
             guard awaitsImagePairProvider, imagePairProvider != nil else { return }
             awaitsImagePairProvider = false
@@ -50,13 +51,35 @@ final class GitReviewFileRow: NSView {
     private weak var imageLoadingNote: NSView?
     private var awaitsImagePairProvider = false
 
-    private var chevron: NSImageView!
-    private var headerBottom: NSLayoutConstraint!
-    private var bodyBottom: NSLayoutConstraint!
+    private lazy var chevron: NSImageView = {
+        let image = NSImageView()
+        image.translatesAutoresizingMaskIntoConstraints = false
+        image.image = NSImage(
+            systemSymbolName: "chevron.right",
+            accessibilityDescription: nil
+        )
+        image.contentTintColor = Design.Text.quaternary
+        image.symbolConfiguration = Design.Symbol.configuration(
+            Design.Symbol.chevron,
+            weight: .semibold
+        )
+        image.isHidden = !canExpand
+        return image
+    }()
+    private var headerBottom: NSLayoutConstraint?
+    private var bodyBottom: NSLayoutConstraint?
 
     /// Where the body lands once built. Installed from the start so the constraints exist;
     /// empty and hidden until first expand.
-    private var bodyContainer: NSStackView!
+    private lazy var bodyContainer: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.tight
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.isHidden = true
+        return stack
+    }()
     private var bodyBuilt = false
     private var isExpanded = false
 
@@ -142,20 +165,6 @@ final class GitReviewFileRow: NSView {
             Self.makeActionButton($0.action.fileTitle, target: self, action: #selector(stageFileClicked))
         }
 
-        chevron = NSImageView()
-        chevron.translatesAutoresizingMaskIntoConstraints = false
-        chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
-        chevron.contentTintColor = Design.Text.quaternary
-        chevron.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold)
-        chevron.isHidden = !canExpand
-
-        bodyContainer = NSStackView()
-        bodyContainer.orientation = .vertical
-        bodyContainer.alignment = .leading
-        bodyContainer.spacing = Design.Spacing.tight
-        bodyContainer.translatesAutoresizingMaskIntoConstraints = false
-        bodyContainer.isHidden = true
-
         [glyphLabel, nameLabel, directoryLabel, metaLabel, stageButton, chevron, bodyContainer]
             .compactMap { $0 }
             .forEach(addSubview)
@@ -165,7 +174,7 @@ final class GitReviewFileRow: NSView {
             ? nameLabel.bottomAnchor
             : directoryLabel.bottomAnchor
         headerBottom = headerContentBottom.constraint(equalTo: bottomAnchor, constant: -inset)
-        headerBottom.isActive = true
+        headerBottom?.isActive = true
         bodyBottom = bodyContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
 
         NSLayoutConstraint.activate([
@@ -244,6 +253,7 @@ final class GitReviewFileRow: NSView {
     }
 
     private func toggle() {
+        guard let headerBottom, let bodyBottom else { return }
         if !bodyBuilt { buildBody() }
 
         isExpanded.toggle()

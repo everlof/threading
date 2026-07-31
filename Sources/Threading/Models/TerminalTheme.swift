@@ -473,6 +473,7 @@ extension TerminalTheme {
     }
 
     /// Convenience accessor - prefer ThemeManager.shared.allThemes
+    @MainActor
     static var allThemes: [TerminalTheme] {
         ThemeManager.shared.allThemes
     }

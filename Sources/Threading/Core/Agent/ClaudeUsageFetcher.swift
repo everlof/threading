@@ -84,7 +84,10 @@ enum ClaudeUsageFetcher {
     private static func fetchFromAPI(
         credentials: (token: String, plan: String?)
     ) async throws -> AccountUsage {
-        var request = URLRequest(url: URL(string: ClaudeUsageDefaults.usageEndpoint)!)
+        guard let endpoint = URL(string: ClaudeUsageDefaults.usageEndpoint) else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: endpoint)
         request.setValue("Bearer \(credentials.token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(ClaudeUsageDefaults.oauthBeta, forHTTPHeaderField: "anthropic-beta")

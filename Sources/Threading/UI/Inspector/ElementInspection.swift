@@ -94,6 +94,7 @@ enum InspectorDefaults {
 /// equals the deeper wins, then the one drawn on top. A row's label beats the row, the row
 /// beats the pane's glass, and the terminal still wins its own pane because nothing smaller
 /// is there.
+@MainActor
 enum ElementHitTest {
 
     /// Returns the most specific visible descendant of `view` containing `point`, or `view`
@@ -149,6 +150,7 @@ enum ElementHitTest {
 
 /// What one picked element is, said in the vocabulary a chat about this codebase already
 /// uses: its class, where it sits, the view chain above it, and the controllers responsible.
+@MainActor
 struct ElementReport {
 
     struct Node {

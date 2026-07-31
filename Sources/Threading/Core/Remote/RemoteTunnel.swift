@@ -9,7 +9,7 @@ import Foundation
 @MainActor
 final class RemoteTunnel {
 
-    enum State: Equatable {
+    enum State: Equatable, Sendable {
         case stopped
         case starting
         case connected(URL)
@@ -21,9 +21,12 @@ final class RemoteTunnel {
     private var outputPipe: Pipe?
     private var launchID: UUID?
     private var outputBuffer = ""
-    private var onStateChange: ((State) -> Void)?
+    private var onStateChange: (@MainActor @Sendable (State) -> Void)?
 
-    func start(port: UInt16, onStateChange: @escaping (State) -> Void) {
+    func start(
+        port: UInt16,
+        onStateChange: @escaping @MainActor @Sendable (State) -> Void
+    ) {
         stop()
         self.onStateChange = onStateChange
 

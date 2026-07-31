@@ -3,6 +3,7 @@ import XCTest
 
 /// The inspector's decisions, tested without a window: which view a point means, and what
 /// the two reports say about a capture.
+@MainActor
 final class ElementInspectionTests: XCTestCase {
 
     // MARK: - Fixtures

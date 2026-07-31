@@ -33,7 +33,7 @@ enum CodexSessionDiscovery {
         projectPath: String,
         codexHome: String,
         launchedAt: Date,
-        completion: @escaping (TranscriptID?) -> Void
+        completion: @escaping @MainActor @Sendable (TranscriptID?) -> Void
     ) {
         let sessionsDirectory = URL(fileURLWithPath: codexHome)
             .appendingPathComponent(AgentAccountDefaults.sessionsSubdirectory)

@@ -19,9 +19,24 @@ final class ChangedFilesCardView: NSView {
     private var chevronsByNodeIndex: [Int: NSImageView] = [:]
     private var collapsedDirectories: Set<Int> = []
 
-    private var collapseButton: ThemedButton!
-    private var viewDiffButton: ThemedButton!
-    private var rowsStack: NSStackView!
+    private lazy var collapseButton = ThemedButton(
+        title: "",
+        target: self,
+        action: #selector(toggleAll)
+    )
+    private lazy var viewDiffButton = ThemedButton(
+        title: L10n.string("View diff"),
+        target: self,
+        action: #selector(viewDiff)
+    )
+    private lazy var rowsStack: NSStackView = {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.hairline
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
 
     // MARK: - Initialization
 
@@ -63,13 +78,6 @@ final class ChangedFilesCardView: NSView {
         ))
         counts.translatesAutoresizingMaskIntoConstraints = false
 
-        collapseButton = ThemedButton(title: "", target: self, action: #selector(toggleAll))
-        viewDiffButton = ThemedButton(
-            title: L10n.string("View diff"),
-            target: self,
-            action: #selector(viewDiff)
-        )
-
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
@@ -78,12 +86,6 @@ final class ChangedFilesCardView: NSView {
         header.alignment = .centerY
         header.spacing = Design.Spacing.small
         header.translatesAutoresizingMaskIntoConstraints = false
-
-        rowsStack = NSStackView()
-        rowsStack.orientation = .vertical
-        rowsStack.alignment = .leading
-        rowsStack.spacing = Design.Spacing.hairline
-        rowsStack.translatesAutoresizingMaskIntoConstraints = false
 
         for (index, node) in tree.nodes.enumerated() {
             let row = makeRow(for: node, at: index)

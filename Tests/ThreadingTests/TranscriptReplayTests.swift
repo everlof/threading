@@ -24,7 +24,7 @@ final class TranscriptReplayTests: XCTestCase {
 
         XCTAssertEqual(id, "call-1")
         XCTAssertEqual(tool, .bash)
-        XCTAssertEqual(input["command"] as? String, "ls -la")
+        XCTAssertEqual(input["command"], .string("ls -la"))
     }
 
     func testCodexCustomToolOutputAttachesToCall() throws {

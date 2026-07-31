@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Enforced **server-side, per message**: a `view` client that sends input is refused at the
 /// server, never merely hidden by the client.
-public enum RemoteCapability: String, Codable, Equatable {
+public enum RemoteCapability: String, Codable, Equatable, Sendable {
     /// Watch only: output flows out, nothing flows back.
     case view
     /// Watch and drive: keystrokes, prompt submissions and permission answers are accepted.

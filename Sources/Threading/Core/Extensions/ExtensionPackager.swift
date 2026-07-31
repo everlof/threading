@@ -191,8 +191,7 @@ enum ExtensionPackager {
         }
         for companion in manifest.companions {
             guard let source = companionBundleURLs[companion.id] else {
-                // Completeness was checked before staging was created.
-                preconditionFailure("validated companion source disappeared")
+                throw ExtensionPackagerError.companionBundleRequired(companion.id)
             }
             let target = staging.appendingPathComponent(
                 companion.bundlePath,

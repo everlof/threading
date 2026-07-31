@@ -48,8 +48,8 @@ final class ArtifactScanService {
     /// Whether anything is being scanned, which the page shows rather than a spinner.
     var isScanning: Bool { !inFlight.isEmpty }
 
-    private let storeURL: URL
     private let fileManager: FileManager
+    private let persistence: RecoverableFileStore<[ProjectID: ProjectScan]>
 
     /// The chore's own queue. `.background` rather than `.utility`: the system throttles its
     /// I/O, which is exactly right for work nobody is waiting on.
@@ -66,9 +66,14 @@ final class ArtifactScanService {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
 
-        self.storeURL = root.appendingPathComponent(ArtifactScanDefaults.fileName)
-
-        load()
+        self.persistence = RecoverableFileStore(
+            url: root.appendingPathComponent(ArtifactScanDefaults.fileName),
+            fileManager: fileManager,
+            criticality: .rebuildableCache,
+            dateEncodingStrategy: .iso8601,
+            dateDecodingStrategy: .iso8601
+        )
+        self.scans = persistence.load(defaultValue: [:]).value
     }
 
     // MARK: - Reading
@@ -123,7 +128,7 @@ final class ArtifactScanService {
         let now = Date()
         for project in ProjectStore.shared.projects {
             let age = scans[project.id].map { now.timeIntervalSince($0.scannedAt) }
-            guard age == nil || age! > ArtifactScanDefaults.staleAfter else { continue }
+            guard age.map({ $0 > ArtifactScanDefaults.staleAfter }) ?? true else { continue }
             refresh(project)
         }
     }
@@ -188,31 +193,10 @@ final class ArtifactScanService {
 
     // MARK: - Persistence
 
-    private func load() {
-        guard let data = try? Data(contentsOf: storeURL) else { return }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        scans = (try? decoder.decode([ProjectID: ProjectScan].self, from: data)) ?? [:]
-    }
-
     /// Written whole, on every change. The file is a few kilobytes — one line per reclaimable
     /// directory — so there is nothing here worth coalescing.
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-
-        do {
-            try fileManager.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try encoder.encode(scans).write(to: storeURL, options: .atomic)
-        } catch {
-            ThreadingLogger.agent.error(
-                "Could not save the storage scan: \(error.localizedDescription, privacy: .public)"
-            )
-        }
+        _ = persistence.save(scans)
     }
 }
 

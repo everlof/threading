@@ -1,4 +1,4 @@
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import CoreGraphics
 import Foundation
 import ThreadingExtensionKit
@@ -35,6 +35,7 @@ protocol ExtensionCompanionSystemPermissionAuthorizing {
     ) throws
 }
 
+@MainActor
 struct SystemExtensionCompanionPermissionAuthorizer:
     ExtensionCompanionSystemPermissionAuthorizing
 {

@@ -7,13 +7,13 @@ import Foundation
 /// A session can run processes from two places at once: the agent Threading launched, and the
 /// shell the user opened in the drawer beneath it. They are different answers to "what is this
 /// port" — one is the agent's dev server, the other is something you started yourself.
-enum SessionInfoOrigin: String, Equatable {
+enum SessionInfoOrigin: String, Equatable, Sendable {
     case agent = "Agent"
     case shell = "Shell"
 }
 
 /// One process in a session's tree, as the panel draws it.
-struct SessionProcess: Equatable {
+struct SessionProcess: Equatable, Sendable {
 
     let pid: pid_t
     let command: String
@@ -24,6 +24,7 @@ struct SessionProcess: Equatable {
     /// `0%` for "not yet known" would claim a measurement that was never taken.
     let cpuPercent: Double?
 
+    @MainActor
     var formattedMemory: String {
         Self.memoryFormatter.string(fromByteCount: Int64(memoryBytes))
     }
@@ -34,6 +35,7 @@ struct SessionProcess: Equatable {
     }
 
     /// Read only while drawing, so the formatter stays on the main thread.
+    @MainActor
     private static let memoryFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .memory
@@ -43,19 +45,19 @@ struct SessionProcess: Equatable {
 }
 
 /// The processes contributed by one origin.
-struct SessionProcessGroup: Equatable {
+struct SessionProcessGroup: Equatable, Sendable {
     let origin: SessionInfoOrigin
     let processes: [SessionProcess]
 }
 
 /// The listening ports contributed by one origin.
-struct SessionPortGroup: Equatable {
+struct SessionPortGroup: Equatable, Sendable {
     let origin: SessionInfoOrigin
     let ports: [ListeningPort]
 }
 
 /// One reading of what a session is running.
-struct SessionInfoSnapshot: Equatable {
+struct SessionInfoSnapshot: Equatable, Sendable {
 
     let processGroups: [SessionProcessGroup]
     let portGroups: [SessionPortGroup]
@@ -137,7 +139,7 @@ enum SessionInfoGrouping {
 /// This is an instance rather than a namespace of static functions because **CPU percentage is
 /// a rate**: it needs the previous reading to subtract from, so the reader carries state between
 /// polls. That state is touched only on `queue`, which is serial.
-final class SessionInfoReader {
+final class SessionInfoReader: @unchecked Sendable {
 
     // MARK: - Types
 
@@ -167,7 +169,7 @@ final class SessionInfoReader {
     func read(
         agentRoot: pid_t?,
         shellRoot: pid_t?,
-        completion: @escaping @MainActor (SessionInfoSnapshot) -> Void
+        completion: @escaping @MainActor @Sendable (SessionInfoSnapshot) -> Void
     ) {
         queue.async {
             let snapshot = self.snapshot(agentRoot: agentRoot, shellRoot: shellRoot)

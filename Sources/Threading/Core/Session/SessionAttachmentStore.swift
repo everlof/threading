@@ -47,6 +47,7 @@ struct SessionAttachmentsDidChange: AppEvent {
 /// came back, which read as attachments appearing and vanishing at random. References are still
 /// re-validated against the filesystem on every read, so a file that has since been deleted
 /// drops out (and the pruned list is written back) rather than offering a dead row.
+@MainActor
 final class SessionAttachmentStore {
 
     /// Hosted tests exercise the shared store; the user's real database is not theirs to write.
@@ -177,15 +178,6 @@ final class SessionAttachmentStore {
 
     // MARK: Persistence
 
-    /// The on-disk form of one reference. The file's bytes stay in the checkout; this is only
-    /// enough to find it again and keep the list's order.
-    private struct PersistedAttachment: Codable {
-        let projectRoot: String
-        let relativePath: String
-        let kind: SessionAttachment.Kind
-        let referencedAt: Date
-    }
-
     private static let encoder = JSONEncoder()
     private static let decoder = JSONDecoder()
 
@@ -197,13 +189,13 @@ final class SessionAttachmentStore {
         loadedSessions.insert(sessionID)
         guard attachmentsBySession[sessionID] == nil,
               let payload = loadPayload?(sessionID),
-              let entries = try? Self.decoder.decode(
-                  [PersistedAttachment].self,
+              let document = try? Self.decoder.decode(
+                  PersistedSessionAttachments.self,
                   from: Data(payload.utf8)
               )
         else { return }
 
-        attachmentsBySession[sessionID] = entries.map { entry in
+        attachmentsBySession[sessionID] = document.entries.map { entry in
             let root = URL(fileURLWithPath: entry.projectRoot, isDirectory: true)
             return SessionAttachment(
                 sessionID: sessionID,
@@ -219,14 +211,16 @@ final class SessionAttachmentStore {
     private func persist(_ attachments: [SessionAttachment], for sessionID: SessionID) {
         guard let savePayload else { return }
         let entries = attachments.map {
-            PersistedAttachment(
+            PersistedSessionAttachment(
                 projectRoot: $0.projectRoot.path,
                 relativePath: $0.relativePath,
                 kind: $0.kind,
                 referencedAt: $0.referencedAt
             )
         }
-        guard let data = try? Self.encoder.encode(entries) else { return }
+        guard let data = try? Self.encoder.encode(
+            PersistedSessionAttachments(entries: entries)
+        ) else { return }
         savePayload(String(decoding: data, as: UTF8.self), sessionID)
     }
 
@@ -399,6 +393,7 @@ enum AttachmentReferenceDetector {
 /// recent scrollback that has moved just above the viewport. A path is recorded only when it
 /// enters the scanned window, so an unrelated later repaint does not keep moving an old file to
 /// the top of the list.
+@MainActor
 final class TerminalAttachmentObserver {
 
     private let sessionID: SessionID
@@ -407,7 +402,7 @@ final class TerminalAttachmentObserver {
     private let text: () -> String
     private let isEnabled: () -> Bool
     private let now: () -> Date
-    private var pendingScan: DispatchWorkItem?
+    nonisolated(unsafe) private var pendingScan: DispatchWorkItem?
     private var lastScan: Date?
     private var pathsInLastScan: Set<String> = []
 

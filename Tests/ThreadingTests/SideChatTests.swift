@@ -33,7 +33,13 @@ final class SideChatTests: XCTestCase {
     func testForkParentResolvesForAFreshSideChat() throws {
         var project = try makeProject()
         let parent = makeParent()
-        let child = AgentSession(kind: .claude, title: "Side Chat", forkedFrom: parent.id)
+        let child = AgentSession(
+            configuration: .claude(
+                remoteControl: nil,
+                origin: .forked(from: parent.id)
+            ),
+            title: "Side Chat"
+        )
         project.sessions = [parent, child]
 
         XCTAssertEqual(AgentLauncher.forkParent(for: child, in: project)?.id, parent.id)
@@ -44,7 +50,13 @@ final class SideChatTests: XCTestCase {
     func testForkParentIsGoneOnceTheChildHasLaunched() throws {
         var project = try makeProject()
         let parent = makeParent()
-        var child = AgentSession(kind: .claude, title: "Side Chat", forkedFrom: parent.id)
+        var child = AgentSession(
+            configuration: .claude(
+                remoteControl: nil,
+                origin: .forked(from: parent.id)
+            ),
+            title: "Side Chat"
+        )
         child.hasLaunched = true
         project.sessions = [parent, child]
 
@@ -57,7 +69,13 @@ final class SideChatTests: XCTestCase {
         var project = try makeProject()
         var parent = makeParent()
         parent.resumeState = .awaitingIdentifier
-        let child = AgentSession(kind: .claude, title: "Side Chat", forkedFrom: parent.id)
+        let child = AgentSession(
+            configuration: .claude(
+                remoteControl: nil,
+                origin: .forked(from: parent.id)
+            ),
+            title: "Side Chat"
+        )
         project.sessions = [parent, child]
 
         XCTAssertNil(AgentLauncher.forkParent(for: child, in: project))
@@ -72,7 +90,7 @@ final class SideChatTests: XCTestCase {
         XCTAssertNil(AgentLauncher.forkParent(for: plain, in: project))
     }
 
-    /// Codex has no `--fork-session`, so a record carrying a parent must not produce one.
+    /// Codex has no `--fork-session`, so its typed configuration cannot carry a parent.
     func testCodexNeverForks() throws {
         var project = try makeProject()
         var parent = AgentSession(kind: .codex, title: "Parent")
@@ -81,7 +99,7 @@ final class SideChatTests: XCTestCase {
         )
         parent.hasLaunched = true
 
-        let child = AgentSession(kind: .codex, title: "Side Chat", forkedFrom: parent.id)
+        let child = AgentSession(kind: .codex, title: "Ordinary")
         project.sessions = [parent, child]
 
         XCTAssertNil(AgentLauncher.forkParent(for: child, in: project))
@@ -96,7 +114,13 @@ final class SideChatTests: XCTestCase {
     func testForkLaunchResumesTheParentUnderTheChildsIdentifier() throws {
         var project = try makeProject()
         let parent = makeParent()
-        let child = AgentSession(kind: .claude, title: "Side Chat", forkedFrom: parent.id)
+        let child = AgentSession(
+            configuration: .claude(
+                remoteControl: nil,
+                origin: .forked(from: parent.id)
+            ),
+            title: "Side Chat"
+        )
         project.sessions = [parent, child]
 
         let transcript = try writeTranscript(for: parent, in: project)
@@ -119,7 +143,13 @@ final class SideChatTests: XCTestCase {
     func testForkFallsBackToAFreshLaunchWithoutTheParentsTranscript() throws {
         var project = try makeProject()
         let parent = makeParent()
-        let child = AgentSession(kind: .claude, title: "Side Chat", forkedFrom: parent.id)
+        let child = AgentSession(
+            configuration: .claude(
+                remoteControl: nil,
+                origin: .forked(from: parent.id)
+            ),
+            title: "Side Chat"
+        )
         project.sessions = [parent, child]
 
         let command = try XCTUnwrap(AgentLauncher.plan(for: child, in: project).arguments.last)
@@ -192,10 +222,12 @@ final class SideChatTests: XCTestCase {
     func testCodexNativeReasoningEffortConfiguresThePersistentAppServer() throws {
         let project = try makeProject()
         var session = AgentSession(
-            kind: .codex,
+            configuration: .codex(
+                reasoningEffort: "ultra",
+                continuedFromClaude: nil
+            ),
             title: "Codex",
-            model: "gpt-5.6-sol",
-            reasoningEffort: "ultra"
+            model: "gpt-5.6-sol"
         )
         session.resumeState = .resumable(TranscriptID("thread-ultra"))
 
@@ -236,10 +268,11 @@ final class SideChatTests: XCTestCase {
     func testContinuationLineageRoundTripsWithoutTheSourceRecord() throws {
         let sourceID = SessionID()
         let session = AgentSession(
-            kind: .codex,
-            title: "Continue the parser fix",
-            continuedFrom: sourceID,
-            continuationSourceKind: .claude
+            configuration: .codex(
+                reasoningEffort: nil,
+                continuedFromClaude: sourceID
+            ),
+            title: "Continue the parser fix"
         )
 
         let restored = try JSONDecoder().decode(
@@ -254,10 +287,11 @@ final class SideChatTests: XCTestCase {
 
     func testContinuationBootstrapExistsOnlyUntilItsFirstLaunch() {
         var continuation = AgentSession(
-            kind: .codex,
-            title: "Continue the parser fix",
-            continuedFrom: SessionID(),
-            continuationSourceKind: .claude
+            configuration: .codex(
+                reasoningEffort: nil,
+                continuedFromClaude: SessionID()
+            ),
+            title: "Continue the parser fix"
         )
 
         let opening = ConversationContinuation.openingPrompt(for: continuation)

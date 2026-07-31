@@ -89,8 +89,7 @@ final class TranscriptUsageService {
     private(set) var report: TranscriptUsageReport?
     private(set) var isBuilding = false
 
-    private let storeURL: URL
-    private let fileManager: FileManager
+    private let persistence: RecoverableFileStore<TranscriptUsageReport?>
     /// `.utility`, not `.background`: the artifact scan is a chore nobody waits on, but this
     /// one is kicked off by opening the page, and `.background` is throttled hard enough to
     /// turn a minute of work into several.
@@ -99,14 +98,18 @@ final class TranscriptUsageService {
     // MARK: - Initialization
 
     init(directory: URL? = nil, fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-
         let root = directory ?? fileManager
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
 
-        self.storeURL = root.appendingPathComponent(UsageReportDefaults.fileName)
-        load()
+        self.persistence = RecoverableFileStore(
+            url: root.appendingPathComponent(UsageReportDefaults.fileName),
+            fileManager: fileManager,
+            criticality: .rebuildableCache,
+            dateEncodingStrategy: .iso8601,
+            dateDecodingStrategy: .iso8601
+        )
+        self.report = persistence.load(defaultValue: nil).value
     }
 
     // MARK: - Building
@@ -280,31 +283,9 @@ final class TranscriptUsageService {
 
     // MARK: - Persistence
 
-    private func load() {
-        guard let data = try? Data(contentsOf: storeURL) else { return }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        report = try? decoder.decode(TranscriptUsageReport.self, from: data)
-    }
-
     private func save() {
         guard let report else { return }
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-
-        do {
-            try fileManager.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try encoder.encode(report).write(to: storeURL, options: .atomic)
-        } catch {
-            ThreadingLogger.agent.error(
-                "Could not save the usage report: \(error.localizedDescription, privacy: .public)"
-            )
-        }
+        _ = persistence.save(report)
     }
 }
 

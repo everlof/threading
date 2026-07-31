@@ -10,6 +10,16 @@ enum ProjectsStateLoadResult {
     case failed(quarantinedAt: URL?)
 }
 
+/// Whether this process may still treat the projects database as authoritative.
+///
+/// Once any operation says the database cannot be trusted, writes stay disabled for the rest
+/// of the launch. A successful quarantine preserves the old bytes, but it does not turn the
+/// empty in-memory state produced by a failed load into a valid replacement.
+enum PersistenceHealth {
+    case healthy
+    case recoveryRequired(quarantinedAt: URL?)
+}
+
 /// Values that once appeared in a stored document and no longer exist in the model.
 private enum LegacyKinds {
     static let shell = "shell"
@@ -30,6 +40,7 @@ private enum ProjectsStateLoadError: LocalizedError {
 }
 
 /// Manages persistence of application and window state.
+@MainActor
 final class StateManager {
 
     // MARK: - Singleton
@@ -42,6 +53,7 @@ final class StateManager {
 
     private var openDatabase: ProjectDatabase?
     private var didAttemptPanelImport = false
+    private(set) var persistenceHealth: PersistenceHealth = .healthy
 
     /// The injectable directory and clock keep persistence tests away from the user's real state.
     init(
@@ -62,7 +74,11 @@ final class StateManager {
             return appSupportDirectoryOverride
         }
 
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
         let appDirectory = appSupport.appendingPathComponent("Threading")
         ensureDirectoryExists(appDirectory)
         return appDirectory
@@ -96,11 +112,13 @@ final class StateManager {
 
     @discardableResult
     func saveProjectsState(_ state: ProjectsState) -> Bool {
+        guard writesAreAllowed(for: "projects state") else { return false }
         do {
             try database().save(state)
             return true
         } catch {
             ThreadingLogger.agent.error("Failed to save projects state: \(error.localizedDescription, privacy: .public)")
+            requireRecovery()
             return false
         }
     }
@@ -108,6 +126,7 @@ final class StateManager {
     /// Writes the selected row without rewriting the projects and sessions beside it.
     @discardableResult
     func saveSelectedSessionID(_ id: SessionID?) -> Bool {
+        guard writesAreAllowed(for: "selected session") else { return false }
         do {
             try database().saveSelectedSessionID(id)
             return true
@@ -115,6 +134,7 @@ final class StateManager {
             ThreadingLogger.agent.error(
                 "Failed to save selected session: \(error.localizedDescription, privacy: .public)"
             )
+            requireRecovery()
             return false
         }
     }
@@ -125,11 +145,19 @@ final class StateManager {
     /// fresh, a readable one loads, and an unreadable one is moved aside and reported — which is
     /// what lets `ProjectStore` refuse to write over state it could not read.
     func loadProjectsState() -> ProjectsStateLoadResult {
+        if case .recoveryRequired(let quarantinedAt) = persistenceHealth {
+            return .failed(quarantinedAt: quarantinedAt)
+        }
+
         do {
             let database = try self.database()
 
-            if database.isEmpty, fileManager.fileExists(atPath: projectsStateURL.path) {
-                return try importLegacyProjectsState(into: database)
+            if try database.isEmpty(), fileManager.fileExists(atPath: projectsStateURL.path) {
+                let result = try importLegacyProjectsState(into: database)
+                if case .failed(let quarantinedAt) = result {
+                    requireRecovery(quarantinedAt: quarantinedAt)
+                }
+                return result
             }
 
             let state = try database.load()
@@ -138,7 +166,9 @@ final class StateManager {
             ThreadingLogger.agent.error(
                 "Failed to load projects state: \(error.localizedDescription, privacy: .public)"
             )
-            return .failed(quarantinedAt: quarantineDatabase())
+            let quarantinedAt = quarantineDatabase()
+            requireRecovery(quarantinedAt: quarantinedAt)
+            return .failed(quarantinedAt: quarantinedAt)
         }
     }
 
@@ -328,22 +358,41 @@ final class StateManager {
     /// keeps one connection: two would each hold their own WAL reader and checkpoint against
     /// each other for no benefit.
     func loadPanelPayload(for sessionID: SessionID) -> String? {
+        guard case .healthy = persistenceHealth else { return nil }
         importLegacyPanelLayoutsIfNeeded()
-        return try? database().panelPayload(for: sessionID)
+        do {
+            return try database().panelPayload(for: sessionID)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not load display panel: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+            return nil
+        }
     }
 
     func savePanelPayload(_ payload: String, for sessionID: SessionID) {
+        guard writesAreAllowed(for: "display panel") else { return }
         do {
             try database().savePanelPayload(payload, for: sessionID)
         } catch {
             ThreadingLogger.mcp.error(
                 "Could not persist display panel: \(error.localizedDescription, privacy: .public)"
             )
+            requireRecovery()
         }
     }
 
     func retainPanelLayouts(sessionIDs: Set<SessionID>) {
-        try? database().retainPanels(sessionIDs: sessionIDs)
+        guard writesAreAllowed(for: "display panel cleanup") else { return }
+        do {
+            try database().retainPanels(sessionIDs: sessionIDs)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not prune display panels: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+        }
     }
 
     // MARK: - Session Attachments
@@ -351,21 +400,40 @@ final class StateManager {
     /// The attachment references a session has surfaced, stored beside its panel layout for the
     /// same reason: both are what the display pane rebuilds after a relaunch.
     func loadAttachmentsPayload(for sessionID: SessionID) -> String? {
-        try? database().attachmentsPayload(for: sessionID)
+        guard case .healthy = persistenceHealth else { return nil }
+        do {
+            return try database().attachmentsPayload(for: sessionID)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not load session attachments: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+            return nil
+        }
     }
 
     func saveAttachmentsPayload(_ payload: String, for sessionID: SessionID) {
+        guard writesAreAllowed(for: "session attachments") else { return }
         do {
             try database().saveAttachmentsPayload(payload, for: sessionID)
         } catch {
             ThreadingLogger.mcp.error(
                 "Could not persist session attachments: \(error.localizedDescription, privacy: .public)"
             )
+            requireRecovery()
         }
     }
 
     func retainAttachments(sessionIDs: Set<SessionID>) {
-        try? database().retainAttachments(sessionIDs: sessionIDs)
+        guard writesAreAllowed(for: "session attachment cleanup") else { return }
+        do {
+            try database().retainAttachments(sessionIDs: sessionIDs)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not prune session attachments: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+        }
     }
 
     /// Reads the `panels/<uuid>.json` files into the database once, then renames the directory.
@@ -373,6 +441,7 @@ final class StateManager {
     /// Attempted at most once per launch whether or not it finds anything, since the common
     /// case is a user who has already migrated and the check is a directory listing.
     private func importLegacyPanelLayoutsIfNeeded() {
+        guard case .healthy = persistenceHealth else { return }
         guard !didAttemptPanelImport else { return }
         didAttemptPanelImport = true
 
@@ -380,29 +449,72 @@ final class StateManager {
             DisplayPaneStoreDefaults.rootDirectory,
             isDirectory: true
         )
-        guard fileManager.fileExists(atPath: legacyRoot.path),
-              let database = try? self.database(),
-              !database.hasPanelLayouts else { return }
+        guard fileManager.fileExists(atPath: legacyRoot.path) else { return }
 
-        let files = (try? fileManager.contentsOfDirectory(at: legacyRoot, includingPropertiesForKeys: nil)) ?? []
-        var imported = 0
-
-        for file in files where file.pathExtension == DisplayPaneStoreDefaults.layoutExtension {
-            guard let sessionID = SessionID(uuidString: file.deletingPathExtension().lastPathComponent),
-                  let payload = try? String(contentsOf: file, encoding: .utf8) else { continue }
-            try? database.savePanelPayload(payload, for: sessionID)
-            imported += 1
+        let database: ProjectDatabase
+        do {
+            database = try self.database()
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not inspect display panel storage: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+            return
         }
 
-        guard imported > 0 else { return }
+        let files: [URL]
+        do {
+            files = try fileManager.contentsOfDirectory(
+                at: legacyRoot,
+                includingPropertiesForKeys: nil
+            )
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not inspect legacy display panels: \(error.localizedDescription, privacy: .public)"
+            )
+            requireRecovery()
+            return
+        }
+        var imported = 0
+        var retired: [URL] = []
+
+        for file in files where file.pathExtension == DisplayPaneStoreDefaults.layoutExtension {
+            guard let sessionID = SessionID(
+                uuidString: file.deletingPathExtension().lastPathComponent
+            ) else {
+                continue
+            }
+            do {
+                let payload = try String(contentsOf: file, encoding: .utf8)
+                if try database.panelPayload(for: sessionID) == nil {
+                    try database.savePanelPayload(payload, for: sessionID)
+                    imported += 1
+                }
+                retired.append(file)
+            } catch {
+                ThreadingLogger.mcp.error(
+                    "Could not import legacy display panel \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+                requireRecovery()
+                return
+            }
+        }
+
+        guard !retired.isEmpty else { return }
 
         // The cached images stay where they are — they are PNGs, and the directory keeps them.
         // Only the layout files are retired, by extension, so the caches beside them survive.
-        for file in files where file.pathExtension == DisplayPaneStoreDefaults.layoutExtension {
-            try? fileManager.moveItem(
-                at: file,
-                to: file.appendingPathExtension(SQLiteDefaults.migratedSuffix)
-            )
+        for file in retired {
+            do {
+                try fileManager.moveItem(
+                    at: file,
+                    to: file.appendingPathExtension(SQLiteDefaults.migratedSuffix)
+                )
+            } catch {
+                ThreadingLogger.mcp.error(
+                    "Could not retire legacy display panel \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
         ThreadingLogger.mcp.info("Imported \(imported, privacy: .public) display panel layouts into the database")
     }
@@ -421,6 +533,23 @@ final class StateManager {
         let database = try ProjectDatabase(url: databaseURL)
         openDatabase = database
         return database
+    }
+
+    // MARK: - Persistence Health
+
+    private func writesAreAllowed(for operation: String) -> Bool {
+        guard case .healthy = persistenceHealth else {
+            ThreadingLogger.agent.error(
+                "Refusing to write \(operation, privacy: .public) while persistence recovery is required"
+            )
+            return false
+        }
+        return true
+    }
+
+    private func requireRecovery(quarantinedAt: URL? = nil) {
+        guard case .healthy = persistenceHealth else { return }
+        persistenceHealth = .recoveryRequired(quarantinedAt: quarantinedAt)
     }
 
     // MARK: - Legacy Cleanup

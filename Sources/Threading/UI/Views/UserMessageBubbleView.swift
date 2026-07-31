@@ -12,9 +12,30 @@ final class UserMessageBubbleView: NSView {
 
     private let text: String
 
-    private var label: NSTextField!
-    private var toggleButton: ThemedButton!
-    private var copyButton: ThemedButton!
+    private lazy var label: NSTextField = {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.applyFont(.body, in: .conversation)
+        label.textColor = Design.Text.label
+        label.isSelectable = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.maximumNumberOfLines = ConversationDefaults.longMessageLineCap
+        label.wantsLayer = true
+        return label
+    }()
+    private lazy var toggleButton = ThemedButton(
+        title: L10n.string("Show full message"),
+        target: self,
+        action: #selector(toggleExpansion)
+    )
+    private lazy var copyButton: ThemedButton = {
+        let button = ThemedButton(
+            title: L10n.string("Copy"),
+            target: self,
+            action: #selector(copyMessage)
+        )
+        button.toolTip = L10n.string("Copy the whole message")
+        return button
+    }()
     private var fade: CAGradientLayer?
 
     private var isExpanded = false
@@ -37,28 +58,9 @@ final class UserMessageBubbleView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         applySurface(fill: Design.Chat.bubbleFill, radius: .panel)
 
-        label = NSTextField(wrappingLabelWithString: text)
-        label.applyFont(.body, in: .conversation)
-        label.textColor = Design.Text.label
-        label.isSelectable = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.maximumNumberOfLines = ConversationDefaults.longMessageLineCap
-        label.wantsLayer = true
-
-        toggleButton = ThemedButton(
-            title: L10n.string("Show full message"),
-            target: self,
-            action: #selector(toggleExpansion)
-        )
         toggleButton.isBordered = false
 
-        copyButton = ThemedButton(
-            title: L10n.string("Copy"),
-            target: self,
-            action: #selector(copyMessage)
-        )
         copyButton.isBordered = false
-        copyButton.toolTip = L10n.string("Copy the whole message")
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)

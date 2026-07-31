@@ -409,8 +409,10 @@ final class ToastPresenter {
             context.allowsImplicitAnimation = true
             toast.animator().alphaValue = 0
             host?.layoutSubtreeIfNeeded()
-        }, completionHandler: {
-            toast.removeFromSuperview()
+        }, completionHandler: { [weak toast] in
+            MainActor.assumeIsolated {
+                toast?.removeFromSuperview()
+            }
         })
     }
 

@@ -1119,7 +1119,7 @@ enum ExtensionRegistrationLoader {
             throw ExtensionBundleError.launchFailed(error.localizedDescription)
         }
 
-        func interrupt(_ reason: Interruption.Reason) {
+        @Sendable func interrupt(_ reason: Interruption.Reason) {
             guard interruption.record(reason) else { return }
             guard child.isRunning else { return }
             child.terminate()

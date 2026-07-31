@@ -3,20 +3,27 @@ import Foundation
 // MARK: - Permission Request
 
 /// A tool call awaiting a decision.
-struct PermissionRequest {
+struct PermissionRequest: Sendable {
     let sessionID: SessionID
     let tool: ToolIdentity
-    let input: [String: Any]
+    let input: [String: JSONValue]
 
     var toolName: String { tool.rawName }
 
-    init(sessionID: SessionID, tool: ToolIdentity, input: [String: Any]) {
+    /// Compatibility projection for the AppKit diff/rendering helpers that still consume
+    /// Foundation JSON. Permission policy itself never crosses that untyped boundary.
+    @MainActor
+    var foundationInput: [String: Any] {
+        input.mapValues(\.foundationValue)
+    }
+
+    init(sessionID: SessionID, tool: ToolIdentity, input: [String: JSONValue]) {
         self.sessionID = sessionID
         self.tool = tool
         self.input = input
     }
 
-    init(sessionID: SessionID, toolName: String, input: [String: Any]) {
+    init(sessionID: SessionID, toolName: String, input: [String: JSONValue]) {
         self.init(sessionID: sessionID, tool: ToolIdentity(toolName), input: input)
     }
 
@@ -33,17 +40,17 @@ struct PermissionRequest {
         // subject through the generic path and lost it the moment it became `.bash`.
         switch tool {
         case .bash:
-            return input["command"] as? String ?? subject ?? ""
+            return input["command"]?.stringValue ?? subject ?? ""
         case .write, .edit, .notebookEdit, .read, .notebookRead:
-            return (input["file_path"] as? String).map { abbreviate($0) } ?? subject ?? ""
+            return input["file_path"]?.stringValue.map { abbreviate($0) } ?? subject ?? ""
         case .webFetch:
-            return input["url"] as? String ?? subject ?? ""
+            return input["url"]?.stringValue ?? subject ?? ""
         case .webSearch, .grep, .glob:
             // `Grep` and `Glob` name themselves by what they looked for, optionally where.
             // Named `term` rather than `subject` so it does not shadow the generic search
             // below, which is what answers when a provider spells neither of these keys.
-            let term = (input["query"] ?? input["pattern"]) as? String ?? ""
-            let path = (input["path"] as? String).map { abbreviate($0) } ?? ""
+            let term = (input["query"] ?? input["pattern"])?.stringValue ?? ""
+            let path = input["path"]?.stringValue.map { abbreviate($0) } ?? ""
 
             switch (term.isEmpty, path.isEmpty) {
             case (false, false): return "\(term)  in \(path)"
@@ -56,17 +63,17 @@ struct PermissionRequest {
             // worth a row; the rest is a checklist nobody reads collapsed.
             return currentPlanStep ?? "\(planSteps.count) steps"
         case .taskCreate:
-            return input["subject"] as? String ?? subject ?? ""
+            return input["subject"]?.stringValue ?? subject ?? ""
         case .taskUpdate:
-            let id = (input["taskId"] ?? input["task_id"] ?? input["id"]) as? String
-            let status = input["status"] as? String
+            let id = (input["taskId"] ?? input["task_id"] ?? input["id"])?.stringValue
+            let status = input["status"]?.stringValue
             return [id.map { "#\($0)" }, status]
                 .compactMap { $0 }
                 .joined(separator: " · ")
         case .taskList:
             return "Task list"
         case .taskGet:
-            let id = (input["taskId"] ?? input["task_id"] ?? input["id"]) as? String
+            let id = (input["taskId"] ?? input["task_id"] ?? input["id"])?.stringValue
             return id.map { "#\($0)" } ?? subject ?? ""
         case .multiEdit, .task, .todoWrite, .todoRead, .toolSearch, .mcp, .unknown:
             // Tools without a rule of their own are the *common* case, not the exception —
@@ -88,7 +95,7 @@ struct PermissionRequest {
     /// must fall through to asking the user, never to a policy decision made on nothing.
     var shellCommand: String? {
         for key in ["command", "cmd"] {
-            if let text = input[key] as? String,
+            if let text = input[key]?.stringValue,
                !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return text
             }
@@ -100,7 +107,7 @@ struct PermissionRequest {
     /// which language a rendered diff is in.
     var filePath: String? {
         for key in ["file_path", "notebook_path", "path"] {
-            if let path = input[key] as? String, !path.isEmpty { return path }
+            if let path = input[key]?.stringValue, !path.isEmpty { return path }
         }
         return nil
     }
@@ -123,20 +130,21 @@ struct PermissionRequest {
     /// says nothing.
     private var nestedSubject: String? {
         for value in input.values {
-            if let first = (value as? [[String: Any]])?.first,
+            if case .array(let values) = value,
+               let first = values.first?.objectValue,
                let found = Self.subject(in: first) {
                 return found
             }
-            if let nested = value as? [String: Any], let found = Self.subject(in: nested) {
+            if let nested = value.objectValue, let found = Self.subject(in: nested) {
                 return found
             }
         }
         return nil
     }
 
-    private static func subject(in input: [String: Any]) -> String? {
+    private static func subject(in input: [String: JSONValue]) -> String? {
         for key in subjectKeys {
-            guard let text = input[key] as? String,
+            guard let text = input[key]?.stringValue,
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             return text
         }
@@ -144,15 +152,16 @@ struct PermissionRequest {
     }
 
     /// Codex's plan items, each `{"step": …, "status": …}`.
-    private var planSteps: [[String: Any]] {
-        input["plan"] as? [[String: Any]] ?? []
+    private var planSteps: [[String: JSONValue]] {
+        guard case .array(let values) = input["plan"] else { return [] }
+        return values.compactMap(\.objectValue)
     }
 
     /// The step being worked on, else the first one not yet done.
     private var currentPlanStep: String? {
-        let step = planSteps.first { $0["status"] as? String == "in_progress" }
-            ?? planSteps.first { ($0["status"] as? String) != "completed" }
-        return (step?["step"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let step = planSteps.first { $0["status"]?.stringValue == "in_progress" }
+            ?? planSteps.first { $0["status"]?.stringValue != "completed" }
+        return step?["step"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The same subject on one line, for a collapsed tool row.
@@ -179,7 +188,7 @@ struct PermissionRequest {
 
 // MARK: - Permission Decision
 
-enum PermissionDecision {
+enum PermissionDecision: Sendable {
     case allow(reason: String)
     case deny(reason: String)
 
@@ -222,10 +231,45 @@ enum PermissionBroker {
     ///
     /// Nil means nothing can present, so requests are denied rather than hanging: a session
     /// whose window has gone away must not leave the CLI blocked forever.
-    static var present: ((PermissionRequest, @escaping (PermissionDecision) -> Void) -> Void)?
+    static var present: (
+        (
+            PermissionRequest,
+            @escaping @MainActor @Sendable (PermissionDecision) -> Void
+        ) -> Void
+    )?
+
+    /// Says what macOS is about to ask for and who caused it, before the call that raises the
+    /// system prompt runs. Set alongside `present` by the same window controller.
+    ///
+    /// Nil is not a denial: an unexplained system prompt is what happens today, and losing the
+    /// explanation must not also lose the tool call.
+    static var explainSystemGrant: (
+        (
+            SystemPrivacyPermission,
+            PermissionRequest,
+            @escaping @MainActor @Sendable (Bool) -> Void
+        ) -> Void
+    )?
+
+    /// Reads a grant without requesting it. Injected so a test states the machine's answer
+    /// instead of inheriting whatever this Mac has approved in System Settings.
+    static var systemGrantStatus: (SystemPrivacyPermission) -> SystemPrivacyStatus? = { permission in
+        SystemPrivacyStatusReader().immediateStatus(of: permission)
+    }
 
     /// Tools the user chose to stop being asked about, per session.
     private static var alwaysAllowed: [SessionID: Set<ToolIdentity>] = [:]
+
+    /// Grants the user has already been briefed on and waved through.
+    ///
+    /// App-wide and for the life of the process, because the grant is app-wide: macOS asks
+    /// Threading once, not once per session. The set only matters in one case — the user let
+    /// the command run and then pressed Deny on the *system* prompt. macOS remembers that and
+    /// never asks again, so without this the next `screencapture` would be briefed forever for
+    /// a dialog that can no longer appear. Every other outcome is settled by the status read:
+    /// an approved grant reads `.allowed` and forecasts nothing, and a briefing the user
+    /// declined leaves the tool unrun, so there is nothing yet to have been asked about.
+    private static var briefedGrants: Set<SystemPrivacyPermission> = []
 
     // MARK: - Public Methods
 
@@ -234,7 +278,97 @@ enum PermissionBroker {
     /// Runs on the main queue: it reaches the model layer and may put a sheet on screen.
     static func decide(
         _ request: PermissionRequest,
-        completion: @escaping (PermissionDecision) -> Void
+        completion: @escaping @MainActor @Sendable (PermissionDecision) -> Void
+    ) {
+        // Ahead of every other rule, including the modes that promise not to interrupt. What
+        // follows is not one of Threading's permission questions — it is the only warning the
+        // user will get that *macOS* is about to put a dialog on their screen naming Threading
+        // for something an agent did. No mode Threading offers can promise the system stays
+        // quiet, so none of them is a reason to let that dialog arrive unexplained.
+        if let grant = foreseenSystemGrant(for: request) {
+            brief(grant, before: request, completion: completion)
+            return
+        }
+
+        decideIgnoringSystemGrant(request, completion: completion)
+    }
+
+    // MARK: - System Grants
+
+    /// The macOS grant this call is about to be stopped by, when there is one worth naming.
+    ///
+    /// Three conditions, and each removes a way of being annoying: the command has to be one
+    /// that needs a grant, the grant has to be one Threading can *read* — so the system prompt
+    /// is certain rather than guessed at — and it has to not have been raised already. A
+    /// session that refuses everything is excluded too: its call is about to be denied, and
+    /// explaining a dialog that will never appear is the interruption this exists to prevent.
+    private static func foreseenSystemGrant(
+        for request: PermissionRequest
+    ) -> SystemPrivacyPermission? {
+        guard let grant = SystemGrantForecast.grant(for: request),
+              !briefedGrants.contains(grant),
+              systemGrantStatus(grant) == .notAllowed,
+              briefingApplies(in: permissionMode(for: request.sessionID)) else { return nil }
+        return grant
+    }
+
+    /// Whether a session's mode leaves anything for a briefing to be about.
+    ///
+    /// Only `dontAsk` is excluded, and the reason is not politeness. Approving a briefing *is*
+    /// the tool's approval, so briefing a `dontAsk` session would turn the one mode that
+    /// promises to refuse rather than interrupt into an allow — the mode inverted by the
+    /// feature meant to warn about a dialog its call was never going to reach. Every other mode
+    /// is briefed, including `bypassPermissions`: no mode Threading offers can promise macOS
+    /// stays quiet, so none of them is a reason to let a system dialog arrive unexplained.
+    ///
+    /// Pure, so the matrix is testable without a store or a sheet.
+    static func briefingApplies(in mode: AgentPermissionMode?) -> Bool {
+        mode != .dontAsk
+    }
+
+    /// Explains the coming system prompt, then lets the call through or refuses it.
+    ///
+    /// Approving here *is* the tool's approval — the card already showed the command, the
+    /// session and the agent, which is strictly more than the ordinary permission card shows.
+    /// A second sheet immediately behind the first would be the app asking twice about one
+    /// decision, which is how people learn to click through both.
+    ///
+    /// It is not a standing approval: `allowAlways` is a choice the user makes in words, and
+    /// nothing here offers it.
+    private static func brief(
+        _ grant: SystemPrivacyPermission,
+        before request: PermissionRequest,
+        completion: @escaping @MainActor @Sendable (PermissionDecision) -> Void
+    ) {
+        guard let explainSystemGrant else {
+            // Nothing to explain with. The prompt arrives unexplained, as it does today — which
+            // is worse than the sheet and far better than the call vanishing.
+            decideIgnoringSystemGrant(request, completion: completion)
+            return
+        }
+
+        // The reasons are the model's, not the user's, and stay in English alongside the rest
+        // of this file's — they are read by an agent deciding what to do next, not shown in the
+        // interface. Naming the grant is what lets it stop retrying and say why.
+        explainSystemGrant(grant, request) { proceed in
+            guard proceed else {
+                completion(.deny(reason:
+                    "The user declined to let this raise the macOS "
+                        + "\(grant.englishName) permission prompt."))
+                return
+            }
+            briefedGrants.insert(grant)
+            completion(.allow(reason:
+                "Approved in Threading, which told the user macOS will ask for "
+                    + "\(grant.englishName) next."))
+        }
+    }
+
+    /// The ordinary decision, with the forecast already spent. Split out so `decide` cannot
+    /// re-enter its own first branch and brief the same call forever.
+    private static func decideIgnoringSystemGrant(
+        _ request: PermissionRequest,
+        completion: @escaping @MainActor @Sendable (PermissionDecision) -> Void
     ) {
         if PermissionPolicy.isAutoAllowed(request.tool) {
             completion(.allow(reason: "Read-only tool, allowed automatically by Threading."))
@@ -273,6 +407,14 @@ enum PermissionBroker {
 
         present(request, completion)
     }
+
+    /// Forgets which grants have been briefed. For tests, which must not inherit a set left
+    /// standing by whichever test ran before them.
+    static func discardSystemGrantBriefings() {
+        briefedGrants.removeAll()
+    }
+
+    // MARK: - Private Methods
 
     /// The mode this session is running under, resolved the same way its launch resolved it.
     ///

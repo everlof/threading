@@ -1,4 +1,4 @@
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import CoreGraphics
 import Foundation
 import UserNotifications
@@ -53,6 +53,18 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
         case .notifications: return L10n.string("Notifications")
         case .accessibility: return L10n.string("Accessibility")
         case .screenRecording: return L10n.string("Screen Recording")
+        }
+    }
+
+    /// The grant's name in English, unlocalized, for text an agent reads rather than the user.
+    /// `title` is the interface's; a translated grant name inside a `permissionDecisionReason`
+    /// would tell a model something it has no way to look up.
+    var englishName: String {
+        switch self {
+        case .filesAndFolders: return "Files & Folders"
+        case .notifications: return "Notifications"
+        case .accessibility: return "Accessibility"
+        case .screenRecording: return "Screen Recording"
         }
     }
 
@@ -143,11 +155,13 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
 /// The system calls are injected for the same reason `SystemExtensionCompanionPermissionAuthorizer`
 /// injects its own: a test must not report whatever the developer's machine happens to have
 /// approved, and must never reach a real `UNUserNotificationCenter` on a test host.
+@MainActor
 struct SystemPrivacyStatusReader {
 
     private let accessibilityTrusted: () -> Bool
     private let screenRecordingAllowed: () -> Bool
-    private let notificationStatus: (@escaping (SystemPrivacyStatus) -> Void) -> Void
+    private let notificationStatus:
+        (@escaping @MainActor @Sendable (SystemPrivacyStatus) -> Void) -> Void
 
     init(
         accessibilityTrusted: @escaping () -> Bool = {
@@ -158,10 +172,14 @@ struct SystemPrivacyStatusReader {
         screenRecordingAllowed: @escaping () -> Bool = {
             CGPreflightScreenCaptureAccess()
         },
-        notificationStatus: @escaping (@escaping (SystemPrivacyStatus) -> Void) -> Void = {
-            completion in
+        notificationStatus: @escaping (
+            @escaping @MainActor @Sendable (SystemPrivacyStatus) -> Void
+        ) -> Void = { completion in
             UNUserNotificationCenter.current().getNotificationSettings { settings in
-                completion(SystemPrivacyStatus(settings.authorizationStatus))
+                let status = SystemPrivacyStatus(settings.authorizationStatus)
+                Task { @MainActor in
+                    completion(status)
+                }
             }
         }
     ) {
@@ -170,12 +188,34 @@ struct SystemPrivacyStatusReader {
         self.notificationStatus = notificationStatus
     }
 
+    /// The grants that can be answered *now*, without a callback and without prompting.
+    ///
+    /// `load` is the page's entry point and is asynchronous because notification settings are.
+    /// A tool call about to raise a system prompt cannot wait for that: `SystemGrantForecast`
+    /// runs inside the permission decision, which holds a CLI blocked while it thinks. Nil means
+    /// "not answerable here" — the folder grant, which has no non-prompting API, and
+    /// notifications, which has one but only through a callback.
+    func immediateStatus(of permission: SystemPrivacyPermission) -> SystemPrivacyStatus? {
+        switch permission {
+        case .accessibility:
+            return accessibilityTrusted() ? .allowed : .notAllowed
+        case .screenRecording:
+            return screenRecordingAllowed() ? .allowed : .notAllowed
+        case .notifications, .filesAndFolders:
+            return nil
+        }
+    }
+
     /// Every status at once, delivered on the main queue.
     ///
     /// One entry point rather than a synchronous accessor plus an asynchronous one: notification
     /// settings are only available through a callback, and a page that refreshed three rows
     /// immediately and a fourth a moment later would flicker on every appearance.
-    func load(completion: @escaping ([SystemPrivacyPermission: SystemPrivacyStatus]) -> Void) {
+    func load(
+        completion: @escaping @MainActor @Sendable (
+            [SystemPrivacyPermission: SystemPrivacyStatus]
+        ) -> Void
+    ) {
         var statuses: [SystemPrivacyPermission: SystemPrivacyStatus] = [
             .filesAndFolders: .askedWhenNeeded,
             .accessibility: accessibilityTrusted() ? .allowed : .notAllowed,
@@ -184,11 +224,7 @@ struct SystemPrivacyStatusReader {
 
         notificationStatus { status in
             statuses[.notifications] = status
-            if Thread.isMainThread {
-                completion(statuses)
-            } else {
-                DispatchQueue.main.async { completion(statuses) }
-            }
+            completion(statuses)
         }
     }
 }

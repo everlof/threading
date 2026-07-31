@@ -85,26 +85,30 @@ final class ProfileStorage {
 
     static let shared = ProfileStorage()
 
-    private init() {}
-
     // MARK: - Storage
 
     /// The profile carries the app-wide default *theme* as well as font and shell, so it is a
     /// recorded choice and goes through `PreferenceStore` — the hosted tests set the default
     /// theme and would otherwise set the user's.
-    private let defaults = PreferenceStore.shared
+    private let defaults: UserDefaults
+    private let persistence: RecoverableDefaultsStore<[TerminalProfile]>
+    private var storedProfiles: [TerminalProfile]
+
+    init(defaults: UserDefaults = PreferenceStore.shared) {
+        self.defaults = defaults
+        self.persistence = RecoverableDefaultsStore(
+            defaults: defaults,
+            key: Keys.profiles,
+            criticality: .preference
+        )
+        self.storedProfiles = persistence.load(defaultValue: [.default]).value
+    }
 
     var profiles: [TerminalProfile] {
-        get {
-            guard let data = defaults.data(forKey: Keys.profiles),
-                  let profiles = try? JSONDecoder().decode([TerminalProfile].self, from: data) else {
-                return [.default]
-            }
-            return profiles
-        }
+        get { storedProfiles }
         set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                defaults.set(data, forKey: Keys.profiles)
+            if persistence.save(newValue) {
+                storedProfiles = newValue
             }
         }
     }
@@ -115,26 +119,38 @@ final class ProfileStorage {
             return profiles.first { $0.name == name } ?? .default
         }
         set {
-            defaults.set(newValue.name, forKey: Keys.defaultProfileName)
-            if !profiles.contains(where: { $0.name == newValue.name }) {
-                profiles.append(newValue)
+            var candidate = storedProfiles
+            if !candidate.contains(where: { $0.name == newValue.name }) {
+                candidate.append(newValue)
             }
+            guard persistence.save(candidate) else { return }
+
+            storedProfiles = candidate
+            defaults.set(newValue.name, forKey: Keys.defaultProfileName)
         }
+    }
+
+    @discardableResult
+    private func persist(_ candidate: [TerminalProfile]) -> Bool {
+        guard persistence.save(candidate) else { return false }
+        storedProfiles = candidate
+        return true
     }
 
     func save(_ profile: TerminalProfile) {
-        var currentProfiles = profiles
-        if let index = currentProfiles.firstIndex(where: { $0.name == profile.name }) {
-            currentProfiles[index] = profile
+        var candidate = storedProfiles
+        if let index = candidate.firstIndex(where: { $0.name == profile.name }) {
+            candidate[index] = profile
         } else {
-            currentProfiles.append(profile)
+            candidate.append(profile)
         }
-        profiles = currentProfiles
-        NotificationCenter.default.post(ProfileDidChange(profile: profile))
+        if persist(candidate) {
+            NotificationCenter.default.post(ProfileDidChange(profile: profile))
+        }
     }
 
     func delete(_ profile: TerminalProfile) {
-        profiles = profiles.filter { $0.name != profile.name }
+        persist(storedProfiles.filter { $0.name != profile.name })
     }
 
     /// Update the theme for the default profile and notify terminals
@@ -142,6 +158,8 @@ final class ProfileStorage {
         var profile = defaultProfile
         profile.theme = theme
         save(profile)
-        defaultProfile = profile
+        if storedProfiles.contains(where: { $0.name == profile.name }) {
+            defaults.set(profile.name, forKey: Keys.defaultProfileName)
+        }
     }
 }

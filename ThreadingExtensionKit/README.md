@@ -175,7 +175,8 @@ New safe extensions set `runtime: webAssembly` and compile to a `.wasm` command 
 runs that module in its signed App Sandboxed interpreter with no filesystem preopens, sockets,
 subprocesses, or direct Keychain API. The guest's sole Threading import forwards authenticated
 requests to the host broker. The SDK describes authorities; the host owns and enforces them.
-Manifests which omit `runtime` remain legacy native packages for compatibility.
+`runtime` is required, and manifests that omit it are refused. Legacy native packages must
+select `runtime: native` explicitly.
 
 `storage.secrets` grants only the host broker, not Keychain APIs or a directory. Use
 `ExtensionHostClient` to set, fetch, list the names of, and remove extension-private secrets.

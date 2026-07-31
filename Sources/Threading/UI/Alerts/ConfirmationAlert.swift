@@ -62,7 +62,11 @@ enum ConfirmationAlert {
     ///
     /// `settings` is injectable so the suppressed path — the one that returns without putting a
     /// modal up — can be tested at all.
-    static func ask(_ request: ConfirmationRequest, settings: AppSettings = .shared) -> Bool {
+    static func ask(_ request: ConfirmationRequest) -> Bool {
+        ask(request, settings: .shared)
+    }
+
+    static func ask(_ request: ConfirmationRequest, settings: AppSettings) -> Bool {
         guard settings.asks(before: request.prompt) else { return true }
         let alert = makeAlert(request)
         return accepted(alert.runModal(), for: request.prompt, in: alert, settings: settings)
@@ -71,7 +75,15 @@ enum ConfirmationAlert {
     static func ask(
         _ request: ConfirmationRequest,
         in window: NSWindow?,
-        settings: AppSettings = .shared,
+        completion: @escaping @MainActor (Bool) -> Void
+    ) {
+        ask(request, in: window, settings: .shared, completion: completion)
+    }
+
+    static func ask(
+        _ request: ConfirmationRequest,
+        in window: NSWindow?,
+        settings: AppSettings,
         completion: @escaping @MainActor (Bool) -> Void
     ) {
         guard settings.asks(before: request.prompt) else {

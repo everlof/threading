@@ -29,7 +29,9 @@ enum PreferenceStore {
 
     /// Resolved once: `NSClassFromString` is a runtime lookup, and the answer cannot change
     /// within a process.
-    static let shared: UserDefaults = {
+    /// `UserDefaults` documents concurrent access as safe, but its Objective-C declaration does
+    /// not yet carry `Sendable`; this is the one shared reference that crosses isolation domains.
+    nonisolated(unsafe) static let shared: UserDefaults = {
         guard NSClassFromString("XCTestCase") != nil else { return .standard }
         return UserDefaults(suiteName: hostedTestSuiteName) ?? .standard
     }()

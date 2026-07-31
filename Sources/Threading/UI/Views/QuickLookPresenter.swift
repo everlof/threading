@@ -14,7 +14,8 @@ import QuickLookUI
 ///
 /// One owner rather than one per call site, because the panel is a single system window: two
 /// data sources would be two objects fighting over one panel's contents.
-final class QuickLookPresenter: NSObject, QLPreviewPanelDataSource {
+@MainActor
+final class QuickLookPresenter: NSObject, @preconcurrency QLPreviewPanelDataSource {
 
     static let shared = QuickLookPresenter()
 

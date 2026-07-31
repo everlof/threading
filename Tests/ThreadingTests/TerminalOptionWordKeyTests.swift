@@ -14,6 +14,7 @@ import SwiftTerm
 ///
 /// Like the mouse reporting tests, these assert exact byte strings: the wire format is the whole
 /// contract with whatever runs in the terminal.
+@MainActor
 final class TerminalOptionWordKeyTests: XCTestCase {
 
     // MARK: - Harness

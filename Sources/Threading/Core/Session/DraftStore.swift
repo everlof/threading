@@ -11,6 +11,7 @@ import Foundation
 /// Written on the keystroke rather than on a timer, deliberately unlike `ProjectStore`'s
 /// coalesced saves: this file exists *for* the crash that lands between two keystrokes, so a
 /// coalescing window is the one interval it cannot afford. A draft is a few hundred bytes.
+@MainActor
 final class DraftStore {
 
     // MARK: - Singleton
@@ -20,19 +21,20 @@ final class DraftStore {
     // MARK: - Properties
 
     private var drafts: [ProjectID: String] = [:]
-    private let fileManager: FileManager
-    private let storeURL: URL
+    private let persistence: RecoverableFileStore<DraftsFile>
 
     // MARK: - Initialization
 
     init(directory: URL? = nil, fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-
         let root = directory ?? fileManager
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
 
-        self.storeURL = root.appendingPathComponent(DraftDefaults.fileName)
+        self.persistence = RecoverableFileStore(
+            url: root.appendingPathComponent(DraftDefaults.fileName),
+            fileManager: fileManager,
+            criticality: .userAuthored
+        )
 
         load()
     }
@@ -68,10 +70,18 @@ final class DraftStore {
     // MARK: - Private Methods
 
     private func load() {
-        guard let data = try? Data(contentsOf: storeURL),
-              let stored = try? JSONDecoder().decode(DraftsFile.self, from: data) else { return }
+        let outcome = persistence.load(defaultValue: DraftsFile(drafts: [:])) { stored in
+            if let invalidID = stored.drafts.keys.first(where: {
+                ProjectID(uuidString: $0) == nil
+            }) {
+                throw DraftStoreError.invalidProjectIdentifier(invalidID)
+            }
+        }
+        let stored = outcome.value
 
         drafts = stored.drafts.reduce(into: [:]) { result, entry in
+            // Validation above proves every key. Keeping the guard makes this total even if
+            // that validation is changed later.
             guard let id = ProjectID(uuidString: entry.key) else { return }
             result[id] = entry.value
         }
@@ -82,24 +92,22 @@ final class DraftStore {
             drafts: drafts.reduce(into: [:]) { $0[$1.key.uuidString] = $1.value }
         )
 
-        do {
-            try fileManager.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(file).write(to: storeURL, options: .atomic)
-        } catch {
-            ThreadingLogger.session.error(
-                "Failed to save drafts: \(error.localizedDescription, privacy: .public)"
-            )
-        }
+        persistence.save(file)
     }
 }
 
 // MARK: - Stored Shape
+
+private enum DraftStoreError: LocalizedError {
+    case invalidProjectIdentifier(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidProjectIdentifier(let value):
+            return "draft key '\(value)' is not a project identifier"
+        }
+    }
+}
 
 private struct DraftsFile: Codable {
     /// Keyed by project id as a string, since JSON object keys cannot be `UUID`.

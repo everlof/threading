@@ -1,6 +1,7 @@
 import XCTest
 @testable import Threading
 
+@MainActor
 final class PermissionRequestViewTests: XCTestCase {
 
     private final class LifetimeToken {}
@@ -84,10 +85,10 @@ final class PermissionRequestViewTests: XCTestCase {
             toolName: "Write",
             input: [
                 "file_path": "/tmp/generated.swift",
-                "content": String(
+                "content": .string(String(
                     repeating: "let generated = true // remote review evidence\n",
                     count: 4_000
-                ),
+                )),
             ]
         )
         var decisionCount = 0

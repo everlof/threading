@@ -12,13 +12,17 @@ enum MobileDiagnostics {
             .appendingPathComponent("Diagnostics", isDirectory: true),
         source: .iOSClient
     )
+    @MainActor static let sharing = MobileDiagnosticSharingController()
 
     static func record(
         _ event: RemoteDiagnosticEvent,
         level: RemoteDiagnosticLevel = .info,
         fields: [RemoteDiagnosticField: String] = [:]
     ) {
-        journal.record(event, level: level, fields: fields)
+        let record = journal.record(event, level: level, fields: fields)
+        Task { @MainActor in
+            sharing.enqueue(record)
+        }
     }
 
     /// Stable inside support reports without exposing the original host, session, or device id.
@@ -67,6 +71,119 @@ enum MobileDiagnostics {
     }
 }
 
+/// A short-lived, user-started bridge from the content-free iOS journal to one paired Mac.
+///
+/// The capability remains in the existing Keychain-backed `RemoteConnectionLink`; this object
+/// is memory-only, so relaunching the app always ends sharing early rather than silently
+/// restoring consent.
+@MainActor
+final class MobileDiagnosticSharingController: ObservableObject {
+    @Published private(set) var sharingUntil: Date?
+    @Published private(set) var destination: URL?
+
+    private var link: RemoteConnectionLink?
+    private var pending: [RemoteDiagnosticRecord] = []
+    private var isUploading = false
+    private var expirationTask: Task<Void, Never>?
+    private var generation = 0
+
+    func isSharing(with candidate: RemoteConnectionLink) -> Bool {
+        link == candidate && (sharingUntil ?? .distantPast) > Date()
+    }
+
+    func beginSharing(with candidate: RemoteConnectionLink) async throws {
+        if isSharing(with: candidate) { return }
+        await endSharing()
+
+        link = candidate
+        destination = candidate.baseURL
+        sharingUntil = Date().addingTimeInterval(
+            RemoteDiagnosticUploadPolicy.sharingDuration
+        )
+        MobileDiagnostics.journal.record(.diagnosticSharingStarted, fields: [
+            .reason: "user",
+        ])
+        pending = MobileDiagnostics.journal.records()
+
+        do {
+            try await flush()
+        } catch {
+            clear()
+            MobileDiagnostics.journal.record(.diagnosticSharingStopped, fields: [
+                .reason: "uploadFailed",
+            ])
+            throw error
+        }
+
+        expirationTask = Task { [weak self] in
+            try? await Task.sleep(
+                for: .seconds(RemoteDiagnosticUploadPolicy.sharingDuration)
+            )
+            guard !Task.isCancelled else { return }
+            await self?.endSharing(reason: "expired")
+        }
+    }
+
+    func endSharing(reason: String = "user") async {
+        guard link != nil else {
+            clear()
+            return
+        }
+        let stopped = MobileDiagnostics.journal.record(
+            .diagnosticSharingStopped,
+            fields: [.reason: reason]
+        )
+        pending.append(stopped)
+        try? await flush()
+        clear()
+    }
+
+    func enqueue(_ record: RemoteDiagnosticRecord) {
+        guard link != nil, (sharingUntil ?? .distantPast) > Date() else { return }
+        pending.append(record)
+        Task { [weak self] in
+            try? await self?.flush()
+        }
+    }
+
+    private func flush() async throws {
+        guard !isUploading, let link else { return }
+        let uploadGeneration = generation
+        isUploading = true
+        defer {
+            if generation == uploadGeneration {
+                isUploading = false
+            }
+        }
+
+        let client = RemoteClient(link: link)
+        while !pending.isEmpty {
+            let count = min(
+                pending.count,
+                RemoteDiagnosticUploadPolicy.maximumRecordsPerUpload
+            )
+            let batch = Array(pending.prefix(count))
+            let response = try await client.uploadDiagnostics(batch)
+            guard generation == uploadGeneration, self.link == link else { return }
+            guard response.acceptedRecords == batch.count else {
+                throw RemoteClientError.invalidResponse
+            }
+            pending.removeFirst(batch.count)
+        }
+    }
+
+    private func clear() {
+        generation &+= 1
+        expirationTask?.cancel()
+        expirationTask = nil
+        sharingUntil = nil
+        destination = nil
+        link = nil
+        pending.removeAll()
+        isUploading = false
+    }
+}
+
 struct RemoteDiagnosticsView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var notifications: RemoteNotificationManager
@@ -76,6 +193,9 @@ struct RemoteDiagnosticsView: View {
     @State private var sharePayload: DiagnosticsSharePayload?
     @State private var issueReportRequest: MobileIssueReportRequest?
     @State private var exportError: String?
+    @State private var sharingError: String?
+    @State private var isChangingSharing = false
+    @ObservedObject private var diagnosticSharing = MobileDiagnostics.sharing
 
     var body: some View {
         NavigationStack {
@@ -105,6 +225,71 @@ struct RemoteDiagnosticsView: View {
                         )
                     )
                     diagnosticRow("Delivery", value: deliveryStatus)
+                }
+
+                if let host = model.activeHost, host.isOwnerDevice {
+                    Section {
+                        if diagnosticSharing.isSharing(with: host.link),
+                           let until = diagnosticSharing.sharingUntil {
+                            diagnosticRow(
+                                "Sharing",
+                                value: MobileL10n.string(
+                                    "Until %@",
+                                    until.formatted(date: .omitted, time: .shortened)
+                                )
+                            )
+                            Button {
+                                isChangingSharing = true
+                                Task {
+                                    await diagnosticSharing.endSharing()
+                                    isChangingSharing = false
+                                }
+                            } label: {
+                                Label(
+                                    "Stop sharing diagnostics",
+                                    systemImage: "stop.circle"
+                                )
+                            }
+                            .disabled(isChangingSharing)
+                        } else {
+                            Button {
+                                isChangingSharing = true
+                                Task {
+                                    do {
+                                        try await diagnosticSharing.beginSharing(
+                                            with: host.link
+                                        )
+                                    } catch {
+                                        sharingError = MobileL10n.string(
+                                            "The Mac could not accept diagnostics."
+                                        )
+                                    }
+                                    isChangingSharing = false
+                                }
+                            } label: {
+                                if isChangingSharing {
+                                    HStack {
+                                        ProgressView().controlSize(.small)
+                                        Text("Starting diagnostics sharing…")
+                                    }
+                                } else {
+                                    Label(
+                                        "Share diagnostics for 30 minutes",
+                                        systemImage: "wave.3.right.circle"
+                                    )
+                                }
+                            }
+                            .disabled(isChangingSharing)
+                        }
+                    } header: {
+                        Text("Mac diagnostics")
+                    } footer: {
+                        Text(
+                            "Sends only the connection events listed in this report to your "
+                                + "paired Mac. Messages, prompts, terminal output, paths and "
+                                + "credentials are never sent."
+                        )
+                    }
                 }
 
                 Section {
@@ -185,6 +370,15 @@ struct RemoteDiagnosticsView: View {
             isPresented: Binding(
                 get: { exportError != nil },
                 set: { if !$0 { exportError = nil } }
+            ),
+            actions: [ThemedDialogAction("OK")]
+        )
+        .themedAlert(
+            "Couldn’t share diagnostics",
+            message: sharingError ?? "",
+            isPresented: Binding(
+                get: { sharingError != nil },
+                set: { if !$0 { sharingError = nil } }
             ),
             actions: [ThemedDialogAction("OK")]
         )

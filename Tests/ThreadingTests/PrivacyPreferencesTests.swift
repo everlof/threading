@@ -49,9 +49,13 @@ final class PrivacyPreferencesTests: XCTestCase {
 
     private func page(
         _ reader: SystemPrivacyStatusReader,
-        height: CGFloat = PrivacyPreferencesTests.fixtureHeight
+        height: CGFloat = PrivacyPreferencesTests.fixtureHeight,
+        refreshInterval: TimeInterval = PrivacyPageDefaults.refreshInterval
     ) -> PrivacyPreferencesViewController {
-        let controller = PrivacyPreferencesViewController(reader: reader)
+        let controller = PrivacyPreferencesViewController(
+            reader: reader,
+            refreshInterval: refreshInterval
+        )
         controller.view.frame = NSRect(
             x: 0,
             y: 0,
@@ -60,6 +64,20 @@ final class PrivacyPreferencesTests: XCTestCase {
         )
         controller.view.layoutSubtreeIfNeeded()
         return controller
+    }
+
+    /// A window the page can be *in* without being on anyone's screen — the same fixture the
+    /// rest of this target uses, and never ordered front. The page only re-reads a grant while
+    /// it is in a window, so the watching tests need one; nothing about them needs it visible.
+    private func hosted(_ controller: NSViewController) -> NSWindow {
+        let window = NSWindow(
+            contentRect: controller.view.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        window.contentView?.addSubview(controller.view)
+        return window
     }
 
     private func descendants(in root: NSView) -> [NSView] {
@@ -152,6 +170,123 @@ final class PrivacyPreferencesTests: XCTestCase {
         XCTAssertEqual(probes.accessibility, 1)
         XCTAssertEqual(probes.screenRecording, 1)
         XCTAssertEqual(probes.notifications, 1)
+    }
+
+    // MARK: - Staying True While It Is Open
+
+    /// A reader whose answer the test can change halfway through, standing in for the user
+    /// flipping the switch in System Settings.
+    private final class LiveGrant {
+        var isAllowed = false
+        var reads = 0
+        var onRead: (() -> Void)?
+    }
+
+    private func liveReader(_ grant: LiveGrant) -> SystemPrivacyStatusReader {
+        SystemPrivacyStatusReader(
+            accessibilityTrusted: {
+                grant.reads += 1
+                grant.onRead?()
+                return grant.isAllowed
+            },
+            screenRecordingAllowed: { false },
+            notificationStatus: { $0(.askedWhenNeeded) }
+        )
+    }
+
+    /// The page invites the change and then used to ignore it: the row says "You allow
+    /// Threading in System Settings", the button opens that pane, and coming back left the word
+    /// reading "Not allowed" until the page was navigated away from and back. `viewWillAppear`
+    /// does not fire for a page that never left.
+    func testAGrantAllowedInSystemSettingsIsReportedOnComingBack() throws {
+        let grant = LiveGrant()
+        let controller = page(liveReader(grant))
+        let window = hosted(controller)
+        controller.viewDidAppear()
+
+        XCTAssertTrue(labels(in: try row(.accessibility, in: controller)).contains("Not allowed"))
+
+        grant.isAllowed = true
+        NotificationCenter.default.post(
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApp
+        )
+
+        XCTAssertTrue(
+            labels(in: try row(.accessibility, in: controller)).contains("Allowed"),
+            "the page kept reporting the old answer after the user granted it and came back"
+        )
+        withExtendedLifetime(window) {}
+    }
+
+    /// Activation covers coming back from System Settings, and nothing covers the rest: a TCC
+    /// dialog is put up by another process, so an approval given to one an *agent* raised can
+    /// land without Threading ever having resigned active.
+    func testAnOpenPageLooksAgainWithoutBeingTouched() throws {
+        let grant = LiveGrant()
+        let controller = page(liveReader(grant), refreshInterval: 0.05)
+        let window = hosted(controller)
+        controller.viewDidAppear()
+
+        let looked = expectation(description: "the page reads the grant again on its own")
+        looked.assertForOverFulfill = false
+        grant.isAllowed = true
+        grant.onRead = { looked.fulfill() }
+
+        wait(for: [looked], timeout: 2)
+
+        XCTAssertTrue(
+            labels(in: try row(.accessibility, in: controller)).contains("Allowed"),
+            "the page looked again and still showed the old answer"
+        )
+        withExtendedLifetime(window) {}
+    }
+
+    /// A settings page is cached and kept alive after being navigated away from, so "still
+    /// polling" is a real failure mode rather than a theoretical one — the page would go on
+    /// reading grants for the rest of the app's life.
+    func testANavigatedAwayPageStopsLookingAltogether() {
+        let grant = LiveGrant()
+        let controller = page(liveReader(grant), refreshInterval: 0.05)
+        let window = hosted(controller)
+        controller.viewDidAppear()
+        controller.viewWillDisappear()
+
+        let before = grant.reads
+        NotificationCenter.default.post(
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApp
+        )
+        let settled = expectation(description: "several poll intervals pass")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settled.fulfill() }
+        wait(for: [settled], timeout: 2)
+
+        XCTAssertEqual(grant.reads, before, "the page went on reading grants after it left")
+        withExtendedLifetime(window) {}
+    }
+
+    /// The poll would otherwise rewrite four identical labels twenty times a minute, which
+    /// re-announces every row to VoiceOver for nothing.
+    func testAnUnchangedGrantDoesNotRewriteItsRow() throws {
+        let grant = LiveGrant()
+        let controller = page(liveReader(grant))
+        let window = hosted(controller)
+        controller.viewDidAppear()
+
+        let label = try XCTUnwrap(
+            descendants(in: try row(.accessibility, in: controller))
+                .compactMap { $0 as? NSTextField }
+                .first { $0.stringValue == "Not allowed" }
+        )
+        label.stringValue = "sentinel"
+
+        NotificationCenter.default.post(
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApp
+        )
+
+        XCTAssertEqual(label.stringValue, "sentinel", "an unchanged row was written again")
+        withExtendedLifetime(window) {}
     }
 
     // MARK: - The Page

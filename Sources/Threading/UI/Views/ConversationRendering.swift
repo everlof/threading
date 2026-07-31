@@ -268,7 +268,9 @@ extension ConversationViewController {
 
         updateWorkingStatus(word: word)
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            self?.updateWorkingStatus(word: word)
+            MainActor.assumeIsolated {
+                self?.updateWorkingStatus(word: word)
+            }
         }
         workingStatusTimer = timer
         RunLoop.main.add(timer, forMode: .common)
@@ -382,7 +384,10 @@ extension ConversationViewController {
     ///
     /// The card stays in the transcript after the decision as a record of what was allowed, and
     /// while anything waits it drives the sidebar's attention dot through `activity`.
-    func presentPermission(_ request: PermissionRequest, decide: @escaping (PermissionDecision) -> Void) {
+    func presentPermission(
+        _ request: PermissionRequest,
+        decide: @escaping @MainActor @Sendable (PermissionDecision) -> Void
+    ) {
         // Force the view to load if the session has never been shown: touching `view` is the
         // 13-compatible `loadViewIfNeeded()`, and the card must exist to be resolved.
         _ = view
@@ -405,17 +410,15 @@ extension ConversationViewController {
 
         let pending = permissionQueue.removeFirst()
 
-        var card: PermissionRequestView?
-        card = PermissionRequestView(request: pending.request) { [weak self] decision in
+        let card = PermissionRequestView(request: pending.request) { [weak self] decision in
             pending.decide(decision)
             guard let self else { return }
-            if self.activePermissionCard === card { self.activePermissionCard = nil }
+            self.activePermissionCard = nil
             self.delegate?.conversationDidChangeActivity(self)
             self.showNextPermissionIfIdle()
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
         }
 
-        guard let card else { return }
         activePermissionCard = card
         RemoteNotificationService.shared.permissionRequested(
             sessionID: sessionID,

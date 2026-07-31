@@ -3,7 +3,9 @@ import ThreadingExtensionKit
 
 enum ExtensionSettingsValueStoreError: LocalizedError {
     case incompatibleFormat(Int)
+    case invalidExtensionIdentifier(String)
     case unreadable(String)
+    case couldNotBeSaved
 
     var errorDescription: String? {
         switch self {
@@ -12,8 +14,14 @@ enum ExtensionSettingsValueStoreError: LocalizedError {
                 "Extension settings use unsupported format version %lld.",
                 Int64(version)
             )
+        case .invalidExtensionIdentifier(let identifier):
+            return L10n.format("Invalid extension identifier: %@.", identifier)
         case .unreadable(let message):
             return L10n.format("Extension settings could not be read: %@", message)
+        case .couldNotBeSaved:
+            return L10n.string(
+                "Extension settings could not be saved without risking their recovery copy."
+            )
         }
     }
 }
@@ -34,6 +42,9 @@ final class ExtensionSettingsValueStore: @unchecked Sendable {
     private let rootURL: URL
     private let fileManager: FileManager
     private let lock = NSLock()
+    private var persistenceByIdentifier: [
+        String: RecoverableFileStore<State>
+    ] = [:]
 
     init(rootURL: URL, fileManager: FileManager = .default) {
         self.rootURL = rootURL
@@ -93,19 +104,14 @@ final class ExtensionSettingsValueStore: @unchecked Sendable {
     }
 
     private func load(identifier: String) throws -> State {
-        let url = stateURL(identifier: identifier)
-        guard fileManager.fileExists(atPath: url.path) else { return State() }
-        do {
-            let state = try JSONDecoder().decode(State.self, from: Data(contentsOf: url))
+        guard ExtensionIdentifierRules.isReverseDNSIdentifier(identifier) else {
+            throw ExtensionSettingsValueStoreError.invalidExtensionIdentifier(identifier)
+        }
+        return persistence(identifier: identifier).load(defaultValue: State()) { state in
             guard state.formatVersion == State.currentFormatVersion else {
                 throw ExtensionSettingsValueStoreError.incompatibleFormat(state.formatVersion)
             }
-            return state
-        } catch let error as ExtensionSettingsValueStoreError {
-            throw error
-        } catch {
-            throw ExtensionSettingsValueStoreError.unreadable(error.localizedDescription)
-        }
+        }.value
     }
 
     private func save(_ state: State, identifier: String) throws {
@@ -115,12 +121,27 @@ final class ExtensionSettingsValueStore: @unchecked Sendable {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(state).write(to: url, options: .atomic)
-        try? fileManager.setAttributes(
+        guard persistence(identifier: identifier).save(state) else {
+            throw ExtensionSettingsValueStoreError.couldNotBeSaved
+        }
+        try fileManager.setAttributes(
             [.posixPermissions: 0o600],
             ofItemAtPath: url.path
         )
+    }
+
+    /// Must be called while `lock` is held: the store carries a write-disable latch after a
+    /// failed quarantine or verification, so recreating it per operation would reopen writes.
+    private func persistence(identifier: String) -> RecoverableFileStore<State> {
+        if let existing = persistenceByIdentifier[identifier] {
+            return existing
+        }
+        let store = RecoverableFileStore<State>(
+            url: stateURL(identifier: identifier),
+            fileManager: fileManager,
+            criticality: .userAuthored
+        )
+        persistenceByIdentifier[identifier] = store
+        return store
     }
 }

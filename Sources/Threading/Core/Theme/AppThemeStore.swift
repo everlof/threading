@@ -4,6 +4,7 @@ import Foundation
 ///
 /// Stock themes remain Swift literals. Custom themes are value documents keyed by stable IDs,
 /// so their display names can change without invalidating the selected-theme preference.
+@MainActor
 final class AppThemeStore {
 
     static let shared = AppThemeStore()
@@ -12,52 +13,53 @@ final class AppThemeStore {
         static let customThemes = "customAppThemes"
     }
 
-    private let defaults: UserDefaults
-    private let key: String
+    private let persistence: RecoverableDefaultsStore<[AppTheme]>
+    private var storedThemes: [AppTheme]
 
     /// `PreferenceStore` rather than `.standard`: a custom theme is something the user made, and
     /// the hosted tests share the app's preferences. One probe palette per suite run used to
     /// survive in the real list.
     init(defaults: UserDefaults = PreferenceStore.shared, key: String = Keys.customThemes) {
-        self.defaults = defaults
-        self.key = key
+        let persistence = RecoverableDefaultsStore<[AppTheme]>(
+            defaults: defaults,
+            key: key,
+            criticality: .userAuthored
+        )
+        self.persistence = persistence
+        self.storedThemes = persistence.load(defaultValue: []).value
     }
 
     var themes: [AppTheme] {
-        guard let data = defaults.data(forKey: key),
-              let themes = try? JSONDecoder().decode([AppTheme].self, from: data) else {
-            return []
-        }
-        return themes
+        storedThemes
     }
 
     func insert(_ theme: AppTheme) {
-        var stored = themes
+        var stored = storedThemes
         stored.append(theme)
-        save(stored)
+        commit(stored)
     }
 
     @discardableResult
     func replace(_ theme: AppTheme) -> Bool {
-        var stored = themes
+        var stored = storedThemes
         guard let index = stored.firstIndex(where: { $0.id == theme.id }) else { return false }
         stored[index] = theme
-        save(stored)
-        return true
+        return commit(stored)
     }
 
     @discardableResult
     func remove(id: AppThemeID) -> Bool {
-        var stored = themes
+        var stored = storedThemes
         let count = stored.count
         stored.removeAll { $0.id == id }
         guard stored.count != count else { return false }
-        save(stored)
-        return true
+        return commit(stored)
     }
 
-    private func save(_ themes: [AppTheme]) {
-        guard let data = try? JSONEncoder().encode(themes) else { return }
-        defaults.set(data, forKey: key)
+    @discardableResult
+    private func commit(_ themes: [AppTheme]) -> Bool {
+        guard persistence.save(themes) else { return false }
+        storedThemes = themes
+        return true
     }
 }

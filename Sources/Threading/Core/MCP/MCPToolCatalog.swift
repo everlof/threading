@@ -2,24 +2,40 @@ import Foundation
 
 // MARK: - Tool Metadata
 
-/// One tool, as shown to the user on the Tools settings page. The behavioural schema an agent
-/// consumes lives in `MCPTools.definitions`; this is the human-facing half.
+/// One tool, as shown to the user on the Tools settings page.
+///
+/// Built-ins carry the same closed identity as their schema and command payload. External
+/// providers remain intentionally open-ended and carry only their names.
 struct MCPToolInfo {
+    let builtInTool: MCPBuiltInTool?
     let name: String
     let title: String
     let detail: String
     let symbol: String
 
     init(
-        name: String,
+        tool: MCPBuiltInTool,
         title: String,
         detail: String,
-        symbol: String,
-        localizesCopy: Bool = true
+        symbol: String
     ) {
-        self.name = name
-        self.title = localizesCopy ? L10n.string(title) : title
-        self.detail = localizesCopy ? L10n.string(detail) : detail
+        self.builtInTool = tool
+        self.name = tool.rawValue
+        self.title = L10n.string(title)
+        self.detail = L10n.string(detail)
+        self.symbol = symbol
+    }
+
+    init(
+        externalName: String,
+        title: String,
+        detail: String,
+        symbol: String
+    ) {
+        self.builtInTool = nil
+        self.name = externalName
+        self.title = title
+        self.detail = detail
         self.symbol = symbol
     }
 }
@@ -31,6 +47,7 @@ struct MCPToolInfo {
 /// not per tool.
 struct MCPToolGroup {
     let id: String
+    let builtInFamily: MCPBuiltInTool.Family?
     let title: String
     let summary: String
     let symbol: String
@@ -42,16 +59,34 @@ struct MCPToolGroup {
 
     init(
         id: String,
+        family: MCPBuiltInTool.Family,
         title: String,
         summary: String,
         symbol: String,
         tools: [MCPToolInfo],
-        instruction: String,
-        localizesCopy: Bool = true
+        instruction: String
     ) {
         self.id = id
-        self.title = localizesCopy ? L10n.string(title) : title
-        self.summary = localizesCopy ? L10n.string(summary) : summary
+        self.builtInFamily = family
+        self.title = L10n.string(title)
+        self.summary = L10n.string(summary)
+        self.symbol = symbol
+        self.tools = tools
+        self.instruction = instruction
+    }
+
+    init(
+        externalID: String,
+        title: String,
+        summary: String,
+        symbol: String,
+        tools: [MCPToolInfo],
+        instruction: String
+    ) {
+        self.id = externalID
+        self.builtInFamily = nil
+        self.title = title
+        self.summary = summary
         self.symbol = symbol
         self.tools = tools
         self.instruction = instruction
@@ -91,12 +126,13 @@ enum MCPToolCatalog {
 
     static let continuation = MCPToolGroup(
         id: "conversation-continuation",
+        family: .continuation,
         title: "Conversation handoff",
         summary: "Let a new provider read the frozen history that created its session.",
         symbol: "arrow.triangle.branch",
         tools: [
             MCPToolInfo(
-                name: MCPTools.conversationHistory,
+                tool: .conversationHistory,
                 title: "Read handoff history",
                 detail: "Read only this session's paginated, cross-provider conversation snapshot.",
                 symbol: "text.book.closed"
@@ -113,24 +149,25 @@ enum MCPToolCatalog {
 
     static let display = MCPToolGroup(
         id: "display",
+        family: .display,
         title: "Display panel",
         summary: "Let agents show images and rendered HTML in the side panel.",
         symbol: "photo.on.rectangle",
         tools: [
             MCPToolInfo(
-                name: MCPTools.displayImage,
+                tool: .displayImage,
                 title: "Show image",
                 detail: "Render an image file in the panel — a screenshot, chart, or diagram.",
                 symbol: "photo"
             ),
             MCPToolInfo(
-                name: MCPTools.displayHTML,
+                tool: .displayHTML,
                 title: "Show HTML",
                 detail: "Render an HTML document — tables, charts, diagrams, rich reports.",
                 symbol: "doc.richtext"
             ),
             MCPToolInfo(
-                name: MCPTools.displayCompareFiles,
+                tool: .displayCompareFiles,
                 title: "Compare files",
                 detail: "Two images as an interactive wipe/fade/difference; two text files as a diff.",
                 symbol: "rectangle.on.rectangle"
@@ -158,18 +195,19 @@ enum MCPToolCatalog {
 
     static let browser = MCPToolGroup(
         id: "browser",
+        family: .browser,
         title: "Browser",
         summary: "Let agents open, read, and act on live web pages in a browser tab.",
         symbol: "globe",
         tools: [
             MCPToolInfo(
-                name: MCPTools.browserNavigate,
+                tool: .browserNavigate,
                 title: "Open a page",
                 detail: "Open or search, optionally returning at commit or DOM readiness.",
                 symbol: "arrow.up.forward.app"
             ),
             MCPToolInfo(
-                name: MCPTools.browserHistory,
+                tool: .browserHistory,
                 title: "Navigate history",
                 detail: """
                     Go back, close a pop-up, go forward, reload, or revalidate with chosen readiness.
@@ -177,13 +215,13 @@ enum MCPToolCatalog {
                 symbol: "clock.arrow.circlepath"
             ),
             MCPToolInfo(
-                name: MCPTools.browserStop,
+                tool: .browserStop,
                 title: "Stop page loading",
                 detail: "Cancel outstanding resources and inspect the content already rendered.",
                 symbol: "xmark"
             ),
             MCPToolInfo(
-                name: MCPTools.browserTabs,
+                tool: .browserTabs,
                 title: "Manage browser tabs",
                 detail: """
                     List, create, activate, and close shared or private live browser tabs.
@@ -191,157 +229,163 @@ enum MCPToolCatalog {
                 symbol: "rectangle.stack"
             ),
             MCPToolInfo(
-                name: MCPTools.browserStorage,
+                tool: .browserStorage,
                 title: "Clear site data",
                 detail: "Clear the active site's browser data after explicit user confirmation.",
                 symbol: "trash"
             ),
             MCPToolInfo(
-                name: MCPTools.browserTrace,
+                tool: .browserTrace,
                 title: "Record browser trace",
                 detail: "Capture and export bounded, sanitized agent and network diagnostics.",
                 symbol: "record.circle"
             ),
             MCPToolInfo(
-                name: MCPTools.browserUpload,
+                tool: .browserUpload,
                 title: "Choose files",
                 detail: "Suggest files through a native user-approved file chooser.",
                 symbol: "arrow.up.doc"
             ),
             MCPToolInfo(
-                name: MCPTools.browserDownload,
+                tool: .browserDownload,
                 title: "Download file",
                 detail: "Download through a native user-approved save destination.",
                 symbol: "arrow.down.doc"
             ),
             MCPToolInfo(
-                name: MCPTools.browserResize,
+                tool: .browserResize,
                 title: "Resize viewport",
                 detail: "Test responsive layouts at an exact CSS-pixel width and height.",
                 symbol: "aspectratio"
             ),
             MCPToolInfo(
-                name: MCPTools.browserEmulate,
+                tool: .browserEmulate,
                 title: "Emulate browser",
                 detail: "Test color, CSS media, and User-Agent behavior in the active tab.",
                 symbol: "circle.lefthalf.filled"
             ),
             MCPToolInfo(
-                name: MCPTools.browserCapabilities,
+                tool: .browserCapabilities,
                 title: "Inspect browser capabilities",
                 detail: "Read supported emulation and automation limits before choosing a backend.",
                 symbol: "checklist"
             ),
             MCPToolInfo(
-                name: MCPTools.browserRunIsolated,
+                tool: .browserRunIsolated,
                 title: "Run isolated browser test",
                 detail: "Execute a bounded scenario in a fresh local Playwright context.",
                 symbol: "testtube.2"
             ),
             MCPToolInfo(
-                name: MCPTools.browserSnapshot,
+                tool: .browserSnapshot,
                 title: "Read page",
                 detail: "Read a semantic page tree with stable references for interaction.",
                 symbol: "list.bullet.rectangle"
             ),
             MCPToolInfo(
-                name: MCPTools.browserClick,
+                tool: .browserAnnotations,
+                title: "Read page annotations",
+                detail: "Read user-authored notes anchored to the current page.",
+                symbol: "note.text"
+            ),
+            MCPToolInfo(
+                tool: .browserClick,
                 title: "Click page content",
                 detail: "Click a semantic target, or a viewport point for canvas-style content.",
                 symbol: "cursorarrow.rays"
             ),
             MCPToolInfo(
-                name: MCPTools.browserHover,
+                tool: .browserHover,
                 title: "Hover an element",
                 detail: "Reveal menus, tooltips, and controls driven by pointer hover.",
                 symbol: "cursorarrow.motionlines"
             ),
             MCPToolInfo(
-                name: MCPTools.browserDrag,
+                tool: .browserDrag,
                 title: "Drag an element",
                 detail: "Drag a referenced item onto another referenced element.",
                 symbol: "hand.draw"
             ),
             MCPToolInfo(
-                name: MCPTools.browserType,
+                tool: .browserType,
                 title: "Enter text",
                 detail: "Fill an editable element without exposing passwords to the agent.",
                 symbol: "character.cursor.ibeam"
             ),
             MCPToolInfo(
-                name: MCPTools.browserFillForm,
+                tool: .browserFillForm,
                 title: "Fill a form",
                 detail: "Fill several text, select, and checkable controls in one validated batch.",
                 symbol: "list.clipboard"
             ),
             MCPToolInfo(
-                name: MCPTools.browserSelect,
+                tool: .browserSelect,
                 title: "Select an option",
                 detail: "Choose an exact visible label or submitted value from a select control.",
                 symbol: "chevron.up.chevron.down"
             ),
             MCPToolInfo(
-                name: MCPTools.browserSetChecked,
+                tool: .browserSetChecked,
                 title: "Set checked state",
                 detail: "Check or uncheck a checkbox or switch without accidentally toggling it.",
                 symbol: "checkmark.square"
             ),
             MCPToolInfo(
-                name: MCPTools.browserPressKey,
+                tool: .browserPressKey,
                 title: "Press a key",
                 detail: "Send keys and modifiers with native control and focus behavior.",
                 symbol: "keyboard"
             ),
             MCPToolInfo(
-                name: MCPTools.browserScroll,
+                tool: .browserScroll,
                 title: "Scroll",
                 detail: "Scroll the page or a referenced scrollable element.",
                 symbol: "arrow.up.and.down"
             ),
             MCPToolInfo(
-                name: MCPTools.browserWait,
+                tool: .browserWait,
                 title: "Wait for page",
                 detail: "Wait for text, URL changes, target states, or a short duration.",
                 symbol: "clock"
             ),
             MCPToolInfo(
-                name: MCPTools.browserScreenshot,
+                tool: .browserScreenshot,
                 title: "Screenshot page or element",
                 detail: "Capture a viewport, full page, or one referenced element.",
                 symbol: "camera"
             ),
             MCPToolInfo(
-                name: MCPTools.browserVisualCompare,
+                tool: .browserVisualCompare,
                 title: "Compare rendered pixels",
                 detail: "Compare a current capture with a PNG baseline and save a visual diff.",
                 symbol: "square.on.square.dashed"
             ),
             MCPToolInfo(
-                name: MCPTools.browserConsole,
+                tool: .browserConsole,
                 title: "Read console",
                 detail: "Read console messages and uncaught page errors.",
                 symbol: "exclamationmark.triangle"
             ),
             MCPToolInfo(
-                name: MCPTools.browserNetwork,
+                tool: .browserNetwork,
                 title: "Read network activity",
                 detail: "Inspect redacted request metadata, status codes, and durations.",
                 symbol: "network"
             ),
             MCPToolInfo(
-                name: MCPTools.browserPerformance,
+                tool: .browserPerformance,
                 title: "Measure page performance",
                 detail: "Summarize navigation, paint, layout, long-task, and resource timing.",
                 symbol: "speedometer"
             ),
             MCPToolInfo(
-                name: MCPTools.browserAccessibilityAudit,
+                tool: .browserAccessibilityAudit,
                 title: "Audit page accessibility",
                 detail: "Find bounded, actionable semantic accessibility issues with stable refs.",
                 symbol: "figure.roll"
             ),
             MCPToolInfo(
-                name: MCPTools.browserQuery,
+                tool: .browserQuery,
                 title: "Query CSS",
                 detail: "Expert fallback for inspecting a selector already known.",
                 symbol: "magnifyingglass"
@@ -414,18 +458,19 @@ enum MCPToolCatalog {
 
     static let tabs = MCPToolGroup(
         id: "tabs",
+        family: .panel,
         title: "Panel tabs",
         summary: "Let agents list the panel's tabs and switch between them.",
         symbol: "rectangle.stack",
         tools: [
             MCPToolInfo(
-                name: MCPTools.panelListTabs,
+                tool: .panelListTabs,
                 title: "List tabs",
                 detail: "See what is open in the panel and which tab is active.",
                 symbol: "list.bullet.rectangle"
             ),
             MCPToolInfo(
-                name: MCPTools.panelActivateTab,
+                tool: .panelActivateTab,
                 title: "Activate tab",
                 detail: "Bring one of the panel's tabs to the front.",
                 symbol: "rectangle.stack.badge.play"
@@ -440,12 +485,13 @@ enum MCPToolCatalog {
 
     static let project = MCPToolGroup(
         id: "project",
+        family: .project,
         title: "Project icon",
         summary: "Let agents set the project's sidebar icon.",
         symbol: "app.badge",
         tools: [
             MCPToolInfo(
-                name: MCPTools.setProjectIcon,
+                tool: .setProjectIcon,
                 title: "Set project icon",
                 detail: "Give the sidebar project an icon, from a file or an image URL.",
                 symbol: "photo.badge.plus"
@@ -461,18 +507,19 @@ enum MCPToolCatalog {
 
     static let storage = MCPToolGroup(
         id: "storage",
+        family: .storage,
         title: "Disk space",
         summary: "Let agents see reclaimable build output and propose removing some of it.",
         symbol: "internaldrive",
         tools: [
             MCPToolInfo(
-                name: MCPTools.listReclaimableStorage,
+                tool: .listReclaimableStorage,
                 title: "List reclaimable storage",
                 detail: "Read what build output can be deleted and rebuilt, and how big it is.",
                 symbol: "list.bullet.rectangle"
             ),
             MCPToolInfo(
-                name: MCPTools.proposeStorageCleanup,
+                tool: .proposeStorageCleanup,
                 title: "Propose a cleanup",
                 detail: "Ask you to approve removing some of it. Never removes anything itself.",
                 symbol: "hand.raised"
@@ -496,12 +543,13 @@ enum MCPToolCatalog {
 
     static let notifications = MCPToolGroup(
         id: "notifications",
+        family: .notifications,
         title: "Notifications",
         summary: "Let agents notify your paired devices when requested work is ready.",
         symbol: "bell",
         tools: [
             MCPToolInfo(
-                name: MCPTools.notifyUser,
+                tool: .notifyUser,
                 title: "Notify chat participants",
                 detail: "Send one requested, session-scoped result to its intended participant.",
                 symbol: "bell.badge"
@@ -520,60 +568,61 @@ enum MCPToolCatalog {
 
     static let appearance = MCPToolGroup(
         id: "appearance",
+        family: .appearance,
         title: "Themes",
         summary: "Let agents style terminals and the app's own chrome.",
         symbol: "paintpalette",
         tools: [
             MCPToolInfo(
-                name: MCPTools.listThemes,
+                tool: .listThemes,
                 title: "List themes",
                 detail: "Read the available themes and which one this session is using.",
                 symbol: "list.bullet"
             ),
             MCPToolInfo(
-                name: MCPTools.setTheme,
+                tool: .setTheme,
                 title: "Set the theme",
                 detail: "Apply a theme to this session, its project, or as the default.",
                 symbol: "paintbrush"
             ),
             MCPToolInfo(
-                name: MCPTools.createTheme,
+                tool: .createTheme,
                 title: "Create a theme",
                 detail: "Build a new palette from a description, guarded against unreadable text.",
                 symbol: "wand.and.stars"
             ),
             MCPToolInfo(
-                name: MCPTools.listAppThemes,
+                tool: .listAppThemes,
                 title: "List app themes",
                 detail: "Read the chrome themes and see which one is active.",
                 symbol: "rectangle.3.group"
             ),
             MCPToolInfo(
-                name: MCPTools.getAppTheme,
+                tool: .getAppTheme,
                 title: "Inspect app theme",
                 detail: "Read a chrome theme's exact semantic colours and material.",
                 symbol: "doc.text.magnifyingglass"
             ),
             MCPToolInfo(
-                name: MCPTools.setAppTheme,
+                tool: .setAppTheme,
                 title: "Set app theme",
                 detail: "Restyle the app's window chrome immediately.",
                 symbol: "paintbrush.pointed"
             ),
             MCPToolInfo(
-                name: MCPTools.createAppTheme,
+                tool: .createAppTheme,
                 title: "Create app theme",
                 detail: "Build a custom chrome theme from a base and a partial patch.",
                 symbol: "wand.and.rays"
             ),
             MCPToolInfo(
-                name: MCPTools.duplicateAppTheme,
+                tool: .duplicateAppTheme,
                 title: "Duplicate app theme",
                 detail: "Make an editable custom copy before modifying a built-in style.",
                 symbol: "plus.square.on.square"
             ),
             MCPToolInfo(
-                name: MCPTools.updateAppTheme,
+                tool: .updateAppTheme,
                 title: "Update app theme",
                 detail: "Patch an editable chrome theme while keeping its stable identity.",
                 symbol: "slider.horizontal.3"
@@ -614,42 +663,43 @@ enum MCPToolCatalog {
 
     static let extensionAuthoring = MCPToolGroup(
         id: "extension-authoring",
+        family: .extensionAuthoring,
         title: "Extension authoring",
         summary: "Let agents discover, validate and preview Threading UI extension components.",
         symbol: "puzzlepiece.extension",
         tools: [
             MCPToolInfo(
-                name: MCPTools.extensionListComponents,
+                tool: .extensionListComponents,
                 title: "List components",
                 detail: "Read every public, versioned UI component contract.",
                 symbol: "list.bullet.rectangle"
             ),
             MCPToolInfo(
-                name: MCPTools.extensionScaffoldProject,
+                tool: .extensionScaffoldProject,
                 title: "Create extension project",
                 detail: "Create a separate project with the app-shipped SDK and starter panel.",
                 symbol: "plus.rectangle.on.folder"
             ),
             MCPToolInfo(
-                name: MCPTools.extensionProposeInstall,
+                tool: .extensionProposeInstall,
                 title: "Propose extension install",
                 detail: "Show a package’s runtime and capabilities, then install it disabled if approved.",
                 symbol: "checkmark.shield"
             ),
             MCPToolInfo(
-                name: MCPTools.extensionDescribeComponent,
+                tool: .extensionDescribeComponent,
                 title: "Describe component",
                 detail: "Read one contract, its limits, host assets, example and JSON Schema.",
                 symbol: "doc.text.magnifyingglass"
             ),
             MCPToolInfo(
-                name: MCPTools.extensionValidateComponentPatch,
+                tool: .extensionValidateComponentPatch,
                 title: "Validate patch",
                 detail: "Check patch JSON using the same validator as the extension runtime.",
                 symbol: "checkmark.seal"
             ),
             MCPToolInfo(
-                name: MCPTools.extensionPreviewComponentPatch,
+                tool: .extensionPreviewComponentPatch,
                 title: "Preview patch",
                 detail: "Render a safe native preview without installing or publishing it.",
                 symbol: "eye"
@@ -695,38 +745,91 @@ enum MCPToolCatalog {
         allGroups.filter { isEnabled($0) && isAvailable($0) }
     }
 
-    /// The bare tool names an enabled launch advertises and pre-approves.
+    /// Static integrity diagnostics. Empty is the only state that may expose every built-in.
+    static let catalogIssues: [String] = {
+        var issues = MCPTools.definitionIssues
+        let builtInInfos = groups.flatMap { group in
+            group.tools.compactMap { info -> (MCPBuiltInTool.Family, MCPBuiltInTool)? in
+                guard let family = group.builtInFamily, let tool = info.builtInTool else {
+                    issues.append("\(group.id) mixes built-in and external tool metadata")
+                    return nil
+                }
+                if tool.family != family {
+                    issues.append(
+                        "\(tool.rawValue) belongs to \(tool.family.rawValue), not \(family.rawValue)"
+                    )
+                }
+                return (family, tool)
+            }
+        }
+        let grouped = Dictionary(grouping: builtInInfos.map(\.1)) { $0 }
+        for tool in MCPBuiltInTool.allCases {
+            let count = grouped[tool]?.count ?? 0
+            if count != 1 {
+                issues.append(
+                    "\(tool.rawValue) has \(count) catalog entries; expected exactly one"
+                )
+            }
+        }
+        return issues
+    }()
+
     @MainActor
-    static var enabledToolNames: [String] {
-        let builtIn = groups
-            .filter(isEnabled)
-            .flatMap { $0.tools.map(\.name) }
-        let external = MCPExternalToolRegistry.shared.groups.flatMap { group in
+    private static var enabledBuiltInTools: [MCPBuiltInTool] {
+        let admitted = Set(groups.filter(isEnabled).flatMap { group in
+            group.tools.compactMap { info -> MCPBuiltInTool? in
+                guard let family = group.builtInFamily,
+                      let tool = info.builtInTool,
+                      tool.family == family,
+                      MCPTools.definition(for: tool) != nil else {
+                    return nil
+                }
+                return tool
+            }
+        })
+        return MCPBuiltInTool.allCases.filter(admitted.contains)
+    }
+
+    @MainActor
+    private static var enabledExternalTools: [MCPExternalTool] {
+        let candidates = MCPExternalToolRegistry.shared.groups.flatMap { group -> [MCPExternalTool] in
             guard group.isAvailable,
                   AppSettings.shared.isToolGroupEnabled(group.id) else {
-                return [String]()
+                return []
             }
-            return group.tools.map(\.name)
+            return group.tools.filter {
+                !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && MCPBuiltInTool(rawValue: $0.name) == nil
+            }
         }
-        return builtIn + external
+        let grouped = Dictionary(grouping: candidates, by: \.name)
+        return candidates.filter { grouped[$0.name]?.count == 1 }
     }
 
     /// The `tools/list` payload, filtered to the enabled groups.
     @MainActor
     static var enabledDefinitions: [MCPToolDefinition] {
-        let names = Set(enabledToolNames)
-        let builtIn = MCPTools.definitions.filter { names.contains($0.name) }
-        let external = MCPExternalToolRegistry.shared.groups.flatMap { group in
-            group.tools.compactMap { tool -> MCPToolDefinition? in
-                guard names.contains(tool.name) else { return nil }
-                return MCPToolDefinition(
-                    name: tool.name,
-                    description: tool.description,
-                    externalSchema: tool.inputSchema
-                )
-            }
+        let builtIn = enabledBuiltInTools.compactMap(MCPTools.definition)
+        let external = enabledExternalTools.map { tool in
+            MCPToolDefinition(
+                name: tool.name,
+                description: tool.description,
+                externalSchema: tool.inputSchema
+            )
         }
         return builtIn + external
+    }
+
+    /// The launch pre-approval list is exactly the list the same session will receive from
+    /// `tools/list`; it cannot independently admit a missing, duplicate, or malformed tool.
+    @MainActor
+    static var enabledToolNames: [String] {
+        enabledDefinitions.map(\.name)
+    }
+
+    @MainActor
+    static func admits(_ command: AgentCommand) -> Bool {
+        enabledToolNames.contains(command.name)
     }
 
     /// The `initialize` instructions, assembled from the enabled groups so the model is told about
@@ -748,21 +851,19 @@ enum MCPToolCatalog {
     @MainActor
     static func externalGroup(_ group: MCPExternalToolGroup) -> MCPToolGroup {
         return MCPToolGroup(
-            id: group.id,
+            externalID: group.id,
             title: group.title,
             summary: group.summary,
             symbol: group.symbol,
             tools: group.tools.map { tool in
                 MCPToolInfo(
-                    name: tool.name,
+                    externalName: tool.name,
                     title: tool.title,
                     detail: tool.detail,
-                    symbol: tool.symbol,
-                    localizesCopy: false
+                    symbol: tool.symbol
                 )
             },
-            instruction: group.instruction,
-            localizesCopy: false
+            instruction: group.instruction
         )
     }
 }

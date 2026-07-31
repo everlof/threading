@@ -14,12 +14,16 @@ chat, repository, notification text, or credentials.
    separate, off-by-default opt-in and are gathered only when the user shares.
 4. The Diagnostics page shows current protocol, Mac reachability, notification authorization, APNs token
    state and whether that Mac registered `push`, `live only`, or nothing.
-5. **Share diagnostics only** exports the bounded JSON report without a description, optional
+5. A paired owner may choose **Share diagnostics for 30 minutes**. iOS or the browser sends its
+   existing bounded history and new connection events to that Mac until the timer expires, the
+   user stops it, or the client closes. Sharing is off by default and never survives an app/page
+   reload.
+6. **Share diagnostics only** exports the bounded JSON report without a description, optional
    device details or screenshot.
-6. The Mac owner chooses Help → **Create Remote Support Report…**. The share-safe Mac report
+7. The Mac owner chooses Help → **Create Remote Support Report…**. The share-safe Mac report
    follows the same schema. **Reveal Diagnostics Log** remains separate because the owner-local
    journal can contain prompts, commands and paths and must not be attached blindly.
-7. Support merges the two timelines by trace id and timestamps. If clocks differ, the handshake
+8. Support merges the two timelines by trace id and timestamps. If clocks differ, the handshake
    offset recorded by the clients is applied before comparison.
 
 A report should make the common answer mechanical:
@@ -43,7 +47,7 @@ Events describe state transitions; they do not contain user content.
 
 Every record has:
 
-- UTC timestamp, source (`macOSHost`, `iOSClient`, later `browserClient`) and severity.
+- UTC timestamp, source (`macOSHost`, `iOSClient`, `browserClient`) and severity.
 - A typed event name and allowlisted structural fields.
 - A per-operation `trace` where the protocol already has one. Notification event ids are traces;
   APNs' `apns-id` is stored as the provider trace.
@@ -52,6 +56,13 @@ Every record has:
 
 The shared writer strips control characters, bounds each value, keeps seven days, and caps an
 export at 5,000 newest events.
+
+Client-to-Mac upload has a second trust boundary: only an interactive all-sessions owner bearer
+may call it; the declared source must match the shipping client header; batches are capped at 250
+records and 256 KiB; timestamps, client-appropriate events and fields are revalidated; and values
+must be compact machine tokens rather than prose, URLs or paths. The authenticated device id is
+replaced with a Mac-side pseudonym. Raw console logs and the Mac's content-bearing diagnostics log
+never use this route.
 
 ### Explicitly optional attachments and context
 
@@ -137,6 +148,8 @@ its report code. A guest can export its own report but cannot inspect another pa
 - Off-by-default, typed additional-device-details manifest.
 - iOS notification, registration, host refresh and session-socket transitions.
 - Durable Mac remote journal and one-click share-safe support report.
+- Browser privacy-bounded local journal plus explicit 30-minute iOS/browser forwarding into the
+  paired Mac's share-safe timeline.
 - Mac listener, relay, auth, registration, socket, permission and APNs transitions.
 - Mac APNs acceptance/refusal records with notification trace and `apns-id`.
 - Opt-in real APNs and Claude → MCP → APNs tests in `ThreadingNotificationE2E`.

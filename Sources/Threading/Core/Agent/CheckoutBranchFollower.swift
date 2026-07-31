@@ -17,7 +17,7 @@ final class CheckoutBranchFollower {
 
     // MARK: - Singleton
 
-    static let shared = CheckoutBranchFollower()
+    static let shared = CheckoutBranchFollower(store: .shared)
 
     // MARK: - Properties
 
@@ -33,7 +33,7 @@ final class CheckoutBranchFollower {
 
     // MARK: - Initialization
 
-    init(store: ProjectStore = .shared) {
+    init(store: ProjectStore) {
         self.store = store
     }
 

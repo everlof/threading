@@ -19,7 +19,8 @@ final class ProjectStore {
     /// Consumers must not interpret the resulting empty project list as authoritative.
     private(set) var didLoadStateSuccessfully = true
 
-    /// A failed quarantine leaves the original file in place, so no write may replace it.
+    /// A failed load is never followed by writes in the same launch. Even when quarantine
+    /// succeeded, the empty in-memory graph is not authoritative replacement state.
     private var stateWritesAllowed = true
 
     private let stateManager: StateManager
@@ -134,19 +135,47 @@ final class ProjectStore {
         id: SessionID = SessionID()
     ) -> AgentSession? {
         guard let index = index(ofProject: projectID) else { return nil }
+        guard (continuedFrom == nil) == (continuationSourceKind == nil) else {
+            return nil
+        }
+
+        let configuration: AgentSessionConfiguration
+        switch kind {
+        case .claude:
+            guard reasoningEffort == nil else { return nil }
+            if let continuedFrom {
+                guard continuationSourceKind == .codex else { return nil }
+                configuration = .claude(
+                    remoteControl: nil,
+                    origin: .continuedFromCodex(continuedFrom)
+                )
+            } else {
+                configuration = .claude(remoteControl: nil, origin: .original)
+            }
+        case .codex:
+            if let continuedFrom {
+                guard continuationSourceKind == .claude else { return nil }
+                configuration = .codex(
+                    reasoningEffort: reasoningEffort,
+                    continuedFromClaude: continuedFrom
+                )
+            } else {
+                configuration = .codex(
+                    reasoningEffort: reasoningEffort,
+                    continuedFromClaude: nil
+                )
+            }
+        }
 
         // No title means unnamed, not named after the agent: the display falls back to a
         // generic label until the first prompt supplies a name (`applyPromptTitle`). The
         // agent and account are the row's icon slot's job, not the name's.
         var session = AgentSession(
-            kind: kind,
+            configuration: configuration,
             title: title ?? "",
             accountHandle: accountHandle,
             model: model,
-            reasoningEffort: reasoningEffort,
             usesNativeUI: usesNativeUI,
-            continuedFrom: continuedFrom,
-            continuationSourceKind: continuationSourceKind,
             id: id
         )
         session.branch = GitInfo.currentBranch(for: projects[index].folderPath)
@@ -174,15 +203,18 @@ final class ProjectStore {
         guard let location = locate(sessionID: parentID) else { return nil }
 
         let parent = projects[location.projectIndex].sessions[location.sessionIndex]
-        guard parent.resumeState.isResumable else { return nil }
+        guard parent.kind == .claude,
+              parent.resumeState.isResumable else { return nil }
 
         var session = AgentSession(
-            kind: parent.kind,
+            configuration: .claude(
+                remoteControl: nil,
+                origin: .forked(from: parentID)
+            ),
             title: title ?? AgentDefaults.sideChatTitle,
             accountHandle: parent.accountHandle,
             model: parent.model,
-            usesNativeUI: parent.usesNativeUI,
-            forkedFrom: parentID
+            usesNativeUI: parent.usesNativeUI
         )
         session.branch = parent.branch
         // A side chat asks a question *about* the parent's work, so it inherits the parent's
@@ -257,7 +289,7 @@ final class ProjectStore {
     /// disconnects a bridge that is already open; that is `/remote-control` inside the session,
     /// or a relaunch.
     func setRemoteControl(_ remoteControl: Bool?, for sessionID: SessionID) {
-        update(sessionID: sessionID) { $0.remoteControl = remoteControl }
+        update(sessionID: sessionID) { $0.setClaudeRemoteControl(remoteControl) }
         notifyChanged()
     }
 
@@ -579,7 +611,12 @@ final class ProjectStore {
             }
         case .failed(let quarantinedAt):
             didLoadStateSuccessfully = false
-            stateWritesAllowed = quarantinedAt != nil
+            stateWritesAllowed = false
+            if let quarantinedAt {
+                ThreadingLogger.agent.error(
+                    "Projects state requires recovery from \(quarantinedAt.path, privacy: .public)"
+                )
+            }
         }
     }
 

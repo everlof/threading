@@ -293,6 +293,73 @@ final class MCPWireTests: XCTestCase {
         XCTAssertEqual(definition.inputSchema.required, ["path"])
     }
 
+    @MainActor
+    func testBuiltInRegistryHasOneSchemaAndOneCatalogEntryPerTypedCommand() {
+        XCTAssertEqual(MCPTools.definitionIssues, [])
+        XCTAssertEqual(MCPToolCatalog.catalogIssues, [])
+        XCTAssertEqual(
+            Set(MCPTools.definitions.map(\.name)),
+            Set(MCPBuiltInTool.allCases.map(\.rawValue))
+        )
+        XCTAssertEqual(
+            Set(MCPToolCatalog.groups.flatMap { $0.tools.map(\.name) }),
+            Set(MCPBuiltInTool.allCases.map(\.rawValue))
+        )
+        XCTAssertTrue(
+            MCPToolCatalog.browser.tools.contains {
+                $0.builtInTool == .browserAnnotations
+            },
+            "browser_annotations had a schema and handler but used to be absent from its group"
+        )
+    }
+
+    func testBuiltInDefinitionsAdvertiseConservativeBehaviorHints() throws {
+        let snapshot = try XCTUnwrap(MCPTools.definition(for: .browserSnapshot))
+        XCTAssertEqual(
+            snapshot.annotations,
+            MCPToolAnnotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: true
+            )
+        )
+
+        let storage = try XCTUnwrap(MCPTools.definition(for: .browserStorage))
+        XCTAssertEqual(storage.annotations?.readOnlyHint, false)
+        XCTAssertEqual(storage.annotations?.destructiveHint, true)
+
+        let encoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(storage))
+                as? [String: Any]
+        )
+        let annotations = try XCTUnwrap(encoded["annotations"] as? [String: Any])
+        XCTAssertEqual(annotations["readOnlyHint"] as? Bool, false)
+        XCTAssertEqual(annotations["destructiveHint"] as? Bool, true)
+        XCTAssertEqual(annotations["openWorldHint"] as? Bool, true)
+    }
+
+    @MainActor
+    func testDisabledGroupCannotBeCalledEvenWhenItsCommandStillDecodes() throws {
+        let group = MCPToolCatalog.display
+        let wasEnabled = MCPToolCatalog.isEnabled(group)
+        AppSettings.shared.setToolGroup(group.id, enabled: false)
+        defer { AppSettings.shared.setToolGroup(group.id, enabled: wasEnabled) }
+
+        let decoded = try JSONDecoder().decode(
+            MCPToolCallParameters.self,
+            from: Data(
+                #"{"name":"display_image","arguments":{"path":"chart.png"}}"#.utf8
+            )
+        )
+        XCTAssertEqual(decoded.call.builtInTool, .displayImage)
+        XCTAssertFalse(MCPToolCatalog.admits(decoded.call))
+        XCTAssertFalse(MCPToolCatalog.enabledToolNames.contains(MCPTools.displayImage))
+        XCTAssertFalse(
+            MCPToolCatalog.enabledDefinitions.contains { $0.name == MCPTools.displayImage }
+        )
+    }
+
     func testUnknownToolPreservesArbitraryArgumentsForExtensionRouting() throws {
         let extensionRequest = try request("""
             {"jsonrpc":"2.0","id":"extension","method":"tools/call","params":{

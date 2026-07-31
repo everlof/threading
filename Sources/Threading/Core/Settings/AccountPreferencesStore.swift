@@ -38,23 +38,20 @@ final class AccountPreferencesStore {
 
     // MARK: - Properties
 
-    private let defaults: UserDefaults
     private var preferences: [String: AccountPreference]
-
-    /// False only when a stored value could not be decoded *and* could not be kept aside. A
-    /// write then has nowhere to put what it would destroy, so it does not happen.
-    private var writesAllowed = true
+    private let persistence: RecoverableDefaultsStore<[String: AccountPreference]>
 
     // MARK: - Initialization
 
     /// Not private so a test can stand one up over its own suite: the app uses `shared`, and
     /// the alternative is a test that writes account state into the user's real defaults.
     init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-
-        let loaded = Self.load(from: defaults)
-        self.preferences = loaded.preferences
-        self.writesAllowed = loaded.writesAllowed
+        self.persistence = RecoverableDefaultsStore(
+            defaults: defaults,
+            key: Keys.accountPreferences,
+            criticality: .preference
+        )
+        self.preferences = persistence.load(defaultValue: [:]).value
     }
 
     // MARK: - Public Methods
@@ -105,13 +102,16 @@ final class AccountPreferencesStore {
     // MARK: - Private Methods
 
     private func update(_ accountID: AccountID, _ mutate: (inout AccountPreference) -> Void) {
-        var preference = preferences[accountID.rawValue] ?? AccountPreference()
+        var candidate = preferences
+        var preference = candidate[accountID.rawValue] ?? AccountPreference()
         mutate(&preference)
 
         // Drop empty entries rather than persisting placeholders.
-        preferences[accountID.rawValue] = preference.isEmpty ? nil : preference
-
-        save()
+        candidate[accountID.rawValue] = preference.isEmpty ? nil : preference
+        if persistence.save(candidate) {
+            preferences = candidate
+            NotificationCenter.default.post(AccountPreferencesDidChange())
+        }
     }
 
     /// Trims whitespace and treats an empty result as "not set".
@@ -119,55 +119,6 @@ final class AccountPreferencesStore {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return nil }
         return trimmed
-    }
-
-    private func save() {
-        guard writesAllowed else {
-            ThreadingLogger.session.error(
-                "Refusing to save account preferences: the unreadable previous value is still there"
-            )
-            return
-        }
-
-        do {
-            defaults.set(try JSONEncoder().encode(preferences), forKey: Keys.accountPreferences)
-            NotificationCenter.default.post(AccountPreferencesDidChange())
-        } catch {
-            // An encode that fails leaves the stored value alone, which is the right outcome —
-            // but silently returning made an edit that never landed look exactly like one that
-            // did, so the emoji reverted on the next launch with nothing to explain it.
-            ThreadingLogger.session.error(
-                "Could not save account preferences: \(error.localizedDescription, privacy: .public)"
-            )
-        }
-    }
-
-    /// Missing and unreadable are different answers.
-    ///
-    /// Both used to return an empty dictionary, and the next customisation then wrote *that*
-    /// over the stored blob — so a user whose preferences failed to decode lost every account
-    /// emoji and name they had set, permanently, the first time they changed one. The unreadable
-    /// case is now kept aside and only then overwritten; see `DefaultsQuarantine`.
-    private static func load(
-        from defaults: UserDefaults
-    ) -> (preferences: [String: AccountPreference], writesAllowed: Bool) {
-        guard let data = defaults.data(forKey: Keys.accountPreferences) else {
-            return ([:], true)
-        }
-
-        guard let decoded = try? JSONDecoder().decode(
-            [String: AccountPreference].self,
-            from: data
-        ) else {
-            let quarantined = DefaultsQuarantine.quarantine(
-                data,
-                forKey: Keys.accountPreferences,
-                in: defaults
-            )
-            return ([:], quarantined)
-        }
-
-        return (decoded, true)
     }
 
     // MARK: - Keys

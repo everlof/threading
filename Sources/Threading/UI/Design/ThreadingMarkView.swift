@@ -110,6 +110,10 @@ enum ThreadingMarkGeometry {
 /// every redraw exactly as `ThemedSpinner`'s are, because a shape layer's `strokeColor` is a
 /// frozen `CGColor` — see that view for the rule.
 ///
+/// Three gestures, one geometry: it stitches itself in once at launch, lifts under the pointer,
+/// and turns a sixth of a circle when pressed. The host says when — `SidebarBrandView` tracks
+/// the whole brand row, because a 24pt logo is too small a thing to ask a pointer to find.
+///
 /// Ink follows the same split the Dock icon draws: under the identity theme the mark wears the
 /// brand's own thread-oranges, because System *is* the brand's home dress; under a style it
 /// takes the theme's accent held legible against the sidebar's ground, so Cyberpunk's sidebar
@@ -126,6 +130,22 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         /// The sidebar brand slot. A `ThreadingMarkView` is always square; hosts that want
         /// another size constrain it themselves.
         static let defaultSide: CGFloat = 20
+
+        /// Used only before the view has a window or a screen to ask. Retina rather than 1x
+        /// because guessing low is the case that ships blurry.
+        static let assumedBackingScale: CGFloat = 2
+
+        /// How far the mark lifts under the pointer.
+        static let hoverScale: CGFloat = 1.08
+        /// How far the core swells inside that lift, so the knot reads as catching the light
+        /// rather than the whole logo simply being bigger.
+        static let hoverCoreScale: CGFloat = 1.3
+        /// The dip a press takes before the turn — the tug before the thread moves.
+        static let pressScale: CGFloat = 0.9
+        /// One strand-step. The mark has six-fold symmetry, so a turn of exactly this lands
+        /// the shield, all six strands and the core back on themselves: the eye reads a notch
+        /// turning, and nothing is left rotated when the animation is removed.
+        static let pressTurn: CGFloat = .pi / 3
     }
 
     /// The brand's own threads, for the identity theme. sRGB restatements of
@@ -144,6 +164,13 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     private var strands: [CAShapeLayer] = []
     private let core = CAShapeLayer()
     private var themeRedraw: ThemeRedraw?
+    /// Whether the mark is currently held lifted, so a press knows what it is scaling from and
+    /// a repeated enter does not re-trigger the core's one beat.
+    private var isHovered = false
+
+    /// Every layer the mark is made of, in draw order. The animations move all of them
+    /// together, so the one list is what stops a new part being left behind by a turn.
+    private var shapes: [CAShapeLayer] { [outline] + strands + [core] }
 
     // MARK: - Initialization
 
@@ -166,6 +193,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         }
 
         layer?.addSublayer(core)
+        applyContentsScale()
 
         themeRedraw = ThemeRedraw(self)
     }
@@ -180,6 +208,31 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     }
 
     override func isAccessibilityElement() -> Bool { false }
+
+    // MARK: - Backing Store
+
+    /// A shape layer added by hand does not inherit its host view's `contentsScale` — only the
+    /// backing layer AppKit makes for the view is given one. So every one of these rasterised
+    /// its path at 1x and had the compositor scale it up, which on a Retina display is exactly
+    /// the soft, half-a-point-of-fuzz mark this was reported as: a 1.1pt stroke drawn at 1x
+    /// and enlarged is a two-pixel grey smear rather than a line.
+    ///
+    /// Re-asked rather than set once, because the answer changes when the window moves between
+    /// displays of different scales — the same rule `ThemeRedraw` follows for ink.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyContentsScale()
+    }
+
+    private func applyContentsScale() {
+        let scale = window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? Layout.assumedBackingScale
+        layer?.contentsScale = scale
+        for shape in shapes {
+            shape.contentsScale = scale
+        }
+    }
 
     // MARK: - Layout & Drawing
 
@@ -272,6 +325,98 @@ final class ThreadingMarkView: NSView, ThemedComponent {
             core.bounds = core.bounds
         }
         core.add(pop, forKey: "drawIn")
+    }
+
+    // MARK: - Pointer Animation
+
+    /// The pointer arriving: the mark lifts a little, and the core swells once inside the lift.
+    ///
+    /// The lift is a *model* change, so it holds for as long as the pointer is over the row and
+    /// settles back on its own; only the core's swell is a beat. That split is what keeps a slow
+    /// pass across the sidebar from reading as the logo inflating — the thing that moves twice
+    /// is the knot, and it does it once.
+    func setHovered(_ hovered: Bool) {
+        guard !Design.Motion.reducesMotion, hovered != isHovered else { return }
+        isHovered = hovered
+        layoutSubtreeIfNeeded()
+
+        let scale = hovered ? Layout.hoverScale : 1
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(Design.Motion.quick)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        for shape in shapes {
+            shape.transform = CATransform3DMakeScale(scale, scale, 1)
+        }
+        CATransaction.commit()
+
+        guard hovered else {
+            // The pointer has left; a swell still in flight would go on pulsing a mark that has
+            // already settled, and land on the lifted scale it was written against.
+            core.removeAnimation(forKey: "hover")
+            return
+        }
+        core.add(
+            keyframe(
+                [pose(scale), pose(scale * Layout.hoverCoreScale), pose(scale)],
+                at: [0, 0.45, 1],
+                over: Design.Motion.standard
+            ),
+            forKey: "hover"
+        )
+    }
+
+    /// The press: one strand-step of turn, with a tug at the start.
+    ///
+    /// A sixth of a turn is the only rotation this mark can make and still be itself — see
+    /// `Layout.pressTurn` — so the gesture reads as a notch snapping over rather than a logo
+    /// spinning, and the model value never has to move: when the animation is removed the mark
+    /// is already exactly where the turn left it.
+    func playPress() {
+        guard !Design.Motion.reducesMotion else { return }
+        layoutSubtreeIfNeeded()
+
+        let scale = isHovered ? Layout.hoverScale : 1
+        // Stated as whole transforms rather than as two animations on `transform.rotation.z`
+        // and `transform.scale`: those are sub-properties of one property, and two animations
+        // arguing over it is how a turn comes out either flat or unscaled.
+        let press = keyframe(
+            [
+                pose(scale),
+                pose(scale * Layout.pressScale, turn: -Layout.pressTurn * 0.2),
+                pose(scale, turn: -Layout.pressTurn)
+            ],
+            at: [0, 0.3, 1],
+            over: Design.Motion.brandStrandDraw
+        )
+
+        for shape in shapes {
+            shape.add(press, forKey: "press")
+        }
+    }
+
+    /// One frame of a pointer animation: a scale about the mark's centre, then a turn about it.
+    private func pose(_ scale: CGFloat, turn: CGFloat = 0) -> NSValue {
+        NSValue(caTransform3D: CATransform3DRotate(
+            CATransform3DMakeScale(scale, scale, 1),
+            turn,
+            0, 0, 1
+        ))
+    }
+
+    private func keyframe(
+        _ poses: [NSValue],
+        at times: [NSNumber],
+        over duration: TimeInterval
+    ) -> CAKeyframeAnimation {
+        let animation = CAKeyframeAnimation(keyPath: "transform")
+        animation.values = poses
+        animation.keyTimes = times
+        animation.duration = duration
+        animation.timingFunctions = Array(
+            repeating: CAMediaTimingFunction(name: .easeInEaseOut),
+            count: max(0, poses.count - 1)
+        )
+        return animation
     }
 
     private func addStrokeIn(to shape: CAShapeLayer, beginTime: CFTimeInterval, duration: TimeInterval) {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Everything needed to locate one root conversation's durable Claude child index.
-struct ClaudeSubagentTranscriptPlan {
+struct ClaudeSubagentTranscriptPlan: Sendable {
     let rootThreadID: String
     let directory: URL
 }
@@ -19,7 +19,7 @@ enum ClaudeSubagentTranscriptReplay {
 
     static func loadIndex(
         plan: ClaudeSubagentTranscriptPlan,
-        completion: @escaping ([SubagentEvent]) -> Void
+        completion: @escaping @MainActor @Sendable ([SubagentEvent]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let events = index(
@@ -32,7 +32,9 @@ enum ClaudeSubagentTranscriptReplay {
 
     static func loadConversation(
         at url: URL,
-        completion: @escaping (_ events: [StreamEvent], _ isTruncated: Bool) -> Void
+        completion: @escaping @MainActor @Sendable (
+            _ events: [StreamEvent], _ isTruncated: Bool
+        ) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let replay = readConversation(at: url)

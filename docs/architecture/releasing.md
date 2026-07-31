@@ -34,6 +34,17 @@ development-signed bundle carrying `get-task-allow`. That is fine — it is not 
 anyone ships — but it means "did the entitlement change work?" cannot be answered by looking at
 a local Release build. See [`permissions.md`](permissions.md).
 
+Before signing, the release script runs the same `scripts/ci.sh` gate as GitHub Actions:
+architecture/localization/theme boundaries, SwiftLint, the three local package suites, and the
+off-screen app test plan under complete concurrency checking. A deliberate emergency run may
+set `THREADING_SKIP_RELEASE_CHECKS=1`; skipping is never the default. Notarization additionally
+requires a clean worktree, so the exported bundle always corresponds to reviewable source.
+
+Archive and export output is captured in `build/release/archive.log` and `export.log`. Their real
+exit statuses are checked before any bundle-existence test. Do not pipe `xcodebuild` through
+`grep … || true`: Xcode can create an archive directory before a later build phase fails, and a
+mere directory check would then let a broken or stale artefact advance to signing.
+
 ## The version is injected, not committed
 
 Sparkle compares `CFBundleVersion`, so it has to increase per release. Threading's version fields

@@ -24,20 +24,23 @@ final class UsageHistoryStore {
     /// Samples per `accountID|windowID`, oldest first.
     private var samples: [String: [UsageSample]] = [:]
 
-    private let storeURL: URL
-    private let fileManager: FileManager
+    private let persistence: RecoverableFileStore<[String: [UsageSample]]>
 
     // MARK: - Initialization
 
     init(directory: URL? = nil, fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-
         let root = directory ?? fileManager
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
 
-        self.storeURL = root.appendingPathComponent(UsageHistoryDefaults.fileName)
-        load()
+        self.persistence = RecoverableFileStore(
+            url: root.appendingPathComponent(UsageHistoryDefaults.fileName),
+            fileManager: fileManager,
+            criticality: .rebuildableCache,
+            dateEncodingStrategy: .iso8601,
+            dateDecodingStrategy: .iso8601
+        )
+        self.samples = persistence.load(defaultValue: [:]).value
     }
 
     // MARK: - Public Methods
@@ -113,29 +116,8 @@ final class UsageHistoryStore {
         return Array(recent.suffix(UsageHistoryDefaults.maximumSamples))
     }
 
-    private func load() {
-        guard let data = try? Data(contentsOf: storeURL) else { return }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        samples = (try? decoder.decode([String: [UsageSample]].self, from: data)) ?? [:]
-    }
-
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-
-        do {
-            try fileManager.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try encoder.encode(samples).write(to: storeURL, options: .atomic)
-        } catch {
-            ThreadingLogger.agent.error(
-                "Could not save usage history: \(error.localizedDescription, privacy: .public)"
-            )
-        }
+        _ = persistence.save(samples)
     }
 }
 

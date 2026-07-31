@@ -1,6 +1,6 @@
 import Foundation
 
-struct PlaywrightAutomationOutput {
+struct PlaywrightAutomationOutput: Sendable {
     let text: String
     let screenshotPNG: Data?
     let succeeded: Bool
@@ -11,7 +11,7 @@ struct PlaywrightAutomationOutput {
 /// Playwright and its browser binaries are intentionally not downloaded by Threading. The backend
 /// uses a local installation when present and otherwise returns one actionable installation
 /// command. This keeps the signed-in WKWebView surface independent from a large test runtime.
-final class PlaywrightAutomationRunner {
+final class PlaywrightAutomationRunner: Sendable {
     static let maximumRequestBytes = 256 * 1_024
     static let maximumResponseBytes = 4 * 1_024 * 1_024
     static let maximumScreenshotBytes = 24 * 1_024 * 1_024
@@ -36,11 +36,11 @@ final class PlaywrightAutomationRunner {
 
     func run(
         _ arguments: BrowserIsolatedRunArguments,
-        completion: @escaping (PlaywrightAutomationOutput) -> Void
+        completion: @escaping @MainActor @Sendable (PlaywrightAutomationOutput) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             let output = runSynchronously(arguments)
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 completion(output)
             }
         }
