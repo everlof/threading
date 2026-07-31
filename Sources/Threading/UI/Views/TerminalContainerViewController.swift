@@ -1,9 +1,10 @@
 import AppKit
 
-/// Hosts the terminal for whichever session is selected in the sidebar.
+/// Hosts whichever chat or standalone terminal is selected in the sidebar.
 ///
-/// Live session controllers are retained by `AgentRuntime`, so switching selection swaps
-/// views without restarting agents or losing scrollback.
+/// Live chat controllers are retained by `AgentRuntime` and standalone terminals by
+/// `ProjectTerminalRuntime`, so switching selection swaps views without restarting processes
+/// or losing scrollback.
 final class TerminalContainerViewController: NSViewController {
 
     // MARK: - Properties
@@ -16,6 +17,14 @@ final class TerminalContainerViewController: NSViewController {
 
     private var currentChild: AgentSessionViewController?
     private var currentConversation: ConversationViewController?
+    private var currentProjectTerminal: ProjectTerminalViewController?
+    private(set) var currentTerminalID: TerminalID?
+
+    /// The terminal surface currently accepting terminal commands, whether it belongs to a
+    /// chat or is a standalone project terminal.
+    var activeTerminalSession: TerminalSession? {
+        currentProjectTerminal?.session ?? currentChild?.session
+    }
 
     /// The one authoritative answer to which session is on screen.
     ///
@@ -136,6 +145,15 @@ final class TerminalContainerViewController: NSViewController {
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.refreshGitStatusOverlayModel()
         }
+        // Who is watching moves on its own clock — a phone picked up, a browser tab closed —
+        // and only the chat on screen is worth redrawing for.
+        appEvents.observe(SessionFollowersDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.currentSessionID else { return }
+            self?.refreshGitStatusOverlayAudience()
+        }
+        appEvents.observe(SessionSharingDidChange.self) { [weak self] _ in
+            self?.refreshGitStatusOverlayAudience()
+        }
     }
 
     /// Repaints the pane behind whatever surface is on screen after a theme change.
@@ -149,7 +167,11 @@ final class TerminalContainerViewController: NSViewController {
     /// showing left the pane on the previous theme's colour. Those surfaces are the app's own
     /// chrome, so they take the app theme's ground.
     private func themeDidChange() {
-        if currentChild != nil || currentConversation != nil {
+        if let currentTerminalID {
+            applyPaneBackground(.terminal(
+                ThemeAssignments.theme(forTerminal: currentTerminalID).background
+            ))
+        } else if currentChild != nil || currentConversation != nil {
             applyPaneBackground(.terminal(ThemeAssignments.theme(for: currentSessionID).background))
         } else {
             applyPaneBackground(.chrome)
@@ -261,11 +283,13 @@ final class TerminalContainerViewController: NSViewController {
         ])
     }
 
-    /// Shows the composer for a project, replacing whatever session was on screen.
-    func showComposer(projectID: ProjectID) {
+    /// Shows the composer for a project — or for none, the choose-a-project mode a store with
+    /// no projects opens onto — replacing whatever session was on screen.
+    func showComposer(projectID: ProjectID?) {
         detachCurrentChild()
         currentComposerProjectID = projectID
         currentSettingsPageID = nil
+        currentTerminalID = nil
         currentSessionID = nil
 
         // A shell belongs to a conversation; neither the composer nor a settings page is one, and
@@ -300,6 +324,7 @@ final class TerminalContainerViewController: NSViewController {
         detachCurrentChild()
         currentComposerProjectID = projectID
         currentSettingsPageID = nil
+        currentTerminalID = nil
         currentSessionID = nil
         applyDrawer(for: nil)
 
@@ -338,6 +363,7 @@ final class TerminalContainerViewController: NSViewController {
 
         if settingsPage == nil {
             detachCurrentChild()
+            currentTerminalID = nil
             currentSessionID = nil
             placeholderView.isHidden = true
             composerViewController.view.isHidden = true
@@ -524,9 +550,11 @@ final class TerminalContainerViewController: NSViewController {
     /// Selecting a dormant session is the "reopen" gesture: it resumes the prior
     /// conversation by identifier rather than starting a fresh one.
     func show(sessionID: SessionID?, initialPrompt: String? = nil) {
-        guard sessionID != currentSessionID || settingsPage != nil else { return }
+        guard sessionID != currentSessionID || settingsPage != nil || currentTerminalID != nil
+        else { return }
 
         detachCurrentChild()
+        currentTerminalID = nil
         currentComposerProjectID = nil
         currentSettingsPageID = nil
         applyDrawer(for: sessionID)
@@ -572,6 +600,30 @@ final class TerminalContainerViewController: NSViewController {
         }
     }
 
+    /// Shows a first-class project terminal, starting a fresh shell only when no process is
+    /// currently retained for it.
+    func show(terminalID: TerminalID) {
+        guard terminalID != currentTerminalID || settingsPage != nil else { return }
+
+        detachCurrentChild()
+        currentComposerProjectID = nil
+        currentSettingsPageID = nil
+        currentSessionID = nil
+        applyDrawer(for: nil)
+
+        guard let terminal = ProjectStore.shared.terminal(withID: terminalID) else {
+            currentTerminalID = nil
+            showEmptyState()
+            return
+        }
+
+        let controller = ProjectTerminalRuntime.shared.makeController(for: terminal)
+        controller.delegate = self
+        currentTerminalID = terminalID
+        attachProjectTerminal(controller)
+        controller.startIfNeeded()
+    }
+
     /// Relaunches the currently shown session, used by the dormant placeholder's button.
     func resumeCurrentSession() {
         guard let sessionID = currentSessionID else { return }
@@ -605,6 +657,14 @@ final class TerminalContainerViewController: NSViewController {
         showDormantState(for: sessionID)
     }
 
+    func closeTerminal(for terminalID: TerminalID) {
+        ProjectTerminalRuntime.shared.discard(terminalID: terminalID)
+        guard terminalID == currentTerminalID else { return }
+        detachCurrentChild()
+        currentTerminalID = nil
+        showEmptyState()
+    }
+
     // MARK: - Private Methods
 
     private func attach(_ controller: AgentSessionViewController) {
@@ -631,6 +691,24 @@ final class TerminalContainerViewController: NSViewController {
         refreshGitStatusOverlayRunState()
         refreshGitStatusOverlaySubagents()
         controller.focusTerminal()
+    }
+
+    private func attachProjectTerminal(_ controller: ProjectTerminalViewController) {
+        addChild(controller)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(controller.view, positioned: .below, relativeTo: gitStatusOverlay)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: contentTopAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+
+        currentProjectTerminal = controller
+        placeholderView.isHidden = true
+        composerViewController.view.isHidden = true
+        applyPaneBackground(.terminal(controller.paneBackgroundColor))
+        controller.focus()
     }
 
     /// Installs the native conversation view for a session, launching it on first show.
@@ -681,9 +759,10 @@ final class TerminalContainerViewController: NSViewController {
         // A conversation outlives its time on screen — `AgentRuntime` keeps it for a dormant
         // session — and the theme sweep walks *windows*, so a detached surface is in none. Its
         // layer colours and its labels' fonts both freeze at assignment, so one returning after
-        // a theme switch would come back wearing the theme it left under. Re-resolving on attach
-        // is the same sweep, scoped to the tree that missed it.
-        AppThemeRefresh.repaint(conversation.view)
+        // a theme switch would come back wearing the theme it left under. The refresh generation
+        // keeps that repair while making an ordinary hot switch O(1) instead of walking every
+        // retained row again.
+        AppThemeRefresh.repaintIfNeeded(conversation.view)
 
         // A native conversation has no terminal, but it should read like one: the backdrop is
         // its resolved terminal theme's background, so it — and the sidebar sampling it — match a
@@ -748,6 +827,12 @@ final class TerminalContainerViewController: NSViewController {
             currentConversation = nil
         }
 
+        if let terminal = currentProjectTerminal {
+            terminal.view.removeFromSuperview()
+            terminal.removeFromParent()
+            currentProjectTerminal = nil
+        }
+
         guard let child = currentChild else { return }
         child.view.removeFromSuperview()
         child.removeFromParent()
@@ -755,8 +840,16 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     private func showEmptyState() {
+        // With no projects at all, the empty pane *is* the way in: the composer in its
+        // choose-a-project mode, not a placeholder describing where else to click.
+        guard !ProjectStore.shared.projects.isEmpty else {
+            showComposer(projectID: nil)
+            return
+        }
+
         currentComposerProjectID = nil
         currentSettingsPageID = nil
+        currentTerminalID = nil
         composerViewController.view.isHidden = true
         placeholderView.isHidden = false
         applyPaneBackground(.chrome)
@@ -774,6 +867,36 @@ final class TerminalContainerViewController: NSViewController {
             guard let self else { return }
             self.delegate?.terminalContainerDidRequestNewSession(self)
         }
+    }
+
+    private func showDormantTerminalState(for terminalID: TerminalID) {
+        guard let terminal = ProjectStore.shared.terminal(withID: terminalID) else {
+            showEmptyState()
+            return
+        }
+
+        composerViewController.view.isHidden = true
+        placeholderView.isHidden = false
+        applyPaneBackground(.chrome)
+        placeholderView.configure(
+            symbolName: "terminal",
+            title: L10n.format("%@ ended", terminal.displayTitle),
+            detail: L10n.string("Start a fresh shell in its last working directory."),
+            actionTitle: L10n.string("Start Again")
+        )
+        placeholderView.onAction = { [weak self] in
+            self?.resumeCurrentTerminal()
+        }
+    }
+
+    private func resumeCurrentTerminal() {
+        guard let terminalID = currentTerminalID,
+              let terminal = ProjectStore.shared.terminal(withID: terminalID) else { return }
+        detachCurrentChild()
+        let controller = ProjectTerminalRuntime.shared.makeController(for: terminal)
+        controller.delegate = self
+        attachProjectTerminal(controller)
+        controller.startIfNeeded()
     }
 
     private func showDormantState(for sessionID: SessionID) {
@@ -832,6 +955,9 @@ private extension TerminalContainerViewController {
         gitStatusOverlay.onOpenSubagents = { [weak self] in
             self?.openSubagents()
         }
+        gitStatusOverlay.onOpenSharing = { [weak self] in
+            self?.openSharing()
+        }
         addOverlay(gitStatusOverlay)
 
         NSLayoutConstraint.activate([
@@ -855,6 +981,7 @@ private extension TerminalContainerViewController {
         gitStatusOverlay.showSession(currentSessionID?.uuidString.lowercased())
         refreshGitStatusOverlaySubagents()
         refreshGitStatusOverlayModel()
+        refreshGitStatusOverlayAudience()
 
         guard let sessionID = currentSessionID,
               let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
@@ -904,6 +1031,21 @@ private extension TerminalContainerViewController {
             isActive: currentConversation?.isTurnInFlight ?? false,
             progress: currentConversation?.runProgress
         )
+    }
+
+    /// Says whether anyone outside this Mac can see the chat on screen, and how many are looking.
+    ///
+    /// Both halves are cheap main-actor reads — a dictionary of live sockets and a dictionary of
+    /// shares — so this is called from every event that could move either rather than polled.
+    func refreshGitStatusOverlayAudience() {
+        guard let sessionID = currentSessionID, AppSettings.shared.remoteAccessEnabled else {
+            gitStatusOverlay.updateAudience(GitStatusOverlayView.AudienceReading())
+            return
+        }
+        gitStatusOverlay.updateAudience(GitStatusOverlayView.AudienceReading(
+            following: RemoteSessionMirrorRegistry.shared.followers(of: sessionID).count,
+            isShared: RemoteAccessCoordinator.shared.hasSessionShares(sessionID)
+        ))
     }
 
     /// Projects the provider-neutral hierarchy into the compact receipt beside Git status.
@@ -1031,6 +1173,10 @@ private extension TerminalContainerViewController {
         selectSubagent(candidate.descriptor.threadID)
     }
 
+    private func openSharing() {
+        delegate?.terminalContainerDidRequestSharing(self)
+    }
+
 }
 
 extension TerminalContainerViewController {
@@ -1140,6 +1286,24 @@ extension TerminalContainerViewController {
                 state: state,
                 sessionID: sessionID
             )
+        }
+    }
+}
+
+// MARK: - ProjectTerminalViewControllerDelegate
+
+extension TerminalContainerViewController: ProjectTerminalViewControllerDelegate {
+    func projectTerminalDidChangeRunningState(_ controller: ProjectTerminalViewController) {
+        guard controller.terminalID == currentTerminalID, !controller.isRunning else { return }
+
+        // SwiftTerm reports process termination inside its delegate stack. Swap surfaces on the
+        // next turn so the terminal finishes unwinding before its view leaves the hierarchy.
+        DispatchQueue.main.async { [weak self, weak controller] in
+            guard let self, let controller,
+                  controller.terminalID == self.currentTerminalID,
+                  !controller.isRunning else { return }
+            self.detachCurrentChild()
+            self.showDormantTerminalState(for: controller.terminalID)
         }
     }
 }
@@ -1262,6 +1426,8 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     )
     /// The Git portion of the floating session status card was clicked.
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController)
+    /// Its audience row was clicked: open who can reach this chat and who is on it.
+    func terminalContainerDidRequestSharing(_ container: TerminalContainerViewController)
     /// A turn's changed-files card asked for its diff; the window opens the review tab on
     /// the Last Turn scope.
     func terminalContainerDidRequestTurnDiff(_ container: TerminalContainerViewController)

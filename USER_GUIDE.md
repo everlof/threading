@@ -3,6 +3,28 @@
 A native macOS app for organizing coding-agent sessions. Projects live in a sidebar on the
 left; the selected session's terminal fills the pane on the right.
 
+## First Launch
+
+A fresh install opens a short walkthrough instead of the main window — four pages, all
+optional beyond the first click:
+
+1. **Appearance** — pick the app's look from every built-in theme. The walkthrough itself
+   restyles the moment you click a tile, and everything is changeable later under
+   **Settings ▸ Themes**.
+2. **Accounts** — the Claude Code and Codex logins found on this Mac, and whether the
+   `claude`/`codex` commands are actually reachable from your shell; a missing one shows the
+   install command instead of failing later inside a terminal.
+3. **Conversations** — chats you already have on disk, grouped by the folder they ran in,
+   with the last two days pre-checked. Importing creates the matching projects and adopts the
+   checked conversations so they resume in place; **Skip for now** leaves everything where it
+   is — each project's composer offers the same import later.
+4. **Notifications** — what Threading would notify about, disabled until you press **Enable
+   notifications** and macOS asks its own question. Skipping is fine: Threading will ask the
+   first time there is genuinely something to say.
+
+Closing the walkthrough quits the app and it returns on the next launch; finishing it opens
+the main window. Run it again anytime from **Settings ▸ Advanced ▸ Welcome Tour**.
+
 ## Layout
 
 One window. The sidebar runs the full height on the left, listing projects and their sessions.
@@ -27,6 +49,9 @@ the current branch shown beneath.
 **Session** — one Claude Code or Codex conversation running inside a project. A session
 outlives its terminal: when the agent exits, the terminal closes but the session stays in the
 sidebar so you can resume the same conversation later.
+
+**Terminal** — a standalone shell in the sidebar, for work that does not belong to a chat. Its
+row, name, directory, branch and theme survive relaunch; its process and scrollback do not.
 
 **Account** — a distinct agent login. If you have more than one, each is offered separately
 when creating a session. See [Accounts](#accounts).
@@ -80,9 +105,9 @@ The branch is re-read whenever a session finishes working, so an agent switching
 reflected the next time you hover, without you refreshing anything.
 
 ### Grouping sessions by branch
-Within a project, sessions that ran on the same branch gather under a quiet branch heading.
-A heading first appears when some branch has more than one session — and from that moment
-every session with a recorded branch gets one, so the tree is either fully flat or fully
+Within a project, chats and standalone terminals on the same branch gather under a quiet branch
+heading. A heading first appears when some branch has more than one row — and from that moment
+every row with a recorded branch gets one, so the tree is either fully flat or fully
 labelled, never a heading beside a bare row whose branch you cannot see:
 
 ```
@@ -224,8 +249,9 @@ minute old. A count honours `.gitignore`, skips minified and generated files, an
 while a session in the project is working.
 
 ### Managing
-**Hover a project row** — a **⋯** fades in at its trailing edge, opening the project's
-actions. The same menu is on **right-click**. Either way it offers:
+**Hover a project row** — a **+** and **⋯** fade in at its trailing edge. The **+** asks for
+**New Chat…** or **New Terminal**; clicking the project row itself still opens the chat
+composer. The **⋯** opens the project's actions, also available on **right-click**:
 - Rename Project…
 - Reveal in Finder
 - Project Icon — see [Project icons](#project-icons)
@@ -234,7 +260,7 @@ actions. The same menu is on **right-click**. Either way it offers:
 - Remove Project — removes it from the sidebar only; saved conversations are never deleted
 
 Click the disclosure triangle to collapse a project. Expansion state is remembered, and a
-collapsed project shows how many sessions it is hiding as a count at its trailing edge.
+collapsed project shows how many chats and terminals it is hiding as a count at its trailing edge.
 
 ## Sessions
 
@@ -247,6 +273,18 @@ it is the only way to create one:
 - **New Session** on the empty pane — when no session is selected, the pane offers the same
   route Cmd+N takes
 
+The composer sits at the **bottom of the pane**, the way a chat input does, and the room above
+it holds the Threading mark over a greeting that changes as you move between projects — it
+knows the time of day and the calendar, and only sometimes says so.
+
+**The first chip is the project itself.** Its menu lists every project (with its folder), so a
+conversation can change its mind about where it runs before it starts — and at the bottom sit
+**Add Existing Folder…** and **Create New Folder…**, the same actions the sidebar's + offers.
+With no projects at all, the empty pane shows this composer directly with the chip reading
+**Choose a project…**: type your task first if you like, pick the folder second — the words
+follow the composer into the project you choose. Start stays disabled until there is somewhere
+to run.
+
 **The prompt is focused the moment the composer appears**, however you got there, so the
 first message can be typed straight away without clicking the field. If a draft is waiting,
 the caret lands at the end of it — typing continues the sentence rather than cutting in front
@@ -257,8 +295,8 @@ account, model, and which checkout it runs in — and the menu items that used t
 outright answered all four with defaults you never saw. The composer asks, and it is replaced
 by the conversation the moment you send the first message, so it costs nothing to pass through.
 
-The chips choose the agent, account, model and, in a git repository, **which checkout it runs
-in**. Beneath them, the chosen account's rate limits are drawn in full — see
+The remaining chips choose the agent, account, model and, in a git repository, **which
+checkout it runs in**. Beneath them, the chosen account's rate limits are drawn in full — see
 [Usage when picking an account](#usage-when-picking-an-account).
 
 Every chip's dropdown is Threading's own menu, and it tracks like a menu should: click to open
@@ -480,6 +518,20 @@ Resuming works by session id:
 
 Claude Code accepts an id chosen up front, so Threading assigns one. Codex assigns its own,
 which Threading reads back from the rollout file Codex writes on launch.
+
+### Standalone terminals
+
+Choose **New Terminal** from a project's hover **+** to add a terminal row and start its shell.
+The process stays alive while you visit other chats or terminals, preserving cwd, history and
+scrollback for the app launch. Exit leaves a dormant row; select it and choose **Start Again**
+to open a fresh shell in its last directory. Closing the row ends the process and removes its
+saved terminal record.
+
+As the shell changes directory, its row follows the most specific already-added project folder
+that contains that cwd in the same git worktree. It moves beneath that project's current branch
+heading too. Moving somewhere unrelated leaves it under the project where it was created. A
+terminal-specific theme wins first; otherwise it inherits from the project it is currently
+shown under, then from the app default.
 
 ### The shell drawer
 
@@ -1288,10 +1340,12 @@ When exact browser or device conditions exceed the visible WebKit browser, the s
 Playwright tool can run a fresh Chromium, Firefox, or WebKit context without importing the live
 tab's cookies or credentials.
 
-Use **Annotate Page** to place numbered notes directly over what you are reviewing. While
-annotation mode is on, the component under the pointer is outlined and named — `button "Sign in"`,
-`link "Docs"` — so you can see what a pin is about to land on before you click; pointing at the
-word inside a button highlights the button, not the word. Notes stay in
+Use **Annotate Page** to place numbered notes directly over what you are reviewing. While the mode
+is on the browser frames itself in the accent colour and shows an **Annotating** badge in its
+bottom-left corner, so it is obvious that a click will leave a note rather than follow a link — press
+Esc or the toolbar button to leave. The component under the pointer is outlined and named —
+`button "Sign in"`, `link "Docs"` — so you can see what a pin is about to land on before you click;
+pointing at the word inside a button highlights the button, not the word. Notes stay in
 Threading's native UI rather than entering the page DOM, so the site cannot read or alter them.
 Click an existing pin while annotation mode is active to edit or delete it. The agent can read the
 notes for the currently authorized page with their document-space coordinates, clearly labelled as
@@ -1538,13 +1592,25 @@ marked, and the report text:
   origin, what AppKit code speaks) and from the top-left (how anyone reading the screenshot
   counts).
 
-The sheet also holds a **note field**: whatever you type there leads the copied text, so
-"make this padding smaller" arrives above the evidence for it. Return in the field copies.
+Above the captured details is the **description**: whatever you type there leads the copied
+text and the filed issue, so "make this padding smaller" arrives above the evidence for it. It
+opens several lines tall — **Return adds a line, ⌘Return submits the issue**.
 
-**Copy Report** puts the text on the clipboard as markdown. The screenshot is referenced by
-its file path (saved under the temporary directory), because a path is the one form of an
-image the agent CLIs can act on — so the pasted report lets an agent read the hierarchy *and*
-open the picture.
+Two things to do with a capture:
+
+- **Copy Report** puts the text on the clipboard as markdown. The screenshot is referenced by
+  its file path (saved under the temporary directory), because a path is the one form of an
+  image the agent CLIs can act on — so the pasted report lets an agent read the hierarchy *and*
+  open the picture.
+- **Submit Issue** files it on Threading's GitHub, labelled `bug`, using whichever GitHub
+  sign-in this Mac has (Threading's own connection, `gh`, or your git credential helper — see
+  **Settings ▸ GitHub**). The issue opens in your browser when it is created, and **the
+  screenshot goes to the clipboard so ⌘V adds it to the issue**. GitHub's API takes markdown
+  and nothing else — image upload is a browser-only endpoint — so that keystroke is the whole
+  of the manual part.
+
+  With no sign-in at all, Submit Issue opens GitHub's own new-issue form with the title, body
+  and label already filled in, and your browser session files it.
 
 The screenshot is taken from Threading's own view tree, so it needs no Screen Recording
 permission and can never include another app's window. The one honest gap: content another
@@ -1592,14 +1658,15 @@ Configure terminal palettes in **Settings > Themes**:
 
 **Use as Default** sets the theme every terminal uses unless it has been given one of its own.
 
-#### Per-project and per-session themes
+#### Per-project, per-session and per-terminal themes
 
 A theme can be set at three levels, and the narrowest one wins:
 
 | Scope | Where to set it | Applies to |
 |---|---|---|
 | Session | The session row's `⋯` menu, or right-click ▸ **Theme** | That one terminal |
-| Project | The project row's `⋯` menu ▸ **Theme** | Every session in it that has no theme of its own |
+| Standalone terminal | The terminal row's `⋯` menu, or right-click ▸ **Theme** | That terminal |
+| Project | The project row's `⋯` menu ▸ **Theme** | Every chat or terminal shown in it that has no theme of its own |
 | Default | Settings ▸ Themes ▸ **Use as Default** | Everything else |
 
 Each menu's **Inherit** item clears that level's choice and names what it falls back to, so
@@ -1924,6 +1991,18 @@ and your macOS version, the way any download does — no identifier, and nothing
 projects. Switch it off under **Settings ▸ General ▸ Software Updates**; **Help ▸ Check for
 Updates…** still works when it is off, so turning off background traffic never means losing the
 ability to look.
+
+**Reporting something.** **Help ▸ Report a Problem…** files an issue on Threading's GitHub
+without leaving the app. Pick whether it is a **Problem** or an **Improvement** — that is the
+label the ticket arrives with — give it a title and the details, and press Submit; ⌘Return in
+the details field does the same. Three facts travel with it and they are named on screen before
+you send: Threading's version, its build, and your macOS version. Nothing else. The issue opens
+in your browser once it is filed, and if this Mac has no GitHub sign-in, the form opens
+prefilled instead so your browser session can file it.
+
+To report a *visual* problem, use **View ▸ Inspect Element** instead and press **Submit Issue**
+on the capture: the ticket then carries the view, its frame, the measured spacing and a
+screenshot ready to paste.
 
 **Getting help.** **Help ▸ Create Remote Support Report…** writes a file and reveals it in the
 Finder. It holds versions, counts, and which OS grants Threading has — no project or session

@@ -165,6 +165,59 @@ final class ThemedControlTests: XCTestCase {
         }
     }
 
+    // MARK: - Toggle Geometry
+
+    /// The knob's corner is derived from the track's rather than stated, so the accent gutter
+    /// between them is the same width on the flats as across the diagonals.
+    ///
+    /// Holding a radius of its own left `knobInset √2` at the corners against `knobInset` on the
+    /// flats — a wedge of track surviving at each knob corner. Invisible inside a full-width
+    /// gutter, and the whole of what was left of it once a focus ring was drawn *in* that gutter:
+    /// four accent specks around a knob that otherwise looked flush.
+    func testTheKnobsCornerIsConcentricWithTheTracks() {
+        let inset = ThemedToggle.Layout.knobInset
+        let knobDiameter = ThemedToggle.Layout.height - inset * 2
+
+        // A hard-cornered theme's 2pt track over a 2pt inset leaves a knob with no corner at all,
+        // which is what a uniform gutter costs — and what Bauhaus, Newsprint and Neo Brutalism
+        // want anyway.
+        XCTAssertEqual(
+            ThemedToggle.Layout.knobRadius(trackRadius: ThemedToggle.Layout.squareKnobRadius),
+            0, accuracy: 0.0001
+        )
+
+        // The rounded themes are unchanged: a stadium track still holds a disc, and still holds
+        // one all the way through the swell.
+        let stadium = ThemedToggle.Layout.height / 2
+        for step in 0...100 {
+            let phase = CGFloat(step) / 100
+            let grow = knobDiameter * (ThemedToggle.Motion.knobScale(at: phase) - 1) / 2
+            XCTAssertEqual(
+                ThemedToggle.Layout.knobRadius(trackRadius: stadium, grownBy: grow),
+                (knobDiameter + grow * 2) / 2,
+                accuracy: 0.0001,
+                "the knob stopped being a disc at phase \(phase)"
+            )
+        }
+    }
+
+    /// The switch reserves its own focus-ring margin, because drawing is clipped to `bounds` and
+    /// this is the one control with no slack inside its silhouette to lend a ring: the knob is
+    /// inset by exactly the ring's width.
+    func testTheSwitchReservesRoomOutsideTheTrackForItsFocusRing() {
+        let size = ThemedToggle().intrinsicContentSize
+        let horizontal = (size.width - ThemedToggle.Layout.width) / 2
+        let vertical = (size.height - ThemedToggle.Layout.height) / 2
+
+        XCTAssertEqual(horizontal, vertical, accuracy: 0.0001, "the margin is not square")
+        XCTAssertEqual(
+            vertical,
+            ThemedToggle.Layout.focusGap + Design.Accessibility.focusRingWidth,
+            accuracy: 0.0001,
+            "the ring is drawn into room the switch never asked for, so the clip takes it"
+        )
+    }
+
     // MARK: - Theming
 
     /// The whole point: the on-track is the theme's accent, not the system's. Sampled from the
@@ -3276,8 +3329,12 @@ final class ThemedControlTests: XCTestCase {
                 "BrowserFindBar",
                 "ChipView",
                 "FileActivityMapView",
+                "GlyphView",
                 "ImageCompareCanvas",
                 "ImageCompareView",
+                "MediaInspectorCanvas",
+                "MediaInspectorDocumentView",
+                "MediaInspectorView",
                 "MorphingTitleLabel",
                 "NavigatorGridItemView",
                 "PaneFooterView",
@@ -3295,6 +3352,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemeSwatchView",
                 "ThemedAlert",
                 "ThemedButton",
+                "ThemedCheckbox",
                 "ThemedClipView",
                 "ThemedControl",
                 "ThemedOutlineView",

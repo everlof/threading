@@ -139,7 +139,7 @@ enum SessionImporter {
     /// every turn, so `SessionNaming` reads them from the file's *tail* where the current pair
     /// sits. The opening message is the fallback until one exists. `cwd` sits on every record,
     /// so the front scan stops as soon as it has both of its answers.
-    private static func claudeInfo(at url: URL) -> (title: String?, cwd: String?) {
+    static func claudeInfo(at url: URL) -> (title: String?, cwd: String?) {
         var firstMessage: String?
         var cwd: String?
 
@@ -233,7 +233,7 @@ enum SessionImporter {
     /// The header cannot be read with a fixed byte cap: `session_meta` carries the session's
     /// instructions, so the record runs to tens of kilobytes and varies per project. Reading
     /// whole records and stopping after the first keeps this correct whatever its length.
-    private static func codexHeader(at url: URL) -> (id: TranscriptID, cwd: String)? {
+    static func codexHeader(at url: URL) -> (id: TranscriptID, cwd: String)? {
         var header: (id: TranscriptID, cwd: String)?
 
         JSONLReader.forEachRecord(at: url, limit: ImportDefaults.headerScanLimit) { record in
@@ -309,12 +309,12 @@ enum SessionImporter {
         return SessionNaming.promptTitle(from: raw)
     }
 
-    private static func modificationDate(of url: URL) -> Date {
+    static func modificationDate(of url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
             ?? .distantPast
     }
 
-    private static func normalized(_ path: String) -> String {
+    static func normalized(_ path: String) -> String {
         URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
     }
 }

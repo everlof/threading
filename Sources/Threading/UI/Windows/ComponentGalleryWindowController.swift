@@ -86,12 +86,19 @@ final class ComponentGalleryViewController: NSViewController {
         "BrowserFindBar",
         "ChipView",
         "FileActivityMapView",
+        "GlyphView",
         "ImageCompareCanvas",
         "ImageCompareView",
+        "MediaInspectorCanvas",
+        "MediaInspectorDocumentView",
+        "MediaInspectorView",
         "MorphingTitleLabel",
+        "NavigatorGridItemView",
         "PaneFooterView",
         "PaneHeaderView",
         "PromptView",
+        "SearchMatchLabel",
+        "SemanticSceneView",
         "SeparatorView",
         "ShortcutRecorderView",
         "SidebarBackdropView",
@@ -102,6 +109,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemeSwatchView",
         "ThemedButton",
         "ThemedAlert",
+        "ThemedCheckbox",
         "ThemedClipView",
         "ThemedControl",
         "ThemedOutlineView",
@@ -148,6 +156,16 @@ final class ComponentGalleryViewController: NSViewController {
     private let spinner = ThemedSpinner()
     private let workingOrbs = OrbState.allCases.map { WorkingOrbView(state: $0) }
     private let morphingTitle = MorphingTitleLabel()
+
+    /// The highlight story's field and the lines it marks, retained so typing re-marks them.
+    /// A search's answer is the one thing here that cannot be shown at rest: the component's
+    /// whole job is what a *query* does to a line, so the story hands the reader the query.
+    private let matchQueryField = ThemedSearchField()
+    private let matchSamples: [SearchMatchLabel] = [
+        SearchMatchLabel(role: .body),
+        SearchMatchLabel(role: .subheading, ink: { Design.Text.secondary }),
+        SearchMatchLabel(role: .code(), ink: { Design.Text.quaternary })
+    ]
 
     /// The tab strip's live model, so its story can be driven rather than looked at: closing
     /// and dragging mutate this and the strip re-renders from it, exactly as a host would.
@@ -412,6 +430,23 @@ final class ComponentGalleryViewController: NSViewController {
             labelledInline("Disabled", disabledToggle)
         ])
 
+        let checkbox = ThemedCheckbox(title: L10n.string("Include this one")) { [weak self] state in
+            self?.showReceipt(L10n.format(
+                "ThemedCheckbox is now %@.",
+                state == .on ? L10n.string("on") : L10n.string("off")
+            ))
+        }
+        let mixedCheckbox = ThemedCheckbox(
+            title: L10n.string("Some of these"),
+            state: .mixed
+        ) { _ in }
+        let disabledCheckbox = ThemedCheckbox(
+            title: L10n.string("Unavailable"),
+            state: .on
+        ) { _ in }
+        disabledCheckbox.isEnabled = false
+        let checkboxRow = row([checkbox, mixedCheckbox, disabledCheckbox])
+
         let segmented = ThemedSegmentedControl()
         let segmentTitles = [
             L10n.string("List"),
@@ -425,6 +460,23 @@ final class ComponentGalleryViewController: NSViewController {
                 segmentTitles[index]
             ))
         }
+
+        let navigatorCellLabel = NSTextField(
+            labelWithString: L10n.string("Navigator cell")
+        )
+        navigatorCellLabel.applyFont(.control)
+        navigatorCellLabel.textColor = Design.Text.label
+        let navigatorCell = NavigatorGridItemView(content: navigatorCellLabel)
+        navigatorCell.isSelected = true
+        navigatorCell.setAccessibilityLabel(
+            L10n.string("Selected navigator grid item.")
+        )
+        navigatorCell.onActivate = { [weak self, weak navigatorCell] in
+            navigatorCell?.isSelected.toggle()
+            self?.showReceipt(L10n.string("Activated the navigator grid item."))
+        }
+        navigatorCell.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        navigatorCell.heightAnchor.constraint(equalToConstant: 72).isActive = true
 
         let popUp = ThemedPopUp()
         [
@@ -557,9 +609,19 @@ final class ComponentGalleryViewController: NSViewController {
                 story("ThemedButton", "Bordered, prominent, icon-only, and disabled.", buttonRow),
                 story("ThemedToggle", "Off, on, disabled, target/action, and accessibility.", toggleRow),
                 story(
+                    "ThemedCheckbox",
+                    "Off, on, mixed for a group that disagrees, and disabled.",
+                    checkboxRow
+                ),
+                story(
                     "ThemedSegmentedControl",
                     "Two or three fixed choices with selection, arrows, and radio-group accessibility.",
                     segmented
+                ),
+                story(
+                    "NavigatorGridItemView",
+                    "A selectable navigator cell with hover, focus, press, and host-owned chrome.",
+                    navigatorCell
                 ),
                 story(
                     "ThemedPopUp & ChipView",
@@ -690,10 +752,24 @@ final class ComponentGalleryViewController: NSViewController {
         let disabled = ThemedTextField(string: L10n.string("Disabled"))
         disabled.isEnabled = false
 
-        for field in [field, search, disabled] {
+        matchQueryField.placeholderString = L10n.string("Type a word, or paste the whole ID")
+        matchQueryField.delegate = self
+        matchQueryField.setAccessibilityIdentifier("gallery.search-match.query")
+
+        for field in [field, search, disabled, matchQueryField] {
             field.translatesAutoresizingMaskIntoConstraints = false
             field.widthAnchor.constraint(greaterThanOrEqualToConstant: 190).isActive = true
         }
+
+        markSampleLines()
+        let matchLines = NSStackView(views: matchSamples)
+        matchLines.orientation = .vertical
+        matchLines.alignment = .leading
+        matchLines.spacing = Design.Spacing.hairline
+        let matchStory = NSStackView(views: [matchQueryField, matchLines])
+        matchStory.orientation = .vertical
+        matchStory.alignment = .leading
+        matchStory.spacing = Design.Spacing.small
 
         let scrollingText = ThemedTextView.scrolling()
         scrollingText.translatesAutoresizingMaskIntoConstraints = false
@@ -770,6 +846,13 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThemedTextField & ThemedSearchField",
                     "Editable, search-shaped, and disabled states.",
                     row([field, search, disabled])
+                ),
+                story(
+                    "SearchMatchLabel",
+                    "The run a query accounts for takes weight and a ground — both, so a match "
+                        + "survives Differentiate Without Colour. Paste the whole ID to see a "
+                        + "line shorter than the query still answer for itself.",
+                    matchStory
                 ),
                 story(
                     "ShortcutRecorderView",
@@ -874,9 +957,39 @@ final class ComponentGalleryViewController: NSViewController {
                     "SeparatorView",
                     "Horizontal and vertical orientations use the theme’s divider and border weight.",
                     row([horizontal, vertical])
+                ),
+                story(
+                    "GlyphView",
+                    "Tinted template glyphs drawn on the device pixel grid; a slot caps foreign artwork.",
+                    row(glyphSamples())
                 )
             ]
         )
+    }
+
+    /// One glyph per role, plus foreign artwork under the slot cap — the three ways the view
+    /// is used in the app's own chrome.
+    private func glyphSamples() -> [NSView] {
+        let inline = GlyphView()
+        inline.image = Design.Symbol.image(
+            "gearshape",
+            slot: Design.Size.inlineButtonGlyph,
+            pointSize: Design.Symbol.control
+        )
+        inline.tint = Design.Text.secondary
+
+        let toolbar = GlyphView()
+        toolbar.image = Design.Symbol.image(
+            "gearshape",
+            slot: Design.Size.tabIconSlot,
+            pointSize: Design.Symbol.toolbar
+        )
+        toolbar.tint = Design.Text.secondary
+
+        let capped = GlyphView()
+        capped.slot = NSSize(width: Design.Size.tabIconSlot, height: Design.Size.tabIconSlot)
+        capped.image = NSApp.applicationIconImage
+        return [inline, toolbar, capped]
     }
 
     private func makePresentationSection() -> NSView {
@@ -962,7 +1075,7 @@ final class ComponentGalleryViewController: NSViewController {
                     "A picture that takes the size it is given rather than lending its own: "
                         + "scaled down to fit, never up, hung from the top. Tab to it for the "
                         + "focus ring, then Space — or double-click — to open the file in "
-                        + "Quick Look. The one below has no file behind it, so it refuses and "
+                        + "the media inspector. The one below has no file behind it, so it refuses and "
                         + "stays out of the key loop; that refusal is the state to check.",
                     makeImagePreviewSample()
                 ),
@@ -1027,7 +1140,9 @@ final class ComponentGalleryViewController: NSViewController {
                     "ToastView",
                     "A receipt for something already done, with the way back on it. Press Show "
                         + "to send one into the pane below: it slides in above the footer, holds "
-                        + "while the pointer is on it, and leaves by itself otherwise.",
+                        + "while the pointer is on it, and leaves by itself otherwise. Agent "
+                        + "sends the same receipt for an archive nobody clicked — it names who "
+                        + "did it, carries their reason, and holds more than twice as long.",
                     makeToastSample()
                 )
             ]
@@ -1063,7 +1178,21 @@ final class ComponentGalleryViewController: NSViewController {
         show.target = self
         show.action = #selector(showGalleryToast(_:))
 
-        let row = NSStackView(views: [pane, show])
+        // The second receipt is here because it is the one the eye has to find unprompted: it
+        // arrives with no click behind it, so its attribution and its longer clock are the whole
+        // difference, and both are only visible beside the band they differ from.
+        let showAgent = ThemedButton()
+        showAgent.title = L10n.string("Agent")
+        showAgent.applyFont(.controlRegular)
+        showAgent.target = self
+        showAgent.action = #selector(showGalleryAgentToast(_:))
+
+        let buttons = NSStackView(views: [show, showAgent])
+        buttons.orientation = .vertical
+        buttons.alignment = .leading
+        buttons.spacing = Design.Spacing.small
+
+        let row = NSStackView(views: [pane, buttons])
         row.orientation = .horizontal
         row.alignment = .bottom
         row.spacing = Design.Spacing.inset
@@ -1073,12 +1202,31 @@ final class ComponentGalleryViewController: NSViewController {
     /// The archive receipt as the app actually builds it, rather than a second copy of its
     /// wording that could drift from the one that ships.
     @objc private func showGalleryToast(_ sender: NSButton) {
-        let session = AgentSession(kind: .claude, title: "Refactor the parser")
         toastPresenter?.present(
-            SessionCoordinator.archiveToast(for: session, wasRunning: true) { [weak self] in
+            SessionCoordinator.archiveToast(
+                for: Self.gallerySession,
+                wasRunning: true
+            ) { [weak self] in
                 self?.showReceipt(L10n.string("Undo"))
             }
         )
+    }
+
+    /// The same archive, performed by the agent whose session it is.
+    @objc private func showGalleryAgentToast(_ sender: NSButton) {
+        toastPresenter?.present(
+            SessionCoordinator.agentArchiveToast(
+                for: Self.gallerySession,
+                reason: "committed and pushed the parser fix",
+                wasRunning: true
+            ) { [weak self] in
+                self?.showReceipt(L10n.string("Undo"))
+            }
+        )
+    }
+
+    private static var gallerySession: AgentSession {
+        AgentSession(kind: .claude, title: "Refactor the parser")
     }
 
     /// A before and an after of the same little scene, drawn here so the story needs no asset
@@ -1137,6 +1285,9 @@ final class ComponentGalleryViewController: NSViewController {
 
         let wide = ThemedImagePreview()
         wide.image = plate(NSSize(width: 900, height: 400), tint: Design.Surface.accent)
+        // The inspector begins from the exact in-memory pixels above; this stable, existing URL
+        // supplies only the file identity/actions that a production image gets from its asset.
+        wide.fileURL = Bundle.main.bundleURL
 
         let small = ThemedImagePreview()
         small.image = plate(NSSize(width: 48, height: 48), tint: Design.Status.positive)
@@ -1435,6 +1586,12 @@ final class ComponentGalleryViewController: NSViewController {
             BrowserAnnotationMarker(id: 1, point: CGPoint(x: 54, y: 34)),
             BrowserAnnotationMarker(id: 2, point: CGPoint(x: 168, y: 66))
         ]
+        // A stand-in for what the live browser reports under the pointer. Deliberately not
+        // localized: at runtime this text is the *page's* own, and no page is translated by us.
+        overlay.hoveredTarget = BrowserAnnotationTarget(
+            rect: CGRect(x: 232, y: 24, width: 190, height: 56),
+            label: "button \u{201C}Sign in\u{201D}"
+        )
         overlay.onAdd = { [weak self] point in
             guard let self else { return }
             let next = (overlay.markers.map(\.id).max() ?? 0) + 1
@@ -1633,7 +1790,13 @@ final class ComponentGalleryViewController: NSViewController {
             lessThanOrEqualTo: processExperiment.widthAnchor
         ).isActive = true
 
+        let semanticScene = makeSemanticSceneStory()
         var rows = [
+            story(
+                "SemanticSceneView",
+                "Normalized, interactive marks for treemaps, heatmaps, timelines, scatter plots, and bubbles.",
+                semanticScene
+            ),
             story(
                 "ExtensionNode renderer",
                 "Text, status, separation, layout, actions, disabled state, and semantic roles.",
@@ -1654,6 +1817,63 @@ final class ComponentGalleryViewController: NSViewController {
             note: "Semantic values cross the extension boundary; the same themed controls render them.",
             rows: rows
         )
+    }
+
+    private func makeSemanticSceneStory() -> NSView {
+        let activate: (String) -> Void = { [weak self] itemID in
+            self?.showReceipt(
+                L10n.format("Extension action “%@” was invoked.", itemID)
+            )
+        }
+        let scene = SemanticSceneView(
+            accessibilityLabel: L10n.string("Installed-size map for iOS 26.5"),
+            items: [
+                .init(
+                    id: "system-library",
+                    normalizedFrame: NSRect(x: 0, y: 0, width: 0.62, height: 1),
+                    shape: .roundedRectangle,
+                    color: .category(0),
+                    label: L10n.string("System Library"),
+                    detail: L10n.string("4.82 GB · +114 MB"),
+                    accessibilityLabel: L10n.string("System Library"),
+                    accessibilityValue: L10n.string("4.82 GB · +114 MB"),
+                    isEnabled: true,
+                    isSelected: true,
+                    onActivate: { activate("system-library") }
+                ),
+                .init(
+                    id: "dyld-cache",
+                    normalizedFrame: NSRect(x: 0.62, y: 0, width: 0.38, height: 0.58),
+                    shape: .roundedRectangle,
+                    color: .category(1),
+                    label: L10n.string("dyld cache"),
+                    detail: L10n.string("2.31 GB · +92 MB"),
+                    accessibilityLabel: L10n.string("dyld cache"),
+                    accessibilityValue: L10n.string("2.31 GB · +92 MB"),
+                    isEnabled: true,
+                    isSelected: false,
+                    onActivate: { activate("dyld-cache") }
+                ),
+                .init(
+                    id: "frameworks",
+                    normalizedFrame: NSRect(x: 0.62, y: 0.58, width: 0.38, height: 0.42),
+                    shape: .roundedRectangle,
+                    color: .category(2),
+                    label: L10n.string("Frameworks"),
+                    detail: L10n.string("1.18 GB"),
+                    accessibilityLabel: L10n.string("Frameworks"),
+                    accessibilityValue: L10n.string("1.18 GB"),
+                    isEnabled: true,
+                    isSelected: false,
+                    onActivate: { activate("frameworks") }
+                )
+            ]
+        )
+        NSLayoutConstraint.activate([
+            scene.widthAnchor.constraint(equalToConstant: 420),
+            scene.heightAnchor.constraint(equalToConstant: 210)
+        ])
+        return scene
     }
 
     // MARK: Actions
@@ -1969,6 +2189,27 @@ final class ComponentGalleryViewController: NSViewController {
         showReceipt(L10n.format("ThemedSearchField searched for “%@”.", sender.stringValue))
     }
 
+    /// Re-marks the highlight story's three lines against whatever is in its field.
+    ///
+    /// Three roles rather than three copies of one: prose, its quieter second line, and an
+    /// identifier in code — the three the app actually highlights, each of which resolves its
+    /// own emphasis. The third is deliberately a real session id, because the interesting case
+    /// is a query *longer* than the line it is being matched against.
+    private func markSampleLines() {
+        let query = matchQueryField.stringValue
+        for (label, line) in zip(matchSamples, Self.matchSampleLines) {
+            label.show(line, matching: query)
+        }
+    }
+
+    private static var matchSampleLines: [String] {
+        [
+            L10n.string("Notifications · Mute · Sound"),
+            L10n.string("Play a sound when a session needs attention"),
+            "9f3c1a20-77b4-4e6d-9c02-5a1e8b3d40ff"
+        ]
+    }
+
     private func configureActivityMap() {
         activityMapView.setFiles(Self.activityDemoUniverse())
         // The map sorts its universe; cycling in *its* order keeps each press touching a
@@ -2209,6 +2450,19 @@ final class ComponentGalleryViewController: NSViewController {
         column.width = width
         column.minWidth = 80
         return column
+    }
+}
+
+// MARK: - NSTextFieldDelegate
+
+extension ComponentGalleryViewController: NSTextFieldDelegate {
+
+    /// The highlight story is the one that has to answer *while* the reader types — its
+    /// component draws a query's effect, and a query committed with Return is a query nobody
+    /// watched land.
+    func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSTextField === matchQueryField else { return }
+        markSampleLines()
     }
 }
 

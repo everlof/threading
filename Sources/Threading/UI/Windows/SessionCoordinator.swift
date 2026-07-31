@@ -15,6 +15,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// Consumed by the next selected session exactly once.
     private var pendingPrompt: String?
 
+    /// Released with this coordinator, which the window owns for its own lifetime.
+    private let appEvents = AppEventObservations()
+
     init(
         sidebar: ProjectSidebarViewController,
         container: TerminalContainerViewController,
@@ -23,6 +26,16 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         self.sidebar = sidebar
         self.container = container
         self.onPresentationChanged = onPresentationChanged
+
+        // An agent asked to be done with its session, and its turn has now ended. It arrives as
+        // an announcement rather than a call because `SessionArchiveScheduler` is in Core and
+        // knows nothing about sidebars — and it is observed *here*, in the type that already
+        // owns every other lifecycle decision, rather than relayed through the window
+        // controller, which would only be passing it straight back down. See
+        // `archiveAtAgentRequest(_:reason:)`.
+        appEvents.observe(SessionArchiveRequestDidBecomeDue.self) { [weak self] event in
+            self?.archiveAtAgentRequest(event.sessionID, reason: event.reason)
+        }
     }
 
     func takePendingPrompt() -> String? {
@@ -39,7 +52,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
 
         guard let projectID else {
-            addProject()
+            // No projects yet: land in the composer's choose-a-project mode rather than a bare
+            // folder panel — the chip offers both existing folders and new ones.
+            container.showComposer(projectID: nil)
             return
         }
         sidebar.select(projectID: projectID)
@@ -99,7 +114,55 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return
         }
 
-        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        archive(sessionID) { session, wasRunning, undo in
+            Self.archiveToast(for: session, wasRunning: wasRunning, undo: undo)
+        }
+    }
+
+    /// Files a session away because its own agent asked to be done with it.
+    ///
+    /// The same action as the menu's Archive, and deliberately not a quieter one: the row goes,
+    /// the agent stops, and the way back is on screen. What differs is the receipt, which has to
+    /// say *who* acted and to hold longer for it — nobody just clicked anything, and the user
+    /// asked for this a turn ago, in words, and has been reading something else since. See
+    /// `agentArchiveToast(for:reason:wasRunning:undo:)`.
+    ///
+    /// Arriving here at all means the request already waited for the turn to end
+    /// (`SessionArchiveScheduler`); this is only the archive.
+    func archiveAtAgentRequest(_ sessionID: SessionID, reason: String?) {
+        let archived = archive(sessionID) { session, wasRunning, undo in
+            Self.agentArchiveToast(
+                for: session,
+                reason: reason,
+                wasRunning: wasRunning,
+                undo: undo
+            )
+        }
+
+        // The band is on screen for fourteen seconds and then the row is simply gone. A session
+        // filed away by something other than a click is exactly the change the durable journal
+        // exists to answer for afterwards.
+        guard archived else { return }
+        EventLog.shared.record(.session, "Session archived by its agent", [
+            "session": sessionID.uuidString,
+            "reason": reason ?? "none"
+        ])
+    }
+
+    /// Archiving, with the receipt left to the caller.
+    ///
+    /// The order is load-bearing and shared by both routes: the agent stops first, because the
+    /// sidebar lists no archived session and a process nothing lists is a process nothing can
+    /// stop; and the pane is emptied before the reload, so the row and what it was showing leave
+    /// together.
+    @discardableResult
+    private func archive(
+        _ sessionID: SessionID,
+        receipt: (AgentSession, Bool, @escaping () -> Void) -> ToastRequest
+    ) -> Bool {
+        guard let session = ProjectStore.shared.session(withID: sessionID),
+              !session.isArchived else { return false }
+
         let wasRunning = AgentRuntime.shared.isRunning(sessionID: sessionID)
         let wasShowing = sessionID == container.currentSessionID
 
@@ -111,9 +174,10 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
         sidebar.reload()
 
-        sidebar.presentToast(Self.archiveToast(for: session, wasRunning: wasRunning) { [weak self] in
+        sidebar.presentToast(receipt(session, wasRunning) { [weak self] in
             self?.restore(sessionID, reselecting: wasShowing)
         })
+        return true
     }
 
     /// The undo behind the archive toast.
@@ -133,6 +197,52 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
 
         guard reselecting else { return }
         sidebar.select(sessionID: sessionID)
+    }
+
+    // MARK: - Naming
+
+    /// Whether this session can be asked to name itself, which decides whether the menu offers
+    /// it at all rather than offering it greyed out.
+    ///
+    /// Three conditions, and the third is the one that is easy to miss: with the session tool
+    /// group switched off on the Tools page the agent has no `set_session_name` to call, so the
+    /// request would spend a turn on an instruction it cannot carry out.
+    static func canAskAgentToRename(_ sessionID: SessionID) -> Bool {
+        AgentRuntime.shared.isRunning(sessionID: sessionID)
+            && !AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
+            && MCPToolCatalog.isEnabled(MCPToolCatalog.session)
+    }
+
+    /// Asks the session's own agent to rename it, by sending it one line.
+    ///
+    /// The agent already holding the conversation is the cheapest thing that can name it: the
+    /// context sits on the provider's side and has been paid for once, so this costs one short
+    /// turn against a warm cache. The two alternatives both pay again for what this agent
+    /// already knows — a fork copies the whole transcript and replays it cold, and a headless
+    /// run buys a fresh system prompt and tool schemas to be told the same thing.
+    ///
+    /// Offered only between turns (`canAskAgentToRename`). Text sent into a working agent lands
+    /// in whatever it has on screen — a permission prompt, a half-typed composer line — so the
+    /// item is absent rather than disabled while a turn is in flight.
+    func askAgentToRename(_ sessionID: SessionID) {
+        guard Self.canAskAgentToRename(sessionID) else { return }
+
+        let prompt = L10n.string(SessionRenameRequest.promptKey)
+
+        // Both caches can hold the same session — a surface switch leaves the old renderer
+        // behind — so each candidate is asked whether it is the one still running rather than
+        // native being assumed to win. Its stream applies the same validation the composer does.
+        if let conversation = AgentRuntime.shared.conversation(for: sessionID),
+           conversation.isRunning {
+            conversation.sendAppPrompt(prompt)
+            return
+        }
+
+        // A PTY has no send-or-refuse — the text is typed in, and the carriage return is what
+        // submits it, exactly as the user pressing Return would.
+        guard let controller = AgentRuntime.shared.controller(for: sessionID),
+              controller.isRunning else { return }
+        controller.session.insertText(prompt + SessionRenameRequest.submitKey)
     }
 
     func setUsesNativeUI(_ usesNative: Bool, for sessionID: SessionID) {
@@ -345,6 +455,23 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         container.showComposer(projectID: project.id)
     }
 
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        didSelectProject projectID: ProjectID
+    ) {
+        // Through the sidebar, so selection, the header tab, and the composer all move on the
+        // one path project selection already takes.
+        sidebar.select(projectID: projectID)
+    }
+
+    func sessionComposerDidRequestAddFolder(_ composer: SessionComposerViewController) {
+        addProject()
+    }
+
+    func sessionComposerDidRequestNewFolder(_ composer: SessionComposerViewController) {
+        newProject()
+    }
+
     /// A branch selection targets its existing checkout; a missing or removed checkout falls
     /// back to the project where the composer opened.
     static func targetProjectID(
@@ -407,6 +534,66 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             action: undo,
             identifier: "sidebar.toast.archive"
         )
+    }
+
+    /// The same receipt, for an archive nobody clicked.
+    ///
+    /// Two things change, and both come from the same fact — the user asked for this in words, a
+    /// turn ago, and has been reading something else since it landed.
+    ///
+    /// **It names the agent.** "Archived “X”" beside a row that vanished on its own is a report
+    /// with no actor in it, and the first thing anyone asks of a window that rearranged itself is
+    /// who did that. The agent's own name is the answer, and it is also the only part that says
+    /// this was not a misclick.
+    ///
+    /// **It holds longer** (`ToastDefaults.unattendedDwell`): the six seconds behind the clicked
+    /// archive are measured from the click, and there was none here.
+    ///
+    /// The agent's reason leads, when it gave one, because it is the only part of the receipt
+    /// the user cannot already work out — it says which piece of work this was the end of.
+    static func agentArchiveToast(
+        for session: AgentSession,
+        reason: String?,
+        wasRunning: Bool,
+        undo: @escaping () -> Void
+    ) -> ToastRequest {
+        let whereItWent = L10n.string("Restore it from Settings ▸ Archived.")
+        let stopped = session.kind.supportsResume
+            ? L10n.string("The agent stopped.")
+            : L10n.string("The shell stopped.")
+
+        let sentences = [
+            reason.map(Self.asSentence),
+            wasRunning ? stopped : nil,
+            whereItWent
+        ].compactMap { $0 }
+
+        return ToastRequest(
+            message: L10n.format(
+                "%@ archived “%@”",
+                session.kind.displayName,
+                session.displayTitle
+            ),
+            detail: sentences.joined(separator: " "),
+            actionTitle: L10n.string("Undo"),
+            action: undo,
+            dwell: ToastDefaults.unattendedDwell,
+            identifier: "sidebar.toast.archive.agent"
+        )
+    }
+
+    /// Sets the agent's fragment beside the app's own sentences without rewriting it: capitalised
+    /// so it does not read as a continuation of the title above it, and closed so the two
+    /// sentences after it do not run into it. Anything longer was already bounded on arrival —
+    /// see `SessionArchiveDefaults.maximumReasonLength`.
+    private static func asSentence(_ reason: String) -> String {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else { return trimmed }
+
+        let opened = first.uppercased() + trimmed.dropFirst()
+        return trimmed.hasSuffix(".") || trimmed.hasSuffix("!") || trimmed.hasSuffix("?")
+            ? opened
+            : opened + "."
     }
 
     /// A move interrupts a running agent exactly as a surface switch does, and each carries its
@@ -483,6 +670,26 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             confirmTitle: L10n.string("Switch UI")
         ))
     }
+}
+
+// MARK: - Session Rename Request
+
+/// The one line the app sends an agent when the user asks it to name its own session.
+///
+/// It names the tool outright rather than describing the wish. An agent asked in prose to
+/// "rename this chat" answers in prose — the CLIs have their own `/rename` and their own idea
+/// of a title — and the sidebar would learn nothing. Naming `set_session_name` is what turns
+/// the request into the one call that reaches the store.
+enum SessionRenameRequest {
+    /// English source copy, and the key it is looked up by, like every other string here.
+    static let promptKey = """
+        Call set_session_name to rename this chat, using two to five words for what it has \
+        actually been about. Reply with just the new name.
+        """
+
+    /// What submits the line in a terminal. Return, as the user's own keypress arrives — not
+    /// `\n`, which several TUI composers insert as a newline instead of sending.
+    static let submitKey = "\r"
 }
 
 // MARK: - New Chat Opening Message

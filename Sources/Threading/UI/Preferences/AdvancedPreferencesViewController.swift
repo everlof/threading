@@ -46,6 +46,14 @@ final class AdvancedPreferencesViewController: NSViewController {
                     action: #selector(revealSupportDirectory)
                 )
             ])),
+            SettingsUI.section(AdvancedStrings.tourSection, SettingsCard(rows: [
+                resetRow(
+                    title: AdvancedStrings.tourTitle,
+                    detail: AdvancedStrings.tourDetail,
+                    button: AdvancedStrings.tourButton,
+                    action: #selector(showWelcomeTour)
+                )
+            ])),
             SettingsUI.section(AdvancedStrings.resetSection, SettingsCard(rows: [
                 resetRow(
                     title: AdvancedStrings.resetSettingsTitle,
@@ -152,6 +160,10 @@ final class AdvancedPreferencesViewController: NSViewController {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    @objc private func showWelcomeTour() {
+        AppDelegate.shared?.presentOnboarding()
+    }
+
     @objc private func resetSettings() {
         reset(.settings, title: AdvancedStrings.confirmSettingsTitle,
               message: AdvancedStrings.confirmSettingsBody,
@@ -227,6 +239,16 @@ enum AdvancedStrings {
     static var settingsLocationTitle: String { L10n.string("Settings") }
     static var dataLocationTitle: String { L10n.string("Projects, sessions and caches") }
     static var reveal: String { L10n.string("Reveal") }
+
+    static var tourSection: String { L10n.string("Welcome Tour") }
+    static var tourTitle: String { L10n.string("First-launch walkthrough") }
+    static var tourDetail: String {
+        L10n.string(
+            "Theme, discovered accounts, conversations to import, and notifications — the "
+                + "same walkthrough a fresh install opens with."
+        )
+    }
+    static var tourButton: String { L10n.string("Show Again…") }
 
     static var resetSection: String { L10n.string("Start Over") }
     static var resetSettingsTitle: String { L10n.string("Reset settings") }

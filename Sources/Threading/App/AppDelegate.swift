@@ -14,6 +14,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // MARK: - Properties
 
     private var mainWindowController: MainWindowController?
+    private var onboardingWindowController: OnboardingWindowController?
+    /// True while first-launch onboarding is deferring the main window. Gates session restore
+    /// and routes Dock-click reopens to the onboarding window instead of the hidden main one.
+    private var isOnboardingActive = false
+    /// Session restore needs both the MCP listener and a visible main window; whichever
+    /// arrives second performs it. See `restoreSelectedSessionIfReady`.
+    private var mcpServerHasStarted = false
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
     private var workspaceNavigatorMenu: NSMenu?
@@ -115,7 +122,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let mainWindowController = MainWindowController()
         self.mainWindowController = mainWindowController
         RemoteWorkspaceBridge.install(mainWindowController)
-        mainWindowController.showWindow(nil)
+
+        // First launch defers the main window behind the onboarding walkthrough. Everything
+        // else in this launch sequence still runs: every downstream consumer needs the
+        // controller *instance*, not a visible window. Session restore is the one exception,
+        // gated in `restoreSelectedSessionIfReady`.
+        if OnboardingState.needsOnboarding {
+            isOnboardingActive = true
+            let onboarding = OnboardingWindowController { [weak self] in
+                self?.onboardingDidFinish()
+            }
+            onboardingWindowController = onboarding
+            onboarding.showWindow(nil)
+        } else {
+            mainWindowController.showWindow(nil)
+        }
         MainThreadStallMonitor.shared.start()
 
         // After the window exists, so a clicked notification always has somewhere to land.
@@ -175,8 +196,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             AgentRuntime.shared.applyLifecycle(report)
         }
 
-        MCPServer.shared.start { [weak mainWindowController] in
-            mainWindowController?.restoreSelectedSession()
+        MCPServer.shared.start { [weak self] in
+            self?.mcpServerHasStarted = true
+            self?.restoreSelectedSessionIfReady()
         }
 
         // Remote access is a separate loopback server behind a tunnel, independent of the MCP
@@ -292,6 +314,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             : L10n.format("Quit with %lld sessions open?", Int64(runningSessionCount))
     }
 
+    // MARK: - Onboarding
+
+    /// Completion in load-bearing order: record, **show the main window, then close the
+    /// walkthrough**. During first launch the walkthrough is the last window, and
+    /// `applicationShouldTerminateAfterLastWindowClosed` answers true — closing it first
+    /// would quit the app on the final click of its own setup.
+    private func onboardingDidFinish() {
+        OnboardingState.markCompleted()
+        EventLog.shared.record(.app, "Onboarding completed")
+
+        mainWindowController?.showWindow(nil)
+        onboardingWindowController?.close()
+        onboardingWindowController = nil
+        isOnboardingActive = false
+        NSApp.activate(ignoringOtherApps: true)
+
+        restoreSelectedSessionIfReady()
+    }
+
+    /// Restores the selected session once *both* prerequisites hold: the MCP listener (a
+    /// launch reads its port for `--mcp-config`) and a main window actually on screen (a
+    /// terminal must be installed in a laid-out, visible view — restoring into the window
+    /// onboarding is still deferring would launch a PTY into a never-shown pane).
+    private func restoreSelectedSessionIfReady() {
+        guard mcpServerHasStarted, !isOnboardingActive else { return }
+        mainWindowController?.restoreSelectedSession()
+    }
+
+    /// The walkthrough on request — Settings ▸ Advanced. The main window is already visible,
+    /// so completion's `showWindow` is a no-op and nothing needs deferring; `isOnboardingActive`
+    /// stays false and the import page simply offers whatever is not yet tracked.
+    func presentOnboarding() {
+        if onboardingWindowController == nil {
+            onboardingWindowController = OnboardingWindowController { [weak self] in
+                self?.onboardingDidFinish()
+            }
+        }
+        onboardingWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // A hosted XCTest bundle runs inside the real application and creates short-lived
         // windows for rendering and chrome tests. Closing one must not terminate the host
@@ -311,6 +374,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // Dock icon is clicked, so the force-unwrap that used to be here was a crash waiting for
         // a click. It found one, in the middle of a test run that was pumping the main run loop.
         guard let mainWindowController else { return true }
+
+        // Mid-walkthrough, a Dock click re-fronts the walkthrough. Without this it would
+        // surface the deferred main window over the setup that is not finished with it.
+        if isOnboardingActive {
+            onboardingWindowController?.showWindow(nil)
+            return true
+        }
 
         if !flag {
             mainWindowController.showWindow(nil)
@@ -435,8 +505,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return
         }
 
+        let projects = ProjectStore.shared.projects
         let activeSessionIDs = Set(
-            ProjectStore.shared.projects.flatMap { $0.sessions.map(\.id) }
+            projects.flatMap { project in
+                project.sessions.map(\.id)
+                    + project.terminals.map { SessionID($0.id.rawValue) }
+            }
         )
         HistoryManager.cleanupOrphanedHistoryFiles(activeSessionIDs: activeSessionIDs)
     }
@@ -947,6 +1021,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         updateItem.target = self
         menu.addItem(updateItem)
 
+        // Above the support report on purpose: filing a ticket is what someone came to this
+        // menu to do, and exporting a diagnostics file is what they do when asked to.
+        let issueItem = NSMenuItem(
+            title: L10n.string("Report a Problem…"),
+            action: #selector(reportProblem),
+            keyEquivalent: ""
+        )
+        issueItem.target = self
+        menu.addItem(issueItem)
+
         let reportItem = NSMenuItem(
             title: L10n.string("Create Remote Support Report…"),
             action: #selector(createRemoteSupportReport),
@@ -1106,6 +1190,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// contain prompts, commands and paths and remains available separately for local diagnosis.
     @MainActor @objc private func checkForUpdates() {
         AppUpdater.shared.checkForUpdates()
+    }
+
+    /// Presented on the main window rather than in one of its own: the ticket is about the app
+    /// the user is looking at, and a sheet cannot be left open behind it and forgotten.
+    @MainActor @objc private func reportProblem() {
+        mainWindowController?.presentReportProblem()
     }
 
     /// The grants are read first because two of them arrive through a callback, and a report

@@ -11,9 +11,15 @@ final class SessionComposerViewController: NSViewController {
 
     private(set) var projectID: ProjectID?
 
-    private let headingLabel = NSTextField(labelWithString: "")
-    private let subheadingLabel = NSTextField(labelWithString: "")
+    /// The hero: the mark above a greeting that knows what day it is. It fills the room the
+    /// bottom-flush composer leaves, and hides when a short pane leaves none.
+    private let heroMark = ThreadingMarkView()
+    private let greetingLabel = MorphingTitleLabel()
+    private let heroStack = NSStackView()
+    private let heroRegion = NSLayoutGuide()
+    private var hasPlayedHeroDrawIn = false
 
+    private let projectChip = ChipView()
     private let agentChip = ChipView()
     private let accountChip = ChipView()
     private let modelChip = ChipView()
@@ -117,24 +123,29 @@ final class SessionComposerViewController: NSViewController {
     // MARK: - Setup
 
     private func setupViews() {
-        headingLabel.applyFont(.heading)
-        headingLabel.textColor = Design.Text.label
+        greetingLabel.applyFont(.heading)
+        greetingLabel.alignment = .center
+        // The label wrapper yields at priority 1 so hosts with slots can truncate it. This
+        // host has no slot — the hero's width *is* the greeting's — and without this the
+        // vertical stack resolved its ambiguous width to the mark's 40 points and cut the
+        // greeting to one glyph and an ellipsis.
+        greetingLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        subheadingLabel.applyFont(.subheading)
-        subheadingLabel.textColor = Design.Text.secondary
+        heroMark.setAccessibilityElement(false)
+        heroStack.orientation = .vertical
+        heroStack.alignment = .centerX
+        heroStack.spacing = Design.Spacing.inset
+        heroStack.addArrangedSubview(heroMark)
+        heroStack.addArrangedSubview(greetingLabel)
+        heroStack.translatesAutoresizingMaskIntoConstraints = false
 
         importButton.emphasis = .secondary
 
-        let headings = NSStackView(views: [headingLabel, subheadingLabel])
-        headings.orientation = .vertical
-        headings.alignment = .leading
-        headings.spacing = Design.Spacing.hairline
-
-        // The choices, then what they will cost, then the task. Reading down the column is
-        // the decision in order — which is the whole reason a session starts here rather than
-        // from a menu item that picked all four defaults silently.
+        // Where first, then the choices, then what they will cost, then the task. Reading
+        // along the row is the decision in order — which is the whole reason a session starts
+        // here rather than from a menu item that picked all the defaults silently.
         let chips = NSStackView(views: [
-            agentChip, accountChip, modelChip, modeChip, branchChip, surfaceChip
+            projectChip, agentChip, accountChip, modelChip, modeChip, branchChip, surfaceChip
         ])
         chips.orientation = .horizontal
         chips.alignment = .centerY
@@ -145,6 +156,14 @@ final class SessionComposerViewController: NSViewController {
         for chip in [agentChip, accountChip, modelChip, modeChip, branchChip, surfaceChip] {
             chip.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
+        // The one chip made to shorten: a long project name truncates before it can push six
+        // siblings out of the row. A hard cap rather than a lowered priority, because a chip's
+        // width comes from its internal label's required edge pins — every chip's label
+        // resists equally, so under pressure the engine squeezed the *siblings* to bare icons
+        // while the long name kept every character.
+        projectChip.widthAnchor.constraint(
+            lessThanOrEqualToConstant: ComposerDefaults.projectChipMaxWidth
+        ).isActive = true
 
         wirePrompt()
         setupPromptCustomization()
@@ -159,25 +178,26 @@ final class SessionComposerViewController: NSViewController {
         actions.spacing = Design.Spacing.small
 
         let stack = NSStackView(
-            views: [headings, chips, usagePanel, promptContentContainer, actions]
+            views: [chips, usagePanel, promptContentContainer, actions]
         )
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
-        stack.setCustomSpacing(Design.Spacing.large, after: headings)
         stack.setCustomSpacing(Design.Spacing.large, after: usagePanel)
         stack.setCustomSpacing(Design.Spacing.large, after: promptContentContainer)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(stack)
+        view.addSubview(heroStack)
+        view.addLayoutGuide(heroRegion)
 
-        // Sits above centre rather than dead centre: a composer reads as the top of the work
-        // about to happen, not as a dialog floating in the middle of an empty pane.
+        // The composer hangs from the pane's bottom edge — the shape every chat product has
+        // taught: input below, room above. The prompt grows upward from here.
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            stack.topAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.topAnchor,
-                constant: ComposerDefaults.topOffset
+            stack.bottomAnchor.constraint(
+                equalTo: view.bottomAnchor,
+                constant: -Design.Spacing.pane
             ),
             stack.widthAnchor.constraint(lessThanOrEqualToConstant: ComposerDefaults.contentWidth),
             stack.leadingAnchor.constraint(
@@ -189,11 +209,37 @@ final class SessionComposerViewController: NSViewController {
                 constant: -Design.Spacing.pane
             ),
             promptContentContainer.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            usagePanel.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            usagePanel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+
+            // The hero floats in whatever room the composer leaves above itself.
+            heroRegion.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            heroRegion.bottomAnchor.constraint(equalTo: stack.topAnchor),
+            heroRegion.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            heroRegion.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            heroStack.centerXAnchor.constraint(equalTo: heroRegion.centerXAnchor),
+            heroStack.centerYAnchor.constraint(equalTo: heroRegion.centerYAnchor),
+            heroStack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: view.leadingAnchor,
+                constant: Design.Spacing.pane
+            ),
+            heroStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: view.trailingAnchor,
+                constant: -Design.Spacing.pane
+            ),
+            heroMark.widthAnchor.constraint(equalToConstant: ComposerDefaults.heroMarkSide),
+            heroMark.heightAnchor.constraint(equalToConstant: ComposerDefaults.heroMarkSide)
         ])
 
         wireChips()
         observeUsage()
+    }
+
+    /// A pane too short to float the greeting shows the composer alone — half a hero peeking
+    /// from behind the prompt reads as a defect, an absent one as a compact window.
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        heroStack.isHidden = heroRegion.frame.height
+            < heroStack.fittingSize.height + ComposerDefaults.heroMinimumClearance
     }
 
     /// Places the protected native prompt behind the generic around-hook host. The contract only
@@ -237,6 +283,25 @@ final class SessionComposerViewController: NSViewController {
 
     /// Each chip rebuilds its menu when opened, so a change of agent is reflected everywhere.
     private func wireChips() {
+        projectChip.itemsProvider = { [weak self] in self?.projectItems() ?? [] }
+        projectChip.onSelect = { [weak self] item in
+            guard let self else { return }
+            switch item.representedValue {
+            case let id as ProjectID:
+                guard id != self.projectID else { return }
+                self.delegate?.sessionComposer(self, didSelectProject: id)
+            case let action as ProjectChipAction:
+                switch action {
+                case .addExisting:
+                    self.delegate?.sessionComposerDidRequestAddFolder(self)
+                case .createNew:
+                    self.delegate?.sessionComposerDidRequestNewFolder(self)
+                }
+            default:
+                break
+            }
+        }
+
         agentChip.itemsProvider = { [weak self] in self?.agentItems() ?? [] }
         agentChip.onSelect = { [weak self] item in
             let kind = item.representedValue as? AgentKind ?? AgentDefaults.defaultKind
@@ -294,15 +359,15 @@ final class SessionComposerViewController: NSViewController {
 
     // MARK: - Public Methods
 
-    /// Points the composer at a project, resetting every choice for it.
+    /// Points the composer at a project — or at none, which is a real mode: the way in when
+    /// nothing exists yet. Every choice resets either way.
     func show(projectID: ProjectID?) {
+        // Words typed before a project was chosen are the user's work: they follow the
+        // composer into the project that is chosen next, unless that project already holds a
+        // draft of its own.
+        let carriedPrompt = self.projectID == nil ? promptView.stringValue : nil
+
         self.projectID = projectID
-
-        guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
-            updatePromptCustomization(for: nil)
-            return
-        }
-
         updatePromptCustomization(for: projectID)
 
         selectedAgent = AppSettings.shared.defaultAgentKind
@@ -314,21 +379,49 @@ final class SessionComposerViewController: NSViewController {
         selectedBranch = nil
         selectedPermissionMode = nil
 
-        // The choices reset per project; what was typed does not. A half-written prompt is
-        // the user's work, and it is restored whether it was left behind by switching
-        // projects or by the app going away underneath it.
         promptView.clearAttachments()
-        promptView.stringValue = DraftStore.shared.draft(for: projectID)
 
         // Warmed as the composer appears, not as its account menu opens: a fetch started on
         // the click lands after the menu has been read and dismissed.
         AccountUsageMenu.prefetch()
+        refreshGreeting()
 
-        headingLabel.stringValue = project.name
-        subheadingLabel.stringValue = subheading(for: project)
+        if !hasPlayedHeroDrawIn, !Design.Motion.reducesMotion {
+            hasPlayedHeroDrawIn = true
+            heroMark.playDrawIn()
+        }
+
+        guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
+            // No project: the prompt is live, Start is not, and the project chip is the ask.
+            // Words typed here stay; a draft belonging to the project just left does not.
+            promptView.stringValue = carriedPrompt ?? ""
+            importable = []
+            refreshImportChip()
+            refreshChips()
+            return
+        }
+
+        // The choices reset per project; what was typed does not. A half-written prompt is
+        // the user's work, and it is restored whether it was left behind by switching
+        // projects or by the app going away underneath it.
+        let draft = DraftStore.shared.draft(for: projectID)
+        if let carriedPrompt, !carriedPrompt.isEmpty, draft.isEmpty {
+            promptView.stringValue = carriedPrompt
+            DraftStore.shared.setDraft(carriedPrompt, for: projectID)
+        } else {
+            promptView.stringValue = draft
+        }
 
         refreshChips()
         discoverImportable(for: project)
+    }
+
+    /// A fresh line each time the composer is pointed somewhere, morphing in place when a
+    /// greeting is already up.
+    private func refreshGreeting() {
+        let message = ComposerGreeting.message()
+        guard message != greetingLabel.stringValue else { return }
+        greetingLabel.setStringValue(message, animated: !greetingLabel.stringValue.isEmpty)
     }
 
     /// Puts the caret in the prompt.
@@ -391,6 +484,19 @@ final class SessionComposerViewController: NSViewController {
     // MARK: - Chip State
 
     private func refreshChips() {
+        let project = projectID.flatMap { ProjectStore.shared.project(withID: $0) }
+        projectChip.configure(
+            symbolName: ComposerDefaults.projectSymbol,
+            title: project?.name ?? ComposerDefaults.chooseProjectTitle
+        )
+        // The folder was the old subheading; as a tooltip it still answers "where", without
+        // spending a line of the pane on a path that rarely matters.
+        projectChip.toolTip = project.map { abbreviatedPath($0.folderPath) }
+
+        // A session cannot start nowhere. The prompt stays live — words first, place second —
+        // but the one loud control keeps the promise honest.
+        startButton.isEnabled = project != nil
+
         agentChip.configure(icon: selectedAgent.icon, title: selectedAgent.displayName)
 
         let accounts = AgentAccountDiscovery.accounts(for: selectedAgent)
@@ -471,14 +577,49 @@ final class SessionComposerViewController: NSViewController {
         projectFolder.flatMap { GitInfo.currentBranch(for: $0) } ?? ComposerDefaults.noBranchTitle
     }
 
-    /// Where the session will run, which is the one thing not otherwise visible.
-    private func subheading(for project: Project) -> String {
+    /// Where the session will run, said the way the shell would say it.
+    private func abbreviatedPath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let path = project.folderPath
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
     // MARK: - Menus
+
+    /// Every project, then the two ways to bring a new one in. The composer can swap projects
+    /// because the alternative was leaving it for the sidebar — one more place to look for a
+    /// decision this screen exists to gather.
+    private func projectItems() -> [ThemedMenuEntry] {
+        var items: [ThemedMenuEntry] = ProjectStore.shared.projects.map { project in
+            .item(
+                ThemedMenuItem(
+                    title: project.name,
+                    subtitle: abbreviatedPath(project.folderPath),
+                    representedValue: project.id,
+                    isSelected: project.id == projectID
+                )
+            )
+        }
+        if !items.isEmpty {
+            items.append(.separator)
+        }
+        items.append(
+            .item(
+                ThemedMenuItem(
+                    title: ComposerDefaults.addExistingFolderTitle,
+                    representedValue: ProjectChipAction.addExisting
+                )
+            )
+        )
+        items.append(
+            .item(
+                ThemedMenuItem(
+                    title: ComposerDefaults.createNewFolderTitle,
+                    representedValue: ProjectChipAction.createNew
+                )
+            )
+        )
+        return items
+    }
 
     private func agentItems() -> [ThemedMenuEntry] {
         AgentKind.allCases.map { kind in
@@ -795,6 +936,25 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         importSession session: ImportableSession,
         into projectID: ProjectID
     )
+
+    /// The project chip chose an existing project. Routed through the delegate so selection,
+    /// the header tab, and the sidebar all move on the one existing path.
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        didSelectProject projectID: ProjectID
+    )
+
+    /// The project chip asked for a folder that is not a project yet.
+    func sessionComposerDidRequestAddFolder(_ composer: SessionComposerViewController)
+    func sessionComposerDidRequestNewFolder(_ composer: SessionComposerViewController)
+}
+
+// MARK: - Project Chip Actions
+
+/// What the project chip's menu offers besides the projects themselves.
+private enum ProjectChipAction {
+    case addExisting
+    case createNew
 }
 
 // MARK: - Branch Selection
@@ -814,8 +974,16 @@ private enum BranchSelection {
 
 /// Only what is specific to this screen. Everything visual comes from `Design`.
 enum ComposerDefaults {
-    /// Placed a little above centre, so the composer reads as the start of the work.
-    static let topOffset: CGFloat = 72
+    /// The hero's mark: larger than the sidebar's 24 because it stands alone over a greeting,
+    /// smaller than an app icon because it is a flourish, not the content.
+    static let heroMarkSide: CGFloat = 40
+
+    /// The least air the hero needs beyond its own height before it is worth showing at all.
+    static let heroMinimumClearance: CGFloat = 48
+
+    /// The widest the project chip may grow before its name truncates — roomy enough for a
+    /// real repository name, not roomy enough to starve the six chips beside it.
+    static let projectChipMaxWidth: CGFloat = 260
 
     /// Wider than `readableWidth`, which paces prose. This column holds a row of controls
     /// and two usage bars, and squeezing those to a reading measure is what shrank the chips
@@ -882,4 +1050,10 @@ enum ComposerDefaults {
     static let accountSymbol = "person.crop.circle"
     static let modelSymbol = "cpu"
     static let branchSymbol = "arrow.trianglehead.branch"
+    static let projectSymbol = "folder"
+
+    /// The chip's ask when the composer has nowhere to start yet.
+    static var chooseProjectTitle: String { L10n.string("Choose a project…") }
+    static var addExistingFolderTitle: String { L10n.string("Add Existing Folder…") }
+    static var createNewFolderTitle: String { L10n.string("Create New Folder…") }
 }

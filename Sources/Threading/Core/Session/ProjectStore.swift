@@ -2,8 +2,9 @@ import Foundation
 
 /// Owns the project list and its persistence.
 ///
-/// This is the model layer only: it knows nothing about running processes. Live terminals
-/// are managed by `AgentRuntime`, keyed by the session identifiers stored here.
+/// This is the model layer only: it knows nothing about running processes. Live agent surfaces
+/// are managed by `AgentRuntime`; standalone terminal surfaces are managed by
+/// `ProjectTerminalRuntime`, each keyed by the durable identifiers stored here.
 @MainActor
 final class ProjectStore {
 
@@ -32,6 +33,9 @@ final class ProjectStore {
     private var projectIndicesByID: [ProjectID: Int] = [:]
     private var sessionLocationsByID: [
         SessionID: (projectIndex: Int, sessionIndex: Int)
+    ] = [:]
+    private var terminalLocationsByID: [
+        TerminalID: (projectIndex: Int, terminalIndex: Int)
     ] = [:]
 
     /// Pending coalesced write, see `scheduleSave()`.
@@ -282,6 +286,46 @@ final class ProjectStore {
         return session
     }
 
+    /// Adopts many conversations with one save, for onboarding's import — hundreds of
+    /// `importSession` calls would write and notify per conversation, and the sidebar reload
+    /// each notification triggers is what would make a large import stutter.
+    ///
+    /// Duplicates (by transcript id) are skipped, same as the single adoption.
+    @discardableResult
+    func importSessions(
+        _ found: [ImportableSession],
+        into projectID: ProjectID
+    ) -> [AgentSession] {
+        guard let index = index(ofProject: projectID), !found.isEmpty else { return [] }
+
+        let branch = GitInfo.currentBranch(for: projects[index].folderPath)
+        var known = Set(projects[index].sessions.compactMap { $0.resumeState.transcriptID })
+        var adopted: [AgentSession] = []
+
+        for conversation in found {
+            guard known.insert(conversation.agentSessionID).inserted else { continue }
+
+            var session = AgentSession(
+                kind: conversation.kind,
+                title: conversation.title,
+                accountHandle: conversation.accountHandle
+            )
+            session.resumeState = .resumable(conversation.agentSessionID)
+            session.hasLaunched = true
+            session.lastActiveAt = conversation.lastActiveAt
+            session.branch = branch
+            adopted.append(session)
+        }
+
+        guard !adopted.isEmpty else { return [] }
+        projects[index].sessions.append(contentsOf: adopted)
+        rebuildLookupIndexes()
+        save()
+        notifyChanged()
+
+        return adopted
+    }
+
     /// Files a session away, or restores it. Its conversation is untouched either way.
     func setArchived(_ archived: Bool, for sessionID: SessionID) {
         update(sessionID: sessionID) { $0.isArchived = archived }
@@ -339,6 +383,82 @@ final class ProjectStore {
         projects[index].themeID = themeID
         save()
         notifyChanged()
+    }
+
+    // MARK: - Standalone Terminal Management
+
+    /// Creates a durable terminal record. Its live PTY is owned separately by
+    /// `ProjectTerminalRuntime` and begins when the row is presented.
+    @discardableResult
+    func addTerminal(to projectID: ProjectID, id: TerminalID = TerminalID()) -> ProjectTerminal? {
+        guard let projectIndex = index(ofProject: projectID) else { return nil }
+
+        let terminal = ProjectTerminal(
+            currentDirectory: projects[projectIndex].folderPath,
+            id: id
+        )
+        projects[projectIndex].terminals.append(terminal)
+        rebuildLookupIndexes()
+        save()
+        notifyChanged()
+        return terminal
+    }
+
+    func removeTerminal(id terminalID: TerminalID) {
+        guard let location = locate(terminalID: terminalID) else { return }
+        projects[location.projectIndex].terminals.remove(at: location.terminalIndex)
+        rebuildLookupIndexes()
+        save()
+        notifyChanged()
+    }
+
+    func renameTerminal(id terminalID: TerminalID, to title: String?) {
+        guard let location = locate(terminalID: terminalID) else { return }
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        projects[location.projectIndex].terminals[location.terminalIndex].customTitle =
+            (trimmed?.isEmpty ?? true) ? nil : trimmed
+        save()
+        notifyChanged(sidebarImpact: .terminalRow(terminalID))
+    }
+
+    /// Records a shell-reported title without displacing an explicit user rename.
+    func updateTerminalTitle(_ title: String, for terminalID: TerminalID) {
+        guard let location = locate(terminalID: terminalID) else { return }
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty,
+              projects[location.projectIndex].terminals[location.terminalIndex].title != cleaned
+        else { return }
+
+        projects[location.projectIndex].terminals[location.terminalIndex].title = cleaned
+        scheduleSave()
+        notifyChanged(sidebarImpact: .terminalRow(terminalID))
+    }
+
+    /// Moves the terminal's sidebar placement and branch whenever OSC 7 or process fallback
+    /// reports a new working directory.
+    func updateTerminalLocation(_ directory: String, for terminalID: TerminalID) {
+        guard let location = locate(terminalID: terminalID) else { return }
+        let normalized = URL(fileURLWithPath: directory)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        let branch = GitInfo.currentBranch(for: normalized)
+        let terminal = projects[location.projectIndex].terminals[location.terminalIndex]
+        guard terminal.currentDirectory != normalized || terminal.branch != branch else { return }
+
+        projects[location.projectIndex].terminals[location.terminalIndex].currentDirectory = normalized
+        projects[location.projectIndex].terminals[location.terminalIndex].branch = branch
+        save()
+        notifyChanged()
+    }
+
+    /// Records a terminal-only override. Nil returns to the project at its current cwd, and
+    /// then the app theme.
+    func setThemeID(_ themeID: TerminalThemeID?, forTerminalID terminalID: TerminalID) {
+        guard let location = locate(terminalID: terminalID) else { return }
+        projects[location.projectIndex].terminals[location.terminalIndex].themeID = themeID
+        save()
+        notifyChanged(sidebarImpact: .terminalRow(terminalID))
     }
 
     /// Silences one conversation's notifications, or lets it speak. Nil returns it to
@@ -540,6 +660,18 @@ final class ProjectStore {
             }
         }
 
+        for projectIndex in projects.indices {
+            for terminalIndex in projects[projectIndex].terminals.indices
+            where GitInfo.worktreeIdentity(
+                for: projects[projectIndex].terminals[terminalIndex].currentDirectory
+            ) == identity
+                && projects[projectIndex].terminals[terminalIndex].branch != branch
+            {
+                projects[projectIndex].terminals[terminalIndex].branch = branch
+                changed = true
+            }
+        }
+
         guard changed else { return }
         save()
         notifyChanged()
@@ -570,6 +702,30 @@ final class ProjectStore {
         return projects[location.projectIndex]
     }
 
+    func terminal(withID terminalID: TerminalID) -> ProjectTerminal? {
+        guard let location = locate(terminalID: terminalID) else { return nil }
+        return projects[location.projectIndex].terminals[location.terminalIndex]
+    }
+
+    /// The project where the terminal was created and whose record persists it.
+    func homeProject(forTerminalID terminalID: TerminalID) -> Project? {
+        guard let location = locate(terminalID: terminalID) else { return nil }
+        return projects[location.projectIndex]
+    }
+
+    /// The project under which the terminal is currently displayed, based on its cwd.
+    func displayProject(forTerminalID terminalID: TerminalID) -> Project? {
+        guard let location = locate(terminalID: terminalID) else { return nil }
+        let home = projects[location.projectIndex]
+        let terminal = home.terminals[location.terminalIndex]
+        let projectID = ProjectTerminalPlacement.projectID(
+            for: terminal,
+            homeProject: home,
+            projects: projects
+        )
+        return project(withID: projectID) ?? home
+    }
+
     // MARK: - Private Methods
 
     private func index(ofProject projectID: ProjectID) -> Int? {
@@ -588,9 +744,19 @@ final class ProjectStore {
         return location
     }
 
+    private func locate(terminalID: TerminalID) -> (projectIndex: Int, terminalIndex: Int)? {
+        guard let location = terminalLocationsByID[terminalID],
+              projects.indices.contains(location.projectIndex),
+              projects[location.projectIndex].terminals.indices.contains(location.terminalIndex),
+              projects[location.projectIndex].terminals[location.terminalIndex].id == terminalID
+        else { return nil }
+        return location
+    }
+
     private func rebuildLookupIndexes() {
         projectIndicesByID.removeAll(keepingCapacity: true)
         sessionLocationsByID.removeAll(keepingCapacity: true)
+        terminalLocationsByID.removeAll(keepingCapacity: true)
 
         for (projectIndex, project) in projects.enumerated() {
             // Preserve the old first-match behavior if a damaged persisted document contains
@@ -601,6 +767,10 @@ final class ProjectStore {
             for (sessionIndex, session) in project.sessions.enumerated()
             where sessionLocationsByID[session.id] == nil {
                 sessionLocationsByID[session.id] = (projectIndex, sessionIndex)
+            }
+            for (terminalIndex, terminal) in project.terminals.enumerated()
+            where terminalLocationsByID[terminal.id] == nil {
+                terminalLocationsByID[terminal.id] = (projectIndex, terminalIndex)
             }
         }
     }

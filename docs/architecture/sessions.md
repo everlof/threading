@@ -1,6 +1,6 @@
-# Sessions
+# Sessions and Terminals
 
-Side chats, the shell drawer, naming, launching, resuming and importing.
+Side chats, standalone terminals, the shell drawer, naming, launching, resuming and importing.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -49,20 +49,39 @@ What fork does *not* give is a merge back. Transcripts do not merge; the honest 
 pasting a conclusion into the parent as a message, which is not built. And the first turn
 replays the whole copied context, so forking a large conversation costs real tokens.
 
-## The Shell
+## Shell Drawers and Standalone Terminals
 
-A shell is **not a kind of session**. It was one for most of this project's life — a sidebar row
+A shell is **not a kind of agent session**. It was one for most of this project's life — a sidebar row
 beside the chats, with a title, a launch record, a branch field and an account slot it could
 never use — for something with no conversation to resume, no transcript, nothing to import and
 no scrollback that was ever persisted. Every one of those fields was a hole, and the code around
 them was a run of branches saying *not for shells*: in the launcher, the replayer, the account
 discovery, the usage service, the brand icons, the migration.
 
-It is now a **drawer under the conversation** (`ShellDrawerViewController`, ⌃`), which is what
-it always was in practice: a place to run a command *about* the conversation you are reading.
+That conclusion still applies to the shell that belongs to a conversation. It is a **drawer
+under the conversation** (`ShellDrawerViewController`, ⌃`), which is what it always was in
+practice: a place to run a command *about* the conversation you are reading.
 `AgentKind` is down to `.claude` and `.codex`, and `supportsResume`, `supportsAccounts` and
 `supportsNativeUI` collapsed to `true` — that is the measure of how much of the model existed to
 describe the absence.
+
+A **standalone project terminal** is a different promise: a first-class sidebar destination
+for work that is not subordinate to a conversation. `ProjectTerminal` is deliberately its own
+small record rather than a third `AgentKind`: identity, displayed and custom titles, current
+directory, branch, theme assignment and creation time, with none of the transcript, provider,
+account, model, resume or import fields an `AgentSession` requires. A project's hover `+` asks
+for **New Chat…** or **New Terminal**; clicking the project row itself keeps opening the chat
+composer. The PTY begins when the terminal is first shown, is retained by
+`ProjectTerminalRuntime` across sidebar switches, and ends when the row, project or app closes.
+After a normal exit the row remains dormant and **Start Again** creates a fresh shell in its
+last recorded directory. The record survives relaunch; process state and scrollback do not.
+
+`ProjectTerminalViewController` accepts OSC 7 working-directory reports and also samples the
+shell process directory, because not every shell emits OSC 7. The cwd decides sidebar
+placement: among already-added projects in the same git worktree, the deepest project folder
+containing the cwd wins. An unrelated directory leaves the terminal in the project where it
+was created. This makes moving into an added monorepo package move the row beneath that package
+and its branch heading without inventing projects from arbitrary directories.
 
 The drawer is a **tab host** (`DrawerHostViewController`) on the same model as the display
 panel — `PaneTab` lists per session, a `ThemedTabStripView` along its top, a `+` for another
@@ -141,6 +160,30 @@ keystroke would land in front of the user's own half-written sentence rather tha
 Plain `focus()` keeps the caret where it is, and is what removing an attachment uses — handing
 the editor back is not the user asking for the caret to move out of the middle of a sentence.
 
+## The Composer
+
+The composer hangs from the pane's **bottom** edge — input below, room above, the shape every
+chat product has taught — and the room above holds a **hero**: the Threading mark over a
+greeting (`ComposerGreeting`). The greeting is deliberately inconsistent: when the calendar
+offers a special (a holiday, a Friday, a weekend) it is taken ~60% of the time, otherwise the
+time of day is mentioned ~40% of the time, and on an ordinary Tuesday most picks say nothing
+about the clock at all. The rule lives in one place with the date as a *parameter* and the
+randomness injected, so tests pass a fixed date and a seeded generator; production reads the
+clock only at the call site. The hero hides below a height threshold
+(`viewDidLayout`) — half a greeting peeking from behind the prompt reads as a defect.
+
+The first chip is the **project**: every project (subtitle = its `~`-abbreviated folder, the
+old subheading), then *Add Existing Folder…* / *Create New Folder…*. Selection routes through
+the delegate to `sidebar.select(projectID:)` — the one path project selection already takes —
+and the folder items reuse the coordinator's `addProject()`/`newProject()`. This is also what
+replaced the idea of a "first project" onboarding page: with **no projects at all the empty
+pane shows the composer itself in a nil-project mode** (`showEmptyState` →
+`showComposer(projectID: nil)`) — prompt live, **Start disabled**, chip reading "Choose a
+project…". Words typed before a project exists follow the composer into the project chosen
+next (unless that project already holds a draft); a draft belonging to a project just left
+does not leak back the other way. With projects present but nothing selected, the
+"No Session Selected" placeholder stays — the composer is the way *in*, not the idle state.
+
 ## Session Names
 
 **A session is never named after its agent or account** — the row's icon slot and account chip
@@ -164,6 +207,45 @@ re-appended every turn (so the *last* one is current, and `SessionNaming` reads 
 tail rather than scanning the conversation); `custom-title` is written by `/rename` — after a
 mid-conversation rename both keep being appended, interleaved, so *presence* of a custom
 title decides, not order. Codex records no title at all; its sessions keep their prompt name.
+
+**`ai-title` is written once and then almost never rewritten**, which is the fact the rest of
+this section turns on. Counted across the twelve largest transcripts here: each carries 34–422
+`ai-title` records, and **ten of the twelve hold a single distinct value**. The two that moved
+moved exactly once, thousands of lines in — `"Commit changes"` → `"fork-session-feature"` at
+line 813 of 3240, and a first-turn sentence → `"public-chat-web-ui"` at line 5896 of 7928 —
+and neither has a `custom-title` record, so those are the CLI rewriting its own title rather
+than a `/rename` misread. Re-reading the transcript therefore rescues a name that arrived after
+a surface switch or was never read; it is **not** a way to make a name follow the work. A
+session named after its opening message keeps that name while the conversation becomes
+something else.
+
+That is what `set_session_name` is for (see [`mcp-and-display.md`](mcp-and-display.md)), and
+what the `⋯` menu's **Rename with Agent** asks for: one line sent into the running session
+telling it to call that tool. The agent already holds the conversation, so the context has been
+paid for once and this costs a short turn against a warm cache. Both alternatives pay again for
+what the agent already knows — a fork copies the whole transcript and replays it cold (the same
+cost noted under side chats above), and a headless `--print` run buys a fresh system prompt and
+tool schemas in order to be told the same thing.
+
+`SessionCoordinator.canAskAgentToRename` decides whether the item appears at all, and the third
+of its three conditions is the one that is easy to miss:
+
+1. an agent is running, or there is nothing to ask;
+2. no turn is in flight — text sent into a working agent lands in whatever it has on screen, a
+   permission prompt or a half-typed composer line;
+3. the session tool group is switched on, or the agent has no `set_session_name` to call and the
+   request would spend a turn on an instruction it cannot carry out.
+
+It is **absent rather than disabled** when those fail: the menu already reads long, and none of
+the three reasons is something a greyed row could say. The request itself names the tool
+outright (`SessionRenameRequest`) rather than asking in prose — an agent asked in prose answers
+in prose, since both CLIs have their own `/rename` and their own idea of a title, and the
+sidebar would learn nothing. It is sent through the ordinary composer path, so it is echoed
+into the transcript as a user turn: an instruction sent to an agent invisibly is one the user
+cannot see, correct, or account for when the reply arrives, and this one spends their usage.
+Native sessions take it over the stream; a terminal has no send-or-refuse, so the text is typed
+into the PTY and a carriage return submits it — `\r`, not `\n`, which several TUI composers
+insert as a line break and send nothing.
 
 **`launchName` is nil unless the user renamed the session**, and the `--name` flag is only
 passed then. This is load-bearing: `--name` marks the conversation custom-titled in the CLI,
@@ -402,6 +484,55 @@ Applicability stays here rather than in the register: each also requires
 `AgentRuntime.isRunning`, because a dormant session has nothing to interrupt, which is a fact
 about the session and not a preference about the prompt.
 
+### The session that archives itself
+
+"Commit this and then close the session" is one instruction, and the second half of it used to
+be the user's to carry out after the agent had finished the first. `archive_session` is that half
+— an MCP tool in the **Session lifecycle** group that files away the session the call arrived on.
+The session is not an argument: the MCP URL carries the identity (see
+[`mcp-and-display.md`](mcp-and-display.md)), so an agent can end its own conversation and no
+other.
+
+**The delay is the feature.** Archiving stops the agent, and an agent stopped inside its own tool
+call never receives the result of that call — the process dies mid-turn, the user loses the answer
+they were waiting for, and the last thing on screen is a half-written reply. So the tool arms
+`SessionArchiveScheduler` and returns at once, the agent writes its final message as usual, and
+the archive lands `SessionArchiveDefaults.settleDelay` after the turn ends. Which is also the only
+order in which the instruction reads the way it was said.
+
+**The turn's end is the app's existing answer to "is it finished".** The scheduler watches
+`SessionActivityDidChange` and fires on the edge out of `hasTurnInFlight` — the same edge the
+attention notifications already treat as a finished turn. For a session whose agent reports its
+own boundaries that edge is the agent saying so; for one still on the output heuristic it is a
+guess, and this is no better or worse than everything else built on that guess (see
+[`session-activity.md`](session-activity.md)). Two rules follow from the guess being fallible: a
+session that goes quiet and starts writing again *disarms* the settle rather than being archived
+mid-turn, and a request that never becomes due is dropped after
+`SessionArchiveDefaults.requestExpiry` rather than being spent on some later, unrelated turn —
+which is the one way this could archive a session nobody asked it to. `cancel_session_archive`
+takes a pending request back; it deliberately cannot un-archive a session that has already gone,
+because that way back belongs to the user, on the receipt.
+
+**The receipt says who acted, and holds longer for it.** `agentArchiveToast` is the same band as
+the clicked archive with two differences, and both come from the same fact: nobody clicked
+anything. It names the agent — a row that leaves the sidebar on its own is the one report where
+"what happened" without "who did it" is the wrong half of the sentence, and the name is also the
+only part saying this was not a misclick — and it carries the agent's own one-line reason, which
+is the only thing on the band the user cannot work out for themselves. It holds for
+`ToastDefaults.unattendedDwell` instead of six seconds, because the six are measured from a click
+and the user has been reading something else since they asked for this. The Undo is identical:
+same action, same restore, same rule about re-selecting only what was on screen — and where two
+of these land close together, the second band waits for the first rather than replacing it. An
+agent that files two sessions away in one turn owes the user two ways back, not the later one;
+the queue and its bound are `ToastPresenter`'s (see [`design-system.md`](design-system.md)).
+
+Nothing about the archive itself differs — `SessionCoordinator.archiveAtAgentRequest` and the
+row's own Archive go through one private `archive(_:receipt:)`, so the agent's route cannot
+quietly grow a second set of rules about stopping the process or emptying the pane. The scheduler
+stays in Core and knows nothing about sidebars: it announces `SessionArchiveRequestDidBecomeDue`,
+and the coordinator that already owns every other lifecycle decision observes it directly rather
+than having the window controller relay it back down.
+
 **Continuation lineage is not provider lineage.** A side chat's `forkedFrom` points at a
 provider-native child that can resume the same transcript semantics. A cross-provider session's
 `continuedFrom` instead records which Threading row supplied a frozen handoff, with
@@ -482,6 +613,23 @@ nested inside the folder — the common `<repo>/.git`-adjacent layout, e.g.
 with its own git directory, on its own branch. The equal-path case, which is almost every
 rollout, is settled without touching disk. This mirrors how opencode anchors a session
 (`rev-parse --git-dir` vs `--git-common-dir`), read off disk rather than by shelling out.
+
+**The sheet is searchable by identifier, and every row wears one.** A busy project offers
+hundreds of conversations whose titles are the agent's own summaries of itself, so three of them
+beginning "Refactor the" is the ordinary case rather than the pathological one — and the id is
+the only thing about a past conversation that is exact. When something else already named the
+conversation (a hook's log, a `--resume` in a shell's history, another window), the reader is
+holding an id and nothing else; before this the sheet had no way to accept one. Matching is
+`contains` over the whole id, so a fragment copied out of the middle of a path works too.
+
+The row shows `ImportLayout.identifierLength` characters of it, in a column of its own down the
+trailing edge — git's eight, and a column rather than a tail on the detail line so the eye can
+skip it entirely and then, when the query *is* an id, read straight down it. A fixed prefix is
+the obvious implementation and is wrong on its own: matched in the middle, the row would come
+back with nothing highlighted, which reads as the sheet having found it for some other reason.
+So the window slides to the match and says so with a leading ellipsis. The matched run is drawn
+by `SearchMatchLabel`, whose "a query containing the whole line marks all of it" rule is what
+makes eight shown characters answer honestly to a pasted thirty-six-character query.
 
 Verify against disk rather than by eye — `~/.codex/sessions/**/*.jsonl` and
 `<claude config>/projects/<slug>/` are the ground truth, and both are cheap to count. The

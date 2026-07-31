@@ -127,6 +127,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Session state (`dormant`/`idle`/`working`/`needsAttention`), lifecycle hooks for both CLIs, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
 | Reading git metadata (worktrees, submodules, identities), the Git Review pane, staging, the commit graph, diff syntax highlighting | [`git.md`](docs/architecture/git.md) |
 | Side chats and forking, the shell drawer, session naming, launching, resuming, importing outside conversations | [`sessions.md`](docs/architecture/sessions.md) |
+| The first-launch walkthrough: window deferral and the terminate trap, the completed flag, the global conversation scan, the notifications opt-in | [`onboarding.md`](docs/architecture/onboarding.md) |
 | Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |
 | Agent marks, account chips, project icons, icon discovery and research | [`icons.md`](docs/architecture/icons.md) |
 | Opening a checkout or a file in another app: the registry, LaunchServices detection, line numbers, the header's split control | [`external-apps.md`](docs/architecture/external-apps.md) |

@@ -116,6 +116,91 @@
         "sv": { "stringUnit": { "state": "translated", "value": "När du skriver en prompt, tryck Return för att" } }
       }
     },
+    "100%": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "100 %" } }
+      }
+    },
+    "A picture that takes the size it is given rather than lending its own: scaled down to fit, never up, hung from the top. Tab to it for the focus ring, then Space — or double-click — to open the file in the media inspector. The one below has no file behind it, so it refuses and stays out of the key loop; that refusal is the state to check.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "En bild som tar den storlek den får i stället för att låna ut sin egen: förminskad för att passa, aldrig förstorad och fäst upptill. Tabb till den för fokusringen och tryck sedan mellanslag – eller dubbelklicka – för att öppna filen i mediegranskaren. Den nedanför saknar bakomliggande fil, så den avböjer och stannar utanför tangentbordsordningen; det är det tillståndet som ska kontrolleras." } }
+      }
+    },
+    "Click or press Space to inspect": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Klicka eller tryck mellanslag för att granska" } }
+      }
+    },
+    "Close inspector": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Stäng granskaren" } }
+      }
+    },
+    "Drag to pan. Pinch or press Command plus and minus to zoom. Press Space to close.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Dra för att panorera. Nyp eller tryck kommando plus och minus för att zooma. Tryck mellanslag för att stänga." } }
+      }
+    },
+    "Fit": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Anpassa" } }
+      }
+    },
+    "Image size": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Bildstorlek" } }
+      }
+    },
+    "Inspect": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Granska" } }
+      }
+    },
+    "Media actions": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Medieåtgärder" } }
+      }
+    },
+    "Media inspector": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Mediegranskare" } }
+      }
+    },
+    "Media inspector, %@": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Mediegranskare, %@" } }
+      }
+    },
+    "Media items": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Medieobjekt" } }
+      }
+    },
+    "Next item": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Nästa objekt" } }
+      }
+    },
+    "Open in System Quick Look": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Öppna i systemets Överblick" } }
+      }
+    },
+    "Press to inspect %@": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Tryck för att granska %@" } }
+      }
+    },
+    "Press to inspect. Press Space again to close.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Tryck för att granska. Tryck mellanslag igen för att stänga." } }
+      }
+    },
+    "Previous item": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Föregående objekt" } }
+      }
+    },
     "\n\nThe run's full output: Project Icon > Open Last Research Log.": {
       "extractionState": "stale",
       "localizations": {
@@ -20431,6 +20516,1166 @@
           "stringUnit": {
             "state": "translated",
             "value": "⌃ hierarki · ⌥ avstånd"
+          }
+        }
+      }
+    },
+    "Include this one": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta med den här"
+          }
+        }
+      }
+    },
+    "ThemedCheckbox is now %@.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ThemedCheckbox är nu %@."
+          }
+        }
+      }
+    },
+    "Some of these": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Några av dessa"
+          }
+        }
+      }
+    },
+    "What are we building today?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vad bygger vi idag?"
+          }
+        }
+      }
+    },
+    "Ready when you are.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redo när du är."
+          }
+        }
+      }
+    },
+    "Pick up where you left off, or start something new.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt där du slutade, eller börja något nytt."
+          }
+        }
+      }
+    },
+    "A blank line is a good place to begin.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En tom rad är en bra plats att börja på."
+          }
+        }
+      }
+    },
+    "What's on your mind?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vad har du i tankarna?"
+          }
+        }
+      }
+    },
+    "Let's make something.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nu skapar vi något."
+          }
+        }
+      }
+    },
+    "Where to next?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vart härnäst?"
+          }
+        }
+      }
+    },
+    "Type a brief, start a thread.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skriv en brief, starta en tråd."
+          }
+        }
+      }
+    },
+    "Good morning. Coffee, then code?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "God morgon. Kaffe, sedan kod?"
+          }
+        }
+      }
+    },
+    "Morning — the day is still unwritten.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Morgon — dagen är ännu oskriven."
+          }
+        }
+      }
+    },
+    "An early start. Let's use it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En tidig start. Låt oss använda den."
+          }
+        }
+      }
+    },
+    "Good afternoon. Where were we?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "God eftermiddag. Var var vi?"
+          }
+        }
+      }
+    },
+    "The afternoon is young.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eftermiddagen är ung."
+          }
+        }
+      }
+    },
+    "A fine hour to ship something.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En utmärkt timme att leverera något."
+          }
+        }
+      }
+    },
+    "Good evening. One more thing before the day ends?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "God kväll. En sak till innan dagen är slut?"
+          }
+        }
+      }
+    },
+    "The evening session — the quiet hours.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kvällspasset — de lugna timmarna."
+          }
+        }
+      }
+    },
+    "Winding down, or winding up?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Varvar du ner, eller varvar du upp?"
+          }
+        }
+      }
+    },
+    "Late night. The best ideas keep odd hours.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sen kväll. De bästa idéerna håller udda tider."
+          }
+        }
+      }
+    },
+    "Burning the midnight oil?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jobbar du över midnatt?"
+          }
+        }
+      }
+    },
+    "Quiet out there. Perfect.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tyst där ute. Perfekt."
+          }
+        }
+      }
+    },
+    "New year, new threads.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nytt år, nya trådar."
+          }
+        }
+      }
+    },
+    "Midsummer light — long days, long sessions.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Midsommarljus — långa dagar, långa sessioner."
+          }
+        }
+      }
+    },
+    "Spooky season. Fear no merge conflict.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kusliga tider. Frukta ingen merge-konflikt."
+          }
+        }
+      }
+    },
+    "Merry Christmas — threads under the tree.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "God jul — trådar under granen."
+          }
+        }
+      }
+    },
+    "The quiet week between the years.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den stilla veckan mellan åren."
+          }
+        }
+      }
+    },
+    "The last hours of the year. Make them count.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Årets sista timmar. Gör dem värda något."
+          }
+        }
+      }
+    },
+    "Seeing the year out in good company.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ser året ut i gott sällskap."
+          }
+        }
+      }
+    },
+    "It's Friday — ship it or shelve it?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det är fredag — leverera eller lägg på hyllan?"
+          }
+        }
+      }
+    },
+    "Friday evening — one last push, or a fresh start?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fredagskväll — en sista spurt, eller en nystart?"
+          }
+        }
+      }
+    },
+    "Weekend project time.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dags för helgprojekt."
+          }
+        }
+      }
+    },
+    "A weekend morning — unhurried, and all yours.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En helgmorgon — utan brådska, och helt din."
+          }
+        }
+      }
+    },
+    "ThemedCheckbox": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ThemedCheckbox"
+          }
+        }
+      }
+    },
+    "Off, on, mixed for a group that disagrees, and disabled.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Av, på, blandat för en grupp som är oense, och inaktiverad."
+          }
+        }
+      }
+    },
+    "GlyphView": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GlyphView"
+          }
+        }
+      }
+    },
+    "Tinted template glyphs drawn on the device pixel grid; a slot caps foreign artwork.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tonade mallglyfer ritade på enhetens pixelrutnät; en lucka begränsar främmande bildmaterial."
+          }
+        }
+      }
+    },
+    "Choose a project…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj ett projekt…"
+          }
+        }
+      }
+    },
+    "Add Existing Folder…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till befintlig mapp…"
+          }
+        }
+      }
+    },
+    "Create New Folder…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapa ny mapp…"
+          }
+        }
+      }
+    },
+    "Welcome to Threading": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välkommen till Threading"
+          }
+        }
+      }
+    },
+    "Make it yours": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gör den till din"
+          }
+        }
+      }
+    },
+    "Threading dresses itself. Pick a look and everything follows it — including the rest of this setup. Change it anytime in Settings ▸ Themes.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading klär sig självt. Välj ett utseende så följer allt annat med — även resten av den här installationen. Ändra när som helst i Inställningar ▸ Teman."
+          }
+        }
+      }
+    },
+    "Welcome Tour": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välkomstrundtur"
+          }
+        }
+      }
+    },
+    "First-launch walkthrough": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Genomgången vid första start"
+          }
+        }
+      }
+    },
+    "Theme, discovered accounts, conversations to import, and notifications — the same walkthrough a fresh install opens with.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tema, upptäckta konton, konversationer att importera och notiser — samma genomgång som en nyinstallation öppnar med."
+          }
+        }
+      }
+    },
+    "Show Again…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa igen…"
+          }
+        }
+      }
+    },
+    "Already signed in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redan inloggad"
+          }
+        }
+      }
+    },
+    "Threading found these agent logins on this Mac. Sessions can start on any of them — name or disable them later in Settings ▸ Accounts.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading hittade de här agentinloggningarna på den här datorn. Sessioner kan starta på vilken som helst av dem — namnge eller inaktivera dem senare i Inställningar ▸ Konton."
+          }
+        }
+      }
+    },
+    "Command-line tools": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kommandoradsverktyg"
+          }
+        }
+      }
+    },
+    "No agent logins found. Sign in to Claude Code or Codex from a terminal first — Threading picks logins up from their config folders.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga agentinloggningar hittades. Logga in i Claude Code eller Codex från en terminal först — Threading plockar upp inloggningar från deras konfigurationsmappar."
+          }
+        }
+      }
+    },
+    "Checking your shell's PATH…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontrollerar ditt skals PATH…"
+          }
+        }
+      }
+    },
+    "Not on your shell's PATH — sessions cannot launch until it is. Install: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finns inte på ditt skals PATH — sessioner kan inte starta förrän det gör det. Installera: %@"
+          }
+        }
+      }
+    },
+    "Found": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hittad"
+          }
+        }
+      }
+    },
+    "Not found": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hittas inte"
+          }
+        }
+      }
+    },
+    "Conversations": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konversationer"
+          }
+        }
+      }
+    },
+    "Skip for now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hoppa över tills vidare"
+          }
+        }
+      }
+    },
+    "Bring your conversations along": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta med dina konversationer"
+          }
+        }
+      }
+    },
+    "Looking through your past conversations…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tittar igenom dina tidigare konversationer…"
+          }
+        }
+      }
+    },
+    "No conversations to import — everything starts fresh.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga konversationer att importera — allt börjar från noll."
+          }
+        }
+      }
+    },
+    "Include conversations in %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta med konversationer i %@"
+          }
+        }
+      }
+    },
+    "%lld conversations in %lld folders — %lld selected to import.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld konversationer i %lld mappar — %lld valda att importera."
+          }
+        }
+      }
+    },
+    "%lld more ran in folders that no longer exist and were left out.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld till kördes i mappar som inte längre finns och lämnades utanför."
+          }
+        }
+      }
+    },
+    "Start using Threading": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Börja använda Threading"
+          }
+        }
+      }
+    },
+    "Know when a session needs you": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vet när en session behöver dig"
+          }
+        }
+      }
+    },
+    "Agents work for minutes at a time. A notification says when one is blocked on an approval, or finished while you were elsewhere — only then, and only while Threading is in the background.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenter arbetar flera minuter i taget. En notis berättar när en väntar på ett godkännande, eller blev klar medan du var någon annanstans — bara då, och bara medan Threading är i bakgrunden."
+          }
+        }
+      }
+    },
+    "Enable notifications": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktivera notiser"
+          }
+        }
+      }
+    },
+    "Only for the approval alert, which is the one that waits.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bara för godkännandenotisen, som är den som väntar."
+          }
+        }
+      }
+    },
+    "Notifications are on. Change any of this later in Settings ▸ General.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notiser är på. Ändra det här när som helst i Inställningar ▸ Allmänt."
+          }
+        }
+      }
+    },
+    "macOS has notifications for Threading switched off; turning them on happens in System Settings ▸ Notifications.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS har notiser för Threading avstängda; de slås på i Systeminställningar ▸ Notiser."
+          }
+        }
+      }
+    },
+    "Open System Settings…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna Systeminställningar…"
+          }
+        }
+      }
+    },
+    "Skipping is fine — Threading will ask the first time there is something to say.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det går bra att hoppa över — Threading frågar första gången det finns något att säga."
+          }
+        }
+      }
+    },
+    "%lld running chats or terminals will be terminated. Saved conversations are not deleted.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld pågående chattar eller terminaler kommer att avslutas. Sparade konversationer raderas inte."
+          }
+        }
+      }
+    },
+    "Close Terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stäng terminal"
+          }
+        }
+      }
+    },
+    "Its chats and terminals are removed from the sidebar. Saved conversations are not deleted.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dess chattar och terminaler tas bort från sidofältet. Sparade konversationer raderas inte."
+          }
+        }
+      }
+    },
+    "New Chat…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny chatt…"
+          }
+        }
+      }
+    },
+    "New Terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny terminal"
+          }
+        }
+      }
+    },
+    "New chat or terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny chatt eller terminal"
+          }
+        }
+      }
+    },
+    "Rename Terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt namn på terminal"
+          }
+        }
+      }
+    },
+    "Rename Terminal…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt namn på terminal…"
+          }
+        }
+      }
+    },
+    "Start a fresh shell in its last working directory.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta ett nytt skal i dess senaste arbetskatalog."
+          }
+        }
+      }
+    },
+    "Terminal actions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminalåtgärder"
+          }
+        }
+      }
+    },
+    "GitHub refused the report (%lld).": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub avvisade rapporten (%lld)."
+          }
+        }
+      }
+    },
+    "GitHub refused the report (%lld): %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub avvisade rapporten (%lld): %@"
+          }
+        }
+      }
+    },
+    "GitHub would not accept the report from this Mac's sign-in, so this opens the form in your browser.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub ville inte ta emot rapporten från den här datorns inloggning, så det här öppnar formuläret i din webbläsare."
+          }
+        }
+      }
+    },
+    "Threading %@ (%@) · %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading %@ (%@) · %@"
+          }
+        }
+      }
+    },
+    "Threading could not build the GitHub address.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading kunde inte bygga GitHub-adressen."
+          }
+        }
+      }
+    },
+    "Threading could not reach GitHub: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading kunde inte nå GitHub: %@"
+          }
+        }
+      }
+    },
+    "Threading has no GitHub sign-in, so this opens the form in your browser.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading har ingen GitHub-inloggning, så det här öppnar formuläret i din webbläsare."
+          }
+        }
+      }
+    },
+    "_Report truncated._": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "_Rapporten avkortad._"
+          }
+        }
+      }
+    },
+    "Captured details": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Insamlade detaljer"
+          }
+        }
+      }
+    },
+    "Describe what's wrong, or what should change": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beskriv vad som är fel, eller vad som borde ändras"
+          }
+        }
+      }
+    },
+    "Description": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beskrivning"
+          }
+        }
+      }
+    },
+    "Filed as issue #%lld. The screenshot is on the clipboard — ⌘V adds it in the browser.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Registrerat som ärende #%lld. Skärmbilden ligger på urklipp — ⌘V lägger till den i webbläsaren."
+          }
+        }
+      }
+    },
+    "Filed on GitHub. The screenshot is on the clipboard — ⌘V adds it in the browser.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Registrerat på GitHub. Skärmbilden ligger på urklipp — ⌘V lägger till den i webbläsaren."
+          }
+        }
+      }
+    },
+    "Filing the issue on GitHub…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Registrerar ärendet på GitHub…"
+          }
+        }
+      }
+    },
+    "⌘Return submits the issue · Return adds a line": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘Retur skickar ärendet · Retur lägger till en rad"
+          }
+        }
+      }
+    },
+    "Submit Issue": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skicka ärende"
+          }
+        }
+      }
+    },
+    "Submitting…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skickar…"
+          }
+        }
+      }
+    },
+    "The screenshot is on the clipboard — ⌘V adds it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skärmbilden ligger på urklipp — ⌘V lägger till den."
+          }
+        }
+      }
+    },
+    "Report a Problem…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapportera ett problem…"
+          }
+        }
+      }
+    },
+    "Report a Problem": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rapportera ett problem"
+          }
+        }
+      }
+    },
+    "Files an issue on Threading's GitHub. Nothing is sent until you press Submit.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skapar ett ärende på Threadings GitHub. Inget skickas förrän du trycker på Skicka."
+          }
+        }
+      }
+    },
+    "Kind": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Typ"
+          }
+        }
+      }
+    },
+    "Problem": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Problem"
+          }
+        }
+      }
+    },
+    "Improvement": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förbättring"
+          }
+        }
+      }
+    },
+    "Title": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rubrik"
+          }
+        }
+      }
+    },
+    "One line naming it": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En rad som namnger det"
+          }
+        }
+      }
+    },
+    "What happened, what you expected, and how to see it again": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vad som hände, vad du förväntade dig och hur man ser det igen"
+          }
+        }
+      }
+    },
+    "Write a title or some details first.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skriv en rubrik eller några detaljer först."
+          }
+        }
+      }
+    },
+    "Problem reported from Threading": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Problem rapporterat från Threading"
+          }
+        }
+      }
+    },
+    "Improvement suggested from Threading": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förbättring föreslagen från Threading"
+          }
+        }
+      }
+    },
+    "Filed on GitHub.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Registrerat på GitHub."
+          }
+        }
+      }
+    },
+    "Filed as issue #%lld.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Registrerat som ärende #%lld."
+          }
+        }
+      }
+    },
+    "Included with the report: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Följer med rapporten: %@"
           }
         }
       }
