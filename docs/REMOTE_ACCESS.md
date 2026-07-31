@@ -62,6 +62,66 @@ relayed ANSI stream locally rather than receiving a scaled screenshot. The Mac s
 returns when the remote view closes. Rotating the phone updates the lease, and disconnecting
 restores the newest natural Mac grid (or another phone that is still controlling the session).
 
+**The chat says who can see it.** For a long time the app could report that a session was
+shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
+links were still lying around unused. That was a privacy gap and a debugging one: two clients
+quietly holding the same terminal is what made the grid flip between sizes, and the only way to
+notice was to screenshot the corner card.
+
+The session status card grows an `eye` row whenever the chat is reachable from outside this Mac
+— `2 following` while somebody is on it, `Shared` while only a link exists. It opens
+`SessionSharingViewController` in the side pane, which groups by the lifecycle rather than by
+source, because a link, a person and a connection are three different things with three
+different verbs:
+
+| Group | What it holds | What you can do |
+|---|---|---|
+| **Watching now** | live sockets, from `RemoteSessionMirrorRegistry.followers(of:)` — guests and the owner's own paired devices alike | nothing; a connection ends by itself |
+| **With access** | members who accepted an invitation and are not here, from `RemoteAccessCoordinator.access(for:)` | Revoke, which asks first |
+| **Invited** | invitations nobody has used yet | Copy, Revoke |
+
+A member who *is* watching appears once, in the live group, where there is more to say about
+them — both sources know that person, and listing them from each reads as two people with one
+name. The owner's paired devices carry no Revoke: they hold the pairing token rather than a
+share of this chat, so dropping one is unpairing the Mac, and the section says so and links to
+Settings.
+
+Revoking a person is a `ConfirmationPrompt` case (`revokeChatAccess`, `alwaysAsks(.irreversible)`)
+because the way back is a *different* action the owner has to know to take — the invitation was
+single-use, so letting them back in means sharing again. Withdrawing an unused link asks nothing:
+nobody has become anybody yet.
+
+**Clients say what they are.** `RemoteClientMessage.deviceName` is an optional, additive field on
+the auth frame — the iPhone sends its model, the browser a user-agent-derived label — so rows read
+"iPhone" or "Safari on Mac" rather than a column of UUID fragments. It is a label and never an
+identity: `device` is what authorization binds to, and the host runs the label through
+`RemoteInboundPolicy.normalizedDeviceName`, which is the member-name rule. A client that predates
+the field omits it and the pane falls back to the pseudonym the diagnostics log uses, which is why
+this needed no protocol bump.
+
+**Two clients settle on the grid both can show**, not on whichever asked last. One PTY has one
+size, and the Mac broadcasts every grid it applies to everybody watching, so last-writer-wins had
+no fixed point: the client that could not display the new grid answered by re-asking for its own,
+the other answered that, and the agent was reflowed and repainted several times a second for as
+long as both stayed open. `RemoteSessionMirrorRegistry.resolvedViewport` takes the intersection —
+the smallest column and row count across every live lease — which every viewer can see whole and
+which does not depend on arrival order. A second viewer joining costs one resize.
+
+**A remote-controlled terminal is laid out at a pixel size that disagrees with its grid**, so
+every AppKit layout pass proposes a grid nobody asked for. Suppressing the PTY resize is not
+enough, because SwiftTerm has already reflowed the emulator by the time the process is consulted,
+and putting it back runs the resize path again — which ends in `softReset()`. A full-screen agent
+therefore lost its scrolling region on every pass, including passes that set the identical frame,
+which is what the Fit-to-iPhone banner's own text change caused. Both sides now answer
+`shouldApplyFrameSizeChange` — a fork seam ahead of the emulator, not behind it — so a managed
+grid is never left, even briefly. `EmojiFixedTerminalView` keeps `shouldApplyProcessSizeChange` as
+the second gate, on the PTY rather than the renderer. Re-applying an unchanged lease is not a
+resize either, for the same soft-reset reason.
+
+Every applied grid is written to the event log as `Remote viewport applied` with the grid and the
+number of clients holding a lease. Diagnosing the argument above meant reading it out of
+screenshots, because nothing recorded what the clients had asked for.
+
 **The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
 a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the
 session off its own frame and put the rest behind a scrollbar, and only resizing the *Mac* ever

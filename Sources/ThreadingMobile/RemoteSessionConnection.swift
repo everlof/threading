@@ -89,6 +89,7 @@ final class RemoteSessionConnection: ObservableObject {
                 type: "auth",
                 token: client.link.token,
                 device: deviceID,
+                deviceName: RemoteDeviceIdentity.currentName,
                 protocolVersion: RemoteProtocol.current,
                 protocolMinimum: RemoteProtocol.minimumSupported
             ), generation: generation)

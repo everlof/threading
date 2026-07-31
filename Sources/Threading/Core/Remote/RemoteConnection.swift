@@ -39,6 +39,14 @@ final class RemoteConnection: @unchecked Sendable {
     /// A browser-minted device id, carried on the auth frame, used for the approval record.
     var deviceID: String?
 
+    /// What the device calls itself, for the sharing pane's rows. Nil for a client that predates
+    /// the field, which the pane renders as the pseudonymous id instead.
+    var deviceName: String?
+
+    /// When this socket authenticated — the "watching since" the sharing pane shows, and the only
+    /// place a live view's age exists: connections are not persisted anywhere.
+    private(set) var authenticatedAt: Date?
+
     private let connection: NWConnection
     private let queue: DispatchQueue
     private weak var delegate: Delegate?
@@ -94,6 +102,7 @@ final class RemoteConnection: @unchecked Sendable {
     func markAuthenticated() {
         authTimer?.cancel()
         authTimer = nil
+        authenticatedAt = Date()
         armPingTimer()
     }
 

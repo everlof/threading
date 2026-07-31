@@ -216,6 +216,29 @@
     }
   }
 
+  // What the Mac's sharing pane calls this browser. Read off the user agent rather than asked
+  // for: it is a label beside a Revoke button, not an identity — `deviceID` is what the Mac
+  // binds anything to — and one the owner can recognise without being prompted for a name.
+  // The Mac bounds and sanitises it on arrival like every other string a client sends.
+  var deviceName = (function () {
+    var agent = navigator.userAgent || "";
+    var browser = /Edg\//.test(agent) ? "Edge"
+      : /OPR\//.test(agent) ? "Opera"
+      : /Firefox\//.test(agent) ? "Firefox"
+      : /Chrome\//.test(agent) ? "Chrome"
+      : /Safari\//.test(agent) ? "Safari"
+      : null;
+    var platform = /iPhone/.test(agent) ? "iPhone"
+      : /iPad/.test(agent) ? "iPad"
+      : /Android/.test(agent) ? "Android"
+      : /Mac OS X/.test(agent) ? "Mac"
+      : /Windows/.test(agent) ? "Windows"
+      : /Linux/.test(agent) ? "Linux"
+      : null;
+    if (browser && platform) { return browser + " on " + platform; }
+    return browser || platform || "Browser";
+  })();
+
   var els = {
     status: document.getElementById("status"),
     sessions: document.getElementById("sessions"),
@@ -729,6 +752,7 @@
         type: "auth",
         token: token,
         device: deviceID,
+        deviceName: deviceName,
         protocolVersion: PROTOCOL.version,
         protocolMinimum: PROTOCOL.minimum,
       }));
@@ -1029,6 +1053,7 @@
         type: "auth",
         token: token,
         device: deviceID,
+        deviceName: deviceName,
         protocolVersion: PROTOCOL.version,
         protocolMinimum: PROTOCOL.minimum,
       }));

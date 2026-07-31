@@ -1359,6 +1359,13 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
     public let type: String
     public let token: String?
     public let device: String?
+    /// What to call this device in the Mac's sharing pane — "iPhone", "Safari on macOS".
+    ///
+    /// Additive and optional: a client that predates it simply omits it and the Mac falls back
+    /// to the pseudonymous device id, so this needs no protocol bump. It is a label and never an
+    /// identity — `device` is what authorization is bound to — and it arrives from the network,
+    /// so the host normalises and bounds it exactly as it does a member's display name.
+    public let deviceName: String?
     public let protocolVersion: Int?
     public let protocolMinimum: Int?
     public let data: String?
@@ -1375,6 +1382,7 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         type: String,
         token: String? = nil,
         device: String? = nil,
+        deviceName: String? = nil,
         protocolVersion: Int? = nil,
         protocolMinimum: Int? = nil,
         data: String? = nil,
@@ -1390,6 +1398,7 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         self.type = type
         self.token = token
         self.device = device
+        self.deviceName = deviceName
         self.protocolVersion = protocolVersion
         self.protocolMinimum = protocolMinimum
         self.data = data

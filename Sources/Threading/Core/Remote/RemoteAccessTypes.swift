@@ -126,6 +126,15 @@ enum RemoteInboundPolicy {
         return value
     }
 
+    /// A device's self-reported label, held to exactly the rules a member's display name is.
+    ///
+    /// It is shown beside a Revoke button, so it is worth being explicit about what it is not:
+    /// nothing is authorized by it. The device id is the bound identity; this only decides which
+    /// of two rows a person recognises as their phone.
+    static func normalizedDeviceName(_ rawValue: String?) -> String? {
+        normalizedMemberName(rawValue)
+    }
+
     static func normalizedMemberName(_ rawValue: String?) -> String? {
         guard let rawValue else { return nil }
         let printable = rawValue.unicodeScalars.compactMap { scalar -> String? in

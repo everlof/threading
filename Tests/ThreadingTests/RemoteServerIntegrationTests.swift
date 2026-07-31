@@ -144,6 +144,135 @@ final class RemoteServerIntegrationTests: XCTestCase {
         )
     }
 
+    /// Two clients watching one session share one PTY, and the Mac broadcasts every grid it
+    /// applies to all of them. Following whichever asked last therefore had no fixed point: the
+    /// client that could not show the new grid answered by re-asking for its own, and the agent
+    /// was reflowed and repainted a few times a second until one of them closed. The
+    /// intersection is the grid every client can show whole, and does not depend on arrival
+    /// order — so a second viewer joining costs one resize, not an endless argument.
+    func testASharedTerminalSettlesOnTheGridEveryClientCanShow() {
+        let phone = (cols: 46, rows: 35)
+        let tablet = (cols: 80, rows: 33)
+
+        let settled = RemoteSessionMirrorRegistry.resolvedViewport(of: [phone, tablet])
+        XCTAssertEqual(settled?.cols, 46)
+        XCTAssertEqual(settled?.rows, 33)
+
+        XCTAssertEqual(
+            RemoteSessionMirrorRegistry.resolvedViewport(of: [tablet, phone])?.cols,
+            settled?.cols,
+            "arrival order must not change the answer, or the two clients trade the grid forever"
+        )
+        XCTAssertEqual(
+            RemoteSessionMirrorRegistry.resolvedViewport(of: [tablet, phone])?.rows,
+            settled?.rows
+        )
+
+        XCTAssertEqual(
+            RemoteSessionMirrorRegistry.resolvedViewport(of: [phone])?.rows,
+            35,
+            "one client alone still gets exactly what it asked for"
+        )
+        XCTAssertNil(
+            RemoteSessionMirrorRegistry.resolvedViewport(of: []),
+            "and the Mac's own frame decides again once nobody holds a lease"
+        )
+    }
+
+    /// The sharing pane draws from two sources that both know about the same person: the live
+    /// socket they are on, and the share store that let them in. Listing them from each would put
+    /// one name in two sections and read as two people, so somebody watching appears once — in
+    /// the live group, where there is more to say about them.
+    func testSomebodyWatchingIsListedOnceRatherThanInBothGroups() {
+        let socket = NSObject()
+        let anna = RemoteSessionMirrorRegistry.Follower(
+            id: ObjectIdentifier(socket),
+            memberName: "Anna",
+            memberID: "member-anna",
+            deviceName: "iPhone",
+            deviceLabel: "device-abc",
+            isOwnerDevice: false,
+            capability: .interact,
+            canApprovePermissions: false,
+            surface: "terminal",
+            viewport: (cols: 46, rows: 35),
+            watchingSince: Date(),
+            isTyping: false
+        )
+        func member(_ id: String, _ name: String) -> RemoteAccessCoordinator.SessionAccess.Member {
+            .init(
+                id: id,
+                displayName: name,
+                deviceID: "device",
+                capability: .view,
+                canApprovePermissions: false,
+                joinedAt: Date(),
+                lastSeenAt: nil
+            )
+        }
+        let access = RemoteAccessCoordinator.SessionAccess(
+            members: [member("member-anna", "Anna"), member("member-jonas", "Jonas")],
+            links: []
+        )
+
+        let sections = SessionSharingViewController.sections(
+            followers: [anna],
+            access: access
+        )
+
+        XCTAssertEqual(sections.watching.map(\.memberName), ["Anna"])
+        XCTAssertEqual(
+            sections.away.map(\.displayName),
+            ["Jonas"],
+            "Anna holds a membership and a socket; only the socket describes what she is doing"
+        )
+        _ = socket
+    }
+
+    /// A device's own label is shown beside a Revoke button, so it arrives from the network held
+    /// to the same rules a member's display name is: bounded, printable, whitespace-collapsed.
+    /// It is never an identity — the device id is what authorization binds to — and this is what
+    /// keeps a chosen string from becoming a row that lies about who is watching.
+    func testADeviceLabelIsBoundedAndSanitizedLikeAnyOtherNameFromTheNetwork() {
+        XCTAssertEqual(RemoteInboundPolicy.normalizedDeviceName("  iPhone   15  "), "iPhone 15")
+        // Control characters are dropped outright rather than turned into a space — a newline
+        // is one, so a two-line label arrives as one word rather than as a row that wraps.
+        XCTAssertEqual(
+            RemoteInboundPolicy.normalizedDeviceName("Safari\u{0}on\nmacOS"),
+            "SafarionmacOS"
+        )
+        XCTAssertEqual(
+            RemoteInboundPolicy.normalizedDeviceName("Safari\u{2028}on macOS"),
+            "Safari on macOS",
+            "a separator that is not a control character still collapses to one space"
+        )
+        XCTAssertNil(RemoteInboundPolicy.normalizedDeviceName("   "))
+        XCTAssertNil(RemoteInboundPolicy.normalizedDeviceName(nil))
+        XCTAssertNil(
+            RemoteInboundPolicy.normalizedDeviceName(String(repeating: "a", count: 4_096)),
+            "an unbounded label would be a row that pushes its own Revoke button off screen"
+        )
+    }
+
+    /// Both clients say what they are, so the sharing pane's rows are readable rather than a
+    /// column of UUID fragments. The field is additive: a client that predates it omits it and
+    /// the Mac falls back to the pseudonym, which is why this needs no protocol bump.
+    func testBothClientsIntroduceThemselvesByName() throws {
+        let script = String(decoding: try XCTUnwrap(get("/app.js")).body, as: UTF8.self)
+        XCTAssertTrue(
+            script.contains("deviceName: deviceName"),
+            "the browser names itself on the auth frame, for the Mac's sharing pane"
+        )
+        XCTAssertTrue(
+            script.contains("navigator.userAgent"),
+            "and derives that name rather than asking, because it is a label and not an identity"
+        )
+        XCTAssertNil(
+            RemoteClientMessage(type: "auth", token: "t", device: "d").deviceName,
+            "a client that says nothing stays valid — the field is optional on the wire"
+        )
+    }
+
     /// The client clamps to the same range the server validates against, so a request from a
     /// very small or very large window is answered rather than refused as `invalidViewport`.
     func testTheClientAsksInsideTheRangeTheServerAccepts() throws {

@@ -60,23 +60,24 @@ final class RemoteSessionMirrorRegistry {
         /// Devices that have already sent input, so the "first remote input" audit line is
         /// written once per device+session rather than per keystroke.
         var inputSeenDevices: Set<String> = []
-        /// Interactive clients that currently have a terminal view on screen. The most recent
-        /// request owns the shared PTY; retaining the others lets ownership fall back cleanly if
-        /// the newest controller disconnects while another phone is still open.
+        /// Interactive clients that currently have a terminal view on screen. They share one
+        /// PTY, so the grid applied is the largest one all of them can display — see
+        /// `applyViewport`.
         var viewportRequests: [ObjectIdentifier: ViewportRequest] = [:]
     }
 
     private struct ViewportRequest {
         let cols: Int
         let rows: Int
-        let sequence: UInt64
     }
 
     private var mirrors: [SessionID: Mirror] = [:]
+    /// Which subscribers are composing right now, per session. Presence is a relayed message
+    /// between clients; this is the Mac keeping the part of it its own sharing pane shows.
+    private var typingConnections: [SessionID: Set<ObjectIdentifier>] = [:]
     private var sessionByConnection: [ObjectIdentifier: SessionID] = [:]
     private var themeEventSubscribers: [ObjectIdentifier: RemoteConnection] = [:]
     private var pendingConversationBroadcasts: [SessionID: DispatchWorkItem] = [:]
-    private var viewportSequence: UInt64 = 0
     private var latestWorkspaceActivity: [SessionID: RemoteWorkspaceChangedDTO] = [:]
 
     // MARK: - REST
@@ -249,24 +250,29 @@ final class RemoteSessionMirrorRegistry {
         ) else {
             return false
         }
+        var attached = false
         if let controller = AgentRuntime.shared.controller(for: sessionID), controller.isRunning {
-            return attachTerminal(
+            attached = attachTerminal(
                 connection,
                 to: controller.session,
                 sessionID: sessionID,
                 capability: authorization.capability
             )
-        }
-        if let conversation = AgentRuntime.shared.conversation(for: sessionID),
-           conversation.isRunning {
-            return attachConversation(
+        } else if let conversation = AgentRuntime.shared.conversation(for: sessionID),
+                  conversation.isRunning {
+            attached = attachConversation(
                 connection,
                 to: conversation,
                 sessionID: sessionID,
                 authorization: authorization
             )
         }
-        return false
+        guard attached else { return false }
+        if authorization.member != nil {
+            RemoteAccessCoordinator.shared.noteMemberSeen(shareID: authorization.shareID)
+        }
+        followersChanged(sessionID)
+        return true
     }
 
     /// Subscribes a dashboard to app-chrome changes without binding it to a particular session.
@@ -440,6 +446,11 @@ final class RemoteSessionMirrorRegistry {
                 mirrors[sessionID] = nil
             }
         }
+        typingConnections[sessionID]?.remove(key)
+        if typingConnections[sessionID]?.isEmpty ?? false {
+            typingConnections[sessionID] = nil
+        }
+        followersChanged(sessionID)
     }
 
     /// Begins keeping the bounded terminal history as soon as a live surface exists, not only
@@ -525,11 +536,9 @@ final class RemoteSessionMirrorRegistry {
             return
         }
 
-        viewportSequence &+= 1
         mirrors[sessionID]?.viewportRequests[ObjectIdentifier(connection)] = ViewportRequest(
             cols: cols,
-            rows: rows,
-            sequence: viewportSequence
+            rows: rows
         )
         applyViewport(for: sessionID)
     }
@@ -698,6 +707,85 @@ final class RemoteSessionMirrorRegistry {
 
     func sessionSharingChanged() {
         broadcastSessionsChanged()
+        for sessionID in mirrors.keys { followersChanged(sessionID) }
+        NotificationCenter.default.post(SessionSharingDidChange())
+    }
+
+    // MARK: - Followers
+
+    /// One live view of one chat. A person may hold two of these — a phone and a browser tab —
+    /// which is exactly the case the sharing pane exists to make visible.
+    struct Follower: Equatable, Identifiable {
+        /// Stable for the life of the socket; a reconnect is a different follower.
+        let id: ObjectIdentifier
+        /// The member's own name for a guest; nil for one of the owner's paired devices, which
+        /// carry the pairing token and have never been asked for one.
+        let memberName: String?
+        let memberID: String?
+        /// What the device calls itself, when it said. Never an identity — see
+        /// `RemoteInboundPolicy.normalizedDeviceName`.
+        let deviceName: String?
+        /// The short pseudonym the diagnostics log already uses, for a device that did not.
+        let deviceLabel: String
+        let isOwnerDevice: Bool
+        let capability: RemoteCapability
+        let canApprovePermissions: Bool
+        /// `terminal` or `conversation` — which of the chat's two faces they are looking at.
+        let surface: String
+        /// The grid this follower is holding the shared PTY at, when it holds one.
+        let viewport: (cols: Int, rows: Int)?
+        let watchingSince: Date?
+        let isTyping: Bool
+
+        static func == (lhs: Follower, rhs: Follower) -> Bool {
+            lhs.id == rhs.id
+                && lhs.memberName == rhs.memberName
+                && lhs.deviceName == rhs.deviceName
+                && lhs.surface == rhs.surface
+                && lhs.viewport?.cols == rhs.viewport?.cols
+                && lhs.viewport?.rows == rhs.viewport?.rows
+                && lhs.isTyping == rhs.isTyping
+        }
+    }
+
+    /// Everyone with a live socket on this chat right now.
+    ///
+    /// Read from the mirror's own subscribers, so it is the truth the PTY answers to rather than
+    /// a record of who was invited: a member who closed their phone is not here, and one of the
+    /// owner's devices that never accepted anything is.
+    func followers(of sessionID: SessionID) -> [Follower] {
+        guard let mirror = mirrors[sessionID] else { return [] }
+        let typing = typingConnections[sessionID] ?? []
+        return mirror.subscribers.map { key, connection in
+            let authorization = connection.authorization
+            let request = mirror.viewportRequests[key]
+            return Follower(
+                id: key,
+                memberName: authorization?.member?.displayName,
+                memberID: authorization?.member?.id,
+                deviceName: connection.deviceName,
+                deviceLabel: MacRemoteDiagnostics.pseudonym(
+                    connection.deviceID ?? "unknown",
+                    prefix: "device"
+                ),
+                isOwnerDevice: authorization?.principal == .ownerDevice,
+                capability: authorization?.capability ?? .view,
+                canApprovePermissions: authorization?.canApprovePermissions ?? false,
+                surface: mirror.surface,
+                viewport: request.map { (cols: $0.cols, rows: $0.rows) },
+                watchingSince: connection.authenticatedAt,
+                isTyping: typing.contains(key)
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.isOwnerDevice != rhs.isOwnerDevice { return !lhs.isOwnerDevice }
+            return (lhs.watchingSince ?? .distantPast) < (rhs.watchingSince ?? .distantPast)
+        }
+    }
+
+    /// Tells the corner card and the sharing pane that this chat's live audience moved.
+    private func followersChanged(_ sessionID: SessionID) {
+        NotificationCenter.default.post(SessionFollowersDidChange(sessionID: sessionID))
     }
 
     // MARK: - Session lifecycle
@@ -707,6 +795,8 @@ final class RemoteSessionMirrorRegistry {
     func sessionDiscarded(_ sessionID: SessionID) {
         pendingConversationBroadcasts.removeValue(forKey: sessionID)?.cancel()
         latestWorkspaceActivity.removeValue(forKey: sessionID)
+        typingConnections.removeValue(forKey: sessionID)
+        defer { followersChanged(sessionID) }
         guard let mirror = mirrors[sessionID] else { return }
         AgentRuntime.shared.controller(for: sessionID)?.session.clearRemoteViewport()
         removeTap(sessionID: sessionID)
@@ -749,14 +839,44 @@ final class RemoteSessionMirrorRegistry {
         guard let terminal = AgentRuntime.shared.controller(for: sessionID)?.session else {
             return
         }
-        let newest = mirrors[sessionID]?.viewportRequests.values.max {
-            $0.sequence < $1.sequence
-        }
-        if let newest {
-            terminal.setRemoteViewport(cols: newest.cols, rows: newest.rows)
-        } else {
+        let requests = mirrors[sessionID]?.viewportRequests.map {
+            (cols: $0.value.cols, rows: $0.value.rows)
+        } ?? []
+        guard let grid = Self.resolvedViewport(of: requests) else {
+            guard terminal.remoteViewport != nil else { return }
+            EventLog.shared.record(.remote, "Remote viewport released", [
+                "session": sessionID.uuidString,
+            ])
             terminal.clearRemoteViewport()
+            return
         }
+        guard terminal.remoteViewport?.cols != grid.cols
+            || terminal.remoteViewport?.rows != grid.rows else {
+            return
+        }
+        EventLog.shared.record(.remote, "Remote viewport applied", [
+            "session": sessionID.uuidString,
+            "grid": "\(grid.cols)×\(grid.rows)",
+            "clients": String(requests.count),
+        ])
+        terminal.setRemoteViewport(cols: grid.cols, rows: grid.rows)
+        followersChanged(sessionID)
+    }
+
+    /// Settles the one shared PTY between every interactive client watching it.
+    ///
+    /// The answer is the intersection — the widest and tallest grid that fits inside all of
+    /// them — because it is the only one every viewer can see whole, and because it does not
+    /// depend on who asked last. Honouring the most recent request instead let two clients
+    /// fight: the Mac broadcast each new grid to everyone, and a client that could not show it
+    /// answered by re-asking for its own, so the agent was reflowed and repainted several times
+    /// a second for as long as both stayed open.
+    static func resolvedViewport(
+        of requests: [(cols: Int, rows: Int)]
+    ) -> (cols: Int, rows: Int)? {
+        guard let cols = requests.map(\.cols).min(),
+              let rows = requests.map(\.rows).min() else { return nil }
+        return (cols, rows)
     }
 
     private func closeUnavailableSessions() {
@@ -794,6 +914,18 @@ final class RemoteSessionMirrorRegistry {
     ) {
         guard let authorization = connection.authorization,
               let mirror = mirrors[sessionID] else { return }
+
+        // The Mac watches this as well as relaying it. A guest composing a reply is the one
+        // piece of live state the sharing pane can show that a list of names cannot.
+        let key = ObjectIdentifier(connection)
+        let wasTyping = typingConnections[sessionID]?.contains(key) ?? false
+        if state == "typing" {
+            typingConnections[sessionID, default: []].insert(key)
+        } else {
+            typingConnections[sessionID]?.remove(key)
+        }
+        if wasTyping != (state == "typing") { followersChanged(sessionID) }
+
         let memberID = authorization.member?.id
             ?? "owner:\(connection.deviceID ?? "device")"
         let displayName = authorization.member?.displayName ?? "Owner"

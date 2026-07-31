@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingRemoteKit
+import UIKit
 
 enum RemoteDeviceIdentity {
     static var current: String {
@@ -10,6 +11,16 @@ enum RemoteDeviceIdentity {
         let made = UUID().uuidString.lowercased()
         defaults.set(made, forKey: "remoteDeviceID")
         return made
+    }
+
+    /// What the Mac's sharing pane calls this device — "iPhone", "iPad".
+    ///
+    /// The *model*, not `UIDevice.name`: the user-assigned name is entitlement-gated and, where
+    /// it is readable at all, is usually the owner's own first name. A row that has to be
+    /// recognised across a room wants the kind of device, and the pane already prints who the
+    /// member is beside it.
+    static var currentName: String {
+        UIDevice.current.model
     }
 }
 

@@ -1317,6 +1317,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         let rawDevice = message.device
         let device = RemoteInboundPolicy.normalizedDeviceID(rawDevice)
+        let deviceName = RemoteInboundPolicy.normalizedDeviceName(message.deviceName)
         let authorization: RemoteAuthorization
         switch resolveAuthorization(for: message.token, device: rawDevice) {
         case .authorized(let resolved):
@@ -1343,6 +1344,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         if routed == RemoteRouter.themeEventsRouteID {
             connection.authorization = authorization
             connection.deviceID = device
+            connection.deviceName = deviceName
             connection.markAuthenticated()
             DispatchQueue.main.async {
                 RemoteSessionMirrorRegistry.shared.attachThemeEvents(connection)
@@ -1363,6 +1365,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         connection.authorization = authorization
         connection.deviceID = device
+        connection.deviceName = deviceName
         connection.markAuthenticated()
 
         DispatchQueue.main.async {

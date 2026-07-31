@@ -103,6 +103,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     private struct MemberRecord {
         let token: String
         let authorization: RemoteAuthorization
+        let joinedAt: Date
+        /// Last time this member authenticated a socket. Not "still watching" — that is a live
+        /// connection, which the mirror registry knows and this store deliberately does not.
+        var lastSeenAt: Date?
     }
 
     private struct SessionShare {
@@ -110,6 +114,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         var invitationToken: String?
         let capability: RemoteCapability
         let canApprovePermissions: Bool
+        let createdAt: Date
         let expiresAt: Date
         var members: [String: MemberRecord]
     }
@@ -118,6 +123,42 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         let url: URL
         let expiresAt: Date
         let canApprovePermissions: Bool
+    }
+
+    // MARK: - Access read model
+
+    /// Everything that can reach one chat from outside this Mac, as the sharing pane shows it.
+    ///
+    /// Deliberately two lists rather than one: an unused link and a person are different things
+    /// to look at and different things to revoke. A link that has been accepted is no longer a
+    /// link — it became the membership below it — which is why `links` only ever holds the
+    /// invitations still waiting to be used.
+    struct SessionAccess: Equatable {
+        var members: [Member] = []
+        var links: [Link] = []
+
+        var isEmpty: Bool { members.isEmpty && links.isEmpty }
+
+        struct Member: Equatable, Identifiable {
+            let id: String
+            let displayName: String
+            let deviceID: String
+            let capability: RemoteCapability
+            let canApprovePermissions: Bool
+            let joinedAt: Date
+            let lastSeenAt: Date?
+        }
+
+        struct Link: Equatable, Identifiable {
+            let id: String
+            let capability: RemoteCapability
+            let canApprovePermissions: Bool
+            let createdAt: Date
+            let expiresAt: Date
+            /// The invitation URL, so the pane can offer to copy it again. Held only while the
+            /// link is unused; accepting one clears it here as well as on the wire.
+            let url: URL?
+        }
     }
 
     /// The local browser door for this launch. The bearer stays in the fragment, which browsers
@@ -183,7 +224,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         capability: RemoteCapability,
         canApprovePermissions requestedPermissionApproval: Bool = false
     ) -> CreatedShare? {
-        guard case .connected(let origin) = relayStatus,
+        guard case .connected = relayStatus,
               RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID))
         else {
             return nil
@@ -191,7 +232,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
         let invitationToken = Self.randomToken()
         let id = UUID().uuidString.lowercased()
-        let expiresAt = Date().addingTimeInterval(RemoteAccessDefaults.defaultShareExpiry)
+        let createdAt = Date()
+        let expiresAt = createdAt.addingTimeInterval(RemoteAccessDefaults.defaultShareExpiry)
         let canApprovePermissions =
             requestedPermissionApproval && capability == .interact
         let share = SessionShare(
@@ -199,6 +241,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             invitationToken: invitationToken,
             capability: capability,
             canApprovePermissions: canApprovePermissions,
+            createdAt: createdAt,
             expiresAt: expiresAt,
             members: [:]
         )
@@ -209,11 +252,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             self?.expireInvitation(token: invitationToken, sessionID: sessionID)
         }
 
-        var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)
-        components?.path = "/"
-        components?.fragment = invitationToken
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-        guard let url = components?.url else {
+        guard let url = invitationURL(token: invitationToken) else {
             sessionShares[sessionID]?.removeAll { $0.id == id }
             return nil
         }
@@ -267,7 +307,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             share.invitationToken = nil
             share.members[memberID] = MemberRecord(
                 token: accessToken,
-                authorization: authorization
+                authorization: authorization,
+                joinedAt: Date()
             )
             shares[index] = share
             sessionShares[sessionID] = shares
@@ -286,18 +327,120 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         !(sessionShares[sessionID]?.isEmpty ?? true)
     }
 
-    func revokeSessionShares(_ sessionID: SessionID) {
-        for share in sessionShares.removeValue(forKey: sessionID) ?? [] {
-            for member in share.members.values {
-                authority.set(nil, forToken: member.token)
-                RemoteNotificationService.shared.revoke(
-                    shareID: member.authorization.shareID
-                )
-                server.revokeConnections(shareID: member.authorization.shareID)
+    /// Who can reach this chat: the people who accepted an invitation, and the invitations still
+    /// waiting to be used. The owner's own paired devices are deliberately absent — they hold the
+    /// pairing token rather than a share, reach every chat, and are shown by the sharing pane
+    /// from the live connection instead, where they can be told apart from a guest.
+    func access(for sessionID: SessionID) -> SessionAccess {
+        let shares = sessionShares[sessionID] ?? []
+        var access = SessionAccess()
+
+        for share in shares {
+            for record in share.members.values {
+                guard let member = record.authorization.member else { continue }
+                access.members.append(SessionAccess.Member(
+                    id: member.id,
+                    displayName: member.displayName,
+                    deviceID: member.deviceID,
+                    capability: record.authorization.capability,
+                    canApprovePermissions: record.authorization.canApprovePermissions,
+                    joinedAt: record.joinedAt,
+                    lastSeenAt: record.lastSeenAt
+                ))
+            }
+            guard let invitationToken = share.invitationToken,
+                  share.expiresAt > Date() else { continue }
+            access.links.append(SessionAccess.Link(
+                id: share.id,
+                capability: share.capability,
+                canApprovePermissions: share.canApprovePermissions,
+                createdAt: share.createdAt,
+                expiresAt: share.expiresAt,
+                url: invitationURL(token: invitationToken)
+            ))
+        }
+
+        access.members.sort { $0.joinedAt < $1.joinedAt }
+        access.links.sort { $0.createdAt < $1.createdAt }
+        return access
+    }
+
+    /// Records that a member's bearer authenticated a socket, for the pane's "last seen".
+    ///
+    /// Keyed by `shareID`, which for a membership *is* the member id — the authorization a
+    /// connection carries has no other back-reference to the share it came from.
+    func noteMemberSeen(shareID: String) {
+        for (sessionID, shares) in sessionShares {
+            for (shareIndex, share) in shares.enumerated() where share.members[shareID] != nil {
+                sessionShares[sessionID]?[shareIndex].members[shareID]?.lastSeenAt = Date()
+                return
             }
         }
+    }
+
+    /// Ends one person's access to one chat, closing whatever they have open.
+    ///
+    /// The share they came through stays only if it still has other members: an invitation is
+    /// single-use, so a share whose one member is gone has nothing left to grant.
+    @discardableResult
+    func revokeMember(_ memberID: String, in sessionID: SessionID) -> Bool {
+        guard var shares = sessionShares[sessionID] else { return false }
+        for (index, share) in shares.enumerated() {
+            guard let record = share.members[memberID] else { continue }
+            revoke(record)
+            shares[index].members[memberID] = nil
+            if shares[index].members.isEmpty, shares[index].invitationToken == nil {
+                shares.remove(at: index)
+            }
+            sessionShares[sessionID] = shares.isEmpty ? nil : shares
+            sharingChanged()
+            return true
+        }
+        return false
+    }
+
+    /// Withdraws a link that has not been used. Anyone who already accepted it keeps their
+    /// access — they are a member now, and revoking a person is its own act.
+    @discardableResult
+    func revokeLink(_ shareID: String, in sessionID: SessionID) -> Bool {
+        guard var shares = sessionShares[sessionID],
+              let index = shares.firstIndex(where: { $0.id == shareID }),
+              shares[index].invitationToken != nil else {
+            return false
+        }
+        shares[index].invitationToken = nil
+        if shares[index].members.isEmpty {
+            shares.remove(at: index)
+        }
+        sessionShares[sessionID] = shares.isEmpty ? nil : shares
+        sharingChanged()
+        return true
+    }
+
+    func revokeSessionShares(_ sessionID: SessionID) {
+        for share in sessionShares.removeValue(forKey: sessionID) ?? [] {
+            for member in share.members.values { revoke(member) }
+        }
+        sharingChanged()
+    }
+
+    private func revoke(_ member: MemberRecord) {
+        authority.set(nil, forToken: member.token)
+        RemoteNotificationService.shared.revoke(shareID: member.authorization.shareID)
+        server.revokeConnections(shareID: member.authorization.shareID)
+    }
+
+    private func sharingChanged() {
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+    }
+
+    private func invitationURL(token: String) -> URL? {
+        guard case .connected(let origin) = relayStatus else { return nil }
+        var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)
+        components?.path = "/"
+        components?.fragment = token
+        return components?.url
     }
 
     private func expireInvitation(token: String, sessionID: SessionID) {

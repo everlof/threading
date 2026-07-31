@@ -141,28 +141,18 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 }
 
 /// SwiftTerm normally derives its grid from this device's pixel size. Remote output was produced
-/// for the Mac's PTY grid, though, so cursor addressing and wraps only remain correct when every
-/// local layout pass reapplies that authoritative size.
+/// for the Mac's PTY grid, though, so cursor addressing and wraps only remain correct when this
+/// view holds that authoritative size against its own layout.
 final class RemoteTerminalView: TerminalView {
     private(set) var usesLocalViewport = false
     private var authoritativeColumns = 0
     private var authoritativeRows = 0
-    private var isApplyingAuthoritativeGrid = false
 
-    override var bounds: CGRect {
-        get { super.bounds }
-        set {
-            super.bounds = newValue
-            applyAuthoritativeGrid()
-        }
-    }
-
-    override var frame: CGRect {
-        get { super.frame }
-        set {
-            super.frame = newValue
-            applyAuthoritativeGrid()
-        }
+    /// Answers before the emulator is touched, so a layout pass cannot reflow the Mac's grid to
+    /// this phone's pixel size and back. The round trip also soft-reset the buffer, which threw
+    /// away the scrolling region of whatever full-screen program the Mac is showing.
+    override func shouldApplyFrameSizeChange(newCols: Int, newRows: Int) -> Bool {
+        usesLocalViewport || authoritativeColumns <= 0 || authoritativeRows <= 0
     }
 
     func setAuthoritativeGrid(cols: Int, rows: Int) {
@@ -187,18 +177,14 @@ final class RemoteTerminalView: TerminalView {
         }
     }
 
+    /// A repeat of the grid already in force is not a resize: `resize` soft-resets the emulator,
+    /// which would discard the scrolling region the Mac's output relies on.
     private func applyAuthoritativeGrid() {
-        guard !isApplyingAuthoritativeGrid,
-              authoritativeColumns > 0,
-              authoritativeRows > 0 else {
-            return
-        }
+        guard authoritativeColumns > 0, authoritativeRows > 0 else { return }
         let current = getTerminal().getDims()
         guard current.cols != authoritativeColumns || current.rows != authoritativeRows else {
             return
         }
-        isApplyingAuthoritativeGrid = true
         resize(cols: authoritativeColumns, rows: authoritativeRows)
-        isApplyingAuthoritativeGrid = false
     }
 }
