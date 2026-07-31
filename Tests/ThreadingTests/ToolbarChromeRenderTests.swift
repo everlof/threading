@@ -561,6 +561,11 @@ final class ToolbarChromeRenderTests: XCTestCase {
                 BrowserAnnotationMarker(id: 2, point: CGPoint(x: width * 0.68, y: 220))
             ]
             overlay.isAnnotating = true
+            // The component under the pointer, as the browser reports it while aiming a pin.
+            overlay.hoveredTarget = BrowserAnnotationTarget(
+                rect: CGRect(x: width * 0.10, y: 262, width: width * 0.45, height: 44),
+                label: "button \u{201C}Continue with another provider\u{201D}"
+            )
 
             let toolbar = BrowserDeviceToolbar(
                 frame: NSRect(

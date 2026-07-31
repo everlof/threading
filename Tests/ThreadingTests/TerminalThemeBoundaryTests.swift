@@ -30,6 +30,48 @@ final class TerminalThemeBoundaryTests: XCTestCase {
         XCTAssertGreaterThan(restored.rows, original.rows)
     }
 
+    /// A remote-controlled terminal is laid out at a pixel size that disagrees with its grid, so
+    /// every layout pass proposes a grid the phone did not ask for. Suppressing only the PTY
+    /// resize was not enough: the emulator had already been reflowed to the desktop grid, and
+    /// putting it back ran SwiftTerm's resize path, which ends in `softReset()`. A full-screen
+    /// agent lost its scrolling region on each pass — including passes that set the identical
+    /// frame, which is what the banner's own text change caused.
+    func testLayoutLeavesARemoteControlledTerminalUntouched() {
+        let view = terminal()
+        view.setRemoteGrid(cols: 46, rows: 20)
+        let emulator = view.getTerminal()
+
+        // DECSTBM, as every full-screen agent sets it.
+        view.feed(text: "\u{1b}[5;15r")
+        XCTAssertEqual(emulator.buffer.scrollTop, 4)
+        XCTAssertEqual(emulator.buffer.scrollBottom, 14)
+
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)  // the rect it already has
+        XCTAssertEqual(emulator.getDims().cols, 46)
+        XCTAssertEqual(emulator.getDims().rows, 20)
+        XCTAssertEqual(emulator.buffer.scrollTop, 4)
+        XCTAssertEqual(emulator.buffer.scrollBottom, 14)
+
+        view.frame = NSRect(x: 0, y: 0, width: 900, height: 640)  // a real window resize
+        XCTAssertEqual(emulator.getDims().cols, 46)
+        XCTAssertEqual(emulator.getDims().rows, 20)
+        XCTAssertEqual(emulator.buffer.scrollTop, 4)
+        XCTAssertEqual(emulator.buffer.scrollBottom, 14)
+    }
+
+    /// Re-leasing the grid already in force is not a resize. The lease is re-applied whenever any
+    /// client joins or leaves, and each `resize` would soft-reset a running agent.
+    func testReapplyingTheSameRemoteGridDoesNotResetTheEmulator() {
+        let view = terminal()
+        view.setRemoteGrid(cols: 46, rows: 20)
+        view.feed(text: "\u{1b}[5;15r")
+
+        view.setRemoteGrid(cols: 46, rows: 20)
+
+        XCTAssertEqual(view.getTerminal().buffer.scrollTop, 4)
+        XCTAssertEqual(view.getTerminal().buffer.scrollBottom, 14)
+    }
+
     // MARK: - Profile boundary
 
     /// Terminal type is intentionally outside the app/conversation font cascade: this surface

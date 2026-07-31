@@ -109,6 +109,11 @@ final class SettingsSearchResultsViewController: NSViewController {
     /// The terms are the row's *subtitle* rather than rows of their own, because a term does not
     /// name a destination — nothing here can scroll a page to the word "mute". Saying which
     /// words matched is the useful half; pretending each is separately reachable is not.
+    ///
+    /// Both lines are handed the query. Listing the terms said *that* the search landed here and
+    /// left the reader to find the word themselves — which, on a row reading
+    /// "Notifications · Mute · Sound", is the row asking them to run their own search inside the
+    /// answer to their search. The highlight is the rest of that sentence.
     private func row(for match: SettingsSearchMatch) -> NSView {
         let open = SettingsUI.button(
             L10n.string("Open"),
@@ -127,7 +132,8 @@ final class SettingsSearchResultsViewController: NSViewController {
                 ? nil
                 : match.terms.joined(separator: SettingsSearchDefaults.termSeparator),
             control: open,
-            localizes: false
+            localizes: false,
+            highlighting: query
         )
     }
 

@@ -303,10 +303,24 @@ enum MCPDefaults {
 // MARK: - Display Pane Defaults
 
 enum DisplayPaneDefaults {
-    /// The width the panel is *opened* at when nothing narrower was chosen, and the floor a
-    /// stored width is clamped to. Not the split item's minimum — see `slimmestWidth`.
+    /// Narrower than this is not a width anyone chose: a value below it in the stored geometry
+    /// is read as "never set". Not the split item's minimum — see `slimmestWidth`.
     static let minWidth: CGFloat = 200
+
+    /// The floor for a panel opening for the first time. What the panel is *for* — an image, a
+    /// rendered report, a comparison — stops being legible below about this.
     static let defaultWidth: CGFloat = 380
+
+    /// A first open takes this share of the window rather than one fixed number, clamped
+    /// between `defaultWidth` and `widestOpening`. A panel that is a third of a 1600pt window is
+    /// the same panel as a third of a 1200pt one; 380pt of either is two different panels, and
+    /// on a large display it reads as a sliver stuck to the edge. Once the divider has been
+    /// dragged, that width is the answer and this is not consulted again.
+    static let openingFraction: CGFloat = 0.32
+
+    /// The most a panel opens itself to. Past this it is taking the window rather than sharing
+    /// it — and the user can still drag it wider.
+    static let widestOpening: CGFloat = 620
 
     /// The panel's hard floor: its own chrome and nothing more.
     ///
@@ -495,6 +509,7 @@ enum SidebarRowDefaults {
     static let archiveSymbol = "archivebox"
     static var archiveAccessibilityLabel: String { L10n.string("Archive session") }
     /// The `+` on a project row's hover, opening its new-session choices.
+    static let createSymbol = "plus"
     /// Revealed on hover over a branch heading, opening the grouping options.
     static let settingsSymbol = "gearshape"
     /// Applied to secondary text when inverted on an emphasized selection.
@@ -535,6 +550,7 @@ enum SidebarRowDefaults {
     /// hovered or not, because a slot that resized under the pointer would re-lay out the
     /// row as the pointer crossed it.
     static let sessionTrailingSlotWidth: CGFloat = trailingSlotSize * 2 + hoverButtonSpacing
+    static let projectTrailingSlotWidth: CGFloat = sessionTrailingSlotWidth
 
     /// Matches the inset of the source list's own selection shape.
     static let hoverHighlightInsetX: CGFloat = 10
@@ -544,6 +560,11 @@ enum SidebarRowDefaults {
     /// theme's `Design.Radius.control` instead — see `SidebarHoverRowView.highlightRadius`.
     static let systemHoverHighlightRadius: CGFloat = 5
     static let hoverHighlightAlpha: CGFloat = 0.06
+}
+
+enum ProjectTerminalDefaults {
+    /// Process cwd is the fallback for shells that do not emit OSC 7 directory reports.
+    static let directoryRefreshInterval: TimeInterval = 1
 }
 
 // MARK: - Typed App Events
@@ -634,6 +655,7 @@ struct ProjectsDidChange: AppEvent {
     enum SidebarImpact {
         case structure
         case sessionRow(SessionID)
+        case terminalRow(TerminalID)
     }
 
     let sidebarImpact: SidebarImpact
@@ -646,6 +668,31 @@ struct ProjectsDidChange: AppEvent {
 struct SessionActivityDidChange: AppEvent {
     static let name = Notification.Name("sessionActivityDidChange")
     let sessionID: SessionID
+}
+
+/// One chat's live audience moved: somebody joined, left, resized, or started composing.
+///
+/// Separate from `SessionSharingDidChange` on purpose — who is *watching* changes many times a
+/// minute while who *may* watch changes when the owner acts, and the corner card only wants to
+/// redraw for the first.
+struct SessionFollowersDidChange: AppEvent {
+    static let name = Notification.Name("sessionFollowersDidChange")
+    let sessionID: SessionID
+}
+
+/// A link was created or withdrawn, or somebody's access was revoked.
+struct SessionSharingDidChange: AppEvent {
+    static let name = Notification.Name("sessionSharingDidChange")
+}
+
+/// An archive an agent asked for has come due: its turn has ended and it can be filed away.
+///
+/// Announced rather than performed, because the archive is a sidebar action with a receipt on
+/// it and `SessionArchiveScheduler` is in Core. See `SessionCoordinator.archiveAtAgentRequest`.
+struct SessionArchiveRequestDidBecomeDue: AppEvent {
+    static let name = Notification.Name("sessionArchiveRequestDidBecomeDue")
+    let sessionID: SessionID
+    let reason: String?
 }
 
 /// A macOS notification about this session was clicked; the window should show it.

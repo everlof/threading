@@ -120,25 +120,79 @@ enum SettingsUI {
         subtitle: String? = nil,
         control: NSView? = nil,
         subtitleField: inout NSTextField?,
-        localizes: Bool = true
+        localizes: Bool = true,
+        highlighting query: String? = nil
     ) -> NSView {
-        let titleLabel = NSTextField(
-            labelWithString: localized(title, if: localizes)
+        // A blank query is not a search, and neither is a whitespace one: both have to leave the
+        // row exactly the plain row it would otherwise have been, or every ordinary settings page
+        // pays for a highlight nobody asked for.
+        let trimmed = query?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = (trimmed?.isEmpty == false) ? trimmed : nil
+
+        let titleLabel = label(
+            localized(title, if: localizes),
+            role: .body,
+            ink: { Design.Text.label },
+            highlighting: query
         )
-        titleLabel.applyFont(.body)
-        titleLabel.textColor = Design.Text.label
 
         var labelViews: [NSView] = [titleLabel]
+        var highlighted: [NSView] = query == nil ? [] : [titleLabel]
         if let subtitle {
-            let sub = NSTextField(
-                wrappingLabelWithString: localized(subtitle, if: localizes)
-            )
-            sub.applyFont(.subheading)
-            sub.textColor = Design.Text.secondary
-            labelViews.append(sub)
-            subtitleField = sub
+            let text = localized(subtitle, if: localizes)
+            if let query {
+                let sub = label(
+                    text,
+                    role: .subheading,
+                    ink: { Design.Text.secondary },
+                    highlighting: query
+                )
+                labelViews.append(sub)
+                highlighted.append(sub)
+            } else {
+                let sub = NSTextField(wrappingLabelWithString: text)
+                sub.applyFont(.subheading)
+                sub.textColor = Design.Text.secondary
+                labelViews.append(sub)
+                subtitleField = sub
+            }
         }
 
+        return assemble(labelViews, highlighted, control: control)
+    }
+
+    /// One of a row's two lines: a plain label, or a `SearchMatchLabel` when the row is being
+    /// shown as a search result and has to say which of its words the query accounts for.
+    ///
+    /// The highlighted line does not wrap where the plain subtitle does, and the difference is
+    /// the content rather than an oversight: a settings page's subtitle is a sentence explaining
+    /// a control, while a result's is a short list of the terms that matched. A list is better
+    /// truncated than run onto a second line under a row the reader is scanning past.
+    private static func label(
+        _ text: String,
+        role: Design.FontRole,
+        ink: @escaping () -> NSColor,
+        highlighting query: String?
+    ) -> NSView {
+        guard let query else {
+            let label = NSTextField(labelWithString: text)
+            label.applyFont(role)
+            label.textColor = ink()
+            return label
+        }
+
+        let label = SearchMatchLabel(role: role, ink: ink)
+        label.show(text, matching: query)
+        return label
+    }
+
+    /// The row's geometry, shared by both paths above so a highlighted row and a plain one
+    /// cannot drift apart.
+    private static func assemble(
+        _ labelViews: [NSView],
+        _ highlighted: [NSView],
+        control: NSView?
+    ) -> NSView {
         let labels = NSStackView(views: labelViews)
         labels.orientation = .vertical
         labels.alignment = .leading
@@ -153,6 +207,14 @@ enum SettingsUI {
         // empty beside it. The control still sits trailing, because the row fills its width
         // either way; what changed is which view absorbs what is left over.
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        // A highlighted line is single-line where the plain subtitle wraps, so it *has* an
+        // intrinsic width and will happily claim more of the row than there is. Capping it at the
+        // label column turns that claim back into a truncation — the same slack, spent the same
+        // way, whether or not a search is running.
+        for view in highlighted {
+            view.trailingAnchor.constraint(lessThanOrEqualTo: labels.trailingAnchor).isActive = true
+        }
 
         let row = NSStackView()
         row.orientation = .horizontal
@@ -179,7 +241,8 @@ enum SettingsUI {
         title: String,
         subtitle: String? = nil,
         control: NSView? = nil,
-        localizes: Bool = true
+        localizes: Bool = true,
+        highlighting query: String? = nil
     ) -> NSView {
         var ignored: NSTextField?
         return row(
@@ -187,7 +250,8 @@ enum SettingsUI {
             subtitle: subtitle,
             control: control,
             subtitleField: &ignored,
-            localizes: localizes
+            localizes: localizes,
+            highlighting: query
         )
     }
 

@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Threading
 
@@ -177,5 +178,114 @@ final class SessionImportBelongingTests: XCTestCase {
             0,
             "git \(arguments.joined(separator: " ")) failed while building the fixture"
         )
+    }
+}
+
+// MARK: - The sheet
+
+/// What the import sheet can be searched by, and what a row says about itself.
+///
+/// The list is the sheet: a busy project offers hundreds of past conversations, and the agent's
+/// own summaries of them read alike — three of them beginning "Refactor the" is the ordinary
+/// case, not the pathological one. So the identifier is here as a first-class way in, and every
+/// row carries enough of one to be recognised.
+@MainActor
+final class SessionImportSheetTests: XCTestCase {
+
+    private let sidebarID = "9f3c1a20-77b4-4e6d-9c02-5a1e8b3d40ff"
+    private let toolbarID = "1188aa30-0000-4000-8000-000000000000"
+
+    /// The reason identifiers are searchable at all: the reader is holding one — out of a hook's
+    /// log, a `--resume` in their shell history, another window — and the titles cannot tell two
+    /// conversations apart.
+    func testAConversationIsFoundByItsIdentifier() {
+        let sheet = makeSheet()
+
+        sheet.updateSearchQuery(sidebarID)
+        XCTAssertEqual(sheet.visibleSessionIDs, [sidebarID])
+
+        // A fragment from the middle counts too: an id is quite often copied out of a path.
+        sheet.updateSearchQuery("4e6d")
+        XCTAssertEqual(sheet.visibleSessionIDs, [sidebarID])
+
+        sheet.updateSearchQuery("Refactor")
+        XCTAssertEqual(sheet.visibleSessionIDs, [sidebarID, toolbarID], "titles stopped matching")
+
+        sheet.updateSearchQuery("")
+        XCTAssertEqual(sheet.visibleSessionIDs, [sidebarID, toolbarID])
+    }
+
+    /// Every row shows some of its identifier whether or not anyone searched for one. It is the
+    /// row's least interesting fact until it is the only one that matters.
+    func testEveryRowShowsTheStartOfItsIdentifier() throws {
+        let sheet = makeSheet()
+        sheet.updateSearchQuery("")
+
+        let row = try XCTUnwrap(sheet.rowViewForTesting(0))
+        XCTAssertTrue(
+            labels(in: row).contains(String(sidebarID.prefix(ImportLayout.identifierLength))),
+            "the row said nothing about which conversation it is"
+        )
+    }
+
+    /// The case a fixed prefix gets wrong. Matched in the middle, a row that went on showing its
+    /// first eight characters would come back with nothing lit up in it — which reads as the
+    /// sheet having found it for some other reason.
+    func testARowShowsThePartOfItsIdentifierThatMatched() throws {
+        let sheet = makeSheet()
+        sheet.updateSearchQuery("4e6d")
+
+        let row = try XCTUnwrap(sheet.rowViewForTesting(0))
+        XCTAssertEqual(marks(in: row), ["4e6d"])
+        XCTAssertTrue(
+            labels(in: row).contains { $0.hasPrefix(ImportStrings.elision) && $0.contains("4e6d") },
+            "the window did not slide to the match, or did not say it had"
+        )
+    }
+
+    /// Pasting the whole identifier is the common way to use this, and the row is showing eight
+    /// characters of a thirty-six character query. Every one of them is a character the reader
+    /// typed, so all of them are marked.
+    func testPastingAWholeIdentifierMarksTheCharactersTheRowIsShowing() throws {
+        let sheet = makeSheet()
+        sheet.updateSearchQuery(sidebarID)
+
+        let row = try XCTUnwrap(sheet.rowViewForTesting(0))
+        XCTAssertEqual(marks(in: row), [String(sidebarID.prefix(ImportLayout.identifierLength))])
+    }
+
+    // MARK: - Fixture
+
+    private func makeSheet() -> SessionImportViewController {
+        let sheet = SessionImportViewController(sessions: [
+            session(id: sidebarID, title: "Refactor the sidebar"),
+            session(id: toolbarID, title: "Refactor the toolbar")
+        ])
+        sheet.loadView()
+        return sheet
+    }
+
+    private func session(id: String, title: String) -> ImportableSession {
+        ImportableSession(
+            agentSessionID: TranscriptID(id),
+            kind: .claude,
+            accountHandle: .standard,
+            title: title,
+            lastActiveAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+
+    private func marks(in view: NSView) -> [String] {
+        descendants(of: view)
+            .compactMap { $0 as? SearchMatchLabel }
+            .flatMap(\.markedTextForTesting)
+    }
+
+    private func labels(in view: NSView) -> [String] {
+        descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
 }

@@ -229,11 +229,12 @@ final class SidebarBrandViewTests: XCTestCase {
         )
     }
 
-    /// Current Theme is a collaboration affordance, so it appears directly above Settings only
-    /// while at least one theme tool is exposed. The row responds live to the Tools switch and
-    /// collapses completely when unavailable.
+    /// Settings is the only standing destination this column carries. Current Theme opens into
+    /// the *trailing* panel, so its door moved to that panel's `+` — a sidebar row for it was a
+    /// permanent fixture pointing at something the sidebar never shows. Asserted with theme tools
+    /// deliberately on, which is the state that used to reveal the row.
     @MainActor
-    func testCurrentThemeAppearsAboveSettingsOnlyWhileThemeToolsAreEnabled() throws {
+    func testTheFooterCarriesSettingsAloneEvenWhileThemeToolsAreEnabled() throws {
         let settings = AppSettings.shared
         let previous = settings.disabledToolGroupIDs
         defer { settings.disabledToolGroupIDs = previous }
@@ -244,19 +245,19 @@ final class SidebarBrandViewTests: XCTestCase {
         sidebar.view.layoutSubtreeIfNeeded()
 
         let buttons = descendants(of: sidebar.view).compactMap { $0 as? ThemedButton }
-        let current = try XCTUnwrap(buttons.first { $0.title == L10n.string("Current Theme") })
-        let settingsButton = try XCTUnwrap(buttons.first { $0.title == L10n.string("Settings") })
-        let currentFooter = try XCTUnwrap(ancestor(of: current, as: PaneFooterView.self))
-
-        XCTAssertFalse(currentFooter.isHidden)
-        XCTAssertGreaterThan(
-            sidebar.view.convert(current.bounds, from: current).midY,
-            sidebar.view.convert(settingsButton.bounds, from: settingsButton).midY,
-            "Current Theme is not the utility row directly above Settings"
+        XCTAssertNil(
+            buttons.first { $0.title == L10n.string("Current Theme") },
+            "the sidebar grew a permanent door to a surface it does not host"
         )
 
-        settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: false)
-        XCTAssertTrue(currentFooter.isHidden, "the disabled collaboration surface stayed visible")
+        let settingsButton = try XCTUnwrap(buttons.first { $0.title == L10n.string("Settings") })
+        let footer = try XCTUnwrap(ancestor(of: settingsButton, as: PaneFooterView.self))
+        XCTAssertFalse(footer.isHidden)
+        XCTAssertEqual(
+            descendants(of: sidebar.view).compactMap { $0 as? PaneFooterView }.count,
+            1,
+            "the second footer band outlived the row it was stacked for"
+        )
     }
 
     /// The brand and Settings sit on the **list's** margin, not on the platform's.

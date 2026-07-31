@@ -412,6 +412,59 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertEqual(opened, "themes")
     }
 
+    /// Listing the terms said *that* the query landed here and left the reader to find the word
+    /// themselves — which on a row reading "Notifications · Mute · Sound" is the row asking them
+    /// to search inside the answer to their search.
+    func testAResultMarksTheWordsTheQueryAccountsFor() {
+        let results = SettingsSearchResultsViewController(
+            query: "mute",
+            matches: [
+                .init(
+                    pageID: "general",
+                    title: "General",
+                    symbol: "gearshape",
+                    terms: ["Notifications", "Mute", "Sound"]
+                )
+            ]
+        )
+        results.loadView()
+
+        XCTAssertEqual(marks(in: results.view), ["Mute"])
+    }
+
+    /// A page whose *name* is what matched says so on the line the reader is reading, rather than
+    /// leaving the only evidence in a sidebar that has already narrowed itself.
+    func testAResultMarksAMatchedPageTitleToo() {
+        let results = SettingsSearchResultsViewController(
+            query: "motion",
+            matches: [.init(pageID: "motion", title: "Motion", symbol: "sparkles", terms: [])]
+        )
+        results.loadView()
+
+        XCTAssertEqual(marks(in: results.view), ["Motion"])
+    }
+
+    /// An ordinary settings page is not a search result. Every row on it must be exactly the row
+    /// it was before the highlight existed — one plain label, no component that follows a query.
+    func testAnOrdinaryRowIsNotBuiltAsASearchResult() {
+        let row = SettingsUI.row(
+            title: "General",
+            subtitle: "Sessions, startup, shell",
+            control: nil,
+            localizes: false
+        )
+        XCTAssertTrue(
+            descendants(of: row).compactMap { $0 as? SearchMatchLabel }.isEmpty,
+            "a page that is merely open paid for a search nobody ran"
+        )
+    }
+
+    private func marks(in view: NSView) -> [String] {
+        descendants(of: view)
+            .compactMap { $0 as? SearchMatchLabel }
+            .flatMap(\.markedTextForTesting)
+    }
+
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }

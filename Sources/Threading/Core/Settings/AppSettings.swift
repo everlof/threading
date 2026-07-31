@@ -538,6 +538,28 @@ final class AppSettings {
 
     // MARK: - Extensions
 
+    /// Which complete leading navigator the user chose. An absent or unreadable value is Native.
+    var workspaceNavigatorSelection: WorkspaceNavigatorSelection {
+        get {
+            guard let data = defaults.data(forKey: Keys.workspaceNavigatorSelection),
+                  let selection = try? JSONDecoder().decode(
+                      WorkspaceNavigatorSelection.self,
+                      from: data
+                  ) else {
+                return .native
+            }
+            return selection
+        }
+        set {
+            if newValue == .native {
+                defaults.removeObject(forKey: Keys.workspaceNavigatorSelection)
+            } else if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Keys.workspaceNavigatorSelection)
+            }
+            notifyChanged()
+        }
+    }
+
     /// Legacy developer default retained only so existing preferences decode unchanged.
     ///
     /// `ExtensionManager` deliberately ignores it: App Sandbox permits legacy login-Keychain
@@ -864,6 +886,7 @@ final class AppSettings {
         static let disabledAttachmentDetectionAgentKinds = "disabledAttachmentDetectionAgentKinds"
         static let disabledToolGroupIDs = "disabledToolGroupIDs"
         static let usesContainedExtensionLauncher = "usesContainedExtensionLauncher"
+        static let workspaceNavigatorSelection = "workspaceNavigatorSelection"
         static let reportsClaudeLifecycleEvents = "reportsClaudeLifecycleEvents"
         static let installsCodexHooks = "installsCodexHooks"
         static let readsClaudeLoginFromKeychain = "readsClaudeLoginFromKeychain"

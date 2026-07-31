@@ -12,6 +12,8 @@ final class SessionImportViewController: NSViewController {
     /// Every conversation offered, before the search field narrows it.
     private let sessions: [ImportableSession]
     private var visible: [ImportableSession] = []
+    /// The trimmed query the visible rows were built for, so a row can show what it was found on.
+    private var query = ""
 
     private let headingLabel = NSTextField(labelWithString: ImportStrings.heading)
     private let subheadingLabel = NSTextField(labelWithString: "")
@@ -160,14 +162,47 @@ final class SessionImportViewController: NSViewController {
         return footer
     }
 
+    // MARK: - Public Methods
+
+    /// Updates the live filter. Kept separate from the delegate callback so a test exercises the
+    /// exact same matching path as typing — the seam `SettingsSidebar` keeps for the same reason.
+    func updateSearchQuery(_ query: String) {
+        searchField.stringValue = query
+        applySearch()
+    }
+
+    /// The identifiers currently offered, in the order they are read down the list.
+    var visibleSessionIDs: [String] {
+        visible.map(\.agentSessionID.rawValue)
+    }
+
+    /// The view a row builds, so a test asserts on what a row *says* rather than on what the
+    /// list happens to hold — the two came apart once already, in a sidebar row whose buttons
+    /// were unreachable in the container they shipped in.
+    func rowViewForTesting(_ index: Int) -> NSView? {
+        guard visible.indices.contains(index) else { return nil }
+        return makeRow(for: visible[index])
+    }
+
     // MARK: - Actions
 
+    /// Narrows the list by title, agent, or the conversation's own identifier.
+    ///
+    /// The identifier is here because it is the one thing about a past conversation that is
+    /// *exact*. Titles are the agent's summary of itself and several of them read alike; when
+    /// something else already named the conversation — a hook's log, a `--resume` in a shell's
+    /// history, another Threading window — the reader is holding an id and nothing else, and
+    /// before this the sheet had no way to accept it.
+    ///
+    /// Matching is `contains` over the whole id rather than a prefix, so a fragment copied out
+    /// of the middle of a path finds its row too.
     private func applySearch() {
-        let query = searchField.stringValue.trimmingCharacters(in: .whitespaces)
+        query = searchField.stringValue.trimmingCharacters(in: .whitespaces)
 
         visible = query.isEmpty ? sessions : sessions.filter {
             $0.title.localizedCaseInsensitiveContains(query)
                 || $0.kind.displayName.localizedCaseInsensitiveContains(query)
+                || $0.agentSessionID.rawValue.localizedCaseInsensitiveContains(query)
         }
 
         tableView.reloadData()
@@ -236,8 +271,14 @@ extension SessionImportViewController: NSTableViewDelegate {
         importButton.isEnabled = tableView.selectedRow >= 0
     }
 
-    /// A row shows the agent it belongs to, what the conversation was about, and when it was
-    /// last touched — which together are what distinguishes one past conversation from another.
+    /// A row shows the agent it belongs to, what the conversation was about, when it was last
+    /// touched, and its identifier — which together are what distinguishes one past conversation
+    /// from another.
+    ///
+    /// The identifier sits in a column of its own down the trailing edge rather than at the end
+    /// of the detail line. It is the row's least interesting fact until it is the only one that
+    /// matters, and a column is what lets the eye skip it entirely and then, when a query is an
+    /// id, read straight down it.
     private func makeRow(for session: ImportableSession) -> NSView {
         let icon = NSImageView()
         icon.image = session.kind.icon
@@ -245,23 +286,30 @@ extension SessionImportViewController: NSTableViewDelegate {
         icon.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
         icon.contentTintColor = Design.Text.secondary
 
-        let title = NSTextField(labelWithString: session.title)
-        title.applyFont(.body)
-        title.lineBreakMode = .byTruncatingTail
+        let title = SearchMatchLabel(role: .body)
+        title.show(session.title, matching: query)
 
-        let detail = NSTextField(labelWithString: detailText(for: session))
-        detail.applyFont(.subheading)
-        detail.textColor = Design.Text.tertiary
-        detail.lineBreakMode = .byTruncatingTail
+        let detail = SearchMatchLabel(role: .subheading, ink: { Design.Text.tertiary })
+        detail.show(detailText(for: session), matching: query)
 
         let text = NSStackView(views: [title, detail])
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = Design.Spacing.hairline
+        // The title column absorbs the row's slack; the identifier keeps its width and the
+        // titles truncate, which is the right way round — one is a summary and the other is
+        // the exact thing somebody may have pasted in to find this row.
+        text.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let row = NSStackView(views: [icon, text])
+        let identifier = SearchMatchLabel(role: .code(), ink: { Design.Text.quaternary })
+        identifier.show(identifierText(for: session), matching: query)
+        identifier.setContentHuggingPriority(.required, for: .horizontal)
+        identifier.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [icon, text, identifier])
         row.orientation = .horizontal
         row.alignment = .centerY
+        row.distribution = .fill
         row.spacing = Design.Spacing.medium
         row.edgeInsets = NSEdgeInsets(
             top: 0, left: Design.Spacing.small,
@@ -269,6 +317,26 @@ extension SessionImportViewController: NSTableViewDelegate {
         )
 
         return row
+    }
+
+    /// As much of the conversation's identifier as a row can carry, always including whatever
+    /// the query landed on.
+    ///
+    /// A fixed prefix is the obvious answer and is wrong on its own: a reader who pasted a
+    /// fragment from the *middle* of an id would get their row back with nothing lit up in it,
+    /// which reads as the sheet having matched on something else. So the window slides — the
+    /// leading ellipsis is the row saying there is more id in front of what you are looking at.
+    private func identifierText(for session: ImportableSession) -> String {
+        let identifier = session.agentSessionID.rawValue
+        let shown = ImportLayout.identifierLength
+        guard identifier.count > shown else { return identifier }
+
+        guard let match = SearchTextMatch.ranges(in: identifier, matching: query).first,
+              identifier.distance(from: identifier.startIndex, to: match.lowerBound) >= shown
+        else { return String(identifier.prefix(shown)) }
+
+        let end = identifier.index(match.lowerBound, offsetBy: shown, limitedBy: identifier.endIndex)
+        return ImportStrings.elision + identifier[match.lowerBound..<(end ?? identifier.endIndex)]
     }
 
     /// Names the account only when it is not the default one, matching the sidebar.
@@ -299,15 +367,24 @@ enum ImportLayout {
     static let sheetHeight: CGFloat = 460
     static let rowHeight: CGFloat = 44
     static let minimumListHeight: CGFloat = 240
+
+    /// How much of a conversation's identifier a row shows. Eight, the length git settled on for
+    /// the same problem: enough that two of them are never confused by eye, short enough to sit
+    /// in the margin of a row without becoming the row.
+    static let identifierLength = 8
 }
 
 // MARK: - Import Strings
 
 enum ImportStrings {
     static var heading: String { L10n.string("Import Conversation") }
-    static var searchPlaceholder: String { L10n.string("Search conversations") }
+    static var searchPlaceholder: String { L10n.string("Search conversations or paste an ID") }
     static var importTitle: String { L10n.string("Import") }
     static var cancelTitle: String { L10n.string("Cancel") }
+
+    /// Not localized: a single ellipsis, standing for the characters of an identifier that are
+    /// in front of the ones the row is showing.
+    static let elision = "…"
 
     static func subheading(count: Int) -> String {
         count == 1

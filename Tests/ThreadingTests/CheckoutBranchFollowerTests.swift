@@ -67,6 +67,32 @@ final class CheckoutBranchFollowerTests: XCTestCase {
         XCTAssertEqual(branches(of: project.id, in: store), ["main"])
     }
 
+    func testCheckoutRefreshMovesStandaloneTerminalBranch() throws {
+        let store = makeStore()
+        let checkout = try makeCheckout(named: "terminal", branch: "main")
+        let project = store.addProject(folderURL: checkout)
+        let terminal = try XCTUnwrap(store.addTerminal(to: project.id))
+
+        try setBranch("feature", in: checkout)
+        store.refreshBranches(forCheckoutAt: checkout.path)
+
+        XCTAssertEqual(store.terminal(withID: terminal.id)?.branch, "feature")
+    }
+
+    func testTerminalCwdMovesItToTheMostSpecificKnownProject() throws {
+        let store = makeStore()
+        let checkout = try makeCheckout(named: "app", branch: "main")
+        let docs = try makeSubfolder(of: checkout, named: "docs")
+        let home = store.addProject(folderURL: checkout)
+        let docsProject = store.addProject(folderURL: docs)
+        let terminal = try XCTUnwrap(store.addTerminal(to: home.id))
+
+        store.updateTerminalLocation(docs.path, for: terminal.id)
+
+        XCTAssertEqual(store.homeProject(forTerminalID: terminal.id)?.id, home.id)
+        XCTAssertEqual(store.displayProject(forTerminalID: terminal.id)?.id, docsProject.id)
+    }
+
     // MARK: - The Follower
 
     func testStartCatchesUpABranchThatMovedWhileUnwatched() throws {

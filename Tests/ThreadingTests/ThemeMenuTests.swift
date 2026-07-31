@@ -74,9 +74,11 @@ final class ThemeMenuTests: XCTestCase {
     func testItemsCarryTheirOwnTarget() throws {
         let sidebar = ProjectSidebarViewController()
         let sessionID = SessionID()
+        let terminalID = TerminalID()
         let projectID = ProjectID()
 
         let sessionMenu = try themeSubmenu(of: sidebar.makeSessionThemeItem(for: sessionID))
+        let terminalMenu = try themeSubmenu(of: sidebar.makeTerminalThemeItem(for: terminalID))
         let projectMenu = try themeSubmenu(of: sidebar.makeProjectThemeItem(for: projectID))
 
         let sessionChoice = try XCTUnwrap(
@@ -85,6 +87,9 @@ final class ThemeMenuTests: XCTestCase {
         let projectChoice = try XCTUnwrap(
             projectMenu.items.compactMap { $0.representedObject as? ThemeMenuChoice }.first
         )
+        let terminalChoice = try XCTUnwrap(
+            terminalMenu.items.compactMap { $0.representedObject as? ThemeMenuChoice }.first
+        )
 
         guard case .session(let id) = sessionChoice.target else {
             return XCTFail("session menu did not target a session")
@@ -92,8 +97,12 @@ final class ThemeMenuTests: XCTestCase {
         guard case .project(let pid) = projectChoice.target else {
             return XCTFail("project menu did not target a project")
         }
+        guard case .terminal(let tid) = terminalChoice.target else {
+            return XCTFail("terminal menu did not target a terminal")
+        }
 
         XCTAssertEqual(id, sessionID)
+        XCTAssertEqual(tid, terminalID)
         XCTAssertEqual(pid, projectID)
     }
 

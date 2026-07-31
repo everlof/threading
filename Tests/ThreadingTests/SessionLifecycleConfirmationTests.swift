@@ -85,6 +85,89 @@ final class SessionLifecycleConfirmationTests: XCTestCase {
         XCTAssertEqual(undone, 1)
     }
 
+    // MARK: - The archive the agent performs
+
+    /// A row that leaves the sidebar on its own is the one report that has to name an actor:
+    /// "Archived “X”" beside a window that rearranged itself answers what happened and not who
+    /// did it, and who did it is the first thing anybody asks — and the only part that says this
+    /// was not a misclick.
+    func testTheAgentsArchiveToastNamesTheAgentAndWhatItFinished() throws {
+        let toast = SessionCoordinator.agentArchiveToast(
+            for: session(),
+            reason: "committed and pushed the parser fix",
+            wasRunning: true,
+            undo: {}
+        )
+
+        XCTAssertTrue(
+            toast.message.contains("Claude Code"),
+            "the receipt for an archive nobody clicked has to say who did"
+        )
+        XCTAssertTrue(toast.message.contains("Refactor the parser"))
+
+        let detail = try XCTUnwrap(toast.detail)
+        XCTAssertTrue(
+            detail.hasPrefix("Committed and pushed the parser fix."),
+            "the agent's own account of what it finished leads, as one sentence"
+        )
+        XCTAssertTrue(detail.contains("The agent stopped."))
+        XCTAssertTrue(detail.contains("Settings ▸ Archived"))
+    }
+
+    /// The reason is a fragment an agent wrote, not copy: it is set beside the app's own
+    /// sentences without being rewritten, and without being punctuated twice.
+    func testTheAgentsReasonIsSetAsOneSentenceOrLeftOut() throws {
+        let punctuated = SessionCoordinator.agentArchiveToast(
+            for: session(),
+            reason: "Committed and pushed.",
+            wasRunning: false,
+            undo: {}
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(punctuated.detail),
+            "Committed and pushed. Restore it from Settings ▸ Archived."
+        )
+
+        let silent = SessionCoordinator.agentArchiveToast(
+            for: session(),
+            reason: nil,
+            wasRunning: false,
+            undo: {}
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(silent.detail),
+            "Restore it from Settings ▸ Archived.",
+            "an agent that gave no reason must not leave an empty sentence on the band"
+        )
+    }
+
+    /// The six seconds behind the clicked archive are measured from the click. There was none
+    /// here: the user asked for this a turn ago, in words, and has been reading something else
+    /// since — so this receipt has to survive them looking up. It still offers the same way back.
+    func testTheAgentsArchiveToastHoldsLongerAndStillOffersTheWayBack() {
+        var undone = 0
+        let toast = SessionCoordinator.agentArchiveToast(
+            for: session(),
+            reason: nil,
+            wasRunning: true,
+            undo: { undone += 1 }
+        )
+
+        XCTAssertEqual(toast.dwell, ToastDefaults.unattendedDwell)
+        XCTAssertNil(
+            SessionCoordinator.archiveToast(for: session(), wasRunning: true, undo: {}).dwell,
+            "the clicked archive takes the pane's own dwell"
+        )
+        XCTAssertNotEqual(
+            toast.identifier,
+            SessionCoordinator.archiveToast(for: session(), wasRunning: true, undo: {}).identifier
+        )
+
+        XCTAssertTrue(toast.hasAction)
+        toast.action?()
+        XCTAssertEqual(undone, 1)
+    }
+
     /// Archiving is deliberately not in the register. Left as a case it would ship a Settings
     /// row for a question nobody asks; the point of removing it is that the way back replaced
     /// the way out.

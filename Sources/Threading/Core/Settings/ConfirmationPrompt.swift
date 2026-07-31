@@ -55,6 +55,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     // MARK: Irreversible
 
     case removeProject
+    case revokeChatAccess
     case deleteSession
     case deleteArchivedSession
     case deleteAppTheme
@@ -182,6 +183,12 @@ enum ConfirmationPrompt: String, CaseIterable {
             ))
 
         case .removeProject,
+             // Not "irreversible" because the person is gone forever — it is that the way back
+             // is a *different* action the owner has to know to take. Their invitation was
+             // single-use, so the link they hold is spent: letting them back in means sharing
+             // the chat again and getting the new link to them. Return therefore belongs on
+             // Cancel, next to a Revoke button sitting inches from a name.
+             .revokeChatAccess,
              .deleteSession,
              .deleteArchivedSession,
              .deleteAppTheme,

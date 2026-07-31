@@ -61,6 +61,26 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertFalse(try database.isEmpty())
     }
 
+    func testStandaloneTerminalsRoundTripInsideTheirProject() throws {
+        let database = try makeDatabase()
+        var terminal = ProjectTerminal(currentDirectory: "/tmp/alpha/Sources")
+        terminal.title = "zsh"
+        terminal.customTitle = "Server"
+        terminal.branch = "feature/terminal"
+        terminal.themeID = .ocean
+        var project = makeProject("alpha")
+        project.terminals = [terminal]
+
+        try database.save(ProjectsState(projects: [project]))
+        let restored = try XCTUnwrap(try database.load().projects.first?.terminals.first)
+
+        XCTAssertEqual(restored.id, terminal.id)
+        XCTAssertEqual(restored.displayTitle, "Server")
+        XCTAssertEqual(restored.currentDirectory, "/tmp/alpha/Sources")
+        XCTAssertEqual(restored.branch, "feature/terminal")
+        XCTAssertEqual(restored.themeID, .ocean)
+    }
+
     func testSessionsAreRowsAndNotAlsoPayload() throws {
         // A session carried in the project payload *and* in its own row would eventually
         // disagree; the payload is stored with `sessions` emptied for that reason.

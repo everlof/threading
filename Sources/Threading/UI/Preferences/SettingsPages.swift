@@ -58,9 +58,10 @@ enum SettingsSearch {
         }
     }
 
-    private static let options: String.CompareOptions = [
-        .caseInsensitive, .diacriticInsensitive, .widthInsensitive
-    ]
+    /// The same comparison the highlight uses. Kept as one value rather than two identical
+    /// literals: a filter that is a shade more forgiving than the highlight shows a page with
+    /// nothing lit up in it, which reads as the search having found it for no reason.
+    private static let options = SearchTextMatch.comparisonOptions
 }
 
 /// The settings catalogue shared by sidebar, content pane, toolbar, and deep links.
