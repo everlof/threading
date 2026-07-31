@@ -5,6 +5,9 @@ import Foundation
 enum UsageFetchError: Error {
     case noCredential(String)
     case tokenExpired
+    /// The usage endpoint itself said "too fast". Carries its `Retry-After` when one was
+    /// sent, so the service can wait exactly as long as it was told to.
+    case rateLimited(retryAfter: TimeInterval?)
     case http(status: Int)
     case network(String)
     case decoding
@@ -18,6 +21,8 @@ enum UsageFetchError: Error {
             return detail
         case .tokenExpired:
             return "The account's login has expired. Run the CLI to refresh it."
+        case .rateLimited:
+            return "The usage service asked for a pause. Trying again later."
         case .http(let status):
             return "The usage service answered with status \(status)."
         case .network(let detail):
@@ -33,10 +38,18 @@ enum UsageFetchError: Error {
 /// Fetches and caches rate-limit usage per agent account.
 ///
 /// The design follows `~/repo/claudex`: read whatever short-lived access token the official
-/// CLI already keeps on disk, use it read-only, and when it is stale say so rather than
-/// refreshing it — the CLI owns the login. The Keychain is never read: its `Claude
-/// Code-credentials` items do not say which config directory they belong to, and an
-/// unbundled `swift build` binary would re-prompt on every rebuild.
+/// CLI already keeps, use it read-only, and when it is stale say so rather than refreshing
+/// it — the CLI owns the login. On-disk tokens are read freely; the Keychain only with the
+/// user's standing opt-in (`readsClaudeLoginFromKeychain`), and never with a prompt — see
+/// `ClaudeKeychainCredentials` for both halves of that promise.
+///
+/// Refreshes are paced from three directions so the usage endpoints are never hammered:
+/// a per-account floor however eagerly the UI asks, a `notBefore` the endpoint itself sets
+/// through 429/`Retry-After` (which even `force` respects — a user clicking refresh must not
+/// be a way to spend a rate limit faster), and an event-driven path that asks *when a turn
+/// ends*, which is the only moment the numbers actually move. The last is what CodexBar calls
+/// agent-aware refresh, done with certainty instead of guesswork: Threading is told about the
+/// turn boundary rather than inferring one.
 ///
 /// State is touched only on the main queue, like everything else stateful in the app.
 /// Fetches run detached and hop back to publish.
@@ -53,6 +66,10 @@ final class AccountUsageService {
         var usage: AccountUsage?
         var errorMessage: String?
         var lastAttemptAt: Date?
+        /// Set when the endpoint answered 429: no request before this moment, forced or not.
+        var notBefore: Date?
+        /// Consecutive 429s, for the backoff that answers a `Retry-After`-less refusal.
+        var consecutiveRateLimits = 0
     }
 
     private var entries: [AccountID: Entry] = [:]
@@ -62,9 +79,25 @@ final class AccountUsageService {
     /// a filesystem walk and its answer does not change between readings.
     private var seededHistory: Set<AccountID> = []
 
+    /// Last known activity per session, kept to recognise the transition *out of* working —
+    /// the one moment a turn has just spent tokens and the number on the server has moved.
+    private let observations = AppEventObservations()
+    private var lastActivity: [SessionID: SessionActivity] = [:]
+
     // MARK: - Initialization
 
-    private init() {}
+    private init() {
+        // A turn ending is the freshest possible moment to ask — and the cheapest, because
+        // every pacing rule above still applies: the floor, the endpoint's own notBefore,
+        // and single-flight. An idle app stops generating turn boundaries and therefore
+        // stops generating these refreshes, which is the back-off half of "adaptive".
+        observations.observe(SessionActivityDidChange.self) { [weak self] event in
+            Task { @MainActor in self?.activityChanged(for: event.sessionID) }
+        }
+        observations.observe(TerminalSessionDidEnd.self) { [weak self] event in
+            Task { @MainActor in self?.sessionEnded(event.sessionID) }
+        }
+    }
 
     // MARK: - Public Methods
 
@@ -77,12 +110,15 @@ final class AccountUsageService {
     }
 
     /// Fetches when the cached value has aged out, or sooner when `force` asks — though
-    /// never more often than the per-account floor, so an eager UI cannot hammer the APIs.
+    /// never more often than the per-account floor, so an eager UI cannot hammer the APIs,
+    /// and never before a `notBefore` the endpoint set by answering 429: a pause the server
+    /// asked for is not the UI's to decline, forced or not.
     func refresh(_ account: AgentAccount, force: Bool = false) {
         let id = account.id
         guard !inFlight.contains(id) else { return }
 
         let now = Date()
+        if let notBefore = entries[id]?.notBefore, now < notBefore { return }
         if let lastAttempt = entries[id]?.lastAttemptAt {
             guard now.timeIntervalSince(lastAttempt) >= spacing(for: id, force: force) else {
                 return
@@ -130,6 +166,8 @@ final class AccountUsageService {
         case .success(let usage):
             entry.usage = usage
             entry.errorMessage = nil
+            entry.notBefore = nil
+            entry.consecutiveRateLimits = 0
 
             // Every reading joins the history, which is the only place a *rate* can come
             // from — a snapshot can say 85% and never say how fast it got there.
@@ -138,6 +176,17 @@ final class AccountUsageService {
         case .failure(let error):
             // The last good reading survives a failed refresh.
             entry.errorMessage = error.message
+
+            if case .rateLimited(let retryAfter) = error {
+                entry.consecutiveRateLimits += 1
+                entry.notBefore = Date().addingTimeInterval(
+                    UsageRetrySchedule.delay(
+                        retryAfter: retryAfter,
+                        consecutiveRateLimits: entry.consecutiveRateLimits
+                    )
+                )
+            }
+
             ThreadingLogger.agent.info(
                 "Usage fetch failed for \(accountID, privacy: .public): \(error.message, privacy: .public)"
             )
@@ -145,6 +194,37 @@ final class AccountUsageService {
         entries[accountID] = entry
 
         NotificationCenter.default.post(AccountUsageDidChange(accountID: accountID))
+    }
+
+    /// The transition out of `.working` is a turn boundary: tokens were just spent, so the
+    /// server's number moved and a refresh right now is worth the most it will ever be.
+    /// Everything else — `working → working`, a session waking up — changes nothing upstream
+    /// and asks for nothing.
+    private func activityChanged(for sessionID: SessionID) {
+        let new = AgentRuntime.shared.activity(sessionID: sessionID)
+        let old = lastActivity[sessionID] ?? .dormant
+        lastActivity[sessionID] = new
+
+        guard old == .working, new != .working else { return }
+        refreshAccount(of: sessionID)
+    }
+
+    /// An exiting agent is the end of whatever it was doing — the same boundary, minus the
+    /// session to keep watching.
+    private func sessionEnded(_ sessionID: SessionID) {
+        let wasWorking = lastActivity.removeValue(forKey: sessionID) == .working
+        if wasWorking { refreshAccount(of: sessionID) }
+    }
+
+    private func refreshAccount(of sessionID: SessionID) {
+        guard let session = ProjectStore.shared.session(withID: sessionID),
+              let account = AgentAccountDiscovery.account(
+                  for: session.kind,
+                  handle: session.accountHandle
+              )
+        else { return }
+
+        refresh(account)
     }
 
     /// Recovers a Codex account's past week from its own rollouts, once, when the history is
@@ -183,6 +263,51 @@ final class AccountUsageService {
     }
 }
 
+// MARK: - Retry Schedule
+
+/// When the next attempt may run after the endpoint said "too fast". Pure, so the arithmetic
+/// is testable without a clock or a network.
+enum UsageRetrySchedule {
+
+    /// `retryAfter` is authoritative when present — the server named its own price — held to
+    /// the refresh floor so a mischievous `Retry-After: 1` cannot invite a hammer. Without
+    /// one, exponential backoff from the ordinary interval, capped. Jitter stretches the wait
+    /// by up to a tenth and never shortens it: three accounts refused together must not come
+    /// back together.
+    static func delay(
+        retryAfter: TimeInterval?,
+        consecutiveRateLimits: Int,
+        jitter: Double = Double.random(in: 0...1)
+    ) -> TimeInterval {
+        let base: TimeInterval
+        if let retryAfter {
+            base = max(retryAfter, UsageDefaults.minimumRefreshSpacing)
+        } else {
+            let doublings = max(0, consecutiveRateLimits - 1)
+            let backoff = UsageDefaults.refreshInterval * pow(2, Double(doublings))
+            base = min(backoff, UsageDefaults.rateLimitBackoffCap)
+        }
+
+        return base * (1 + UsageDefaults.rateLimitJitterFraction * min(max(jitter, 0), 1))
+    }
+
+    /// `Retry-After` arrives as delta-seconds or as an HTTP-date; both mean a wait from now.
+    static func retryAfter(fromHeader value: String?, now: Date = Date()) -> TimeInterval? {
+        guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty
+        else { return nil }
+
+        if let seconds = TimeInterval(value) { return max(0, seconds) }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = formatter.date(from: value) else { return nil }
+
+        return max(0, date.timeIntervalSince(now))
+    }
+}
+
 // MARK: - Shared HTTP
 
 enum UsageHTTP {
@@ -216,6 +341,12 @@ enum UsageHTTP {
             break
         case 401, 403:
             throw UsageFetchError.tokenExpired
+        case 429:
+            throw UsageFetchError.rateLimited(
+                retryAfter: UsageRetrySchedule.retryAfter(
+                    fromHeader: http.value(forHTTPHeaderField: "Retry-After")
+                )
+            )
         default:
             throw UsageFetchError.http(status: http.statusCode)
         }

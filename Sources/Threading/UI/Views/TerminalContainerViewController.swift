@@ -1002,8 +1002,11 @@ private extension TerminalContainerViewController {
             isFast: isFast
         )
 
-        // Only Claude runs a status line, so a Codex terminal has nothing to complement.
-        guard session.kind == .claude else {
+        // Only Claude runs a status line, so a Codex terminal has nothing to complement — and
+        // a suppressed one prints nothing by construction, so there is no line to defer to
+        // and the card owes every fact. Skipping the probe also skips its cached answer,
+        // which describes a line the user is no longer shown.
+        guard session.kind == .claude, !AppSettings.shared.suppressesClaudeStatusLine else {
             gitStatusOverlay.updateModel(reading)
             return
         }

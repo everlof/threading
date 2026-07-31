@@ -515,4 +515,153 @@ final class PrivacyPreferencesTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Claude Keychain Row
+
+    /// A page whose keychain answers are all stated by the test, on a defaults suite that is
+    /// not the developer's own — the same hermetic rules as `reader`, for the same reason.
+    private func keychainPage(
+        enabled: Bool = false,
+        accounts: [AgentAccount] = [],
+        availability: @escaping (String) -> ClaudeKeychainCredentials.Availability = { _ in .missing },
+        grant: @escaping (String) -> Bool = { _ in
+            XCTFail("nothing here may request keychain access")
+            return false
+        },
+        prefetch: @escaping () -> Void = {},
+        suiteName: String = "privacy-keychain-tests-\(UUID().uuidString)"
+    ) throws -> (page: PrivacyPreferencesViewController, settings: AppSettings, cleanup: () -> Void) {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let settings = AppSettings(defaults: defaults)
+        settings.readsClaudeLoginFromKeychain = enabled
+
+        let controller = PrivacyPreferencesViewController(
+            reader: reader(),
+            settings: settings,
+            claudeAccounts: { accounts },
+            keychainAvailability: availability,
+            keychainGrant: grant,
+            prefetchUsage: prefetch
+        )
+        controller.view.frame = NSRect(
+            x: 0, y: 0, width: 640, height: Self.fixtureHeight
+        )
+        controller.view.layoutSubtreeIfNeeded()
+
+        return (controller, settings, { defaults.removePersistentDomain(forName: suiteName) })
+    }
+
+    private func toggle(in page: PrivacyPreferencesViewController) throws -> ThemedToggle {
+        let toggles = descendants(of: page.view).compactMap { $0 as? ThemedToggle }
+        return try XCTUnwrap(toggles.first, "the live-usage row carries the page's one toggle")
+    }
+
+    private func descendants(of root: NSView) -> [NSView] {
+        root.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    /// Off by default: reading someone else's credential is opt-in however good the reason.
+    func testKeychainReadingIsOffByDefault() throws {
+        let (page, settings, cleanup) = try keychainPage()
+        defer { cleanup() }
+
+        XCTAssertFalse(settings.readsClaudeLoginFromKeychain)
+        XCTAssertEqual(try toggle(in: page).state, .off)
+    }
+
+    /// Turning it on records the choice and asks for exactly the grants that are missing —
+    /// an account already granted, or with no keychain login at all, gets no prompt.
+    func testEnablingGrantsOnlyTheLoginsThatNeedIt() throws {
+        let granted = account(handle: "claude", path: "/fixtures/claude")
+        let ungranted = account(handle: "claude-two", path: "/fixtures/claude-two")
+        let absent = account(handle: "claude-three", path: "/fixtures/claude-three")
+
+        var requested: [String] = []
+        let asked = expectation(description: "grant flow ran")
+
+        let (page, settings, cleanup) = try keychainPage(
+            accounts: [granted, ungranted, absent],
+            availability: { path in
+                switch path {
+                case granted.configPath: return .granted
+                case ungranted.configPath: return .needsGrant
+                default: return .missing
+                }
+            },
+            grant: { path in
+                requested.append(path)
+                return true
+            },
+            prefetch: { asked.fulfill() }
+        )
+        defer { cleanup() }
+
+        let control = try toggle(in: page)
+        control.state = .on
+        control.sendAction(control.action, to: control.target)
+
+        wait(for: [asked], timeout: 5)
+        XCTAssertTrue(settings.readsClaudeLoginFromKeychain)
+        XCTAssertEqual(
+            requested,
+            [ungranted.configPath],
+            "only the login that needed a grant may be asked for one"
+        )
+    }
+
+    /// Turning it off is only the bit — no keychain traffic of any kind. The page's initial
+    /// refresh probes legitimately (the status line has to say where the grant stands), so the
+    /// prohibition starts at the flip, not at the build.
+    func testDisablingTouchesNothing() throws {
+        let initialProbe = expectation(description: "the on-state page probed once")
+        initialProbe.assertForOverFulfill = false
+        nonisolated(unsafe) var flipped = false
+
+        let (page, settings, cleanup) = try keychainPage(
+            enabled: true,
+            accounts: [account(handle: "claude", path: "/fixtures/claude")],
+            availability: { _ in
+                XCTAssertFalse(flipped, "switching off must not probe the keychain")
+                initialProbe.fulfill()
+                return .granted
+            }
+        )
+        defer { cleanup() }
+        wait(for: [initialProbe], timeout: 5)
+
+        flipped = true
+        let control = try toggle(in: page)
+        control.state = .off
+        control.sendAction(control.action, to: control.target)
+
+        XCTAssertFalse(settings.readsClaudeLoginFromKeychain)
+    }
+
+    /// The status sentence, at each of its three truths.
+    func testKeychainStatusNamesWhatIsActuallyReadable() {
+        XCTAssertEqual(
+            PrivacyPreferencesViewController.keychainStatus(for: []),
+            "On — no Claude sign-in found in the keychain."
+        )
+        XCTAssertEqual(
+            PrivacyPreferencesViewController.keychainStatus(for: [.missing, .missing]),
+            "On — no Claude sign-in found in the keychain."
+        )
+        XCTAssertEqual(
+            PrivacyPreferencesViewController.keychainStatus(for: [.granted, .granted, .missing]),
+            "On — reading 2 of 2 logins."
+        )
+        XCTAssertEqual(
+            PrivacyPreferencesViewController.keychainStatus(for: [.granted, .needsGrant]),
+            "On — reading 1 of 2 logins. Toggle off and on to be asked again for the rest."
+        )
+    }
+
+    private func account(handle: String, path: String) -> AgentAccount {
+        AgentAccount(
+            provider: .claude,
+            handle: .named(handle),
+            configPath: path
+        )
+    }
 }

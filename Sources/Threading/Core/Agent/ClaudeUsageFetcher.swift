@@ -55,6 +55,25 @@ enum ClaudeUsageFetcher {
             }
         }
 
+        // The keychain is where macOS logins actually keep the token; the file above is the
+        // Linux-style layout. Only with the user's standing opt-in, and never with a prompt:
+        // an ungranted read fails closed inside `ClaudeKeychainCredentials` and the chain
+        // falls through to the caches as though the setting were off.
+        if let credentials = await keychainCredentials(for: account) {
+            do {
+                return withModelWindows(from: profile, on: try await fetchFromAPI(credentials: credentials))
+            } catch UsageFetchError.tokenExpired {
+                // The CLI rotates the item in place, so a refused token is dropped and the
+                // next cycle re-reads the keychain rather than concluding the login is gone.
+                ClaudeKeychainCredentials.invalidate(configPath: account.configPath)
+                if let cached = ClaudeUsageCache.read(account: account) {
+                    return withModelWindows(from: profile, on: cached)
+                }
+                if let profile { return profile }
+                throw UsageFetchError.tokenExpired
+            }
+        }
+
         if let cached = ClaudeUsageCache.read(account: account) {
             return withModelWindows(from: profile, on: cached)
         }
@@ -138,6 +157,22 @@ enum ClaudeUsageFetcher {
             resetsAt: window.resetsAt.flatMap(UsageHTTP.parseISO8601),
             windowDuration: UsageDefaults.duration(forWindowID: id)
         )
+    }
+
+    /// The keychain token as the API branch consumes one, or nil when the setting is off or
+    /// the read cannot be silent. The setting is read on the main actor, where every other
+    /// `AppSettings` access lives; the keychain read stays off it, because a granted read is
+    /// still a round trip to `securityd`.
+    private static func keychainCredentials(
+        for account: AgentAccount
+    ) async -> (token: String, plan: String?)? {
+        guard await MainActor.run(body: { AppSettings.shared.readsClaudeLoginFromKeychain })
+        else { return nil }
+
+        guard let token = ClaudeKeychainCredentials.token(forConfigPath: account.configPath)
+        else { return nil }
+
+        return (token.accessToken, token.plan)
     }
 
     /// Nil when the file simply is not there; throws when it exists but cannot serve.

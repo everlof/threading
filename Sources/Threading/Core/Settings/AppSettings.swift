@@ -562,6 +562,44 @@ final class AppSettings {
         }
     }
 
+    /// Whether Claude terminal sessions launched by Threading silence the account's own
+    /// status line.
+    ///
+    /// The line duplicates what Threading's own chrome already shows — the status card carries
+    /// model, effort and branch; the toolbar pill carries usage — and a user's script can
+    /// drift from the truth (the one this was built against printed a hard-coded effort).
+    /// Suppression rides the per-session `--settings` file, which was verified to outrank the
+    /// account's configuration for this key, so the user's own terminals keep their line
+    /// untouched. The account's command still *runs* with its output discarded, because these
+    /// commands are commonly bridges whose side effects matter — Claudex's cache is a usage
+    /// source — and "hide the line" must not quietly mean "starve the pill". Off by default:
+    /// the line is the user's own configuration, and hiding it is a choice.
+    var suppressesClaudeStatusLine: Bool {
+        get { defaults.bool(forKey: Keys.suppressesClaudeStatusLine) }
+        set {
+            defaults.set(newValue, forKey: Keys.suppressesClaudeStatusLine)
+            notifyChanged()
+        }
+    }
+
+    /// Whether Threading may read the Claude CLI's saved login from the macOS keychain to
+    /// fetch live usage.
+    ///
+    /// Off by default: the token is a credential Threading does not own, and reading someone
+    /// else's credential is opt-in however good the reason. Turning it on triggers the
+    /// keychain grant flow right there in the Privacy page, so the macOS prompt is a direct
+    /// consequence of an action the user just took — background refreshes never prompt,
+    /// whatever this is set to (`ClaudeKeychainCredentials` fails closed instead). With it
+    /// off, usage falls back to the local caches the CLI leaves behind, which can be hours
+    /// old or absent.
+    var readsClaudeLoginFromKeychain: Bool {
+        get { defaults.bool(forKey: Keys.readsClaudeLoginFromKeychain) }
+        set {
+            defaults.set(newValue, forKey: Keys.readsClaudeLoginFromKeychain)
+            notifyChanged()
+        }
+    }
+
     /// Whether Codex sessions launch with `--dangerously-bypass-hook-trust`.
     ///
     /// Codex refuses to run a hook until its exact text has been reviewed, and review happens
@@ -804,6 +842,8 @@ final class AppSettings {
         static let usesContainedExtensionLauncher = "usesContainedExtensionLauncher"
         static let reportsClaudeLifecycleEvents = "reportsClaudeLifecycleEvents"
         static let installsCodexHooks = "installsCodexHooks"
+        static let readsClaudeLoginFromKeychain = "readsClaudeLoginFromKeychain"
+        static let suppressesClaudeStatusLine = "suppressesClaudeStatusLine"
         static let bypassesCodexHookTrust = "bypassesCodexHookTrust"
         static let claudeRemoteControl = "claudeRemoteControl"
         static let defaultPermissionMode = "defaultPermissionMode"

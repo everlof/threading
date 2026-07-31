@@ -236,6 +236,14 @@ enum UsageDefaults {
     /// refetches once `refreshInterval` has elapsed, so this stays cheap.
     static let refreshTimerInterval: TimeInterval = 60
 
+    /// The longest a 429 backoff grows however many refusals arrive in a row — an hour is
+    /// enough contrition, and past it a stuck flag would silence the pill for the whole run.
+    static let rateLimitBackoffCap: TimeInterval = 3600
+
+    /// How much jitter may *stretch* a rate-limit wait (it never shortens one), so refusals
+    /// dealt to several accounts together do not send them back together.
+    static let rateLimitJitterFraction = 0.1
+
     static let requestTimeout: TimeInterval = 20
 
     /// Window identifiers shared by both providers' normalizers.

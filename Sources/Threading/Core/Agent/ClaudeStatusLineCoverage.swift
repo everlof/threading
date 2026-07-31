@@ -142,7 +142,20 @@ enum ClaudeStatusLineCoverage {
         }
     }
 
-    // MARK: - Private Methods — Settings Resolution
+    // MARK: - Settings Resolution
+
+    /// The exact silencing wrapper the launcher writes when the user suppresses the line: the
+    /// account's own command still runs — these commands are commonly bridges whose side
+    /// effects matter, Claudex's usage cache being the live example — but nothing reaches the
+    /// terminal. A brace group so a command that is itself a pipeline or list wraps whole,
+    /// and stderr silenced too: a suppressed line must not degrade into a stray error line.
+    ///
+    /// Verified against the real bridge (2026-07-31): wrapped, it still rewrote its heartbeat
+    /// while printing nothing. `type: "none"` was tried first and is a trap — the CLI schema-
+    /// rejects the whole settings file, which would take the permission hooks down with it.
+    static func silencedCommand(wrapping command: String) -> String {
+        "{ \(command) ; } >/dev/null 2>&1"
+    }
 
     /// The `statusLine` command that would run for this account in this project.
     ///
@@ -150,7 +163,10 @@ enum ClaudeStatusLineCoverage {
     /// user's value outright (`policySettings.statusLine` is read *instead of* it), while the
     /// three writable layers override one another most-specific-first. Only `type: "command"`
     /// runs; any other shape draws nothing and so covers nothing.
-    private static func resolvedCommand(account: AgentAccount, projectDirectory: String) -> String? {
+    ///
+    /// Internal rather than private since the launcher resolves the same answer to build the
+    /// suppression wrapper — one resolution, two consumers, no drift.
+    static func resolvedCommand(account: AgentAccount, projectDirectory: String) -> String? {
         if let managed = statusLine(inSettingsAt: URL(fileURLWithPath: ClaudeSettingsDefaults.managedSettingsPath)) {
             return managed
         }

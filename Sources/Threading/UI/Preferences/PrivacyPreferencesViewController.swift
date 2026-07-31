@@ -38,8 +38,18 @@ final class PrivacyPreferencesViewController: NSViewController {
 
     private let reader: SystemPrivacyStatusReader
     private let refreshInterval: TimeInterval
+    private let settings: AppSettings
+    /// Injected keychain probes, so a test asserts on stated answers rather than on whatever
+    /// the developer's own keychain holds — the same rule as `reader`.
+    private let claudeAccounts: () -> [AgentAccount]
+    private let keychainAvailability: (String) -> ClaudeKeychainCredentials.Availability
+    private let keychainGrant: (String) -> Bool
+    private let prefetchUsage: () -> Void
     private var rows: [SystemPrivacyPermission: PermissionRow] = [:]
     private var shown: [SystemPrivacyPermission: SystemPrivacyStatus] = [:]
+    private var keychainToggle: ThemedToggle?
+    private var keychainSubtitleField: NSTextField?
+    private var shownKeychainSubtitle: String?
 
     /// Live while the page is on screen. Nil is the whole of "not watching" — the notification
     /// observer is added and removed alongside it, so there is one state rather than two that
@@ -50,10 +60,26 @@ final class PrivacyPreferencesViewController: NSViewController {
 
     init(
         reader: SystemPrivacyStatusReader = SystemPrivacyStatusReader(),
-        refreshInterval: TimeInterval = PrivacyPageDefaults.refreshInterval
+        refreshInterval: TimeInterval = PrivacyPageDefaults.refreshInterval,
+        settings: AppSettings = .shared,
+        claudeAccounts: @escaping () -> [AgentAccount] = {
+            AgentAccountDiscovery.accounts(for: .claude)
+        },
+        keychainAvailability: @escaping (String) -> ClaudeKeychainCredentials.Availability = {
+            ClaudeKeychainCredentials.availability(forConfigPath: $0)
+        },
+        keychainGrant: @escaping (String) -> Bool = {
+            ClaudeKeychainCredentials.requestAccess(forConfigPath: $0)
+        },
+        prefetchUsage: @escaping () -> Void = { AccountUsageMenu.prefetch() }
     ) {
         self.reader = reader
         self.refreshInterval = refreshInterval
+        self.settings = settings
+        self.claudeAccounts = claudeAccounts
+        self.keychainAvailability = keychainAvailability
+        self.keychainGrant = keychainGrant
+        self.prefetchUsage = prefetchUsage
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -302,7 +328,24 @@ final class PrivacyPreferencesViewController: NSViewController {
     }
 
     private func credentialsCard() -> SettingsCard {
-        SettingsCard(rows: [
+        let toggle = SettingsUI.toggle(
+            isOn: settings.readsClaudeLoginFromKeychain,
+            target: self,
+            action: #selector(keychainToggleChanged(_:))
+        )
+        toggle.setAccessibilityLabel(L10n.string("Live usage from your Claude login"))
+        keychainToggle = toggle
+
+        var subtitleField: NSTextField?
+        let liveUsageRow = SettingsUI.row(
+            title: "Live usage from your Claude login",
+            subtitle: keychainSubtitle(status: nil),
+            control: toggle,
+            subtitleField: &subtitleField
+        )
+        keychainSubtitleField = subtitleField
+
+        return SettingsCard(rows: [
             SettingsUI.detailRow(
                 symbol: "key",
                 title: "Kept in your login keychain",
@@ -313,9 +356,111 @@ final class PrivacyPreferencesViewController: NSViewController {
                 symbol: "person.crop.circle",
                 title: "Agent logins stay with the agent",
                 detail: "Threading reads which accounts exist under ~/.claude and ~/.codex so "
-                    + "it can route a session to one. It never reads or copies their credentials."
-            )
+                    + "it can route a session to one. It reads a credential only for the "
+                    + "live-usage switch below, and only after you allow it in the keychain "
+                    + "prompt."
+            ),
+            liveUsageRow
         ])
+    }
+
+    // MARK: - Claude Keychain Row
+
+    /// The row's whole story in one place: what is read, where it goes, what saying no costs.
+    /// The dynamic status is appended rather than shown in its own label so the paragraph and
+    /// the fact never sit in different type styles arguing about which is the truth.
+    private func keychainSubtitle(status: String?) -> String {
+        let explanation = L10n.string(
+            "Reads the sign-in the Claude CLI keeps in your macOS keychain and asks Anthropic "
+                + "for the account's rate limits — the numbers in the toolbar's usage pill. The "
+                + "token goes to Anthropic and nowhere else; Threading never stores, refreshes, "
+                + "or logs it. macOS asks once per login — choose Always Allow to not be asked "
+                + "again. When this is off, usage comes from caches the CLI leaves on disk, "
+                + "which can be hours old or missing."
+        )
+        guard let status else { return explanation }
+        return explanation + "\n" + status
+    }
+
+    /// On is a grant flow, not just a bit: each Claude login that has a keychain item Threading
+    /// cannot yet read gets its one macOS prompt now, while the user is looking at the sentence
+    /// that explains it. Off is only the bit — the reads stop, and any standing "Always Allow"
+    /// stays until revoked in Keychain Access, which the status line says while it matters.
+    @objc private func keychainToggleChanged(_ sender: ThemedToggle) {
+        settings.readsClaudeLoginFromKeychain = sender.state == .on
+        guard sender.state == .on else {
+            refreshKeychainStatus()
+            return
+        }
+
+        let accounts = claudeAccounts()
+        let availability = keychainAvailability
+        let grant = keychainGrant
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            for account in accounts
+            where availability(account.configPath) == .needsGrant {
+                _ = grant(account.configPath)
+            }
+            Task { @MainActor [weak self] in
+                self?.refreshKeychainStatus()
+                // The pill should light up with the new source now, not a timer-tick later.
+                self?.prefetchUsage()
+            }
+        }
+    }
+
+    /// Reads availability off the main thread — a granted probe is a round trip to
+    /// `securityd` — and rewrites the row only when the answer changed, the same
+    /// VoiceOver-quiet rule the permission rows follow.
+    private func refreshKeychainStatus() {
+        let enabled = settings.readsClaudeLoginFromKeychain
+        keychainToggle?.state = enabled ? .on : .off
+
+        guard enabled else {
+            showKeychainSubtitle(keychainSubtitle(status: L10n.string("Off.")))
+            return
+        }
+
+        let accounts = claudeAccounts()
+        let availability = keychainAvailability
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let states = accounts.map { availability($0.configPath) }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.showKeychainSubtitle(
+                    self.keychainSubtitle(status: Self.keychainStatus(for: states))
+                )
+            }
+        }
+    }
+
+    private func showKeychainSubtitle(_ subtitle: String) {
+        guard subtitle != shownKeychainSubtitle else { return }
+        shownKeychainSubtitle = subtitle
+        keychainSubtitleField?.stringValue = subtitle
+    }
+
+    /// One sentence of truth about where the grant stands, testable as a pure function.
+    static func keychainStatus(
+        for states: [ClaudeKeychainCredentials.Availability]
+    ) -> String {
+        let withItems = states.filter { $0 != .missing }
+        guard !withItems.isEmpty else {
+            return L10n.string("On — no Claude sign-in found in the keychain.")
+        }
+
+        let granted = withItems.filter { $0 == .granted }.count
+        if granted == withItems.count {
+            return L10n.format(
+                "On — reading %lld of %lld logins.", Int64(granted), Int64(withItems.count)
+            )
+        }
+        return L10n.format(
+            "On — reading %lld of %lld logins. Toggle off and on to be asked again "
+                + "for the rest.",
+            Int64(granted),
+            Int64(withItems.count)
+        )
     }
 
     /// The old copy here claimed Threading "sends nothing about your projects anywhere". That
@@ -370,6 +515,7 @@ final class PrivacyPreferencesViewController: NSViewController {
                 self.apply(status, to: permission)
             }
         }
+        refreshKeychainStatus()
     }
 
     /// Rewriting a label that has not changed is what a poll would otherwise do twenty times a

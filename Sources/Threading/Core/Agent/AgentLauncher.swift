@@ -183,6 +183,32 @@ enum AgentLauncher {
         return session.remoteControl ?? AppSettings.shared.claudeRemoteControl.startupValue
     }
 
+    /// The silenced status line this terminal launch writes, or nil to leave the account's
+    /// line exactly as the user configured it.
+    ///
+    /// Only with the suppression setting on, and only when the account actually resolves a
+    /// command: an account with no status line has nothing to silence, and writing an override
+    /// for it would add a key where the user has none. The account's own command is kept
+    /// running inside the wrapper because these commands are commonly bridges with side
+    /// effects the app itself relies on — see `ClaudeStatusLineCoverage.silencedCommand`.
+    ///
+    /// Terminal launches only. A native conversation runs `--print`, where the CLI never
+    /// draws a status line, so its settings file has nothing to say about one.
+    static func statusLineOverride(for session: AgentSession, in project: Project) -> String? {
+        guard session.kind == .claude, AppSettings.shared.suppressesClaudeStatusLine,
+              let account = AgentAccountDiscovery.account(
+                  for: session.kind,
+                  handle: session.accountHandle
+              ),
+              let command = ClaudeStatusLineCoverage.resolvedCommand(
+                  account: account,
+                  projectDirectory: project.folderPath
+              )
+        else { return nil }
+
+        return ClaudeStatusLineCoverage.silencedCommand(wrapping: command)
+    }
+
     /// The permission posture this launch states, or nil to state none.
     ///
     /// The conversation's own choice first, then the app-wide default for new sessions, then
@@ -515,13 +541,15 @@ enum AgentLauncher {
 
         // Optional lifecycle hooks only. A terminal session raises the CLI's own permission
         // prompt, which the user can see and answer — intercepting it would replace a working
-        // prompt with a second one. With reporting off and no Remote Control override,
-        // `writeHookSettings` returns nil and the terminal launches with no settings file.
+        // prompt with a second one. With reporting off, no Remote Control override and no
+        // status-line override, `writeHookSettings` returns nil and the terminal launches
+        // with no settings file.
         if let settingsPath = MCPSessionRegistry.writeHookSettings(
             for: session.id,
             brokersPermissions: false,
             reportsLifecycle: AppSettings.shared.reportsClaudeLifecycleEvents,
-            remoteControl: remoteControlAtStartup(for: session)
+            remoteControl: remoteControlAtStartup(for: session),
+            statusLineOverride: statusLineOverride(for: session, in: project)
         ) {
             command.append(flag: "--settings", value: settingsPath)
         }

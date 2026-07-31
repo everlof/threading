@@ -155,6 +155,48 @@ final class ClaudeRemoteControlTests: XCTestCase {
         XCTAssertNotNil(settings["hooks"] as? [String: Any])
     }
 
+    /// A status-line override travels in the same file, in the one shape the CLI's schema
+    /// accepts. `type: "none"` was tried during design and rejects the *whole* file — the
+    /// permission hooks with it — so the exact shape written here is load-bearing.
+    func testAStatusLineOverrideIsWrittenAsACommand() throws {
+        let sessionID = SessionID()
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: sessionID,
+            brokersPermissions: false,
+            reportsLifecycle: true,
+            statusLineOverride: "{ bridge ; } >/dev/null 2>&1",
+            listenerPort: 4_321
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let settings = try settingsJSON(at: path)
+        let statusLine = try XCTUnwrap(settings["statusLine"] as? [String: Any])
+        XCTAssertEqual(statusLine["type"] as? String, "command")
+        XCTAssertEqual(statusLine["command"] as? String, "{ bridge ; } >/dev/null 2>&1")
+        XCTAssertNotNil(settings["hooks"] as? [String: Any])
+    }
+
+    /// The override alone is a reason to write the file — a terminal with hooks off and no
+    /// Remote Control choice still gets its silenced line, or the setting would silently hold
+    /// only on sessions that happen to carry something else.
+    func testAStatusLineOverrideAloneStillWritesTheFile() throws {
+        let sessionID = SessionID()
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: sessionID,
+            brokersPermissions: false,
+            reportsLifecycle: false,
+            statusLineOverride: "true"
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let settings = try settingsJSON(at: path)
+        XCTAssertEqual(
+            (settings["statusLine"] as? [String: Any])?["command"] as? String,
+            "true"
+        )
+        XCTAssertNil(settings["hooks"], "no listener was asked for, so no hooks may appear")
+    }
+
     func testTerminalOptOutWritesNoSettingsFileWithoutAnotherSettingToCarry() {
         XCTAssertNil(MCPSessionRegistry.writeHookSettings(
             for: SessionID(),

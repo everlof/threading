@@ -111,6 +111,7 @@ enum MCPSessionRegistry {
         brokersPermissions: Bool,
         reportsLifecycle: Bool,
         remoteControl: Bool? = nil,
+        statusLineOverride: String? = nil,
         listenerPort: UInt16? = MCPServer.shared.port
     ) -> String? {
         let port = listenerPort
@@ -127,11 +128,12 @@ enum MCPSessionRegistry {
                 "reportsLifecycle": reportsLifecycle ? "yes" : "no"
             ])
 
-            // A settings file is still written when the session has a Remote Control choice to
-            // state. Losing the hooks costs accurate activity; dropping this would silently
-            // connect a conversation the user had switched off, which is a different order of
-            // wrong and must not depend on whether an unrelated listener came up.
-            if remoteControl == nil {
+            // A settings file is still written when the session has a Remote Control choice or
+            // a status-line override to state. Losing the hooks costs accurate activity;
+            // dropping either of these would silently undo a choice the user made, which is a
+            // different order of wrong and must not depend on whether an unrelated listener
+            // came up.
+            if remoteControl == nil, statusLineOverride == nil {
                 removeSettingsFile(for: sessionID)
                 return nil
             }
@@ -139,7 +141,7 @@ enum MCPSessionRegistry {
 
         // This is what makes terminal opt-out complete rather than an empty hooks dictionary
         // still carried through `--settings`.
-        if !needsListener, remoteControl == nil {
+        if !needsListener, remoteControl == nil, statusLineOverride == nil {
             removeSettingsFile(for: sessionID)
             return nil
         }
@@ -165,6 +167,14 @@ enum MCPSessionRegistry {
         }
         if let remoteControl {
             settings[AgentDefaults.claudeRemoteControlKey] = remoteControl
+        }
+        if let statusLineOverride {
+            // Must stay `type: "command"`: the CLI schema-validates this file and rejects it
+            // *whole* on any other shape — taking the permission hooks above down with it.
+            settings[ClaudeSettingsDefaults.statusLineKey] = [
+                ClaudeSettingsDefaults.typeKey: ClaudeSettingsDefaults.commandType,
+                ClaudeSettingsDefaults.commandKey: statusLineOverride
+            ]
         }
 
         let file = settingsFile(for: sessionID)

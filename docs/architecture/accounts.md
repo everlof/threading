@@ -116,9 +116,41 @@ rate-limit pressure: a ring gauging the peak window beside every window's own va
 red past 92%, each value tinted by its own window's severity; clicking opens per-window bars
 with reset countdowns. `AccountUsageService` caches
 per account and keeps the last good reading through failed refreshes. The credential posture
-mirrors `~/repo/claudex`: read the short-lived tokens the official CLIs already keep, never
-refresh them, and **never read the Keychain** — its `Claude Code-credentials` items do not
-say which config directory they belong to, and an unbundled binary re-prompts every rebuild.
+mirrors `~/repo/claudex`: read the short-lived tokens the official CLIs already keep, use
+them read-only, never refresh them.
+
+**The Keychain is read only with a standing opt-in** (`readsClaudeLoginFromKeychain`, the
+Privacy page's "Live usage from your Claude login"). The old rule here was "never", for two
+stated reasons, and both were retired by measurement rather than argument
+(`ClaudeKeychainCredentials` records the probe):
+
+- *"Items do not say which config directory they belong to."* They do. The CLI names its item
+  per config directory: the default login owns the bare service `Claude Code-credentials`, an
+  alternate owns `Claude Code-credentials-<first 8 hex of SHA-256 of the canonical config
+  path>` — verified byte-for-byte against the three real logins on this machine, with the
+  never-logged-in data root correctly owning none. A token is therefore attributable to
+  exactly one account.
+- *"An unbundled binary re-prompts every rebuild."* It would, so no background read is ever
+  allowed to prompt: refresh-path reads run with keychain interaction disabled and *fail
+  closed* (verified: `errSecAuthFailed`, no dialog), falling back to the cache chain below.
+  The one interactive read lives behind the Privacy page's own toggle, where the macOS
+  prompt is the direct consequence of the flip the user just made. A Debug build (ad-hoc
+  signed, so its grant dies with each rebuild) quietly degrades to the caches; a release
+  build's "Always Allow" persists.
+
+The token stays in memory only, is never logged, and goes nowhere but the usage endpoint's
+`Authorization` header. A 401 drops it and the next cycle re-reads — the CLI rotates the item
+in place.
+
+**Refreshes are paced from three directions** so the usage endpoints cannot be hammered: the
+per-account floor (`minimumRefreshSpacing`) however eagerly the UI asks; a `notBefore` the
+endpoint sets by answering 429 — honoured from `Retry-After` when sent, exponential with
+upward-only jitter when not (`UsageRetrySchedule`), and respected even by `force`, because a
+user clicking refresh must not be a way to spend a rate limit faster; and an event-driven
+path that refreshes when a session *leaves* `working` — the one moment the server's number
+has just moved. That last is CodexBar's "agent-aware refresh" done with certainty instead of
+guesswork (Threading is told the turn boundary), and it is also the back-off: an idle app
+generates no turn boundaries and therefore no extra requests.
 
 Sources, per provider:
 
@@ -126,9 +158,11 @@ Sources, per provider:
   `chatgpt.com/backend-api/wham/usage`, with the `ChatGPT-Account-ID` and `originator`
   headers the backend gates on. Primary/secondary windows are *positions*, not timeframes —
   each is named from its own `limit_window_seconds`.
-- **Claude** — three sources, ordered by freshness, in `ClaudeUsageFetcher`:
+- **Claude** — four sources, ordered by freshness, in `ClaudeUsageFetcher`:
   1. `<config>/.credentials.json` against `api.anthropic.com/api/oauth/usage` when the file
      exists. On this machine it does not (macOS keeps the token in the Keychain).
+  1b. The **Keychain token** (`ClaudeKeychainCredentials`, opt-in as above) against the same
+     endpoint — the live source a macOS login actually has.
   2. **Claudex's status-line cache**:
      `~/Library/Application Support/Claudex/ClaudeStatus/<profileID>.json`, where `profileID`
      is the lowercase-hex SHA-256 of the standardized, symlink-resolved config-dir path

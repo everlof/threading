@@ -438,6 +438,19 @@ only ever recognised when it is **on**, because "off" and "not shown" are the sa
 the line counts are matched as the `+N`/`N` pair a numstat summary prints, so a token total of
 `1699` cannot pass for a diff stat.
 
+**The line can be suppressed instead of complemented** (`suppressesClaudeStatusLine`, off by
+default, on the General page beside the hook switches). The override rides the same per-session
+`--settings` file as the hooks, which was *verified* to outrank every writable layer for this
+key — and it must be shaped `type: "command"`, because `type: "none"` fails the CLI's schema
+and a failing settings file is skipped **whole**, permission hooks included. The account's own
+command keeps running inside `ClaudeStatusLineCoverage.silencedCommand`'s wrapper with both
+streams discarded: these commands are commonly the caching bridges described above, and hiding
+the line must not starve what they feed (verified — the wrapped bridge still wrote its
+heartbeat while printing nothing). With suppression on, the status card skips the coverage run
+entirely and shows every fact: there is no line to defer to, and the coverage cache would be
+describing one the user can no longer see. Terminal launches only — a native pane never mounts
+the component, so its settings file says nothing about it.
+
 Precedence follows the CLI's, which for this key is **not** a merge: a managed policy replaces the
 user's `statusLine` outright, and below that `.claude/settings.local.json`,
 `.claude/settings.json` and the account's `settings.json` override most-specific-first. The answer

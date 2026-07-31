@@ -36,6 +36,7 @@ final class GeneralPreferencesViewController: NSViewController {
     )
     private let alertSoundToggle = ThemedToggle()
     private let claudeHookToggle = ThemedToggle()
+    private let statusLineToggle = ThemedToggle()
     private let codexHookToggle = ThemedToggle()
     private let codexHookTrustToggle = ThemedToggle()
     private let remoteControlPopUp = ThemedPopUp()
@@ -119,6 +120,9 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(claudeHookToggle,
                   isOn: AppSettings.shared.reportsClaudeLifecycleEvents,
                   action: #selector(claudeHookChanged))
+        configure(statusLineToggle,
+                  isOn: AppSettings.shared.suppressesClaudeStatusLine,
+                  action: #selector(statusLineChanged))
         configure(codexHookToggle,
                   isOn: AppSettings.shared.installsCodexHooks,
                   action: #selector(codexHookChanged))
@@ -470,6 +474,16 @@ final class GeneralPreferencesViewController: NSViewController {
                     + "configuration. Off removes Threading's lifecycle hooks from Terminal; "
                     + "Native permission prompts keep working. Applies on the next start or resume.",
                 control: claudeHookToggle
+            ),
+            SettingsUI.row(
+                title: "Hide Claude's status line in Threading terminals",
+                subtitle: "Threading's status card and usage pill already show the model, "
+                    + "effort, branch and rate limits, so the line under the composer mostly "
+                    + "repeats them. This hides it in sessions Threading launches — your own "
+                    + "terminals keep it — while your status-line command still runs with its "
+                    + "output discarded, so anything it feeds (like a usage cache) keeps "
+                    + "working. Applies on the next start or resume.",
+                control: statusLineToggle
             )
         ])
     }
@@ -595,6 +609,12 @@ final class GeneralPreferencesViewController: NSViewController {
     /// intentionally a next-launch choice rather than pretending to detach hooks mid-turn.
     @objc private func claudeHookChanged() {
         AppSettings.shared.reportsClaudeLifecycleEvents = claudeHookToggle.state == .on
+    }
+
+    /// Same next-launch rule as the hooks above, for the same reason: the override rides the
+    /// per-session settings file a running Claude has already read.
+    @objc private func statusLineChanged() {
+        AppSettings.shared.suppressesClaudeStatusLine = statusLineToggle.state == .on
     }
 
     /// Switching off also removes what was installed, rather than leaving inert entries in a
