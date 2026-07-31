@@ -2,7 +2,7 @@ import AppKit
 
 // MARK: - Themed Image Preview
 
-/// An image shown at whatever size it is given, which the user can open in Quick Look.
+/// An image shown at whatever size it is given, which the user can open in the media inspector.
 ///
 /// Two things this is, that `NSImageView` is not:
 ///
@@ -16,12 +16,12 @@ import AppKit
 ///   `noIntrinsicMetric` removes the opinion rather than out-prioritising it, and the image
 ///   simply draws into whatever it is given.
 /// - **It is a control.** An image the agent just produced is the thing the user most wants to
-///   look at properly — full size, zoomed, in Quick Look, which is where macOS keeps zoom,
-///   rotate, share, Open With and full screen for free. Reaching that needs focus, a key, and
-///   an accessibility action, which is what `ThemedControl` supplies.
+///   look at properly — full size, zoomed, panned, and beside the other images in its collection.
+///   Reaching that needs focus, a key, and an accessibility action, which is what
+///   `ThemedControl` supplies.
 ///
-/// Every route in lands on `performPrimaryAction`: click to focus and Space or Return, a
-/// double-click, the trackpad's own Quick Look gesture, and VoiceOver's press.
+/// Every route in lands on `performPrimaryAction`: click, Space or Return, the trackpad's own
+/// preview gesture, and VoiceOver's press.
 final class ThemedImagePreview: ThemedControl {
 
     // MARK: - Properties
@@ -39,11 +39,18 @@ final class ThemedImagePreview: ThemedControl {
         }
     }
 
-    /// The file behind the picture, which is what Quick Look is given. Nil — or a path that has
-    /// since been deleted — leaves the preview unavailable rather than opening an empty panel.
+    /// The file behind the picture, which supplies actions and a stable collection identity.
+    /// Nil — or a path that has since been deleted — leaves inspection unavailable.
     var fileURL: URL? {
         didSet { toolTip = Self.tooltip(for: fileURL) }
     }
+
+    /// Supplies siblings and the clicked index where the image belongs to a collection. A plain
+    /// display-pane image leaves this nil and receives the ordinary one-item inspector.
+    var inspectorSelectionProvider: (() -> MediaInspectorSelection?)?
+
+    private var isTrackingPress = false
+    private var isPressArmed = false
 
     /// Where the image is actually drawn inside the view: scaled down to fit, never up, and
     /// pinned to the top edge. Read by the tests, and by the focus ring, which belongs around
@@ -103,6 +110,8 @@ final class ThemedImagePreview: ThemedControl {
         let target = imageRect
         guard !target.isEmpty else { return }
 
+        let shape = ThemedSurface.Shape(rect: target, radius: Design.Radius.control)
+
         image.draw(
             in: target,
             from: .zero,
@@ -112,14 +121,27 @@ final class ThemedImagePreview: ThemedControl {
             hints: [.interpolation: NSImageInterpolation.high]
         )
 
+        // The image is itself the control. A quiet themed wash makes that discoverable when the
+        // pointer arrives, and holding the wash through mouse-down keeps the click from feeling
+        // like it landed on inert content. No transform: Reduce Motion should not turn a basic
+        // affordance into a different interaction.
+        if isHovered || isPressArmed {
+            Design.Surface.controlHover.setFill()
+            shape.path.fill()
+            Design.Surface.accent.setStroke()
+            let hoverPath = shape.inset(by: Design.Radius.border / 2).path
+            hoverPath.lineWidth = Design.Radius.border
+            hoverPath.stroke()
+        }
+
         // Around the picture, not the view: the view is the whole content region and a ring at
         // its edge would read as the pane being focused rather than the image.
-        drawKeyboardFocus(around: ThemedSurface.Shape(rect: target, radius: Design.Radius.control))
+        drawKeyboardFocus(around: shape)
     }
 
     // MARK: - Activation
 
-    override var acceptsFirstResponder: Bool { isEnabled && canPreview }
+    override var acceptsFirstResponder: Bool { isEnabled && canInspect }
 
     /// The panel is not the key window when the pointer arrives, and a first click that only
     /// activated the window would make the picture feel dead. See `SidebarHoverRowView` for
@@ -127,24 +149,36 @@ final class ThemedImagePreview: ThemedControl {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        guard isEnabled, canPreview else {
+        guard isEnabled, canInspect else {
             super.mouseDown(with: event)
             return
         }
 
         window?.makeFirstResponder(self)
-
-        // Double-click, not single: the picture fills the pane, and a system panel taking over
-        // the screen because the user clicked the thing they were looking at is a jump scare.
-        // The prompt's thumbnails open on one click for the opposite reason — a 40pt chip is
-        // not something anyone is reading.
-        if event.clickCount >= 2 {
-            _ = performPrimaryAction()
-        }
+        isTrackingPress = true
+        isPressArmed = true
+        needsDisplay = true
     }
 
-    /// The trackpad's own Quick Look gesture — three-finger tap, or a force click — which is
-    /// how many people reach it in Finder without ever pressing Space.
+    override func mouseDragged(with event: NSEvent) {
+        guard isTrackingPress else { return }
+        let armed = bounds.contains(convert(event.locationInWindow, from: nil))
+        guard armed != isPressArmed else { return }
+        isPressArmed = armed
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let shouldInspect = isTrackingPress && isPressArmed
+            && bounds.contains(convert(event.locationInWindow, from: nil))
+        isTrackingPress = false
+        isPressArmed = false
+        needsDisplay = true
+        if shouldInspect { _ = performPrimaryAction() }
+    }
+
+    /// The trackpad's preview gesture — three-finger tap, or a force click — follows the same
+    /// in-window route as click and Space.
     override func quickLook(with event: NSEvent) {
         guard performPrimaryAction() else {
             super.quickLook(with: event)
@@ -153,12 +187,19 @@ final class ThemedImagePreview: ThemedControl {
     }
 
     override func performPrimaryAction() -> Bool {
-        guard isEnabled, QuickLookPresenter.shared.present(fileURL) else { return false }
-        return true
+        guard isEnabled else { return false }
+        if let selection = inspectorSelectionProvider?() {
+            return MediaInspectorPresenter.present(selection, from: self)
+        }
+        guard let fileURL, let image else { return false }
+        return MediaInspectorPresenter.present(
+            MediaInspectorItem(url: fileURL, image: image),
+            from: self
+        )
     }
 
     override func resetCursorRects() {
-        guard canPreview else { return }
+        guard canInspect else { return }
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
@@ -171,8 +212,8 @@ final class ThemedImagePreview: ThemedControl {
     }
 
     override func accessibilityHelp() -> String? {
-        guard canPreview else { return nil }
-        return L10n.string("Press to open in Quick Look")
+        guard canInspect else { return nil }
+        return L10n.string("Press to inspect. Press Space again to close.")
     }
 
     override func accessibilityPerformPress() -> Bool {
@@ -184,13 +225,13 @@ final class ThemedImagePreview: ThemedControl {
     /// Whether there is anything to open. A picture with no file behind it — or one whose file
     /// has since been deleted — is still worth *looking* at, so it draws; it simply offers no
     /// preview, no pointer change and no place in the key loop.
-    private var canPreview: Bool {
+    private var canInspect: Bool {
         image != nil && QuickLookPresenter.canPreview(fileURL)
     }
 
     private static func tooltip(for url: URL?) -> String? {
         guard QuickLookPresenter.canPreview(url) else { return nil }
-        return L10n.string("Double-click or press Space to open in Quick Look")
+        return L10n.string("Click or press Space to inspect")
     }
 
     private func resignIfEmpty() {

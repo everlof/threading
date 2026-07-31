@@ -10,6 +10,9 @@ enum ImageCompareDefaults {
     static let checkerSquare: CGFloat = 8
     /// The arrow-key nudge, as a fraction of the canvas.
     static let keyboardStep: CGFloat = 0.05
+    /// Between a caption and the pixels it names. The band reserved for it is this plus the
+    /// caption's own measured line.
+    static let captionGap: CGFloat = Design.Spacing.small
     /// Past this many points per pixel the images are icons being inspected, and interpolation
     /// smears exactly the pixels the comparison is looking for.
     static let crispScaleThreshold: CGFloat = 4
@@ -22,15 +25,15 @@ enum ImageCompareDefaults {
 /// a pixel difference, and side-by-side — one scrubbed fraction shared across modes, so the
 /// seam stays where the user left it when they switch.
 ///
-/// The component is the whole surface: the drawing canvas, the per-side title tags, the
+/// The component is the whole surface: the drawing canvas, the per-side captions, the
 /// dimension note when the two sides disagree, and the mode chip. Hosts size it and hand it
 /// content; nothing about its appearance is theirs to choose.
 final class ImageCompareView: NSView {
 
     // MARK: - Properties
 
-    /// One side of the comparison. The title is what the tag over the image says — a filename,
-    /// or a revision like "HEAD".
+    /// One side of the comparison. The title is what the caption beside the image says — a
+    /// filename, or a revision like "HEAD".
     struct Side {
         let image: NSImage
         let title: String
@@ -208,11 +211,14 @@ final class ImageCompareCanvas: ThemedControl {
     // MARK: - Public Methods
 
     /// The canvas height that fits the two sides at `width`, capped so a tall screenshot stays
-    /// a row rather than a page.
+    /// a row rather than a page — plus the caption bands, which are the surface's height too:
+    /// asking for the image's height alone would take the captions back out of the image.
     func preferredCanvasHeight(forWidth width: CGFloat) -> CGFloat {
+        let bands = captionBands
+        let reserved = bands.top + bands.bottom
         let union = unionPixelSize
         guard union.width > 0, union.height > 0, width > 0 else {
-            return ImageCompareDefaults.maximumPreferredCanvasHeight / 2
+            return ImageCompareDefaults.maximumPreferredCanvasHeight / 2 + reserved
         }
         var fittedWidth: CGFloat = width
         if mode == .sideBySide {
@@ -220,7 +226,7 @@ final class ImageCompareCanvas: ThemedControl {
             fittedWidth = max(0, half)
         }
         let height: CGFloat = union.height * (fittedWidth / union.width)
-        return min(height, ImageCompareDefaults.maximumPreferredCanvasHeight)
+        return min(height, ImageCompareDefaults.maximumPreferredCanvasHeight) + reserved
     }
 
     // MARK: - Layout
@@ -252,19 +258,48 @@ final class ImageCompareCanvas: ThemedControl {
         return best == .zero ? image.size : best
     }
 
-    private var currentLayout: ImageCompareLayout {
+    /// The geometry the canvas is drawing at right now: the pure layout, fed this canvas's own
+    /// content, mode and caption bands.
+    var currentLayout: ImageCompareLayout {
         ImageCompareLayout.layout(
             oldSize: oldPixelSize,
             newSize: newPixelSize,
             in: bounds,
             mode: effectiveMode,
-            gap: Design.Spacing.medium
+            gap: Design.Spacing.medium,
+            captions: captionBands
         )
     }
 
     /// One side alone has no modes: it draws as a plain fitted image whatever `mode` says.
     private var effectiveMode: ImageCompareMode {
         (old == nil || new == nil) ? .fade : mode
+    }
+
+    /// The measured caption line. Read from the font rather than pinned to a token, because the
+    /// caption follows the app's text-size setting and a fixed band would clip it.
+    private var captionLineHeight: CGFloat {
+        ("Ag" as NSString).size(withAttributes: [.font: Design.Typography.caption()]).height
+    }
+
+    /// Whether the two sides disagree about their pixel size — what the dimension note says.
+    private var hasDimensionNote: Bool {
+        guard old != nil, new != nil else { return false }
+        return oldPixelSize != newPixelSize
+    }
+
+    /// The room this mode's captions need, taken out of the surface before the images are
+    /// fitted. A band is only reserved where something is written, so an unnamed single image
+    /// still gets the whole surface.
+    private var captionBands: ImageCompareLayout.CaptionBands {
+        let band = captionLineHeight + ImageCompareDefaults.captionGap
+        let isNamed = old != nil || new != nil
+        // The vertical wipe's mapping is vertical, so the new side is named under the image.
+        let namesNewSideBelow = effectiveMode == .wipeVertical && old != nil && new != nil
+        return ImageCompareLayout.CaptionBands(
+            top: isNamed ? band : 0,
+            bottom: namesNewSideBelow || hasDimensionNote ? band : 0
+        )
     }
 
     // MARK: - Drawing
@@ -291,7 +326,7 @@ final class ImageCompareCanvas: ThemedControl {
             drawSideBySide(layout: layout)
         }
 
-        drawDimensionNote(in: placement.canvasRect)
+        drawCaptions(layout: layout)
         drawCanvasFocusRing()
     }
 
@@ -352,7 +387,6 @@ final class ImageCompareCanvas: ThemedControl {
             NSGraphicsContext.restoreGraphicsState()
         }
 
-        drawSideTags(layout: layout)
         drawSeam(in: placement.canvasRect)
     }
 
@@ -366,10 +400,6 @@ final class ImageCompareCanvas: ThemedControl {
         }
         if let new {
             drawImage(new.image, in: placement.newRect, at: layout.scale, alpha: newAlpha)
-        }
-        drawSideTags(layout: layout)
-        if isScrubbable {
-            drawBlendTag(in: placement.canvasRect)
         }
     }
 
@@ -398,7 +428,6 @@ final class ImageCompareCanvas: ThemedControl {
         if let new {
             drawImage(new.image, in: placement.newRect, at: layout.scale)
         }
-        drawSideTags(layout: layout)
     }
 
     // MARK: - Seam
@@ -518,141 +547,149 @@ final class ImageCompareCanvas: ThemedControl {
         }
     }
 
-    // MARK: - Tags
+    // MARK: - Captions
 
-    private struct Tag {
-        let text: String
-        /// Anchors are in the flipped space: `minY` is the top.
-        let anchor: CGPoint
-        let alignedTrailing: Bool
-        let alignedBottom: Bool
+    /// Which end of its band a caption hugs, so the gap in the band is always the one between
+    /// the words and the picture.
+    private enum CaptionEdge {
+        case top
+        case bottom
     }
 
-    private func drawSideTags(layout: ImageCompareLayout) {
+    /// Names the two sides in the strips reserved beside the images.
+    ///
+    /// Nothing here draws over the comparison. Position carries the mapping — start of the
+    /// travel is the old side, end of it the new — and the new side is inked a step stronger, so
+    /// which is which survives a title too long to read to its end.
+    private func drawCaptions(layout: ImageCompareLayout) {
         let placement = layout.placement
-        let inset = Design.Spacing.small
-        var tags: [Tag] = []
+        let top = layout.captions.top
+        let bottom = layout.captions.bottom
+        var bottomHoldsATitle = false
 
         switch effectiveMode {
         case .wipeVertical:
+            // The seam sweeps downward, so the sides are named above and below the picture.
             if let old {
-                tags.append(Tag(
-                    text: old.title,
-                    anchor: CGPoint(x: placement.canvasRect.minX + inset, y: placement.canvasRect.minY + inset),
-                    alignedTrailing: false,
-                    alignedBottom: false
-                ))
+                drawCaption(old.title, ink: Design.Text.secondary, in: top, edge: .top)
             }
             if let new {
-                tags.append(Tag(
-                    text: new.title,
-                    anchor: CGPoint(x: placement.canvasRect.minX + inset, y: placement.canvasRect.maxY - inset),
-                    alignedTrailing: false,
-                    alignedBottom: true
-                ))
+                drawCaption(new.title, ink: Design.Text.label, in: bottom, edge: .bottom)
+                bottomHoldsATitle = true
             }
+
         case .sideBySide:
-            if let old, let secondary = placement.secondaryCanvasRect {
-                tags.append(Tag(
-                    text: old.title,
-                    anchor: CGPoint(x: placement.canvasRect.minX + inset, y: placement.canvasRect.minY + inset),
-                    alignedTrailing: false,
-                    alignedBottom: false
-                ))
-                if let new {
-                    tags.append(Tag(
-                        text: new.title,
-                        anchor: CGPoint(x: secondary.minX + inset, y: secondary.minY + inset),
-                        alignedTrailing: false,
-                        alignedBottom: false
-                    ))
-                }
-            }
-        default:
             if let old {
-                tags.append(Tag(
-                    text: old.title,
-                    anchor: CGPoint(x: placement.canvasRect.minX + inset, y: placement.canvasRect.minY + inset),
-                    alignedTrailing: false,
-                    alignedBottom: false
-                ))
+                drawCaption(
+                    old.title, ink: Design.Text.secondary,
+                    in: slot(over: placement.canvasRect, in: top), edge: .top, alignment: .center
+                )
             }
-            if let new {
-                tags.append(Tag(
-                    text: new.title,
-                    anchor: CGPoint(x: placement.canvasRect.maxX - inset, y: placement.canvasRect.minY + inset),
-                    alignedTrailing: true,
-                    alignedBottom: false
-                ))
+            if let new, let secondary = placement.secondaryCanvasRect {
+                drawCaption(
+                    new.title, ink: Design.Text.label,
+                    in: slot(over: secondary, in: top), edge: .top, alignment: .center
+                )
+            }
+
+        case .difference:
+            // Neither side is anywhere — the difference is one image made of both — so the pair
+            // is named the way the text diff names it rather than split across two edges that
+            // would imply a position this mode does not have.
+            if let old, let new {
+                drawCaption(
+                    "\(old.title) → \(new.title)", ink: Design.Text.secondary,
+                    in: top, edge: .top, alignment: .center
+                )
+            }
+
+        default:
+            // The wipe's seam and the fade's blend are both scrubbed left to right, so the old
+            // side sits at the start of that travel and the new side at its end.
+            switch (old, new) {
+            case let (.some(old), .some(new)):
+                let (leading, trailing) = halves(of: top)
+                drawCaption(old.title, ink: Design.Text.secondary, in: leading, edge: .top)
+                drawCaption(
+                    newSideCaption(new), ink: Design.Text.label,
+                    in: trailing, edge: .top, alignment: .right
+                )
+            case let (.some(side), nil), let (nil, .some(side)):
+                // One side alone — an added or deleted file. There is nothing to tell it apart
+                // from, so it takes the whole band.
+                drawCaption(side.title, ink: Design.Text.label, in: top, edge: .top)
+            case (nil, nil):
+                break
             }
         }
 
-        for tag in tags {
-            drawTag(tag)
-        }
+        drawDimensionNote(in: bottom, sharingTheBand: bottomHoldsATitle)
     }
 
-    private func drawBlendTag(in canvas: CGRect) {
-        let percent = Int((fraction * 100).rounded())
-        drawTag(Tag(
-            text: "\(percent)% new",
-            anchor: CGPoint(x: canvas.midX, y: canvas.maxY - Design.Spacing.small),
-            alignedTrailing: false,
-            alignedBottom: true
-        ), centredHorizontally: true)
+    /// The new side's caption. In the crossfade it carries the blend, which is the fraction's
+    /// only readout — the wipes show theirs as the seam's own position.
+    private func newSideCaption(_ side: ImageCompareView.Side) -> String {
+        guard effectiveMode == .fade, isScrubbable else { return side.title }
+        return "\(side.title) · \(Int((fraction * 100).rounded()))%"
     }
 
-    private func drawDimensionNote(in canvas: CGRect) {
-        guard let old, let new else { return }
-        let oldSize = Self.pixelSize(of: old.image)
-        let newSize = Self.pixelSize(of: new.image)
-        guard oldSize != newSize else { return }
-        guard effectiveMode != .fade || !isScrubbable else {
-            // The blend tag already sits bottom-centre; the note yields rather than stacking.
-            return
-        }
-        let text = "\(Int(oldSize.width))×\(Int(oldSize.height)) → " +
-            "\(Int(newSize.width))×\(Int(newSize.height))"
-        drawTag(Tag(
-            text: text,
-            anchor: CGPoint(x: canvas.midX, y: canvas.maxY - Design.Spacing.small),
-            alignedTrailing: false,
-            alignedBottom: true
-        ), centredHorizontally: true)
+    /// The note that says the two sides are not the same size. Centred in its band, unless a
+    /// title already has the left of it — then it takes the right, rather than stacking on top
+    /// of the words or being dropped the way it used to be.
+    private func drawDimensionNote(in band: CGRect, sharingTheBand: Bool) {
+        guard hasDimensionNote else { return }
+        let text = "\(Int(oldPixelSize.width))×\(Int(oldPixelSize.height)) → " +
+            "\(Int(newPixelSize.width))×\(Int(newPixelSize.height))"
+        let slot = sharingTheBand ? halves(of: band).trailing : band
+        drawCaption(
+            text, ink: Design.Text.tertiary,
+            in: slot, edge: .bottom, alignment: sharingTheBand ? .right : .center
+        )
     }
 
-    /// A caption in an opaque pill over the image. Measured and drawn with the same attributes,
-    /// and given a truncating paragraph style — `NSString.draw(in:)` wraps, and a tag that
-    /// breaks at a space draws its second word outside its own pill.
-    private func drawTag(_ tag: Tag, centredHorizontally: Bool = false) {
+    /// Two captions in one band, each capped at half of it, so a long title truncates rather
+    /// than running into the one opposite.
+    private func halves(of band: CGRect) -> (leading: CGRect, trailing: CGRect) {
+        let width = max(0, (band.width - Design.Spacing.medium) / 2)
+        return (
+            CGRect(x: band.minX, y: band.minY, width: width, height: band.height),
+            CGRect(x: band.maxX - width, y: band.minY, width: width, height: band.height)
+        )
+    }
+
+    /// The part of a band that lies over one canvas — how a side-by-side caption stays over the
+    /// image it names instead of over the pair.
+    private func slot(over canvas: CGRect, in band: CGRect) -> CGRect {
+        CGRect(x: canvas.minX, y: band.minY, width: canvas.width, height: band.height)
+    }
+
+    /// One line of caption, hugging the outer edge of its band. Truncating rather than
+    /// wrapping: the line is one line high, and `NSString.draw(in:)` wraps by default, which
+    /// would draw the second word over the pixels the band exists to keep clear.
+    private func drawCaption(
+        _ text: String,
+        ink: NSColor,
+        in slot: CGRect,
+        edge: CaptionEdge,
+        alignment: NSTextAlignment = .left
+    ) {
+        guard slot.width > 0, slot.height > 0 else { return }
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
+        style.alignment = alignment
         let attributes: [NSAttributedString.Key: Any] = [
             .font: Design.Typography.caption(),
-            .foregroundColor: Design.Text.secondary,
+            .foregroundColor: ink,
             .paragraphStyle: style
         ]
-        let text = tag.text as NSString
-        let padding = Design.Spacing.small
-        let maximumWidth = bounds.width / 2
-        var size = text.size(withAttributes: attributes)
-        size.width = min(size.width, maximumWidth)
-
-        let pill = CGSize(width: size.width + padding * 2, height: size.height + Design.Spacing.tight)
-        var origin = tag.anchor
-        if centredHorizontally { origin.x -= pill.width / 2 }
-        if tag.alignedTrailing { origin.x -= pill.width }
-        if tag.alignedBottom { origin.y -= pill.height }
-
-        let pillRect = CGRect(origin: origin, size: pill)
-        ThemedSurface.draw(
-            pillRect,
-            fill: WindowBackdrop.opaque(Design.Surface.elevated),
-            border: Design.Surface.border,
-            radius: Design.Radius.pill(height: pill.height)
-        )
-        text.draw(
-            in: pillRect.insetBy(dx: padding, dy: Design.Spacing.tight / 2),
+        let line = min(captionLineHeight, slot.height)
+        (text as NSString).draw(
+            in: CGRect(
+                x: slot.minX,
+                y: edge == .top ? slot.minY : slot.maxY - line,
+                width: slot.width,
+                height: line
+            ),
             withAttributes: attributes
         )
     }

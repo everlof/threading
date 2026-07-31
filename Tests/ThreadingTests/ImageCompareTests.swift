@@ -75,6 +75,73 @@ final class ImageCompareTests: XCTestCase {
         XCTAssertEqual(layout.placement.canvasRect.size, .zero)
     }
 
+    // MARK: - Captions
+
+    func testTheCaptionBandsAreTakenOffBeforeTheImagesAreFitted() {
+        let bounds = CGRect(x: 0, y: 0, width: 400, height: 200)
+        let layout = ImageCompareLayout.layout(
+            oldSize: CGSize(width: 200, height: 100),
+            newSize: CGSize(width: 200, height: 100),
+            in: bounds,
+            mode: .wipeHorizontal,
+            gap: 10,
+            captions: ImageCompareLayout.CaptionBands(top: 20, bottom: 12)
+        )
+
+        // The images are fitted into what is left, not into the whole surface.
+        let canvas = layout.placement.canvasRect
+        XCTAssertGreaterThanOrEqual(canvas.minY, bounds.minY + 20)
+        XCTAssertLessThanOrEqual(canvas.maxY, bounds.maxY - 12)
+        // And the strips sit flush against the picture rather than at the container's edges,
+        // so a letterboxed image is still named by something touching it.
+        XCTAssertEqual(layout.captions.top.maxY, canvas.minY)
+        XCTAssertEqual(layout.captions.bottom.minY, canvas.maxY)
+        XCTAssertEqual(layout.captions.top.width, canvas.width)
+    }
+
+    func testTheSideBySideBandSpansBothCanvases() {
+        let layout = ImageCompareLayout.layout(
+            oldSize: CGSize(width: 100, height: 100),
+            newSize: CGSize(width: 100, height: 100),
+            in: CGRect(x: 0, y: 0, width: 410, height: 300),
+            mode: .sideBySide,
+            gap: 10,
+            captions: ImageCompareLayout.CaptionBands(top: 20, bottom: 0)
+        )
+
+        let left = layout.placement.canvasRect
+        guard let right = layout.placement.secondaryCanvasRect else {
+            return XCTFail("Side by side lays out a second canvas")
+        }
+        XCTAssertEqual(layout.captions.top.minX, left.minX)
+        XCTAssertEqual(layout.captions.top.maxX, right.maxX)
+    }
+
+    @MainActor
+    func testNoModeEverPrintsItsCaptionsOverThePixelsBeingCompared() {
+        // Sizes that disagree, so the dimension note is in play beside the titles.
+        let canvas = ImageCompareCanvas(frame: NSRect(x: 0, y: 0, width: 400, height: 220))
+        canvas.old = .init(image: Self.solidImage(.systemRed), title: "baseline.png")
+        canvas.new = .init(
+            image: Self.solidImage(.systemBlue, size: NSSize(width: 60, height: 30)),
+            title: "current.png"
+        )
+
+        for mode in ImageCompareMode.allCases {
+            canvas.mode = mode
+            let layout = canvas.currentLayout
+            let pictures = [layout.placement.canvasRect, layout.placement.secondaryCanvasRect]
+                .compactMap { $0 }
+
+            XCTAssertGreaterThan(layout.captions.top.height, 0, "\(mode) names neither side")
+            XCTAssertGreaterThan(layout.captions.bottom.height, 0, "\(mode) drops the sizes")
+            for picture in pictures {
+                XCTAssertFalse(layout.captions.top.intersects(picture), "\(mode) caption over image")
+                XCTAssertFalse(layout.captions.bottom.intersects(picture), "\(mode) note over image")
+            }
+        }
+    }
+
     // MARK: - Wipe partition
 
     func testTheWipePartitionsTheCanvasExactlyAtTheSeam() {
@@ -222,8 +289,12 @@ final class ImageCompareTests: XCTestCase {
         canvas.old = .init(image: tall, title: "old")
         canvas.new = .init(image: tall, title: "new")
 
+        // The cap is on the picture. The caption band is height the surface needs *besides* it,
+        // so asking for the picture's height alone would take the captions back out of it.
+        let captions = canvas.currentLayout.captions
+        XCTAssertGreaterThan(captions.top.height, 0)
         XCTAssertEqual(
-            canvas.preferredCanvasHeight(forWidth: 300),
+            canvas.preferredCanvasHeight(forWidth: 300) - captions.top.height - captions.bottom.height,
             ImageCompareDefaults.maximumPreferredCanvasHeight
         )
     }

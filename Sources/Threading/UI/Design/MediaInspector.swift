@@ -1,0 +1,1134 @@
+import AppKit
+import PDFKit
+import QuickLookUI
+
+// MARK: - Media Inspector Model
+
+/// One file the app-owned inspector can show.
+///
+/// The optional image is the already-decoded value a call site is drawing. Keeping it avoids a
+/// second decode for a just-produced image and, more importantly, guarantees that inspection
+/// begins with the exact pixels the user clicked. The URL remains authoritative for file actions.
+struct MediaInspectorItem {
+    let url: URL
+    let title: String
+    let image: NSImage?
+
+    init(url: URL, title: String? = nil, image: NSImage? = nil) {
+        self.url = url
+        self.title = title ?? url.lastPathComponent
+        self.image = image
+    }
+
+    var isAvailable: Bool {
+        url.isFileURL && FileManager.default.fileExists(atPath: url.path)
+    }
+}
+
+/// A source can provide its surrounding collection so the inspector's arrow keys and thumbnail
+/// rail move through the things already on screen rather than opening an isolated one-file view.
+struct MediaInspectorSelection {
+    let items: [MediaInspectorItem]
+    let selectedIndex: Int
+
+    init(items: [MediaInspectorItem], selectedIndex: Int) {
+        self.items = items
+        self.selectedIndex = selectedIndex
+    }
+}
+
+enum MediaInspectorZoomMode: Equatable {
+    case fit
+    case actualSize
+    case custom
+}
+
+// MARK: - Presentation
+
+/// Presents one app-owned inspector per window, inside that window's themed content hierarchy.
+///
+/// No panel or popover is involved: the overlay follows the current theme live, does not steal
+/// key-window status, and can restore focus to the exact source that opened it. System Quick Look
+/// remains available from the action menu as the deliberate fallback for uncommon formats.
+@MainActor
+enum MediaInspectorPresenter {
+
+    private static var sessions: [ObjectIdentifier: MediaInspectorSession] = [:]
+
+    @discardableResult
+    static func present(
+        _ selection: MediaInspectorSelection,
+        from source: NSView
+    ) -> Bool {
+        guard let window = source.window, let root = window.contentView else { return false }
+
+        let available = selection.items.enumerated().filter { $0.element.isAvailable }
+        guard !available.isEmpty else { return false }
+
+        let requested = min(max(selection.selectedIndex, 0), selection.items.count - 1)
+        let selectedURL = selection.items[requested].url.standardizedFileURL
+        let items = available.map(\.element)
+        let selectedIndex = items.firstIndex {
+            $0.url.standardizedFileURL == selectedURL
+        } ?? 0
+
+        let key = ObjectIdentifier(window)
+        sessions[key]?.close()
+
+        let session = MediaInspectorSession(
+            items: items,
+            selectedIndex: selectedIndex,
+            source: source,
+            root: root,
+            window: window,
+            onClose: { sessions.removeValue(forKey: key) }
+        )
+        sessions[key] = session
+        return true
+    }
+
+    @discardableResult
+    static func present(_ item: MediaInspectorItem, from source: NSView) -> Bool {
+        present(MediaInspectorSelection(items: [item], selectedIndex: 0), from: source)
+    }
+
+    static func dismiss(in window: NSWindow?) {
+        guard let window else { return }
+        sessions[ObjectIdentifier(window)]?.close()
+    }
+
+    static func isPresenting(in window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        return sessions[ObjectIdentifier(window)] != nil
+    }
+}
+
+@MainActor
+private final class MediaInspectorSession {
+
+    private weak var source: NSView?
+    private weak var window: NSWindow?
+    private weak var previousFirstResponder: NSResponder?
+    private let inspector: MediaInspectorView
+    private let onClose: () -> Void
+    private var isClosed = false
+
+    init(
+        items: [MediaInspectorItem],
+        selectedIndex: Int,
+        source: NSView,
+        root: NSView,
+        window: NSWindow,
+        onClose: @escaping () -> Void
+    ) {
+        self.source = source
+        self.window = window
+        previousFirstResponder = window.firstResponder
+        self.onClose = onClose
+        inspector = MediaInspectorView(items: items, selectedIndex: selectedIndex)
+
+        inspector.onDismiss = { [weak self] in self?.close() }
+        root.addSubview(inspector, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            inspector.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            inspector.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            inspector.topAnchor.constraint(equalTo: root.topAnchor),
+            inspector.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+        ])
+        root.layoutSubtreeIfNeeded()
+        window.makeFirstResponder(inspector.preferredFirstResponder)
+        NSAccessibility.post(element: inspector, notification: .layoutChanged)
+    }
+
+    func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        inspector.prepareForRemoval()
+        inspector.removeFromSuperview()
+
+        if let window {
+            if let source, source.window === window {
+                window.makeFirstResponder(source)
+            } else if let previousFirstResponder {
+                window.makeFirstResponder(previousFirstResponder)
+            }
+        }
+        onClose()
+    }
+}
+
+// MARK: - Inspector
+
+/// The complete in-window media experience: title and file actions, native image interaction,
+/// embedded document rendering, collection navigation, and a recognisable thumbnail rail.
+final class MediaInspectorView: NSView, ThemedComponent {
+
+    private let items: [MediaInspectorItem]
+    private(set) var selectedIndex: Int
+    private let canvas = MediaInspectorCanvas()
+    private let documentView = MediaInspectorDocumentView()
+    private let headerSeparator = SeparatorView()
+    private let railSeparator = SeparatorView()
+    private let railScrollView = ThemedScrollView()
+    private let railStack = NSStackView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let zoomLabel = NSTextField(labelWithString: "")
+    private let zoomModeControl = ThemedSegmentedControl()
+    private var thumbnails: [MediaInspectorThumbnail] = []
+    private var railHeightConstraint: NSLayoutConstraint?
+    private var menuSession: AnyObject?
+    private var themeRedraw: ThemeRedraw?
+    private let appEvents = AppEventObservations()
+
+    var onDismiss: (() -> Void)?
+
+    private lazy var previousButton = ThemedIconButton(
+        symbolName: "chevron.left",
+        accessibility: L10n.string("Previous item"),
+        target: .toolbar,
+        inkSource: .chrome
+    )
+    private lazy var nextButton = ThemedIconButton(
+        symbolName: "chevron.right",
+        accessibility: L10n.string("Next item"),
+        target: .toolbar,
+        inkSource: .chrome
+    )
+    private lazy var actionsButton = ThemedIconButton(
+        symbolName: "ellipsis",
+        accessibility: L10n.string("Media actions"),
+        target: .toolbar,
+        inkSource: .chrome
+    )
+    private lazy var closeButton = ThemedIconButton(
+        symbolName: "xmark",
+        accessibility: L10n.string("Close inspector"),
+        target: .toolbar,
+        inkSource: .chrome
+    )
+
+    init(items: [MediaInspectorItem], selectedIndex: Int) {
+        self.items = items
+        self.selectedIndex = min(max(selectedIndex, 0), max(0, items.count - 1))
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        themeRedraw = ThemeRedraw(self)
+        setup()
+        showSelectedItem()
+
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyTheme() }
+        appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.applyTheme() }
+        appEvents.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in
+            self?.applyTheme()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    var preferredFirstResponder: NSView {
+        canvas.isHidden ? self : canvas
+    }
+
+    private var selectedItem: MediaInspectorItem { items[selectedIndex] }
+
+    var showsCollectionRail: Bool { items.count > 1 && !railScrollView.isHidden }
+
+    private func setup() {
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(L10n.string("Media inspector"))
+
+        titleLabel.applyFont(.subheading)
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        detailLabel.applyFont(.caption)
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        zoomLabel.applyFont(.caption)
+        zoomLabel.alignment = .right
+        zoomLabel.setContentHuggingPriority(.required, for: .horizontal)
+        zoomLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        zoomModeControl.configure(
+            titles: [L10n.string("Fit"), L10n.string("100%")],
+            selectedIndex: 0
+        )
+        zoomModeControl.setAccessibilityLabel(L10n.string("Image size"))
+        zoomModeControl.onSelect = { [weak self] index in
+            if index == 0 { self?.canvas.fit() } else { self?.canvas.showActualSize() }
+        }
+        zoomModeControl.translatesAutoresizingMaskIntoConstraints = false
+
+        previousButton.onPress = { [weak self] in self?.move(by: -1) }
+        nextButton.onPress = { [weak self] in self?.move(by: 1) }
+        actionsButton.presentsMenu = true
+        actionsButton.onPress = { [weak self] in self?.presentActions() }
+        closeButton.onPress = { [weak self] in self?.onDismiss?() }
+
+        canvas.onDismiss = { [weak self] in self?.onDismiss?() }
+        canvas.onPrevious = { [weak self] in self?.move(by: -1) }
+        canvas.onNext = { [weak self] in self?.move(by: 1) }
+        canvas.onZoomChange = { [weak self] mode, percentage in
+            self?.zoomChanged(mode: mode, percentage: percentage)
+        }
+
+        railScrollView.hasHorizontalScroller = true
+        railScrollView.hasVerticalScroller = false
+        railScrollView.autohidesScrollers = true
+        railScrollView.translatesAutoresizingMaskIntoConstraints = false
+        railStack.orientation = .horizontal
+        railStack.alignment = .centerY
+        railStack.spacing = Design.Spacing.small
+        railStack.setAccessibilityElement(true)
+        railStack.setAccessibilityRole(.radioGroup)
+        railStack.setAccessibilityLabel(L10n.string("Media items"))
+        railStack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.small,
+            left: Design.Spacing.inset,
+            bottom: Design.Spacing.small,
+            right: Design.Spacing.inset
+        )
+        // `NSScrollView` initially installs its document view at a zero frame. An `NSStackView`
+        // immediately solves its arranged-subview constraints against that frame, briefly
+        // breaking the thumbnails' fixed targets before our first layout. Seed the honest
+        // content extent up front; `layout()` will widen it to the viewport when appropriate.
+        railStack.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Design.Spacing.inset * 2
+                + CGFloat(items.count) * Design.Size.mediaInspectorThumbnail
+                + CGFloat(max(0, items.count - 1)) * Design.Spacing.small,
+            height: Design.Size.mediaInspectorRailHeight
+        )
+        railScrollView.documentView = railStack
+
+        for view in [canvas, documentView, headerSeparator, railSeparator, railScrollView,
+                     titleLabel, detailLabel, zoomLabel, zoomModeControl, previousButton,
+                     nextButton, actionsButton, closeButton] {
+            addSubview(view)
+        }
+
+        let railHeight = railScrollView.heightAnchor.constraint(
+            equalToConstant: items.count > 1 ? Design.Size.mediaInspectorRailHeight : 0
+        )
+        railHeightConstraint = railHeight
+
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.large),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.medium),
+            titleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: zoomLabel.leadingAnchor,
+                constant: -Design.Spacing.medium
+            ),
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: Design.Spacing.hairline),
+            detailLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            closeButton.centerYAnchor.constraint(
+                equalTo: topAnchor,
+                constant: Design.Size.mediaInspectorHeaderHeight / 2
+            ),
+            actionsButton.trailingAnchor.constraint(
+                equalTo: closeButton.leadingAnchor,
+                constant: -Design.Spacing.tight
+            ),
+            actionsButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            zoomModeControl.trailingAnchor.constraint(
+                equalTo: actionsButton.leadingAnchor,
+                constant: -Design.Spacing.medium
+            ),
+            zoomModeControl.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            zoomLabel.trailingAnchor.constraint(
+                equalTo: zoomModeControl.leadingAnchor,
+                constant: -Design.Spacing.small
+            ),
+            zoomLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+
+            headerSeparator.topAnchor.constraint(
+                equalTo: topAnchor,
+                constant: Design.Size.mediaInspectorHeaderHeight
+            ),
+            headerSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            headerSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            railScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            railScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            railScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            railHeight,
+            railSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            railSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            railSeparator.bottomAnchor.constraint(equalTo: railScrollView.topAnchor),
+
+            canvas.topAnchor.constraint(equalTo: headerSeparator.bottomAnchor),
+            canvas.leadingAnchor.constraint(equalTo: leadingAnchor),
+            canvas.trailingAnchor.constraint(equalTo: trailingAnchor),
+            canvas.bottomAnchor.constraint(equalTo: railSeparator.topAnchor),
+            documentView.topAnchor.constraint(equalTo: canvas.topAnchor),
+            documentView.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
+            documentView.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
+            documentView.bottomAnchor.constraint(equalTo: canvas.bottomAnchor),
+
+            previousButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
+            previousButton.centerYAnchor.constraint(equalTo: canvas.centerYAnchor),
+            nextButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            nextButton.centerYAnchor.constraint(equalTo: canvas.centerYAnchor)
+        ])
+
+        rebuildRail()
+        applyTheme()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Design.Surface.ground.setFill()
+        bounds.fill()
+    }
+
+    override func layout() {
+        super.layout()
+        let desiredWidth = max(railScrollView.bounds.width, railStack.fittingSize.width)
+        railStack.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: desiredWidth,
+            height: railScrollView.contentSize.height
+        )
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onDismiss?()
+            return
+        }
+        let characters = event.charactersIgnoringModifiers ?? ""
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        switch characters {
+        case " ":
+            onDismiss?()
+        case String(UnicodeScalar(NSLeftArrowFunctionKey)!):
+            move(by: -1)
+        case String(UnicodeScalar(NSRightArrowFunctionKey)!):
+            move(by: 1)
+        case "z", "Z":
+            canvas.toggleFitAndActualSize()
+        case "+", "=":
+            if modifiers.contains(.command) { canvas.zoomIn() } else { super.keyDown(with: event) }
+        case "-" where modifiers.contains(.command):
+            canvas.zoomOut()
+        case "0" where modifiers.contains(.command):
+            canvas.fit()
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    /// Escape is a property of the transient surface, not of whichever child happens to own
+    /// focus. AppKit offers key equivalents through the view tree first, so this also covers the
+    /// close button, segmented control, thumbnail rail, and the contained PDF/Quick Look views.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.keyCode == 53 else {
+            return super.performKeyEquivalent(with: event)
+        }
+        // The actions menu is the topmost transient layer and owns the first Escape. The next
+        // one reaches the inspector, matching ordinary nested AppKit menus and popovers.
+        guard menuSession == nil else { return false }
+        onDismiss?()
+        return true
+    }
+
+    func prepareForRemoval() {
+        ThemedMenuPresenter.dismiss(menuSession)
+        menuSession = nil
+        documentView.close()
+    }
+
+    private func showSelectedItem() {
+        let item = selectedItem
+        let image = item.image ?? NSImage(contentsOf: item.url)
+
+        titleLabel.stringValue = item.title
+        titleLabel.toolTip = item.url.path
+        detailLabel.stringValue = detail(for: item, image: image)
+
+        if let image, image.isValid {
+            documentView.clear()
+            documentView.isHidden = true
+            canvas.isHidden = false
+            canvas.configure(image: image, title: item.title)
+            zoomModeControl.isHidden = false
+            zoomLabel.isHidden = false
+        } else {
+            canvas.clear()
+            canvas.isHidden = true
+            documentView.isHidden = false
+            _ = documentView.display(item.url)
+            zoomModeControl.isHidden = true
+            zoomLabel.isHidden = true
+        }
+
+        previousButton.isEnabled = selectedIndex > 0
+        nextButton.isEnabled = selectedIndex + 1 < items.count
+        previousButton.isHidden = items.count < 2
+        nextButton.isHidden = items.count < 2
+        updateRailSelection()
+        window?.makeFirstResponder(preferredFirstResponder)
+        setAccessibilityLabel(L10n.format("Media inspector, %@", item.title))
+        NSAccessibility.post(element: self, notification: .layoutChanged)
+    }
+
+    func move(by offset: Int) {
+        let target = selectedIndex + offset
+        guard items.indices.contains(target) else { return }
+        selectedIndex = target
+        showSelectedItem()
+    }
+
+    private func zoomChanged(mode: MediaInspectorZoomMode, percentage: Int) {
+        zoomLabel.stringValue = "\(percentage)%"
+        switch mode {
+        case .fit: zoomModeControl.selectedIndex = 0
+        case .actualSize: zoomModeControl.selectedIndex = 1
+        case .custom: break
+        }
+    }
+
+    private func rebuildRail() {
+        for thumbnail in thumbnails {
+            railStack.removeArrangedSubview(thumbnail)
+            thumbnail.removeFromSuperview()
+        }
+        thumbnails = items.enumerated().map { index, item in
+            let thumbnail = MediaInspectorThumbnail(item: item)
+            thumbnail.onChoose = { [weak self] in
+                self?.selectedIndex = index
+                self?.showSelectedItem()
+            }
+            thumbnail.onMove = { [weak self] offset in
+                guard let self else { return }
+                let target = index + offset
+                guard self.items.indices.contains(target) else { return }
+                self.selectedIndex = target
+                self.showSelectedItem()
+                self.window?.makeFirstResponder(self.thumbnails[target])
+            }
+            railStack.addArrangedSubview(thumbnail)
+            return thumbnail
+        }
+        railScrollView.isHidden = items.count < 2
+        railSeparator.isHidden = items.count < 2
+        updateRailSelection()
+    }
+
+    private func updateRailSelection() {
+        for (index, thumbnail) in thumbnails.enumerated() {
+            thumbnail.isSelected = index == selectedIndex
+        }
+        guard thumbnails.indices.contains(selectedIndex) else { return }
+        railStack.layoutSubtreeIfNeeded()
+        railScrollView.contentView.scrollToVisible(thumbnails[selectedIndex].frame)
+        railScrollView.reflectScrolledClipView(railScrollView.contentView)
+    }
+
+    private func detail(for item: MediaInspectorItem, image: NSImage?) -> String {
+        var parts: [String] = []
+        if items.count > 1 {
+            parts.append(L10n.format("%lld of %lld", Int64(selectedIndex + 1), Int64(items.count)))
+        }
+        if let image {
+            parts.append("\(Int(image.size.width)) × \(Int(image.size.height))")
+        } else if !item.url.pathExtension.isEmpty {
+            parts.append(item.url.pathExtension.uppercased())
+        }
+        if let bytes = try? item.url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func applyTheme() {
+        titleLabel.textColor = Design.Text.label
+        detailLabel.textColor = Design.Text.tertiary
+        zoomLabel.textColor = Design.Text.secondary
+        documentView.applyTheme()
+        needsDisplay = true
+    }
+
+    private func presentActions() {
+        guard menuSession == nil else { return }
+        let item = selectedItem
+        let image = canvas.isHidden ? nil : canvas.image
+        var entries: [ThemedMenuEntry] = []
+
+        if let image {
+            entries.append(menuItem("Copy Image") { Self.copy(image: image) })
+        } else {
+            entries.append(menuItem("Copy File") { Self.copy(file: item.url) })
+        }
+        entries.append(menuItem("Copy File Name") { Self.copy(string: item.title) })
+        entries.append(menuItem("Copy File Path") { Self.copy(path: item.url) })
+        entries.append(.separator)
+        entries.append(menuItem("Reveal in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([item.url])
+        })
+        entries.append(menuItem("Open in Default App") {
+            if !NSWorkspace.shared.open(item.url) { NSSound.beep() }
+        })
+        entries.append(.separator)
+        entries.append(menuItem("Open in System Quick Look") {
+            if !QuickLookPresenter.shared.present(item.url) { NSSound.beep() }
+        })
+
+        menuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 220),
+            from: actionsButton,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.menuSession = nil }
+        )
+    }
+
+    private func menuItem(_ title: String, action: @escaping () -> Void) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(title: L10n.string(title), onChoose: action))
+    }
+
+    private static func copy(image: NSImage) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+    }
+
+    private static func copy(file url: URL) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([url as NSURL])
+    }
+
+    private static func copy(string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+    }
+
+    private static func copy(path url: URL) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([url as NSURL])
+        NSPasteboard.general.setString(url.path, forType: .string)
+    }
+}
+
+// MARK: - Native Image Canvas
+
+/// The inspector's image renderer: fit/actual/custom zoom, anchored magnification, drag-to-pan,
+/// collection swipes, and keyboard/accessibility equivalents for every operation.
+final class MediaInspectorCanvas: ThemedControl {
+
+    private enum Interaction {
+        static let zoomStep: CGFloat = 1.25
+        static let minimumScale: CGFloat = 0.05
+        static let maximumScale: CGFloat = 16
+        static let swipeThreshold: CGFloat = 48
+    }
+
+    private(set) var image: NSImage?
+    private(set) var zoomMode: MediaInspectorZoomMode = .fit
+    private(set) var customScale: CGFloat = 1
+    private(set) var panOffset: NSPoint = .zero
+    private var imageTitle = ""
+    private var dragOrigin: NSPoint?
+    private var dragStartingOffset = NSPoint.zero
+    private var horizontalGesture: CGFloat = 0
+
+    var onDismiss: (() -> Void)?
+    var onPrevious: (() -> Void)?
+    var onNext: (() -> Void)?
+    var onZoomChange: ((MediaInspectorZoomMode, Int) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(true)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isFlipped: Bool { true }
+
+    var viewportRect: NSRect {
+        bounds.insetBy(dx: Design.Spacing.large, dy: Design.Spacing.large)
+    }
+
+    var fitScale: CGFloat {
+        guard let image, image.size.width > 0, image.size.height > 0,
+              viewportRect.width > 0, viewportRect.height > 0 else { return 1 }
+        return min(1, min(
+            viewportRect.width / image.size.width,
+            viewportRect.height / image.size.height
+        ))
+    }
+
+    var displayedScale: CGFloat {
+        switch zoomMode {
+        case .fit: fitScale
+        case .actualSize: 1
+        case .custom: customScale
+        }
+    }
+
+    var imageRect: NSRect {
+        guard let image else { return .zero }
+        let scale = displayedScale
+        let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+        return NSRect(
+            x: bounds.midX - size.width / 2 + panOffset.x,
+            y: bounds.midY - size.height / 2 + panOffset.y,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    func configure(image: NSImage, title: String) {
+        self.image = image
+        imageTitle = title
+        fit()
+        setAccessibilityLabel(title)
+        setAccessibilityHelp(
+            L10n.string("Drag to pan. Pinch or press Command plus and minus to zoom. Press Space to close.")
+        )
+        needsDisplay = true
+    }
+
+    func clear() {
+        image = nil
+        imageTitle = ""
+        zoomMode = .fit
+        customScale = 1
+        panOffset = .zero
+        needsDisplay = true
+    }
+
+    func fit() {
+        zoomMode = .fit
+        panOffset = .zero
+        stateChanged()
+    }
+
+    func showActualSize() {
+        zoomMode = .actualSize
+        panOffset = .zero
+        stateChanged()
+    }
+
+    func toggleFitAndActualSize() {
+        if zoomMode == .fit { showActualSize() } else { fit() }
+    }
+
+    func zoomIn() {
+        zoom(by: Interaction.zoomStep, around: NSPoint(x: bounds.midX, y: bounds.midY))
+    }
+
+    func zoomOut() {
+        zoom(by: 1 / Interaction.zoomStep, around: NSPoint(x: bounds.midX, y: bounds.midY))
+    }
+
+    func zoom(by factor: CGFloat, around anchor: NSPoint) {
+        guard image != nil, factor.isFinite, factor > 0 else { return }
+        let oldScale = displayedScale
+        guard oldScale > 0 else { return }
+        let newScale = min(max(oldScale * factor, Interaction.minimumScale), Interaction.maximumScale)
+        let centre = NSPoint(x: bounds.midX, y: bounds.midY)
+        let imagePoint = NSPoint(
+            x: (anchor.x - centre.x - panOffset.x) / oldScale,
+            y: (anchor.y - centre.y - panOffset.y) / oldScale
+        )
+        panOffset = NSPoint(
+            x: anchor.x - centre.x - imagePoint.x * newScale,
+            y: anchor.y - centre.y - imagePoint.y * newScale
+        )
+        zoomMode = .custom
+        customScale = newScale
+        clampPan()
+        stateChanged()
+    }
+
+    func pan(by delta: NSPoint) {
+        guard canPan else { return }
+        panOffset.x += delta.x
+        panOffset.y += delta.y
+        clampPan()
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        clampPan()
+        stateChanged(notifyAccessibility: false)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        ThemedSurface.draw(bounds, fill: Design.Surface.panel)
+        guard let image else { return }
+        image.draw(
+            in: imageRect,
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
+        drawKeyboardFocus(
+            around: ThemedSurface.Shape(rect: bounds, radius: Design.Radius.panel)
+        )
+    }
+
+    override func resetCursorRects() {
+        guard image != nil else { return }
+        let cursor: NSCursor
+        if canPan {
+            cursor = .openHand
+        } else if #available(macOS 15.0, *) {
+            cursor = zoomMode == .fit ? .zoomIn : .zoomOut
+        } else {
+            cursor = .pointingHand
+        }
+        addCursorRect(bounds, cursor: cursor)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        if event.clickCount >= 2 {
+            toggleFitAndActualSize()
+            return
+        }
+        dragOrigin = convert(event.locationInWindow, from: nil)
+        dragStartingOffset = panOffset
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard canPan, let dragOrigin else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        panOffset = dragStartingOffset
+        pan(by: NSPoint(x: point.x - dragOrigin.x, y: point.y - dragOrigin.y))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragOrigin = nil
+    }
+
+    override func magnify(with event: NSEvent) {
+        let factor = max(0.1, 1 + event.magnification)
+        zoom(by: factor, around: convert(event.locationInWindow, from: nil))
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers.contains(.command) {
+            zoom(
+                by: exp(event.scrollingDeltaY / 100),
+                around: convert(event.locationInWindow, from: nil)
+            )
+            return
+        }
+
+        if canPan, abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX) {
+            pan(by: NSPoint(x: event.scrollingDeltaX, y: event.scrollingDeltaY))
+            return
+        }
+
+        if event.phase == .began { horizontalGesture = 0 }
+        horizontalGesture += event.scrollingDeltaX
+        if event.phase == .ended || event.momentumPhase == .ended {
+            if horizontalGesture > Interaction.swipeThreshold {
+                onPrevious?()
+            } else if horizontalGesture < -Interaction.swipeThreshold {
+                onNext?()
+            }
+            horizontalGesture = 0
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onDismiss?()
+            return
+        }
+        let characters = event.charactersIgnoringModifiers ?? ""
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        switch characters {
+        case " ":
+            onDismiss?()
+        case String(UnicodeScalar(NSLeftArrowFunctionKey)!):
+            onPrevious?()
+        case String(UnicodeScalar(NSRightArrowFunctionKey)!):
+            onNext?()
+        case "z", "Z":
+            toggleFitAndActualSize()
+        case "+", "=":
+            if modifiers.contains(.command) { zoomIn() } else { super.keyDown(with: event) }
+        case "-" where modifiers.contains(.command):
+            zoomOut()
+        case "0" where modifiers.contains(.command):
+            fit()
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .image }
+    override func accessibilityLabel() -> String? { imageTitle }
+    override func accessibilityValue() -> Any? { "\(Int((displayedScale * 100).rounded()))%" }
+    override func accessibilityPerformPress() -> Bool {
+        toggleFitAndActualSize()
+        return true
+    }
+    override func accessibilityPerformIncrement() -> Bool {
+        zoomIn()
+        return true
+    }
+    override func accessibilityPerformDecrement() -> Bool {
+        zoomOut()
+        return true
+    }
+
+    private var canPan: Bool {
+        let rect = imageRect
+        return rect.width > viewportRect.width || rect.height > viewportRect.height
+    }
+
+    private func clampPan() {
+        guard let image else {
+            panOffset = .zero
+            return
+        }
+        let size = NSSize(
+            width: image.size.width * displayedScale,
+            height: image.size.height * displayedScale
+        )
+        let maximumX = max(0, (size.width - viewportRect.width) / 2)
+        let maximumY = max(0, (size.height - viewportRect.height) / 2)
+        panOffset.x = min(max(panOffset.x, -maximumX), maximumX)
+        panOffset.y = min(max(panOffset.y, -maximumY), maximumY)
+    }
+
+    private func stateChanged(notifyAccessibility: Bool = true) {
+        needsDisplay = true
+        window?.invalidateCursorRects(for: self)
+        onZoomChange?(zoomMode, Int((displayedScale * 100).rounded()))
+        if notifyAccessibility {
+            NSAccessibility.post(element: self, notification: .valueChanged)
+        }
+    }
+}
+
+// MARK: - Document System-Chrome Boundary
+
+/// PDFKit supplies the native document renderer; Quick Look supplies the embedded fallback for
+/// formats Threading does not render itself. Their descendants are system-owned by definition,
+/// so the exception is explicit and cannot leak to siblings in the inspector.
+final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBoundary {
+
+    private let pdfView = PDFView()
+    private let quickLookView = QLPreviewView(frame: .zero, style: .normal)!
+    private var themeRedraw: ThemeRedraw?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        themeRedraw = ThemeRedraw(self)
+
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.displaysPageBreaks = true
+        quickLookView.autostarts = true
+        addSubview(pdfView)
+        addSubview(quickLookView)
+        applyTheme()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        pdfView.frame = bounds
+        quickLookView.frame = bounds
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Design.Surface.panel.setFill()
+        bounds.fill()
+    }
+
+    @discardableResult
+    func display(_ url: URL) -> Bool {
+        clear()
+        if url.pathExtension.lowercased() == "pdf" {
+            guard let document = PDFDocument(url: url) else { return false }
+            pdfView.document = document
+            pdfView.isHidden = false
+            quickLookView.isHidden = true
+        } else {
+            quickLookView.previewItem = url as NSURL
+            quickLookView.isHidden = false
+            pdfView.isHidden = true
+        }
+        return true
+    }
+
+    func clear() {
+        pdfView.document = nil
+        quickLookView.previewItem = nil
+        pdfView.isHidden = true
+        quickLookView.isHidden = true
+    }
+
+    func close() {
+        quickLookView.close()
+        clear()
+    }
+
+    func applyTheme() {
+        pdfView.backgroundColor = Design.Surface.panel
+        needsDisplay = true
+    }
+
+    func permitsSystemChrome(_ view: NSView) -> Bool {
+        belongs(view, to: pdfView) || belongs(view, to: quickLookView)
+    }
+
+    private func belongs(_ view: NSView, to root: NSView) -> Bool {
+        var candidate: NSView? = view
+        while let current = candidate {
+            if current === root { return true }
+            if current === self { return false }
+            candidate = current.superview
+        }
+        return false
+    }
+}
+
+// MARK: - Collection Thumbnail
+
+private final class MediaInspectorThumbnail: ThemedControl {
+
+    private let item: MediaInspectorItem
+    private let preview: NSImage?
+    private var isTrackingPress = false
+    private var isPressArmed = false
+    var onChoose: (() -> Void)?
+    var onMove: ((Int) -> Void)?
+    var isSelected = false {
+        didSet {
+            guard isSelected != oldValue else { return }
+            needsDisplay = true
+            setAccessibilityValue(isSelected)
+            NSAccessibility.post(element: self, notification: .valueChanged)
+        }
+    }
+
+    init(item: MediaInspectorItem) {
+        self.item = item
+        preview = item.image ?? NSImage(contentsOf: item.url)
+            ?? NSWorkspace.shared.icon(forFile: item.url.path)
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(true)
+        toolTip = item.title
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: Design.Size.mediaInspectorThumbnail),
+            heightAnchor.constraint(equalToConstant: Design.Size.mediaInspectorThumbnail)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let shape = ThemedSurface.draw(
+            bounds,
+            fill: isHovered || isPressArmed
+                ? Design.Surface.controlHover
+                : Design.Surface.controlResting,
+            border: isSelected ? Design.Surface.accent : Design.Surface.border
+        )
+        if let preview, preview.size.width > 0, preview.size.height > 0 {
+            NSGraphicsContext.saveGraphicsState()
+            defer { NSGraphicsContext.restoreGraphicsState() }
+            shape.path.addClip()
+            let inset = bounds.insetBy(dx: Design.Spacing.tight, dy: Design.Spacing.tight)
+            let scale = min(inset.width / preview.size.width, inset.height / preview.size.height)
+            let rect = NSRect(
+                x: inset.midX - preview.size.width * scale / 2,
+                y: inset.midY - preview.size.height * scale / 2,
+                width: preview.size.width * scale,
+                height: preview.size.height * scale
+            )
+            preview.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+        }
+        drawKeyboardFocus(around: shape)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        isTrackingPress = true
+        isPressArmed = true
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isTrackingPress else { return }
+        let armed = bounds.contains(convert(event.locationInWindow, from: nil))
+        guard armed != isPressArmed else { return }
+        isPressArmed = armed
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let shouldChoose = isTrackingPress && isPressArmed
+            && bounds.contains(convert(event.locationInWindow, from: nil))
+        isTrackingPress = false
+        isPressArmed = false
+        needsDisplay = true
+        if shouldChoose { onChoose?() }
+    }
+
+    override func performPrimaryAction() -> Bool {
+        onChoose?()
+        return true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.charactersIgnoringModifiers {
+        case String(UnicodeScalar(NSLeftArrowFunctionKey)!): onMove?(-1)
+        case String(UnicodeScalar(NSRightArrowFunctionKey)!): onMove?(1)
+        default: super.keyDown(with: event)
+        }
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .radioButton }
+    override func accessibilityLabel() -> String? { item.title }
+    override func accessibilityValue() -> Any? { isSelected }
+    override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
+}

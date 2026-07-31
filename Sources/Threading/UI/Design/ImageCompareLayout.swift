@@ -52,9 +52,30 @@ struct ImageCompareLayout: Equatable {
         let secondaryCanvasRect: CGRect?
     }
 
+    /// How much room the captions are given *before* the images are fitted.
+    ///
+    /// A caption printed over the comparison hides the pixels the comparison exists to show —
+    /// and at rest it sits exactly where the wipe starts, so reading a label meant scrubbing
+    /// it out from under. The band is reserved first and the images take what is left: the
+    /// titles are legible at every fraction, and nothing has to move on hover to be read.
+    struct CaptionBands: Equatable {
+        let top: CGFloat
+        let bottom: CGFloat
+
+        static let none = CaptionBands(top: 0, bottom: 0)
+    }
+
+    /// The strips the captions draw in: flush against the images, never over them, and
+    /// zero-height where the mode captions nothing.
+    struct Captions: Equatable {
+        let top: CGRect
+        let bottom: CGRect
+    }
+
     let placement: Placement
     /// The shared points-per-pixel scale both sides drew at.
     let scale: CGFloat
+    let captions: Captions
 
     /// The scrubbed position, 0 at the seam's start (left, or top) and 1 at its end. In the
     /// wipes it is the seam's place; in `.fade` it is the new side's opacity. One number, so
@@ -88,25 +109,47 @@ struct ImageCompareLayout: Equatable {
         )
     }
 
+    /// The caption strips around what was drawn. They hug the fitted canvas rather than the
+    /// container's edges: an image that letterboxes leaves slack, and a title floating an inch
+    /// off the picture it names reads as belonging to neither side.
+    private static func captionRects(around span: CGRect, bands: CaptionBands) -> Captions {
+        Captions(
+            top: CGRect(x: span.minX, y: span.minY - bands.top, width: span.width, height: bands.top),
+            bottom: CGRect(x: span.minX, y: span.maxY, width: span.width, height: bands.bottom)
+        )
+    }
+
     /// Lays two pixel sizes out in `bounds` for `mode`. A missing side (an added or deleted
     /// file) passes `.zero` and receives a zero-sized rect at the shared centre.
+    ///
+    /// `captions` is taken off the top and bottom before anything is fitted, so the images are
+    /// sized against the room that is actually theirs.
     static func layout(
         oldSize: CGSize,
         newSize: CGSize,
         in bounds: CGRect,
         mode: ImageCompareMode,
-        gap: CGFloat
+        gap: CGFloat,
+        captions bands: CaptionBands = .none
     ) -> ImageCompareLayout {
         let union = CGSize(
             width: max(oldSize.width, newSize.width),
             height: max(oldSize.height, newSize.height)
         )
+        let content = CGRect(
+            x: bounds.minX,
+            y: bounds.minY + bands.top,
+            width: bounds.width,
+            height: max(0, bounds.height - bands.top - bands.bottom)
+        )
 
         if mode == .sideBySide {
-            let half = max(0, (bounds.width - gap) / 2)
-            let leftBounds = CGRect(x: bounds.minX, y: bounds.minY, width: half, height: bounds.height)
+            let half = max(0, (content.width - gap) / 2)
+            let leftBounds = CGRect(
+                x: content.minX, y: content.minY, width: half, height: content.height
+            )
             let rightBounds = CGRect(
-                x: bounds.minX + half + gap, y: bounds.minY, width: half, height: bounds.height
+                x: content.minX + half + gap, y: content.minY, width: half, height: content.height
             )
             let (leftCanvas, scale) = fit(union, into: leftBounds)
             let (rightCanvas, _) = fit(union, into: rightBounds)
@@ -117,11 +160,12 @@ struct ImageCompareLayout: Equatable {
                     canvasRect: leftCanvas,
                     secondaryCanvasRect: rightCanvas
                 ),
-                scale: scale
+                scale: scale,
+                captions: captionRects(around: leftCanvas.union(rightCanvas), bands: bands)
             )
         }
 
-        let (canvas, scale) = fit(union, into: bounds)
+        let (canvas, scale) = fit(union, into: content)
         return ImageCompareLayout(
             placement: Placement(
                 oldRect: centre(oldSize, at: scale, in: canvas),
@@ -129,7 +173,8 @@ struct ImageCompareLayout: Equatable {
                 canvasRect: canvas,
                 secondaryCanvasRect: nil
             ),
-            scale: scale
+            scale: scale,
+            captions: captionRects(around: canvas, bands: bands)
         )
     }
 
