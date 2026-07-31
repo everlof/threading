@@ -158,9 +158,35 @@ class ThemedControl: NSControl, ThemedComponent {
     func drawKeyboardFocus(around shape: ThemedSurface.Shape, color: NSColor = Design.Surface.accent) {
         guard hasKeyboardFocus else { return }
         let width = Design.Accessibility.focusRingWidth
-        let path = (clippingSilhouette ?? shape).inset(by: width / 2).path
+        strokeFocusRing((clippingSilhouette ?? shape).inset(by: width / 2), color)
+    }
+
+    /// Strokes the ring *outside* the silhouette, holding `gap` clear between the two.
+    ///
+    /// The ring above assumes a control has slack between its edge and whatever it draws inside
+    /// it. `ThemedToggle` has none: its knob is inset by exactly the ring's width, so an inside
+    /// ring lands on the entire gutter and the knob comes out flush against it, with the track's
+    /// own colour gone from three sides — and what survives at each knob corner is the wedge
+    /// between the knob's arc and the ring's inner edge, four accent specks in a control that
+    /// otherwise has no accent left to show.
+    ///
+    /// A caller taking this overload has reserved `gap + focusRingWidth` of its own bounds
+    /// outside `shape`, because drawing is clipped there: a ring stroked into room that was not
+    /// reserved comes back at partial weight or not at all. `clippingSilhouette` is deliberately
+    /// not consulted — an applied surface *is* the clip, so there is no outside to draw in.
+    func drawKeyboardFocus(
+        around shape: ThemedSurface.Shape,
+        color: NSColor = Design.Surface.accent,
+        outsideBy gap: CGFloat
+    ) {
+        guard hasKeyboardFocus else { return }
+        strokeFocusRing(shape.outset(by: gap + Design.Accessibility.focusRingWidth / 2), color)
+    }
+
+    private func strokeFocusRing(_ shape: ThemedSurface.Shape, _ color: NSColor) {
+        let path = shape.path
         color.setStroke()
-        path.lineWidth = width
+        path.lineWidth = Design.Accessibility.focusRingWidth
         path.stroke()
     }
 
@@ -209,6 +235,18 @@ enum ThemedSurface {
             Shape(
                 rect: rect.insetBy(dx: amount, dy: amount),
                 radius: max(0, radius - amount)
+            )
+        }
+
+        /// The mirror of `inset`, for a ring drawn *around* a silhouette rather than inside it.
+        ///
+        /// A squared theme's rect stays square for the same reason it does on the way in: the
+        /// true offset curve of a sharp corner is a round one, but a hard-cornered theme wants a
+        /// hard-cornered ring, and the ring exists to restate the shape it surrounds.
+        func outset(by amount: CGFloat) -> Shape {
+            Shape(
+                rect: rect.insetBy(dx: -amount, dy: -amount),
+                radius: radius > 0 ? radius + amount : 0
             )
         }
     }

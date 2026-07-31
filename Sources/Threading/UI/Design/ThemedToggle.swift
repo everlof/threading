@@ -23,13 +23,45 @@ final class ThemedToggle: ThemedControl {
     // MARK: - Geometry
 
     /// Internal rather than private: the motion tests pin the knob inside this geometry.
+    ///
+    /// `width` and `height` are the **track**, not the control: the switch reserves a margin
+    /// around them for its focus ring — see `focusMargin`.
     enum Layout {
         static let width: CGFloat = 38
         static let height: CGFloat = 22
         static let knobInset: CGFloat = 2
-        /// How far the knob travels when the theme's corners are square (Swiss), so the switch
-        /// picks up the same silhouette as everything else.
+        /// The track's corner when the theme's corners are square (Swiss, Neo Brutalism), so the
+        /// switch picks up the same silhouette as everything else. The knob's corner is derived
+        /// from it rather than stated — see `knobRadius(trackRadius:grownBy:)`.
         static let squareKnobRadius: CGFloat = 2
+        /// Clear space between the track and its focus ring, so the ring reads as a ring rather
+        /// than as a border the switch has grown.
+        static let focusGap: CGFloat = 2
+
+        /// The track's corner. Square corners follow the theme's material, so a Swiss switch is a
+        /// rounded rect and a Cyberpunk one is a stadium — the same corner language as its cards
+        /// and chips.
+        static func trackRadius(square: Bool) -> CGFloat {
+            square ? squareKnobRadius : height / 2
+        }
+
+        /// The knob's corner, kept concentric with the track's, at a knob grown `grow` past its
+        /// resting size by the swell.
+        ///
+        /// Holding a radius of its own instead leaves the gutter uneven — `knobInset` along the
+        /// flats and `knobInset √2` across the diagonals — so a wedge of track survives at each
+        /// knob corner. Invisible inside a full-width gutter, and the whole of what was left of
+        /// it once the focus ring was drawn *in* that gutter: four accent specks around a knob
+        /// that otherwise looked flush.
+        ///
+        /// The growth term is `ThemedSurface.Shape.outset`'s rule, for the same reason: a
+        /// stadium track answers `height / 2 - knobInset`, exactly the resting knob's own
+        /// half-height, and adding the swell to it keeps the knob a disc all the way through
+        /// the flip — while a hard-cornered theme's square knob swells square.
+        static func knobRadius(trackRadius: CGFloat, grownBy grow: CGFloat = 0) -> CGFloat {
+            let resting = max(0, trackRadius - knobInset)
+            return resting > 0 ? resting + grow : 0
+        }
     }
 
     // MARK: - Motion
@@ -97,8 +129,22 @@ final class ThemedToggle: ThemedControl {
     private var displayLink: Any? // CADisplayLink, stored untyped for macOS 13
     private var fallbackTimer: Timer?
 
+    /// The room the focus ring is given outside the track, on each side.
+    ///
+    /// Read at draw *and* measure time rather than stated as a constant, because
+    /// `focusRingWidth` grows under Increase Contrast; `ThemeRedraw` answers that notification
+    /// with `invalidateIntrinsicContentSize()`, so the reserved margin follows it.
+    private var focusMargin: CGFloat {
+        Layout.focusGap + Design.Accessibility.focusRingWidth
+    }
+
+    /// The track plus the margin its focus ring needs. Drawing is clipped to `bounds`, so a ring
+    /// outside the track only exists if the control asked to be that much bigger than it looks.
     override var intrinsicContentSize: NSSize {
-        NSSize(width: Layout.width, height: Layout.height)
+        NSSize(
+            width: Layout.width + focusMargin * 2,
+            height: Layout.height + focusMargin * 2
+        )
     }
 
     // MARK: - Interaction
@@ -212,10 +258,8 @@ final class ThemedToggle: ThemedControl {
             height: Layout.height
         )
 
-        // Square corners follow the theme's material, so a Swiss switch is a rounded-rect and a
-        // Cyberpunk one is nearly a stadium — the same corner language as its cards and chips.
         let square = AppThemePalette.current.material.panelRadius == 0
-        let trackRadius = square ? Layout.squareKnobRadius : rect.height / 2
+        let trackRadius = Layout.trackRadius(square: square)
 
         // The drawn position is unclamped — the settle carries the knob a hair past its end —
         // while everything that *fades* reads the clamped value: a fill cannot be 104% accent.
@@ -233,10 +277,10 @@ final class ThemedToggle: ThemedControl {
             track.lineWidth = 1
             track.stroke()
         }
-        drawKeyboardFocus(
-            around: trackShape,
-            color: isOn ? Design.Text.selected : Design.Surface.accent
-        )
+        // Outside the track, in the margin `intrinsicContentSize` reserved for it. One colour for
+        // both states, because the ring no longer sits *on* the accent: `Text.selected` was the
+        // ink that read on an on-track, and reading on the track was the bug.
+        drawKeyboardFocus(around: trackShape, outsideBy: Layout.focusGap)
 
         let knobDiameter = rect.height - Layout.knobInset * 2
         let travel = Layout.width - knobDiameter - Layout.knobInset * 2
@@ -247,7 +291,7 @@ final class ThemedToggle: ThemedControl {
             width: knobDiameter,
             height: knobDiameter
         ).insetBy(dx: -grow, dy: -grow)
-        let knobRadius = square ? Layout.squareKnobRadius : knobRect.height / 2
+        let knobRadius = Layout.knobRadius(trackRadius: trackRadius, grownBy: grow)
         let knob = NSBezierPath(roundedRect: knobRect, xRadius: knobRadius, yRadius: knobRadius)
 
         // The knob is the ground colour, so it reads against both an accent track and a neutral

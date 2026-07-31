@@ -597,6 +597,22 @@ Nine bugs are worth keeping, because each is a trap the next drawn control will 
   the ring's width. Pinned by sampling the drawn control all the way round the ring, diagonals
   included: those are the places the mismatch erased.
 
+- **An inside ring assumes slack the switch does not have.** Everything above holds for a control
+  with room between its edge and what it draws inside it. `ThemedToggle`'s knob is inset by
+  exactly `focusRingWidth`, so the ring landed on the entire accent gutter: the knob came out
+  flush against a near-white ring (`Text.selected`, the only ink that reads *on* an accent track)
+  with the track's own colour gone from three sides, and what survived at each knob corner was the
+  wedge between the knob's arc and the ring's square inner edge — four accent specks around a knob
+  that otherwise looked flush, which is how it was reported. Two fixes, and the second is the one
+  that was always wrong: `drawKeyboardFocus(around:color:outsideBy:)` strokes the ring outside the
+  silhouette, in margin `ThemedToggle.intrinsicContentSize` reserves for it, because drawing is
+  clipped to `bounds` and a ring in unreserved room comes back at partial weight or not at all;
+  and the knob's corner is now *derived* from the track's (`Layout.knobRadius`) instead of stated,
+  because a knob holding a radius of its own is not concentric with its track — the gutter was
+  `knobInset` on the flats and `knobInset √2` across the diagonals the whole time, and the wedge
+  was only ever invisible because a full gutter hid it. `ThemedSurface.Shape.outset` is `inset`'s
+  mirror, and keeps a squared theme square for the same reason.
+
 - **`withAlphaComponent` replaces alpha, it does not scale it.** Dimming a disabled button
   against a resting surface that is *already* translucent — Cyberpunk holds its neon at 10% —
   made the disabled controls the loudest things on the page. Resolve, then multiply.
