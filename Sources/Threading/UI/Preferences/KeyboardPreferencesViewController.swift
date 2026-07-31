@@ -133,7 +133,7 @@ final class KeyboardPreferencesViewController: NSViewController {
     }
 
     private func presentConflict(_ shortcut: KeyboardShortcut, taken other: AppCommand) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = L10n.format(Strings.conflictTitle, shortcut.displayString)
         alert.informativeText = L10n.format(Strings.conflictBody, other.title)
         alert.alertStyle = .warning

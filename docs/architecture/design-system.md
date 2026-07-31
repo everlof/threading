@@ -100,6 +100,18 @@ Components so far:
 | `ToastView` / `ToastPresenter` | A receipt for something already done, floating above a pane's footer, with the way back on it. The view is one message, one optional detail line and one `ThemedButton`; the presenter owns everything that is about *time* — one band at a time, a six-second dwell (a request may ask for longer, and the one an agent raises does), the clock stopping while the pointer is on it, and the VoiceOver announcement a surface that takes no focus would otherwise never make. |
 | `ImageCompareView` | Two images against each other: a draggable wipe seam (either axis), a crossfade, a pixel difference, and side by side, with per-side captions and a mode chip. The captions are given a band **outside** the images before anything is fitted, never a pill over them: printed on the picture they hid the pixels the comparison exists to show, and at rest they sat exactly where the wipe starts, so reading a label meant scrubbing it out from under. Position carries the mapping — old at the start of the scrub's travel, new at its end, above and below it for the vertical wipe, over each image in side by side — the new side is inked a step darker, and difference names the pair `old → new` centred rather than splitting two titles across edges that mode has no sides for. One scrubbed fraction serves every mode — there is deliberately no slider control: the seam *is* the control (accent-inked, since it is the one thing on the surface asking to be used), fade held at the middle is the onion skin, and both images draw at one shared scale so a resized asset stays visibly resized rather than being normalised into "looks identical". The canvas is a `ThemedControl`: arrow keys nudge the scrub, Space recentres it, and VoiceOver reads it as a slider. |
 
+**A component is its interaction contract, not its resting render.** Before a new component is
+finished, walk it through pointer, keyboard, assistive technology, and the ordinary AppKit host
+that will contain it. Decide hover, press, drag cancellation, first-click behavior and cursor;
+Space/Return, arrows, Tab order, shortcuts and Escape; role, label, value/state, primary and custom
+actions, and announcements; then focus on open, focus containment, nested-surface dismissal, and
+focus restoration on close. A transient surface always gives Escape a meaning — Cancel for a
+question, otherwise Close — and nested surfaces peel one layer per press. Every gesture has a
+non-gesture route, motion disappears rather than merely slowing under Reduce Motion, and state
+never depends on colour alone. Finally put the fixture in the real kind of host: a control that
+works in a plain view can still lose its click to a table, its shortcut to a text editor, its
+scroll to a nested clip view, or its focus to the window behind an overlay.
+
 **Two components say "every" for a reason, and it is the design system's sharpest lesson so
 far.** Each of them was two or three implementations, and each had already been "unified" by
 sharing constants — one radius, one type scale, one height, read from a common enum. It did not
@@ -157,17 +169,19 @@ The rule behind the table now covers **every chrome-drawing AppKit class**, not 
 that eroded first: content containers (`NSScrollView`, `NSTextView`, tables) because their
 stock backgrounds are system surfaces, and every control the app has never used, so the first
 slider arrives through a themed wrapper rather than establishing stock. Layout types
-(`NSView`, `NSStackView`, `NSGridView`), labels, chromeless `NSImageView` and contained system
-chrome (`NSMenu`, `NSPopover`, `NSAlert`, the file panels) stay allowed — they draw nothing
-the theme owns. `config/theme-boundary.json` owns the list; the build and test suite both run
+(`NSView`, `NSStackView`, `NSGridView`), labels, chromeless `NSImageView` and genuinely system
+workflows (native application/context menus and file panels) stay allowed — they draw nothing
+the theme owns. App-owned popovers and alerts do not: `ThemedPopover` and `ThemedAlert` own those
+surfaces. `config/theme-boundary.json` owns the list; the build and test suite both run
 its SwiftSyntax checker, while `.swiftlint.yml` provides fast editor feedback. A class with no
 wrapper yet gets one in `UI/Design/` first.
 
 ### Confirmations
 
-`NSAlert` stays allowed as contained system chrome, but *asking the user a question* does not.
-Every confirmation goes through `ConfirmationAlert` in `UI/Alerts/`, and every one names a case
-in `ConfirmationPrompt`.
+`ThemedAlert` owns presentation, but *asking the user a question* still requires a semantic
+policy. Every app confirmation goes through `ConfirmationAlert` in `UI/Alerts/`, and every one
+names a case in `ConfirmationPrompt`. The web delegate's JavaScript dialogs are the narrow
+exception: the page, not Threading, dictates their questions and answers.
 
 The register exists because the alternative is a reflex. There were 44 alerts and no suppression
 anywhere: writing one more `NSAlert` with two buttons required no decision about whether the
@@ -224,10 +238,10 @@ Five rules, each one a bug it prevents:
   least able to notice that a destructive action stopped asking.
 
 **The lint is what makes the register the only door**, because the exhaustive switch only forces a
-decision for prompts already routed through it — it says nothing about the 45th raw `NSAlert`.
-Banning `NSAlert` would need an exception per OK-only alert; the precise signal is narrower:
+decision for prompts already routed through it — it says nothing about a direct two-button
+`ThemedAlert`. Stock alert construction is banned, and the semantic signal is narrower still:
 *an informational alert never inspects its response*. So `confirmationResponse` reports any read of
-`alertFirstButtonReturn` / `alertSecondButtonReturn` / `alertThirdButtonReturn` outside
+the AppKit response names or `ThemedAlert.firstButtonResponse` outside
 `confirmationGateDirectories`. One exception exists, for the JavaScript dialogs a web page
 dictates in `BrowserViewController`. Honest gaps: comparing `response.rawValue == 1000`, running a
 two-button alert and discarding the answer, or adding a second gate. Those are deliberate evasion;
@@ -506,10 +520,11 @@ and a control that draws itself has no cell; without it a themed control is invi
 VoiceOver and to UI scripting alike. That was found by a settings page reporting no pop-up
 buttons on a page that visibly had one.
 
-Two things are contained rather than replaced, and both are drawn by the window server where no
-amount of our drawing reaches: the **`NSMenu` a `ThemedPopUp` opens**, and the **system colour
-panel behind `ThemeSwatchView`**. Callers depend on the wrapper, not on the system part, so
-replacing either with something custom later is a change to one file.
+Two things are contained rather than replaced, and both are platform workflows whose behavior is
+the value: the **native application/right-click menus** and the **system colour panel behind
+`ThemeSwatchView`**. App-owned dropdowns already use `ThemedMenuPresenter`; the remaining menus
+retain Services, responder roles, type-to-select, keyboard navigation, and conventional secondary
+click behavior. Callers still depend on a named boundary rather than constructing their chrome.
 
 Nine bugs are worth keeping, because each is a trap the next drawn control will walk into:
 

@@ -15,7 +15,7 @@ struct ConfirmationRequest {
     let message: String
     let confirmTitle: String
     var cancelTitle: String = L10n.string("Cancel")
-    var style: NSAlert.Style = .warning
+    var style: ThemedAlert.Style = .warning
     /// Shown above the buttons; the permission sheet's edit diff is the only one so far.
     var accessory: NSView?
 }
@@ -36,7 +36,7 @@ struct ChoiceRequest {
     let message: String
     let options: [ConfirmationOption]
     var cancelTitle: String = L10n.string("Cancel")
-    var style: NSAlert.Style = .warning
+    var style: ThemedAlert.Style = .warning
     var accessory: NSView?
 }
 
@@ -133,7 +133,7 @@ enum ConfirmationAlert {
     /// arrived through a `default:` clause that also catches every unrelated dismissal. `nil`
     /// is the way out. Pure, so the off-by-one is testable without a modal.
     static func chosenIndex(_ response: NSApplication.ModalResponse, optionCount: Int) -> Int? {
-        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        let index = response.rawValue - ThemedAlert.firstButtonResponse.rawValue
         return (0..<optionCount).contains(index) ? index : nil
     }
 
@@ -141,7 +141,7 @@ enum ConfirmationAlert {
 
     /// Built without being run, so a test can read the wording, the button order, which button
     /// carries Return, and whether the suppression box is there at all.
-    static func makeAlert(_ request: ConfirmationRequest) -> NSAlert {
+    static func makeAlert(_ request: ConfirmationRequest) -> ThemedAlert {
         let alert = base(
             title: request.title,
             message: request.message,
@@ -159,7 +159,7 @@ enum ConfirmationAlert {
         return alert
     }
 
-    static func makeAlert(_ request: ChoiceRequest) -> NSAlert {
+    static func makeAlert(_ request: ChoiceRequest) -> ThemedAlert {
         assert(
             request.prompt.suppression == nil,
             "\(request.prompt.rawValue) is suppressible; a remembered answer needs one decision"
@@ -186,10 +186,10 @@ enum ConfirmationAlert {
     private static func base(
         title: String,
         message: String,
-        style: NSAlert.Style,
+        style: ThemedAlert.Style,
         accessory: NSView?
-    ) -> NSAlert {
-        let alert = NSAlert()
+    ) -> ThemedAlert {
+        let alert = ThemedAlert()
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = style
@@ -200,7 +200,7 @@ enum ConfirmationAlert {
     /// The register's one presentational consequence: an irreversible action does not answer to
     /// the chord that dismisses a dialog. Applied here rather than per site, which is how it
     /// came to be true of exactly one alert out of eight.
-    private static func applyDefaultButton(_ prompt: ConfirmationPrompt, to alert: NSAlert) {
+    private static func applyDefaultButton(_ prompt: ConfirmationPrompt, to alert: ThemedAlert) {
         guard prompt.defaultsToCancel else { return }
         alert.buttons.first?.hasDestructiveAction = true
         alert.buttons.first?.keyEquivalent = ""
@@ -208,7 +208,7 @@ enum ConfirmationAlert {
     }
 
     private static func present(
-        _ alert: NSAlert,
+        _ alert: ThemedAlert,
         in window: NSWindow?,
         completion: @escaping @MainActor (NSApplication.ModalResponse) -> Void
     ) {
@@ -229,7 +229,7 @@ enum ConfirmationAlert {
     private static func accepted(
         _ response: NSApplication.ModalResponse,
         for prompt: ConfirmationPrompt,
-        in alert: NSAlert,
+        in alert: ThemedAlert,
         settings: AppSettings
     ) -> Bool {
         // A two-button confirmation is a one-option choice: index 0 is the action, anything

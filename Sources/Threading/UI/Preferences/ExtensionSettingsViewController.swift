@@ -261,7 +261,7 @@ private final class ExtensionSettingActionTarget: NSObject {
     }
 
     private func present(_ error: Error) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.alertStyle = .warning
         alert.messageText = L10n.string("Couldn’t Change Extension Setting")
         alert.informativeText = error.localizedDescription

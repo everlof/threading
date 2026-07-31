@@ -103,7 +103,7 @@ final class ProjectRowView: NSTableCellView {
     /// hovering is what refreshes the count it shows.
     private var popoverProject: Project?
     private var hoverTimer: Timer?
-    private var popover: NSPopover?
+    private var popover: ThemedPopover?
 
     /// Retained so colours can be reapplied when the selection state changes.
     private var isHeading = false

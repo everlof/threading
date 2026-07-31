@@ -1,6 +1,56 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Appägda tillfälliga ytor med temaanpassat utseende, Escape, återställd fokus och tillgänglighet." } }
+      }
+    },
+    "Open alert": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Öppna dialog" } }
+      }
+    },
+    "Open each surface, switch the theme while it is visible, and dismiss it with Escape.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Öppna varje yta, byt tema medan den visas och stäng den med Escape." } }
+      }
+    },
+    "Open popover": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Öppna poppfönster" } }
+      }
+    },
+    "Presentation": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Presentation" } }
+      }
+    },
+    "Presentation chrome": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Presentationsutseende" } }
+      }
+    },
+    "Popover": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Poppfönster" } }
+      }
+    },
+    "ThemedAlert & ThemedPopover": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "ThemedAlert och ThemedPopover" } }
+      }
+    },
+    "This alert follows the app theme and always gives Escape back to its source.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Dialogen följer appens tema och låter alltid Escape återgå till källan." } }
+      }
+    },
+    "This anchored surface flips at screen edges and follows live theme changes.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Den förankrade ytan byter sida vid skärmkanter och följer temabyten direkt." } }
+      }
+    },
     "\n\nThe run's full output: Project Icon > Open Last Research Log.": {
       "extractionState": "stale",
       "localizations": {

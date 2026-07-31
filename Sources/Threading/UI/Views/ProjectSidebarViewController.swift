@@ -2005,7 +2005,7 @@ extension ProjectSidebarViewController: NSMenuDelegate {
 
     /// A quiet informational alert; icon actions have no state worth a warning style.
     private func presentIconNotice(_ message: String) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = L10n.string("Project Icon")
         alert.informativeText = message
         alert.alertStyle = .informational

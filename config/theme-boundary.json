@@ -1,5 +1,6 @@
 {
   "bannedTypes": {
+    "NSAlert": "ThemedAlert",
     "NSBox": "SeparatorView or a component from UI/Design",
     "NSBrowser": "a component from UI/Design",
     "NSButton": "ThemedButton",
@@ -13,6 +14,7 @@
     "NSLevelIndicator": "a component from UI/Design",
     "NSMatrix": "a component from UI/Design",
     "NSOutlineView": "ThemedOutlineView",
+    "NSPopover": "ThemedPopover",
     "NSPathControl": "a component from UI/Design",
     "NSPopUpButton": "ThemedPopUp",
     "NSPredicateEditor": "a component from UI/Design",
@@ -127,7 +129,8 @@
   "confirmationResponses": [
     "alertFirstButtonReturn",
     "alertSecondButtonReturn",
-    "alertThirdButtonReturn"
+    "alertThirdButtonReturn",
+    "firstButtonResponse"
   ],
   "confirmationGateDirectories": [
     "Sources/Threading/UI/Alerts"
@@ -274,7 +277,7 @@
     {
       "path": "Sources/Threading/UI/Views/BrowserViewController.swift",
       "kind": "confirmationResponse",
-      "symbol": "alertFirstButtonReturn",
+      "symbol": "firstButtonResponse",
       "reason": "The web page dictates these buttons, not Threading: WKUIDelegate's JavaScript alert, confirm and prompt panels, plus the download-complete offer. None is a decision the app could register or remember, and this file holds no confirmation of its own."
     },
     {

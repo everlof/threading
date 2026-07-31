@@ -5,7 +5,7 @@ import ThreadingExtensionKit
 ///
 /// The catalogue forces one explicit extension-boundary decision: either the visual body has a
 /// public component contract, or the presentation stays host-only for a stated reason. A source
-/// audit rejects direct `NSPopover` construction elsewhere, so adding a popover cannot silently
+/// audit rejects direct system popover construction elsewhere, so adding a popover cannot silently
 /// bypass this review.
 enum HostPopoverID: String, CaseIterable {
     case sidebarProjectHoverCard = "sidebar.project-hover-card"
@@ -46,10 +46,10 @@ enum HostPopoverExposure: Equatable {
 
 @MainActor
 enum HostPopoverFactory {
-    static func make(_ id: HostPopoverID) -> NSPopover {
+    static func make(_ id: HostPopoverID) -> ThemedPopover {
         // Reading `id.exposure` is deliberate even though construction needs no branch: every
         // enum case must satisfy the exhaustive exposure switch before it can reach this point.
         _ = id.exposure
-        return NSPopover()
+        return ThemedPopover()
     }
 }

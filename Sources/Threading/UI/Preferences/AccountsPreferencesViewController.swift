@@ -16,7 +16,7 @@ final class AccountsPreferencesViewController: NSViewController {
     private var accounts: [AgentAccount] = []
 
     /// The open icon picker, retained so it survives until dismissed.
-    private var iconPopover: NSPopover?
+    private var iconPopover: ThemedPopover?
 
     // MARK: - Lifecycle
 

@@ -413,7 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     private func presentAlreadyRunningAlert() {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = L10n.string("Threading is already running")
         alert.informativeText = L10n.string("""
             Another Threading is open and owns the session state. Running two at once would \
@@ -1145,7 +1145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             )
             NSWorkspace.shared.activateFileViewerSelecting([report])
         } catch {
-            let alert = NSAlert()
+            let alert = ThemedAlert()
             alert.alertStyle = .warning
             alert.messageText = L10n.string("Couldn’t create support report")
             alert.informativeText = L10n.string(

@@ -659,7 +659,7 @@ final class ThemePreferencesViewController: NSViewController {
                 do {
                     lastImported = try ThemeManager.shared.importAppleTerminalTheme(from: url)
                 } catch {
-                    NSAlert(error: error).runModal()
+                    ThemedAlert(error: error).runModal()
                 }
             }
 
@@ -716,7 +716,7 @@ final class ThemePreferencesViewController: NSViewController {
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 try encoder.encode(theme).write(to: url)
             } catch {
-                NSAlert(error: error).runModal()
+                ThemedAlert(error: error).runModal()
             }
         }
     }
@@ -752,7 +752,7 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     private func presentAlert(_ title: String, _ message: String) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = title
         alert.informativeText = message
         alert.runModal()

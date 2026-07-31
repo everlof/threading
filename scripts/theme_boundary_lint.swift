@@ -201,14 +201,15 @@ final class BoundaryVisitor: SyntaxVisitor {
         let member = node.declName.baseName.text
 
         // An informational alert never inspects its response — only a decision reads one. That
-        // makes this the precise signal for "a confirmation was built here", where banning
-        // `NSAlert` itself would need an exception per OK-only alert in the app. Must run
+        // makes this the precise signal for "a confirmation was built here", whether the source
+        // uses the old AppKit response names or ThemedAlert's app-owned response base. Must run
         // before the system-colour guard below, which returns early.
         if policy.confirmationResponses.contains(member), !isConfirmationGate {
             let responseBase = node.base?.trimmedDescription
             if responseBase == nil
                 || responseBase == "NSApplication.ModalResponse"
-                || responseBase == "AppKit.NSApplication.ModalResponse" {
+                || responseBase == "AppKit.NSApplication.ModalResponse"
+                || responseBase == "ThemedAlert" {
                 report(
                     node: node,
                     kind: "confirmationResponse",
@@ -531,7 +532,8 @@ func verifyChecker(_ policy: Policy) {
         // `Parser.parse` wraps a case pattern in `ExpressionPatternSyntax`, so this pins that
         // the visitor still reaches the member access inside one.
         ("switch response { case .alertThirdButtonReturn: break; default: break }",
-         "confirmationResponse")
+         "confirmationResponse"),
+        ("let accepted = response == ThemedAlert.firstButtonResponse", "confirmationResponse")
     ]
 
     for (source, expectedKind) in violations {

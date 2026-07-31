@@ -58,7 +58,7 @@ final class ExtensionDisclosureNodeView: NSView {
     private let detailViews: [NSView]
     private let row = NSStackView()
     private let mark = NSImageView()
-    private var popover: NSPopover?
+    private var popover: ThemedPopover?
     nonisolated(unsafe) private var hoverTimer: Timer?
     nonisolated(unsafe) private var closeWorkItem: DispatchWorkItem?
     private var isHovered = false {
@@ -137,7 +137,13 @@ final class ExtensionDisclosureNodeView: NSView {
         // reader is holding open, not a mode they have entered.
         presented.behavior = .transient
         presented.animates = false
-        presented.delegate = self
+        presented.onClose = { [weak self, weak presented] in
+            guard let self, self.popover === presented else { return }
+            self.popover = nil
+            self.detailContent = nil
+            self.isRevealed = false
+            self.setAccessibilityExpanded(false)
+        }
         // Toward the pane, not off the edge of it: the card this usually rides is pinned to the
         // window's trailing edge, and `minX` is the only side with room. AppKit still flips it
         // when there is not.
@@ -308,19 +314,5 @@ final class ExtensionDisclosureNodeView: NSView {
     private func applyBackground() {
         layer?.cornerRadius = Design.Radius.control
         applyLayerBackground(isHovered ? Design.Surface.controlHover : .clear)
-    }
-}
-
-// MARK: - NSPopoverDelegate
-
-extension ExtensionDisclosureNodeView: NSPopoverDelegate {
-
-    /// A transient popover can be closed by AppKit without anyone telling this view, which would
-    /// leave the row believing it is still open — and refusing to reopen.
-    func popoverDidClose(_ notification: Notification) {
-        popover = nil
-        detailContent = nil
-        isRevealed = false
-        setAccessibilityExpanded(false)
     }
 }

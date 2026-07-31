@@ -144,7 +144,7 @@ enum ShareChatSheet {
             capability: grant.capability,
             canApprovePermissions: grant.canApprovePermissions
         ) else {
-            let unavailable = NSAlert()
+            let unavailable = ThemedAlert()
             unavailable.messageText = L10n.string("Secure relay isn’t ready")
             unavailable.informativeText = L10n.string(
                 "Wait for Remote Access to say it is ready, then try again."
@@ -188,7 +188,7 @@ enum ShareChatSheet {
     /// dimmed button to be guessed at; that is the same rule `ConfirmationOption.isEnabled`
     /// already states for the button itself.
     ///
-    /// Sized rather than left to Auto Layout: `NSAlert` lays an accessory out by its **frame**,
+    /// Sized rather than left to Auto Layout: the alert lays an accessory out by its **frame**,
     /// so the height has to be measured here, against a width the wrapping labels were told
     /// about. A stack left at its natural size arrives one line tall with the rest clipped.
     static func grantsAccessory(isRunning: Bool) -> NSView {

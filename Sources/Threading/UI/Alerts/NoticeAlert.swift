@@ -14,7 +14,7 @@ struct NoticeRequest {
     var notice: AppNotice?
     let title: String
     let message: String
-    var style: NSAlert.Style = .informational
+    var style: ThemedAlert.Style = .informational
 }
 
 // MARK: - Notice Alert
@@ -53,7 +53,7 @@ enum NoticeAlert {
         let finish: @MainActor (NSApplication.ModalResponse) -> Void = { response in
             guard let notice = request.notice,
                   remembers(
-                      acknowledged: response == .alertFirstButtonReturn,
+                      acknowledged: response == ThemedAlert.firstButtonResponse,
                       suppressionChecked: alert.suppressionButton?.state == .on
                   ) else { return }
             settings.setShows(false, for: notice)
@@ -85,8 +85,8 @@ enum NoticeAlert {
     }
 
     /// Built without being run, so a test can read the wording and whether the box is there.
-    static func makeAlert(_ request: NoticeRequest) -> NSAlert {
-        let alert = NSAlert()
+    static func makeAlert(_ request: NoticeRequest) -> ThemedAlert {
+        let alert = ThemedAlert()
         alert.messageText = request.title
         alert.informativeText = request.message
         alert.alertStyle = request.style

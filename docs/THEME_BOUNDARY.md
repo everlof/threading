@@ -16,8 +16,15 @@ types that do not choose visible styling.
 System-owned chrome is allowed only behind a named containment boundary. Current examples are
 the invisible `NSColorWell` inside `ThemeSwatchView`, the private field editor inside
 `ThemedTextField`, AppKit's overlay-scroll effect pockets around `ThemedScroller`, outline
-disclosure buttons, application/context menus, alerts, toolbars, and open/save panels. The
-system object must not leak out as the component callers build against.
+disclosure buttons, application/context menus, toolbars, and open/save panels. The system object
+must not leak out as the component callers build against.
+
+App-owned alerts and anchored popovers are not system-owned chrome: callers use `ThemedAlert`
+and `ThemedPopover`, which own their visible surfaces, focus return, Escape handling, and live
+theme response. Application-menu and right-click/context menus remain native on purpose; they
+retain Services, responder-chain roles, type-to-select, keyboard navigation, and the platform's
+expected secondary-click behavior. Open/save panels, the colour panel, and the `NSWindow` frame
+remain system workflows behind their named boundaries.
 
 Containment includes API shape, not only where construction happens. `ChipView` and
 `ThemedPopUp` accept `ThemedMenuEntry` values and present them through the app-owned
@@ -70,18 +77,33 @@ records why it cannot be removed.
    keyboard activation, visible focus, enabled state, and accessibility cannot be omitted
    accidentally. Every concrete subclass still states its semantic accessibility role and
    primary action; the source checker rejects one that does not.
-13. Read transition durations from `Design.Motion`; it collapses them under Reduce Motion.
+13. Every pointer action has a keyboard and accessibility equivalent. Space/Return activates a
+   focused control, arrows move inside ordered choices, and a custom gesture (drag, pinch, swipe,
+   secondary click) exposes an ordinary control, menu command, key, or accessibility action that
+   reaches the same semantic operation.
+14. Every transient surface states its complete dismissal and focus lifecycle. Escape closes an
+   alert, inspector, menu, or popover (one nested layer per press); Cancel owns Escape where a
+   choice is being made; closing restores the source or previous first responder. Tab cannot
+   strand focus behind an app-owned modal surface, and opening one produces the appropriate
+   accessibility announcement or layout change.
+15. A pointer target visibly answers hover and press, accepts the first click when appropriate,
+   uses a cursor consistent with its action, and clears stale hover when layout moves it. Its hit
+   target and focus shape belong to the component rather than being recreated by callers.
+16. Test a control inside the ordinary AppKit host it will inhabit, not only in a plain `NSView`:
+   table selection, key-view traversal, menus/popovers, text editing, window activation, and
+   nested scrolling can all consume an event before an isolated control sees it.
+17. Read transition durations from `Design.Motion`; it collapses them under Reduce Motion.
    Indeterminate status views may stay visible, but must stop perpetual animation.
-14. Read contrast-sensitive colours and focus geometry through `Design.Surface`, `Design.Text`,
+18. Read contrast-sensitive colours and focus geometry through `Design.Surface`, `Design.Text`,
    and `Design.Accessibility`. Increase Contrast must strengthen faint borders, dividers,
    controls, secondary ink, and focus without replacing the active theme.
-15. Add behavior tests and render the component under at least System plus two deliberately
+19. Add behavior tests and render the component under at least System plus two deliberately
    different app themes. Include focus, selection and disabled states when applicable. A claim
    about balance, alignment or legibility is checked by looking at a render, not by asserting
    about the constraints that were meant to produce it.
-16. Top-level app windows subclass `ThemedWindowController`. It audits the app-owned content
-    root after AppKit expands it; never opt a window out or start the audit at the system frame
-    view.
+20. Top-level app windows subclass `ThemedWindowController`. It audits the app-owned content
+   root after AppKit expands it; never opt a window out or start the audit at the system frame
+   view.
 
 Do not fix a violation with a directory exclusion or a blanket lint disable. Add a narrow,
 documented policy exception only for genuinely system-owned chrome.
@@ -108,7 +130,8 @@ or feature-owned duration fails the checker, making Reduce Motion the default fo
 transitions instead of a review-time convention. A perpetual animation needs a narrow exception
 and an explicit branch that removes it when Reduce Motion is active.
 
-Reading `alertFirstButtonReturn`, `alertSecondButtonReturn` or `alertThirdButtonReturn` outside
+Reading `alertFirstButtonReturn`, `alertSecondButtonReturn`, `alertThirdButtonReturn`, or
+`ThemedAlert.firstButtonResponse` outside
 `confirmationGateDirectories` (`Sources/Threading/UI/Alerts`) fails the checker as
 `confirmationResponse`. An informational alert never inspects its response, so that read is the
 precise signal that an alert is asking a question — and a question must be built through
@@ -120,11 +143,15 @@ documented variable-font/artwork boundaries. This keeps new screens on the same 
 without forbidding the terminal profile from honoring an explicitly selected font and size.
 
 Public and module-internal `UI/Design/` contracts are checked for system-chrome types such as
-`NSMenu`, `NSMenuItem`, `NSPopover`, panels, and toolbars. Private implementation may contain
+`NSMenu`, `NSMenuItem`, panels, and toolbars. Private implementation may contain
 them only at a documented system-owned boundary. Dropdown controls have no exception:
 `ChipView` and `ThemedPopUp` use the shared semantic `ThemedMenuItem` model and the custom
 `ThemedMenuPresenter`, whose rows, selection, scrolling, focus, and elevation all come from
 `Design`.
+
+Construction of `NSAlert` and `NSPopover` is rejected everywhere in application source. Their
+app-owned replacements contain an `NSPanel` only as the AppKit transport for window ordering,
+sheet attachment, focus, and accessibility; the visible chrome is drawn from `Design` roles.
 
 Every class in `UI/Windows/` that directly owns an `NSWindowController` must inherit
 `ThemedWindowController`. Debug builds then audit that window after showing, resizing, and live

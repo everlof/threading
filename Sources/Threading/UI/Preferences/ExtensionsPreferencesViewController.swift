@@ -718,7 +718,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
     }
 
     private func present(error: Error) {
-        let alert = NSAlert(error: error)
+        let alert = ThemedAlert(error: error)
         if let window = view.window {
             alert.beginSheetModal(for: window)
         } else {
@@ -727,7 +727,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
     }
 
     private func presentAlert(title: String, message: String) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = title
         alert.informativeText = message
         if let window = view.window {

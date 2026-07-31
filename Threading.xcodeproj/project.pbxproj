@@ -190,6 +190,7 @@
 		3D98B541B905C53B6060A78C /* SessionAttachmentStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */; };
 		E5972E5560BC2C0E698F5214 /* SessionArchiveSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F0122F4145AF214A1AF5B3 /* SessionArchiveSchedulerTests.swift */; };
 		1BB1080C65C2B68360D4E462 /* SessionNameToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF4567C7CDACFF28D543CF05 /* SessionNameToolTests.swift */; };
+		8F4D6D9656466CB83150A523 /* ThemedPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0F42F3B4CAD519CBB3AEE4F /* ThemedPresentationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -424,6 +425,7 @@
 		6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionAttachmentStoreTests.swift; sourceTree = "<group>"; };
 		33F0122F4145AF214A1AF5B3 /* SessionArchiveSchedulerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionArchiveSchedulerTests.swift; sourceTree = "<group>"; };
 		DF4567C7CDACFF28D543CF05 /* SessionNameToolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionNameToolTests.swift; sourceTree = "<group>"; };
+		A0F42F3B4CAD519CBB3AEE4F /* ThemedPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedPresentationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -718,6 +720,7 @@
 				6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */,
 				33F0122F4145AF214A1AF5B3 /* SessionArchiveSchedulerTests.swift */,
 				DF4567C7CDACFF28D543CF05 /* SessionNameToolTests.swift */,
+				A0F42F3B4CAD519CBB3AEE4F /* ThemedPresentationTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1258,6 +1261,7 @@
 				3D98B541B905C53B6060A78C /* SessionAttachmentStoreTests.swift in Sources */,
 				E5972E5560BC2C0E698F5214 /* SessionArchiveSchedulerTests.swift in Sources */,
 				1BB1080C65C2B68360D4E462 /* SessionNameToolTests.swift in Sources */,
+				8F4D6D9656466CB83150A523 /* ThemedPresentationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

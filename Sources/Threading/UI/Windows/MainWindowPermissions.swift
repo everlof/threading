@@ -179,7 +179,7 @@ extension MainWindowController {
 
     /// A scrollable, size-bounded diff for the approval sheet's accessory slot.
     ///
-    /// `NSAlert` sizes an accessory view to its frame, so the diff is capped in both directions
+    /// The alert sizes an accessory view to its frame, so the diff is capped in both directions
     /// and allowed to scroll — a large edit must not push the buttons off the screen.
     private func permissionDiffAccessory(_ diff: [DiffLine], path: String?) -> NSView {
         let scroll = ThemedScrollView(frame: NSRect(

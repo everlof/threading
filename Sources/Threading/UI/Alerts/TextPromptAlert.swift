@@ -64,7 +64,7 @@ enum TextPromptAlert {
     /// `nil` is Cancel, and so is an empty field the request did not allow: both mean the
     /// caller does nothing, and separating them would invite a caller to act on a blank.
     static func ask(_ request: TextPromptRequest) -> Answer? {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = request.title
         if let message = request.message {
             alert.informativeText = message
@@ -79,7 +79,7 @@ enum TextPromptAlert {
         field.stringValue = request.current
         field.placeholderString = request.placeholder
         alert.accessoryView = field
-        alert.window.initialFirstResponder = field
+        alert.initialFirstResponder = field
 
         let optionCount = request.clearTitle == nil ? 1 : 2
         switch ConfirmationAlert.chosenIndex(alert.runModal(), optionCount: optionCount) {

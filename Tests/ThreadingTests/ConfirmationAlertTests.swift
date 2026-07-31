@@ -216,7 +216,7 @@ final class ConfirmationAlertTests: XCTestCase {
     /// fourth used to arrive through a `default:` clause that also catches every unrelated
     /// dismissal. Arithmetic reads all four back and still says `nil` for the way out.
     func testAFourthOptionIsStillReadBack() {
-        let first = NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        let first = ThemedAlert.firstButtonResponse.rawValue
         let response = { NSApplication.ModalResponse(rawValue: first + $0) }
 
         XCTAssertEqual(ConfirmationAlert.chosenIndex(response(0), optionCount: 4), 0)

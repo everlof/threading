@@ -202,7 +202,7 @@ final class AdvancedPreferencesViewController: NSViewController {
     }
 
     private func presentFailure(_ error: Error) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.alertStyle = .warning
         alert.messageText = AdvancedStrings.resetFailedTitle
         alert.informativeText = error.localizedDescription

@@ -101,10 +101,12 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemeSwatchImage",
         "ThemeSwatchView",
         "ThemedButton",
+        "ThemedAlert",
         "ThemedClipView",
         "ThemedControl",
         "ThemedOutlineView",
         "ThemedPopUp",
+        "ThemedPopover",
         "ThemedProgressBar",
         "ThemedScroller",
         "ThemedScrollView",
@@ -134,6 +136,7 @@ final class ComponentGalleryViewController: NSViewController {
     /// The toast story's presenter, retained so the button beside the pane can send a band into
     /// it more than once.
     private var toastPresenter: ToastPresenter?
+    private var galleryPopover: ThemedPopover?
 
     private let themePopUp = ThemedPopUp()
     /// The mark stories' views, retained so the replay control can reach them.
@@ -326,6 +329,7 @@ final class ComponentGalleryViewController: NSViewController {
             makeButtonsAndChoicesSection(),
             makeTextSection(),
             makeFeedbackSection(),
+            makePresentationSection(),
             makeContainersSection(),
             makeBrowserChromeSection(),
             makeColourSection(),
@@ -870,6 +874,25 @@ final class ComponentGalleryViewController: NSViewController {
                     "SeparatorView",
                     "Horizontal and vertical orientations use the theme’s divider and border weight.",
                     row([horizontal, vertical])
+                )
+            ]
+        )
+    }
+
+    private func makePresentationSection() -> NSView {
+        let alert = button("Open alert", action: #selector(showGalleryAlert(_:)))
+        alert.setAccessibilityIdentifier("gallery.presentation.alert")
+        let popover = button("Open popover", action: #selector(showGalleryPopover(_:)))
+        popover.setAccessibilityIdentifier("gallery.presentation.popover")
+
+        return section(
+            "Presentation",
+            note: "Open each surface, switch the theme while it is visible, and dismiss it with Escape.",
+            rows: [
+                story(
+                    "ThemedAlert & ThemedPopover",
+                    "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.",
+                    row([alert, popover])
                 )
             ]
         )
@@ -1673,6 +1696,72 @@ final class ComponentGalleryViewController: NSViewController {
         let button = sender as? ThemedButton
         let name = button?.accessibilityTitle() ?? L10n.string("Button")
         showReceipt(L10n.format("%@ pressed · %lld total.", name, Int64(clickCount)))
+    }
+
+    @objc private func showGalleryAlert(_ sender: ThemedButton) {
+        let alert = ThemedAlert()
+        alert.messageText = L10n.string("Presentation chrome")
+        alert.informativeText = L10n.string(
+            "This alert follows the app theme and always gives Escape back to its source."
+        )
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.string("Continue"))
+        alert.addButton(withTitle: L10n.string("Cancel"))
+        if let window = view.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
+
+    @objc private func showGalleryPopover(_ sender: ThemedButton) {
+        if galleryPopover?.isShown == true {
+            galleryPopover?.close()
+            return
+        }
+
+        let title = NSTextField(labelWithString: L10n.string("Popover"))
+        title.applyFont(.heading)
+        title.textColor = Design.Text.label
+        let message = NSTextField(
+            wrappingLabelWithString: L10n.string(
+                "This anchored surface flips at screen edges and follows live theme changes."
+            )
+        )
+        message.applyFont(.body)
+        message.textColor = Design.Text.secondary
+        message.preferredMaxLayoutWidth = 260
+        let close = button("Close", action: #selector(closeGalleryPopover(_:)))
+
+        let stack = NSStackView(views: [title, message, close])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.medium
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.inset,
+            left: Design.Spacing.inset,
+            bottom: Design.Spacing.inset,
+            right: Design.Spacing.inset
+        )
+        stack.frame = NSRect(x: 0, y: 0, width: 292, height: 126)
+
+        let controller = NSViewController()
+        controller.view = stack
+        controller.preferredContentSize = stack.frame.size
+
+        let popover = ThemedPopover()
+        popover.behavior = .transient
+        popover.contentViewController = controller
+        popover.onClose = { [weak self, weak popover] in
+            guard self?.galleryPopover === popover else { return }
+            self?.galleryPopover = nil
+        }
+        galleryPopover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+    }
+
+    @objc private func closeGalleryPopover(_ sender: ThemedButton) {
+        galleryPopover?.close()
     }
 
     @objc private func chooseExtensionDirectory() {

@@ -745,7 +745,7 @@ final class SessionComposerViewController: NSViewController {
     }
 
     private func present(error: Error) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = L10n.string("Could not create worktree")
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning

@@ -2432,7 +2432,7 @@ final class BrowserViewController: NSViewController {
     }
 
     private func showScreenshotFailure(_ detail: String?) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.alertStyle = .warning
         alert.messageText = L10n.string("Couldn’t Save Screenshot")
         alert.informativeText = detail
@@ -2483,7 +2483,7 @@ final class BrowserViewController: NSViewController {
                         origin.displayName
                     )
                 }
-                let alert = NSAlert()
+                let alert = ThemedAlert()
                 alert.messageText = L10n.string("Website Data Cleared")
                 alert.informativeText = detail + " " + L10n.string(
                     "Reload the page to fetch its signed-out state."
@@ -3251,7 +3251,7 @@ extension BrowserViewController: WKUIDelegate {
         alert.addButton(withTitle: L10n.string("OK"))
         alert.addButton(withTitle: L10n.string("Cancel"))
         present(alert) { response in
-            completionHandler(response == .alertFirstButtonReturn)
+            completionHandler(response == ThemedAlert.firstButtonResponse)
         }
     }
 
@@ -3274,12 +3274,12 @@ extension BrowserViewController: WKUIDelegate {
         alert.addButton(withTitle: L10n.string("OK"))
         alert.addButton(withTitle: L10n.string("Cancel"))
         present(alert) { response in
-            completionHandler(response == .alertFirstButtonReturn ? field.stringValue : nil)
+            completionHandler(response == ThemedAlert.firstButtonResponse ? field.stringValue : nil)
         }
     }
 
-    private func websiteAlert(message: String, informativeText: String) -> NSAlert {
-        let alert = NSAlert()
+    private func websiteAlert(message: String, informativeText: String) -> ThemedAlert {
+        let alert = ThemedAlert()
         alert.alertStyle = .informational
         alert.messageText = message
         alert.informativeText = informativeText
@@ -3287,7 +3287,7 @@ extension BrowserViewController: WKUIDelegate {
     }
 
     private func present(
-        _ alert: NSAlert,
+        _ alert: ThemedAlert,
         completion: @escaping (NSApplication.ModalResponse) -> Void
     ) {
         if let window = view.window {
@@ -3384,13 +3384,13 @@ extension BrowserViewController: WKDownloadDelegate {
             )
         }
 
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = L10n.string("Download Complete")
         alert.informativeText = destination.lastPathComponent
         alert.addButton(withTitle: L10n.string("Reveal in Finder"))
         alert.addButton(withTitle: L10n.string("Done"))
         let reveal: (NSApplication.ModalResponse) -> Void = { response in
-            guard response == .alertFirstButtonReturn else { return }
+            guard response == ThemedAlert.firstButtonResponse else { return }
             NSWorkspace.shared.activateFileViewerSelecting([destination])
         }
         if let window = view.window {
@@ -3413,7 +3413,7 @@ extension BrowserViewController: WKDownloadDelegate {
     }
 
     private func showDownloadFailure(_ message: String) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.alertStyle = .warning
         alert.messageText = L10n.string("Download Failed")
         alert.informativeText = message

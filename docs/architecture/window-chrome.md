@@ -2,6 +2,11 @@
 
 The toolbar, the pane headers, and why the sidebar is a plain split item.
 
+This boundary is already app-owned where it should be: the full-height sidebar ground, split
+rule, headers, and toolbar item views are themed; `NSWindow`, traffic lights, resizing, sheets,
+and full-screen integration remain AppKit's. Replacing the window frame would remove behavior,
+not system-coloured application chrome, so further work here is an audit rather than a rewrite.
+
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 The window uses `.fullSizeContentView` with a transparent, hidden title bar, so the sidebar

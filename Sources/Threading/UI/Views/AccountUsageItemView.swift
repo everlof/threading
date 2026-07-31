@@ -35,7 +35,7 @@ final class AccountUsageItemView: BackdropOverlay {
     /// tick actually fetches, so the timer stays cheap.
     nonisolated(unsafe) private var refreshTimer: Timer?
 
-    private weak var popover: NSPopover?
+    private var popover: ThemedPopover?
 
     /// Pending close of the hover popover, cancelled when the pointer returns to the pill or moves
     /// into the popover before it fires.

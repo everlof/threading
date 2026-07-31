@@ -49,7 +49,7 @@ final class SessionRowView: NSTableCellView {
     /// Content for the hover popover, refreshed on every configure.
     private var popoverInfo: SessionInfoPopoverViewController.Info?
     private var hoverTimer: Timer?
-    private var popover: NSPopover?
+    private var popover: ThemedPopover?
     private let sessionHoverContentProvider: SessionHoverContentProvider
 
     /// Invoked when the row's action button is pressed, carrying the row's session.

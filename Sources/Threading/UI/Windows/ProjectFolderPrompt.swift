@@ -52,7 +52,7 @@ enum ProjectFolderPrompt {
     }
 
     private static func presentCreationFailure(for url: URL, error: Error) {
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = L10n.format(
             "Could not create “%@”",
             url.lastPathComponent

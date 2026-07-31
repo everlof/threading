@@ -164,7 +164,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             onPresentationChanged()
         case .failure(let error):
             container.reopenIfShowing(sessionID: sessionID)
-            let alert = NSAlert()
+            let alert = ThemedAlert()
             alert.messageText = L10n.string("Couldn't move the conversation")
             alert.informativeText = error.message
             alert.alertStyle = .warning
@@ -195,7 +195,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
 
         case .failure(let error):
             container.reopenIfShowing(sessionID: sessionID)
-            let alert = NSAlert()
+            let alert = ThemedAlert()
             alert.messageText = L10n.string("Couldn't continue the conversation")
             alert.informativeText = error.message
             alert.alertStyle = .warning
