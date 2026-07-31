@@ -119,7 +119,7 @@ final class ThemedTabItemView: BackdropThemedControl {
     }
 
     private let placement: Placement
-    private let iconView = NSImageView()
+    private let iconView = GlyphView()
     private let titleLabel = MorphingTitleLabel()
     private let closeButton: ThemedIconButton
     /// Public component content rendered after the title but still inside this native control.
@@ -161,12 +161,11 @@ final class ThemedTabItemView: BackdropThemedControl {
     private func setup(title: String, symbolName: String, showsClose: Bool) {
         translatesAutoresizingMaskIntoConstraints = false
 
-        iconView.image = NSImage(
-            systemSymbolName: symbolName,
-            accessibilityDescription: nil
+        iconView.image = Design.Symbol.image(
+            symbolName,
+            slot: Design.Size.tabIconSlot,
+            pointSize: Design.Symbol.control
         )
-        iconView.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
-        iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.setContentHuggingPriority(.required, for: .horizontal)
 
         titleLabel.applyFont(Self.role(isSelected: isSelected))
@@ -290,7 +289,12 @@ final class ThemedTabItemView: BackdropThemedControl {
             && title != titleLabel.stringValue
         self.identity = identity
 
-        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        iconView.slot = nil
+        iconView.image = Design.Symbol.image(
+            symbolName,
+            slot: Design.Size.tabIconSlot,
+            pointSize: Design.Symbol.control
+        )
         titleLabel.setStringValue(title, animated: isRename)
         closeButton.isHidden = !showsClose
         closeButton.setAccessibilityTitle(L10n.format("Close %@", title))
@@ -303,8 +307,10 @@ final class ThemedTabItemView: BackdropThemedControl {
     }
 
     /// Shows a template image in the icon slot — an agent's own mark, where a symbol name cannot
-    /// name what belongs there.
+    /// name what belongs there. Capped to the slot, because the artwork's natural size is the
+    /// artist's rather than the tab's.
     func setIcon(_ image: NSImage?) {
+        iconView.slot = NSSize(width: Design.Size.tabIconSlot, height: Design.Size.tabIconSlot)
         iconView.image = image
     }
 
@@ -392,7 +398,7 @@ final class ThemedTabItemView: BackdropThemedControl {
         // The icon follows its label rather than taking the accent. The accent means "this needs
         // you" everywhere else in the app — the sidebar's attention dot is the same colour — and
         // spending it on whichever tab happens to be open says that about nothing.
-        iconView.contentTintColor = foreground
+        iconView.tint = foreground
         closeButton.alphaValue = isSelected || isHovered ? 1 : 0
     }
 

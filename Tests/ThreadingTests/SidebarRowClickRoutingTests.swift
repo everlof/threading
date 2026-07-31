@@ -187,8 +187,8 @@ final class SidebarRowClickRoutingTests: XCTestCase {
         let glyph = try XCTUnwrap(button.subviews.first, "the archive button draws no glyph")
 
         XCTAssertTrue(
-            glyph is NSImageView,
-            "the glyph is no longer an image view, so the case this rule is about may have moved"
+            glyph is GlyphView,
+            "the glyph is no longer a GlyphView, so the case this rule is about may have moved"
         )
         XCTAssertTrue(
             RowControls.takesItsOwnClick(glyph),
@@ -211,11 +211,18 @@ final class SidebarRowClickRoutingTests: XCTestCase {
             "the row's agent mark claimed a click that belongs to the row"
         )
 
+        // AppKit's own answer, for contrast — asked about the *button*, because that is where
+        // the veto lives: a stock table exempts its own `NSButton`s and vetoes every other
+        // `NSControl`, which `ThemedControl` is. (It was asked about the glyph while the glyph
+        // was an `NSImageView` — also an `NSControl`; a `GlyphView` is a plain view, which
+        // AppKit lets through natively, so the glyph no longer demonstrates the veto.)
         let stock = hostedOutline { NSOutlineView(frame: .zero) }
-        let stockGlyph = try XCTUnwrap(archiveButton(in: stock.source.row).subviews.first)
         XCTAssertFalse(
-            stock.outline.validateProposedFirstResponder(stockGlyph, for: nil),
-            "AppKit now hands a row click to a control's glyph, so the rule above may be redundant"
+            stock.outline.validateProposedFirstResponder(
+                try archiveButton(in: stock.source.row),
+                for: nil
+            ),
+            "AppKit now exempts a themed control in a stock table, so the rule above may be redundant"
         )
     }
 

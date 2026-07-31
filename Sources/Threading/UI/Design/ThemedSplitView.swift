@@ -77,15 +77,21 @@ final class ThemedSplitView: NSSplitView {
     override var dividerThickness: CGFloat { max(Self.minimumGrab, Design.Radius.border) }
 
     /// The theme's own line wherever it reads on the backdrop; measured ink where it cannot.
+    ///
+    /// The theme's *rule* ink, not its border: the seam is a rule between panes, and the pane
+    /// headers' `SeparatorView`s it meets draw `Design.Surface.divider` — which is also where
+    /// the rule-ink budget is enforced. Drawn in `Surface.border` it was the one full-strength
+    /// rule left in a window whose every other rule had been held back, stepping in *ink* at
+    /// exactly the crossing where it once stepped in weight.
     override var dividerColor: NSColor {
-        let border = Design.Surface.border
-        guard !WindowBackdrop.isChromeGround else { return border }
+        let rule = Design.Surface.divider
+        guard !WindowBackdrop.isChromeGround else { return rule }
 
         let backdrop = WindowBackdrop.color
-        let drawn = backdrop.composited(under: border)
+        let drawn = backdrop.composited(under: rule)
         return ThemeContrast.ratio(drawn, backdrop) >= Self.visibleLineRatio
-            ? border
-            : WindowBackdrop.ink.border
+            ? rule
+            : WindowBackdrop.ink.rule
     }
 
     override func viewDidChangeEffectiveAppearance() {

@@ -65,9 +65,9 @@ enum RowControls {
     /// Whether the click that landed on `responder` belongs to a control rather than to the row.
     ///
     /// **AppKit asks about the deepest view under the pointer**, and that is the whole subtlety:
-    /// what it hit is not what the user aimed at. `ThemedIconButton` draws its glyph in an
-    /// `NSImageView` child, so the proposed responder over an archive box is that image view — an
-    /// `NSControl` subclass AppKit does not exempt — and the table went on vetoing the click in the
+    /// what it hit is not what the user aimed at. `ThemedIconButton` draws its glyph in a child
+    /// view (a `GlyphView`; an `NSImageView` when this was found), so the proposed responder over
+    /// an archive box is that child — which AppKit does not exempt — and the table went on vetoing the click in the
     /// middle of a button it had just been taught to allow. What survived was the four-point
     /// padding ring around the glyph, which is why this was reported twice and differently: the `⋯`
     /// "worked, but nowhere near always" because an ellipsis is 9 points tall in a 20-point target

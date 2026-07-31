@@ -41,11 +41,27 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
             }
         }
 
-        /// The glyph inside. The remainder is the padding, equal on every side.
+        /// The glyph's slot. The remainder is the padding, equal on every side.
         var glyph: CGFloat {
             switch self {
             case .toolbar: Design.Size.tabIconSlot
             case .inline: Design.Size.inlineButtonGlyph
+            }
+        }
+
+        /// The size the symbol is *configured* at, as against the slot it must fit.
+        ///
+        /// Two numbers because they answer different questions: the slot is layout — what the
+        /// padding is measured from — while the point size is optics. One hard-set 11pt
+        /// configuration served both roles, which missed in both directions at once: toolbar
+        /// glyphs floated small in a 16pt slot, and inline symbols wider than 12pt
+        /// (`gearshape` renders 14×14 at 11pt) were shrunk *after* rendering, thinning the
+        /// stroke the configuration had chosen. `Design.Symbol.image(_:slot:pointSize:)` is
+        /// the fit.
+        var glyphPointSize: CGFloat {
+            switch self {
+            case .toolbar: Design.Symbol.toolbar
+            case .inline: Design.Symbol.control
             }
         }
 
@@ -91,7 +107,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         }
     }
 
-    private let iconView = NSImageView()
+    private let iconView = GlyphView()
     private var accessibilityName: String
     private let isEmphasized: Bool
     private let actionTarget: Target
@@ -149,24 +165,23 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     private func setup(symbolName: String) {
         translatesAutoresizingMaskIntoConstraints = false
 
-        iconView.image = NSImage(
-            systemSymbolName: symbolName,
-            accessibilityDescription: nil
+        iconView.image = Design.Symbol.image(
+            symbolName,
+            slot: actionTarget.glyph,
+            pointSize: actionTarget.glyphPointSize
         )
-        iconView.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
-        iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
 
         // The glyph is centred and the target states its own size, so the padding is whatever is
         // left over — equal on all four sides, by construction rather than by a caller's
-        // arithmetic. Nothing here takes a size from outside.
+        // arithmetic. Nothing here takes a size from outside. The glyph carries no size
+        // constraints of its own: it is configured to fit the slot (see `glyphPointSize`), and
+        // pinning it to the slot was exactly the shrink-after-render this replaced.
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: actionTarget.size.width),
             heightAnchor.constraint(equalToConstant: actionTarget.size.height),
             iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: actionTarget.glyph),
-            iconView.heightAnchor.constraint(equalToConstant: actionTarget.glyph)
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
     }
 
@@ -183,10 +198,15 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// One slot, two roles: a project row's `⋯` and a branch heading's gear are the same control
     /// in the same place, and swapping the glyph is the whole difference between them.
     func setSymbol(_ symbolName: String, accessibility: String) {
-        // Restored, because `setImage` clears it: a slot that has held an app's icon must draw
-        // the next symbol at the same weight and size every other glyph in the app has.
-        iconView.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
-        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        // The slot cap is cleared, because `setImage` sets it: a slot that has held an app's
+        // icon must draw the next symbol at the same size every other glyph in the app has —
+        // configured to fit, never squeezed to.
+        iconView.slot = nil
+        iconView.image = Design.Symbol.image(
+            symbolName,
+            slot: actionTarget.glyph,
+            pointSize: actionTarget.glyphPointSize
+        )
         accessibilityName = accessibility
         setAccessibilityTitle(accessibility)
     }
@@ -201,19 +221,17 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// surface, the hover lift, the focus ring — stays ours. Passing nil empties the slot rather
     /// than leaving the previous app's mark behind.
     func setImage(_ image: NSImage?, accessibility: String) {
-        // **The symbol configuration has to go before the artwork arrives.** `NSImageView`
-        // applies it to whatever image it is given, and a configuration sized for an 11pt glyph
-        // applied to a rendered app icon draws *nothing at all* — an empty button in the middle
-        // of the header, which is exactly how this was found, in a render rather than in an
-        // assertion.
-        iconView.symbolConfiguration = nil
+        // The slot cap is what keeps foreign artwork honest: an installed app's icon arrives
+        // at whatever size LaunchServices holds, and a symbol's fitted configuration cannot
+        // speak for it. Capped to the role's slot it draws exactly where the symbol would.
+        iconView.slot = NSSize(width: actionTarget.glyph, height: actionTarget.glyph)
         iconView.image = image
         accessibilityName = accessibility
         setAccessibilityTitle(accessibility)
     }
 
     override func applyInk(_ ink: Design.Ink) {
-        iconView.contentTintColor = isEnabled ? ink.secondary : ink.quaternary
+        iconView.tint = isEnabled ? ink.secondary : ink.quaternary
         needsDisplay = true
     }
 
@@ -242,7 +260,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
 
         drawKeyboardFocus(around: shape, color: ink.label)
 
-        iconView.contentTintColor = isEnabled
+        iconView.tint = isEnabled
             ? (isSelected || isHovered ? ink.label : ink.secondary)
             : ink.quaternary
     }

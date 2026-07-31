@@ -34,7 +34,10 @@ final class ShellDrawerDivider: BackdropOverlay {
             bounds.fill()
         }
 
-        ink.border.setFill()
+        // The *rule* ink: this strip is a rule between two panes, the same decision the pane
+        // headers' separators and the split's seam take, and the one place the ink budget is
+        // enforced. Over a backdrop the two inks coincide; the name is the point.
+        ink.rule.setFill()
         let width = Design.Radius.border
         NSRect(x: 0, y: bounds.maxY - width, width: bounds.width, height: width).fill()
     }

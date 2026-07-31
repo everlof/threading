@@ -230,6 +230,51 @@ final class ThemedIndicatorsTests: XCTestCase {
         }
     }
 
+    /// A rule's *perceived* weight is thickness × ink, and the anchor is the text stem: a rule
+    /// carrying more ink than the body face's stem (`Material.ruleInkBudget`) reads as a bar
+    /// across the content rather than a rule between rows. Neo Brutalism stated full label ink
+    /// under a 3pt weight and every rule in the window drew 2.5× the stem of the text beside it.
+    ///
+    /// Swept across the whole catalogue and both appearances because the cap is enforced at the
+    /// one interpreter (`Design.Surface.divider`) precisely so a theme — the next stock style, a
+    /// user's own, an extension's — cannot state its way past it. The second assertion is the
+    /// other half of the contract: a theme already quieter than its ceiling keeps its authored
+    /// ink, so the cap only ever pulls *down*.
+    func testEveryStockThemeKeepsItsRuleInkWithinTheBudget() throws {
+        Design.Accessibility.increaseContrastOverrideForTesting = false
+        defer { Design.Accessibility.increaseContrastOverrideForTesting = nil }
+
+        for theme in [AppTheme.system] + AppThemeStyles.all {
+            switchTheme(to: theme)
+            for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
+                let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+                var drawn: NSColor?
+                var authored: NSColor?
+                appearance.performAsCurrentDrawingAppearance {
+                    drawn = Design.Surface.divider.usingColorSpace(.sRGB)
+                    authored = theme.resolved(.divider, appearance: appearance)
+                        .usingColorSpace(.sRGB)
+                }
+                let material = theme.material(for: appearance)
+                let rule = try XCTUnwrap(drawn, "\(theme.name)'s rule ink did not resolve")
+                XCTAssertLessThanOrEqual(
+                    rule.alphaComponent * max(1, material.borderWidth),
+                    AppTheme.Material.ruleInkBudget + 0.01,
+                    "\(theme.name) (\(appearanceName.rawValue)) rules heavier than the text stem"
+                )
+
+                let stated = try XCTUnwrap(authored)
+                if stated.alphaComponent <= material.ruleInkCeiling {
+                    XCTAssertEqual(
+                        rule.hexString,
+                        stated.hexString,
+                        "\(theme.name) (\(appearanceName.rawValue)) had its quiet rule re-inked"
+                    )
+                }
+            }
+        }
+    }
+
     // MARK: - Spinner
 
     func testMotionDurationsBecomeImmediateWhenReduceMotionIsEnabled() {
@@ -278,6 +323,37 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         spinner.isAnimating = false
         XCTAssertNil(arc.animation(forKey: "spin"), "stopping left the animation attached")
+    }
+
+    /// A shape layer added by hand is not given the view's `contentsScale` — only the backing
+    /// layer AppKit makes is — so it rasterises its path at 1× and the compositor scales it up.
+    /// `ThreadingMarkView` documents the trap and fixed itself; the spinner had the identical
+    /// construction and spun blurry on every Retina display for as long as an agent worked.
+    /// Swept over every hand-layered indicator so the next one cannot reintroduce it.
+    func testHandAddedShapeLayersCarryTheWindowsBackingScale() throws {
+        let spinner = ThemedSpinner(frame: NSRect(x: 0, y: 0, width: 14, height: 14))
+        spinner.isAnimating = true
+        let mark = ThreadingMarkView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+
+        for view in [spinner, mark] {
+            let host = hosted(view)
+            host.layoutSubtreeIfNeeded()
+            let window = try XCTUnwrap(host.window)
+            let shapes = sublayers(of: try XCTUnwrap(view.layer))
+                .compactMap { $0 as? CAShapeLayer }
+            XCTAssertFalse(shapes.isEmpty, "\(type(of: view)) lost its shape layers")
+            for shape in shapes {
+                XCTAssertEqual(
+                    shape.contentsScale,
+                    window.backingScaleFactor,
+                    "\(type(of: view)) rasterises a path at a scale its window does not have"
+                )
+            }
+        }
+    }
+
+    private func sublayers(of layer: CALayer) -> [CALayer] {
+        (layer.sublayers ?? []).flatMap { [$0] + sublayers(of: $0) }
     }
 
     /// Reduce Motion removes perpetual rotation but not the status itself: the themed arc stays

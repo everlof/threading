@@ -222,12 +222,24 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         applyContentsScale()
+        // The stroke widths are snapped to this display's pixel grid (see `layout()`), so a
+        // move between displays is a remeasure, not only a re-rasterise.
+        needsLayout = true
+    }
+
+    private var backingScale: CGFloat {
+        window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? Layout.assumedBackingScale
     }
 
     private func applyContentsScale() {
-        let scale = window?.backingScaleFactor
-            ?? NSScreen.main?.backingScaleFactor
-            ?? Layout.assumedBackingScale
+        // The hover lift scales the *raster*: Core Animation rasterises a shape layer's path
+        // at `contentsScale` and the compositor transforms that bitmap, so a lifted mark is a
+        // bitmap enlarged 8% — visibly soft on 1×. While lifted, the raster is held at the
+        // lifted density instead, so full lift is pixel-exact; at rest the plain scale keeps
+        // the resting mark crisp, which is where it spends nearly all of its time.
+        let scale = backingScale * (isHovered ? Layout.hoverScale : 1)
         layer?.contentsScale = scale
         for shape in shapes {
             shape.contentsScale = scale
@@ -241,18 +253,29 @@ final class ThreadingMarkView: NSView, ThemedComponent {
 
         // The mark is square whatever the view is: fit the largest centred square, inset by
         // half the heaviest stroke so round caps are not clipped at the vertices.
+        //
+        // Strokes are snapped to the display's pixel grid. The ratios come from a 128pt SVG
+        // canvas, and in the sidebar's 20pt slot they land at 1.09 and 1.17 — which on a 1×
+        // display is one antialiased pixel straddling two rows. A whole-pixel stroke is the
+        // same drawing with its edges on the grid; at 2× the rounding is a sixteenth of a
+        // point and invisible. The box is aligned for the same reason: curves antialias
+        // regardless, but the shield's extremes land on pixel columns instead of between two.
+        let scale = backingScale
         let side = min(bounds.width, bounds.height)
-        let strandWidth = side * ThreadingMarkGeometry.strandStrokeRatio
-        let box = CGRect(
-            x: bounds.midX - side / 2,
-            y: bounds.midY - side / 2,
-            width: side,
-            height: side
-        ).insetBy(dx: strandWidth / 2, dy: strandWidth / 2)
+        let strandWidth = snapped(side * ThreadingMarkGeometry.strandStrokeRatio, to: scale)
+        let box = backingAlignedRect(
+            CGRect(
+                x: bounds.midX - side / 2,
+                y: bounds.midY - side / 2,
+                width: side,
+                height: side
+            ).insetBy(dx: strandWidth / 2, dy: strandWidth / 2),
+            options: .alignAllEdgesInward
+        )
 
         outline.frame = bounds
         outline.path = ThreadingMarkGeometry.outlinePath(in: box)
-        outline.lineWidth = side * ThreadingMarkGeometry.outlineStrokeRatio
+        outline.lineWidth = snapped(side * ThreadingMarkGeometry.outlineStrokeRatio, to: scale)
 
         for (strand, path) in zip(strands, ThreadingMarkGeometry.strandPaths(in: box)) {
             strand.frame = bounds
@@ -262,6 +285,11 @@ final class ThreadingMarkView: NSView, ThemedComponent {
 
         core.frame = bounds
         core.path = ThreadingMarkGeometry.corePath(in: box)
+    }
+
+    /// The nearest whole number of device pixels, and never fewer than one.
+    private func snapped(_ width: CGFloat, to scale: CGFloat) -> CGFloat {
+        max(1 / scale, (width * scale).rounded() / scale)
     }
 
     /// Colours re-applied per redraw, never trusted to survive a theme switch on the layer.
@@ -338,6 +366,8 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     func setHovered(_ hovered: Bool) {
         guard !Design.Motion.reducesMotion, hovered != isHovered else { return }
         isHovered = hovered
+        // The raster follows the lift — see `applyContentsScale`.
+        applyContentsScale()
         layoutSubtreeIfNeeded()
 
         let scale = hovered ? Layout.hoverScale : 1

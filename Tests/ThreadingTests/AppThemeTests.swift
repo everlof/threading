@@ -1046,8 +1046,12 @@ final class AppThemeTests: XCTestCase {
     /// it cannot. A neutral over the chrome drew a pale grey seam across themes whose every
     /// other rule is their own hue — and a themed line over a backdrop it vanishes against is
     /// the invisible seam this view originally existed to restore.
+    ///
+    /// The theme's line is its *rule* ink — `Design.Surface.divider`, where the ink budget is
+    /// enforced — not its border: drawn in `Surface.border` the seam was the one full-strength
+    /// rule left in the window, stepping in ink at the same crossing it once stepped in weight.
     @MainActor
-    func testTheSplitDividerTakesTheThemeBorderWhereverItReadsOnTheBackdrop() {
+    func testTheSplitDividerTakesTheThemeRuleInkWhereverItReadsOnTheBackdrop() {
         let original = WindowBackdrop.ground
         defer { WindowBackdrop.set(original) }
 
@@ -1058,16 +1062,16 @@ final class AppThemeTests: XCTestCase {
         WindowBackdrop.set(.chrome)
         XCTAssertEqual(
             split.dividerColor.resolvedHex,
-            Design.Surface.border.resolvedHex,
-            "the chrome's seam ignored the theme's own border"
+            Design.Surface.divider.resolvedHex,
+            "the chrome's seam ignored the theme's own rule ink"
         )
 
-        // Cyberpunk's border still reads on a black terminal, so the seam stays the theme's.
+        // Cyberpunk's rule still reads on a black terminal, so the seam stays the theme's.
         WindowBackdrop.set(.terminal(.black))
         XCTAssertEqual(
             split.dividerColor.resolvedHex,
-            Design.Surface.border.resolvedHex,
-            "a border that reads on the backdrop should be the seam"
+            Design.Surface.divider.resolvedHex,
+            "a rule that reads on the backdrop should be the seam"
         )
 
         // Swiss rules near-black lines; over a black terminal they vanish, so the seam falls
@@ -1075,8 +1079,8 @@ final class AppThemeTests: XCTestCase {
         AppThemePalette.set(AppThemeStyles.swissMinimalist)
         XCTAssertEqual(
             split.dividerColor.resolvedHex,
-            WindowBackdrop.ink.border.resolvedHex,
-            "a border the backdrop swallows must fall back to the measured neutral"
+            WindowBackdrop.ink.rule.resolvedHex,
+            "a rule the backdrop swallows must fall back to the measured neutral"
         )
     }
 

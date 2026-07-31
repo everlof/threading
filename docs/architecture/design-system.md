@@ -56,10 +56,13 @@ Four consequences worth knowing before adding UI:
   rather than onto the view. Those surfaces rebuild instead: Git Review re-reads on
   `AppThemeDidChange`, `ThemedTextField` rebuilds its placeholder. Prefer drawing in `draw(_:)`
   (as `PromptView`'s placeholder does) where the choice is available.
-- **A detached tree is in no window, so the sweep never reaches it.** A cached settings page and
-  a retained conversation take `AppThemeRefresh.repaint` on attach for that reason — the same
-  applies to any surface the app keeps alive off-screen, and it covers stale layer colours as
-  well as stale fonts.
+- **A detached tree is in no window, so the sweep never reaches it.** A cached settings page takes
+  `AppThemeRefresh.repaint` on attach for that reason. Retained conversations use
+  `repaintIfNeeded`: every whole-window sweep advances a generation and stamps the views it
+  reached, so a tree that actually missed a theme/accessibility/font change is repaired on
+  return while an ordinary hot session switch does not recursively repaint hundreds of rows.
+  The same invalidation rule applies to any surface the app keeps alive off-screen, and it covers
+  stale layer colours as well as stale fonts.
 
 Components so far:
 
@@ -93,11 +96,15 @@ Components so far:
 | `WorkingOrbView` | The dotted "working" orb, tinted with the accent — the theme boundary for the `ThinkingOrbs` view. |
 | `ThemedTabItemView` | **Every** tab: the display pane's strip, the settings sidebar, and the toolbar's active page. A middle-button click closes a closable tab on release without selecting it first; dragging away cancels, and other auxiliary buttons keep their own meaning. |
 | `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its `bandHeight` is `PaneHeaderView.bandHeight`, so every strip's hairline lands on the panes' shared line. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut`/`onDragEnded` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land, the receiving strip washing as a drop target (`isDropTarget`), and the slot named by the same midpoint rule as the reorder (`insertionIndex(forWindowPoint:)`) — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. A host that pins **both** of the strip's edges says so with `fillsHostWidth`: the default `.defaultHigh` hugging is what lets a control placed *after* the tabs follow them, and in a host that has no such control it is a *maximum on the host* — it capped the display panel at its own tab titles (see [`mcp-and-display.md`](mcp-and-display.md)). |
-| `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. `setImage` is its one documented exception to "a symbol": artwork whose silhouette is not ours — an installed application's own icon, which is what the header's Open in control wears (see [`external-apps.md`](external-apps.md)). It clears the view's `symbolConfiguration` first, because `NSImageView` applies that to *whatever* image it is handed and a configuration sized for an 11pt glyph draws a rendered app icon as nothing at all; `setSymbol` puts it back. |
+| `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. The role states a *slot* (layout: what the padding is measured from) and a *point size* (optics: what the symbol is configured at) — see the 2026-07-31 note for why those are two numbers. `setImage` is its one documented exception to "a symbol": artwork whose silhouette is not ours — an installed application's own icon, which is what the header's Open in control wears (see [`external-apps.md`](external-apps.md)). Foreign artwork is capped to the slot (`GlyphView.slot`); `setSymbol` clears the cap and configures to fit. |
+| `GlyphView` | A tinted glyph on the device pixel grid — `NSImageView` minus the fractional placement, inside `ThemedIconButton` and `ThemedTabItemView`. A symbol's natural size is fractional by design, so an image view centres it at a half-point offset: slight softness at 2×, a smeared stroke at 1×. This view centres the same rect and then `backingAlignedRect`s it (inward — nearest can push an edge past `bounds`, and a view clips its own drawing) before handing it to `TemplateImageDrawing`. Decorative; the control around it carries the name. |
 | `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
 | `PaneHeaderView` | The footer's mirror at a pane's top. Its height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it), so the two panes' hairlines land on one line. |
 | `PairingCodeImage` | The Remote Access QR code, drawn rather than scaled up from `CIQRCodeGenerator`: Chromium's geometry (dots at 0.8 of the pitch, rounded finder patterns), a four-module quiet zone Core Image does not supply, and a plate and ink carrying the accent's hue at a stated saturation. The only artwork here a *machine* has to read, so it is tested by decoding the render, not by asserting on the constants that drew it. |
-| `ToastView` / `ToastPresenter` | A receipt for something already done, floating above a pane's footer, with the way back on it. The view is one message, one optional detail line and one `ThemedButton`; the presenter owns everything that is about *time* — one band at a time, a six-second dwell (a request may ask for longer, and the one an agent raises does), the clock stopping while the pointer is on it, and the VoiceOver announcement a surface that takes no focus would otherwise never make. |
+| `ToastView` / `ToastPresenter` | A receipt for something already done, floating above a pane's footer, with the way back on it. The view is one message, one optional detail line and one `ThemedButton`; the presenter owns everything that is about *time* — one band at a time, a six-second dwell (a request may ask for longer, and the one an agent raises does), the clock stopping while the pointer is on it, and the VoiceOver announcement a surface that takes no focus would otherwise never make. The dwell is also *drawn*: a hairline in the accent along the band's lower edge drains as the clock runs, freezes with it under the pointer, and refills when a released band is granted a fresh dwell. It is a layer animation for `ThemedSpinner`'s reason, it lives inside the band's existing bottom inset so showing the clock costs no height, and Reduce Motion removes it rather than freezing it full — a still rail is a band claiming a countdown it is not showing. The band's words argue for **no** width at all (`ToastDefaults.contentWidthPriority`): pinned inside a host, a wrapping label's 750 outranked the sidebar's own holding priority, and the column jumped wider as a receipt arrived and back again as it left. |
+| `ThemedPopover` | Every app-owned anchored transient surface. It owns the themed body and arrow, preferred-edge placement with screen-edge flip and clamp, parent-window movement, live theme changes, transient/semitransient dismissal, Escape, accessibility announcement, and focus return. Content remains an ordinary view controller. Native application and context menus do not use it. |
+| `ThemedAlert` | Every app-owned modal statement, confirmation, choice, error, and text prompt. It owns themed severity, copy, accessory, suppression choice, button hover/press/focus, Return policy, universal Escape, sheet/modal presentation, accessibility, and focus return. `ConfirmationAlert`, `NoticeAlert`, and `TextPromptAlert` remain the semantic policy layer above it. |
+| `MediaInspectorView` / `MediaInspectorCanvas` | The in-window inspection surface for visible files. Images use an app-owned renderer with fit/actual/custom zoom, anchored pinch, pan, collection navigation and a thumbnail rail. PDFKit and embedded `QLPreviewView` live only inside `MediaInspectorDocumentView`, a named `SystemChromeBoundary`; System Quick Look is an action-menu fallback rather than the primary route. |
 | `ImageCompareView` | Two images against each other: a draggable wipe seam (either axis), a crossfade, a pixel difference, and side by side, with per-side captions and a mode chip. The captions are given a band **outside** the images before anything is fitted, never a pill over them: printed on the picture they hid the pixels the comparison exists to show, and at rest they sat exactly where the wipe starts, so reading a label meant scrubbing it out from under. Position carries the mapping — old at the start of the scrub's travel, new at its end, above and below it for the vertical wipe, over each image in side by side — the new side is inked a step darker, and difference names the pair `old → new` centred rather than splitting two titles across edges that mode has no sides for. One scrubbed fraction serves every mode — there is deliberately no slider control: the seam *is* the control (accent-inked, since it is the one thing on the surface asking to be used), fade held at the middle is the onion skin, and both images draw at one shared scale so a resized asset stays visibly resized rather than being normalised into "looks identical". The canvas is a `ThemedControl`: arrow keys nudge the scrub, Space recentres it, and VoiceOver reads it as a slider. |
 
 **A component is its interaction contract, not its resting render.** Before a new component is
@@ -221,6 +228,17 @@ reading something else since — so `ToastRequest.dwell` overrides the presenter
 receipt takes `ToastDefaults.unattendedDwell`. It also names the agent in its message, because a
 row that leaves the sidebar on its own is the one report where "what happened" without "who did
 it" is the wrong half of the sentence.
+
+**Nothing that can be taken back is dropped, so bursts queue.** One band at a time is still the
+rule — two of them in a 240-point column is a wall over the list they report on — but the band
+already up is no longer overwritten by the next arrival. Four archives in a row are four separate
+undos, and a receipt replaced a moment after it lands is one whose action nobody ever gets to
+press, which is precisely the safety net that justified archiving without asking first. So a band
+**with a way back** holds the pane and later reports wait behind it (`ToastDefaults.queueLimit`,
+oldest dropped first, because the queue is measured in dwells and a receipt surfacing most of a
+minute after the click is news rather than a receipt); a band with **nothing to offer** is still
+replaced where it stands, since nothing is lost and the newer line is the one that describes the
+state the user is in — the navigator's error arriving behind its own progress message.
 
 Five rules, each one a bug it prevents:
 
@@ -392,10 +410,10 @@ out of the editor and are appended only to the string submitted to the CLI. Raw 
 written to the temporary directory first (`PromptAttachment`) — a screenshot on the pasteboard
 has no path, and a path is still the only form of an image either CLI can act on. The visual
 distinction is for the person composing the prompt, not a second transport. A thumbnail is also
-a keyboard-focusable control: click it, or focus it and press Space/Return, to hand its path to
-the system Quick Look panel. Its corner remove button remains a separate action. The context menu
-keeps file actions at this boundary too: Quick Look, the default app, Finder reveal, copying the
-pixels/name/path, and removal.
+a keyboard-focusable control: click it, or focus it and press Space/Return, to open the app-owned
+media inspector at that item in the prompt's collection. Its corner remove button remains a
+separate action. The context menu keeps file actions at this boundary too: Inspect, the default
+app, Finder reveal, copying the pixels/name/path, explicit System Quick Look, and removal.
 
 The strip adds its height to the text input rather than consuming the text's existing minimum.
 That matters most in `SessionComposerViewController`, whose generous empty prompt asks for a
@@ -773,3 +791,49 @@ difference between the accent blue and a flat grey. Pressing one row's `⋯` rec
 selection of a different row, which is what made the selection read as random. A press no longer
 takes the keyboard focus, which is what every AppKit button does; Tab still reaches the button and
 still draws the ring.
+
+## 2026-07-31 — the chrome's ink weights agree, and glyphs land on the pixel grid
+
+One report ("the icons look light, and blurry on my external display") that decomposed, under
+measurement, into four separate defects. The numbers are worth keeping because every one of them
+was assumed fine until rasterised.
+
+**The anchor for every stroke in the chrome is the body text's stem: ~1.25pt** (SF 13 regular,
+measured by drawing an `l` at 8× and taking the median ink run). Rules are capped *down* to it —
+see the rule-ink budget in [`themes.md`](themes.md) — and glyphs were raised *up* to it:
+`Design.Symbol.configuration`'s default weight is `.medium`, whose 11pt stroke is exactly that
+1.25pt, where `.regular` strokes at 1.0 — every icon in the window sat below the weight of its
+own label, and on a 1× display a 1pt stroke at a fractional offset is two rows of antialiased
+grey. `GlyphTests.testTheDefaultGlyphStrokeMatchesTheBodyTextStem` pins glyph to stem by
+measuring both, so an OS symbol redesign surfaces as a failure instead of a drift.
+
+**A symbol is configured to fit its slot, never rendered and then shrunk.** One hard-set 11pt
+configuration served every role, and symbol natural sizes are the symbol's own: `gearshape`
+renders 14×14 at 11pt, the sidebar's arrange glyph 15×14 — both squeezed into the 12pt inline
+slot at ~0.8×, thinning the stroke the configuration had chosen and dropping it off the grid,
+while the same 11pt glyphs *underfilled* the toolbar's 16pt slot in the other direction.
+`ThemedIconButton.Target` now states both numbers (slot = layout, point size = optics;
+`Design.Symbol.toolbar` is 13), and `Design.Symbol.image(_:slot:pointSize:)` re-configures at
+the fitted point size when the render overflows — keeping the weight compensation SF's optical
+sizes exist to provide. Fitting never configures up.
+
+**Placement is aligned to the backing store, not to the arithmetic.** `GlyphView` (see the
+component table) replaced the `NSImageView` inside icon buttons and tabs.
+
+**A hand-added `CAShapeLayer` rasterises at `contentsScale` 1 until someone says otherwise.**
+`ThreadingMarkView` documented the trap and fixed itself; `ThemedSpinner` had the identical
+construction and spun blurry on every Retina display for as long as an agent worked — minutes at
+a time, in every sidebar row. It now re-applies the scale on `viewDidChangeBackingProperties`,
+and `ThemedIndicatorsTests.testHandAddedShapeLayersCarryTheWindowsBackingScale` sweeps the
+hand-layered indicators so the next one cannot reintroduce it. (`SidebarBackdropView`'s layers
+were checked and are immune: gravity-resized `contents` and a gradient rasterise nothing.)
+
+**The mark itself was at the floor of what 20pt can carry.** Its stroke ratios come from a 128pt
+SVG canvas — 7/128 and 7.5/128, which in the sidebar's slot are 1.09pt and 1.17pt of *curved*
+stroke: sub-pixel by construction on a 1× panel, and fractional even at 2×. `layout()` now snaps
+both widths to whole device pixels (floored at one) and backing-aligns the drawing box, and
+re-snaps when the window changes displays. The hover lift scales the raster, so while lifted the
+`contentsScale` carries the lift as headroom — full lift is pixel-exact, and the resting mark,
+where the time is spent, keeps the plain scale. If the mark still reads soft on a ~110ppi panel
+after this, the remaining move is a small-size cut (heavier ratios, or the mono form below a
+real-pixel threshold) — a design decision deliberately not taken here.

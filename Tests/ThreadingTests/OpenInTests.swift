@@ -374,7 +374,7 @@ final class OpenInTests: XCTestCase {
         button.setImage(icon, accessibility: "Open in Finder")
 
         XCTAssertEqual(button.accessibilityTitle(), "Open in Finder")
-        let images = descendantImageViews(of: button).compactMap(\.image)
+        let images = descendantGlyphViews(of: button).compactMap(\.image)
         XCTAssertTrue(images.contains { $0 === icon }, "the button is not showing the app's icon")
     }
 
@@ -382,10 +382,10 @@ final class OpenInTests: XCTestCase {
     /// what is being asserted is which app the item names, not what pressing it does.
     @objc private func openInAppClicked(_ sender: NSMenuItem) {}
 
-    private func descendantImageViews(of view: NSView) -> [NSImageView] {
-        view.subviews.flatMap { subview -> [NSImageView] in
-            let nested = descendantImageViews(of: subview)
-            return (subview as? NSImageView).map { [$0] + nested } ?? nested
+    private func descendantGlyphViews(of view: NSView) -> [GlyphView] {
+        view.subviews.flatMap { subview -> [GlyphView] in
+            let nested = descendantGlyphViews(of: subview)
+            return (subview as? GlyphView).map { [$0] + nested } ?? nested
         }
     }
 }

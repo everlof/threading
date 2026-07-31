@@ -21719,6 +21719,26 @@
           }
         }
       }
+    },
+    "SubmissionStatusView": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SubmissionStatusView"
+          }
+        }
+      }
+    },
+    "How a submitted thing ended. Press each: the wording and the glyph carry the outcome, so it survives Differentiate Without Colour — and every change announces itself to VoiceOver.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hur något inskickat slutade. Tryck på varje: formuleringen och symbolen bär utfallet, så det överlever Differentiera utan färg — och varje ändring aviseras för VoiceOver."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

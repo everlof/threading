@@ -229,6 +229,27 @@ struct AppTheme: Codable, Equatable {
 
         static let system = Material()
 
+        /// The heaviest a *rule* may read, in points of fully-opaque ink.
+        ///
+        /// A rule and the text beside it are weighed by the same eye, and the anchor is the
+        /// text: the body face's stem is ~1.25pt (SF 13 regular, measured by rasterising),
+        /// so a rule carrying more ink than that stops reading as a rule between things and
+        /// starts reading as a bar across them. Perceived weight is thickness × ink strength,
+        /// which is why this is a budget rather than a width: a 1pt rule may be fully inked
+        /// (Swiss Minimalist's brief is exactly that), while a 3pt rule must hold back to
+        /// ~0.43 — which is, to the point, what Industrial already authored by hand.
+        static let ruleInkBudget: CGFloat = 1.3
+
+        /// The strongest ink a rule of this material's weight may carry.
+        ///
+        /// Derived rather than authored, so a theme — stock, custom, or contributed — states
+        /// only `borderWidth` and can never state its way past the budget. The floor of 1 in
+        /// the divisor mirrors `ThemedSplitView.minimumGrab`: a sub-point rule is drawn at a
+        /// point, so it is judged at a point.
+        var ruleInkCeiling: CGFloat {
+            min(1, Self.ruleInkBudget / max(1, borderWidth))
+        }
+
         init(
             panelRadius: CGFloat = 12,
             controlRadius: CGFloat = 8,

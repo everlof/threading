@@ -456,12 +456,46 @@ enum Design {
     enum Symbol {
         /// Beside a control's label.
         static let control: CGFloat = 11
+        /// A top-level toolbar action, whose 16pt slot an 11pt glyph underfilled — the toolbar
+        /// read as a row of marks smaller and lighter than every control below it.
+        static let toolbar: CGFloat = 13
         /// Disclosure chevrons, which should read as a hint rather than a control.
         static let chevron: CGFloat = 8
 
-        static func configuration(_ pointSize: CGFloat, weight: NSFont.Weight = .regular)
+        /// `.medium`, because glyphs are weighed against the text beside them and the anchor
+        /// is its stem: SF 13 regular's is ~1.25pt, which is what an 11pt `.medium` symbol
+        /// strokes at — measured by rasterising, not read off a table. `.regular` strokes at
+        /// 1.0pt, so every icon in the chrome sat *below* the weight of its own label; on a 1×
+        /// display that is a single antialiased pixel. Callers with a reason still state their
+        /// own weight — the chevron is `.semibold` because at 8pt even medium reads faint.
+        static func configuration(_ pointSize: CGFloat, weight: NSFont.Weight = .medium)
             -> NSImage.SymbolConfiguration {
             .init(pointSize: pointSize, weight: weight)
+        }
+
+        /// A symbol sized so its rendered form fits `slot` — by *configuring* smaller, never by
+        /// scaling the render.
+        ///
+        /// A symbol's natural size is its own: at the 11pt configuration `gearshape` renders
+        /// 14×14 and the sidebar's arrange glyph 15×14, so a 12pt slot was shrinking finished
+        /// renders by a fifth — which thins the stroke below what the configuration chose and
+        /// drops it off the pixel grid. Re-configuring at the fitted point size keeps the
+        /// weight compensation SF's optical sizes exist to provide. Symbols already inside the
+        /// slot keep their nominal size; nothing is ever configured *up*.
+        static func image(
+            _ symbolName: String,
+            slot: CGFloat,
+            pointSize: CGFloat,
+            weight: NSFont.Weight = .medium
+        ) -> NSImage? {
+            func rendered(at size: CGFloat) -> NSImage? {
+                NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(configuration(size, weight: weight))
+            }
+            guard let nominal = rendered(at: pointSize) else { return nil }
+            let widest = max(nominal.size.width, nominal.size.height)
+            guard widest > slot else { return nominal }
+            return rendered(at: pointSize * slot / widest)
         }
     }
 
@@ -491,9 +525,27 @@ enum Design {
             Accessibility.color(.border, increasedContrastAlphaFloor: 0.70)
         }
 
-        /// A rule between rows, quieter than a border around them.
+        /// A rule between rows, quieter than a border around them — and *held* quieter.
+        ///
+        /// Quieter is enforced rather than hoped for. Most stock themes attenuate their
+        /// `divider` role by hand, but nothing made a loud one do it: Neo Brutalism stated
+        /// full label ink under a 3pt rule weight, and every rule in the window drew as a
+        /// black bar 2.5× the stem of the text beside it. So the authored ink is capped at
+        /// `Material.ruleInkCeiling` — thickness × ink stays within the budget one body stem
+        /// costs — and never *raised*: a theme quieter than its ceiling keeps its own value.
+        /// Resolved inside a dynamic colour so a live theme switch, an appearance flip and
+        /// Increase Contrast each take the decision again; under Increase Contrast the
+        /// ceiling yields to the floor, because contrast asked for is contrast given.
         static var divider: NSColor {
-            Accessibility.color(.divider, increasedContrastAlphaFloor: 0.60)
+            NSColor(name: NSColor.Name("threading.surface.divider")) { appearance in
+                let authored = AppThemePalette.current.resolved(.divider, appearance: appearance)
+                guard let resolved = authored.usingColorSpace(.sRGB) else { return authored }
+                if Accessibility.increasesContrast {
+                    return resolved.withAlphaComponent(max(resolved.alphaComponent, 0.60))
+                }
+                let ceiling = AppThemePalette.current.material(for: appearance).ruleInkCeiling
+                return resolved.withAlphaComponent(min(resolved.alphaComponent, ceiling))
+            }
         }
 
         /// The window's own backdrop.
@@ -647,6 +699,16 @@ enum Design {
         let surfaceHover: NSColor
         let border: NSColor
 
+        /// A rule *between* things, as against the border *around* one.
+        ///
+        /// Distinct because only the chrome distinguishes them: there the theme states both
+        /// roles and `Design.Surface.divider` holds the rule to the ink budget, so a rule and
+        /// a border genuinely differ. Over a backdrop the ink is derived from the ground, and
+        /// the derived border already sits inside the budget at any weight the gates allow —
+        /// so it is the same value under a second name, and the name is what a call site
+        /// drawing a rule states.
+        let rule: NSColor
+
         /// Surfaces cut from `base`, for a ground the theme does not own.
         init(
             base: NSColor,
@@ -656,6 +718,7 @@ enum Design {
             quaternary: NSColor
         ) {
             let increased = Accessibility.increasesContrast
+            let border = base.withAlphaComponent(increased ? 0.52 : 0.30)
             self.init(
                 base: base,
                 label: label,
@@ -664,7 +727,8 @@ enum Design {
                 quaternary: quaternary,
                 surface: base.withAlphaComponent(increased ? 0.22 : 0.14),
                 surfaceHover: base.withAlphaComponent(increased ? 0.34 : 0.24),
-                border: base.withAlphaComponent(increased ? 0.52 : 0.30)
+                border: border,
+                rule: border
             )
         }
 
@@ -677,7 +741,8 @@ enum Design {
             quaternary: NSColor,
             surface: NSColor,
             surfaceHover: NSColor,
-            border: NSColor
+            border: NSColor,
+            rule: NSColor
         ) {
             self.base = base
             self.label = label
@@ -687,6 +752,7 @@ enum Design {
             self.surface = surface
             self.surfaceHover = surfaceHover
             self.border = border
+            self.rule = rule
         }
 
         /// The chrome's own ground, as an `Ink`.
@@ -703,7 +769,8 @@ enum Design {
                 quaternary: Design.Text.quaternary,
                 surface: Design.Surface.controlResting,
                 surfaceHover: Design.Surface.controlHover,
-                border: Design.Surface.border
+                border: Design.Surface.border,
+                rule: Design.Surface.divider
             )
         }
     }

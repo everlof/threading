@@ -4,14 +4,15 @@ Terminal themes, app themes, and the three scopes both resolve through.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-A terminal theme is chosen at one of three scopes — session, project, or the app default —
-and `ThemeResolution.resolve` picks the narrowest one that names a theme that exists.
+A terminal theme is chosen at one of three scopes — the selected chat or standalone terminal,
+its project, or the app default — and `ThemeResolution.resolve` picks the narrowest one that
+names a theme that exists.
 
 Two rules carry the whole design, and both are pure functions of four arguments precisely so
 they could be tested without standing up three singletons and a window:
 
-- **Absent means inherit, not copy.** A session with no `themeName` follows its project, and a
-  project with none follows the default, so changing the default still moves everything that
+- **Absent means inherit, not copy.** A chat or standalone terminal with no assignment follows
+  its project, and a project with none follows the default, so changing the default still moves everything that
   never opted out. Recording the current theme at creation would have frozen every session
   against the one setting most likely to change.
 - **A dangling name is not an error.** Themes are identified by name, so deleting one leaves
@@ -33,9 +34,11 @@ Only the *theme* is scoped. The rest of a profile — font, cursor, shell, scrol
 describes how the user works rather than how one conversation looks, and `ThemeAssignments.profile`
 returns the global profile carrying a resolved theme.
 
-The assignments live on the records they theme (`AgentSession.themeName`, `Project.themeName`
-in `projects.json`) rather than in a side table, so each is deleted with the thing it applies
-to instead of outliving it and re-theming whatever reuses the identifier.
+The assignments live on the records they theme (`AgentSession.themeID`,
+`ProjectTerminal.themeID`, `Project.themeID`) rather than in a side table, so each is deleted
+with the thing it applies to instead of outliving it and re-theming whatever reuses the
+identifier. A standalone terminal inherits from the project at its **current cwd**, so moving
+under another already-added project updates the palette with the sidebar placement.
 
 `ThemeColorKey` names the palette's twenty colours once, as key paths with a `displayName` and
 a snake-case `wireName`. The settings editor previously kept a `[String: NSColorWell]` and a
@@ -43,8 +46,8 @@ twenty-case `switch` to put a changed colour back, and the MCP schema needs the 
 generating the tool's schema from the enum is what stops a colour being added to the model and
 left out of the schema an agent reads.
 
-**Scope is chosen where it applies**, which is a session's or a project's own `⋯` menu — the
-same placement as the surface switch and the project icon. Only the default lives in Settings,
+**Scope is chosen where it applies**, which is a chat's, standalone terminal's or project's
+own `⋯` menu — the same placement as the surface switch and the project icon. Only the default lives in Settings,
 being the scope with no row to hang from. Each menu's "Inherit" item names what it inherits,
 since that is the one choice in the list whose result cannot otherwise be seen, and every item
 carries a `ThemeMenuChoice` naming its own target rather than reading "whichever row was last
@@ -151,8 +154,9 @@ were diffs would guess wrong on somebody's progress bar. Foregrounds are never o
 transform — a program's syntax highlighting is its own — and indexed colours never reach it,
 being the palette already. `TerminalBackgroundHarmonyTests` pins the three guarantees.
 
-A live app-theme switch is a terminal-theme switch for any session following it, which is why
-`AgentSessionViewController` observes `AppThemeDidChange` alongside the assignment events.
+A live app-theme switch is a terminal-theme switch for any chat or standalone terminal
+following it, which is why `AgentSessionViewController` and `ProjectTerminalViewController`
+observe `AppThemeDidChange` alongside the assignment events.
 
 **The palette is only half of it: the program has to be *told* what it is drawing on.** Claude
 Code ships `"theme": "auto"`, which is not "follow macOS" — it sends `OSC 11 ; ? ST`, reads the
@@ -377,6 +381,27 @@ the sweep across the whole catalogue is `ThemedIndicatorsTests`
 (`testEveryStockThemeRulesAtOneWeightThroughoutTheWindow`), entering each style from the heaviest
 one so a stale rule has somewhere to show.
 
+**A rule's *ink* is budgeted, and the budget is the text stem (2026-07-31).** Weight agreeing
+everywhere made the loud themes uniformly loud: Neo Brutalism states `divider` at full label ink
+under a 3pt rule weight, so every rule in the window drew as a black bar ~2.5× the stem of the
+text beside it (SF 13 regular's stem is ~1.25pt, measured off a raster). Perceived heaviness is
+thickness × ink, so the invariant is a *budget* — `AppTheme.Material.ruleInkBudget`, 1.3pt of
+fully-opaque ink — and the ceiling it implies for a given weight is `Material.ruleInkCeiling`.
+Enforcement lives in the one interpreter, `Design.Surface.divider`: authored alpha is capped at
+the ceiling, never raised (eight of twelve stock themes already attenuate by hand and keep their
+own values; Industrial's hand-authored 2pt × 33% is almost exactly what the cap derives for
+Neo Brutalism), and Increase Contrast bypasses the cap for its floor. Because it is derived at
+draw time, a custom or contributed theme cannot state its way past it — the gates still clamp
+`borderWidth` to 0.5–4, and within that range the capped ink always clears the seam's visibility
+floor. Three consequences to know about: the split seam now draws `Surface.divider` rather than
+`Surface.border` (it is a rule between panes, and in the eight hand-attenuated themes the seam
+was stepping in *ink* at the same crossing it once stepped in weight); `Design.Ink` gained
+`rule` beside `border` so backdrop-drawn rules (the shell drawer's strip) state the same
+decision; and `RemoteThemeBridge` applies the ceiling to the `divider` it projects, so remote
+clients inherit the discipline instead of re-learning it. The catalogue sweep is
+`ThemedIndicatorsTests.testEveryStockThemeKeepsItsRuleInkWithinTheBudget`, both appearances,
+asserting the cap *and* that a quiet theme is never re-inked.
+
 ## 2026-07-31 — the active app theme is a living workspace document
 
 **Current Theme** is an app-wide workspace surface, separate from both Settings and the
@@ -385,14 +410,22 @@ has one active value for the whole window, while a terminal palette resolves thr
 project, and default scopes. Basic app-theme selection remains in Settings ▸ Appearance; the
 living document is for inspecting, editing, and collaborating with an agent on the active theme.
 
-The direct entry is a conditional sidebar utility immediately above Settings, visible while at
-least one built-in theme MCP tool is enabled. **View ▸ Current Theme** exposes the same command;
-it does not live under Window because it is a surface inside the main window rather than another
-window. The document opens in the trailing display panel beside the conversation, but it is not a
-session tab: it does not appear in the panel's `+` menu, persist in either per-session tab list, or
-move between panels. Selecting another conversation keeps the app-wide document open so the user
-can compare or discuss it without losing context; explicitly opening a session surface restores
-that session's ordinary tabs.
+The direct entry is in the display panel's `+` menu, below that chat's own surfaces and behind its
+own separator, while at least one built-in theme MCP tool is enabled. **View ▸ Current Theme**
+exposes the same command; it does not live under Window because it is a surface inside the main
+window rather than another window. The document opens in the trailing display panel beside the
+conversation, and the door is there because that is the pane it opens into: the entry was first a
+standing row in the *leading* sidebar, above Settings, which made a permanent fixture out of a
+pointer to something that column never shows — and left the panel with no way in at all. Being in
+the `+` does not make it a session tab: it persists in neither per-session tab list, joins no
+strip, and does not move between panels. Choosing it takes the whole panel. Selecting another
+conversation keeps the app-wide document open so the user can compare or discuss it without losing
+context; explicitly opening a session surface restores that session's ordinary tabs.
+
+The `+` route goes through the window (`DisplayPaneController.onShowCurrentTheme`) rather than
+calling `showCurrentTheme` directly, because opening it also has to uncollapse the panel and step
+out of Settings — neither of which the panel can see. Unset, the entry falls back to showing the
+document in place, which is what a standalone pane in a test does.
 
 The page reads `AppThemeLibrary.current` every time it refreshes and exposes the theme's source,
 available appearance variants, material, sidebar treatment, paired terminal colours, and the

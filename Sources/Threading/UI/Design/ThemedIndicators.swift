@@ -63,6 +63,9 @@ final class ThemedSpinner: NSView, ThemedComponent {
         /// A gap in the ring is what makes rotation visible at all.
         static let sweep: CGFloat = 0.72
         static let period: CFTimeInterval = 0.9
+        /// Used only before the view has a window or a screen to ask. Retina rather than 1×
+        /// because guessing low is the case that ships blurry — `ThreadingMarkView`'s rule.
+        static let assumedBackingScale: CGFloat = 2
     }
 
     private let arc = CAShapeLayer()
@@ -81,6 +84,7 @@ final class ThemedSpinner: NSView, ThemedComponent {
         arc.lineWidth = Layout.lineWidth
         arc.lineCap = .round
         layer?.addSublayer(arc)
+        applyContentsScale()
         themeRedraw = ThemeRedraw(self)
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -139,6 +143,23 @@ final class ThemedSpinner: NSView, ThemedComponent {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
+    }
+
+    /// The same trap `ThreadingMarkView` documents: a shape layer added by hand is not given
+    /// the view's `contentsScale`, so the arc rasterised its path at 1× and the compositor
+    /// scaled it up — a 1.5pt ring that was two pixels of grey smear on every Retina display,
+    /// for every minute an agent worked. Re-asked when the window moves between displays.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyContentsScale()
+    }
+
+    private func applyContentsScale() {
+        let scale = window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? Layout.assumedBackingScale
+        layer?.contentsScale = scale
+        arc.contentsScale = scale
     }
 
     @objc private func accessibilityDisplayOptionsChanged() {

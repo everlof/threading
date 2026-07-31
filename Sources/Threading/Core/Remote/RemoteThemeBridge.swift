@@ -34,10 +34,20 @@ enum RemoteThemeBridge {
                     ? "dark"
                     : "light"
             }
-            for role in AppThemeRole.allCases {
-                colors[role.wireName] = theme.resolved(role, appearance: appearance).hexString
-            }
             material = theme.variant(for: appearance)?.material ?? theme.material
+            for role in AppThemeRole.allCases {
+                var resolved = theme.resolved(role, appearance: appearance)
+                // The Mac holds every rule to `Material.ruleInkBudget` at draw time
+                // (`Design.Surface.divider`); remote clients draw their rules straight from
+                // this value, so the projection carries the capped ink rather than each
+                // client re-learning the budget.
+                if role == .divider, let srgb = resolved.usingColorSpace(.sRGB) {
+                    resolved = srgb.withAlphaComponent(
+                        min(srgb.alphaComponent, material.ruleInkCeiling)
+                    )
+                }
+                colors[role.wireName] = resolved.hexString
+            }
             if let glow = material.glow {
                 glowColor = theme.resolved(glow.role, appearance: appearance).hexString
             }
