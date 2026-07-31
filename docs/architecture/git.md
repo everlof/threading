@@ -340,6 +340,28 @@ case where the staleness would have shown. The transcript records what each turn
 and is the authoritative source where a conversation is being replayed — see
 [`native-conversations.md`](native-conversations.md).
 
+**The model has a third source, and it is the transcript.** The two configuration sources both
+describe what was *chosen*: `session.model` is what the user pinned in the composer, and
+`AgentModels.defaultModel` reads `"model"` from the account's `settings.json`. A login that
+leaves the choice to the CLI sets neither — `~/.claude-vlundborg/settings.json` here carries
+`effortLevel` and no `model` — and Claude then resolves its own default from a layer this app
+does not read, so the card sat beside a session visibly running Opus 5 and could say only "Extra
+High". `ClaudeTranscriptModel` reads the newest `message.model` back out of the session's own
+transcript, which observed rather than configured and is the only one of the three that moves
+when the user types `/model`.
+
+Three properties make that affordable, and each is a cost it would otherwise have. The scan runs
+**backwards and capped** (`JSONLReader.forEachRecordFromEnd`): the model is on assistant records
+and a transcript ends on whatever the last tool wrote, so the answer is near the end and almost
+never on the last line — `lastRecord`'s answer — while reading forwards would walk a whole
+conversation to reach its end. It **never touches the disk on the main thread**: `known(at:)`
+answers from memory so the card paints on selection, and even the size check that decides whether
+to re-read happens on the background queue. And it **calls back only on a change**, because
+`ProjectsDidChange` fires for the terminal titles agents rewrite constantly, and a completion per
+event would redraw the card for an answer that had not moved. A tail made of nothing but tool
+output answers nothing rather than reading a 250 MB file — duplicating a fact is the safe
+direction for a guess here, but inventing one is not.
+
 One consequence worth stating: a session in a **non-git folder** now shows a card where it
 previously showed none, because the model is a fact the pane has even when the checkout is not
 one. The card was already a session status card rather than a Git one — children alone have kept

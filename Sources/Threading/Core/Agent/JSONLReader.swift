@@ -116,6 +116,61 @@ enum JSONLReader {
         return nil
     }
 
+    /// Calls `handle` for each record from the **end** backwards, newest first, until it returns
+    /// false or `limit` bytes have been read.
+    ///
+    /// `lastRecord` above answers "how did this conversation stop", which only ever needs the
+    /// final line. This answers "when did it last say X", and the two are different questions
+    /// whenever the fact wanted is not on that line — a Claude transcript ends on whatever the
+    /// last tool wrote, while the model is recorded on assistant records only. Reading forwards
+    /// to find it would walk an entire conversation to reach the part nearest its end.
+    ///
+    /// `limit` bounds the scan rather than the record, the same rule the forward reader keeps: a
+    /// tail made of nothing but tool output answers nothing rather than reading a 250 MB file to
+    /// the top.
+    static func forEachRecordFromEnd(at url: URL, limit: Int, _ handle: ([String: Any]) -> Bool) {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? file.close() }
+
+        guard let fileSize = try? file.seekToEnd(), fileSize > 0 else { return }
+
+        var offset = fileSize
+        var buffer = Data()
+        var consumed = 0
+        let newline = UInt8(ascii: "\n")
+
+        while offset > 0, consumed < limit {
+            let count = min(UInt64(JSONLDefaults.chunkBytes), offset)
+            offset -= count
+
+            do {
+                try file.seek(toOffset: offset)
+                guard let chunk = try file.read(upToCount: Int(count)), !chunk.isEmpty else {
+                    return
+                }
+                buffer.insert(contentsOf: chunk, at: buffer.startIndex)
+            } catch {
+                return
+            }
+
+            consumed += Int(count)
+
+            // Everything after the buffer's first newline is a whole record and can be handed
+            // out now, newest first. What is left in front of that newline is the *tail* of a
+            // record whose start lies in the chunk not read yet, so it waits — the same
+            // never-truncate-a-record rule, in the other direction.
+            while let delimiter = buffer.lastIndex(of: newline) {
+                let line = buffer[buffer.index(after: delimiter)...]
+                buffer.removeSubrange(delimiter..<buffer.endIndex)
+                if !line.isEmpty, !deliver(line, to: handle) { return }
+            }
+        }
+
+        // Only once the top of the file has been reached is the leading remainder a whole
+        // record; a scan that stopped at `limit` leaves a fragment, which is not one.
+        if offset == 0, !buffer.isEmpty { _ = deliver(buffer, to: handle) }
+    }
+
     /// Parses one line and passes it on, reporting whether reading should continue.
     private static func deliver(_ line: Data, to handle: ([String: Any]) -> Bool) -> Bool {
         guard let record = dictionary(from: line) else { return true }

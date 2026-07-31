@@ -450,7 +450,17 @@ The vocabulary these encode, which new work should follow:
   the control always had: **primary** is the accent fill (`isProminent`), **secondary** the
   surface-and-hairline (`isBordered`), **tertiary** the mark with no surface until the pointer
   reaches it. There is deliberately no destructive colour — a destructive button says so in its
-  *title*, and red on a theme whose accent is already red says nothing. A second primary makes
+  *title*, and red on a theme whose accent is already red says nothing. **A destructive
+  confirmation has no primary at all**, which is the one place the tier is decided by the action
+  rather than by the key equivalent: `ThemedAlert` fills whichever button carries Return, and
+  `ConfirmationAlert.applyDefaultButton` deliberately moves Return to *Cancel* for an
+  `.irreversible` prompt — so the accent fill went with it, and in Swiss Minimalist, whose
+  `accent` and `statusNegative` are the same `#D6180B`, the loudest and reddest thing in a delete
+  dialog was the button that does not delete. Filling the *action* instead was the other
+  candidate and is worse: it makes the irreversible button the most clickable thing on a sheet
+  whose whole purpose is to slow the user down. Neither is filled, which also makes the pair the
+  same size — a prominent button's focus ring is stroked *inside* its own silhouette, so the
+  filled Cancel came out 4pt shorter than the bordered Delete beside it. A second primary makes
   both of them ordinary: the composer's action row is one primary ("Start session") beside one
   secondary ("Import 90 conversations"), which is what tells you which of the two the screen is
   about. A button that owns a chord names it on its own face through `shortcut` — one

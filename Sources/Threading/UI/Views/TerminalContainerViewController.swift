@@ -1095,10 +1095,17 @@ private extension TerminalContainerViewController {
             for: session.kind,
             handle: session.accountHandle
         )
-        let model = session.model ?? AgentModels.defaultModel(
+        let configured = session.model ?? AgentModels.defaultModel(
             for: session.kind,
             account: account
         )
+        // Neither source is set for a login that leaves the model to the CLI, and Claude then
+        // picks its own from a layer this app does not read — which is how a session visibly
+        // running Opus 5 reported only its effort. Its transcript records what actually
+        // answered, so that is the third source; `known` reads memory, and the file is re-read
+        // behind the paint. See `ClaudeTranscriptModel`.
+        let transcript = observedModelTranscript(for: session, in: project)
+        let model = configured ?? transcript.flatMap { ClaudeTranscriptModel.known(at: $0) }
         let effort = AgentModels.effectiveEffort(for: session, model: model, account: account)
         let isFast = session.kind == .codex
             && (
@@ -1118,6 +1125,18 @@ private extension TerminalContainerViewController {
             },
             isFast: isFast
         )
+
+        // Behind the paint, never in front of it. The card shows what is already known and this
+        // re-reads only when the transcript has grown, calling back only when the model moved —
+        // so a `/model` lands on the card without a refresh per `ProjectsDidChange`, and the
+        // first read of a freshly selected session arrives a beat later rather than stalling the
+        // switch.
+        if configured == nil, let transcript {
+            ClaudeTranscriptModel.revalidate(at: transcript) { [weak self] _ in
+                guard let self, self.currentSessionID == sessionID else { return }
+                self.refreshGitStatusOverlayModel()
+            }
+        }
 
         // Only Claude runs a status line, so a Codex terminal has nothing to complement — and
         // a suppressed one prints nothing by construction, so there is no line to defer to
@@ -1150,6 +1169,21 @@ private extension TerminalContainerViewController {
             if coverage.fastMode { filtered.isFast = false }
             self.gitStatusOverlay.updateModel(filtered)
         }
+    }
+
+    /// The transcript whose records can name the model this session ran, or nil where none can.
+    ///
+    /// Claude only, and only once the conversation has an identifier: Codex records its model in
+    /// a rollout of a different shape, and a session that has not been resumed or launched yet
+    /// has nothing written to read. A path is returned whether or not the file exists —
+    /// `ClaudeTranscriptModel` answers nothing for a file it cannot open, which is the same
+    /// answer by a shorter route than a `fileExists` check on the main thread.
+    private func observedModelTranscript(for session: AgentSession, in project: Project) -> URL? {
+        guard session.kind == .claude,
+              let transcriptID = session.resumeState.transcriptID
+        else { return nil }
+
+        return ClaudeTranscript.url(sessionID: transcriptID, for: session, in: project)
     }
 
     /// Opens the most relevant child, after which the display pane owns navigation among all

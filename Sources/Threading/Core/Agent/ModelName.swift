@@ -19,6 +19,7 @@ enum ModelName {
     /// "Default".
     private static let families: [(id: String, name: String)] = [
         ("claude-fable-5", "Fable 5"),
+        ("claude-opus-5", "Opus 5"),
         ("claude-opus-4-8", "Opus 4.8"),
         ("claude-sonnet-5", "Sonnet 5"),
         ("claude-haiku-4-5", "Haiku 4.5"),

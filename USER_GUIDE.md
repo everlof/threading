@@ -1451,6 +1451,13 @@ branch and totals highlight together and open Git Review, the children row opens
 audience row opens Sharing, and the model line — a reading rather than a destination — stays
 quiet under the pointer and does nothing when clicked.
 
+The model line names whatever the session is running, including when you never chose one. If you
+pinned a model in the composer, or your Claude account's `settings.json` names one, that is what
+it says; otherwise Threading reads the model back out of the conversation's own transcript, so a
+session left on the CLI's own default still reports it — and a `/model` typed mid-conversation
+moves the line the next time the card refreshes. A terminal session whose own status line already
+prints the model shows it once, on that line, rather than twice.
+
 While the agent is working, that card becomes a live run receipt: the branch gives way to a
 working orb, the current **Step n / total** when the agent reports a plan, and the number of
 changed files beside the live `+N −M` totals. If Claude is running several task-list items in

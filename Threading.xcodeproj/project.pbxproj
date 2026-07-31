@@ -208,6 +208,7 @@
 		21784437C4536523D2704BC0 /* TitlebarDoubleClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82373011D8034BC7FD92008F /* TitlebarDoubleClickTests.swift */; };
 		0A38C83E5356A2D876DEC347 /* SessionAttachmentsLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE17ED05CC0D15A1469686A1 /* SessionAttachmentsLayoutTests.swift */; };
 		3AD26AD4BEAD20471B07D633 /* TerminalNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747D954A4517492D10D6C8C3 /* TerminalNamingTests.swift */; };
+		7D45DC42930AD631018557DE /* ClaudeTranscriptModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BF13934933AAFE8D35DCB26 /* ClaudeTranscriptModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -460,6 +461,7 @@
 		82373011D8034BC7FD92008F /* TitlebarDoubleClickTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TitlebarDoubleClickTests.swift; sourceTree = "<group>"; };
 		AE17ED05CC0D15A1469686A1 /* SessionAttachmentsLayoutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionAttachmentsLayoutTests.swift; sourceTree = "<group>"; };
 		747D954A4517492D10D6C8C3 /* TerminalNamingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalNamingTests.swift; sourceTree = "<group>"; };
+		8BF13934933AAFE8D35DCB26 /* ClaudeTranscriptModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeTranscriptModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -772,6 +774,7 @@
 				82373011D8034BC7FD92008F /* TitlebarDoubleClickTests.swift */,
 				AE17ED05CC0D15A1469686A1 /* SessionAttachmentsLayoutTests.swift */,
 				747D954A4517492D10D6C8C3 /* TerminalNamingTests.swift */,
+				8BF13934933AAFE8D35DCB26 /* ClaudeTranscriptModelTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1330,6 +1333,7 @@
 				21784437C4536523D2704BC0 /* TitlebarDoubleClickTests.swift in Sources */,
 				0A38C83E5356A2D876DEC347 /* SessionAttachmentsLayoutTests.swift in Sources */,
 				3AD26AD4BEAD20471B07D633 /* TerminalNamingTests.swift in Sources */,
+				7D45DC42930AD631018557DE /* ClaudeTranscriptModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

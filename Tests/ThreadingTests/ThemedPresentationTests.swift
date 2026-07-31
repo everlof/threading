@@ -128,6 +128,79 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: root), [])
     }
 
+    /// Prominence follows Return everywhere else, and must not here.
+    ///
+    /// `ConfirmationAlert.applyDefaultButton` deliberately moves Return to Cancel for an
+    /// `.irreversible` prompt, so the accent fill went with it: the loudest thing in a delete
+    /// dialog was the button that does not delete, and on a theme whose accent is its negative
+    /// colour it was the reddest thing too. Filling the *action* instead was rejected — it makes
+    /// the irreversible button the most clickable thing on a sheet meant to slow the user down —
+    /// so a destructive confirmation fills neither, and the two come out the same size.
+    func testADestructiveAlertFillsNeitherButtonAndSizesThemAlike() throws {
+        let root = sized(destructiveAlert().makeContentView())
+        let buttons = themedButtons(in: root)
+        let delete = try XCTUnwrap(buttons.first { $0.title == "Delete" })
+        let cancel = try XCTUnwrap(buttons.first { $0.title == "Cancel" })
+
+        XCTAssertEqual(delete.emphasis, .secondary)
+        XCTAssertEqual(cancel.emphasis, .secondary, "Cancel is wearing the accent fill")
+        XCTAssertEqual(
+            delete.frame.height,
+            cancel.frame.height,
+            "a filled button's focus ring is stroked inside its own silhouette, "
+                + "so the prominent one read shorter than the bordered one beside it"
+        )
+        XCTAssertNotNil(delete.contentTintColor, "the destructive action says so in its title")
+        XCTAssertNil(cancel.contentTintColor)
+    }
+
+    /// The other half of the rule: an ordinary confirmation — a grant, an OK — still fills the
+    /// button Return activates, because there the default *is* the action.
+    func testAnOrdinaryAlertStillFillsTheButtonReturnActivates() throws {
+        let alert = ThemedAlert()
+        alert.messageText = "Allow this tool?"
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Cancel")
+
+        let buttons = themedButtons(in: sized(alert.makeContentView()))
+
+        XCTAssertEqual(buttons.first { $0.title == "Allow" }?.emphasis, .primary)
+        XCTAssertEqual(buttons.first { $0.title == "Cancel" }?.emphasis, .secondary)
+    }
+
+    /// The picture, under the theme that showed it. Swiss Minimalist sets `accent` and
+    /// `statusNegative` to the same `#D6180B`, which is what collapsed "this is the action" and
+    /// "this is destructive" into one signal wearing the wrong label.
+    func testSwissMinimalistLeavesTheCancelOfADeleteDialogOnPaper() throws {
+        let previous = AppThemeLibrary.current
+        defer {
+            AppThemePalette.set(previous)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: previous.id))
+        }
+        let swiss = AppThemeStyles.swissMinimalist
+        AppThemePalette.set(swiss)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: swiss.id))
+
+        let root = sized(destructiveAlert().makeContentView())
+        root.appearance = NSAppearance(named: .aqua)
+        root.layoutSubtreeIfNeeded()
+
+        let rep = try rendered(root, scale: 2)
+        try writeRender(of: rep, named: "alert-destructive-swiss")
+
+        let cancel = try XCTUnwrap(themedButtons(in: root).first { $0.title == "Cancel" })
+        let centre = cancel.convert(
+            NSPoint(x: cancel.bounds.midX, y: cancel.bounds.midY),
+            to: root
+        )
+
+        XCTAssertGreaterThan(
+            contrast(try pixel(of: rep, at: centre, in: root), Design.Surface.accent),
+            0.3,
+            "Cancel is filled with the accent in a dialog whose action is Delete"
+        )
+    }
+
     func testPresentationChromeChangesLiveAcrossDistinctThemes() throws {
         let previous = AppThemeLibrary.current
         defer {
@@ -189,9 +262,92 @@ final class ThemedPresentationTests: XCTestCase {
         root.subviews.flatMap { [$0] + descendants(in: $0) }
     }
 
+    private func themedButtons(in root: NSView) -> [ThemedButton] {
+        ([root] + descendants(in: root)).compactMap { $0 as? ThemedButton }
+    }
+
+    /// The alert `ConfirmationAlert` builds for an `.irreversible` prompt: the action first, the
+    /// way out second, `hasDestructiveAction` on the action and Return moved off it.
+    private func destructiveAlert() -> ThemedAlert {
+        let alert = ThemedAlert()
+        alert.messageText = "Delete “our custom popover got stuck”?"
+        alert.informativeText =
+            "The agent will stop and the session is removed from Threading. The saved "
+            + "conversation on disk is not deleted, so it could still be imported again later."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        alert.buttons.first?.keyEquivalent = ""
+        alert.buttons.last?.keyEquivalent = "\r"
+        return alert
+    }
+
     private func renderedPNG(of view: NSView) throws -> Data {
         let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
         return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    }
+
+    /// The view drawn at a magnification, so a one-point border is several pixels a sample
+    /// can land inside rather than a blend it has to guess at.
+    private func rendered(_ view: NSView, scale: Int) throws -> NSBitmapImageRep {
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(view.bounds.width) * scale,
+            pixelsHigh: Int(view.bounds.height) * scale,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        rep.size = view.bounds.size
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+        view.displayIgnoringOpacity(view.bounds, in: context)
+        return rep
+    }
+
+    /// The rep's colour under a point given in the view's own (unflipped) coordinates.
+    private func pixel(
+        of rep: NSBitmapImageRep,
+        at point: NSPoint,
+        in view: NSView
+    ) throws -> NSColor {
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let x = Int((point.x * scale).rounded(.down))
+        let y = Int(((view.bounds.height - point.y) * scale).rounded(.down))
+        return try XCTUnwrap(rep.colorAt(
+            x: min(max(x, 0), rep.pixelsWide - 1),
+            y: min(max(y, 0), rep.pixelsHigh - 1)
+        ))
+    }
+
+    /// The largest per-channel difference — enough to say "this pixel is not that surface".
+    private func contrast(_ a: NSColor, _ b: NSColor) -> CGFloat {
+        guard let a = a.usingColorSpace(.deviceRGB),
+              let b = b.usingColorSpace(.deviceRGB) else { return 0 }
+        return max(
+            abs(a.redComponent - b.redComponent),
+            abs(a.greenComponent - b.greenComponent),
+            abs(a.blueComponent - b.blueComponent),
+            abs(a.alphaComponent - b.alphaComponent)
+        )
+    }
+
+    private func along(_ from: NSPoint, _ to: NSPoint, _ t: CGFloat) -> NSPoint {
+        NSPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
+    }
+
+    /// Saves the render where the other render tests put theirs, for appearance review.
+    private func writeRender(of rep: NSBitmapImageRep, named name: String) throws {
+        guard let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] else {
+            return
+        }
+        let url = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        try data.write(to: url.appendingPathComponent("\(name).png"))
     }
 }

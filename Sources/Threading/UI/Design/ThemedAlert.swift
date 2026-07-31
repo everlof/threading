@@ -360,14 +360,32 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         row.spacing = Design.Spacing.small
 
         let defaultIndex = alert.buttons.firstIndex(where: { $0.keyEquivalent == "\r" }) ?? 0
+
+        // **A destructive confirmation has no primary.** Prominence normally follows Return,
+        // which is right where the default *is* the action — a grant, an ordinary OK. It is
+        // wrong here, because `ConfirmationAlert.applyDefaultButton` deliberately moves Return
+        // to Cancel for an `.irreversible` prompt: the accent fill then landed on Cancel, and
+        // on a theme whose accent is its negative colour — Swiss Minimalist is `#D6180B` for
+        // both — the loudest, reddest thing in a delete dialog was the button that does not
+        // delete, beside a Delete drawn as the quiet one.
+        //
+        // Filling the *action* instead was the other candidate and is worse: it makes the
+        // irreversible button the most clickable thing on a sheet whose whole purpose is to
+        // slow the user down. So neither is filled. Both buttons are secondary, which also
+        // makes them the same size — a prominent button's focus ring is stroked inside its own
+        // silhouette, so the filled Cancel read 4pt shorter than the bordered Delete beside it.
+        // What is left says it plainly: Delete is the only red thing, and the ring says Return
+        // is on Cancel.
+        let hasDestructiveAction = alert.buttons.contains(where: \.hasDestructiveAction)
+
         for index in alert.buttons.indices.reversed() {
             let model = alert.buttons[index]
             let button = ThemedButton(title: model.title, target: self, action: #selector(buttonPressed(_:)))
             button.tag = index
             button.isEnabled = model.isEnabled
             button.keyEquivalent = model.keyEquivalent
-            button.emphasis = index == defaultIndex ? .primary : .secondary
-            if model.hasDestructiveAction, index != defaultIndex {
+            button.emphasis = !hasDestructiveAction && index == defaultIndex ? .primary : .secondary
+            if model.hasDestructiveAction {
                 button.contentTintColor = Design.Status.negative
             }
             row.addArrangedSubview(button)
