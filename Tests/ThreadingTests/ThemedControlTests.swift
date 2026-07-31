@@ -564,6 +564,81 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
     }
 
+    /// Two *adjacent* filled rows keep a hairline of panel between them.
+    ///
+    /// The account menu shows both fills at once — the checked login is filled, and the pointer
+    /// sits on the row under it. Drawn at the row's full height those capsules share an edge and
+    /// fuse into one pinched blob, with the corner radii reading as a dent rather than as the gap
+    /// between two shapes. Asserted off the pixels, because the claim is about what the two rows
+    /// look like together and each row on its own was always right.
+    func testThemedMenuPartsTwoFilledRowsWithAHairline() throws {
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+        root.appearance = appearance
+        let source = NSView(frame: NSRect(x: 24, y: 250, width: 240, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.contentView = root
+        defer { window.close() }
+
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(title: "One")),
+                    .item(ThemedMenuItem(title: "Two")),
+                    .item(ThemedMenuItem(title: "Three"))
+                ],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: 0,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        // The first row opens checked *and* highlighted; one arrow down moves the highlight to
+        // the row beneath it, which is the account menu's ordinary state.
+        try XCTUnwrap(window.firstResponder).keyDown(with: try keyEvent("", keyCode: 125))
+
+        // The overlay is laid out by frames during the window's display cycle, which an
+        // offscreen render never enters — so the pass is forced.
+        markNeedingLayout(root)
+        root.layoutSubtreeIfNeeded()
+
+        let rows = descendants(in: root).filter { $0.accessibilityRole() == .menuItem }
+        XCTAssertEqual(rows.count, 3)
+        let frames = rows.map { root.convert($0.bounds, from: $0) }
+
+        let rep = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+        root.cacheDisplay(in: root.bounds, to: rep)
+
+        // Well inside the fill's right end: past every title, and clear of the corner arc that
+        // rounds the capsule's own edge.
+        let probeX = frames[0].maxX - Design.Spacing.pane
+        let checked = try colour(of: rep, at: NSPoint(x: probeX, y: frames[0].midY), in: root)
+        let hovered = try colour(of: rep, at: NSPoint(x: probeX, y: frames[1].midY), in: root)
+        // The third row is filled by nothing, so it is what bare panel looks like here.
+        let bare = try colour(of: rep, at: NSPoint(x: probeX, y: frames[2].midY), in: root)
+        let between = try colour(of: rep, at: NSPoint(x: probeX, y: frames[0].minY), in: root)
+
+        XCTAssertNotEqual(checked.hexString, bare.hexString, "the checked row drew no fill")
+        XCTAssertNotEqual(hovered.hexString, bare.hexString, "the highlighted row drew no fill")
+        XCTAssertEqual(
+            between.hexString,
+            bare.hexString,
+            "the two fills met — a filled row has to stop short of the row stacked against it"
+        )
+    }
+
     func testThemedMenuSurfaceUsesTheSourceViewsLocalAppearance() throws {
         let originalAppAppearance = NSApp.appearance
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -1672,6 +1747,7 @@ final class ThemedControlTests: XCTestCase {
         )
         XCTAssertTrue(ids.contains("settings.remote-access.page"))
         XCTAssertTrue(ids.contains("settings.remote-access.enabled"))
+        XCTAssertTrue(ids.contains("settings.remote-access.connection-mode"))
         XCTAssertTrue(ids.contains("settings.remote-access.status"))
         XCTAssertTrue(ids.contains("settings.remote-access.pair"))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
@@ -3625,6 +3701,32 @@ final class ThemedControlTests: XCTestCase {
 
     private func descendants(in root: NSView) -> [NSView] {
         root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
+    private func markNeedingLayout(_ view: NSView) {
+        view.needsLayout = true
+        for subview in view.subviews { markNeedingLayout(subview) }
+    }
+
+    /// What was actually painted at `point`, stated in `view`'s own coordinates.
+    ///
+    /// The bitmap is addressed in pixels from its top-left corner and `view` is not flipped, so
+    /// both the flip and the backing scale are applied here rather than at each probe.
+    private func colour(
+        of rep: NSBitmapImageRep,
+        at point: NSPoint,
+        in view: NSView
+    ) throws -> NSColor {
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let x = Int((point.x * scale).rounded(.down))
+        let y = Int(((view.bounds.maxY - point.y) * scale).rounded(.down))
+        return try XCTUnwrap(
+            rep.colorAt(
+                x: min(max(0, x), rep.pixelsWide - 1),
+                y: min(max(0, y), rep.pixelsHigh - 1)
+            ),
+            "no pixel at \(point)"
+        )
     }
 
     private func keyEvent(_ characters: String, keyCode: UInt16) throws -> NSEvent {

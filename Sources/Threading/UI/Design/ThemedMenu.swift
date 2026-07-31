@@ -727,6 +727,18 @@ enum ThemedMenuMetrics {
     static let outerInset: CGFloat = Design.Spacing.small
     static let rowHeight: CGFloat = 28
     static let subtitleRowHeight: CGFloat = 42
+    /// How far a row's fill sits inside its own slot, so two *adjacent* filled rows are parted
+    /// by a hairline rather than meeting.
+    ///
+    /// Rows are stacked edge to edge, and a fill drawn at the row's full height therefore shares
+    /// an edge with the row above it. One filled row never showed this; the account menu does,
+    /// where the checked account is filled and the pointer is on the row directly under it —
+    /// the two capsules fused into a single pinched blob, with their corner radii reading as a
+    /// dent in one shape instead of the gap between two.
+    ///
+    /// Half a hairline each side, so the gap the pair opens is the whole one. Same arithmetic,
+    /// and the same 1pt, as the sidebar's `hoverHighlightInsetY`.
+    static let fillInset: CGFloat = Design.Spacing.hairline / 2
     /// A separator's slot. Sized so the gap it opens between two rows' text reads as the
     /// ordinary inter-row rhythm plus the rule — at the old 9pt the rule crowded whichever
     /// row's fill it sat against and the spacing read as unequal.
@@ -1234,15 +1246,19 @@ private final class ThemedMenuRowView: ThemedControl {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        // Every fill takes the same silhouette: one shape, drawn at three strengths. The inset
+        // is what keeps a filled row off the one stacked against it.
+        let fillRect = bounds.insetBy(dx: 0, dy: ThemedMenuMetrics.fillInset)
+
         if isKeyboardHighlighted || pressed {
             ThemedSurface.draw(
-                bounds,
+                fillRect,
                 fill: Design.Surface.controlHover,
                 radius: Design.Radius.control
             )
         } else if selected {
             ThemedSurface.draw(
-                bounds,
+                fillRect,
                 fill: Design.Surface.selection,
                 radius: Design.Radius.control
             )
@@ -1252,7 +1268,7 @@ private final class ThemedMenuRowView: ThemedControl {
             let hover = Design.Surface.controlHover
             let resolved = hover.usingColorSpace(.sRGB) ?? hover
             ThemedSurface.draw(
-                bounds,
+                fillRect,
                 fill: resolved.withAlphaComponent(
                     resolved.alphaComponent * ThemedMenuMetrics.disabledHoverWash
                 ),
