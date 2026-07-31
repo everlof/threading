@@ -3,7 +3,7 @@ import ThreadingExtensionKit
 import ThreadingRemoteKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
 
     // MARK: - Singleton
 
@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var mainWindowController: MainWindowController?
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
+    private var workspaceNavigatorMenu: NSMenu?
 
     /// Whether this process won the single-instance lock and therefore owns the state.
     private var ownsSingleInstanceLock = false
@@ -39,6 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // startup then: the tests exercise types directly and must not spawn agents, start the MCP
         // server, or touch the user's stores.
         if NSClassFromString("XCTestCase") != nil { return }
+
+        let launchSpan = PerformanceRecorder.shared.begin(
+            "app.launch",
+            category: "lifecycle"
+        )
+        defer { launchSpan.end() }
 
         // Before anything can touch the stores: a second instance must never get far enough
         // to write projects.json, or the two silently overwrite each other's state.
@@ -68,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // After the lock, so only the instance that owns the state writes the journal — and
         // early, because the first thing it reports is how the *previous* launch ended.
         EventLog.shared.beginLaunch()
+        MetricKitDiagnostics.shared.start()
         // Recorded after the journal opens rather than inside the migration, so the one launch
         // that adopted the old directory says so in the same place every other launch fact goes.
         if adoption.didAdoptAnything {
@@ -108,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         self.mainWindowController = mainWindowController
         RemoteWorkspaceBridge.install(mainWindowController)
         mainWindowController.showWindow(nil)
+        MainThreadStallMonitor.shared.start()
 
         // After the window exists, so a clicked notification always has somewhere to land.
         // Never under tests: only `start()` touches `UNUserNotificationCenter`.
@@ -210,6 +219,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         // Last, and only on this path: the marker it removes is what distinguishes a quit
         // from a launch that never came back.
+        MainThreadStallMonitor.shared.stop()
+        MetricKitDiagnostics.shared.stop()
         EventLog.shared.endLaunch()
 
         return .terminateNow
@@ -695,6 +706,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(commandItem(AppCommands.ID.addProject, action: #selector(addProject)))
 
         menu.addItem(.separator())
+        // The checkout's way out to a real editor, on the platform's own ⌘O. The pane header
+        // carries the same action beside a chevron that picks the app; this is the menu-bar
+        // half of it, and the reason the chord exists at all.
+        menu.addItem(commandItem(AppCommands.ID.openIn, action: #selector(openInExternalApp)))
+
+        menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.closeTab, action: #selector(closeActiveTab)))
         menu.addItem(commandItem(AppCommands.ID.closeSession, action: #selector(closeSession)))
 
@@ -737,6 +754,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let menu = NSMenu(title: MenuIdentifiers.viewMenu)
 
         menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
+
+        let navigatorMenu = NSMenu(title: L10n.string("Navigator"))
+        navigatorMenu.delegate = self
+        let navigatorItem = NSMenuItem(
+            title: L10n.string("Navigator"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        navigatorItem.submenu = navigatorMenu
+        menu.addItem(navigatorItem)
+        workspaceNavigatorMenu = navigatorMenu
 
         // Selection history — the toolbar's < > pair, on Xcode's chords. Enablement is
         // stamped in `validateMenuItem`, since a Back with nowhere to go should read that way.
@@ -824,6 +852,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let item = NSMenuItem()
         item.submenu = menu
         return item
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === workspaceNavigatorMenu else { return }
+        menu.removeAllItems()
+
+        let effective = mainWindowController?.effectiveWorkspaceNavigatorSelection ?? .native
+        let native = NSMenuItem(
+            title: L10n.string("Native"),
+            action: #selector(selectWorkspaceNavigator(_:)),
+            keyEquivalent: ""
+        )
+        native.target = self
+        native.representedObject = WorkspaceNavigatorSelection.native
+        native.state = effective == .native ? .on : .off
+        menu.addItem(native)
+
+        let inventory = ExtensionManager.shared.extensionWorkspaceNavigatorInventory
+        guard !inventory.isEmpty else { return }
+        menu.addItem(.separator())
+        for item in inventory {
+            let selection = WorkspaceNavigatorSelection.extensionNavigator(
+                extensionIdentifier: item.extensionIdentifier,
+                navigatorID: item.navigator.id
+            )
+            let menuItem = NSMenuItem(
+                title: L10n.format("%@ — %@", item.navigator.title, item.extensionName),
+                action: #selector(selectWorkspaceNavigator(_:)),
+                keyEquivalent: ""
+            )
+            menuItem.target = self
+            menuItem.representedObject = selection
+            menuItem.state = selection == effective ? .on : .off
+            menu.addItem(menuItem)
+        }
     }
 
     private func makeWindowMenuItem() -> NSMenuItem {
@@ -928,6 +991,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             menuItem.state = AppSettings.shared.groupsLoneBranches ? .on : .off
             // The refinement has nothing to refine while grouping is off.
             return AppSettings.shared.groupsSessionsByBranch
+        }
+        // Settings and an empty window carry no checkout, so the item reads as unavailable
+        // rather than beeping at a chord the menu said would work.
+        if menuItem.action == #selector(openInExternalApp) {
+            return mainWindowController?.currentFolderURL != nil
         }
         if menuItem.action == #selector(navigateBack) {
             return mainWindowController?.canGoBack ?? false
@@ -1107,12 +1175,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         mainWindowController?.newProject()
     }
 
+    @objc private func openInExternalApp() {
+        mainWindowController?.openInPreferredApp()
+    }
+
     @objc private func closeSession() {
         mainWindowController?.closeCurrentSession()
     }
 
     @objc private func toggleSidebar() {
         mainWindowController?.toggleSidebar()
+    }
+
+    @objc private func selectWorkspaceNavigator(_ sender: NSMenuItem) {
+        guard let selection = sender.representedObject as? WorkspaceNavigatorSelection else {
+            return
+        }
+        mainWindowController?.selectWorkspaceNavigator(selection)
     }
 
     // The two sidebar-arrangement toggles act on settings, not on the window, so they work

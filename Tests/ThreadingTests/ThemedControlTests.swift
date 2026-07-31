@@ -1510,8 +1510,14 @@ final class ThemedControlTests: XCTestCase {
         )
 
         // The session's four actions travel as one group, so the row cannot space them as
-        // unrelated controls.
-        let group = try XCTUnwrap(all.compactMap { $0 as? ToolbarButtonGroupView }.first)
+        // unrelated controls. Found through the Context button rather than by taking the first
+        // group in the row: the header carries a second one — the "Open in" pair — and "the
+        // first group" silently became that the day it was added.
+        let context = try XCTUnwrap(controller.sessionContextToolbarButton)
+        let group = try XCTUnwrap(
+            all.compactMap { $0 as? ToolbarButtonGroupView }
+                .first { context.isDescendant(of: $0) }
+        )
         XCTAssertEqual(
             descendants(in: group).compactMap { $0 as? ThemedIconButton }.count,
             4,
@@ -2288,6 +2294,166 @@ final class ThemedControlTests: XCTestCase {
                           "a disabled button drew a louder surface than an enabled one")
     }
 
+    // MARK: - Search Match
+
+    /// Every token is found everywhere it occurs, so a phrase lights up both of its words rather
+    /// than neither. Matching is case- and diacritic-insensitive, which is the one spelling of
+    /// "contains" the filters use too.
+    func testEveryTokenOfAQueryIsFoundWhereverItOccurs() {
+        func marked(_ text: String, _ query: String) -> [String] {
+            SearchTextMatch.ranges(in: text, matching: query).map { String(text[$0]) }
+        }
+
+        XCTAssertEqual(marked("Mute the sound, mute the orb", "mute"), ["Mute", "mute"])
+        XCTAssertEqual(marked("Notifications · Mute · Sound", "mute sound"), ["Mute", "Sound"])
+        XCTAssertEqual(marked("Motión", "motion"), ["Motión"])
+        XCTAssertEqual(marked("Nothing here", ""), [])
+        XCTAssertEqual(marked("Nothing here", "   "), [])
+        XCTAssertEqual(marked("", "mute"), [])
+    }
+
+    /// Two tokens landing on neighbouring characters are one found word, not two grounds with a
+    /// seam down the middle — and an overlap must not produce two runs over the same characters,
+    /// which would paint the tint on itself and read darker than every other match on screen.
+    func testTouchingAndOverlappingMatchesBecomeOneRun() {
+        let text = "Startup shell"
+        XCTAssertEqual(
+            SearchTextMatch.ranges(in: text, matching: "start artup").map { String(text[$0]) },
+            ["Startup"]
+        )
+        XCTAssertEqual(
+            SearchTextMatch.ranges(in: text, matching: "start up").map { String(text[$0]) },
+            ["Startup"]
+        )
+    }
+
+    /// The case a fixed "find the query inside the text" gets backwards. A row showing the first
+    /// characters of a session id, found because the reader pasted the *whole* id, has to say so:
+    /// every character it is showing is one they typed.
+    func testAQueryThatContainsTheWholeLineMarksAllOfIt() {
+        let shown = "9f3c1a20"
+        let ranges = SearchTextMatch.ranges(
+            in: shown,
+            matching: "9f3c1a20-77b4-4e6d-9c02-5a1e8b3d40ff"
+        )
+        XCTAssertEqual(ranges.map { String(shown[$0]) }, [shown])
+
+        XCTAssertEqual(
+            SearchTextMatch.ranges(in: shown, matching: "0000-77b4-4e6d").count, 0,
+            "a longer query that does not contain the line marked it anyway"
+        )
+    }
+
+    /// A match carries weight *and* a ground. Colour alone fails Differentiate Without Colour;
+    /// weight alone disappears in a list of matches. The label states both or it states neither.
+    func testAMatchIsMarkedByWeightAsWellAsByColour() throws {
+        let label = SearchMatchLabel(role: .body)
+        label.show("Mute a session", matching: "mute")
+
+        let field = try XCTUnwrap(descendants(in: label).compactMap { $0 as? NSTextField }.first)
+        let content = field.attributedStringValue
+
+        let matched = content.attributes(at: 0, effectiveRange: nil)
+        let rest = content.attributes(at: content.length - 1, effectiveRange: nil)
+
+        let matchedFont = try XCTUnwrap(matched[.font] as? NSFont)
+        let restFont = try XCTUnwrap(rest[.font] as? NSFont)
+        XCTAssertNotEqual(matchedFont, restFont, "the matched run was set in the resting weight")
+        XCTAssertNotNil(matched[.backgroundColor], "the matched run was given no ground")
+        XCTAssertNil(rest[.backgroundColor], "the ground ran past the match")
+        XCTAssertEqual(
+            matchedFont.pointSize, restFont.pointSize,
+            "emphasis changed the point size, which moves the line the two runs share"
+        )
+    }
+
+    /// An empty query is not a search. A settings page that is merely *open* must look exactly as
+    /// it did before this component existed.
+    func testAnUnsearchedLineIsAPlainLine() throws {
+        let label = SearchMatchLabel(role: .body)
+        label.show("Mute a session", matching: "")
+
+        let field = try XCTUnwrap(descendants(in: label).compactMap { $0 as? NSTextField }.first)
+        let content = field.attributedStringValue
+        content.enumerateAttribute(
+            .backgroundColor,
+            in: NSRange(location: 0, length: content.length)
+        ) { value, _, _ in
+            XCTAssertNil(value, "an empty query marked something")
+        }
+        XCTAssertEqual(field.stringValue, "Mute a session")
+    }
+
+    /// The ground has to *draw*, not merely be an attribute nobody applied. Asserted in pixels,
+    /// under a theme whose accent is nothing like the panel it sits on, because the bug this
+    /// catches — a background attribute on a label AppKit draws through its cell — is invisible
+    /// to every assertion about the attributed string.
+    func testTheMatchedRunPaintsAGroundBehindItself() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+
+        /// Covered pixels rather than the strongest one: the *text* is opaque either way, so
+        /// peak alpha cannot tell a ground from the glyphs standing on it. A ground is area.
+        func coveredPixels(matching query: String) throws -> Int {
+            let host = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 22))
+            host.appearance = NSAppearance(named: .darkAqua)
+
+            let label = SearchMatchLabel(role: .body)
+            label.show("Mute", matching: query)
+            host.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                label.centerYAnchor.constraint(equalTo: host.centerYAnchor)
+            ])
+            host.layoutSubtreeIfNeeded()
+
+            let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+
+            var covered = 0
+            for x in 0..<rep.pixelsWide {
+                for y in 0..<rep.pixelsHigh where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.05 {
+                    covered += 1
+                }
+            }
+            return covered
+        }
+
+        let unmatched = try coveredPixels(matching: "zzz")
+        let matched = try coveredPixels(matching: "mute")
+        XCTAssertGreaterThan(unmatched, 0, "the line itself never drew")
+        XCTAssertGreaterThan(
+            matched, unmatched,
+            "the highlight covered no more of the line than the glyphs did — the ground never drew"
+        )
+    }
+
+    /// The freeze this component exists to answer. An attributed string keeps the fonts and inks
+    /// it was built with; `AppThemeRefresh`'s sweep re-resolves a *recorded role* on a label and
+    /// cannot reach inside one, so a highlighted row would keep the previous theme's typeface.
+    func testAHighlightedLineFollowsALiveThemeChange() throws {
+        AppThemePalette.set(.system)
+        let label = SearchMatchLabel(role: .body)
+        label.show("Mute a session", matching: "mute")
+
+        let field = try XCTUnwrap(descendants(in: label).compactMap { $0 as? NSTextField }.first)
+        let before = try XCTUnwrap(
+            field.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        )
+
+        // Cyberpunk states a monospaced typeface, so the switch has to move the *font*, not only
+        // the palette — which is the half a colour sweep would have got right on its own.
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeLibrary.current.id))
+
+        let after = try XCTUnwrap(
+            field.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        )
+        XCTAssertNotEqual(
+            before.fontName, after.fontName,
+            "the matched run stayed in the previous theme's typeface"
+        )
+    }
+
     // MARK: - Text Field
 
     /// The bezel is the whole point: a stock field draws a system-shaped, system-coloured well,
@@ -2785,9 +2951,12 @@ final class ThemedControlTests: XCTestCase {
                 "ImageCompareCanvas",
                 "ImageCompareView",
                 "MorphingTitleLabel",
+                "NavigatorGridItemView",
                 "PaneFooterView",
                 "PaneHeaderView",
                 "PromptView",
+                "SearchMatchLabel",
+                "SemanticSceneView",
                 "SeparatorView",
                 "ShortcutRecorderView",
                 "SidebarBackdropView",

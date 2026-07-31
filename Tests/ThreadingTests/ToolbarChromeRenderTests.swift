@@ -339,6 +339,23 @@ final class ToolbarChromeRenderTests: XCTestCase {
 
         let newSession = ThemedIconButton(symbolName: "plus", accessibility: "New session")
 
+        // The way out to another app, drawn beside the actions it must *not* read as one of:
+        // it is the only control in this strip carrying colour, because the one question it
+        // answers at a glance is which app the press sends you to. Finder's icon stands in
+        // because every Mac has it — on a real strip this is VS Code, Xcode or Zed.
+        let openIn = ThemedIconButton(
+            symbolName: OpenInToolbarDefaults.fallbackSymbol,
+            accessibility: "Open in Finder"
+        )
+        if let finder = ExternalApps.app(id: ExternalApps.finderID),
+           let icon = ExternalAppLauncher.shared.icon(for: finder) {
+            openIn.setImage(icon, accessibility: "Open in Finder")
+        }
+        let openInGroup = ToolbarButtonGroupView(buttons: [
+            openIn,
+            ThemedIconButton(symbolName: DesignSymbols.chevron, accessibility: "Choose an app")
+        ])
+
         let actions = ToolbarButtonGroupView(buttons: [
             ThemedIconButton(symbolName: "ellipsis", accessibility: "Session options"),
             ThemedIconButton(symbolName: "terminal", accessibility: "Show as Claude Code UI"),
@@ -349,7 +366,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
             selected(ThemedIconButton(symbolName: "sidebar.trailing", accessibility: "Panel"))
         ])
 
-        return strip([pageTab, newSession, actions], spacing: Design.Spacing.medium)
+        return strip([pageTab, newSession, openInGroup, actions], spacing: Design.Spacing.medium)
     }
 
     /// The pane's header row as it is drawn: the tabs and the `+` that adds one, with both of

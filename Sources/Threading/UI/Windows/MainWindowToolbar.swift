@@ -123,6 +123,7 @@ extension MainWindowController: NSToolbarDelegate {
             newSessionButton,
             spacer,
             accountUsageItemView,
+            makeOpenInGroup(),
             makeSessionActionsGroup()
         ])
         header.orientation = .horizontal
@@ -179,6 +180,45 @@ extension MainWindowController: NSToolbarDelegate {
         item.isBordered = false
         view.translatesAutoresizingMaskIntoConstraints = false
         return item
+    }
+
+    /// The way out of Threading and into an editor, as one split control: the app's own icon
+    /// opens the checkout in whichever app was reached for last, and the chevron beside it
+    /// chooses a different one.
+    ///
+    /// **Its own group, beside the session's actions rather than inside them.** The four buttons
+    /// to its right act on the pane — its menu, its renderer, its two drawers — while this one
+    /// leaves for somewhere else entirely, and a run of six identical squares would have said
+    /// those were the same kind of thing. It is also why the primary button carries the target
+    /// app's *icon* rather than a symbol: the one question it has to answer at a glance is
+    /// "where will this send me", and only Xcode's own hammer answers that without being read.
+    ///
+    /// A press is one click because that is the whole point of the control — the chevron exists
+    /// for the day the answer is different, not for every day. The chosen app becomes the new
+    /// preference, so the two halves converge on one press for anybody who uses one editor.
+    private func makeOpenInGroup() -> ToolbarButtonGroupView {
+        let open = ThemedIconButton(
+            symbolName: OpenInToolbarDefaults.fallbackSymbol,
+            accessibility: L10n.string("Open in external app")
+        )
+        open.onPress = { [weak self] in self?.openInPreferredApp() }
+        openInToolbarButton = open
+
+        let choose = ThemedIconButton(
+            symbolName: DesignSymbols.chevron,
+            accessibility: L10n.string("Choose an app to open in")
+        )
+        // Names what the chevron adds rather than repeating the button beside it: the press
+        // already says where it goes, and this is the way to somewhere else.
+        choose.toolTip = L10n.string("Choose an app to open in")
+        choose.presentsMenu = true
+        choose.onPress = { [weak self, weak choose] in
+            guard let self, let choose else { return }
+            self.presentOpenInMenu(from: choose)
+        }
+        openInMenuToolbarButton = choose
+
+        return ToolbarButtonGroupView(buttons: [open, choose])
     }
 
     /// The session's four actions, as one group.
@@ -263,6 +303,67 @@ extension MainWindowController: NSToolbarDelegate {
 
     // MARK: Actions
 
+    /// Opens the visible page's checkout in the app used last. Also the ⌘O command's whole body.
+    func openInPreferredApp() {
+        guard let folder = currentFolderURL else {
+            NSSound.beep()
+            return
+        }
+
+        ExternalAppLauncher.shared.openInPreferredApp(.folder(folder))
+        updateOpenInControls()
+    }
+
+    /// The dropdown of installed apps, opened from the chevron.
+    ///
+    /// `refresh()` first: this is the one moment the list is about to be read, and an app
+    /// installed since launch should be in it. The choice made here becomes the button's own,
+    /// which is what keeps the two halves of the control agreeing.
+    private func presentOpenInMenu(from source: ThemedIconButton) {
+        ThemedMenuPresenter.dismiss(openInMenuSession)
+        ExternalAppLauncher.shared.refresh()
+
+        guard let folder = currentFolderURL else {
+            NSSound.beep()
+            return
+        }
+
+        let target = ExternalAppTarget.folder(folder)
+        let entries = OpenInMenu.entries(for: target) { [weak self] app in
+            ExternalAppLauncher.shared.open(target, in: app)
+            self?.updateOpenInControls()
+        }
+
+        let preferred = ExternalAppLauncher.shared.preferred(for: target)
+        let selected = ExternalAppLauncher.shared.installed(for: target)
+            .firstIndex { $0.id == preferred?.id }
+
+        openInMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: OpenInMenuDefaults.menuWidth),
+            from: source,
+            selectedEntryIndex: selected,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.openInMenuSession = nil }
+        )
+    }
+
+    /// Points the control at the app a press would use, or hides it where there is nothing to
+    /// open — Settings carries no checkout, and a Mac with none of these apps installed carries
+    /// no answer at all.
+    func updateOpenInControls() {
+        let launcher = ExternalAppLauncher.shared
+        let app = currentFolderURL.flatMap { launcher.preferred(for: .folder($0)) }
+
+        openInToolbarButton?.isHidden = app == nil
+        openInMenuToolbarButton?.isHidden = app == nil
+
+        guard let app else { return }
+
+        let title = L10n.format("Open in %@", app.name)
+        openInToolbarButton?.setImage(launcher.icon(for: app), accessibility: title)
+        openInToolbarButton?.toolTip = OpenInToolbarDefaults.tooltip(opening: app)
+    }
+
     private func showSessionContextMenu(from button: ThemedIconButton) {
         menuNeedsUpdate(sessionContextMenu)
         sessionContextMenu.popUp(
@@ -311,4 +412,25 @@ enum SessionTitleDefaults {
     static let minWidth: CGFloat = 120
     static let maxWidth: CGFloat = 360
     static let projectSymbolName = "folder"
+}
+
+// MARK: - Open In Defaults
+
+/// What the header's "Open in" control shows before it knows which app it points at.
+enum OpenInToolbarDefaults {
+    /// Stands in for one press only: the control is hidden whenever no app was resolved, so
+    /// this is what the button is *built* with, not what it settles at.
+    static let fallbackSymbol = "arrow.up.forward.app"
+
+    /// The tooltip names the app *and* the chord, read from the command table rather than
+    /// written down — ⌘O is rebindable, and a tooltip promising a chord the user has changed is
+    /// worse than one that promises none.
+    @MainActor
+    static func tooltip(opening app: ExternalApp) -> String {
+        let title = L10n.format("Open in %@", app.name)
+        guard let shortcut = ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.openIn) else {
+            return title
+        }
+        return "\(title) (\(shortcut.displayString))"
+    }
 }

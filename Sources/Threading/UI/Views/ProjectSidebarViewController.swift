@@ -1022,6 +1022,20 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebar(self, didSelectSettingsPage: SettingsPages.storageID)
     }
 
+    /// Opens the clicked project's checkout in the app the item names.
+    ///
+    /// The project is read back from the row rather than captured when the menu was built, for
+    /// the same reason every other handler here does: the menu that opened is the one for the
+    /// row under the pointer, and `presentProjectMenu` pins that row for exactly as long as the
+    /// menu is up.
+    @objc private func openProjectInAppClicked(_ sender: NSMenuItem) {
+        guard let app = OpenInMenu.app(in: sender),
+              let projectID = contextProjectID(),
+              let project = ProjectStore.shared.project(withID: projectID) else { return }
+
+        ExternalAppLauncher.shared.open(.folder(project.folderURL), in: app)
+    }
+
     @objc private func revealInFinderClicked() {
         guard let row = contextRow(),
               let node = outlineView.item(atRow: row) as? ProjectNode,
@@ -1511,6 +1525,19 @@ extension ProjectSidebarViewController: NSMenuDelegate {
             action: #selector(renameClicked),
             keyEquivalent: ""
         )
+        // The way out to an editor sits above the Finder reveal, because it is the one people
+        // reach for: a checkout is opened in the app they work in far more often than it is
+        // looked at in a file manager. Finder is in that submenu too, and stays here in its own
+        // right — it is one press either way, and the one press is what the item is for.
+        if let projectID = contextProjectID(),
+           let project = ProjectStore.shared.project(withID: projectID),
+           let openIn = OpenInMenu.item(
+               for: .folder(project.folderURL),
+               action: #selector(openProjectInAppClicked),
+               owner: self
+           ) {
+            menu.addItem(openIn)
+        }
         menu.addItem(
             withTitle: L10n.string("Reveal in Finder"),
             action: #selector(revealInFinderClicked),
@@ -1818,6 +1845,10 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         closeSession sessionID: SessionID
+    )
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        askAgentToRename sessionID: SessionID
     )
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,

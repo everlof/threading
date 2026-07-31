@@ -108,6 +108,7 @@ enum AppCommands {
         static let closeSession = "session.close"
         static let closeTab = "tab.close"
         static let find = "edit.find"
+        static let openIn = "session.openIn"
 
         static let toggleSidebar = "view.sidebar"
         static let groupByBranch = "view.groupByBranch"
@@ -156,6 +157,12 @@ enum AppCommands {
                    defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.find, group: .session, title: "Find…",
                    defaultShortcut: KeyboardShortcut(key: "f", modifiers: .command), isEditable: true),
+        // ⌘O is the platform's Open, and this is the only opening this app does: it has no
+        // documents of its own, and a checkout is what "open" means here. The app it opens in
+        // is the one used last, which is why the title cannot name one.
+        AppCommand(id: ID.openIn, group: .session, title: "Open in External App",
+                   detail: "Opens the checkout in the editor, terminal or Finder you last chose.",
+                   defaultShortcut: KeyboardShortcut(key: "o", modifiers: .command), isEditable: true),
 
         AppCommand(id: ID.toggleSidebar, group: .view, title: "Toggle Sidebar",
                    defaultShortcut: KeyboardShortcut(key: "s", modifiers: [.command, .control]), isEditable: true),

@@ -20,6 +20,12 @@ final class FileNode: NSObject {
 
     var name: String { url.lastPathComponent }
 
+    /// What handing this row to another app means. A directory is a place to work in; a file is
+    /// a file, and this tree knows no line inside it.
+    var openInTarget: ExternalAppTarget {
+        isDirectory ? .folder(url) : .file(url, line: nil)
+    }
+
     /// Reads this directory's entries once. Cheap to call repeatedly; `reload` is what re-reads.
     func loadChildrenIfNeeded() {
         guard isDirectory, children == nil else { return }
@@ -209,13 +215,33 @@ final class FileTreeViewController: NSViewController {
         }
     }
 
+    /// The row menu, rebuilt on every open.
+    ///
+    /// It used to be built once with the outline view, which was right while every item meant
+    /// the same thing for every row. "Open in" does not: its list is the apps installed *now*,
+    /// and which of them may be offered depends on whether the clicked row is a file or a
+    /// folder — a terminal takes a directory and would *run* a file. So the menu is a delegate's
+    /// answer per click rather than a fixture.
     private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.delegate = self
+        return menu
+    }
+
+    private func populateContextMenu(_ menu: NSMenu) {
         menu.addItem(
             withTitle: L10n.string("Open"),
             action: #selector(openClicked),
             keyEquivalent: ""
         )
+        if let node = clickedNode,
+           let openIn = OpenInMenu.item(
+               for: node.openInTarget,
+               action: #selector(openInAppClicked),
+               owner: self
+           ) {
+            menu.addItem(openIn)
+        }
         menu.addItem(
             withTitle: L10n.string("Reveal in Finder"),
             action: #selector(revealClicked),
@@ -227,13 +253,21 @@ final class FileTreeViewController: NSViewController {
             action: #selector(copyPathClicked),
             keyEquivalent: ""
         )
-        menu.items.forEach { $0.target = self }
-        return menu
+        // The submenu's items carry their own target; this claims the top-level ones, exactly
+        // as the fixed menu did.
+        menu.items.forEach { $0.target = $0.target ?? self }
     }
 
     @objc private func openClicked() {
         guard let node = clickedNode else { return }
         NSWorkspace.shared.open(node.url)
+    }
+
+    /// Opens the clicked row in the app the item names — a file at no particular line, since a
+    /// tree knows nothing about what is inside the file it lists.
+    @objc private func openInAppClicked(_ sender: NSMenuItem) {
+        guard let app = OpenInMenu.app(in: sender), let node = clickedNode else { return }
+        ExternalAppLauncher.shared.open(node.openInTarget, in: app)
     }
 
     @objc private func revealClicked() {
@@ -245,6 +279,16 @@ final class FileTreeViewController: NSViewController {
         guard let node = clickedNode else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(node.url.path, forType: .string)
+    }
+}
+
+// MARK: - Menu Delegate
+
+extension FileTreeViewController: NSMenuDelegate {
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        populateContextMenu(menu)
     }
 }
 

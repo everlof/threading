@@ -13,6 +13,16 @@ extension GitReviewViewController {
 
     func show(_ phase: Phase) {
         if !isViewLoaded { loadView() }
+        let performanceSpan = PerformanceRecorder.shared.begin(
+            "git.review.render",
+            category: "git.review.ui",
+            metadata: Self.performanceMetadata(for: phase)
+        )
+        defer {
+            performanceSpan.end(metadata: [
+                "rendered_rows": String(stack.arrangedSubviews.count)
+            ])
+        }
 
         // A watched checkout redraws itself under the reader. Keeping the offset across a
         // reload of the *same* surface is what makes that tolerable; a mode switch or a commit
@@ -23,8 +33,13 @@ extension GitReviewViewController {
 
         self.phase = phase
         renderedMode = mode
+        if !keepsPlace {
+            materializedFileLimit = GitReviewUIDefaults.fileRowBatchSize
+            bulkExpansionOverride = nil
+        }
 
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        resetRenderedFiles()
         placeholderLabel.isHidden = true
         backButton.isHidden = true
         counterLabel.isHidden = true
@@ -128,23 +143,64 @@ extension GitReviewViewController {
         scrollView.contentInsets.bottom = 54
     }
 
-    /// Small files open ready to read; everything else opens on click. Both limits exist to
-    /// bound the view count a huge diff builds, which is what keeps the pane responsive.
+    /// Small files open ready to read; everything else opens on click. A large file index is
+    /// also materialized in batches: collapsed bodies are cheap, but AppKit still solves every
+    /// header's constraints before it can display the first one.
     func renderFiles(_ files: [GitFileDiff]) {
-        var expandBudget = Self.initialExpandBudget(for: files)
+        let performanceSpan = PerformanceRecorder.shared.begin(
+            "git.review.render-files",
+            category: "git.review.ui",
+            metadata: [
+                "files": String(files.count),
+                "changed_lines": String(files.reduce(0) { $0 + $1.added + $1.removed })
+            ]
+        )
+        defer {
+            performanceSpan.end(metadata: [
+                "materialized_files": String(nextFileIndex)
+            ])
+        }
 
-        for file in files {
+        renderedFiles = files
+        remainingExpandBudget = Self.initialExpandBudget(for: files)
+        // Once for the whole diff: `repositoryRoot` walks the tree looking for `.git`, and a
+        // branch comparison can list hundreds of files.
+        renderedFileRoot = repositoryRoot
+        appendFileRows(upTo: min(materializedFileLimit, files.count))
+    }
+
+    /// Adds only the next slice to the existing stack. Rebuilding the previous rows on every
+    /// click would make traversing the index quadratic even though opening it was bounded.
+    private func appendFileRows(upTo requestedLimit: Int) {
+        moreFilesButton?.removeFromSuperview()
+        moreFilesButton = nil
+
+        let limit = min(max(requestedLimit, nextFileIndex), renderedFiles.count)
+        guard nextFileIndex < limit else {
+            addMoreFilesButtonIfNeeded()
+            return
+        }
+
+        for file in renderedFiles[nextFileIndex..<limit] {
             let lineCount = file.hunks.reduce(0) { $0 + $1.lines.count }
             let fitsBudget = lineCount > 0
                 && lineCount <= GitReviewDefaults.autoExpandFileLineLimit
-                && lineCount <= expandBudget
+                && lineCount <= remainingExpandBudget
 
             // A file the user opened stays open however large it is; one they closed stays
             // closed however small. The budget only decides what they have not said.
-            let expand = expansionOverrides[file.path] ?? fitsBudget
-            if expand { expandBudget -= lineCount }
+            let expand = expansionOverrides[file.path] ?? bulkExpansionOverride ?? fitsBudget
+            if expand { remainingExpandBudget -= lineCount }
 
-            let row = GitReviewFileRow(file: file, expanded: expand, staging: staging, wraps: wrapsDiffLines)
+            // The row's "Open in" needs an absolute path, and a diff carries only a path
+            // relative to the checkout — which is the pane's fact, not the row's.
+            let row = GitReviewFileRow(
+                file: file,
+                expanded: expand,
+                staging: staging,
+                wraps: wrapsDiffLines,
+                fileURL: renderedFileRoot?.appendingPathComponent(file.path)
+            )
             row.onToggle = { [weak self] expanded in
                 self?.expansionOverrides[file.path] = expanded
             }
@@ -164,6 +220,51 @@ extension GitReviewViewController {
             }
             addRow(row)
         }
+
+        nextFileIndex = limit
+        materializedFileLimit = max(materializedFileLimit, limit)
+        addMoreFilesButtonIfNeeded()
+    }
+
+    private func addMoreFilesButtonIfNeeded() {
+        guard nextFileIndex < renderedFiles.count else { return }
+
+        let more = ThemedButton(
+            title: L10n.string("Show more…"),
+            target: self,
+            action: #selector(loadMoreFiles)
+        )
+        more.isBordered = false
+        more.applyFont(.caption)
+        more.contentTintColor = Design.Text.secondary
+        more.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(more)
+        moreFilesButton = more
+    }
+
+    @objc func loadMoreFiles() {
+        let performanceSpan = PerformanceRecorder.shared.begin(
+            "git.review.materialize-file-batch",
+            category: "git.review.ui",
+            metadata: [
+                "start": String(nextFileIndex),
+                "files": String(renderedFiles.count)
+            ]
+        )
+        appendFileRows(
+            upTo: nextFileIndex + GitReviewUIDefaults.fileRowBatchSize
+        )
+        view.layoutSubtreeIfNeeded()
+        updateScrollControls()
+        performanceSpan.end(metadata: ["end": String(nextFileIndex)])
+    }
+
+    private func resetRenderedFiles() {
+        renderedFiles = []
+        nextFileIndex = 0
+        remainingExpandBudget = 0
+        renderedFileRoot = nil
+        moreFilesButton = nil
     }
 
     static func initialExpandBudget(for files: [GitFileDiff]) -> Int {
@@ -171,6 +272,19 @@ extension GitReviewViewController {
         let isLargeComparison = files.count > GitReviewDefaults.largeDiffFileThreshold
             || changedLines > GitReviewDefaults.largeDiffChangedLineThreshold
         return isLargeComparison ? 0 : GitReviewDefaults.autoExpandTotalLineLimit
+    }
+
+    private static func performanceMetadata(for phase: Phase) -> [String: String] {
+        switch phase {
+        case .message:
+            return ["phase": "message"]
+        case .files(let files):
+            return ["phase": "files", "files": String(files.count)]
+        case .commits:
+            return ["phase": "commits"]
+        case .commitDetail(_, let files):
+            return ["phase": "commit-detail", "files": String(files.count)]
+        }
     }
 
     /// What this mode's diff can do to the index, which is nothing in most of them.

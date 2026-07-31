@@ -183,7 +183,31 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// One slot, two roles: a project row's `⋯` and a branch heading's gear are the same control
     /// in the same place, and swapping the glyph is the whole difference between them.
     func setSymbol(_ symbolName: String, accessibility: String) {
+        // Restored, because `setImage` clears it: a slot that has held an app's icon must draw
+        // the next symbol at the same weight and size every other glyph in the app has.
+        iconView.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
         iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        accessibilityName = accessibility
+        setAccessibilityTitle(accessibility)
+    }
+
+    /// The same slot, holding artwork whose silhouette is not the app's to draw — an installed
+    /// application's own icon, read from LaunchServices.
+    ///
+    /// A symbol is what this button is for, and this is the documented exception: no glyph we
+    /// could draw says "Xcode" as fast as Xcode's own icon does, which is the whole reason the
+    /// file tree shows Finder's icons rather than ours. A non-template image ignores
+    /// `contentTintColor`, so it keeps its own colours while everything the theme owns — the
+    /// surface, the hover lift, the focus ring — stays ours. Passing nil empties the slot rather
+    /// than leaving the previous app's mark behind.
+    func setImage(_ image: NSImage?, accessibility: String) {
+        // **The symbol configuration has to go before the artwork arrives.** `NSImageView`
+        // applies it to whatever image it is given, and a configuration sized for an 11pt glyph
+        // applied to a rendered app icon draws *nothing at all* — an empty button in the middle
+        // of the header, which is exactly how this was found, in a render rather than in an
+        // assertion.
+        iconView.symbolConfiguration = nil
+        iconView.image = image
         accessibilityName = accessibility
         setAccessibilityTitle(accessibility)
     }

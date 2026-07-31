@@ -21,6 +21,9 @@ final class GitReviewFileRow: NSView {
     /// Whether the diff wraps to the pane or runs off it into a horizontal scroller.
     private let wraps: Bool
 
+    /// Where this file lives, when it still does. See `init`.
+    private let fileURL: URL?
+
     /// Fired only for a click, never for the initial state — the pane remembers what the user
     /// chose, not what the auto-expand budget chose for them.
     var onToggle: ((Bool) -> Void)?
@@ -109,10 +112,21 @@ final class GitReviewFileRow: NSView {
 
     /// `staging` is nil in the read-only modes, which is most of them — see
     /// `GitStaging.capability(for:)` for why only two of six offer it.
-    init(file: GitFileDiff, expanded: Bool, staging: GitStaging? = nil, wraps: Bool = true) {
+    ///
+    /// `fileURL` is what the row can hand to another app. The pane resolves it, because only
+    /// the pane knows the checkout the paths in a diff are relative to; nil where there is
+    /// nothing on disk to open — a fixture, or a file this comparison deletes.
+    init(
+        file: GitFileDiff,
+        expanded: Bool,
+        staging: GitStaging? = nil,
+        wraps: Bool = true,
+        fileURL: URL? = nil
+    ) {
         self.file = file
         self.staging = staging
         self.wraps = wraps
+        self.fileURL = fileURL
         super.init(frame: .zero)
         setupViews()
         if expanded && canExpand { toggle() }
@@ -227,6 +241,80 @@ final class GitReviewFileRow: NSView {
         let click = NSClickGestureRecognizer(target: self, action: #selector(headerClicked))
         click.delegate = self
         addGestureRecognizer(click)
+    }
+
+    // MARK: - Context Menu
+
+    /// A right-click on the file's row: open it where it can be edited, or find it on disk.
+    ///
+    /// **This is where "open in" earns its keep**, because a review is the one surface in the
+    /// app that knows *which line* the user is looking at. The primary click still belongs to
+    /// the row's own job — opening and closing the diff — so the way out lives on the gesture
+    /// that costs the row nothing.
+    ///
+    /// Nil where there is nothing to point at: a file this comparison deletes has no working
+    /// copy left, and offering to open it would fail after the menu had already promised.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+
+        let menu = NSMenu()
+        if let openIn = OpenInMenu.item(
+            for: .file(fileURL, line: firstChangedLine),
+            action: #selector(openInAppClicked),
+            owner: self
+        ) {
+            menu.addItem(openIn)
+        }
+        menu.addItem(
+            withTitle: L10n.string("Reveal in Finder"),
+            action: #selector(revealInFinderClicked),
+            keyEquivalent: ""
+        )
+        menu.addItem(.separator())
+        menu.addItem(
+            withTitle: L10n.string("Copy Path"),
+            action: #selector(copyPathClicked),
+            keyEquivalent: ""
+        )
+        menu.items.forEach { $0.target = $0.target ?? self }
+        return menu
+    }
+
+    private var firstChangedLine: Int? { Self.firstChangedLine(in: file) }
+
+    /// The line an editor should land on: the first one this diff actually changes.
+    ///
+    /// The *new* numbering, because that is the file the user is about to edit — a removed
+    /// line's old number points into a version that no longer exists on disk. A hunk of pure
+    /// removals therefore lands on the context line beside it, which is the closest thing the
+    /// working copy still has to where the change was, and a diff with no numbered line at all
+    /// (a binary change, an image) lands nowhere in particular.
+    static func firstChangedLine(in file: GitFileDiff) -> Int? {
+        for hunk in file.hunks {
+            if let changed = hunk.lines.first(where: { $0.kind != .context })?.newNumber {
+                return changed
+            }
+            if let context = hunk.lines.compactMap(\.newNumber).first {
+                return context
+            }
+        }
+        return nil
+    }
+
+    @objc private func openInAppClicked(_ sender: NSMenuItem) {
+        guard let app = OpenInMenu.app(in: sender), let fileURL else { return }
+        ExternalAppLauncher.shared.open(.file(fileURL, line: firstChangedLine), in: app)
+    }
+
+    @objc private func revealInFinderClicked() {
+        guard let fileURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+    }
+
+    @objc private func copyPathClicked() {
+        guard let fileURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(fileURL.path, forType: .string)
     }
 
     // MARK: - Expansion

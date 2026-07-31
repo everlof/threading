@@ -157,6 +157,23 @@ branch diff. Small files auto-expand (≤200 lines each, ≤600 cumulative). The
 with the tab (`PersistedTab.mode`); restore builds the controller but runs no git until the
 tab is actually shown, the browser's deferred-load rule.
 
+The collapsed body rule does **not** make the file index virtual. Measurement showed the
+`NSStackView` eagerly laying out 1,000 collapsed headers took about 94 seconds, so `renderFiles`
+now **materializes 20 headers at a time** and appends rather than rebuilding prior batches. The
+initial 1,000-file workload is consequently bounded at about 29 ms on the same Debug fixture.
+A watched redraw of the same surface preserves the number already reached. This is progressive
+materialization, not reuse: if `git.review.materialize-file-batch` later shows deep traversal is
+slow, a reusable table is the next measured boundary. The fixture and the `git.read.*`,
+`git.process`, `git.review.render`, `git.review.render-files`, and batch spans are documented in
+[`performance.md`](performance.md).
+
+A file row's **right-click opens it in an editor at the first line the diff changes** — the
+primary click still belongs to the row's own job, opening and closing the body. This is the
+only surface in the app that knows which line the reader is looking at, which is what makes it
+worth the wiring; the pane resolves the absolute path (a diff carries only a checkout-relative
+one) and the row picks the line. See [`external-apps.md`](external-apps.md) for why it is the
+*new* numbering, and why a file this comparison deletes offers no menu at all.
+
 **Staging is offered by two modes of six**, and the rule is not a UI preference: a patch
 applies to the index only when the index is what the diff was measured *from*. Unstaged
 (index → worktree) stages hunks, Staged (HEAD → index) unstages them by applying the same
@@ -229,8 +246,12 @@ in (`ThemedButton.markSlotWidth`), because one of the rows *is* one — the chil
 text rows carry that button's `opticalHorizontalInset` as a stack edge inset rather than as a
 constraint. Insetting the frames instead of pulling the button outward is deliberate: a control
 hanging outside its parent's bounds is unclickable along the overhang, which would have made the
-children row's own mark a dead strip. The counters line is the two columns a list wants — the
-file count at the leading edge, the totals held to the trailing one by a flexible gap.
+children row's own mark a dead strip. The counters line reads left to right like every other
+row: the file count, then `+N −M` a `Spacing.medium` step after it. The totals used to be held
+to the card's trailing edge by a flexible spacer, on the theory that a list wants two columns —
+but the card is only as wide as its longest row, so on a long branch name that spacer opened a
+hole halfway across the counters line and nowhere else, and a lone right-aligned reading has
+nothing above or below it to line up with.
 
 The **file count is no longer run-only**. It used to appear as "N files changed" during a turn
 and vanish when the turn ended; it is now the label the counters row wants beside its totals in
@@ -240,15 +261,25 @@ both states, which is one presentation to learn instead of two.
 360-point ceiling, and every fact that joined the line took its width from the branch name —
 which truncates in the middle, so a busy run ate the one thing that says which checkout this
 is. Each fact now keeps the full width and the card grows downward instead, the direction it
-has room in and the one its extension slot already grew in. The summary line keeps its exact
-26-point band, which is what reproduces the original single-line pill for a clean checkout with
-no children — and what keeps the render tests measuring the line they were written against.
-Vertical padding comes from the bands themselves: the summary line and the children button are
-each a 26-point band with their text centred, so only a bare counters line at the bottom needs
-the card to end below it. On a **detached head** there is no first line to draw, so the band
-moves to the counters row, which leads with its own mark — the reason each row owning a mark is
-worth the column it costs. The **agent line** below the counters can lead too (a detached head
-with a clean tree), so the band moves again; every row that can lead needs it available.
+has room in and the one its extension slot already grew in. On a **detached head** there is no
+first line to draw, so the counters row leads with its own mark — the reason each row owning a
+mark is worth the column it costs. The **agent line** can lead too (a detached head with a clean
+tree), and so can the children row.
+
+**The card is padded, not banded, and that is a fix.** Its rows sit at their own heights with
+`verticalInset` above the first and below the last and `rowGap` between each pair; one 14-point
+line inset top and bottom *is* the 26-point pill, so a one-row card is the shape it always was
+whichever of the four rows is the one showing. It used to centre whichever row led in a 26-point
+band and leave the rest bare in a stack spaced at zero, which meant the gap under the leading row
+was that band's own half-padding and every gap below it was nothing: a card showing branch,
+counters and agent line came out 6 / 0 / 0, the branch floating alone with the other two stuck
+together underneath. The band also had to *move* — to the counters row on a detached head, to the
+agent line on a clean one — three special cases for a padding the card can simply have.
+
+The children row is the one row that pads itself, because it is a `ThemedButton` sized around a
+hit target rather than a line of text. Wherever it meets an inset or a gap, that inset or gap
+gives its padding back (`childrenRowInset`), so what the reader sees lands on the same rhythm as
+every other row instead of a step below it.
 
 **The agent line says what the session's own CLI does not.** It carries the model, and where they
 are knowable the effort and Fast state, under the checkout rows and above the children — the rows
@@ -290,13 +321,18 @@ sees as a line break: an abbreviation read aloud is a number lost rather than a 
 shortened. The file count itself stays exact in both places; it is small enough to read at a
 glance and it carries the plural of the noun beside it.
 
-The mark sits closer to the branch name than the sentence's own gap between name and counters,
-so it reads as belonging to the name rather than as a third item in the row — and it sits on the
+A row's mark sits closer to its words than the counters row's two readings sit to each other, so
+it reads as belonging to them rather than as an item of its own — and it sits on the
 same optical line, which took a fix in the label helper rather than in the card (see
-`design-system.md`). The test that pins that pair measures the ink inside the summary band held
-clear of the card's border: at eight samples per point the border's antialiased skirt is ink
-too, and the band it used to measure ran to the card's own edges — so both ranges were pinned
+`design-system.md`). The test that pins that pair measures the ink in the card's top 26 points
+held clear of its border: at eight samples per point the border's antialiased skirt is ink
+too, and the range it used to measure ran to the card's own edges — so both ranges were pinned
 to the border and the assertion compared the card's edges with themselves.
+
+The gaps themselves are pinned by a test of their own, on the laid-out frames rather than on the
+ink: the rows share one font and therefore one line box, so equal frame gaps are equal gaps
+between the words. The children row is measured back down to that line box first, since its frame
+is deliberately taller.
 
 The card is also an **extension surface**: `session.corner-card@1` exposes one display-only
 slot whose ID is the placement — `top-trailing` today, `top-leading` reserved for a future
@@ -362,8 +398,8 @@ text, and its diff says more than a render of it would) becomes expandable, its 
 fade, difference, side by side). The bytes come from `GitReviewReader.endpointFilePair`, which
 states each mode's two endpoints as addresses one file can be read from — the same pairs the
 diff commands imply: HEAD→worktree, index→worktree, HEAD→index, merge-base→worktree,
-turn-baseline→worktree, `commit^`→`commit` — and titles the sides accordingly, so the tags over
-the image say *which* two things are compared. A side git does not hold comes back nil rather
+turn-baseline→worktree, `commit^`→`commit` — and titles the sides accordingly, so the captions
+beside the image say *which* two things are compared. A side git does not hold comes back nil rather
 than failing the pair: that is what added, deleted and untracked look like, and half a pair is
 still worth showing. Two accepted gaps, both from the parser's binary collapse
 (`UnifiedDiffParser` checks `isBinary` first, so a binary add/delete/rename loses its mode

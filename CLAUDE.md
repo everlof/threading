@@ -129,9 +129,11 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Side chats and forking, the shell drawer, session naming, launching, resuming, importing outside conversations | [`sessions.md`](docs/architecture/sessions.md) |
 | Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |
 | Agent marks, account chips, project icons, icon discovery and research | [`icons.md`](docs/architecture/icons.md) |
+| Opening a checkout or a file in another app: the registry, LaunchServices detection, line numbers, the header's split control | [`external-apps.md`](docs/architecture/external-apps.md) |
 | Multiple logins per CLI, discovery and naming, migrating a conversation between accounts, usage readings | [`accounts.md`](docs/architecture/accounts.md) |
 | The GitHub credential chain (app connection, `gh`, credential helper), the device-flow sign-in, the `network.brokered` extension fetch and its grant rules | [`github.md`](docs/architecture/github.md) |
 | The SQLite store, quarantine, `EventLog`/`ThreadingLogger`, composer drafts, where state lives on disk and the Advanced page's resets | [`persistence.md`](docs/architecture/persistence.md) |
+| Performance spans, main-thread stalls, MetricKit payloads, `sample`/`xctrace`, and the full/full+ sweep | [`performance.md`](docs/architecture/performance.md) |
 | Entitlements, the TCC grants and who inherits them, the Privacy settings page, Info.plist usage strings | [`permissions.md`](docs/architecture/permissions.md) |
 | Developer ID signing, notarization, `scripts/release.sh`, and the Sparkle automatic-update plan | [`releasing.md`](docs/architecture/releasing.md) |
 | Reclaimable build output, the two deletion gates, `scc` code stats | [`storage-and-stats.md`](docs/architecture/storage-and-stats.md) |

@@ -123,6 +123,41 @@ enum ShareSheetDefaults {
 @MainActor
 enum ShareChatSheet {
 
+    /// Runs the sheet and puts the resulting invitation on the pasteboard.
+    ///
+    /// Here rather than on the sidebar because two surfaces offer this now — the session's
+    /// context menu and the sharing pane's own button — and a link that expires in 24 hours,
+    /// grants exactly one chat, and is copied rather than shown is too much behaviour to have
+    /// two copies of. The sheet itself stays a value above, so the wording remains testable.
+    static func run(for sessionID: SessionID) {
+        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        let grants = ShareLinkGrant.allCases
+        let chosen = ConfirmationAlert.choose(request(
+            chatTitle: session.displayTitle,
+            isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID)
+        ))
+        guard let chosen, grants.indices.contains(chosen) else { return }
+        let grant = grants[chosen]
+
+        guard let url = RemoteAccessCoordinator.shared.shareURL(
+            for: sessionID,
+            capability: grant.capability,
+            canApprovePermissions: grant.canApprovePermissions
+        ) else {
+            let unavailable = NSAlert()
+            unavailable.messageText = L10n.string("Secure relay isn’t ready")
+            unavailable.informativeText = L10n.string(
+                "Wait for Remote Access to say it is ready, then try again."
+            )
+            unavailable.alertStyle = .warning
+            unavailable.runModal()
+            return
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
+
     static func request(chatTitle: String, isRunning: Bool) -> ChoiceRequest {
         // Four buttons, and the named modal responses stop at three — so the fourth used to
         // arrive through `default:`, sharing that branch with every unrelated dismissal.
@@ -308,11 +343,32 @@ extension ProjectSidebarViewController {
         menu.addItem(makeSessionOptionsItem(for: session))
 
         addGroupSeparator(to: menu)
+        // A session's folder is its project's checkout, so this is the same offer the project
+        // row makes, made where the user already is. It leads the identity group because it is
+        // the one item here that leaves the app.
+        if let project = ProjectStore.shared.project(forSessionID: sessionID),
+           let openIn = OpenInMenu.item(
+               for: .folder(project.folderURL),
+               action: #selector(openSessionFolderInAppClicked),
+               owner: self
+           ) {
+            menu.addItem(openIn)
+        }
         menu.addItem(
             withTitle: L10n.string("Rename Session…"),
             action: #selector(renameSessionClicked),
             keyEquivalent: ""
         )
+        // Absent rather than disabled when the agent is mid-turn or has no naming tool: a
+        // greyed row here would be one more thing to read in a menu that already reads long,
+        // and the reason it is unavailable is not something a disabled item could say.
+        if SessionCoordinator.canAskAgentToRename(sessionID) {
+            menu.addItem(
+                withTitle: L10n.string("Rename with Agent"),
+                action: #selector(askAgentToRenameClicked),
+                keyEquivalent: ""
+            )
+        }
         menu.addItem(
             withTitle: L10n.string("Copy Session ID"),
             action: #selector(copySessionIDClicked),
@@ -762,6 +818,24 @@ extension ProjectSidebarViewController {
         delegate?.projectSidebar(self, closeSession: sessionID)
     }
 
+    /// Opens the session's checkout in the app the item names.
+    ///
+    /// Reads `actionSessionID` like every other handler here, which is what lets the same menu
+    /// serve the row's `⋯`, its right-click and the pane header's Context button.
+    @objc private func openSessionFolderInAppClicked(_ sender: NSMenuItem) {
+        guard let app = OpenInMenu.app(in: sender),
+              let sessionID = actionSessionID,
+              let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
+
+        ExternalAppLauncher.shared.open(.folder(project.folderURL), in: app)
+    }
+
+    /// Hands the naming back to the one thing that already knows what this chat is about.
+    @objc private func askAgentToRenameClicked() {
+        guard let sessionID = actionSessionID else { return }
+        delegate?.projectSidebar(self, askAgentToRename: sessionID)
+    }
+
     @objc private func renameSessionClicked() {
         guard let sessionID = actionSessionID,
               let session = ProjectStore.shared.session(withID: sessionID) else { return }
@@ -799,37 +873,8 @@ extension ProjectSidebarViewController {
     /// how "Collaborator + Approval" came to be a phrase the sheet never explained. Each grant
     /// now prints above its own button, in `shareGrantsAccessory`.
     @objc private func shareSessionClicked() {
-        guard let sessionID = actionSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return }
-
-        let grants = ShareLinkGrant.allCases
-        let request = ShareChatSheet.request(
-            chatTitle: session.displayTitle,
-            isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID)
-        )
-
-        guard let chosen = ConfirmationAlert.choose(request), grants.indices.contains(chosen) else {
-            return
-        }
-        let grant = grants[chosen]
-
-        guard let url = RemoteAccessCoordinator.shared.shareURL(
-            for: sessionID,
-            capability: grant.capability,
-            canApprovePermissions: grant.canApprovePermissions
-        ) else {
-            let unavailable = NSAlert()
-            unavailable.messageText = L10n.string("Secure relay isn’t ready")
-            unavailable.informativeText = L10n.string(
-                "Wait for Remote Access to say it is ready, then try again."
-            )
-            unavailable.alertStyle = .warning
-            unavailable.runModal()
-            return
-        }
-
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        guard let sessionID = actionSessionID else { return }
+        ShareChatSheet.run(for: sessionID)
     }
 
     @objc private func stopSharingSessionClicked() {

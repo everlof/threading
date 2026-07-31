@@ -144,6 +144,18 @@ Branches** — disabled while grouping is off), then how they sort:
 A pinned session leads the list under every order — pinning is a stronger statement than
 any sort. Sorting rearranges branch groups too: a group sits where its first session would.
 
+### Choosing a navigator
+
+An enabled extension can replace the complete list area with another navigator: a project
+outline, activity inbox, lifecycle view, grid, or a composition with its own host-rendered search
+and filters. Choose it under **View ▸ Navigator**. The choice is remembered, while **Native**
+always returns to Threading's built-in project and session list.
+
+The extension changes only the column's interior. Threading still owns the divider, collapse
+behavior, theme, accessibility, keyboard focus, and project/session navigation. If the selected
+extension stops, reloads, or returns an invalid view, the visible column immediately returns to
+Native; the extension can be selected again after a valid process generation registers.
+
 ### Project icons
 Every project row carries an icon: the project's own mark when one is known, a **generated
 tile** — the project's initial on a colour hashed from its name — until then, so projects
@@ -362,6 +374,17 @@ the one on screen; the agent is not restarted, so the session comes back dormant
 on it, exactly as it would after Close. Miss the band and nothing is lost — the session is in
 **Settings ▸ Archived**, which is what the band's second line says.
 
+**A session can also file itself away when you ask it to.** "Commit this and then close the
+session" is one instruction, and the agent can now carry out both halves: it finishes the work,
+answers you as usual, and the session is archived a moment after that answer lands — never
+before, since archiving stops the agent and would otherwise cut its reply off mid-sentence. The
+band that appears says which agent did it and, if it gave one, what it had just finished, and it
+stays on screen for about fourteen seconds rather than six, because nobody clicked anything and
+you may well be reading elsewhere. **Undo** works exactly as it does for an archive you performed
+yourself. Agents archive only when asked to; if you change your mind before the turn ends, saying
+so is enough — the agent takes the request back. The capability is **Settings ▸ Tools ▸ Session
+lifecycle**, and switching that group off removes it.
+
 How it works: an idle agent writes nothing to its terminal, so sustained output means it is
 working, and output stopping means it has finished. A terminal bell counts as an explicit
 request for attention. This is a heuristic rather than something the agents report directly —
@@ -469,9 +492,15 @@ Conversations you started outside Threading — in a plain terminal, say — can
 project and then resumed like any other session.
 
 Select a project and the composer shows an **Import _n_ conversations** chip once it has
-finished looking. Opening it lists what was found, newest first, searchable by title. Picking
-one adds it to the project already resumable; it is not launched, so selecting it in the
-sidebar is what reopens the conversation.
+finished looking. Opening it lists what was found, newest first. Picking one adds it to the
+project already resumable; it is not launched, so selecting it in the sidebar is what reopens
+the conversation.
+
+Search it by title, by agent, or **by session ID** — paste a whole one, or type any fragment of
+one. Each row carries the first eight characters of its ID down the right-hand edge, which is
+usually enough to tell two conversations with near-identical titles apart; when your query
+matches further into an ID than that, the row slides its window along to show you the part that
+matched. Whatever matched is marked in the row, ID included.
 
 Threading finds these by reading the transcripts both CLIs already keep — Claude under
 `<config>/projects/`, Codex under `<codex home>/sessions/` — across every account it knows
@@ -553,6 +582,18 @@ first-prompt names.
 
 Rename via right-click in the sidebar, or right-click inside the terminal and choose
 **Rename Session…**.
+
+**Rename with Agent** sits just below it and hands the job to the agent running in the chat.
+Threading sends it one line asking it to name the conversation in a few words, and the name
+appears in the sidebar when it answers. This is worth reaching for because a chat is named
+after its *first* message and keeps that name however far the work moves on — the agent's own
+title, in practice, is chosen early and then rarely revisited.
+
+Two things to know. It costs one short turn of your usage, which is why it never happens on its
+own. And it appears only when there is an agent running, it is between turns, and **Settings ▸
+Tools ▸ This session** is switched on — the agent renames the chat by calling a tool, so with
+that group off there is nothing to ask. A name you typed yourself still wins: the agent's name
+is stored underneath it and shows through if you ever clear your own.
 
 ### Permission mode
 How much a chat may do before it stops to ask. Both agents support it, in one set of names:
@@ -741,6 +782,12 @@ panel's own controls slide right and the pill stays over the conversation it des
 Click it for the full picture: every rate-limit window (the 5-hour session window and the
 weekly one), each with its own bar, percentage and reset countdown, plus how fresh the
 reading is. Hovering the pill shows the same summary as a tooltip.
+
+For Claude accounts the freshest numbers come from **Settings ▸ Privacy ▸ Live usage from
+your Claude login**; without it the pill reads the CLI's local caches, which can lag by
+hours. Refreshes are polite by design: they run when a turn finishes — the only moment the
+number moves — and back off whenever the usage service asks for a pause, so watching the
+pill never eats into the limits it reports.
 
 ### Usage when picking an account
 Choosing a login is when the number actually changes a decision — an account at 90% of its
@@ -982,10 +1029,33 @@ starts an agent — so its button waits, and says why. The invitation works once
 explicit right for that member and chat; it never grants another chat, Mac settings, or the
 ability to create shares.
 
+### Who is watching
+
+The session status card at the pane's top-right grows a row whenever a chat can be reached from
+outside this Mac: **2 following** while somebody has it open, **Shared** while a link exists and
+nobody is on it. Click the row — or use the **Sharing** tab in the side pane — to see the whole
+picture:
+
+- **Watching now** — every live view, including your own paired devices, which are marked as
+  yours. Each row says what they may do, which surface they are on, and the terminal grid they
+  are holding it at. Somebody composing a reply shows as typing.
+- **With access** — people who accepted an invitation and are not looking right now, with when
+  they joined and when they were last seen. **Revoke** ends their access immediately and closes
+  anything they have open; because the invitation was single-use, letting them back in means
+  sharing the chat again, so this asks first.
+- **Invited** — links nobody has used yet, with when each was created and when it expires.
+  **Copy** puts it back on the clipboard; **Revoke** withdraws it without touching anybody who
+  already accepted a different one.
+
+Your own paired devices carry no Revoke here: they are paired to the Mac rather than to one
+chat, so unpairing them belongs in Settings, and the section links there.
+
 A shared chat sizes itself to the window it is opened in. A collaborator's browser asks the Mac
 to reflow the terminal to the width it can actually show — the same lease the iPhone takes, given
 back when the page closes — while a view-only page, which is never allowed to resize your
-session, shrinks its own type until the whole grid fits its frame instead.
+session, shrinks its own type until the whole grid fits its frame instead. Two clients watching
+one chat settle on the grid both can display, which is why the Sharing pane prints each one's:
+the chat is held at the smallest.
 
 A dormant session can be resumed remotely; a running agent UI mirrors its terminal scrollback
 and accepts keyboard input, while Native sessions show the conversation, composer, and
@@ -1088,6 +1158,16 @@ Go Forward through your selection history (**⌃⌘←** / **⌃⌘→**), the w
 editors. Sessions, composers and settings pages all count as places; deleted sessions fall
 out of the history.
 
+**Open in** sits just before those, as a pair: the icon of the app you last opened something in
+— VS Code, Xcode, Zed, a terminal, Finder — and a chevron beside it. Press the icon (or **⌘O**)
+and this session's checkout opens there; take the chevron to pick a different app, which then
+becomes what the press does. Only apps you actually have installed are listed, and a terminal
+is only ever offered a folder. The pair hides on a Settings page, which has no checkout.
+
+The same **Open in ▸** submenu appears wherever a folder or a file is named: on a project row
+and a session row in the sidebar, on a row of the **Files** tab, and — the useful one — on a
+right-click in **Git Review**, where it opens the file *at the first line the diff changes*.
+
 Four buttons sit at the header's right edge:
 
 - **Context** (⋯) — the same full menu as the session row's `⋯`: pinning, archiving, side
@@ -1099,7 +1179,7 @@ Four buttons sit at the header's right edge:
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
 
-Three kinds of content:
+Five kinds of content:
 
 - **Images** — screenshots, generated charts, design assets. Anything `NSImage` reads: PNG,
   JPEG, GIF, HEIC, PDF, SVG. Scaled to fit the panel's width.
@@ -1110,10 +1190,20 @@ Three kinds of content:
   interactive comparison: drag the seam across the picture (or arrow-key it; Space recentres),
   and pick the mode from the chip — **Wipe** in either direction, **Fade** (hold it in the
   middle for an onion skin), **Difference** (identical pixels go black, so any change leaps
-  out), or **Side by Side**. Each side carries a title tag, and mismatched pixel sizes are
+  out), or **Side by Side**. Each side is named in the margin beside the picture rather than
+  on top of it — old where the wipe starts, new where it ends, above and below for the vertical
+  wipe — so no title ever sits on the pixels you are comparing. Mismatched pixel sizes are
   flagged rather than silently normalised. Two text files render as a native diff instead.
   Agents open comparisons with a before and an after; you can open your own with the panel's
   **+ ▸ Compare Files…**, which asks for exactly two files (first chosen is the old side).
+- **Native scenes** — bounded semantic maps supplied by an agent or another MCP server. Treemaps,
+  heatmaps, timelines, dependency maps, scatter plots, and similar views use Threading's active
+  theme and native AppKit accessibility rather than HTML. The scene is stored with its tab.
+- **Extension panels** — safe extensions can provide persistent native tabs made from Threading's
+  own AppKit controls: text and status, actions, search fields, pickers, and interactive semantic
+  maps. Treemaps, heatmaps, charts, timelines, and similar views follow the active theme and
+  remain keyboard and accessibility navigable. They are declarative host UI, not extension HTML
+  or code loaded into the app.
 
 ### Attachments
 
@@ -1216,11 +1306,11 @@ Available in every session, since every session is an agent conversation.
 ### How it works
 
 Threading runs a small MCP server on a loopback port and registers it with each Claude or Codex
-session it launches, giving that session a private endpoint. The agent gets three tools —
-`display_image`, `display_html` and `display_compare_files` — and is told the panel exists so
-it reaches for them instead of printing a file path or an ASCII table.
+session it launches, giving that session a private endpoint. The agent gets four display tools —
+`display_image`, `display_scene`, `display_html` and `display_compare_files` — and is told the
+panel exists so it reaches for them instead of printing a file path or an ASCII table.
 
-Both are pre-approved, so displaying something does not raise a permission prompt every time.
+They are pre-approved, so displaying something does not raise a permission prompt every time.
 This does not affect any other tool: your normal permission rules and your own MCP servers
 are untouched.
 
@@ -1638,6 +1728,11 @@ and picking either the section or one of its matches opens the page. The pane fi
 same answer as a results page: every matching section, the terms it matched, and an **Open**
 button for each. Clearing the field puts the selected page back.
 
+On that results page the words themselves are marked, so a row reading
+*Notifications · Mute · Sound* shows you which of the three you asked for rather than leaving
+you to search inside the answer to your search. A match is both emboldened and given a tinted
+ground — two signals, so it is still visible with **Differentiate Without Colour** turned on.
+
 Threading follows the language macOS selects for the app, with English as the per-string fallback.
 Menus, built-in Settings navigation, commands, and Settings components use the app string
 catalog. Extensions carry their own translations and choose the closest language the app
@@ -1660,6 +1755,7 @@ than borrowing an unrelated app translation.
   see [Confirmations](#confirmations)
 - **Allow remote access** — see [Remote Access](#remote-access-beta)
 - **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)
+- **Hide Claude's status line in Threading terminals** — see [Agent hooks](#agent-hooks)
 - **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
 - **Skip Codex hook review** — see [Codex hooks](#codex-hooks)
 - **Shell path** — used by the shell drawer (⌃`); agents always launch via your login shell
@@ -1700,6 +1796,17 @@ session starts or resumes:
 Use the off switch if a Claude release or another part of your setup conflicts with a hook. A
 running Claude process has already loaded its settings file, so it must be restarted or resumed
 before the change applies.
+
+**Hide Claude's status line in Threading terminals** (off by default) blanks the line Claude
+draws under its composer — the one your own `statusLine` command produces — in sessions Threading
+launches. Inside Threading that line mostly repeats what the app already shows: the status card
+carries model, effort and branch, and the toolbar pill carries rate limits. Your other terminals
+are untouched — the override travels in the same session-only settings file as the hooks, never
+in your Claude configuration. Your status-line command still **runs** on every turn with its
+output thrown away, so a command with side effects (such as a usage-caching bridge) keeps
+feeding whatever depends on it. With the line hidden, Threading's status card stops deferring to
+it and shows every fact itself. Codex has no user status line, so there is nothing to hide there.
+Applies the next time a session starts or resumes.
 
 #### Codex hooks
 
@@ -1742,6 +1849,17 @@ and says so plainly for the one that cannot.
 Each row has an **Open Settings** button that goes to that exact pane rather than to the top of
 System Settings. The page keeps reading while it is open, so allowing something over in System
 Settings and switching back shows the new answer without reopening anything.
+
+**Live usage from your Claude login** (off by default) is the one place Threading will read a
+credential that belongs to an agent. On macOS the Claude CLI keeps its sign-in in the keychain,
+not in a file, so without this switch the usage pill can only report what the CLI's local caches
+happen to say — numbers that can be hours old. Switched on, Threading reads that sign-in and asks
+Anthropic's usage endpoint directly: the token goes there and nowhere else, is never stored on
+disk, never refreshed, and never logged. macOS asks once per login when you flip the switch —
+answer **Always Allow** and it stays silent — and the row reports where things stand
+(`On — reading 2 of 3 logins`). Background refreshes never trigger a keychain prompt: if a grant
+is missing, the pill quietly falls back to the caches instead. Switching it off stops the reads
+immediately; the keychain approval itself persists until you revoke it in Keychain Access.
 
 **The part worth knowing: agents inherit what you grant Threading.** macOS attributes a directly
 launched child process to the app that launched it, and Claude and Codex are launched by
@@ -2003,6 +2121,7 @@ sharing control.
 | New Session (opens the composer) | Cmd+N |
 | Start the session being composed (Return breaks the line instead) | Cmd+Return |
 | Add Existing Project | Cmd+Shift+N |
+| Open in External App (this checkout, in the app you last chose) | Cmd+O |
 | Close Tab (the focused drawer/panel tab, else the page on screen; never stops the agent) | Cmd+W |
 | Close Session (stops the agent) | unbound by default — assign one in Settings ▸ Keyboard |
 

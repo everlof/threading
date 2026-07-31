@@ -10,6 +10,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Not private: the toolbar delegate needs the split view for its tracking separator.
     private(set) lazy var splitViewController = SidebarSplitViewController()
     private lazy var sidebarViewController = ProjectSidebarViewController()
+    private lazy var workspaceSidebarViewController = WorkspaceSidebarContainerViewController(
+        nativeController: sidebarViewController,
+        routing: ExtensionManager.shared,
+        contextProvider: { [weak self] in
+            ExtensionCommandContext(
+                projectID: self?.currentProjectID?.uuidString.lowercased(),
+                sessionID: self?.currentSessionID?.uuidString.lowercased()
+            )
+        },
+        destinationHandler: { [weak self] destination in
+            self?.openWorkspaceNavigatorDestination(destination)
+                ?? L10n.string("The workspace window is no longer available.")
+        }
+    )
     private lazy var containerViewController = TerminalContainerViewController()
     private lazy var extensionHookViewController = ExtensionComponentHookViewController(
         target: .init(component: .applicationMainWindow, contractVersion: 1),
@@ -20,7 +34,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     )
 
     /// Retained so the sidebar can be collapsed and restored directly.
-    private lazy var sidebarItem = NSSplitViewItem(viewController: sidebarViewController)
+    private lazy var sidebarItem = NSSplitViewItem(viewController: workspaceSidebarViewController)
 
     /// Owns session creation, import, worktree targeting, surface switches, and closing.
     private lazy var sessionCoordinator = SessionCoordinator(
@@ -62,6 +76,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Suppresses width recording while the panel is being revealed, so the transient
     /// thickness that pass produces is not mistaken for a width the user chose.
     private var isRestoringDisplayPaneWidth = false
+    private var pendingWorkspaceNavigatorWidth: CGFloat?
 
     /// Store-change observations, released with the window.
     private let appEvents = AppEventObservations()
@@ -94,12 +109,21 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     var displayPaneToolbarButton: ThemedIconButton?
     var sessionContextToolbarButton: ThemedIconButton?
     var surfaceToggleToolbarButton: ThemedIconButton?
+    var openInToolbarButton: ThemedIconButton?
+    var openInMenuToolbarButton: ThemedIconButton?
+
+    /// Holds the "Open in" dropdown while it is up; released from its own dismissal.
+    var openInMenuSession: AnyObject?
 
     /// The toolbar context button's menu, rebuilt each open so all session state is live.
     let sessionContextMenu = NSMenu()
 
     /// Exposed to the toolbar delegate, which needs the split view for its tracking separator.
     var splitView: NSSplitView { splitViewController.splitView }
+
+    var effectiveWorkspaceNavigatorSelection: WorkspaceNavigatorSelection {
+        workspaceSidebarViewController.effectiveSelection
+    }
 
 
     private var findBar: FindBarView?
@@ -120,6 +144,19 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return ProjectStore.shared.project(forSessionID: currentSessionID)?.id
         }
         return containerViewController.currentComposerProjectID
+    }
+
+    /// The checkout the visible page is about — what "Open in" opens, and what the Finder
+    /// reveal in the same menus points at.
+    ///
+    /// A session's folder is its *project's*, because a worktree is a project here rather than
+    /// a mode of one (see `git.md`), so a session in a checkout and the checkout itself answer
+    /// the same URL. Settings has no project and therefore no answer, which is what hides the
+    /// control rather than leaving it pointed at whatever was open before.
+    var currentFolderURL: URL? {
+        currentProjectID
+            .flatMap { ProjectStore.shared.project(withID: $0) }?
+            .folderURL
     }
 
     // MARK: - Initialization
@@ -226,6 +263,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // what the sidebar behaviour arranged for itself and a plain item does not.
         sidebarItem.holdingPriority = SidebarDefaults.holdingPriority
         splitViewController.addSplitViewItem(sidebarItem)
+        configureWorkspaceNavigator()
 
         containerViewController.delegate = self
 
@@ -263,6 +301,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateToolbarControlStates()
         splitViewController.sidebarTransitionDidComplete = { [weak self] isCollapsed in
             self?.updateHeaderInset(sidebarIsCollapsed: isCollapsed)
+            if !isCollapsed {
+                self?.applyPendingWorkspaceNavigatorWidth()
+            }
         }
 
         // The toolbar was installed a moment ago and has not laid its items out yet, so the
@@ -270,6 +311,32 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // screen, and well before a divider can be dragged.
         DispatchQueue.main.async { [weak self] in
             self?.updateSidebarMinimumThickness()
+        }
+    }
+
+    private func configureWorkspaceNavigator() {
+        workspaceSidebarViewController.activate(AppSettings.shared.workspaceNavigatorSelection)
+        workspaceSidebarViewController.synchronizeSelection(
+            with: currentWorkspaceNavigatorDestination
+        )
+        appEvents.observe(ExtensionsDidChange.self) { [weak self] _ in
+            guard let self else { return }
+            self.workspaceSidebarViewController.refreshAvailability()
+            self.workspaceSidebarViewController.synchronizeSelection(
+                with: self.currentWorkspaceNavigatorDestination
+            )
+        }
+        appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
+            guard let self else { return }
+            self.workspaceSidebarViewController.activate(
+                AppSettings.shared.workspaceNavigatorSelection
+            )
+            self.workspaceSidebarViewController.synchronizeSelection(
+                with: self.currentWorkspaceNavigatorDestination
+            )
+        }
+        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
+            self?.workspaceSidebarViewController.refreshDocument()
         }
     }
 
@@ -341,6 +408,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let self, sessionID == self.currentSessionID else { return }
             self.containerViewController.selectSubagent(threadID)
         }
+        displayPaneController.onShareSession = { sessionID in
+            ShareChatSheet.run(for: sessionID)
+        }
 
         // The shell drawer belongs to the terminal container, on the other side of the split; the
         // window is what can see both, so it is what joins them.
@@ -389,6 +459,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             // sidebar keeps listing settings sections, with no row to show which one arrived.
             self.exitSettingsForNavigation()
             self.sidebarViewController.select(sessionID: event.sessionID)
+        }
+
+        // An agent that was asked to be done with its session archives it through the same
+        // coordinator the row's own Archive uses; the scheduler's only job was to hold the
+        // request until the turn it was made in had ended. See `SessionArchiveScheduler`.
+        appEvents.observe(SessionArchiveRequestDidBecomeDue.self) { [weak self] event in
+            self?.sessionCoordinator.archiveAtAgentRequest(
+                event.sessionID,
+                reason: event.reason
+            )
         }
     }
 
@@ -648,6 +728,95 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // off screen; subsequent layout callbacks refine this fallback with measured geometry.
         updateHeaderInset(sidebarIsCollapsed: targetIsCollapsed)
         updateToolbarControlStates()
+    }
+
+    func selectWorkspaceNavigator(_ selection: WorkspaceNavigatorSelection) {
+        AppSettings.shared.workspaceNavigatorSelection = selection
+        workspaceSidebarViewController.activate(selection)
+        workspaceSidebarViewController.synchronizeSelection(
+            with: currentWorkspaceNavigatorDestination
+        )
+        if case .extensionNavigator(let extensionIdentifier, let navigatorID) = selection,
+           let width = ExtensionManager.shared.registeredWorkspaceNavigator(
+               extensionIdentifier: extensionIdentifier,
+               navigatorID: navigatorID
+           )?.navigator.preferredWidth {
+            requestWorkspaceNavigatorWidth(CGFloat(width))
+        }
+    }
+
+    /// Applies a contribution's width only when the user explicitly chooses it. The temporary
+    /// constraint is released immediately, so subsequent divider movement remains authoritative.
+    private func requestWorkspaceNavigatorWidth(_ proposedWidth: CGFloat) {
+        pendingWorkspaceNavigatorWidth = min(
+            sidebarItem.maximumThickness,
+            max(sidebarItem.minimumThickness, proposedWidth)
+        )
+        guard !sidebarItem.isCollapsed else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.applyPendingWorkspaceNavigatorWidth()
+        }
+    }
+
+    private func applyPendingWorkspaceNavigatorWidth() {
+        guard !sidebarItem.isCollapsed, let width = pendingWorkspaceNavigatorWidth else {
+            return
+        }
+        pendingWorkspaceNavigatorWidth = nil
+        let constraint = workspaceSidebarViewController.view.widthAnchor.constraint(
+            equalToConstant: width
+        )
+        constraint.isActive = true
+        workspaceSidebarViewController.view.layoutSubtreeIfNeeded()
+        constraint.isActive = false
+    }
+
+    private var currentWorkspaceNavigatorDestination:
+        ExtensionWorkspaceNavigatorDestination?
+    {
+        if let sessionID = currentSessionID {
+            return .session(
+                id: sessionID.uuidString.lowercased(),
+                projectID: ProjectStore.shared.project(forSessionID: sessionID)?
+                    .id.uuidString.lowercased()
+            )
+        }
+        if let projectID = containerViewController.currentComposerProjectID {
+            return .project(id: projectID.uuidString.lowercased())
+        }
+        return nil
+    }
+
+    private func openWorkspaceNavigatorDestination(
+        _ destination: ExtensionWorkspaceNavigatorDestination
+    ) -> String? {
+        switch destination {
+        case .project(let rawID):
+            guard let projectID = ProjectID(uuidString: rawID),
+                  ProjectStore.shared.project(withID: projectID) != nil else {
+                return L10n.string("That project is no longer available.")
+            }
+            exitSettingsForNavigation()
+            sidebarViewController.select(projectID: projectID)
+            return nil
+
+        case .session(let rawID, let rawProjectID):
+            guard let sessionID = SessionID(uuidString: rawID),
+                  let session = ProjectStore.shared.session(withID: sessionID),
+                  !session.isArchived,
+                  let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+                return L10n.string("That session is no longer available.")
+            }
+            if let rawProjectID {
+                guard let expectedProjectID = ProjectID(uuidString: rawProjectID),
+                      expectedProjectID == project.id else {
+                    return L10n.string("That session does not belong to the requested project.")
+                }
+            }
+            exitSettingsForNavigation()
+            sidebarViewController.select(sessionID: sessionID)
+            return nil
+        }
     }
 
     /// Keeps the header naming whatever is on screen.
@@ -1143,6 +1312,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func exitSettingsForNavigation() {
         guard containerViewController.isShowingSettings else { return }
         sidebarViewController.setSettingsMode(false)
+        workspaceSidebarViewController.setSettingsOverride(false)
         preSettingsPage = nil
     }
 
@@ -1257,6 +1427,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // design system's own rule: a control offering nothing here hides rather than sitting
         // there dead.
         newSessionButton?.isHidden = containerViewController.isShowingSettings
+        updateOpenInControls()
         shellDrawerToolbarButton?.isEnabled = hasSession
         shellDrawerToolbarButton?.isSelected = containerViewController.isShellDrawerOpen
         displayPaneToolbarButton?.isSelected = !displayItem.isCollapsed
@@ -1318,6 +1489,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         let review = displayPaneController.activateReview(for: sessionID)
         if let mode { review?.show(mode: mode) }
+        displayPaneController.showSession(sessionID)
+        setDisplayPaneVisible(true)
+    }
+
+    /// Opens who can reach the chat on screen, and who is looking at it right now.
+    func showSharing() {
+        window?.makeKeyAndOrderFront(nil)
+
+        guard let sessionID = containerViewController.currentSessionID else {
+            NSSound.beep()
+            return
+        }
+
+        displayPaneController.activateSharing(for: sessionID)
         displayPaneController.showSession(sessionID)
         setDisplayPaneVisible(true)
     }
@@ -1459,6 +1644,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     func toggleSettings() {
         if containerViewController.isShowingSettings {
             sidebarViewController.setSettingsMode(false)
+            workspaceSidebarViewController.setSettingsOverride(false)
 
             switch preSettingsPage {
             case .session(let sessionID):
@@ -1481,6 +1667,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             preSettingsPage = nil
         } else {
             preSettingsPage = currentPage()
+            workspaceSidebarViewController.setSettingsOverride(true)
             sidebarViewController.setSettingsMode(true)
             containerViewController.showSettingsPage(id: SettingsPages.generalID)
             syncDisplayPane(to: nil)
@@ -1619,6 +1806,9 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         containerViewController.show(sessionID: sessionID, initialPrompt: prompt)
         syncDisplayPane(to: sessionID)
         recordVisit(.session(sessionID))
+        workspaceSidebarViewController.synchronizeSelection(
+            with: currentWorkspaceNavigatorDestination
+        )
 
         // Visibility can change the attention state of the row leaving and entering the pane.
         // Those are the only two rows affected; rebuilding the entire outline made selection
@@ -1636,6 +1826,9 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         containerViewController.showComposer(projectID: projectID)
         syncDisplayPane(to: nil)
         recordVisit(.composer(projectID))
+        workspaceSidebarViewController.synchronizeSelection(
+            with: currentWorkspaceNavigatorDestination
+        )
         if let previousSessionID {
             sidebar.refreshRow(sessionID: previousSessionID)
         }
@@ -1659,6 +1852,15 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
     func projectSidebar(_ sidebar: ProjectSidebarViewController, closeSession sessionID: SessionID) {
         sessionCoordinator.closeSession(sessionID)
+    }
+
+    /// Naming is a decision about the session record, so it routes through the coordinator with
+    /// the rest of them rather than the sidebar reaching for the running agent itself.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        askAgentToRename sessionID: SessionID
+    ) {
+        sessionCoordinator.askAgentToRename(sessionID)
     }
 
     /// Switches a session between the terminal and the native conversation, and reopens it
@@ -1838,6 +2040,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController) {
         showReview()
+    }
+
+    func terminalContainerDidRequestSharing(_ container: TerminalContainerViewController) {
+        showSharing()
     }
 
     func terminalContainerDidRequestTurnDiff(_ container: TerminalContainerViewController) {

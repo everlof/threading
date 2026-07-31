@@ -185,7 +185,11 @@
 		9D3C92123FC0C70AF939DCAD /* WindowEdgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C0EF54B1B5A0259B810C4DB /* WindowEdgeTests.swift */; };
 		8230F80B6DBC52AC3844F0AA /* ToastTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D6E5071CD39E2C48FF724C /* ToastTests.swift */; };
 		848E256B37EE297666E7DD93 /* ToastRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E716F7AED733087F8126C89 /* ToastRenderTests.swift */; };
+		A6429EEC7C7350EB77E90A88 /* OpenInTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63D4A97BC7B730BF994EB26 /* OpenInTests.swift */; };
+		8346D87A6A74D364BF5DA442 /* ClaudeKeychainCredentialsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2FFA2E6B481FF64DD00BF8 /* ClaudeKeychainCredentialsTests.swift */; };
 		3D98B541B905C53B6060A78C /* SessionAttachmentStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */; };
+		E5972E5560BC2C0E698F5214 /* SessionArchiveSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F0122F4145AF214A1AF5B3 /* SessionArchiveSchedulerTests.swift */; };
+		1BB1080C65C2B68360D4E462 /* SessionNameToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF4567C7CDACFF28D543CF05 /* SessionNameToolTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -415,7 +419,11 @@
 		2C0EF54B1B5A0259B810C4DB /* WindowEdgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WindowEdgeTests.swift; sourceTree = "<group>"; };
 		00D6E5071CD39E2C48FF724C /* ToastTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToastTests.swift; sourceTree = "<group>"; };
 		1E716F7AED733087F8126C89 /* ToastRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToastRenderTests.swift; sourceTree = "<group>"; };
+		B63D4A97BC7B730BF994EB26 /* OpenInTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenInTests.swift; sourceTree = "<group>"; };
+		9D2FFA2E6B481FF64DD00BF8 /* ClaudeKeychainCredentialsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeKeychainCredentialsTests.swift; sourceTree = "<group>"; };
 		6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionAttachmentStoreTests.swift; sourceTree = "<group>"; };
+		33F0122F4145AF214A1AF5B3 /* SessionArchiveSchedulerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionArchiveSchedulerTests.swift; sourceTree = "<group>"; };
+		DF4567C7CDACFF28D543CF05 /* SessionNameToolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionNameToolTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -705,7 +713,11 @@
 				2C0EF54B1B5A0259B810C4DB /* WindowEdgeTests.swift */,
 				00D6E5071CD39E2C48FF724C /* ToastTests.swift */,
 				1E716F7AED733087F8126C89 /* ToastRenderTests.swift */,
+				B63D4A97BC7B730BF994EB26 /* OpenInTests.swift */,
+				9D2FFA2E6B481FF64DD00BF8 /* ClaudeKeychainCredentialsTests.swift */,
 				6A976C0699764D44FD595D50 /* SessionAttachmentStoreTests.swift */,
+				33F0122F4145AF214A1AF5B3 /* SessionArchiveSchedulerTests.swift */,
+				DF4567C7CDACFF28D543CF05 /* SessionNameToolTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1241,7 +1253,11 @@
 				9D3C92123FC0C70AF939DCAD /* WindowEdgeTests.swift in Sources */,
 				8230F80B6DBC52AC3844F0AA /* ToastTests.swift in Sources */,
 				848E256B37EE297666E7DD93 /* ToastRenderTests.swift in Sources */,
+				A6429EEC7C7350EB77E90A88 /* OpenInTests.swift in Sources */,
+				8346D87A6A74D364BF5DA442 /* ClaudeKeychainCredentialsTests.swift in Sources */,
 				3D98B541B905C53B6060A78C /* SessionAttachmentStoreTests.swift in Sources */,
+				E5972E5560BC2C0E698F5214 /* SessionArchiveSchedulerTests.swift in Sources */,
+				1BB1080C65C2B68360D4E462 /* SessionNameToolTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

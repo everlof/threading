@@ -58,6 +58,13 @@ duplicating the sidebar (see `sessions.md`, "Why Sessions Are Not Tabs"). It is 
 `ThemedTabItemView` the pane strips build from, inked from the backdrop, bounded by
 `SessionTitleDefaults.minWidth/maxWidth`.
 
+Before those actions sits a second, smaller group: **Open in** — the visible checkout handed to
+the editor, terminal or Finder used last, with a chevron that picks another. It is a separate
+group on purpose. The four buttons after it act on *this pane*; this one leaves for another app,
+and six identical squares in a row would have said they were the same kind of thing. It is also
+the only control in the strip carrying colour, because it wears the target app's own icon —
+see [`external-apps.md`](external-apps.md).
+
 The session actions at its trailing edge are one grouped control: **Context**, the renderer
 switch, **Shell**, and **Panel**. Context does not maintain a toolbar-specific action list; it
 calls `ProjectSidebarViewController.populateSessionActions`, the same builder as the row's hover
