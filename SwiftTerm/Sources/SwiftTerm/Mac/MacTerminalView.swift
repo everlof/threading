@@ -1272,10 +1272,72 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         return event.deltaY > 0 ? velocity : -velocity
     }
 
+    /// Wheel reports a second the program on the other end keeps up with.
+    ///
+    /// Measured against a reader on a 40ms frame, writing SGR reports into a pty it was not
+    /// draining: at 100 a second every one of its `read`s still began on a report boundary even
+    /// after it stalled 800ms; at 180 a second an 800ms stall split one; at 300 a second 400ms
+    /// was enough. See `forwardWheelEvent` for what a split costs.
+    private static let wheelReportsPerSecond: Double = 100
+
+    /// The most reports one gesture may put out at once, so a deliberate notch still moves the
+    /// application's view immediately while a flick cannot open the tap.
+    private static let wheelReportBurst: Double = 6
+
+    /// Reports available to spend now.
+    private var wheelReportAllowance: Double = TerminalView.wheelReportBurst
+    private var wheelAllowanceStamp: DispatchTime = DispatchTime.now()
+
+    /// Takes up to `wanted` reports out of the budget, refilling it for the time elapsed since
+    /// the last one. Nothing banks past the burst, so a pause cannot buy a flood.
+    private func grantWheelReports(_ wanted: Int) -> Int {
+        let now = DispatchTime.now()
+        let elapsed = Double(now.uptimeNanoseconds &- wheelAllowanceStamp.uptimeNanoseconds) / 1_000_000_000
+        wheelAllowanceStamp = now
+
+        wheelReportAllowance = min(
+            TerminalView.wheelReportBurst,
+            wheelReportAllowance + elapsed * TerminalView.wheelReportsPerSecond
+        )
+        let granted = min(wanted, Int(wheelReportAllowance))
+        wheelReportAllowance -= Double(granted)
+        return granted
+    }
+
+    /// The wheel's distance in lines *as reported to the application*.
+    ///
+    /// The scrollback path multiplies a classic notch by a velocity curve — up to a screenful
+    /// for one event — which is a scrolling nicety and the wrong count to report: one notch is
+    /// one wheel event, which is what the program expects to be told.
+    private func wheelReportLines(for event: NSEvent) -> Int? {
+        guard event.hasPreciseScrollingDeltas else {
+            guard event.deltaY != 0 else { return nil }
+            return event.deltaY > 0 ? 1 : -1
+        }
+        return wheelLineDelta(for: event)
+    }
+
     /// Reports a wheel event to the application as mouse wheel button presses (64/65),
-    /// one per accumulated line, at the pointer's cell.
+    /// one per accumulated line, at the pointer's cell — and no faster than the program
+    /// on the other end reads them.
+    ///
+    /// A pty carries no message boundaries and its input queue fills a byte at a time, so a
+    /// program that is mid-render when reports arrive resumes reading in the *middle* of one. A
+    /// stdin parser that does not carry a partial escape sequence across reads then drops the
+    /// orphaned `ESC [ <` and takes the rest for typing: `65;104;33M` landing in Claude Code's
+    /// composer while scrolling is this, and nothing else. The reports themselves arrive in
+    /// order — that was measured too, and it is not where this breaks.
+    ///
+    /// Rate is the whole fix, because the split is the reader's backlog draining, not our
+    /// framing: writing a burst as one write instead of thirty made it *worse*. This gesture was
+    /// worth up to 30 reports on its own, which cleared 1000 a second on any momentum flick.
+    /// Reports past the budget are dropped rather than queued — a scroll the application never
+    /// saw is a scroll that did not happen, and the next gesture already says where the user
+    /// wants to be.
     private func forwardWheelEvent(_ event: NSEvent) {
-        guard let lines = wheelLineDelta(for: event) else { return }
+        guard let lines = wheelReportLines(for: event) else { return }
+        let reports = grantWheelReports(min(abs(lines), Int(TerminalView.wheelReportBurst)))
+        guard reports > 0 else { return }
 
         let hit = calculateMouseHit(with: event)
         let flags = terminal.encodeButton(
@@ -1286,8 +1348,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             control: event.modifierFlags.contains(.control)
         )
 
-        // Capped so a momentum flick cannot flood the application with events.
-        for _ in 0..<min(abs(lines), 30) {
+        for _ in 0..<reports {
             terminal.sendEvent(
                 buttonFlags: flags,
                 x: hit.grid.col,

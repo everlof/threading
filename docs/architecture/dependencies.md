@@ -26,6 +26,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     cannot overwrite the exit monitor and make the old callback wait on a new child.
     `TerminalSession` retains a launch requested during that short interval and performs it from
     the old child's termination callback.
+  - **The managed-grid seam is ours**, on both platforms. `TerminalView.shouldApplyFrameSizeChange`
+    is consulted at the top of `processSizeChange`, *before* the emulator is touched, so a view
+    whose grid does not follow its pixel size can refuse a frame-driven resize outright. The
+    later `LocalProcessTerminalView.shouldApplyProcessSizeChange` is not a substitute: by the
+    time it answers, `terminal.resize` has already reflowed the buffer, and putting the grid back
+    runs SwiftTerm's resize path, which ends in `softReset()`. That cost a remote-controlled
+    session its scrolling region on every layout pass — see [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
+    Keep both hooks when re-syncing: one gates the renderer, the other gates the PTY.
   - **Main-queue output is bounded.** PTY reads pause once pending terminal data reaches the
     4 MiB high-water mark and resume below 1 MiB. The kernel PTY buffer then supplies
     normal producer backpressure instead of an unbounded queue growing behind a busy AppKit
@@ -38,6 +46,22 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets
     `Terminal.userScrolling`, so output repaints do not pull the viewport back to the bottom.
+  - **Wheel reports are rate-limited, and dropped rather than queued.** A pty carries no message
+    boundaries and its input queue fills a byte at a time, so a client that is mid-render when
+    reports arrive resumes reading *inside* one; a stdin parser that does not carry a partial
+    escape sequence across reads then drops the orphaned `ESC [ <` and takes the rest for typing.
+    `65;104;33M` appearing in Claude Code's composer while scrolling is this, and only this. The
+    bytes themselves arrive in order — measured, `LocalProcess`'s per-write `DispatchIO.write`
+    calls do not reorder — and writing a burst as one write instead of thirty made the splitting
+    *worse*, so the rate is the whole fix. Against a reader on a 40 ms frame: 100 reports a
+    second survived an 800 ms stall with every read still landing on a report boundary; 180 a
+    second split one at 800 ms; 300 a second needed only 400 ms. `forwardWheelEvent` spends a
+    token bucket of 100 a second with a burst of 6, and one classic notch now reports once
+    instead of being multiplied by the scrollback velocity curve — which was worth up to a
+    screenful of reports for a single event, and cleared 1000 a second on any momentum flick.
+    A dropped report is right where a queued one is not: a scroll the client never saw is a
+    scroll that did not happen, and the next gesture already says where the user wants to be.
+    `TerminalMouseReportingTests` pins the counts.
   - **`pasteText` is ours.** Upstream reaches bracketed paste only through `paste(_:)`, which
     reads `NSPasteboard.general` — so text that never came from the clipboard could only be sent
     as typing, or by writing over the user's clipboard first. A drop is a paste, and the markers
