@@ -98,6 +98,22 @@ final class GitReviewViewController: NSViewController {
         scroll.drawsBackground = false
         return scroll
     }()
+    lazy var fileTableView: ThemedTableView = {
+        let table = ThemedTableView()
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("GitReviewFile"))
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = NSSize(width: 0, height: Design.Spacing.small)
+        table.rowHeight = 48
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
     lazy var placeholderLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -168,6 +184,17 @@ final class GitReviewViewController: NSViewController {
     /// Which files the user has opened or closed by hand. Consulted ahead of the auto-expand
     /// heuristic, so a watched checkout re-reading itself does not close what is being read.
     var expansionOverrides: [String: Bool] = [:]
+    var bulkExpansionOverride: Bool?
+
+    /// File comparisons use a reusable table. `NSStackView` eagerly solves constraints for
+    /// every arranged child, which made both the original eager list and progressively appended
+    /// deep indexes superlinear. The table owns all model rows while creating views only around
+    /// the viewport.
+    var renderedFiles: [GitFileDiff] = []
+    var filePreludeViews: [NSView] = []
+    var defaultFileExpansion: [String: Bool] = [:]
+    var renderedFileRoot: URL?
+    var instantiatedFileRowCount = 0
 
     /// Whether a long line wraps to the pane or runs off it into a horizontal scroller. Wrapping
     /// is the default because the pane is often narrow, and hiding half a changed line off the
@@ -467,16 +494,34 @@ final class GitReviewViewController: NSViewController {
         generation += 1
         let expected = generation
         isLoading = true
+        let span = PerformanceRecorder.shared.begin(
+            "git.review.load-and-render",
+            category: "git.review",
+            metadata: ["mode": mode.rawValue]
+        )
 
         GitReviewReader.diff(request, in: root, ignoringWhitespace: ignoresWhitespace) { [weak self] result in
-            guard let self, expected == self.generation else { return }
+            guard let self else {
+                span.end(metadata: ["result": "controller-released"])
+                return
+            }
+            guard expected == self.generation else {
+                span.end(metadata: ["result": "stale"])
+                return
+            }
             self.lastLoadedAt = Date()
 
             switch result {
             case .success(let files):
                 self.show(files.isEmpty ? .message("No changes.") : .files(files))
+                span.end(metadata: [
+                    "result": "success",
+                    "files": String(files.count),
+                    "changed_lines": String(files.reduce(0) { $0 + $1.added + $1.removed })
+                ])
             case .failure(let failure):
                 self.show(.message(failure.errorDescription ?? L10n.string("git failed.")))
+                span.end(metadata: ["result": "failure"])
             }
             self.isLoading = false
             self.reloadIfPending()
@@ -487,9 +532,21 @@ final class GitReviewViewController: NSViewController {
         generation += 1
         let expected = generation
         isLoading = true
+        let span = PerformanceRecorder.shared.begin(
+            "git.review.load-history-and-render",
+            category: "git.review",
+            metadata: ["skip": String(skip)]
+        )
 
         GitReviewReader.log(skip: skip, in: root) { [weak self] result in
-            guard let self, expected == self.generation else { return }
+            guard let self else {
+                span.end(metadata: ["result": "controller-released"])
+                return
+            }
+            guard expected == self.generation else {
+                span.end(metadata: ["result": "stale"])
+                return
+            }
             self.lastLoadedAt = Date()
 
             switch result {
@@ -499,8 +556,13 @@ final class GitReviewViewController: NSViewController {
                 self.show(self.commits.isEmpty
                     ? .message("No commits yet.")
                     : .commits(canLoadMore: self.lastPageWasFull))
+                span.end(metadata: [
+                    "result": "success",
+                    "commits": String(self.commits.count)
+                ])
             case .failure(let failure):
                 self.show(.message(failure.errorDescription ?? L10n.string("git failed.")))
+                span.end(metadata: ["result": "failure"])
             }
             self.isLoading = false
             self.reloadIfPending()
@@ -512,13 +574,24 @@ final class GitReviewViewController: NSViewController {
         generation += 1
         let expected = generation
         isLoading = true
+        let span = PerformanceRecorder.shared.begin(
+            "git.review.load-commit-and-render",
+            category: "git.review"
+        )
 
         GitReviewReader.diff(
             .commit(hash: commit.hash),
             in: root,
             ignoringWhitespace: ignoresWhitespace
         ) { [weak self] result in
-            guard let self, expected == self.generation else { return }
+            guard let self else {
+                span.end(metadata: ["result": "controller-released"])
+                return
+            }
+            guard expected == self.generation else {
+                span.end(metadata: ["result": "stale"])
+                return
+            }
 
             switch result {
             case .success(let files):
@@ -527,8 +600,13 @@ final class GitReviewViewController: NSViewController {
                 } else {
                     self.show(.commitDetail(commit, files))
                 }
+                span.end(metadata: [
+                    "result": "success",
+                    "files": String(files.count)
+                ])
             case .failure(let failure):
                 self.show(.message(failure.errorDescription ?? L10n.string("git failed.")))
+                span.end(metadata: ["result": "failure"])
             }
             self.isLoading = false
         }

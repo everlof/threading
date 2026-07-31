@@ -95,6 +95,76 @@ final class EventLogTests: XCTestCase {
         XCTAssertNotNil(detail["startedAt"])
     }
 
+    func testPerformanceTraceExportsCompletedAndActiveSpans() throws {
+        var configuration = PerformanceRecorder.Configuration()
+        configuration.slowMainThreadMilliseconds = .greatestFiniteMagnitude
+        let traceDirectory = testDirectory.appendingPathComponent("traces")
+        let recorder = PerformanceRecorder(
+            directory: traceDirectory,
+            configuration: configuration
+        )
+
+        recorder.measure(
+            "test.completed",
+            category: "test",
+            metadata: [
+                "files": "500",
+                String(repeating: "shared-prefix", count: 8) + "-a": "first",
+                String(repeating: "shared-prefix", count: 8) + "-b": "second"
+            ]
+        ) {}
+        let active = recorder.begin("test.active", category: "test")
+
+        let url = try recorder.export(reason: "unit-test")
+        active.end()
+
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        let events = try XCTUnwrap(root["traceEvents"] as? [[String: Any]])
+        let completed = try XCTUnwrap(events.first { $0["name"] as? String == "test.completed" })
+        let inFlight = try XCTUnwrap(events.first { $0["name"] as? String == "test.active" })
+
+        XCTAssertEqual(completed["ph"] as? String, "X")
+        XCTAssertEqual((completed["args"] as? [String: String])?["files"], "500")
+        XCTAssertEqual((inFlight["args"] as? [String: String])?["incomplete"], "true")
+        XCTAssertEqual((root["otherData"] as? [String: String])?["reason"], "unit-test")
+    }
+
+    func testPerformanceTraceBoundsEventsAndReports() throws {
+        var configuration = PerformanceRecorder.Configuration()
+        configuration.eventCapacity = 2
+        configuration.reportLimit = 2
+        configuration.slowMainThreadMilliseconds = .greatestFiniteMagnitude
+        let traceDirectory = testDirectory.appendingPathComponent("bounded-traces")
+        let recorder = PerformanceRecorder(
+            directory: traceDirectory,
+            configuration: configuration
+        )
+
+        recorder.measure("test.first", category: "test") {}
+        recorder.measure("test.second", category: "test") {}
+        recorder.measure("test.third", category: "test") {}
+
+        let firstURL = try recorder.export(reason: "first")
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: firstURL)) as? [String: Any]
+        )
+        let events = try XCTUnwrap(root["traceEvents"] as? [[String: Any]])
+        XCTAssertEqual(events.compactMap { $0["name"] as? String }, [
+            "test.second",
+            "test.third"
+        ])
+
+        _ = try recorder.export(reason: "second")
+        _ = try recorder.export(reason: "third")
+        let reports = try FileManager.default.contentsOfDirectory(
+            at: traceDirectory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+        XCTAssertEqual(reports.count, 2)
+    }
+
     // MARK: - Helpers
 
     private func journalRecords() throws -> [[String: Any]] {

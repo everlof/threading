@@ -46,7 +46,13 @@ enum GitReviewReader {
         ignoringWhitespace: Bool = false,
         completion: @escaping @MainActor @Sendable (Result<[GitFileDiff], Failure>) -> Void
     ) {
-        perform(completion) { try performDiff(request, in: root, ignoringWhitespace: ignoringWhitespace) }
+        perform(
+            "git.read.diff",
+            metadata: ["comparison": metricName(for: request)],
+            completion
+        ) {
+            try performDiff(request, in: root, ignoringWhitespace: ignoringWhitespace)
+        }
     }
 
     /// The raw unified-diff patch for a request, exactly as git writes it — for handing the
@@ -59,7 +65,11 @@ enum GitReviewReader {
         ignoringWhitespace: Bool = false,
         completion: @escaping @MainActor @Sendable (Result<String, Failure>) -> Void
     ) {
-        perform(completion) {
+        perform(
+            "git.read.raw-diff",
+            metadata: ["comparison": metricName(for: request)],
+            completion
+        ) {
             GitDiffParser.decode(try rawDiffData(request, in: root, ignoringWhitespace: ignoringWhitespace))
         }
     }
@@ -70,7 +80,7 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<[GitCommitSummary], Failure>) -> Void
     ) {
-        perform(completion) {
+        perform("git.read.log", metadata: ["skip": String(skip)], completion) {
             guard hasCommits(in: root) else { throw Failure.noCommits }
             return GitDiffParser.commits(fromLog: try run(GitReviewCommands.log(skip: skip), in: root))
         }
@@ -81,7 +91,7 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
     ) {
-        perform(completion) {
+        perform("git.read.repository-files", completion) {
             try repositoryFilePaths(in: root)
         }
     }
@@ -94,7 +104,7 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<GitRepositoryFile, Failure>) -> Void
     ) {
-        perform(completion) {
+        perform("git.read.repository-file", completion) {
             guard try repositoryFilePaths(in: root).contains(path) else {
                 throw Failure.gitFailed("File not found.")
             }
@@ -146,7 +156,11 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<GitEndpointFilePair, Failure>) -> Void
     ) {
-        perform(completion) {
+        perform(
+            "git.read.endpoint-file-pair",
+            metadata: ["comparison": metricName(for: request)],
+            completion
+        ) {
             let (old, new) = try endpoints(for: request, in: root)
             return GitEndpointFilePair(
                 old: bytes(at: old, path: path, in: root),
@@ -165,7 +179,12 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
     ) {
-        perform(on: summaryQueue, completion) {
+        perform(
+            "git.read.recent-subjects",
+            on: summaryQueue,
+            metadata: ["count": String(count)],
+            completion
+        ) {
             guard hasCommits(in: root) else { return [] }
             return GitDiffParser.decode(
                 try run(GitReviewCommands.recentSubjects(count: count), in: root)
@@ -181,7 +200,7 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<GitChangeSummary, Failure>) -> Void
     ) {
-        perform(on: summaryQueue, completion) {
+        perform("git.read.uncommitted-summary", on: summaryQueue, completion) {
             // The same unborn-HEAD rule as the full uncommitted diff: with nothing to diff
             // against, the index against the empty tree is everything staged so far.
             let tracked = GitDiffParser.summary(fromNumstat: try run(
@@ -205,7 +224,7 @@ enum GitReviewReader {
         in root: URL,
         completion: @escaping @MainActor @Sendable (Result<GitTurnBaseline, Failure>) -> Void
     ) {
-        perform(completion) {
+        perform("git.read.create-snapshot", completion) {
             guard hasCommits(in: root) else { throw Failure.noCommits }
 
             // `stash create` writes an unreferenced commit and touches nothing else; empty
@@ -227,10 +246,17 @@ enum GitReviewReader {
     // MARK: - Private Methods
 
     private static func perform<Value: Sendable>(
+        _ operation: StaticString,
         on queue: DispatchQueue = GitReviewReader.queue,
+        metadata: [String: String] = [:],
         _ completion: @escaping @MainActor @Sendable (Result<Value, Failure>) -> Void,
         _ work: @escaping @Sendable () throws -> Value
     ) {
+        let span = PerformanceRecorder.shared.begin(
+            operation,
+            category: "git.background",
+            metadata: metadata
+        )
         queue.async {
             let result: Result<Value, Failure>
             do {
@@ -240,9 +266,30 @@ enum GitReviewReader {
             } catch {
                 result = .failure(.gitFailed(error.localizedDescription))
             }
+            let metricResult: String
+            switch result {
+            case .success: metricResult = "success"
+            case .failure: metricResult = "failure"
+            }
+            span.end(metadata: [
+                "result": metricResult
+            ])
             Task { @MainActor in
                 completion(result)
             }
+        }
+    }
+
+    /// Stable, aggregate comparison names for telemetry. `String(describing:)` would include
+    /// commit hashes and Last Turn baseline details, neither of which belongs in a trace.
+    private static func metricName(for request: DiffRequest) -> String {
+        switch request {
+        case .uncommitted: return "uncommitted"
+        case .unstaged: return "unstaged"
+        case .staged: return "staged"
+        case .branch: return "branch"
+        case .lastTurn: return "last-turn"
+        case .commit: return "commit"
         }
     }
 

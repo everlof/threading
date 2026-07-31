@@ -36,6 +36,9 @@ enum ThreadingLogger {
     /// Read-only git queries behind the review pane (command, duration, failures)
     static let git = Logger(subsystem: subsystem, category: "git")
 
+    /// Coarse performance spans, main-thread stalls, and trace export failures.
+    static let performance = Logger(subsystem: subsystem, category: "performance")
+
     // MARK: - MCP Loggers
 
     /// The MCP server Threading exposes to agents (listener lifecycle, tool calls)

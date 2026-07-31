@@ -43,12 +43,12 @@ extension GitReviewViewController {
     /// Offered only when something can actually open, so a diff of binaries alone does not carry
     /// a control that would do nothing.
     private func addCollapseItem(to menu: NSMenu) {
-        let expandable = fileRows.filter(\.canOpen)
+        let expandable = renderedFiles.filter(GitReviewFileRow.isExpandable)
         guard !expandable.isEmpty else { return }
 
         menu.addItem(.separator())
         menu.addItem(
-            withTitle: expandable.contains(where: \.isOpen)
+            withTitle: expandable.contains(where: isFileExpanded)
                 ? L10n.string("Collapse all diffs")
                 : L10n.string("Expand all diffs"),
             action: #selector(toggleAllExpansion),
@@ -94,8 +94,11 @@ extension GitReviewViewController {
         }
     }
 
-    private var fileRows: [GitReviewFileRow] {
-        stack.arrangedSubviews.compactMap { $0 as? GitReviewFileRow }
+    private func isFileExpanded(_ file: GitFileDiff) -> Bool {
+        expansionOverrides[file.path]
+            ?? bulkExpansionOverride
+            ?? defaultFileExpansion[file.path]
+            ?? false
     }
 
     /// What the pane is showing, as a request the reader can run again — which is what copying
@@ -129,9 +132,15 @@ extension GitReviewViewController {
     /// opens everything. Each row reports the change as though it had been clicked, so what the
     /// user chose here survives the next re-read exactly as a hand-collapsed file does.
     @objc private func toggleAllExpansion() {
-        let expandable = fileRows.filter(\.canOpen)
-        let expand = !expandable.contains(where: \.isOpen)
-        expandable.forEach { $0.setExpanded(expand) }
+        let expandable = renderedFiles.filter(GitReviewFileRow.isExpandable)
+        guard !expandable.isEmpty else { return }
+        let expand = !expandable.contains(where: isFileExpanded)
+        bulkExpansionOverride = expand
+        for file in expandable {
+            expansionOverrides[file.path] = expand
+        }
+        fileTableView.reloadData()
+        updateScrollControls()
     }
 
     /// The rows carry the wrap setting, so this rebuilds the diff on screen rather than

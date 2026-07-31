@@ -157,15 +157,18 @@ branch diff. Small files auto-expand (≤200 lines each, ≤600 cumulative). The
 with the tab (`PersistedTab.mode`); restore builds the controller but runs no git until the
 tab is actually shown, the browser's deferred-load rule.
 
-The collapsed body rule does **not** make the file index virtual. Measurement showed the
-`NSStackView` eagerly laying out 1,000 collapsed headers took about 94 seconds, so `renderFiles`
-now **materializes 20 headers at a time** and appends rather than rebuilding prior batches. The
-initial 1,000-file workload is consequently bounded at about 29 ms on the same Debug fixture.
-A watched redraw of the same surface preserves the number already reached. This is progressive
-materialization, not reuse: if `git.review.materialize-file-batch` later shows deep traversal is
-slow, a reusable table is the next measured boundary. The fixture and the `git.read.*`,
-`git.process`, `git.review.render`, `git.review.render-files`, and batch spans are documented in
-[`performance.md`](performance.md).
+The collapsed body rule does **not** by itself make the file index cheap. Measurement showed
+`NSStackView` eagerly laying out 1,000 collapsed headers took about 94 seconds. Progressive
+20-row materialization reduced the first viewport to about 29 ms, but a deep walk still became
+superlinear because every appended header remained in the stack.
+
+File comparisons now use a **reusable `ThemedTableView`**. The complete file model is available
+for immediate scrolling, while only viewport rows are constructed: the 1,000-file Debug fixture
+creates 14 rows initially and 28 total after a direct jump to the end. That run opens in about
+19 ms and the deep jump takes about 18 ms. A watched redraw preserves the scroll offset and
+expansion overrides; lazily built bodies invalidate the table's automatic row-height cache.
+The fixture and the `git.read.*`, `git.process`, `git.review.render`, and
+`git.review.render-files` spans are documented in [`performance.md`](performance.md).
 
 A file row's **right-click opens it in an editor at the first line the diff changes** — the
 primary click still belongs to the row's own job, opening and closing the body. This is the

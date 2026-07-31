@@ -28,6 +28,10 @@ final class GitReviewFileRow: NSView {
     /// chose, not what the auto-expand budget chose for them.
     var onToggle: ((Bool) -> Void)?
 
+    /// A reusable table needs an explicit invalidation when this view changes its fitted height.
+    /// A stack observes the constraint change directly; an automatic-height table caches it.
+    var onHeightChange: (() -> Void)?
+
     /// The whole file, staged or unstaged in one go.
     var onStageFile: (() -> Void)?
 
@@ -87,7 +91,11 @@ final class GitReviewFileRow: NSView {
     private var isExpanded = false
 
     private var canExpand: Bool {
-        !file.hunks.isEmpty || isImageComparison
+        Self.isExpandable(file)
+    }
+
+    static func isExpandable(_ file: GitFileDiff) -> Bool {
+        !file.hunks.isEmpty || isImageComparison(file)
     }
 
     /// Extensions the compare surface decodes — raster formats. SVG stays out on purpose: it
@@ -99,6 +107,10 @@ final class GitReviewFileRow: NSView {
     /// A binary change whose path says raster image — including an untracked one, which the
     /// synthesis left hunkless whether it was sniffed binary or merely over the text cap.
     private var isImageComparison: Bool {
+        Self.isImageComparison(file)
+    }
+
+    private static func isImageComparison(_ file: GitFileDiff) -> Bool {
         guard file.hunks.isEmpty else { return false }
         switch file.change {
         case .binary, .untracked: break
@@ -255,11 +267,12 @@ final class GitReviewFileRow: NSView {
     /// Nil where there is nothing to point at: a file this comparison deletes has no working
     /// copy left, and offering to open it would fail after the menu had already promised.
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        guard let openInTarget,
+              FileManager.default.fileExists(atPath: openInTarget.url.path) else { return nil }
 
         let menu = NSMenu()
         if let openIn = OpenInMenu.item(
-            for: .file(fileURL, line: firstChangedLine),
+            for: openInTarget,
             action: #selector(openInAppClicked),
             owner: self
         ) {
@@ -282,6 +295,12 @@ final class GitReviewFileRow: NSView {
 
     private var firstChangedLine: Int? { Self.firstChangedLine(in: file) }
 
+    /// The editor destination carried by this particular row. Kept as a testable seam because
+    /// a reusable table may tear down and reconstruct the view far from where its model began.
+    var openInTarget: ExternalAppTarget? {
+        fileURL.map { .file($0, line: firstChangedLine) }
+    }
+
     /// The line an editor should land on: the first one this diff actually changes.
     ///
     /// The *new* numbering, because that is the file the user is about to edit — a removed
@@ -302,8 +321,8 @@ final class GitReviewFileRow: NSView {
     }
 
     @objc private func openInAppClicked(_ sender: NSMenuItem) {
-        guard let app = OpenInMenu.app(in: sender), let fileURL else { return }
-        ExternalAppLauncher.shared.open(.file(fileURL, line: firstChangedLine), in: app)
+        guard let app = OpenInMenu.app(in: sender), let openInTarget else { return }
+        ExternalAppLauncher.shared.open(openInTarget, in: app)
     }
 
     @objc private func revealInFinderClicked() {
@@ -353,6 +372,7 @@ final class GitReviewFileRow: NSView {
             systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
             accessibilityDescription: nil
         )
+        onHeightChange?()
     }
 
     /// One `DiffView` per hunk with its `@@` header between, spending the file's line budget
@@ -406,6 +426,7 @@ final class GitReviewFileRow: NSView {
         guard let imagePairProvider else { return }
         imagePairProvider(file) { [weak self] result in
             guard let self else { return }
+            defer { self.onHeightChange?() }
             self.imageLoadingNote?.removeFromSuperview()
 
             switch result {

@@ -62,6 +62,21 @@ enum GitProcess {
         maximumOutput: Int = GitReviewDefaults.maximumDiffBytes,
         acceptedExitCodes: Set<Int32> = [0]
     ) throws -> Data {
+        let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "unknown"
+        let performanceSpan = PerformanceRecorder.shared.begin(
+            "git.process",
+            category: "git.process",
+            metadata: ["command": command]
+        )
+        var performanceResult = "failure"
+        var performanceOutputBytes = 0
+        defer {
+            performanceSpan.end(metadata: [
+                "result": performanceResult,
+                "output_bytes": String(performanceOutputBytes)
+            ])
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: GitDefaults.executablePath)
         process.arguments = arguments
@@ -136,6 +151,7 @@ enum GitProcess {
         stderrDrained.wait()
 
         let elapsed = Int(-started.timeIntervalSinceNow * 1000)
+        performanceOutputBytes = outputData.count
         ThreadingLogger.git.info(
             "git \(arguments.first ?? "", privacy: .public) finished in \(elapsed)ms, \(outputData.count) bytes"
         )
@@ -152,6 +168,7 @@ enum GitProcess {
             throw failure(fromStandardError: message)
         }
 
+        performanceResult = "success"
         return outputData
     }
 

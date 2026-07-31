@@ -19,8 +19,14 @@ extension GitReviewViewController {
             metadata: Self.performanceMetadata(for: phase)
         )
         defer {
+            let isFileSurface = scrollView.documentView === fileTableView
             performanceSpan.end(metadata: [
-                "rendered_rows": String(stack.arrangedSubviews.count)
+                "model_rows": String(
+                    isFileSurface
+                        ? filePreludeViews.count + renderedFiles.count
+                        : stack.arrangedSubviews.count
+                ),
+                "instantiated_file_rows": String(instantiatedFileRowCount)
             ])
         }
 
@@ -34,12 +40,12 @@ extension GitReviewViewController {
         self.phase = phase
         renderedMode = mode
         if !keepsPlace {
-            materializedFileLimit = GitReviewUIDefaults.fileRowBatchSize
             bulkExpansionOverride = nil
         }
 
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         resetRenderedFiles()
+        scrollView.documentView = stack
         placeholderLabel.isHidden = true
         backButton.isHidden = true
         counterLabel.isHidden = true
@@ -47,33 +53,45 @@ extension GitReviewViewController {
         jumpToEndButton.isHidden = true
         scrollView.contentInsets.bottom = 0
 
-        if let notice {
-            addRow(makeNotice(notice.text, isError: notice.isError))
-            self.notice = nil
-        }
+        let pendingNotice = notice
+        notice = nil
 
         switch phase {
         case .message(let text):
+            if let pendingNotice {
+                addRow(makeNotice(pendingNotice.text, isError: pendingNotice.isError))
+            }
             placeholderLabel.stringValue = text
             placeholderLabel.isHidden = false
 
         case .files(let files):
             renderCounter(files)
+            var prelude: [NSView] = []
+            if let pendingNotice {
+                prelude.append(makeNotice(pendingNotice.text, isError: pendingNotice.isError))
+            }
             // The composer belongs to Staged mode, which is the one place where what is about
             // to be committed is exactly what is on screen.
             if mode == .staged {
-                addRow(makeCommitComposer(focused: composerWasFocused))
+                prelude.append(makeCommitComposer(focused: composerWasFocused))
             }
-            renderFiles(files)
+            renderFiles(files, prelude: prelude)
 
         case .commits(let canLoadMore):
+            if let pendingNotice {
+                addRow(makeNotice(pendingNotice.text, isError: pendingNotice.isError))
+            }
             renderCommits(canLoadMore: canLoadMore)
 
         case .commitDetail(let commit, let files):
             backButton.isHidden = false
             renderCounter(files)
-            renderDetailHeader(commit)
-            renderFiles(files)
+            var prelude: [NSView] = []
+            if let pendingNotice {
+                prelude.append(makeNotice(pendingNotice.text, isError: pendingNotice.isError))
+            }
+            prelude.append(makeDetailHeader(commit))
+            renderFiles(files, prelude: prelude)
         }
 
         restoreScroll(to: keepsPlace ? offset.y : 0)
@@ -143,10 +161,9 @@ extension GitReviewViewController {
         scrollView.contentInsets.bottom = 54
     }
 
-    /// Small files open ready to read; everything else opens on click. A large file index is
-    /// also materialized in batches: collapsed bodies are cheap, but AppKit still solves every
-    /// header's constraints before it can display the first one.
-    func renderFiles(_ files: [GitFileDiff]) {
+    /// Small files open ready to read; everything else opens on click. The model is complete
+    /// immediately, while AppKit asks for views only around the table's viewport.
+    func renderFiles(_ files: [GitFileDiff], prelude: [NSView] = []) {
         let performanceSpan = PerformanceRecorder.shared.begin(
             "git.review.render-files",
             category: "git.review.ui",
@@ -157,114 +174,40 @@ extension GitReviewViewController {
         )
         defer {
             performanceSpan.end(metadata: [
-                "materialized_files": String(nextFileIndex)
+                "model_files": String(renderedFiles.count),
+                "instantiated_files": String(instantiatedFileRowCount)
             ])
         }
 
         renderedFiles = files
-        remainingExpandBudget = Self.initialExpandBudget(for: files)
-        // Once for the whole diff: `repositoryRoot` walks the tree looking for `.git`, and a
-        // branch comparison can list hundreds of files.
-        renderedFileRoot = repositoryRoot
-        appendFileRows(upTo: min(materializedFileLimit, files.count))
-    }
-
-    /// Adds only the next slice to the existing stack. Rebuilding the previous rows on every
-    /// click would make traversing the index quadratic even though opening it was bounded.
-    private func appendFileRows(upTo requestedLimit: Int) {
-        moreFilesButton?.removeFromSuperview()
-        moreFilesButton = nil
-
-        let limit = min(max(requestedLimit, nextFileIndex), renderedFiles.count)
-        guard nextFileIndex < limit else {
-            addMoreFilesButtonIfNeeded()
-            return
-        }
-
-        for file in renderedFiles[nextFileIndex..<limit] {
+        filePreludeViews = prelude
+        var remainingExpandBudget = Self.initialExpandBudget(for: files)
+        for file in files {
             let lineCount = file.hunks.reduce(0) { $0 + $1.lines.count }
             let fitsBudget = lineCount > 0
                 && lineCount <= GitReviewDefaults.autoExpandFileLineLimit
                 && lineCount <= remainingExpandBudget
-
-            // A file the user opened stays open however large it is; one they closed stays
-            // closed however small. The budget only decides what they have not said.
-            let expand = expansionOverrides[file.path] ?? bulkExpansionOverride ?? fitsBudget
-            if expand { remainingExpandBudget -= lineCount }
-
-            // The row's "Open in" needs an absolute path, and a diff carries only a path
-            // relative to the checkout — which is the pane's fact, not the row's.
-            let row = GitReviewFileRow(
-                file: file,
-                expanded: expand,
-                staging: staging,
-                wraps: wrapsDiffLines,
-                fileURL: renderedFileRoot?.appendingPathComponent(file.path)
-            )
-            row.onToggle = { [weak self] expanded in
-                self?.expansionOverrides[file.path] = expanded
-            }
-            row.onStageFile = { [weak self] in self?.stageFile(file) }
-            row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
-            // The row knows it holds a picture; the pane knows which two endpoints the mode
-            // measures between. `currentDiffRequest` already answers for an opened commit too.
-            row.imagePairProvider = { [weak self] file, completion in
-                guard let self, let root = self.repositoryRoot,
-                      let request = self.currentDiffRequest else {
-                    completion(.failure(.gitFailed("No comparison to read from.")))
-                    return
-                }
-                GitReviewReader.endpointFilePair(
-                    path: file.path, request: request, in: root, completion: completion
-                )
-            }
-            addRow(row)
+            defaultFileExpansion[file.path] = fitsBudget
+            let expanded = expansionOverrides[file.path]
+                ?? bulkExpansionOverride
+                ?? fitsBudget
+            if expanded { remainingExpandBudget -= lineCount }
         }
 
-        nextFileIndex = limit
-        materializedFileLimit = max(materializedFileLimit, limit)
-        addMoreFilesButtonIfNeeded()
-    }
-
-    private func addMoreFilesButtonIfNeeded() {
-        guard nextFileIndex < renderedFiles.count else { return }
-
-        let more = ThemedButton(
-            title: L10n.string("Show more…"),
-            target: self,
-            action: #selector(loadMoreFiles)
-        )
-        more.isBordered = false
-        more.applyFont(.caption)
-        more.contentTintColor = Design.Text.secondary
-        more.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(more)
-        moreFilesButton = more
-    }
-
-    @objc func loadMoreFiles() {
-        let performanceSpan = PerformanceRecorder.shared.begin(
-            "git.review.materialize-file-batch",
-            category: "git.review.ui",
-            metadata: [
-                "start": String(nextFileIndex),
-                "files": String(renderedFiles.count)
-            ]
-        )
-        appendFileRows(
-            upTo: nextFileIndex + GitReviewUIDefaults.fileRowBatchSize
-        )
-        view.layoutSubtreeIfNeeded()
-        updateScrollControls()
-        performanceSpan.end(metadata: ["end": String(nextFileIndex)])
+        // Once for the whole diff: `repositoryRoot` walks the tree looking for `.git`, and a
+        // branch comparison can list hundreds of files.
+        renderedFileRoot = repositoryRoot
+        fileTableView.reloadData()
+        scrollView.documentView = fileTableView
     }
 
     private func resetRenderedFiles() {
         renderedFiles = []
-        nextFileIndex = 0
-        remainingExpandBudget = 0
+        filePreludeViews = []
+        defaultFileExpansion = [:]
         renderedFileRoot = nil
-        moreFilesButton = nil
+        instantiatedFileRowCount = 0
+        fileTableView.reloadData()
     }
 
     static func initialExpandBudget(for files: [GitFileDiff]) -> Int {
@@ -324,7 +267,7 @@ extension GitReviewViewController {
         }
     }
 
-    func renderDetailHeader(_ commit: GitCommitSummary) {
+    func makeDetailHeader(_ commit: GitCommitSummary) -> NSView {
         let label = NSTextField(labelWithString: "\(commit.shortHash)  \(commit.subject)")
         label.applyFont(.caption)
         label.textColor = Design.Text.secondary
@@ -332,7 +275,7 @@ extension GitReviewViewController {
         label.usesSingleLineMode = true
         label.toolTip = "\(commit.subject) — \(commit.author)"
         label.translatesAutoresizingMaskIntoConstraints = false
-        addRow(label)
+        return label
     }
 
     func addRow(_ view: NSView) {
@@ -345,5 +288,107 @@ extension GitReviewViewController {
             equalTo: stack.trailingAnchor,
             constant: -Design.Spacing.inset
         ).isActive = true
+    }
+}
+
+// MARK: - Virtual File Index
+
+extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        filePreludeViews.count + renderedFiles.count
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard tableRow >= 0, tableRow < numberOfRows(in: tableView) else { return nil }
+
+        let identifier = NSUserInterfaceItemIdentifier("GitReviewVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? GitReviewVirtualRowHost ?? GitReviewVirtualRowHost()
+        host.identifier = identifier
+
+        if filePreludeViews.indices.contains(tableRow) {
+            host.install(filePreludeViews[tableRow])
+            return host
+        }
+
+        let fileIndex = tableRow - filePreludeViews.count
+        guard renderedFiles.indices.contains(fileIndex) else { return nil }
+        host.install(makeFileRow(renderedFiles[fileIndex], tableRow: tableRow))
+        return host
+    }
+
+    private func makeFileRow(_ file: GitFileDiff, tableRow: Int) -> GitReviewFileRow {
+        instantiatedFileRowCount += 1
+        let expanded = expansionOverrides[file.path]
+            ?? bulkExpansionOverride
+            ?? defaultFileExpansion[file.path]
+            ?? false
+
+        // The row's "Open in" needs an absolute path, and a diff carries only a path
+        // relative to the checkout — which is the pane's fact, not the row's.
+        let row = GitReviewFileRow(
+            file: file,
+            expanded: expanded,
+            staging: staging,
+            wraps: wrapsDiffLines,
+            fileURL: renderedFileRoot?.appendingPathComponent(file.path)
+        )
+        row.onToggle = { [weak self] expanded in
+            self?.expansionOverrides[file.path] = expanded
+        }
+        row.onHeightChange = { [weak self, weak row] in
+            guard let self, let row,
+                  tableRow < self.fileTableView.numberOfRows,
+                  self.fileTableView.row(for: row) == tableRow else { return }
+            self.fileTableView.noteHeightOfRows(
+                withIndexesChanged: IndexSet(integer: tableRow)
+            )
+            self.updateScrollControls()
+        }
+        row.onStageFile = { [weak self] in self?.stageFile(file) }
+        row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
+        // The row knows it holds a picture; the pane knows which two endpoints the mode
+        // measures between. `currentDiffRequest` already answers for an opened commit too.
+        row.imagePairProvider = { [weak self] file, completion in
+            guard let self, let root = self.repositoryRoot,
+                  let request = self.currentDiffRequest else {
+                completion(.failure(.gitFailed("No comparison to read from.")))
+                return
+            }
+            GitReviewReader.endpointFilePair(
+                path: file.path, request: request, in: root, completion: completion
+            )
+        }
+        return row
+    }
+}
+
+/// A reusable table shell. The expensive diff row is replaced whenever the table reassigns
+/// this host, so offscreen file views and their constraints are released.
+private final class GitReviewVirtualRowHost: NSView {
+
+    func install(_ content: NSView) {
+        subviews.forEach { $0.removeFromSuperview() }
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+
+        let inset = Design.Spacing.inset * 2
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
     }
 }
