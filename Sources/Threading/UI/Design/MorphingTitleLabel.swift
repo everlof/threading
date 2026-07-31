@@ -38,7 +38,7 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     /// `nil` follows the app setting. Previews can pin a style without changing
     /// the global preference before their selector action has committed it.
     var morphStyleOverride: ChatNameMorphStyle? {
-        didSet { applyEffect() }
+        didSet { applyEffect(morphingTo: stringValue) }
     }
 
     var stringValue: String { label.text }
@@ -120,7 +120,7 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         useAutomaticTextColor()
-        applyEffect()
+        applyEffect(morphingTo: stringValue)
 
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.refreshTextColor()
@@ -160,7 +160,7 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
         // Only a morph reads the effect, and a sidebar of these is reconfigured constantly
         // while an agent works — so the setting is not consulted on every pass.
         if shouldAnimate {
-            applyEffect()
+            applyEffect(morphingTo: value)
         }
         label.setText(value, animated: shouldAnimate)
         setAccessibilityLabel(value)
@@ -176,9 +176,10 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     /// mid-flight or leaves the row looking finished. Zero under Reduce Motion, where
     /// `setStringValue` does not animate at all.
     func morphSettleDuration(to value: String) -> TimeInterval {
-        guard !Design.Motion.reducesMotion else { return 0 }
+        guard !Design.Motion.reducesMotion, let preset = currentPreset else { return 0 }
         let characters = max(stringValue.count, value.count)
-        return label.timing.duration + label.timing.stagger * Double(max(0, characters - 1))
+        let timing = Self.timing(for: preset, characters: characters)
+        return timing.duration + timing.stagger * Double(max(0, characters - 1))
     }
 
     /// States the ink as a rule to be re-asked, rather than a colour to be kept.
@@ -212,11 +213,34 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
         }
     }
 
-    private func applyEffect() {
+    private var currentPreset: MorphPreset? {
         let style = morphStyleOverride ?? AppSettings.shared.chatNameMorphStyle
-        guard let preset = MorphPreset(rawValue: style.rawValue) else { return }
+        return MorphPreset(rawValue: style.rawValue)
+    }
+
+    private func applyEffect(morphingTo value: String) {
+        guard let preset = currentPreset else { return }
 
         label.effect = preset.makeEffect(intensity: Defaults.intensity)
-        label.timing = preset.recommendedTiming
+        label.timing = Self.timing(for: preset,
+                                   characters: max(stringValue.count, value.count))
+    }
+
+    /// The preset's recommended timing brought to this app's tempo, for a line `characters` long.
+    ///
+    /// Two adjustments, and the second is the one that matters. The package recommends a
+    /// duration that shows an effect off; `Design.Motion.nameMorphTempo` scales it to the tempo
+    /// the rest of the app moves at. The stagger is then held to a *total* rather than a step,
+    /// because a per-character delay is multiplied by the name: at the default preset's 45ms
+    /// every session title long enough to be a sentence took over a second and a half to
+    /// settle, and the cascade — not the character animation — was nearly all of it. Below the
+    /// budget a short name still cascades exactly as the preset asked.
+    private static func timing(for preset: MorphPreset, characters: Int) -> MorphTiming {
+        var timing = preset.recommendedTiming
+        timing.duration *= Design.Motion.nameMorphTempo
+        let steps = Double(max(1, characters - 1))
+        timing.stagger = min(timing.stagger * Design.Motion.nameMorphTempo,
+                             Design.Motion.nameMorphCascade / steps)
+        return timing
     }
 }

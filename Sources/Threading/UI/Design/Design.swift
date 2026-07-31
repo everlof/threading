@@ -946,6 +946,26 @@ enum Design {
         /// name still.
         static var demonstrationHold: TimeInterval { reducesMotion ? 0 : 0.9 }
 
+        // MARK: Name transitions
+
+        /// How much of a LabelMorph preset's own recommended per-character duration a name
+        /// transition here actually takes.
+        ///
+        /// The package recommends what shows an effect off — one large title, watched. These
+        /// play on a sidebar row while an agent works, where the morph acknowledges a rename
+        /// rather than being the thing you came to look at, and every other transition in the
+        /// app lands in 0.15–0.2s. At the preset's full length a rename read as a wait.
+        static let nameMorphTempo: Double = 0.65
+
+        /// The whole cascade a name transition is allowed, however long the name.
+        ///
+        /// A per-character stagger multiplies out: at the default preset's 45ms a 26-character
+        /// session title took 1.7s to settle, so a *longer* name looked slower rather than
+        /// merely longer — and sidebar names are sentences. Budgeting the cascade rather than
+        /// the step holds a transition near half a second at any length, and leaves the step as
+        /// the preset asked for it whenever the name is short enough to fit inside the budget.
+        static let nameMorphCascade: TimeInterval = 0.3
+
         // MARK: Brand mark
 
         /// The Threading mark stitching itself in on launch: the shield outline draws first,

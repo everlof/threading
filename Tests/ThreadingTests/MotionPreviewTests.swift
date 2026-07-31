@@ -278,6 +278,37 @@ final class MotionPreviewTests: XCTestCase {
         XCTAssertEqual(label.morphSettleDuration(to: AppInfo.name), 0)
     }
 
+    /// A name transition is budgeted whole, not per character.
+    ///
+    /// The stagger is a cascade's cost and it is multiplied by the name, so a preset's own step
+    /// makes the same transition read as slower the more there is to read: at the default
+    /// preset's 45ms a session title that is a sentence took two and a half seconds to settle,
+    /// nearly all of it cascade. Every preset is pinned, since the budget is the wrapper's and
+    /// the step is the package's.
+    func testANameTransitionIsBudgetedRatherThanPaidPerCharacter() {
+        Design.Motion.reduceMotionOverrideForTesting = false
+
+        let short = "Land it"
+        let long = "Land the redirect fix and update the guide"
+        let longer = long + ", then land the follow-up behind it as well"
+
+        for style in ChatNameMorphStyle.allCases {
+            let label = MorphingTitleLabel()
+            label.morphStyleOverride = style
+            label.setStringValue("Fix", animated: false)
+
+            let settled = [short, long, longer].map(label.morphSettleDuration(to:))
+
+            XCTAssertGreaterThanOrEqual(settled[1], settled[0], style.displayName)
+            // Past the budget, length stops buying time at all.
+            XCTAssertEqual(settled[2], settled[1], accuracy: 0.001, style.displayName)
+            XCTAssertLessThan(
+                settled[2], 0.8,
+                "\(style.displayName) settles a long name in \(settled[2])s"
+            )
+        }
+    }
+
     // MARK: - Geometry
 
     /// A hosted preview and a drawn title start in the same place. The column of names shifting

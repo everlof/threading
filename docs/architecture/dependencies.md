@@ -126,6 +126,17 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - `MorphingTitleLabel` (in `UI/Design/`) is the theme boundary: the package owns glyph
     layout and animation, the wrapper owns the semantic ink, Reduce Motion, clipping,
     accessibility and the user's chosen preset.
+  - **Tempo is ours.** `MorphPreset.recommendedTiming` is tuned to show an effect off — one
+    large title, watched — and the wrapper brings it to the app's own pace before every morph:
+    the per-character duration scaled by `Design.Motion.nameMorphTempo`, and the stagger held
+    to a *total* cascade (`Design.Motion.nameMorphCascade`) rather than a per-character step.
+    The second is the one that mattered. A stagger is multiplied by the name, so at the default
+    preset's 45ms a 26-character session title took 1.7s to settle against a one-word project
+    name's 0.8 — the same transition reading as slower the more there was to read, and sidebar
+    names are sentences. Budgeted, a transition lands near half a second at any length, and a
+    name short enough to fit inside the budget still cascades exactly as the preset asked.
+    `morphSettleDuration(to:)` resolves the same timing for the name it is asked about, so a
+    repeating preview waits for what will actually play rather than for the last morph's length.
   - **Truncation is ours.** The stock label lays a whole line out from the leading edge and
     lets it run past the view, which the wrapper's clip then cuts dead mid-glyph. That is
     fine for a toolbar item sized to its text and wrong for every sidebar row, where names
