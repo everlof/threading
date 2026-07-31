@@ -143,6 +143,45 @@ struct ExtensionPanelInventoryItem: Equatable {
     let panel: ExtensionPanel
 }
 
+/// One live, validated navigator contribution and the process generation which owns it.
+///
+/// The eventual sidebar host consumes only this inventory boundary. Installation and lifecycle
+/// mutation stay outside the UI surface, and a generation mismatch restores the native navigator.
+struct ExtensionWorkspaceNavigatorInventoryItem: Equatable {
+    let extensionIdentifier: String
+    let extensionName: String
+    let processGeneration: String
+    let navigator: ExtensionWorkspaceNavigator
+}
+
+/// The lifecycle-safe boundary consumed by the leading workspace navigator host.
+@MainActor
+protocol ExtensionWorkspaceNavigatorRouting: AnyObject {
+    var extensionWorkspaceNavigatorInventory: [ExtensionWorkspaceNavigatorInventoryItem] { get }
+
+    func registeredWorkspaceNavigator(
+        extensionIdentifier: String,
+        navigatorID: String
+    ) -> ExtensionWorkspaceNavigatorInventoryItem?
+
+    func extensionImageResourceURL(
+        extensionIdentifier: String,
+        relativePath: String
+    ) -> URL?
+
+    @discardableResult
+    func invokeWorkspaceNavigatorAction(
+        extensionIdentifier: String,
+        navigatorID: String,
+        actionID: String,
+        value: ExtensionJSONValue?,
+        context: ExtensionCommandContext,
+        completion: @escaping (
+            Result<ExtensionWorkspaceNavigatorActionResponse, Error>
+        ) -> Void
+    ) -> Bool
+}
+
 /// The narrow panel boundary consumed by the display pane.
 ///
 /// Keeping it separate from installation and lifecycle APIs lets the product surface be tested
@@ -170,6 +209,16 @@ protocol ExtensionPanelRouting: AnyObject {
         completion: @escaping (Result<ExtensionActionResponse, Error>) -> Void
     ) -> Bool
 
+    @discardableResult
+    func invokePanelAction(
+        extensionIdentifier: String,
+        panelID: String,
+        actionID: String,
+        value: ExtensionJSONValue?,
+        context: ExtensionCommandContext,
+        completion: @escaping (Result<ExtensionActionResponse, Error>) -> Void
+    ) -> Bool
+
     func connectRemoteSurface(
         extensionIdentifier: String,
         panelID: String,
@@ -180,6 +229,24 @@ protocol ExtensionPanelRouting: AnyObject {
 }
 
 extension ExtensionPanelRouting {
+    @discardableResult
+    func invokePanelAction(
+        extensionIdentifier: String,
+        panelID: String,
+        actionID: String,
+        value: ExtensionJSONValue?,
+        context: ExtensionCommandContext,
+        completion: @escaping (Result<ExtensionActionResponse, Error>) -> Void
+    ) -> Bool {
+        invokePanelAction(
+            extensionIdentifier: extensionIdentifier,
+            panelID: panelID,
+            actionID: actionID,
+            context: context,
+            completion: completion
+        )
+    }
+
     func connectRemoteSurface(
         extensionIdentifier: String,
         panelID: String,
@@ -200,6 +267,7 @@ extension ExtensionPanelRouting {
 final class ExtensionManager:
     ExtensionServiceRouting,
     ExtensionCompanionRouting,
+    ExtensionWorkspaceNavigatorRouting,
     ExtensionPanelRouting
 {
     static let shared = ExtensionManager()
@@ -559,7 +627,8 @@ final class ExtensionManager:
 
         process.invokeComponentAction(
             target: action.target,
-            actionID: action.actionID
+            actionID: action.actionID,
+            value: action.value
         ) { result in
             if case .failure(let error) = result {
                 ThreadingLogger.extensions.error(
@@ -598,6 +667,94 @@ final class ExtensionManager:
             return $0.panel.title.localizedCaseInsensitiveCompare($1.panel.title)
                 == .orderedAscending
         }
+    }
+
+    var extensionWorkspaceNavigatorInventory: [ExtensionWorkspaceNavigatorInventoryItem] {
+        registrations.flatMap { identifier, registration in
+            guard enabledIdentifiers.contains(identifier),
+                  sessions[identifier] != nil,
+                  let processGeneration = sessionGenerations[identifier],
+                  let bundle = packages[identifier]?.bundle else {
+                return [ExtensionWorkspaceNavigatorInventoryItem]()
+            }
+            let localization = ExtensionLocalizationResolver(catalogs: bundle.localizations)
+            return registration.workspaceNavigators.map {
+                ExtensionWorkspaceNavigatorInventoryItem(
+                    extensionIdentifier: identifier,
+                    extensionName: localization.string(bundle.manifest.name),
+                    processGeneration: processGeneration,
+                    navigator: $0
+                )
+            }
+        }
+        .sorted {
+            let extensionOrder = $0.extensionName.localizedCaseInsensitiveCompare(
+                $1.extensionName
+            )
+            if extensionOrder != .orderedSame {
+                return extensionOrder == .orderedAscending
+            }
+            return $0.navigator.title.localizedCaseInsensitiveCompare($1.navigator.title)
+                == .orderedAscending
+        }
+    }
+
+    func registeredWorkspaceNavigator(
+        extensionIdentifier: String,
+        navigatorID: String
+    ) -> ExtensionWorkspaceNavigatorInventoryItem? {
+        guard enabledIdentifiers.contains(extensionIdentifier),
+              sessions[extensionIdentifier] != nil,
+              let processGeneration = sessionGenerations[extensionIdentifier],
+              let bundle = packages[extensionIdentifier]?.bundle,
+              let navigator = registrations[extensionIdentifier]?.workspaceNavigators.first(
+                  where: { $0.id == navigatorID }
+              ) else {
+            return nil
+        }
+        return ExtensionWorkspaceNavigatorInventoryItem(
+            extensionIdentifier: extensionIdentifier,
+            extensionName: ExtensionLocalizationResolver(
+                catalogs: bundle.localizations
+            ).string(bundle.manifest.name),
+            processGeneration: processGeneration,
+            navigator: navigator
+        )
+    }
+
+    @discardableResult
+    func invokeWorkspaceNavigatorAction(
+        extensionIdentifier: String,
+        navigatorID: String,
+        actionID: String,
+        value: ExtensionJSONValue?,
+        context: ExtensionCommandContext,
+        completion: @escaping (
+            Result<ExtensionWorkspaceNavigatorActionResponse, Error>
+        ) -> Void
+    ) -> Bool {
+        guard enabledIdentifiers.contains(extensionIdentifier),
+              registrations[extensionIdentifier]?.workspaceNavigators.contains(where: {
+                  $0.id == navigatorID
+              }) == true,
+              let process = sessions[extensionIdentifier] else {
+            completion(.failure(ExtensionProcessError.notRunning))
+            return false
+        }
+
+        let localization = packages[extensionIdentifier]?.bundle.map {
+            ExtensionLocalizationResolver(catalogs: $0.localizations)
+        } ?? ExtensionLocalizationResolver(strings: [:])
+        process.invokeWorkspaceNavigatorAction(
+            navigatorID: navigatorID,
+            actionID: actionID,
+            value: value,
+            context: context,
+            completion: { result in
+                completion(result.map(localization.workspaceNavigatorActionResponse))
+            }
+        )
+        return true
     }
 
     func registeredPanel(
@@ -641,6 +798,25 @@ final class ExtensionManager:
         context: ExtensionCommandContext,
         completion: @escaping (Result<ExtensionActionResponse, Error>) -> Void
     ) -> Bool {
+        invokePanelAction(
+            extensionIdentifier: extensionIdentifier,
+            panelID: panelID,
+            actionID: actionID,
+            value: nil,
+            context: context,
+            completion: completion
+        )
+    }
+
+    @discardableResult
+    func invokePanelAction(
+        extensionIdentifier: String,
+        panelID: String,
+        actionID: String,
+        value: ExtensionJSONValue?,
+        context: ExtensionCommandContext,
+        completion: @escaping (Result<ExtensionActionResponse, Error>) -> Void
+    ) -> Bool {
         guard enabledIdentifiers.contains(extensionIdentifier),
               registrations[extensionIdentifier]?.panels.contains(where: {
                   $0.id == panelID
@@ -656,6 +832,7 @@ final class ExtensionManager:
         process.invoke(
             panelID: panelID,
             actionID: actionID,
+            value: value,
             context: context,
             completion: { result in
                 completion(result.map(localization.actionResponse))

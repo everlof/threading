@@ -14,6 +14,7 @@ enum ExtensionProcessError: LocalizedError {
     case invalidMessage(String)
     case responseForUnknownRequest(String)
     case responsePanelMismatch(expected: String, actual: String)
+    case responseNavigatorMismatch(expected: String, actual: String)
     case responseCommandMismatch(expected: String, actual: String)
     case responseSettingsMismatch(expected: [String], actual: [String])
     case responseServiceMismatch(
@@ -51,6 +52,10 @@ enum ExtensionProcessError: LocalizedError {
             return "The extension responded to unknown request “\(requestID)”."
         case .responsePanelMismatch(let expected, let actual):
             return "The extension action for panel “\(expected)” returned panel “\(actual)”."
+        case .responseNavigatorMismatch(let expected, let actual):
+            return """
+            The extension action for navigator “\(expected)” returned navigator “\(actual)”.
+            """
         case .responseCommandMismatch(let expected, let actual):
             return "The extension response for command “\(expected)” named command “\(actual)”."
         case .responseSettingsMismatch(let expected, let actual):
@@ -96,6 +101,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
     typealias ActionCompletion = @MainActor @Sendable (
         Result<ExtensionActionResponse, Error>
     ) -> Void
+    typealias NavigatorCompletion = @MainActor @Sendable (
+        Result<ExtensionWorkspaceNavigatorActionResponse, Error>
+    ) -> Void
     typealias CommandCompletion = @MainActor @Sendable (
         Result<ExtensionCommandResponse, Error>
     ) -> Void
@@ -113,6 +121,13 @@ final class ExtensionProcessSession: @unchecked Sendable {
         let actionID: String
         let panelID: String?
         let completion: ActionCompletion
+        let timeoutItem: DispatchWorkItem
+    }
+
+    private struct PendingNavigator {
+        let actionID: String
+        let navigatorID: String
+        let completion: NavigatorCompletion
         let timeoutItem: DispatchWorkItem
     }
 
@@ -164,6 +179,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
 
     private var startupResult: Result<ExtensionRegistration, Error>?
     private var pendingActions: [String: PendingAction] = [:]
+    private var pendingNavigators: [String: PendingNavigator] = [:]
     private var pendingCommands: [String: PendingCommand] = [:]
     private var pendingSettings: [String: PendingSettings] = [:]
     private var pendingServices: [String: PendingService] = [:]
@@ -261,6 +277,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
     func invoke(
         panelID: String,
         actionID: String,
+        value: ExtensionJSONValue? = nil,
         context: ExtensionCommandContext = .init(),
         requestID: String = UUID().uuidString.lowercased(),
         timeout: TimeInterval = defaultTimeout,
@@ -270,6 +287,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
             requestID: requestID,
             panelID: panelID,
             actionID: actionID,
+            value: value,
             context: context
         )
 
@@ -328,6 +346,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
     func invokeComponentAction(
         target: ExtensionComponentTarget,
         actionID: String,
+        value: ExtensionJSONValue? = nil,
         requestID: String = UUID().uuidString.lowercased(),
         timeout: TimeInterval = defaultTimeout,
         completion: @escaping ActionCompletion
@@ -335,7 +354,8 @@ final class ExtensionProcessSession: @unchecked Sendable {
         let request = ExtensionComponentActionRequest(
             requestID: requestID,
             target: target,
-            actionID: actionID
+            actionID: actionID,
+            value: value
         )
 
         do {
@@ -387,6 +407,75 @@ final class ExtensionProcessSession: @unchecked Sendable {
             }
         } catch {
             deliver(.failure(error), to: completion)
+        }
+    }
+
+    func invokeWorkspaceNavigatorAction(
+        navigatorID: String,
+        actionID: String,
+        value: ExtensionJSONValue? = nil,
+        context: ExtensionCommandContext = .init(),
+        requestID: String = UUID().uuidString.lowercased(),
+        timeout: TimeInterval = defaultTimeout,
+        completion: @escaping NavigatorCompletion
+    ) {
+        let request = ExtensionWorkspaceNavigatorActionRequest(
+            requestID: requestID,
+            navigatorID: navigatorID,
+            actionID: actionID,
+            value: value,
+            context: context
+        )
+
+        do {
+            try request.validate()
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let data = encoded
+
+            let timeoutItem = DispatchWorkItem { [weak self] in
+                self?.timeOutNavigator(requestID: requestID)
+            }
+            let pending = PendingNavigator(
+                actionID: actionID,
+                navigatorID: navigatorID,
+                completion: completion,
+                timeoutItem: timeoutItem
+            )
+
+            lock.lock()
+            guard !isStopped, child.isRunning else {
+                lock.unlock()
+                deliverNavigator(.failure(ExtensionProcessError.notRunning), to: completion)
+                return
+            }
+            guard requestIDIsAvailableLocked(requestID) else {
+                lock.unlock()
+                deliverNavigator(.failure(ExtensionProcessError.invalidMessage(
+                    "request id “\(requestID)” is already pending"
+                )), to: completion)
+                return
+            }
+            pendingNavigators[requestID] = pending
+            lock.unlock()
+
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + timeout,
+                execute: timeoutItem
+            )
+            writeQueue.async { [weak self] in
+                guard let self else { return }
+                do {
+                    try self.stdin.fileHandleForWriting.write(contentsOf: data)
+                } catch {
+                    self.finish(
+                        with: ExtensionProcessError.writeFailed(error.localizedDescription),
+                        terminate: true
+                    )
+                }
+            }
+        } catch {
+            deliverNavigator(.failure(error), to: completion)
         }
     }
 
@@ -761,6 +850,10 @@ final class ExtensionProcessSession: @unchecked Sendable {
 
         do {
             let envelope = try JSONDecoder().decode(ResponseEnvelope.self, from: data)
+            if hasPendingNavigator(requestID: envelope.requestID) {
+                try handleNavigatorResponse(data)
+                return
+            }
             if hasPendingCommand(requestID: envelope.requestID) {
                 try handleCommandResponse(data)
                 return
@@ -848,6 +941,79 @@ final class ExtensionProcessSession: @unchecked Sendable {
         lock.unlock()
         action?.timeoutItem.cancel()
         return action
+    }
+
+    private func handleNavigatorResponse(_ data: Data) throws {
+        let response = try JSONDecoder().decode(
+            ExtensionWorkspaceNavigatorActionResponse.self,
+            from: data
+        )
+        try response.validate()
+        guard let pending = takePendingNavigator(requestID: response.requestID) else {
+            finish(
+                with: ExtensionProcessError.responseForUnknownRequest(response.requestID),
+                terminate: true
+            )
+            return
+        }
+        guard response.navigatorID == pending.navigatorID else {
+            deliverNavigator(
+                .failure(ExtensionProcessError.responseNavigatorMismatch(
+                    expected: pending.navigatorID,
+                    actual: response.navigatorID
+                )),
+                to: pending.completion
+            )
+            return
+        }
+        if let navigator = response.navigator {
+            guard navigator.id == pending.navigatorID else {
+                deliverNavigator(
+                    .failure(ExtensionProcessError.responseNavigatorMismatch(
+                        expected: pending.navigatorID,
+                        actual: navigator.id
+                    )),
+                    to: pending.completion
+                )
+                return
+            }
+            do {
+                try ExtensionRegistration(
+                    workspaceNavigators: [navigator]
+                ).validate(for: bundle.manifest)
+            } catch {
+                let detail = (error as? ExtensionValidationError)?.description
+                    ?? error.localizedDescription
+                deliverNavigator(
+                    .failure(ExtensionProcessError.invalidMessage(detail)),
+                    to: pending.completion
+                )
+                return
+            }
+        }
+        deliverNavigator(.success(response), to: pending.completion)
+    }
+
+    private func timeOutNavigator(requestID: String) {
+        guard let pending = takePendingNavigator(requestID: requestID) else { return }
+        deliverNavigator(
+            .failure(ExtensionProcessError.actionTimedOut(pending.actionID)),
+            to: pending.completion
+        )
+    }
+
+    private func takePendingNavigator(requestID: String) -> PendingNavigator? {
+        lock.lock()
+        let pending = pendingNavigators.removeValue(forKey: requestID)
+        lock.unlock()
+        pending?.timeoutItem.cancel()
+        return pending
+    }
+
+    private func hasPendingNavigator(requestID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingNavigators[requestID] != nil
     }
 
     private func handleCommandResponse(_ data: Data) throws {
@@ -1030,6 +1196,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
     /// The caller holds `lock`; keeping this non-locking avoids recursive `NSLock` acquisition.
     private func requestIDIsAvailableLocked(_ requestID: String) -> Bool {
         pendingActions[requestID] == nil
+            && pendingNavigators[requestID] == nil
             && pendingCommands[requestID] == nil
             && pendingSettings[requestID] == nil
             && pendingServices[requestID] == nil
@@ -1059,6 +1226,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
 
     private func finish(with error: Error, terminate: Bool) {
         let actions: [PendingAction]
+        let navigators: [PendingNavigator]
         let commands: [PendingCommand]
         let settings: [PendingSettings]
         let services: [PendingService]
@@ -1078,6 +1246,8 @@ final class ExtensionProcessSession: @unchecked Sendable {
         }
         actions = Array(pendingActions.values)
         pendingActions.removeAll()
+        navigators = Array(pendingNavigators.values)
+        pendingNavigators.removeAll()
         commands = Array(pendingCommands.values)
         pendingCommands.removeAll()
         settings = Array(pendingSettings.values)
@@ -1094,6 +1264,10 @@ final class ExtensionProcessSession: @unchecked Sendable {
         actions.forEach {
             $0.timeoutItem.cancel()
             deliver(.failure(error), to: $0.completion)
+        }
+        navigators.forEach {
+            $0.timeoutItem.cancel()
+            deliverNavigator(.failure(error), to: $0.completion)
         }
         commands.forEach {
             $0.timeoutItem.cancel()
@@ -1137,6 +1311,15 @@ final class ExtensionProcessSession: @unchecked Sendable {
     private func deliver(
         _ result: Result<ExtensionActionResponse, Error>,
         to completion: @escaping ActionCompletion
+    ) {
+        Task { @MainActor in
+            completion(result)
+        }
+    }
+
+    private func deliverNavigator(
+        _ result: Result<ExtensionWorkspaceNavigatorActionResponse, Error>,
+        to completion: @escaping NavigatorCompletion
     ) {
         Task { @MainActor in
             completion(result)

@@ -231,8 +231,11 @@ ExtensionImageReference
 ExtensionIdentityComposition
 ```
 
-`ExtensionNode` already renders horizontal and vertical stacks, text, status, buttons, dividers,
-and fixed spacers. Full row replacement additionally needs:
+`ExtensionNode` renders horizontal and vertical stacks, text, status, buttons, dividers, fixed
+spacers, native value controls, and bounded semantic scenes. Inputs, pickers, and scenes are
+enabled for full panels; compact contracts keep them disabled unless `allowsTextInput`,
+`maximumPickerOptions`, or `maximumSceneItems` explicitly opt in. See
+[`DECLARATIVE_UI.md`](DECLARATIVE_UI.md). Full row replacement additionally needs:
 
 - `image(reference, role, accessibilityLabel)`;
 - `flexibleSpacer`;

@@ -14,6 +14,7 @@ enum ExtensionNodeRenderer {
     enum RenderError: Error, Equatable, LocalizedError {
         case tooDeep(maximum: Int)
         case tooManyNodes(maximum: Int)
+        case tooManyRenderedElements(maximum: Int)
         case customSurfaceUnavailable
 
         var errorDescription: String? {
@@ -28,6 +29,11 @@ enum ExtensionNodeRenderer {
                     "Extension UI exceeds the maximum node count of %lld.",
                     Int64(maximum)
                 )
+            case .tooManyRenderedElements(let maximum):
+                return L10n.format(
+                    "Extension UI exceeds the aggregate rendered-element count of %lld.",
+                    Int64(maximum)
+                )
             case .customSurfaceUnavailable:
                 return L10n.string("The extension custom surface could not be created.")
             }
@@ -37,6 +43,7 @@ enum ExtensionNodeRenderer {
     private enum Limits {
         static let depth = ExtensionPanel.nodeConstraints.maximumDepth
         static let nodes = ExtensionPanel.nodeConstraints.maximumNodes
+        static let renderedElements = ExtensionPanel.nodeConstraints.maximumRenderedElements
     }
 
     static func render(
@@ -45,13 +52,33 @@ enum ExtensionNodeRenderer {
         customSurfaceRenderer: @escaping CustomSurfaceRenderer = { _ in nil },
         onAction: @escaping (String) -> Void
     ) throws -> ExtensionNodeHostView {
+        try render(
+            node,
+            imageResolver: imageResolver,
+            customSurfaceRenderer: customSurfaceRenderer,
+            onEvent: { actionID, _ in onAction(actionID) }
+        )
+    }
+
+    static func render(
+        _ node: ExtensionNode,
+        imageResolver: @escaping ImageResolver = defaultImageResolver,
+        customSurfaceRenderer: @escaping CustomSurfaceRenderer = { _ in nil },
+        onEvent: @escaping (String, ExtensionJSONValue?) -> Void
+    ) throws -> ExtensionNodeHostView {
         var count = 0
-        try validate(node, depth: 0, count: &count)
+        var renderedElementCount = 0
+        try validate(
+            node,
+            depth: 0,
+            count: &count,
+            renderedElementCount: &renderedElementCount
+        )
         return try ExtensionNodeHostView(
             node: node,
             imageResolver: imageResolver,
             customSurfaceRenderer: customSurfaceRenderer,
-            onAction: onAction
+            onEvent: onEvent
         )
     }
 
@@ -63,32 +90,72 @@ enum ExtensionNodeRenderer {
     private static func validate(
         _ node: ExtensionNode,
         depth: Int,
-        count: inout Int
+        count: inout Int,
+        renderedElementCount: inout Int
     ) throws {
         guard depth <= Limits.depth else {
             throw RenderError.tooDeep(maximum: Limits.depth)
         }
 
         count += 1
+        renderedElementCount += 1
         guard count <= Limits.nodes else {
             throw RenderError.tooManyNodes(maximum: Limits.nodes)
         }
+        guard renderedElementCount <= Limits.renderedElements else {
+            throw RenderError.tooManyRenderedElements(maximum: Limits.renderedElements)
+        }
 
         switch node {
+        case .picker(_, _, let options, _, _):
+            renderedElementCount += options.count
+            guard renderedElementCount <= Limits.renderedElements else {
+                throw RenderError.tooManyRenderedElements(maximum: Limits.renderedElements)
+            }
+        case .scene(let scene):
+            renderedElementCount += scene.items.count
+            guard renderedElementCount <= Limits.renderedElements else {
+                throw RenderError.tooManyRenderedElements(maximum: Limits.renderedElements)
+            }
         case .stack(_, _, let children):
             for child in children {
-                try validate(child, depth: depth + 1, count: &count)
+                try validate(
+                    child,
+                    depth: depth + 1,
+                    count: &count,
+                    renderedElementCount: &renderedElementCount
+                )
             }
         case .overlay(let base, let overlay):
-            try validate(base, depth: depth + 1, count: &count)
-            try validate(overlay, depth: depth + 1, count: &count)
+            try validate(
+                base,
+                depth: depth + 1,
+                count: &count,
+                renderedElementCount: &renderedElementCount
+            )
+            try validate(
+                overlay,
+                depth: depth + 1,
+                count: &count,
+                renderedElementCount: &renderedElementCount
+            )
         case .disclosure(_, let summary, let detail):
             // Both levels are built in this pass, so both spend the renderer's own budget. The
             // contract's separate budget for a revealed level is a *narrower* limit stated per
             // surface, not a licence to hand this renderer an unbounded tree.
-            try validate(summary, depth: depth + 1, count: &count)
+            try validate(
+                summary,
+                depth: depth + 1,
+                count: &count,
+                renderedElementCount: &renderedElementCount
+            )
             for child in detail {
-                try validate(child, depth: depth + 1, count: &count)
+                try validate(
+                    child,
+                    depth: depth + 1,
+                    count: &count,
+                    renderedElementCount: &renderedElementCount
+                )
             }
         default:
             break
@@ -106,19 +173,21 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
 
     private let imageResolver: ExtensionNodeRenderer.ImageResolver
     private let customSurfaceRenderer: ExtensionNodeRenderer.CustomSurfaceRenderer
-    private let onAction: (String) -> Void
+    private let onEvent: (String, ExtensionJSONValue?) -> Void
     private var actionsByButton: [ObjectIdentifier: String] = [:]
+    private var actionsByTextInput: [ObjectIdentifier: String] = [:]
+    private var actionsByPicker: [ObjectIdentifier: String] = [:]
     private(set) var proceedPlaceholder: ExtensionProceedPlaceholderView?
 
     init(
         node: ExtensionNode,
         imageResolver: @escaping ExtensionNodeRenderer.ImageResolver,
         customSurfaceRenderer: @escaping ExtensionNodeRenderer.CustomSurfaceRenderer,
-        onAction: @escaping (String) -> Void
+        onEvent: @escaping (String, ExtensionJSONValue?) -> Void
     ) throws {
         self.imageResolver = imageResolver
         self.customSurfaceRenderer = customSurfaceRenderer
-        self.onAction = onAction
+        self.onEvent = onEvent
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityIdentifier("extension.node.host")
@@ -175,6 +244,57 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
             }
             actionsByButton[ObjectIdentifier(button)] = id
             return button
+
+        case .textInput(
+            let id,
+            let value,
+            let placeholder,
+            let accessibilityLabel,
+            let role,
+            let isEnabled
+        ):
+            let field: ThemedTextField = role == .search
+                ? ThemedSearchField(frame: .zero)
+                : ThemedTextField(frame: .zero)
+            field.stringValue = value
+            field.placeholderString = placeholder
+            field.isEnabled = isEnabled
+            field.target = self
+            field.action = #selector(textInputSubmitted)
+            field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            field.setAccessibilityIdentifier("extension.input.\(id)")
+            field.setAccessibilityLabel(accessibilityLabel)
+            actionsByTextInput[ObjectIdentifier(field)] = id
+            return field
+
+        case .picker(let id, let selection, let options, let accessibilityLabel, let isEnabled):
+            let picker = ThemedPopUp(frame: .zero)
+            for option in options {
+                picker.addItem(
+                    ThemedMenuItem(
+                        title: option.title,
+                        representedValue: option.value,
+                        isEnabled: option.isEnabled
+                    )
+                )
+            }
+            if let selection,
+               let index = options.firstIndex(where: { $0.value == selection }) {
+                picker.selectItem(at: index)
+            } else {
+                picker.selectItem(at: -1)
+            }
+            picker.isEnabled = isEnabled
+            picker.target = self
+            picker.action = #selector(pickerChanged)
+            picker.setAccessibilityIdentifier("extension.picker.\(id)")
+            picker.setAccessibilityLabel(accessibilityLabel)
+            actionsByPicker[ObjectIdentifier(picker)] = id
+            return picker
+
+        case .scene(let scene):
+            return makeScene(scene)
 
         case .status(let text, let role):
             let label = NSTextField(labelWithString: text)
@@ -264,7 +384,78 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
                     view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
                 }
             }
+            if axis == .vertical {
+                for (node, view) in zip(children, views) {
+                    switch node {
+                    case .textInput, .scene:
+                        view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                    default:
+                        break
+                    }
+                }
+            }
             return stack
+        }
+    }
+
+    private func makeScene(_ scene: ExtensionScene) -> SemanticSceneView {
+        let items = scene.items.map { item in
+            SemanticSceneView.Item(
+                id: item.id,
+                normalizedFrame: NSRect(
+                    x: item.frame.x,
+                    y: item.frame.y,
+                    width: item.frame.width,
+                    height: item.frame.height
+                ),
+                shape: sceneShape(item.shape),
+                color: sceneColor(item.color),
+                label: item.label,
+                detail: item.detail,
+                accessibilityLabel: item.accessibilityLabel ?? item.label ?? item.id,
+                accessibilityValue: item.accessibilityValue ?? item.detail,
+                isEnabled: item.isEnabled,
+                isSelected: item.isSelected,
+                onActivate: item.actionID.map { actionID in
+                    { [weak self] in
+                        self?.onEvent(actionID, .string(item.id))
+                    }
+                }
+            )
+        }
+        let view = SemanticSceneView(
+            accessibilityLabel: scene.accessibilityLabel,
+            items: items
+        )
+        view.heightAnchor.constraint(
+            equalTo: view.widthAnchor,
+            multiplier: 1 / scene.preferredAspectRatio
+        ).isActive = true
+        view.setAccessibilityIdentifier("extension.scene")
+        return view
+    }
+
+    private func sceneShape(_ shape: ExtensionSceneShape) -> SemanticSceneView.Item.Shape {
+        switch shape {
+        case .rectangle: .rectangle
+        case .roundedRectangle: .roundedRectangle
+        case .ellipse: .ellipse
+        }
+    }
+
+    private func sceneColor(_ color: ExtensionSceneColorRole) -> SemanticSceneView.Item.Color {
+        switch color {
+        case .neutral: .neutral
+        case .accent: .accent
+        case .positive: .positive
+        case .warning: .warning
+        case .negative: .negative
+        case .category1: .category(0)
+        case .category2: .category(1)
+        case .category3: .category(2)
+        case .category4: .category(3)
+        case .category5: .category(4)
+        case .category6: .category(5)
         }
     }
 
@@ -354,7 +545,18 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
 
     @objc private func buttonPressed(_ sender: ThemedButton) {
         guard let action = actionsByButton[ObjectIdentifier(sender)] else { return }
-        onAction(action)
+        onEvent(action, nil)
+    }
+
+    @objc private func textInputSubmitted(_ sender: ThemedTextField) {
+        guard let action = actionsByTextInput[ObjectIdentifier(sender)] else { return }
+        onEvent(action, .string(sender.stringValue))
+    }
+
+    @objc private func pickerChanged(_ sender: ThemedPopUp) {
+        guard let action = actionsByPicker[ObjectIdentifier(sender)],
+              let value = sender.selectedItem?.representedValue as? String else { return }
+        onEvent(action, .string(value))
     }
 }
 

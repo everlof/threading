@@ -215,6 +215,7 @@ enum ExtensionBundleInspector {
         .servicesConsume,
         .companionOperations,
         .componentCustomization,
+        .workspaceNavigation,
         .customMetalSurfaces,
         .hostProjectsRead,
         .hostSessionsRead,

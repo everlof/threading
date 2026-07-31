@@ -108,6 +108,133 @@ final class ExtensionProcessSessionTests: XCTestCase {
         wait(for: [completed], timeout: 2)
     }
 
+    func testPersistentProcessRoutesACorrelatedWorkspaceNavigatorUpdate() throws {
+        let initial = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Loading", role: .neutral)),
+            loadActionID: "refresh"
+        )
+        let replacement = ExtensionWorkspaceNavigator(
+            id: initial.id,
+            title: initial.title,
+            root: .collection(.init(
+                id: "threads",
+                layout: .list,
+                items: [
+                    .init(
+                        id: "thread-1",
+                        content: .text("Build fixed", role: .body),
+                        activation: .action(id: "open-thread")
+                    )
+                ]
+            )),
+            loadActionID: initial.loadActionID
+        )
+        let response = ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "navigator-request-1",
+            navigatorID: initial.id,
+            navigator: replacement,
+            message: "Activity refreshed."
+        )
+        let storage = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingNavigatorAction-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: storage,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: storage) }
+        let directory = try makeBundle(
+            registration: .init(workspaceNavigators: [initial]),
+            additionalCapabilities: [.keyValueStorage],
+            scriptAfterRegistration: """
+            IFS= read -r request || exit 65
+            printf '%s\\n' "$request" > "$THREADING_EXTENSION_KEY_VALUE_DIRECTORY/navigator-request.json"
+            printf '%s\\n' \(shellQuoted(try json(response)))
+            while IFS= read -r request; do :; done
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let started = try ExtensionProcessSession.start(
+            bundle: ExtensionBundleInspector.inspect(at: directory),
+            additionalEnvironment: [
+                ExtensionStorageEnvironment.keyValueDirectory: storage.path
+            ]
+        )
+        defer { started.session.terminate() }
+
+        let context = ExtensionCommandContext(projectID: "project-1", sessionID: "session-1")
+        let completed = expectation(description: "navigator response")
+        started.session.invokeWorkspaceNavigatorAction(
+            navigatorID: initial.id,
+            actionID: "filter",
+            value: .string("active"),
+            context: context,
+            requestID: response.requestID
+        ) { result in
+            XCTAssertEqual(try? result.get(), response)
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 2)
+
+        let request = try JSONDecoder().decode(
+            ExtensionWorkspaceNavigatorActionRequest.self,
+            from: Data(
+                contentsOf: storage.appendingPathComponent("navigator-request.json")
+            )
+        )
+        XCTAssertEqual(request.navigatorID, initial.id)
+        XCTAssertEqual(request.actionID, "filter")
+        XCTAssertEqual(request.value, .string("active"))
+        XCTAssertEqual(request.context, context)
+    }
+
+    func testWorkspaceNavigatorResponseMustNameTheInvokedNavigator() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Ready", role: .positive))
+        )
+        let response = ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "navigator-request-mismatch",
+            navigatorID: "different-navigator"
+        )
+        let directory = try makeBundle(
+            registration: .init(workspaceNavigators: [navigator]),
+            scriptAfterRegistration: """
+            IFS= read -r request || exit 65
+            printf '%s\\n' \(shellQuoted(try json(response)))
+            while IFS= read -r request; do :; done
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let started = try ExtensionProcessSession.start(
+            bundle: ExtensionBundleInspector.inspect(at: directory)
+        )
+        defer { started.session.terminate() }
+
+        let completed = expectation(description: "navigator mismatch")
+        started.session.invokeWorkspaceNavigatorAction(
+            navigatorID: navigator.id,
+            actionID: "refresh",
+            requestID: response.requestID
+        ) { result in
+            guard case .failure(let error) = result,
+                  case .responseNavigatorMismatch(let expected, let actual) =
+                    error as? ExtensionProcessError else {
+                XCTFail("mismatched navigator was accepted")
+                completed.fulfill()
+                return
+            }
+            XCTAssertEqual(expected, navigator.id)
+            XCTAssertEqual(actual, response.navigatorID)
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 2)
+    }
+
     func testIndividualActionTimesOutWithoutBlockingTheCaller() throws {
         let registration = ExtensionRegistration(
             panels: [
@@ -412,6 +539,7 @@ final class ExtensionProcessSessionTests: XCTestCase {
         started.session.invokeComponentAction(
             target: target,
             actionID: "open-build",
+            value: .string("build-42"),
             requestID: response.requestID
         ) { result in
             XCTAssertEqual(try? result.get(), response)
@@ -430,6 +558,7 @@ final class ExtensionProcessSessionTests: XCTestCase {
         XCTAssertEqual(received.requestID, response.requestID)
         XCTAssertEqual(received.target, target)
         XCTAssertEqual(received.actionID, "open-build")
+        XCTAssertEqual(received.value, .string("build-42"))
     }
 
     func testSandboxKeepsThePackageReadOnlyAndDeclaredStorageWritable() throws {
@@ -578,6 +707,9 @@ final class ExtensionProcessSessionTests: XCTestCase {
         }
         if !registration.services.isEmpty {
             capabilities.insert(.servicesProvide)
+        }
+        if !registration.workspaceNavigators.isEmpty {
+            capabilities.insert(.workspaceNavigation)
         }
         capabilities.formUnion(additionalCapabilities)
         if !settings.isEmpty {

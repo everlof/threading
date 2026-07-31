@@ -6,6 +6,7 @@ The package contains:
 
 - inspectable extension manifests and capabilities;
 - semantic command and panel contributions;
+- semantic workspace navigator contributions with virtualizable collection snapshots;
 - statically declared and runtime-registered MCP tool contributions;
 - statically inspectable, host-rendered Settings pages and built-in-page sections;
 - versioned, manifest-declared extension services brokered without shared storage;
@@ -13,7 +14,8 @@ The package contains:
 - a tokenized host client for atomic component and primitive identity publications plus safe
   project/session/provider/account snapshots, separately gated session-runtime telemetry, and
   cursor-based change events;
-- a Codable `ExtensionNode` UI tree rendered by Threading;
+- a Codable `ExtensionNode` UI tree, including native value controls and bounded semantic
+  visualization scenes, rendered by Threading;
 - versioned component contracts and property, slot, and full-content patch values;
 - correlated Codable request/response values for commands, persistent actions, and MCP calls;
 - validation with machine-readable field paths;
@@ -62,9 +64,22 @@ keyboard defaults, and decision.
 
 Enabled `ExtensionPanel` contributions appear in the selected session's display-pane `+` menu
 beside Threading's built-in surfaces. They open as persistent tabs keyed by extension and panel ID.
-Button requests carry opaque project/session context; returned semantic panel state is rendered
-by Threading. Disable, reload, crash, and startup ordering produce a host-owned unavailable state
-until the current process generation registers the panel again.
+Buttons, text/search inputs, pickers, and interactive scene marks raise correlated action
+requests with opaque project/session context; returned semantic panel state is rendered by
+Threading. A generic scene supplies normalized semantic marks for treemaps, heatmaps, charts,
+timelines, and similar native visualizations without accepting extension drawing code or HTML.
+See [`docs/extensions/DECLARATIVE_UI.md`](../docs/extensions/DECLARATIVE_UI.md). Disable, reload,
+crash, and startup ordering produce a host-owned unavailable state until the current process
+generation registers the panel again.
+
+`ExtensionWorkspaceNavigator` replaces the complete interior of the host-owned leading navigator.
+Its root composes ordinary semantic content with virtualized list, outline, and grid snapshots
+carrying stable IDs and host project/session destinations. Users select a live navigator under
+**View → Navigator**; Threading persists the identity, routes value-bearing actions through the
+owning process, atomically installs returned snapshots, preserves collection presentation state,
+and falls back to Native if that process generation disappears or cannot render. Actionable grid
+items supply an `accessibilityLabel` for the host-owned cell. See
+[`docs/extensions/WORKSPACE_NAVIGATORS.md`](../docs/extensions/WORKSPACE_NAVIGATORS.md).
 
 Settings contributions are declared in the manifest under the `settings` capability. Threading
 renders complete pages and sections appended to stable built-in pages using toggle, bounded text,

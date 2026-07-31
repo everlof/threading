@@ -33,6 +33,7 @@ public enum ThreadingExtensionAPI {
         .servicesConsume,
         .companionOperations,
         .componentCustomization,
+        .workspaceNavigation,
         .customMetalSurfaces,
         .hostProjectsRead,
         .hostSessionsRead,

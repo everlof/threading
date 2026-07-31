@@ -312,6 +312,12 @@ extension ExtensionComponentDetailConstraints: Codable {
 public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     public let maximumDepth: Int
     public let maximumNodes: Int
+    /// Aggregate host-rendered elements across the tree.
+    ///
+    /// Nodes, picker options, and scene marks all consume this budget. Keeping it separate from
+    /// `maximumNodes` prevents a shallow tree from hiding an unbounded amount of eager renderer
+    /// work inside value-bearing nodes.
+    public let maximumRenderedElements: Int
     public let maximumTextLength: Int
     public let requiredRootAxis: ExtensionAxis?
     public let allowedStackAxes: [ExtensionAxis]
@@ -319,6 +325,12 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     public let allowedImageRoles: [ExtensionImageRole]
     public let allowedButtonRoles: [ExtensionButtonRole]
     public let allowedStatusRoles: [ExtensionStatusRole]
+    /// Whether this surface accepts editable text fields.
+    public let allowsTextInput: Bool
+    /// Zero disallows pickers; a positive value is the option budget for each picker.
+    public let maximumPickerOptions: Int
+    /// Zero disallows scenes; a positive value is the mark budget for each scene.
+    public let maximumSceneItems: Int
     public let allowsDivider: Bool
     public let allowsFixedSpacer: Bool
     public let allowsFlexibleSpacer: Bool
@@ -338,6 +350,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     public init(
         maximumDepth: Int,
         maximumNodes: Int,
+        maximumRenderedElements: Int? = nil,
         maximumTextLength: Int,
         requiredRootAxis: ExtensionAxis? = nil,
         allowedStackAxes: [ExtensionAxis] = [],
@@ -345,6 +358,9 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         allowedImageRoles: [ExtensionImageRole] = [],
         allowedButtonRoles: [ExtensionButtonRole] = [],
         allowedStatusRoles: [ExtensionStatusRole] = [],
+        allowsTextInput: Bool = false,
+        maximumPickerOptions: Int = 0,
+        maximumSceneItems: Int = 0,
         allowsDivider: Bool = false,
         allowsFixedSpacer: Bool = false,
         allowsFlexibleSpacer: Bool = false,
@@ -356,6 +372,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     ) {
         self.maximumDepth = maximumDepth
         self.maximumNodes = maximumNodes
+        self.maximumRenderedElements = maximumRenderedElements ?? maximumNodes
         self.maximumTextLength = maximumTextLength
         self.requiredRootAxis = requiredRootAxis
         self.allowedStackAxes = allowedStackAxes
@@ -363,6 +380,9 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         self.allowedImageRoles = allowedImageRoles
         self.allowedButtonRoles = allowedButtonRoles
         self.allowedStatusRoles = allowedStatusRoles
+        self.allowsTextInput = allowsTextInput
+        self.maximumPickerOptions = maximumPickerOptions
+        self.maximumSceneItems = maximumSceneItems
         self.allowsDivider = allowsDivider
         self.allowsFixedSpacer = allowsFixedSpacer
         self.allowsFlexibleSpacer = allowsFlexibleSpacer
@@ -374,9 +394,11 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case maximumDepth, maximumNodes, maximumTextLength, requiredRootAxis
+        case maximumDepth, maximumNodes, maximumRenderedElements, maximumTextLength
+        case requiredRootAxis
         case allowedStackAxes, allowedTextRoles, allowedImageRoles, allowedButtonRoles
-        case allowedStatusRoles, allowsDivider, allowsFixedSpacer, allowsFlexibleSpacer
+        case allowedStatusRoles, allowsTextInput, maximumPickerOptions, maximumSceneItems
+        case allowsDivider, allowsFixedSpacer, allowsFlexibleSpacer
         case allowsProceed, requiresProceed, allowsOverlay, allowedCustomSurfaceKinds
         case disclosureDetail
     }
@@ -385,6 +407,10 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         maximumDepth = try container.decode(Int.self, forKey: .maximumDepth)
         maximumNodes = try container.decode(Int.self, forKey: .maximumNodes)
+        maximumRenderedElements = try container.decodeIfPresent(
+            Int.self,
+            forKey: .maximumRenderedElements
+        ) ?? maximumNodes
         maximumTextLength = try container.decode(Int.self, forKey: .maximumTextLength)
         requiredRootAxis = try container.decodeIfPresent(
             ExtensionAxis.self,
@@ -410,6 +436,18 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
             [ExtensionStatusRole].self,
             forKey: .allowedStatusRoles
         )
+        allowsTextInput = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .allowsTextInput
+        ) ?? false
+        maximumPickerOptions = try container.decodeIfPresent(
+            Int.self,
+            forKey: .maximumPickerOptions
+        ) ?? 0
+        maximumSceneItems = try container.decodeIfPresent(
+            Int.self,
+            forKey: .maximumSceneItems
+        ) ?? 0
         allowsDivider = try container.decode(Bool.self, forKey: .allowsDivider)
         allowsFixedSpacer = try container.decode(Bool.self, forKey: .allowsFixedSpacer)
         allowsFlexibleSpacer = try container.decode(Bool.self, forKey: .allowsFlexibleSpacer)
@@ -434,8 +472,20 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         if maximumNodes < 1 {
             issues.append(.init(path: "maximumNodes", message: "must be at least 1"))
         }
+        if maximumRenderedElements < maximumNodes {
+            issues.append(.init(
+                path: "maximumRenderedElements",
+                message: "must be at least maximumNodes"
+            ))
+        }
         if maximumTextLength < 1 {
             issues.append(.init(path: "maximumTextLength", message: "must be at least 1"))
+        }
+        if maximumPickerOptions < 0 {
+            issues.append(.init(path: "maximumPickerOptions", message: "must not be negative"))
+        }
+        if maximumSceneItems < 0 {
+            issues.append(.init(path: "maximumSceneItems", message: "must not be negative"))
         }
         if let requiredRootAxis,
            !allowedStackAxes.contains(requiredRootAxis) {
@@ -462,12 +512,14 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         try validate()
         var issues: [ExtensionValidationIssue] = []
         var count = 0
+        var renderedElementCount = 0
         var proceedCount = 0
         validateNode(
             node,
             path: path,
             depth: 0,
             count: &count,
+            renderedElementCount: &renderedElementCount,
             proceedCount: &proceedCount,
             issues: &issues
         )
@@ -491,20 +543,42 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         path: String,
         issues: inout [ExtensionValidationIssue]
     ) {
+        validateRoots(
+            nodes.enumerated().map { ("\(path)[\($0.offset)]", $0.element) },
+            aggregatePath: path,
+            issues: &issues
+        )
+    }
+
+    /// Several independently located roots against one eager-render budget.
+    ///
+    /// This is used by composite host surfaces whose semantic content is interleaved with
+    /// virtualized or host-owned structure. Keeping the real paths makes validation failures
+    /// actionable without granting every fragment a fresh budget.
+    func validateRoots(
+        _ roots: [(path: String, node: ExtensionNode)],
+        aggregatePath: String? = nil,
+        issues: inout [ExtensionValidationIssue]
+    ) {
         var count = 0
+        var renderedElementCount = 0
         var proceedCount = 0
-        for (index, node) in nodes.enumerated() {
+        for root in roots {
             validateNode(
-                node,
-                path: "\(path)[\(index)]",
+                root.node,
+                path: root.path,
                 depth: 0,
                 count: &count,
+                renderedElementCount: &renderedElementCount,
                 proceedCount: &proceedCount,
                 issues: &issues
             )
         }
         if proceedCount > 0 {
-            issues.append(.init(path: path, message: "may not contain a proceed node"))
+            issues.append(.init(
+                path: aggregatePath ?? roots.first?.path ?? "content",
+                message: "may not contain a proceed node"
+            ))
         }
     }
 
@@ -513,6 +587,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         path: String,
         depth: Int,
         count: inout Int,
+        renderedElementCount: inout Int,
         proceedCount: inout Int,
         issues: inout [ExtensionValidationIssue]
     ) {
@@ -525,6 +600,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         }
 
         count += 1
+        renderedElementCount += 1
         guard count <= maximumNodes else {
             if count == maximumNodes + 1 {
                 issues.append(.init(
@@ -533,6 +609,13 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                 ))
             }
             return
+        }
+        if renderedElementCount > maximumRenderedElements,
+           renderedElementCount == maximumRenderedElements + 1 {
+            issues.append(.init(
+                path: path,
+                message: "exceeds aggregate rendered-element count \(maximumRenderedElements)"
+            ))
         }
 
         switch node {
@@ -568,6 +651,135 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
             )
             validateText(title, path: "\(path).title", issues: &issues)
 
+        case .textInput(let id, let value, let placeholder, let accessibilityLabel, _, _):
+            require(
+                allowsTextInput,
+                path: path,
+                message: "text input is not allowed",
+                issues: &issues
+            )
+            require(
+                ExtensionIdentifierRules.isContributionIdentifier(id),
+                path: "\(path).id",
+                message: ExtensionIdentifierRules.contributionMessage,
+                issues: &issues
+            )
+            require(
+                value.count <= maximumTextLength,
+                path: "\(path).value",
+                message: "exceeds maximum length \(maximumTextLength)",
+                issues: &issues
+            )
+            if let placeholder {
+                validateText(
+                    placeholder,
+                    path: "\(path).placeholder",
+                    issues: &issues
+                )
+            }
+            validateText(
+                accessibilityLabel,
+                path: "\(path).accessibilityLabel",
+                issues: &issues
+            )
+
+        case .picker(let id, let selection, let options, let accessibilityLabel, _):
+            require(
+                maximumPickerOptions > 0,
+                path: path,
+                message: "picker is not allowed",
+                issues: &issues
+            )
+            require(
+                ExtensionIdentifierRules.isContributionIdentifier(id),
+                path: "\(path).id",
+                message: ExtensionIdentifierRules.contributionMessage,
+                issues: &issues
+            )
+            require(
+                !options.isEmpty,
+                path: "\(path).options",
+                message: "must not be empty",
+                issues: &issues
+            )
+            require(
+                options.count <= maximumPickerOptions,
+                path: "\(path).options",
+                message: "exceeds maximum option count \(maximumPickerOptions)",
+                issues: &issues
+            )
+            let renderedElementCountBeforeOptions = renderedElementCount
+            renderedElementCount += options.count
+            if renderedElementCountBeforeOptions <= maximumRenderedElements,
+               renderedElementCount > maximumRenderedElements {
+                issues.append(.init(
+                    path: "\(path).options",
+                    message: "exceeds aggregate rendered-element count \(maximumRenderedElements)"
+                ))
+            }
+            var optionValues = Set<String>()
+            for (index, option) in options.enumerated() {
+                let optionPath = "\(path).options[\(index)]"
+                require(
+                    !option.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    path: "\(optionPath).value",
+                    message: "must not be empty",
+                    issues: &issues
+                )
+                require(
+                    option.value.count <= maximumTextLength,
+                    path: "\(optionPath).value",
+                    message: "exceeds maximum length \(maximumTextLength)",
+                    issues: &issues
+                )
+                require(
+                    optionValues.insert(option.value).inserted,
+                    path: "\(optionPath).value",
+                    message: "must be unique",
+                    issues: &issues
+                )
+                validateText(option.title, path: "\(optionPath).title", issues: &issues)
+            }
+            if let selection {
+                require(
+                    options.contains { $0.value == selection },
+                    path: "\(path).selection",
+                    message: "must match an option value",
+                    issues: &issues
+                )
+            }
+            validateText(
+                accessibilityLabel,
+                path: "\(path).accessibilityLabel",
+                issues: &issues
+            )
+
+        case .scene(let scene):
+            require(
+                maximumSceneItems > 0,
+                path: path,
+                message: "scene is not allowed",
+                issues: &issues
+            )
+            if maximumSceneItems > 0 {
+                let renderedElementCountBeforeItems = renderedElementCount
+                renderedElementCount += scene.items.count
+                if renderedElementCountBeforeItems <= maximumRenderedElements,
+                   renderedElementCount > maximumRenderedElements {
+                    issues.append(.init(
+                        path: "\(path).scene.items",
+                        message: """
+                        exceeds aggregate rendered-element count \(maximumRenderedElements)
+                        """
+                    ))
+                }
+                issues.append(contentsOf: scene.validationIssues(
+                    path: "\(path).scene",
+                    maximumItems: maximumSceneItems,
+                    maximumTextLength: maximumTextLength
+                ))
+            }
+
         case .status(let text, let role):
             require(
                 allowedStatusRoles.contains(role),
@@ -596,6 +808,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                 path: "\(path).summary",
                 depth: depth + 1,
                 count: &count,
+                renderedElementCount: &renderedElementCount,
                 proceedCount: &proceedCount,
                 issues: &issues
             )
@@ -636,6 +849,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                 path: "\(path).base",
                 depth: depth + 1,
                 count: &count,
+                renderedElementCount: &renderedElementCount,
                 proceedCount: &proceedCount,
                 issues: &issues
             )
@@ -644,6 +858,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                 path: "\(path).overlay",
                 depth: depth + 1,
                 count: &count,
+                renderedElementCount: &renderedElementCount,
                 proceedCount: &proceedCount,
                 issues: &issues
             )
@@ -715,6 +930,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                     path: "\(path).children[\(index)]",
                     depth: depth + 1,
                     count: &count,
+                    renderedElementCount: &renderedElementCount,
                     proceedCount: &proceedCount,
                     issues: &issues
                 )

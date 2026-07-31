@@ -31,8 +31,14 @@ The first vertical slice exists:
   service declarations, dependencies, calls, and results.
 - [`extension-node.schema.json`](schema/extension-node.schema.json) is the machine-readable UI
   schema.
+- [`workspace-navigator.schema.json`](schema/workspace-navigator.schema.json) defines the
+  compositional, collection-oriented navigator contribution documented in
+  [`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md).
+- [`DECLARATIVE_UI.md`](DECLARATIVE_UI.md) documents native value controls, generic semantic
+  scenes, correlated action values, surface limits, and the host-rendering architecture.
 - [`extension-process.schema.json`](schema/extension-process.schema.json) describes correlated
-  settings, service, command, panel/component-action, and MCP-tool requests and responses.
+  settings, service, command, panel/component/navigator-action, and MCP-tool requests and
+  responses.
 - [`extension-host.schema.json`](schema/extension-host.schema.json) describes atomic component
   patch publications over the independent host channel.
 - [`extension-host-data.schema.json`](schema/extension-host-data.schema.json) describes safe
@@ -49,7 +55,11 @@ The first vertical slice exists:
   SDK catalogue Threading's runtime registers.
 - [`API_V1.md`](API_V1.md) freezes the supported safe API, its version domains, capability
   set, and compatibility promise.
-- Threading links the SDK and renders `ExtensionNode` trees into its own themed AppKit controls.
+- Threading links the SDK and renders `ExtensionNode` trees into its own themed AppKit controls,
+  including text/search fields, pickers, and generic interactive scenes for data visualizations.
+- Extensions may register validated `ui.workspace-navigation` contributions. Users choose one
+  under **View → Navigator**; Threading virtualizes its collections, owns project/session routing,
+  and restores Native when the selected process generation becomes unavailable.
 - The Component Gallery remains a direct development harness: it can choose an extension
   directory, inspect its manifest, supervise a persistent process, validate every JSONL value,
   route button actions, and re-render returned panel state.
@@ -132,6 +142,7 @@ capabilities, so a small extension can grow without changing package format:
 | Settings extension | `settings` | Complete pages and sections appended to stable host pages | Threading Settings |
 | Service extension | `services.provide` | Versioned JSON service contracts | Other declared extensions |
 | Component extension | `ui.components` | Properties, slots, and constrained content replacement | Documented host components |
+| Navigator extension | `ui.workspace-navigation` | Complete semantic navigator documents with virtualizable collections | Leading workspace navigator |
 | Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal |
 | Identity extension | `appearance.provider-icons`, `appearance.account-icons`, `appearance.session-identity` | Primitive image recipes and constrained composition | Provider/account marks and session identity layout |
 | Appearance extension | `appearance.themes`, `appearance.fonts` | App-theme documents and font files carried as package data | Settings ▸ Themes and the chrome/conversation font pickers |
@@ -661,6 +672,7 @@ docs/extensions/
     ├── extension-settings.schema.json
     ├── extension-services.schema.json
     ├── extension-node.schema.json
+    ├── workspace-navigator.schema.json
     ├── extension-host.schema.json
     ├── extension-host-data.schema.json
     ├── extension-identity-resolutions.schema.json

@@ -43,6 +43,19 @@ struct ComponentCustomizationAction: Equatable {
     let target: ExtensionComponentTarget
     let extensionIdentifier: String?
     let actionID: String
+    let value: ExtensionJSONValue?
+
+    init(
+        target: ExtensionComponentTarget,
+        extensionIdentifier: String?,
+        actionID: String,
+        value: ExtensionJSONValue? = nil
+    ) {
+        self.target = target
+        self.extensionIdentifier = extensionIdentifier
+        self.actionID = actionID
+        self.value = value
+    }
 }
 
 /// The complete optional seam exposed to customizable UI.

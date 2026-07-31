@@ -61,8 +61,12 @@
         "allowsFlexibleSpacer" : true,
         "allowsOverlay" : false,
         "allowsProceed" : false,
+        "allowsTextInput" : false,
         "maximumDepth" : 1,
         "maximumNodes" : 8,
+        "maximumPickerOptions" : 0,
+        "maximumRenderedElements" : 8,
+        "maximumSceneItems" : 0,
         "maximumTextLength" : 80,
         "requiredRootAxis" : "horizontal",
         "requiresProceed" : false
@@ -108,8 +112,12 @@
                   "allowsFlexibleSpacer" : false,
                   "allowsOverlay" : false,
                   "allowsProceed" : false,
+                  "allowsTextInput" : false,
                   "maximumDepth" : 0,
                   "maximumNodes" : 1,
+                  "maximumPickerOptions" : 0,
+                  "maximumRenderedElements" : 1,
+                  "maximumSceneItems" : 0,
                   "maximumTextLength" : 24,
                   "requiresProceed" : false
                 }

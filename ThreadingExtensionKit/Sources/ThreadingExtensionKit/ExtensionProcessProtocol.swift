@@ -1,5 +1,129 @@
 import Foundation
 
+/// One semantic action raised from a selected workspace navigator.
+///
+/// The navigator and action IDs are local to the supervised extension process. Context IDs are
+/// routing values only and do not broaden that extension's host-data capabilities.
+public struct ExtensionWorkspaceNavigatorActionRequest: Codable, Equatable, Sendable {
+    public static let currentProtocolVersion = 1
+
+    public let protocolVersion: Int
+    public let requestID: String
+    public let navigatorID: String
+    public let actionID: String
+    public let value: ExtensionJSONValue?
+    public let context: ExtensionCommandContext
+
+    public init(
+        protocolVersion: Int = Self.currentProtocolVersion,
+        requestID: String,
+        navigatorID: String,
+        actionID: String,
+        value: ExtensionJSONValue? = nil,
+        context: ExtensionCommandContext = .init()
+    ) {
+        self.protocolVersion = protocolVersion
+        self.requestID = requestID
+        self.navigatorID = navigatorID
+        self.actionID = actionID
+        self.value = value
+        self.context = context
+    }
+
+    public func validate() throws {
+        var issues: [ExtensionValidationIssue] = []
+        if protocolVersion != Self.currentProtocolVersion {
+            issues.append(.init(
+                path: "protocolVersion",
+                message: "expected \(Self.currentProtocolVersion), got \(protocolVersion)"
+            ))
+        }
+        if requestID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(.init(path: "requestID", message: "must not be empty"))
+        }
+        for (path, identifier) in [
+            ("navigatorID", navigatorID),
+            ("actionID", actionID)
+        ] where !ExtensionIdentifierRules.isContributionIdentifier(identifier) {
+            issues.append(.init(
+                path: path,
+                message: ExtensionIdentifierRules.contributionMessage
+            ))
+        }
+        issues.append(contentsOf: context.validationIssues(path: "context"))
+        if !issues.isEmpty {
+            throw ExtensionValidationError(issues: issues)
+        }
+    }
+}
+
+/// The atomic result of a navigator action or refresh.
+///
+/// A replacement snapshot must retain the navigator ID that raised the action. Threading checks
+/// the ID, capability, complete document validation, and process generation before presenting it.
+public struct ExtensionWorkspaceNavigatorActionResponse: Codable, Equatable, Sendable {
+    public static let currentProtocolVersion = 1
+
+    public let protocolVersion: Int
+    public let requestID: String
+    public let navigatorID: String
+    public let navigator: ExtensionWorkspaceNavigator?
+    public let message: String?
+    public let error: String?
+
+    public init(
+        protocolVersion: Int = Self.currentProtocolVersion,
+        requestID: String,
+        navigatorID: String,
+        navigator: ExtensionWorkspaceNavigator? = nil,
+        message: String? = nil,
+        error: String? = nil
+    ) {
+        self.protocolVersion = protocolVersion
+        self.requestID = requestID
+        self.navigatorID = navigatorID
+        self.navigator = navigator
+        self.message = message
+        self.error = error
+    }
+
+    public func validate() throws {
+        var issues: [ExtensionValidationIssue] = []
+        if protocolVersion != Self.currentProtocolVersion {
+            issues.append(.init(
+                path: "protocolVersion",
+                message: "expected \(Self.currentProtocolVersion), got \(protocolVersion)"
+            ))
+        }
+        if requestID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(.init(path: "requestID", message: "must not be empty"))
+        }
+        if !ExtensionIdentifierRules.isContributionIdentifier(navigatorID) {
+            issues.append(.init(
+                path: "navigatorID",
+                message: ExtensionIdentifierRules.contributionMessage
+            ))
+        }
+        if let navigator {
+            issues.append(contentsOf: navigator.validationIssues(path: "navigator"))
+        }
+        if let error {
+            if error.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                issues.append(.init(path: "error", message: "must not be empty when present"))
+            }
+            if navigator != nil || message != nil {
+                issues.append(.init(
+                    path: "error",
+                    message: "cannot be combined with a navigator or success message"
+                ))
+            }
+        }
+        if !issues.isEmpty {
+            throw ExtensionValidationError(issues: issues)
+        }
+    }
+}
+
 /// One semantic action raised by extension-rendered content inside a host component.
 ///
 /// The contributing extension identity is not carried on the wire: Threading already selected
@@ -11,17 +135,21 @@ public struct ExtensionComponentActionRequest: Codable, Equatable, Sendable {
     public let requestID: String
     public let target: ExtensionComponentTarget
     public let actionID: String
+    /// The native control value or activated scene-item ID, when the action carries one.
+    public let value: ExtensionJSONValue?
 
     public init(
         protocolVersion: Int = Self.currentProtocolVersion,
         requestID: String,
         target: ExtensionComponentTarget,
-        actionID: String
+        actionID: String,
+        value: ExtensionJSONValue? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.requestID = requestID
         self.target = target
         self.actionID = actionID
+        self.value = value
     }
 
     public func validate() throws {
@@ -57,7 +185,7 @@ public struct ExtensionComponentActionRequest: Codable, Equatable, Sendable {
     }
 }
 
-/// One button action sent from Threading to a running extension.
+/// One semantic UI action sent from Threading to a running extension.
 ///
 /// The process protocol is newline-delimited JSON. Every value occupies exactly one line and
 /// stdout is reserved for these values; extensions must write diagnostics to stderr.
@@ -68,6 +196,8 @@ public struct ExtensionActionRequest: Codable, Equatable, Sendable {
     public let requestID: String
     public let panelID: String
     public let actionID: String
+    /// The native control value or activated scene-item ID, when the action carries one.
+    public let value: ExtensionJSONValue?
     public let context: ExtensionCommandContext
 
     public init(
@@ -75,17 +205,19 @@ public struct ExtensionActionRequest: Codable, Equatable, Sendable {
         requestID: String,
         panelID: String,
         actionID: String,
+        value: ExtensionJSONValue? = nil,
         context: ExtensionCommandContext = .init()
     ) {
         self.protocolVersion = protocolVersion
         self.requestID = requestID
         self.panelID = panelID
         self.actionID = actionID
+        self.value = value
         self.context = context
     }
 
     private enum CodingKeys: String, CodingKey {
-        case protocolVersion, requestID, panelID, actionID, context
+        case protocolVersion, requestID, panelID, actionID, value, context
     }
 
     public init(from decoder: Decoder) throws {
@@ -94,6 +226,7 @@ public struct ExtensionActionRequest: Codable, Equatable, Sendable {
         requestID = try container.decode(String.self, forKey: .requestID)
         panelID = try container.decode(String.self, forKey: .panelID)
         actionID = try container.decode(String.self, forKey: .actionID)
+        value = try container.decodeIfPresent(ExtensionJSONValue.self, forKey: .value)
         context = try container.decodeIfPresent(
             ExtensionCommandContext.self,
             forKey: .context

@@ -25,6 +25,12 @@
       "$ref": "#/$defs/componentActionRequest"
     },
     {
+      "$ref": "#/$defs/workspaceNavigatorActionRequest"
+    },
+    {
+      "$ref": "#/$defs/workspaceNavigatorActionResponse"
+    },
+    {
       "$ref": "#/$defs/settingsUpdateRequest"
     },
     {
@@ -51,6 +57,7 @@
         "requestID": { "type": "string", "minLength": 1 },
         "panelID": { "$ref": "#/$defs/identifier" },
         "actionID": { "$ref": "#/$defs/identifier" },
+        "value": true,
         "context": { "$ref": "#/$defs/commandContext" }
       }
     },
@@ -77,8 +84,56 @@
         "protocolVersion": { "const": 1 },
         "requestID": { "type": "string", "minLength": 1 },
         "target": { "$ref": "#/$defs/componentTarget" },
-        "actionID": { "$ref": "#/$defs/identifier" }
+        "actionID": { "$ref": "#/$defs/identifier" },
+        "value": true
       }
+    },
+    "workspaceNavigatorActionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "navigatorID",
+        "actionID",
+        "context"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "navigatorID": { "$ref": "#/$defs/identifier" },
+        "actionID": { "$ref": "#/$defs/identifier" },
+        "value": true,
+        "context": { "$ref": "#/$defs/commandContext" }
+      }
+    },
+    "workspaceNavigatorActionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestID", "navigatorID"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "navigatorID": { "$ref": "#/$defs/identifier" },
+        "navigator": { "$ref": "workspace-navigator.schema.json" },
+        "message": { "type": "string" },
+        "error": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["error"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["navigator"] },
+                { "required": ["message"] }
+              ]
+            }
+          }
+        }
+      ]
     },
     "actionResponse": {
       "type": "object",

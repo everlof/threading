@@ -68,6 +68,7 @@
                   "allowsFlexibleSpacer" : true,
                   "allowsOverlay" : false,
                   "allowsProceed" : false,
+                  "allowsTextInput" : false,
                   "disclosureDetail" : {
                     "allowedButtonRoles" : [
                       "standard"
@@ -98,13 +99,20 @@
                     "allowsFlexibleSpacer" : true,
                     "allowsOverlay" : false,
                     "allowsProceed" : false,
+                    "allowsTextInput" : false,
                     "maximumDepth" : 2,
                     "maximumNodes" : 60,
+                    "maximumPickerOptions" : 0,
+                    "maximumRenderedElements" : 60,
+                    "maximumSceneItems" : 0,
                     "maximumTextLength" : 80,
                     "requiresProceed" : false
                   },
                   "maximumDepth" : 2,
                   "maximumNodes" : 8,
+                  "maximumPickerOptions" : 0,
+                  "maximumRenderedElements" : 8,
+                  "maximumSceneItems" : 0,
                   "maximumTextLength" : 40,
                   "requiresProceed" : false
                 }

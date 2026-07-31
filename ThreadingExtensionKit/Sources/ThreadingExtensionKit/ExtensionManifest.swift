@@ -517,6 +517,7 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
     public static let servicesConsume = Self(rawValue: "services.consume")
     public static let companionOperations = Self(rawValue: "companions.invoke")
     public static let componentCustomization = Self(rawValue: "ui.components")
+    public static let workspaceNavigation = Self(rawValue: "ui.workspace-navigation")
     public static let customMetalSurfaces = Self(rawValue: "ui.rendering.metal")
     public static let hostProjectsRead = Self(rawValue: "host.projects.read")
     public static let hostSessionsRead = Self(rawValue: "host.sessions.read")

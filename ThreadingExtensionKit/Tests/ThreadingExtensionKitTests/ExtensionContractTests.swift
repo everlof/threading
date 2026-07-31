@@ -606,6 +606,39 @@ final class ExtensionContractTests: XCTestCase {
                 accessibilityLabel: "Codex"
             ),
             .button(id: "run", title: "Run", role: .primary, isEnabled: false),
+            .textInput(
+                id: "filter",
+                value: "dyld",
+                placeholder: "Filter artifacts",
+                accessibilityLabel: "Artifact filter",
+                role: .search,
+                isEnabled: true
+            ),
+            .picker(
+                id: "release",
+                selection: "ios-26.5",
+                options: [
+                    .init(value: "ios-26.4", title: "iOS 26.4"),
+                    .init(value: "ios-26.5", title: "iOS 26.5")
+                ],
+                accessibilityLabel: "Release",
+                isEnabled: true
+            ),
+            .scene(
+                ExtensionScene(
+                    accessibilityLabel: "Artifact map",
+                    items: [
+                        .init(
+                            id: "system",
+                            frame: .init(x: 0, y: 0, width: 1, height: 1),
+                            color: .category1,
+                            label: "System",
+                            detail: "4.8 GB",
+                            actionID: "inspect"
+                        )
+                    ]
+                )
+            ),
             .status("Waiting", role: .warning),
             .proceed,
             .overlay(
@@ -808,7 +841,8 @@ final class ExtensionContractTests: XCTestCase {
         let action = ExtensionComponentActionRequest(
             requestID: "component-action-1",
             target: target,
-            actionID: "open-build"
+            actionID: "open-build",
+            value: .string("build-42")
         )
 
         try publication.validate()
@@ -827,6 +861,22 @@ final class ExtensionContractTests: XCTestCase {
             ),
             action
         )
+
+        let legacyAction = try JSONDecoder().decode(
+            ExtensionComponentActionRequest.self,
+            from: Data("""
+            {
+              "protocolVersion": 1,
+              "requestID": "legacy",
+              "target": {
+                "component": "sidebar.session-row",
+                "contractVersion": 1
+              },
+              "actionID": "open-build"
+            }
+            """.utf8)
+        )
+        XCTAssertNil(legacyAction.value)
     }
 
     func testComponentPublicationRejectsDuplicatePatchIDsBeforeTransport() {
@@ -909,6 +959,50 @@ final class ExtensionContractTests: XCTestCase {
             XCTAssertTrue(issues.contains { $0.message.contains("body") })
             XCTAssertTrue(issues.contains { $0.message.contains("destructive") })
         }
+
+        let scene = ExtensionScene(
+            accessibilityLabel: "Artifact map",
+            items: [
+                .init(
+                    id: "system",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    label: "System"
+                )
+            ]
+        )
+        XCTAssertThrowsError(try compact.validate(.textInput(
+            id: "filter",
+            value: "",
+            placeholder: "Filter",
+            accessibilityLabel: "Artifact filter",
+            role: .search,
+            isEnabled: true
+        )))
+        XCTAssertThrowsError(try compact.validate(.picker(
+            id: "release",
+            selection: "current",
+            options: [.init(value: "current", title: "Current")],
+            accessibilityLabel: "Release",
+            isEnabled: true
+        )))
+        XCTAssertThrowsError(try compact.validate(.scene(scene)))
+
+        XCTAssertNoThrow(try ExtensionPanel.nodeConstraints.validate(.textInput(
+            id: "filter",
+            value: "",
+            placeholder: "Filter",
+            accessibilityLabel: "Artifact filter",
+            role: .search,
+            isEnabled: true
+        )))
+        XCTAssertNoThrow(try ExtensionPanel.nodeConstraints.validate(.picker(
+            id: "release",
+            selection: "current",
+            options: [.init(value: "current", title: "Current")],
+            accessibilityLabel: "Release",
+            isEnabled: true
+        )))
+        XCTAssertNoThrow(try ExtensionPanel.nodeConstraints.validate(.scene(scene)))
     }
 
     func testComponentContractRejectsDuplicateAndUnboundedSlots() {
@@ -934,6 +1028,314 @@ final class ExtensionContractTests: XCTestCase {
                 ]
             )
         }
+    }
+
+    func testAggregateRenderBudgetCountsPickerOptionsAndSceneMarks() {
+        let constraints = ExtensionComponentNodeConstraints(
+            maximumDepth: 4,
+            maximumNodes: 5,
+            maximumRenderedElements: 5,
+            maximumTextLength: 100,
+            allowedStackAxes: [.vertical],
+            allowedTextRoles: [.body],
+            allowsTextInput: true,
+            maximumPickerOptions: 3,
+            maximumSceneItems: 3
+        )
+        let scene = ExtensionScene(
+            accessibilityLabel: "Map",
+            items: [
+                .init(
+                    id: "one",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    label: "One"
+                )
+            ]
+        )
+        let root = ExtensionNode.stack(
+            axis: .vertical,
+            spacing: .small,
+            children: [
+                .picker(
+                    id: "choice",
+                    selection: nil,
+                    options: [
+                        .init(value: "one", title: "One"),
+                        .init(value: "two", title: "Two")
+                    ],
+                    accessibilityLabel: "Choice",
+                    isEnabled: true
+                ),
+                .scene(scene)
+            ]
+        )
+
+        XCTAssertThrowsError(try constraints.validate(root)) { error in
+            let messages = (error as? ExtensionValidationError)?.issues.map(\.message) ?? []
+            XCTAssertTrue(messages.contains {
+                $0.contains("aggregate rendered-element count")
+            })
+        }
+    }
+
+    func testValueControlsRequireAccessibleNames() {
+        XCTAssertThrowsError(try ExtensionPanel.nodeConstraints.validate(.textInput(
+            id: "filter",
+            value: "",
+            placeholder: "Filter",
+            accessibilityLabel: " ",
+            role: .search,
+            isEnabled: true
+        )))
+        XCTAssertThrowsError(try ExtensionPanel.nodeConstraints.validate(.picker(
+            id: "release",
+            selection: nil,
+            options: [.init(value: "current", title: "Current")],
+            accessibilityLabel: "",
+            isEnabled: true
+        )))
+    }
+
+    func testWorkspaceNavigatorOutlineRoundTripsAndRequiresCapability() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "project-outline",
+            title: "Project outline",
+            root: .stack(
+                axis: .vertical,
+                spacing: .small,
+                children: [
+                    .content(.textInput(
+                        id: "filter",
+                        value: "",
+                        placeholder: "Search",
+                        accessibilityLabel: "Search projects and sessions",
+                        role: .search,
+                        isEnabled: true
+                    )),
+                    .collection(.init(
+                        id: "work",
+                        layout: .outline,
+                        sections: [],
+                        items: [
+                            .init(
+                                id: "project:p1",
+                                content: .text("Threading", role: .body),
+                                activation: .destination(.project(id: "p1")),
+                                isExpanded: true
+                            ),
+                            .init(
+                                id: "session:s1",
+                                parentID: "project:p1",
+                                content: .text("Navigator contract", role: .body),
+                                activation: .destination(
+                                    .session(id: "s1", projectID: "p1")
+                                ),
+                                isSelected: true
+                            )
+                        ]
+                    ))
+                ]
+            ),
+            preferredWidth: 280
+        )
+        let registration = ExtensionRegistration(workspaceNavigators: [navigator])
+        let permittedManifest = ExtensionManifest(
+            identifier: "com.example.navigator",
+            name: "Navigator",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/navigator",
+            capabilities: [.workspaceNavigation]
+        )
+
+        try registration.validate(for: permittedManifest)
+        XCTAssertEqual(permittedManifest.profile, .navigator)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionRegistration.self,
+                from: JSONEncoder().encode(registration)
+            ),
+            registration
+        )
+
+        let missingCapability = ExtensionManifest(
+            identifier: "com.example.navigator",
+            name: "Navigator",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/navigator"
+        )
+        XCTAssertThrowsError(try registration.validate(for: missingCapability))
+    }
+
+    func testWorkspaceNavigatorLoadActionAndWireResponsesRoundTrip() throws {
+        let replacement = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "threads",
+                layout: .list,
+                items: [
+                    .init(
+                        id: "thread-1",
+                        content: .text("Build fixed", role: .body),
+                        accessibilityLabel: "Open build-fixed thread",
+                        activation: .action(id: "open-thread")
+                    )
+                ]
+            )),
+            loadActionID: "refresh"
+        )
+        let request = ExtensionWorkspaceNavigatorActionRequest(
+            requestID: "navigator-request",
+            navigatorID: replacement.id,
+            actionID: "filter",
+            value: .string("active"),
+            context: .init(projectID: "project-1", sessionID: "session-1")
+        )
+        let response = ExtensionWorkspaceNavigatorActionResponse(
+            requestID: request.requestID,
+            navigatorID: replacement.id,
+            navigator: replacement,
+            message: "Updated."
+        )
+
+        try request.validate()
+        try response.validate()
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionWorkspaceNavigatorActionRequest.self,
+                from: JSONEncoder().encode(request)
+            ),
+            request
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionWorkspaceNavigatorActionResponse.self,
+                from: JSONEncoder().encode(response)
+            ),
+            response
+        )
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorActionResponse(
+            requestID: request.requestID,
+            navigatorID: replacement.id,
+            navigator: replacement,
+            error: "No connection"
+        ).validate())
+
+        var legacyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(replacement)
+            ) as? [String: Any]
+        )
+        legacyObject.removeValue(forKey: "loadActionID")
+        XCTAssertNil(
+            try JSONDecoder().decode(
+                ExtensionWorkspaceNavigator.self,
+                from: JSONSerialization.data(withJSONObject: legacyObject)
+            ).loadActionID
+        )
+    }
+
+    func testWorkspaceNavigatorRejectsInvalidHierarchyAndSelection() {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "threads",
+                layout: .list,
+                selectionMode: .single,
+                sections: [],
+                items: [
+                    .init(
+                        id: "one",
+                        parentID: "missing",
+                        content: .text("One", role: .body),
+                        isSelected: true
+                    ),
+                    .init(
+                        id: "two",
+                        content: .text("Two", role: .body),
+                        isSelected: true
+                    )
+                ]
+            ))
+        )
+
+        let issues = navigator.validationIssues(path: "navigator")
+        XCTAssertTrue(issues.contains { $0.path.hasSuffix(".parentID") })
+        XCTAssertTrue(issues.contains { $0.message.contains("at most one selected") })
+    }
+
+    func testWorkspaceNavigatorRequiresAnAccessibleNameForActionableGridItems() {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "cards",
+                layout: .grid(columns: 2),
+                items: [
+                    .init(
+                        id: "one",
+                        content: .text("One", role: .body),
+                        activation: .action(id: "open")
+                    )
+                ]
+            ))
+        )
+
+        XCTAssertTrue(navigator.validationIssues(path: "navigator").contains {
+            $0.path.hasSuffix(".accessibilityLabel")
+                && $0.message.contains("actionable grid item")
+        })
+    }
+
+    func testWorkspaceNavigatorRequiresGloballyStableCollectionIDs() {
+        let collection = ExtensionWorkspaceNavigatorCollection(
+            id: "results",
+            layout: .list,
+            items: [.init(id: "one", content: .text("One", role: .body))]
+        )
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "duplicates",
+            title: "Duplicates",
+            root: .stack(
+                axis: .vertical,
+                spacing: .small,
+                children: [.collection(collection), .collection(collection)]
+            )
+        )
+
+        XCTAssertTrue(navigator.validationIssues(path: "navigator").contains {
+            $0.path.hasSuffix(".collection.id")
+                && $0.message.contains("unique across the navigator")
+        })
+    }
+
+    func testWorkspaceNavigatorChromeSharesOneAggregateRenderBudget() {
+        let options = (0..<64).map {
+            ExtensionPickerOption(value: "value-\($0)", title: "Option \($0)")
+        }
+        let picker = ExtensionNode.picker(
+            id: "choice",
+            selection: nil,
+            options: options,
+            accessibilityLabel: "Choice",
+            isEnabled: true
+        )
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "budget",
+            title: "Budget",
+            root: .stack(
+                axis: .vertical,
+                spacing: .small,
+                children: [.content(picker), .content(picker)]
+            )
+        )
+
+        XCTAssertTrue(navigator.validationIssues(path: "navigator").contains {
+            $0.message.contains("aggregate rendered-element count")
+        })
     }
 
     func testRegistrationRequiresCapabilitiesAndUniqueValidIDs() throws {
@@ -1373,6 +1775,7 @@ final class ExtensionContractTests: XCTestCase {
             requestID: "request-42",
             panelID: "status",
             actionID: "refresh",
+            value: .string("ios-26.5"),
             context: .init(projectID: "project-1", sessionID: "session-1")
         )
         let response = ExtensionActionResponse(
@@ -1409,6 +1812,9 @@ final class ExtensionContractTests: XCTestCase {
         XCTAssertEqual(
             try JSONDecoder().decode(ExtensionActionRequest.self, from: legacy).context,
             .init()
+        )
+        XCTAssertNil(
+            try JSONDecoder().decode(ExtensionActionRequest.self, from: legacy).value
         )
     }
 

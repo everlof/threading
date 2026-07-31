@@ -82,9 +82,75 @@ struct ExtensionLocalizationResolver: Sendable {
         ExtensionRegistration(
             commands: registration.commands.map(command),
             panels: registration.panels.map(panel),
+            workspaceNavigators: registration.workspaceNavigators.map(workspaceNavigator),
             mcpTools: registration.mcpTools.map(mcpTool),
             services: registration.services.map(service)
         )
+    }
+
+    func workspaceNavigator(
+        _ navigator: ExtensionWorkspaceNavigator
+    ) -> ExtensionWorkspaceNavigator {
+        ExtensionWorkspaceNavigator(
+            id: navigator.id,
+            title: string(navigator.title),
+            root: workspaceNavigatorNode(navigator.root),
+            loadActionID: navigator.loadActionID,
+            preferredWidth: navigator.preferredWidth
+        )
+    }
+
+    private func workspaceNavigatorNode(
+        _ sourceNode: ExtensionWorkspaceNavigatorNode
+    ) -> ExtensionWorkspaceNavigatorNode {
+        switch sourceNode {
+        case .content(let content):
+            return .content(node(content))
+        case .collection(let collection):
+            return .collection(
+                ExtensionWorkspaceNavigatorCollection(
+                    id: collection.id,
+                    layout: collection.layout,
+                    selectionMode: collection.selectionMode,
+                    sections: collection.sections.map {
+                        ExtensionWorkspaceNavigatorSection(
+                            id: $0.id,
+                            header: $0.header.map(node)
+                        )
+                    },
+                    items: collection.items.map {
+                        ExtensionWorkspaceNavigatorItem(
+                            id: $0.id,
+                            sectionID: $0.sectionID,
+                            parentID: $0.parentID,
+                            content: node($0.content),
+                            accessibilityLabel: optional($0.accessibilityLabel),
+                            activation: $0.activation,
+                            isEnabled: $0.isEnabled,
+                            isSelected: $0.isSelected,
+                            isExpanded: $0.isExpanded
+                        )
+                    }
+                )
+            )
+        case .divider:
+            return .divider
+        case .spacer(let spacing):
+            return .spacer(spacing)
+        case .flexibleSpacer:
+            return .flexibleSpacer
+        case .stack(let axis, let spacing, let children):
+            return .stack(
+                axis: axis,
+                spacing: spacing,
+                children: children.map(workspaceNavigatorNode)
+            )
+        case .overlay(let base, let overlay):
+            return .overlay(
+                base: workspaceNavigatorNode(base),
+                overlay: workspaceNavigatorNode(overlay)
+            )
+        }
     }
 
     func panel(_ panel: ExtensionPanel) -> ExtensionPanel {
@@ -102,6 +168,19 @@ struct ExtensionLocalizationResolver: Sendable {
             protocolVersion: response.protocolVersion,
             requestID: response.requestID,
             panel: response.panel.map(panel),
+            message: optional(response.message),
+            error: optional(response.error)
+        )
+    }
+
+    func workspaceNavigatorActionResponse(
+        _ response: ExtensionWorkspaceNavigatorActionResponse
+    ) -> ExtensionWorkspaceNavigatorActionResponse {
+        ExtensionWorkspaceNavigatorActionResponse(
+            protocolVersion: response.protocolVersion,
+            requestID: response.requestID,
+            navigatorID: response.navigatorID,
+            navigator: response.navigator.map(workspaceNavigator),
             message: optional(response.message),
             error: optional(response.error)
         )
@@ -161,6 +240,58 @@ struct ExtensionLocalizationResolver: Sendable {
                 title: string(title),
                 role: role,
                 isEnabled: isEnabled
+            )
+        case .textInput(
+            let id,
+            let value,
+            let placeholder,
+            let accessibilityLabel,
+            let role,
+            let isEnabled
+        ):
+            return .textInput(
+                id: id,
+                value: value,
+                placeholder: optional(placeholder),
+                accessibilityLabel: string(accessibilityLabel),
+                role: role,
+                isEnabled: isEnabled
+            )
+        case .picker(let id, let selection, let options, let accessibilityLabel, let isEnabled):
+            return .picker(
+                id: id,
+                selection: selection,
+                options: options.map {
+                    ExtensionPickerOption(
+                        value: $0.value,
+                        title: string($0.title),
+                        isEnabled: $0.isEnabled
+                    )
+                },
+                accessibilityLabel: string(accessibilityLabel),
+                isEnabled: isEnabled
+            )
+        case .scene(let scene):
+            return .scene(
+                ExtensionScene(
+                    accessibilityLabel: string(scene.accessibilityLabel),
+                    preferredAspectRatio: scene.preferredAspectRatio,
+                    items: scene.items.map {
+                        ExtensionSceneItem(
+                            id: $0.id,
+                            frame: $0.frame,
+                            shape: $0.shape,
+                            color: $0.color,
+                            label: optional($0.label),
+                            detail: optional($0.detail),
+                            accessibilityLabel: optional($0.accessibilityLabel),
+                            accessibilityValue: optional($0.accessibilityValue),
+                            actionID: $0.actionID,
+                            isEnabled: $0.isEnabled,
+                            isSelected: $0.isSelected
+                        )
+                    }
+                )
             )
         case .status(let text, let role):
             return .status(string(text), role: role)

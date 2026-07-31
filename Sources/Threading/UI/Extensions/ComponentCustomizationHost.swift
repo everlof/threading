@@ -121,13 +121,14 @@ final class ComponentCustomizationHost {
                     guard let extensionIdentifier else { return nil }
                     return customSurfaceResolver(surface, extensionIdentifier)
                 },
-                onAction: { [weak self] actionID in
+                onEvent: { [weak self] actionID, value in
                     guard let self else { return }
                     self.onAction(
                         ComponentCustomizationAction(
                             target: self.target,
                             extensionIdentifier: extensionIdentifier,
-                            actionID: actionID
+                            actionID: actionID,
+                            value: value
                         )
                     )
                 }

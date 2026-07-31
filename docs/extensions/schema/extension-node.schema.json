@@ -101,6 +101,60 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "value",
+            "accessibilityLabel",
+            "role",
+            "isEnabled"
+          ],
+          "properties": {
+            "type": { "const": "textInput" },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9.-]*$"
+            },
+            "value": { "type": "string" },
+            "placeholder": { "type": "string", "minLength": 1 },
+            "accessibilityLabel": { "type": "string", "minLength": 1 },
+            "role": { "enum": ["text", "search"] },
+            "isEnabled": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "options", "accessibilityLabel", "isEnabled"],
+          "properties": {
+            "type": { "const": "picker" },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9.-]*$"
+            },
+            "selection": { "type": "string" },
+            "options": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": { "$ref": "#/$defs/pickerOption" }
+            },
+            "accessibilityLabel": { "type": "string", "minLength": 1 },
+            "isEnabled": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "scene"],
+          "properties": {
+            "type": { "const": "scene" },
+            "scene": { "$ref": "#/$defs/scene" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["type", "text", "role"],
           "properties": {
             "type": { "const": "status" },
@@ -161,6 +215,102 @@
     },
     "spacing": {
       "enum": ["none", "tight", "small", "medium", "large"]
+    },
+    "pickerOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "title", "isEnabled"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "isEnabled": { "type": "boolean" }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accessibilityLabel", "preferredAspectRatio", "items"],
+      "properties": {
+        "accessibilityLabel": { "type": "string", "minLength": 1 },
+        "preferredAspectRatio": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 4
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/sceneItem" }
+        }
+      }
+    },
+    "sceneItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "frame",
+        "shape",
+        "color",
+        "isEnabled",
+        "isSelected"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "frame": { "$ref": "#/$defs/sceneRect" },
+        "shape": {
+          "enum": ["rectangle", "roundedRectangle", "ellipse"]
+        },
+        "color": {
+          "enum": [
+            "neutral",
+            "accent",
+            "positive",
+            "warning",
+            "negative",
+            "category1",
+            "category2",
+            "category3",
+            "category4",
+            "category5",
+            "category6"
+          ]
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 },
+        "accessibilityLabel": { "type": "string", "minLength": 1 },
+        "accessibilityValue": { "type": "string", "minLength": 1 },
+        "actionID": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]*$"
+        },
+        "isEnabled": { "type": "boolean" },
+        "isSelected": { "type": "boolean" }
+      },
+      "anyOf": [
+        { "required": ["label"] },
+        { "required": ["accessibilityLabel"] }
+      ]
+    },
+    "sceneRect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
+      }
     },
     "customSurface": {
       "oneOf": [

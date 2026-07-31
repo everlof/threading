@@ -42,8 +42,12 @@
         "allowsFlexibleSpacer" : true,
         "allowsOverlay" : true,
         "allowsProceed" : true,
+        "allowsTextInput" : false,
         "maximumDepth" : 6,
         "maximumNodes" : 16,
+        "maximumPickerOptions" : 0,
+        "maximumRenderedElements" : 16,
+        "maximumSceneItems" : 0,
         "maximumTextLength" : 200,
         "requiresProceed" : true
       }

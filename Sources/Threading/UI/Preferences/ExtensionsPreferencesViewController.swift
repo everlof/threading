@@ -396,6 +396,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case .settings: L10n.string("Settings extension")
         case .service: L10n.string("Service extension")
         case .component: L10n.string("Component extension")
+        case .navigator: L10n.string("Navigator extension")
         case .hybrid: L10n.string("Hybrid extension")
         }
     }
@@ -408,6 +409,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case .settings: L10n.string("Settings")
         case .services: L10n.string("Services")
         case .componentCustomization: L10n.string("Component customization")
+        case .workspaceNavigation: L10n.string("Workspace navigator")
         case .providerIcons: L10n.string("Provider icons")
         case .accountIcons: L10n.string("Account icons")
         case .sessionIdentity: L10n.string("Session identity")

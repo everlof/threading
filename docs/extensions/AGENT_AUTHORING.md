@@ -375,6 +375,9 @@ items.
   another extension.
 - Declare `ui.components` before constructing `ExtensionHostClient` or publishing component
   patches.
+- Declare `ui.workspace-navigation` before registering workspace navigators. This capability
+  grants no project or session data by itself; request the applicable host-read capabilities
+  separately.
 - Declare `host.projects.read` before calling `projects()` or `project(id:)`.
 - Declare `host.sessions.read` before calling `sessions()` or `session(id:)`.
 - Declare `host.sessions.runtime.read` before calling `sessionRuntime(id:)`. Pass only a stable
@@ -409,6 +412,7 @@ There is no manifest `type` field. Select capabilities by the surfaces the exten
 - `settings` for complete Settings pages or sections appended to built-in pages;
 - `services.provide` for versioned JSON APIs consumed by other extensions;
 - `ui.components` for safe property, slot, or content patches to documented host components;
+- `ui.workspace-navigation` for a user-selectable complete leading-navigator interior;
 - any combination for a hybrid sharing one process and state model.
 
 Threading derives `ExtensionManifest.profile` and `contributionKinds` from that set. Do not add an
@@ -417,9 +421,19 @@ another example does. An MCP-only extension should not register an empty panel; 
 extension should not declare `mcp.tools`.
 
 Panel registration is bounded to 32 panels. Each semantic tree is limited to 24 levels, 500
-nodes, and 10,000 characters per text value; titles are non-empty and at most 120 characters.
-Use valid contribution identifiers for every button so its returned action can pass the same
-wire validation.
+nodes, 1,000 aggregate rendered elements, and 10,000 characters per text value; titles are
+non-empty and at most 120 characters.
+Use valid contribution identifiers for every button, input, and picker and for every scene mark
+action so its returned action can pass the same wire validation. A panel accepts at most 100
+options per picker and 500 marks per scene. Every text input and picker also requires a localized
+`accessibilityLabel`; a placeholder or selected option is not an accessible field name.
+
+Workspace navigator registration is bounded to eight contributions. Read
+[`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md) before authoring one. Navigator collection
+items are snapshots with stable IDs and bounded row content, not eagerly nested stacks. The
+user chooses a live contribution under **View → Navigator**. Threading virtualizes its rows,
+routes project/session destinations through the native navigation coordinator, and returns to
+Native if the owning process generation stops or its document cannot be rendered.
 
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
 fallback state. Threading sends that action once when the tab connects to each extension process
@@ -427,6 +441,16 @@ generation, using the same opaque project/session context as a button. Return a 
 panel with the same panel ID. Keep `loadActionID` on replacement values for clarity; the host
 tracks the generation and will not recursively invoke it. Make the load action idempotent
 because reload and crash recovery intentionally run it again.
+
+A context-dependent workspace navigator uses the same pattern: set its `loadActionID`, handle
+`ExtensionWorkspaceNavigatorActionRequest`, and return an
+`ExtensionWorkspaceNavigatorActionResponse` naming the same `navigatorID`. Navigator refreshes
+also run after project-store changes, so keep the load action cheap and idempotent. Returned
+navigators are complete atomic snapshots; retain stable collection and item IDs so the host can
+restore selection, expansion, scroll position, and focus. Collection `.action` activations carry
+the item ID as `value`; semantic inputs carry their native string or choice value. Every
+actionable grid item requires a localized `accessibilityLabel`, because the complete cell is its
+host-owned activation surface.
 
 ## Required package policy
 
@@ -705,6 +729,18 @@ let root = ExtensionNode.stack(
 Threading decides how heading text, positive status, primary actions, spacing, focus,
 accessibility, and live theme changes render.
 
+For editable values, single choices, and broad native visualizations, use `.textInput`,
+`.picker`, and `.scene`. Their interactions use the same action request as a button, with the
+field value, stable option value, or activated scene-item ID in `ExtensionActionRequest.value`.
+The scene is generic normalized geometry rather than a chart or domain-specific widget, so it can
+express treemaps, heatmaps, bars, timelines, scatter plots, and bubbles without requiring one host
+view per extension idea. See [`DECLARATIVE_UI.md`](DECLARATIVE_UI.md) for the complete contract,
+examples, limits, and architecture diagram.
+
+These richer nodes are available in full panels. Compact component surfaces disallow them unless
+their published constraint vocabulary explicitly opts in. Read the contract rather than assuming
+that a node legal in a panel is legal in a sidebar row, toolbar, or annotation.
+
 ### A summary with a second level
 
 Compact surfaces have room for one reading. When there is more behind it — seven check runs
@@ -810,8 +846,9 @@ Threading supports two executable modes:
   this mode for validation and diagnostics.
 - `--threading-serve` writes the same registration as its first line, stays alive, reads
   `ExtensionSettingsUpdateRequest`, `ExtensionServiceRequest`, `ExtensionCommandRequest`,
-  `ExtensionActionRequest`, `ExtensionComponentActionRequest`, or `ExtensionMCPToolRequest`
-  lines from stdin, and writes the corresponding correlated response to stdout.
+  `ExtensionActionRequest`, `ExtensionComponentActionRequest`,
+  `ExtensionWorkspaceNavigatorActionRequest`, or `ExtensionMCPToolRequest` lines from stdin,
+  and writes the corresponding correlated response to stdout.
 
 The persistent sequence is:
 
@@ -822,16 +859,20 @@ The persistent sequence is:
    `ExtensionCommandRequest`. The extension returns one `ExtensionCommandResponse` echoing its
    `requestID` and `commandID`.
 5. When a registered panel has `loadActionID`, Threading writes one
-   `ExtensionActionRequest` as the tab connects to each process generation. A rendered button
-   uses the same request type.
+   `ExtensionActionRequest` as the tab connects to each process generation. A rendered button,
+   text input, picker, or interactive scene mark uses the same request type. Value controls and
+   marks include their correlated semantic value in the optional `value` field.
 6. The extension copies its `requestID` into exactly one `ExtensionActionResponse`.
 7. A returned panel must have the same ID as the panel that raised the action. Threading validates
    the value and renders it through its own controls.
-8. For a contributed MCP tool, Threading writes an `ExtensionMCPToolRequest`; the extension copies
+8. A selected navigator's load action, semantic control, or collection action produces an
+   `ExtensionWorkspaceNavigatorActionRequest`. Return one
+   `ExtensionWorkspaceNavigatorActionResponse` with the same request ID and navigator ID.
+9. For a contributed MCP tool, Threading writes an `ExtensionMCPToolRequest`; the extension copies
    its `requestID` into one `ExtensionMCPToolResponse`.
-9. For a user settings change, Threading writes an `ExtensionSettingsUpdateRequest`; the extension
+10. For a user settings change, Threading writes an `ExtensionSettingsUpdateRequest`; the extension
    applies it and returns one `ExtensionSettingsUpdateResponse` with the same `requestID`.
-10. For a brokered call, Threading writes an `ExtensionServiceRequest` to the declared provider;
+11. For a brokered call, Threading writes an `ExtensionServiceRequest` to the declared provider;
     it returns one `ExtensionServiceResponse` matching request ID, service ID, and version.
 
 Component state does not share that sequential stream. A process with `ui.components` receives
@@ -1087,8 +1128,16 @@ An action response may contain:
 
 Use the SDK's `ExtensionActionRequest` and `ExtensionActionResponse` rather than constructing
 wire dictionaries. A panel action's `context` contains the opaque project and session IDs for
-the display-pane tab that raised it; those values do not bypass host-data capabilities. Call
-`validate()` on decoded requests and encoded responses.
+the display-pane tab that raised it; those values do not bypass host-data capabilities. Its
+optional `value` is the current input string, stable picker value, or activated scene-item ID;
+buttons and load actions send no value. Call `validate()` on decoded requests and encoded
+responses.
+
+Likewise, decode navigator requests with
+`ExtensionWorkspaceNavigatorActionRequest` and answer with
+`ExtensionWorkspaceNavigatorActionResponse`. Its optional `navigator` is a complete replacement
+document and must keep the originating ID. A navigator response may carry that document, a
+success `message`, both, or an `error` by itself.
 
 For a command, decode `ExtensionCommandRequest` before falling back to action requests. The
 context contains optional opaque `projectID` and `sessionID` values according to the declared

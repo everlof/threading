@@ -169,12 +169,16 @@ public struct ExtensionPanel: Codable, Equatable, Sendable {
     public static let nodeConstraints = ExtensionComponentNodeConstraints(
         maximumDepth: 24,
         maximumNodes: 500,
+        maximumRenderedElements: 1_000,
         maximumTextLength: 10_000,
         allowedStackAxes: [.horizontal, .vertical],
         allowedTextRoles: ExtensionTextRole.allCases,
         allowedImageRoles: ExtensionImageRole.allCases,
         allowedButtonRoles: ExtensionButtonRole.allCases,
         allowedStatusRoles: ExtensionStatusRole.allCases,
+        allowsTextInput: true,
+        maximumPickerOptions: 100,
+        maximumSceneItems: 500,
         allowsDivider: true,
         allowsFixedSpacer: true,
         allowsFlexibleSpacer: true
@@ -257,29 +261,36 @@ public struct ExtensionPanel: Codable, Equatable, Sendable {
 public struct ExtensionRegistration: Codable, Equatable, Sendable {
     public let commands: [ExtensionCommand]
     public let panels: [ExtensionPanel]
+    public let workspaceNavigators: [ExtensionWorkspaceNavigator]
     public let mcpTools: [ExtensionMCPTool]
     public let services: [ExtensionServiceDefinition]
 
     public init(
         commands: [ExtensionCommand] = [],
         panels: [ExtensionPanel] = [],
+        workspaceNavigators: [ExtensionWorkspaceNavigator] = [],
         mcpTools: [ExtensionMCPTool] = [],
         services: [ExtensionServiceDefinition] = []
     ) {
         self.commands = commands
         self.panels = panels
+        self.workspaceNavigators = workspaceNavigators
         self.mcpTools = mcpTools
         self.services = services
     }
 
     private enum CodingKeys: String, CodingKey {
-        case commands, panels, mcpTools, services
+        case commands, panels, workspaceNavigators, mcpTools, services
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         commands = try container.decodeIfPresent([ExtensionCommand].self, forKey: .commands) ?? []
         panels = try container.decodeIfPresent([ExtensionPanel].self, forKey: .panels) ?? []
+        workspaceNavigators = try container.decodeIfPresent(
+            [ExtensionWorkspaceNavigator].self,
+            forKey: .workspaceNavigators
+        ) ?? []
         mcpTools = try container.decodeIfPresent([ExtensionMCPTool].self, forKey: .mcpTools) ?? []
         services = try container.decodeIfPresent(
             [ExtensionServiceDefinition].self,
@@ -303,6 +314,15 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         issues.append(contentsOf: duplicateIdentifierIssues(
             panels.map(\.id),
             collectionPath: "panels"
+        ))
+        for (index, navigator) in workspaceNavigators.enumerated() {
+            issues.append(contentsOf: navigator.validationIssues(
+                path: "workspaceNavigators[\(index)]"
+            ))
+        }
+        issues.append(contentsOf: duplicateIdentifierIssues(
+            workspaceNavigators.map(\.id),
+            collectionPath: "workspaceNavigators"
         ))
         issues.append(contentsOf: identifierIssues(
             mcpTools.map(\.id),
@@ -343,6 +363,21 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
             issues.append(.init(
                 path: "panels",
                 message: "must contain at most 32 panels"
+            ))
+        }
+        if !workspaceNavigators.isEmpty,
+           !manifest.capabilities.contains(.workspaceNavigation) {
+            issues.append(.init(
+                path: "capabilities",
+                message: """
+                must contain 'ui.workspace-navigation' when workspace navigators are registered
+                """
+            ))
+        }
+        if workspaceNavigators.count > 8 {
+            issues.append(.init(
+                path: "workspaceNavigators",
+                message: "must contain at most 8 workspace navigators"
             ))
         }
         for (index, panel) in panels.enumerated() {

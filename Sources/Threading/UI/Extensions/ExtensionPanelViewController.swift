@@ -226,8 +226,8 @@ final class ExtensionPanelViewController: NSViewController {
                 imageResolver: { [weak self] reference in
                     self?.resolveImage(reference)
                 },
-                onAction: { [weak self] actionID in
-                    self?.invoke(actionID)
+                onEvent: { [weak self] actionID, value in
+                    self?.invoke(actionID, value: value)
                 }
             )
             rendered.setAccessibilityIdentifier(
@@ -328,7 +328,11 @@ final class ExtensionPanelViewController: NSViewController {
         }
     }
 
-    private func invoke(_ actionID: String, pendingMessage: String? = nil) {
+    private func invoke(
+        _ actionID: String,
+        value: ExtensionJSONValue? = nil,
+        pendingMessage: String? = nil
+    ) {
         actionSequence += 1
         let sequence = actionSequence
         statusMessage = pendingMessage ?? "Running “\(actionID)”…"
@@ -338,6 +342,7 @@ final class ExtensionPanelViewController: NSViewController {
             extensionIdentifier: extensionIdentifier,
             panelID: panelID,
             actionID: actionID,
+            value: value,
             context: context,
             completion: { [weak self] result in
                 guard let self, self.actionSequence == sequence else { return }

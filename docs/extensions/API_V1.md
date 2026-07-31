@@ -22,8 +22,13 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   (`extensions`, `project`, `view`) and the sidebar rows (`session-row`, `project-row`),
   whose invocation context is the row's own identity; the rows' native actions stay
   host-owned.
-- Host-rendered panels with optional generation-scoped load actions, complete Settings pages,
-  and built-in Settings sections.
+- Host-rendered panels with optional generation-scoped load actions, native text/search input,
+  native single-choice pickers, and bounded semantic scenes for interactive visualizations;
+  complete Settings pages and built-in Settings sections.
+- Validated `ui.workspace-navigation` registrations describing a complete semantic navigator
+  interior with virtualized list, outline, and grid snapshots, optional initial load actions,
+  correlated runtime replacements, host-routed project/session destinations, persistent user
+  selection, and generation-scoped Native failback.
 - Package-owned localization catalogues with host language negotiation. The selected catalogue
   localizes static Settings and runtime semantic contributions, and is also exposed through
   `ExtensionLocalizer` for dynamic messages and formatted copy.
@@ -201,6 +206,8 @@ are not part of safe extension API v1.
 The reference behavior and authoring rules live in:
 
 - `AGENT_AUTHORING.md`
+- `DECLARATIVE_UI.md`
+- `WORKSPACE_NAVIGATORS.md`
 - `AUTHORING_FLOW.md`
 - `HOST_SURFACES.md`
 - `COMPONENT_CUSTOMIZATION.md`

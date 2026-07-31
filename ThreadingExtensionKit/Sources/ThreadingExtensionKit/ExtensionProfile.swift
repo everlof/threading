@@ -11,6 +11,7 @@ public enum ExtensionContributionKind: String, Codable, CaseIterable, Hashable, 
     case settings
     case services
     case componentCustomization
+    case workspaceNavigation
     case providerIcons
     case accountIcons
     case sessionIdentity
@@ -23,6 +24,7 @@ public enum ExtensionContributionKind: String, Codable, CaseIterable, Hashable, 
         case .settings: return "Settings"
         case .services: return "Services"
         case .componentCustomization: return "Component customization"
+        case .workspaceNavigation: return "Workspace navigator"
         case .providerIcons: return "Provider icons"
         case .accountIcons: return "Account icons"
         case .sessionIdentity: return "Session identity"
@@ -39,6 +41,7 @@ public enum ExtensionProfile: String, Codable, Equatable, Sendable {
     case settings
     case service
     case component
+    case navigator
     case hybrid
 
     public var displayName: String {
@@ -50,6 +53,7 @@ public enum ExtensionProfile: String, Codable, Equatable, Sendable {
         case .settings: return "Settings extension"
         case .service: return "Service extension"
         case .component: return "Component extension"
+        case .navigator: return "Navigator extension"
         case .hybrid: return "Hybrid extension"
         }
     }
@@ -76,6 +80,9 @@ public extension ExtensionManifest {
         }
         if capabilities.contains(.componentCustomization) {
             result.insert(.componentCustomization)
+        }
+        if capabilities.contains(.workspaceNavigation) {
+            result.insert(.workspaceNavigation)
         }
         if capabilities.contains(.providerIconResolver) {
             result.insert(.providerIcons)
@@ -110,6 +117,8 @@ public extension ExtensionManifest {
              [.sessionIdentity],
              [.providerIcons, .accountIcons]:
             return .component
+        case [.workspaceNavigation]:
+            return .navigator
         default:
             return .hybrid
         }

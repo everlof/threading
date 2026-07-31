@@ -18,6 +18,25 @@ public indirect enum ExtensionNode: Equatable, Sendable {
         role: ExtensionButtonRole,
         isEnabled: Bool
     )
+    /// A native editable field which raises `id` with its string value.
+    case textInput(
+        id: String,
+        value: String,
+        placeholder: String?,
+        accessibilityLabel: String,
+        role: ExtensionTextInputRole,
+        isEnabled: Bool
+    )
+    /// A native single-choice control which raises `id` with the selected option value.
+    case picker(
+        id: String,
+        selection: String?,
+        options: [ExtensionPickerOption],
+        accessibilityLabel: String,
+        isEnabled: Bool
+    )
+    /// A host-rendered, interactive visualization with normalized semantic marks.
+    case scene(ExtensionScene)
     case status(String, role: ExtensionStatusRole)
     /// A summary that has a second level behind it.
     ///
@@ -99,6 +118,11 @@ extension ExtensionNode: Codable {
         case role
         case id
         case title
+        case value
+        case placeholder
+        case selection
+        case options
+        case scene
         case isEnabled
         case reference
         case accessibilityLabel
@@ -116,6 +140,9 @@ extension ExtensionNode: Codable {
         case text
         case image
         case button
+        case textInput
+        case picker
+        case scene
         case status
         case disclosure
         case proceed
@@ -153,6 +180,31 @@ extension ExtensionNode: Codable {
                 role: try container.decode(ExtensionButtonRole.self, forKey: .role),
                 isEnabled: try container.decode(Bool.self, forKey: .isEnabled)
             )
+        case .textInput:
+            self = .textInput(
+                id: try container.decode(String.self, forKey: .id),
+                value: try container.decode(String.self, forKey: .value),
+                placeholder: try container.decodeIfPresent(String.self, forKey: .placeholder),
+                accessibilityLabel: try container.decode(
+                    String.self,
+                    forKey: .accessibilityLabel
+                ),
+                role: try container.decode(ExtensionTextInputRole.self, forKey: .role),
+                isEnabled: try container.decode(Bool.self, forKey: .isEnabled)
+            )
+        case .picker:
+            self = .picker(
+                id: try container.decode(String.self, forKey: .id),
+                selection: try container.decodeIfPresent(String.self, forKey: .selection),
+                options: try container.decode([ExtensionPickerOption].self, forKey: .options),
+                accessibilityLabel: try container.decode(
+                    String.self,
+                    forKey: .accessibilityLabel
+                ),
+                isEnabled: try container.decode(Bool.self, forKey: .isEnabled)
+            )
+        case .scene:
+            self = .scene(try container.decode(ExtensionScene.self, forKey: .scene))
         case .status:
             self = .status(
                 try container.decode(String.self, forKey: .text),
@@ -215,6 +267,31 @@ extension ExtensionNode: Codable {
             try container.encode(title, forKey: .title)
             try container.encode(role, forKey: .role)
             try container.encode(isEnabled, forKey: .isEnabled)
+        case .textInput(
+            let id,
+            let value,
+            let placeholder,
+            let accessibilityLabel,
+            let role,
+            let isEnabled
+        ):
+            try container.encode(Kind.textInput, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(value, forKey: .value)
+            try container.encodeIfPresent(placeholder, forKey: .placeholder)
+            try container.encode(accessibilityLabel, forKey: .accessibilityLabel)
+            try container.encode(role, forKey: .role)
+            try container.encode(isEnabled, forKey: .isEnabled)
+        case .picker(let id, let selection, let options, let accessibilityLabel, let isEnabled):
+            try container.encode(Kind.picker, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encodeIfPresent(selection, forKey: .selection)
+            try container.encode(options, forKey: .options)
+            try container.encode(accessibilityLabel, forKey: .accessibilityLabel)
+            try container.encode(isEnabled, forKey: .isEnabled)
+        case .scene(let scene):
+            try container.encode(Kind.scene, forKey: .type)
+            try container.encode(scene, forKey: .scene)
         case .status(let text, let role):
             try container.encode(Kind.status, forKey: .type)
             try container.encode(text, forKey: .text)
