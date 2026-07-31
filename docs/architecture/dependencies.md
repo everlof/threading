@@ -183,6 +183,16 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     itself when `contentsScale` moves, so the old code only had to retag it. A bitmap does
     not, and the slots are scale-dependent besides — they are snapped to a specific pixel
     grid — so dragging a window between a Retina screen and a 1x one rebuilds the line.
+  - **Width-only relayout reuses glyphs.** A divider drag used to make every visible title
+    rebuild every glyph layer whenever tail truncation crossed one character boundary. The
+    unchanged leading prefix now keeps its layers, a changed suffix alone is replaced, and a
+    layer whose raster inputs stayed equal moves without invalidating its bitmap. A leading
+    line whose displayed text did not change skips Core Text layout entirely; centered and
+    trailing lines still respond to width, every alignment still responds to height, and a
+    backing-scale change remains a full rebuild. The production sidebar sweep in
+    `SidebarTreeBuilderTests` drives 5,000 sessions through 120 width ticks from 220 to 600
+    points and back. On the profiling machine this moved resize p95 from 10.9–12.5 ms to
+    6.0–6.4 ms, and total resize work from 400–453 ms to 282–300 ms.
 
 - **NativeDiffKit** (remote, ours): the diff *rendering* — line layout, syntax highlighting,
   wrapping, sizing — shared between this app's AppKit views and a UIKit sibling.

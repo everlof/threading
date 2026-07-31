@@ -555,6 +555,31 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let roots = SidebarTreeBuilder.rootNodes(from: store.projects)
         let treeElapsed = DispatchTime.now().uptimeNanoseconds - treeStarted
 
+        // A divider drag changes the sidebar's width once per pointer/display update. Drive the
+        // production controller through a complete widening and narrowing pass, keeping each
+        // tick separate so one long layout cannot hide inside a cheap total. This deliberately
+        // runs after the other phases: resizing should not warm their first-layout measurements.
+        let resizeTickCount = 120
+        let narrowWidth: CGFloat = 220
+        let wideWidth: CGFloat = 600
+        var resizeSamples: [UInt64] = []
+        resizeSamples.reserveCapacity(resizeTickCount)
+        for tick in 0..<resizeTickCount {
+            let half = resizeTickCount / 2
+            let index = tick < half ? tick : resizeTickCount - tick - 1
+            let fraction = CGFloat(index) / CGFloat(half - 1)
+            let width = narrowWidth + (wideWidth - narrowWidth) * fraction
+            let started = DispatchTime.now().uptimeNanoseconds
+            controller.view.frame.size.width = width
+            controller.view.layoutSubtreeIfNeeded()
+            resizeSamples.append(DispatchTime.now().uptimeNanoseconds - started)
+        }
+        controller.view.frame.size.width = 300
+        controller.view.layoutSubtreeIfNeeded()
+
+        let orderedResizeSamples = resizeSamples.sorted()
+        let resizeElapsed = resizeSamples.reduce(0, +)
+
         XCTAssertFalse(roots.isEmpty)
         XCTAssertEqual(controller.selectedSessionID, fixture.deepSessionID)
         XCTAssertGreaterThan(controller.outlineRowCount, projectCount * sessionsPerProject)
@@ -575,7 +600,12 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + "title_event_ms=\(Self.milliseconds(titleEventElapsed)) "
                 + "row_scan_refresh_250_ms=\(Self.milliseconds(scanningChurnElapsed)) "
                 + "row_refresh_250_ms=\(Self.milliseconds(churnElapsed)) "
-                + "tree_build_ms=\(Self.milliseconds(treeElapsed))"
+                + "tree_build_ms=\(Self.milliseconds(treeElapsed)) "
+                + "resize_ticks=\(resizeTickCount) "
+                + "resize_total_ms=\(Self.milliseconds(resizeElapsed)) "
+                + "resize_p50_ms=\(Self.milliseconds(Self.percentile(0.50, in: orderedResizeSamples))) "
+                + "resize_p95_ms=\(Self.milliseconds(Self.percentile(0.95, in: orderedResizeSamples))) "
+                + "resize_max_ms=\(Self.milliseconds(orderedResizeSamples.last ?? 0))"
         )
     }
 
@@ -622,5 +652,11 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
     private static func milliseconds(_ nanoseconds: UInt64) -> String {
         String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private static func percentile(_ percentile: Double, in orderedValues: [UInt64]) -> UInt64 {
+        guard !orderedValues.isEmpty else { return 0 }
+        let index = Int((Double(orderedValues.count - 1) * percentile).rounded(.up))
+        return orderedValues[index]
     }
 }
