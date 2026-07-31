@@ -331,6 +331,20 @@ final class SessionComposerViewController: NSViewController {
         discoverImportable(for: project)
     }
 
+    /// Puts the caret in the prompt.
+    ///
+    /// The pane hands focus to whatever it puts on screen — a terminal takes it in `attach`, a
+    /// native conversation's prompt in `attachConversation` — and this is the same surface for a
+    /// session that does not exist yet. Arriving here by ⌘N or by selecting a project, the only
+    /// thing being asked for is what to type, so the field should not have to be clicked first.
+    ///
+    /// Skipped when an extension has replaced the prompt: the native editor is hidden then, and
+    /// AppKit answers `makeFirstResponder` for a hidden view by clearing the window's instead.
+    func focusPrompt() {
+        guard !promptView.isHiddenOrHasHiddenAncestor else { return }
+        promptView.focusAtEnd()
+    }
+
     /// Re-reads everything the chips *derive* — the app-wide defaults they name, the account
     /// they resolve, what is left of it — while leaving every choice and the prompt untouched.
     ///

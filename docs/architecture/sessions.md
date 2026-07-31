@@ -129,6 +129,18 @@ model and checkout, and drops attachments, which are deliberately not drafts (se
 [`persistence.md`](persistence.md)). Only what the chips *derive* is re-read
 (`refreshDerivedState`), because Settings is exactly where those defaults change.
 
+**The pane focuses whatever it puts on screen, and the composer is not an exception.** `attach`
+hands a terminal the keyboard and `attachConversation` hands a native conversation's reply box
+the caret, so a composer that arrived unfocused was the one surface asking to be clicked before
+it could be used — and it is the surface reached by ⌘N, which is a request to type. Both entry
+points focus it: `showComposer` after configuring it for the project, `restoreComposer` after
+Settings closes over it. The caret lands **after** any restored draft (`PromptView.focusAtEnd`).
+`stringValue` deliberately leaves the selection at position 0 so a long draft is *read* from its
+beginning, which is right while nothing is focused and wrong the moment something is: the next
+keystroke would land in front of the user's own half-written sentence rather than continuing it.
+Plain `focus()` keeps the caret where it is, and is what removing an attachment uses — handing
+the editor back is not the user asking for the caret to move out of the middle of a sentence.
+
 ## Session Names
 
 **A session is never named after its agent or account** — the row's icon slot and account chip

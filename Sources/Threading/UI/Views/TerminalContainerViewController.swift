@@ -276,6 +276,7 @@ final class TerminalContainerViewController: NSViewController {
         composerViewController.view.isHidden = false
         applyPaneBackground(.chrome)
         composerViewController.show(projectID: projectID)
+        composerViewController.focusPrompt()
     }
 
     /// Puts a composer back on screen **without resetting it**, for a detour that never changed
@@ -306,6 +307,7 @@ final class TerminalContainerViewController: NSViewController {
         composerViewController.view.isHidden = false
         applyPaneBackground(.chrome)
         composerViewController.refreshDerivedState()
+        composerViewController.focusPrompt()
     }
 
     /// Shows a settings page centred in the pane, replacing whatever session or composer was on

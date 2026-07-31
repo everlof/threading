@@ -244,6 +244,11 @@ it is the only way to create one:
 - **New Session** on the empty pane — when no session is selected, the pane offers the same
   route Cmd+N takes
 
+**The prompt is focused the moment the composer appears**, however you got there, so the
+first message can be typed straight away without clicking the field. If a draft is waiting,
+the caret lands at the end of it — typing continues the sentence rather than cutting in front
+of it.
+
 There is no shortcut that starts a session for you. A session carries four decisions — agent,
 account, model, and which checkout it runs in — and the menu items that used to create one
 outright answered all four with defaults you never saw. The composer asks, and it is replaced

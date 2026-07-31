@@ -317,8 +317,23 @@ final class PromptView: NSView, ThemedComponent {
 
     // MARK: - Public Methods
 
+    /// Takes the caret and leaves it where it was.
+    ///
+    /// For focus the user did not ask for: removing an attachment hands the editor back, and a
+    /// caret that jumps out of the middle of a half-written sentence is worse than no focus.
     func focus() {
         window?.makeFirstResponder(textView)
+    }
+
+    /// Takes the caret and places it after whatever is already in the editor.
+    ///
+    /// For a composer being *put on screen*. `stringValue` leaves the selection at the start so
+    /// a restored draft is read from its beginning; once that composer is focused the same
+    /// position means something else — the next keystroke lands in front of the user's own
+    /// sentence rather than continuing it.
+    func focusAtEnd() {
+        focus()
+        textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     }
 
     /// Adds files through the same path used by paste and drop.

@@ -670,6 +670,69 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(prompt.stringValue, "hej")
     }
 
+    /// Arriving at the composer *is* the request to type: ⌘N and selecting a project both land
+    /// here, and the pane focuses everything else it puts on screen — a terminal, a native
+    /// conversation's reply box. The caret goes after any restored draft, because the position
+    /// `stringValue` leaves it in so the draft is read from its start is the one position where
+    /// the next keystroke lands in front of the user's own sentence.
+    func testArrivingAtTheComposerFocusesThePromptAfterAnyRestoredDraft() throws {
+        let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
+        _ = composer.view
+        composer.updatePromptCustomization(for: ProjectID())
+
+        let window = makeWindow(hosting: composer.view)
+        let prompt = try XCTUnwrap(
+            descendants(of: composer.view).compactMap { $0 as? PromptView }.first
+        )
+        let textView = try promptTextView(in: prompt)
+
+        prompt.stringValue = "fixa"
+        XCTAssertEqual(
+            textView.selectedRange().location,
+            0,
+            "an unfocused draft is still read from its beginning"
+        )
+
+        composer.focusPrompt()
+
+        XCTAssertTrue(window.firstResponder === textView, "the composer has to arrive focused")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 4, length: 0))
+
+        type(" testet", in: window)
+
+        XCTAssertEqual(prompt.stringValue, "fixa testet", "typing has to continue the draft")
+    }
+
+    /// Removing an attachment hands the editor back, and that is not the user asking for the
+    /// caret: it stays mid-sentence rather than jumping to the end the way arriving at a
+    /// composer does.
+    func testRemovingAnAttachmentLeavesTheCaretWhereItWas() throws {
+        let imageURL = try makeImageFile(named: "caret.png")
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+
+        let prompt = PromptView()
+        prompt.showsImageAttachments = true
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+
+        prompt.stringValue = "fixa testet"
+        prompt.attachFiles(at: [imageURL.path])
+        textView.setSelectedRange(NSRange(location: 4, length: 0))
+
+        let remove = try XCTUnwrap(
+            descendants(of: prompt).first {
+                $0.accessibilityRole() == .button
+                    && $0.accessibilityTitle() == "Remove \(imageURL.lastPathComponent)"
+            },
+            "an attached image has to carry its own remove control"
+        )
+        XCTAssertTrue(remove.accessibilityPerformPress())
+
+        XCTAssertEqual(prompt.attachmentPaths, [])
+        XCTAssertTrue(window.firstResponder === textView, "the editor has to come back focused")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 4, length: 0))
+    }
+
     /// The prompt lives inside a container that detaches and re-attaches it whenever the
     /// component customization is resolved. That happens for reasons the user cannot see — a
     /// project being selected, an extension publishing — so it must not take the caret with it.
