@@ -31,34 +31,60 @@ private struct ClaudeUsageResponse: Decodable {
 /// cache when no credentials file exists — which is the normal macOS layout, where Claude
 /// Code keeps its token in the Keychain instead.
 ///
-/// Three sources, ordered by freshness: the API when there is a token on disk to call it with,
-/// then the status-line cache Claude Code pushes on every turn, then the CLI's own
+/// Four sources, ordered by freshness: the API against a token on disk, the API against the
+/// Keychain token, the status-line cache Claude Code pushes on every turn, then the CLI's own
 /// `cachedUsageUtilization`. The last one is also *merged into* whichever won, because it is
 /// the only one that names a model-scoped window — see `ClaudeUsageProfileCache`.
+///
+/// **A source that cannot serve hands the question down; it does not answer for the chain.**
+/// That rule was learnt from the opposite: a stale `<config>/.credentials.json` threw from
+/// outside the fall-through, so an account whose CLI was mid-turn — refreshing its Keychain
+/// item happily, with a status-line reading minutes old on disk — showed "the account's login
+/// has expired". Only the last source left may name the failure.
 enum ClaudeUsageFetcher {
+
+    // MARK: - Types
+
+    /// What one token source can offer this cycle.
+    enum CredentialSource: Equatable {
+        case usable(token: String, plan: String?)
+        /// Present but unable to serve. Carries what to say if no later source serves either.
+        case unusable(reason: UsageFetchError)
+        /// This login keeps no token here — which says nothing about the ones it keeps
+        /// elsewhere.
+        case absent
+    }
 
     // MARK: - Public Methods
 
     static func fetch(account: AgentAccount) async throws -> AccountUsage {
         let profile = ClaudeUsageProfileCache.read(account: account)
 
-        if let credentials = try readCredentialsFile(account: account) {
+        /// The most specific reason a *token* source declined, kept for the throw at the end
+        /// and used only if every later source also comes up empty.
+        var refusal: UsageFetchError?
+
+        // 1. The credentials file — the Linux-style layout, and on macOS sometimes a leftover
+        //    that has gone stale beside a Keychain login that is perfectly current.
+        switch readCredentialsFile(account: account) {
+        case .usable(let token, let plan):
             do {
-                return withModelWindows(from: profile, on: try await fetchFromAPI(credentials: credentials))
+                return withModelWindows(
+                    from: profile,
+                    on: try await fetchFromAPI(credentials: (token, plan))
+                )
             } catch UsageFetchError.tokenExpired {
-                // A stale file token can still be beaten by the local cache.
-                if let cached = ClaudeUsageCache.read(account: account) {
-                    return withModelWindows(from: profile, on: cached)
-                }
-                if let profile { return profile }
-                throw UsageFetchError.tokenExpired
+                refusal = .tokenExpired
             }
+        case .unusable(let reason):
+            refusal = reason
+        case .absent:
+            break
         }
 
-        // The keychain is where macOS logins actually keep the token; the file above is the
-        // Linux-style layout. Only with the user's standing opt-in, and never with a prompt:
-        // an ungranted read fails closed inside `ClaudeKeychainCredentials` and the chain
-        // falls through to the caches as though the setting were off.
+        // 2. The keychain is where macOS logins actually keep the token. Only with the user's
+        //    standing opt-in, and never with a prompt: an ungranted read fails closed inside
+        //    `ClaudeKeychainCredentials` and reads here as no token at all.
         if let credentials = await keychainCredentials(for: account) {
             do {
                 return withModelWindows(from: profile, on: try await fetchFromAPI(credentials: credentials))
@@ -66,23 +92,48 @@ enum ClaudeUsageFetcher {
                 // The CLI rotates the item in place, so a refused token is dropped and the
                 // next cycle re-reads the keychain rather than concluding the login is gone.
                 ClaudeKeychainCredentials.invalidate(configPath: account.configPath)
-                if let cached = ClaudeUsageCache.read(account: account) {
-                    return withModelWindows(from: profile, on: cached)
-                }
-                if let profile { return profile }
-                throw UsageFetchError.tokenExpired
+                refusal = .tokenExpired
             }
         }
 
+        // 3. The status-line feed, which needs no credential at all — so a login whose tokens
+        //    are all unreadable from here still reports the number Claude Code last pushed.
         if let cached = ClaudeUsageCache.read(account: account) {
             return withModelWindows(from: profile, on: cached)
         }
 
+        // 4. The CLI's own last API reading, staler still.
         if let profile { return profile }
 
-        throw UsageFetchError.noCredential(
-            "No readable usage source for this Claude account."
-        )
+        throw refusal ?? .noCredential("No readable usage source for this Claude account.")
+    }
+
+    // MARK: - Internal Methods (pure, testable)
+
+    /// The expiry rule for a credentials payload, without a file to hold it. A token past its
+    /// expiry (or within the skew of it) is `.unusable` rather than fatal: the same account can
+    /// hold a current token in the Keychain, which is exactly what the macOS layout does.
+    static func credentials(fromFile data: Data, at now: Date) -> CredentialSource {
+        guard data.count <= ClaudeUsageDefaults.credentialsMaxBytes,
+              let file = try? JSONDecoder().decode(ClaudeCredentialsFile.self, from: data),
+              let oauth = file.claudeAiOauth,
+              let token = oauth.accessToken, !token.isEmpty
+        else {
+            return .unusable(reason: .noCredential("The account's credentials file is unreadable."))
+        }
+
+        if let expiresAt = oauth.expiresAt {
+            let expiry = Date(timeIntervalSince1970: expiresAt / 1000)
+            guard expiry > now.addingTimeInterval(ClaudeUsageDefaults.expirySkew) else {
+                return .unusable(reason: .tokenExpired)
+            }
+        }
+
+        let plan = oauth.subscriptionType?
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+
+        return .usable(token: token, plan: plan)
     }
 
     // MARK: - Private Methods
@@ -175,36 +226,18 @@ enum ClaudeUsageFetcher {
         return (token.accessToken, token.plan)
     }
 
-    /// Nil when the file simply is not there; throws when it exists but cannot serve.
-    private static func readCredentialsFile(
-        account: AgentAccount
-    ) throws -> (token: String, plan: String?)? {
+    /// `.absent` when the file simply is not there; otherwise whatever the payload can offer.
+    private static func readCredentialsFile(account: AgentAccount) -> CredentialSource {
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(ClaudeUsageDefaults.credentialsFileName)
 
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
 
-        guard let data = try? Data(contentsOf: url),
-              data.count <= ClaudeUsageDefaults.credentialsMaxBytes,
-              let file = try? JSONDecoder().decode(ClaudeCredentialsFile.self, from: data),
-              let oauth = file.claudeAiOauth,
-              let token = oauth.accessToken, !token.isEmpty
-        else {
-            throw UsageFetchError.noCredential("The account's credentials file is unreadable.")
+        guard let data = try? Data(contentsOf: url) else {
+            return .unusable(reason: .noCredential("The account's credentials file is unreadable."))
         }
 
-        if let expiresAt = oauth.expiresAt {
-            let expiry = Date(timeIntervalSince1970: expiresAt / 1000)
-            guard expiry > Date().addingTimeInterval(ClaudeUsageDefaults.expirySkew) else {
-                throw UsageFetchError.tokenExpired
-            }
-        }
-
-        let plan = oauth.subscriptionType?
-            .replacingOccurrences(of: "_", with: " ")
-            .capitalized
-
-        return (token, plan)
+        return credentials(fromFile: data, at: Date())
     }
 }
 

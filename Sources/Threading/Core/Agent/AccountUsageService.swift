@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Usage Fetch Error
 
-enum UsageFetchError: Error {
+enum UsageFetchError: Error, Equatable {
     case noCredential(String)
     case tokenExpired
     /// The usage endpoint itself said "too fast". Carries its `Retry-After` when one was

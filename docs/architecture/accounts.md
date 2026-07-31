@@ -160,7 +160,9 @@ Sources, per provider:
   each is named from its own `limit_window_seconds`.
 - **Claude** — four sources, ordered by freshness, in `ClaudeUsageFetcher`:
   1. `<config>/.credentials.json` against `api.anthropic.com/api/oauth/usage` when the file
-     exists. On this machine it does not (macOS keeps the token in the Keychain).
+     exists. On macOS the live token lives in the Keychain instead, so where this file exists
+     at all it is usually a leftover of an older layout — present, unrefreshed, and stale
+     within the day.
   1b. The **Keychain token** (`ClaudeKeychainCredentials`, opt-in as above) against the same
      endpoint — the live source a macOS login actually has.
   2. **Claudex's status-line cache**:
@@ -173,6 +175,16 @@ Sources, per provider:
      own copy of its last API reading. Staler — the CLI refreshes it on its own schedule, not
      per turn — but it needs neither a credential nor Claudex, so it is what an account with
      neither of the first two still reports.
+
+  **A source that cannot serve hands the question down; it never answers for the chain.** The
+  order above only means anything if every step falls through, and one did not: the credentials
+  file's expiry check threw from *outside* the fall-through, so a stale token on disk skipped
+  the Keychain, the status-line cache and the profile snapshot in one go and reported "The
+  account's login has expired" — under an account whose CLI was mid-turn, with a status-line
+  reading minutes old sitting unread beside it. A token source now returns `.usable`,
+  `.unusable(reason:)` or `.absent`; only the last source left may name the failure, and
+  "expired" is said only when a token really was refused *and* nothing below could serve. An
+  account with no token anywhere reports `.noCredential`, not an expired login.
 
   The third source is also **merged into** whichever won, because it is the only one that names
   a **model-scoped** window. A plan can meter some models separately (a weekly window for Fable
