@@ -15,11 +15,13 @@ per-file JSON to `opencode.db`, and their schema keeps `message.data` and `event
 `Codable` encoding. A field added to `AgentSession` therefore costs no migration, which is what
 makes the schema survivable in a model still growing side chats, archiving and typed ids. A
 project's payload is stored with `sessions` **emptied**, because sessions are rows; giving the
-same fact two homes is how one of them goes stale.
+same fact two homes is how one of them goes stale. Standalone `ProjectTerminal` records remain
+embedded in that project payload: they are small project-owned sidebar destinations with no
+transcript or independently queried lifecycle, so a separate relational row buys nothing.
 
 Writes are **per row, in one transaction**: upsert what is there, delete what has gone. That is
 the actual gain over the document — the store is no longer rewritten in full every time an agent
-renames a terminal tab — and it retires the rolling `projects.json.bak`, whose whole job was
+renames a chat or standalone terminal — and it retires the rolling `projects.json.bak`, whose whole job was
 covering the window in which a full rewrite could be interrupted. WAL is the other half: a read
 never blocks the writer, and `busy_timeout` turns "another process has it" into a wait. That
 makes multiple writers *possible*, not permitted — `SingleInstanceLock` still stands, and is a

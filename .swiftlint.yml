@@ -73,7 +73,7 @@ custom_rules:
   frozen_layer_colour:
     name: "Frozen layer theme colour"
     regex: '(backgroundColor|borderColor|shadowColor|strokeColor|fillColor)\s*=\s*[^\n]*\.cgColor'
-    excluded: ".*/(Core/Theme/AppThemeRefresh|UI/Design/Design|UI/Design/ThemedIndicators|UI/Design/ThreadingMarkView|UI/Design/SidebarBackdropView)\\.swift"
+    excluded: ".*/(Core/Theme/AppThemeRefresh|UI/Design/Design|UI/Design/ThemedIndicators|UI/Design/ThreadingMarkView|UI/Design/SidebarBackdropView|UI/Design/Toast)\\.swift"
     message: "A CALayer freezes CGColor at assignment. Use applySurface or the refresh-aware NSView layer-colour helpers."
     match_kinds:
       - identifier

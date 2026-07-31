@@ -84,57 +84,6 @@ write it into the developer's own preferences. Two orderings are load-bearing: t
 in the same run-loop turn that claims the floor, and `recordsSidebarWidth` stays false until it
 has, or launch's default layout would overwrite the stored width one turn before it was read.
 
-**The toolbar holds only controls that act on the window itself, and everything else belongs
-to the pane it describes.** `NSToolbar` positions its items relative to the *window*, which is
-what makes it right for exactly two things: the sidebar toggle, which acts on the split rather
-than on either side of it, and the selection-history pair (`<` `>`, ⌃⌘←/⌃⌘→), which retraces
-the window's page selection — both stay beside the traffic lights in both collapse states. It
-is wrong for everything else that used to live there: the page tab, the `+`, the usage pill
-and the session's actions all name or act on the *content pane*, so at a fixed window x they
-drift away from it the moment a divider moves.
-
-Anything that joins the toolbar joins a measurement too, and now two: `windowControlsTrailingEdge`
-answers where the window's own controls end (the **trailing-most** of the candidates, with
-`PaneHeaderDefaults.assumedWindowControlsWidth` as the pre-layout fallback), and both
-`updateHeaderInset` and `updateSidebarMinimumThickness` are that one answer applied to the two
-panes. An item added without extending the candidate list puts the pane header's tab under the
-new control — and lets the sidebar's divider cut through it.
-
-**The sidebar's minimum width is those controls, not a number.** `SidebarDefaults.minWidth` is
-what the *list* needs (icon, indented name, the row's two trailing buttons); the column actually
-stops where the toolbar does, because the toolbar positions its items against the window and they
-therefore stay put while the divider moves. At the 180pt list floor the divider ran through the
-forward chevron — measured off the running window's accessibility frames, that chevron ends 198pt
-from the window's leading edge — leaving half a button hanging over the terminal. So
-`updateSidebarMinimumThickness` raises the split item's minimum to that edge plus
-`Spacing.medium`, on the run-loop turn after setup and again on any split resize; it is
-idempotent, and it can only ever raise the constant. Below that width there is no useful size
-left, and there does not need to be: a divider pushed past the minimum shuts the column, so the
-sizes are "as narrow as its controls" and then "gone" — see
-[Dragging a pane shut](#dragging-a-pane-shut), which is where that push is turned into an
-answer, and why `canCollapse` alone does not buy it.
-
-A split item's minimum is a *required* constraint and therefore also a floor on the window's
-width, so this costs the window the ~28pt the sidebar gained (see `DisplayPaneDefaults.slimmestWidth`
-for the other end of that trade).
-
-**The column has no ceiling of its own.** `sidebarItem.maximumThickness` is
-`NSSplitViewItem.unspecifiedDimension`: a fixed 400 stopped the divider in open space with the
-window nowhere near full, which reads as a broken drag rather than as a decision, and there is
-nothing at 400 that the column stops being useful past. What it may take is what the terminal
-can spare, and the terminal states that itself in `MainWindowDefaults.minContentWidth` — one
-rule instead of two. `SidebarDefaults.maxWidth` survives as the ceiling on widths the *app*
-proposes: a restored width, or an extension navigator's `preferredWidth`. How wide the user may
-drag is a different question from how wide the app may open it unasked.
-
-**And the width survives a relaunch.** The window's frame is autosaved, so a restart used to
-bring the arranged window back with the column reset to 240. `SidebarWidth` records it on divider
-movement and `restoreSidebarWidth` puts it back, both through `PreferenceStore` and for the same
-reasons as `DisplayPaneWidth` — it is a choice made with a divider, and a hosted test must not
-write it into the developer's own preferences. Two orderings are load-bearing: the restore runs
-in the same run-loop turn that claims the floor, and `recordsSidebarWidth` stays false until it
-has, or launch's default layout would overwrite the stored width one turn before it was read.
-
 `NSTrackingSeparatorToolbarItem` hid that for years, and stopped the day the sidebar became a
 plain split item: measured on macOS 26 across all three split-item kinds, it follows the divider
 only when the pane beside it has `.sidebar` behaviour. Dragging the divider wider then slid the

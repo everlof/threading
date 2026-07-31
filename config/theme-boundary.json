@@ -311,6 +311,18 @@
       "reason": "The tiled sidebar pattern is a CGColor by Core Animation's own contract; apply() restates it on every theme change and appearance flip."
     },
     {
+      "path": "Sources/Threading/UI/Design/Toast.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "backgroundColor",
+      "reason": "The toast's dwell rail reapplies its layer fill from draw(_:) on every theme refresh, the same discipline as the spinner's stroke."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/Toast.swift",
+      "kind": "motionDuration",
+      "symbol": "duration",
+      "reason": "The rail's drain lasts exactly as long as the band's dwell, which is a fact about the clock rather than a motion length — a Design.Motion token here would draw a countdown that disagrees with the timer it depicts. run(for:) returns before constructing any animation under Reduce Motion, which takes the rail away rather than freezing it."
+    },
+    {
       "path": "Sources/Threading/UI/Design/ThemedSplitView.swift",
       "kind": "interactiveComponent",
       "symbol": "ThemedSplitView",

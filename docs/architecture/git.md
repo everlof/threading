@@ -33,8 +33,10 @@ single-checkout case keeps the flatter two-level layout. Grouped checkouts are l
 branch, since the repository name is already shown above them.
 
 A branch belongs to a *checkout*, not to a repository: two worktrees of one repo are on
-different branches simultaneously. It is re-read when a session stops working, which is when
-an agent is most likely to have just switched, rather than by polling.
+different branches simultaneously. A chat re-reads it when the agent stops working, which is
+when an agent is most likely to have just switched. A standalone terminal updates it with its
+cwd, from OSC 7 or the process-directory fallback, because the shell can move between added
+projects while it remains live.
 
 The composer's branch chip therefore offers **checkouts, not branches**
 (`ProjectStore.siblingCheckouts(of:)`): this checkout, any other added checkout of the same
@@ -56,15 +58,17 @@ its checkout is on now, and after a switch in another session the chat sat group
 branch it would never run on again. `CheckoutBranchFollower` is the following: one
 branch-scoped `GitCheckoutWatcher` per unique checkout (keyed by `worktreeIdentity`, watching
 only the worktree's own `HEAD`, so builds and agent edits never wake it), applying a switch to
-every session standing in that checkout via `ProjectStore.refreshBranches(forCheckoutAt:)` —
-whether the mover was another session, the shell drawer, or a terminal outside Threading.
+every chat and standalone terminal standing in that checkout via
+`ProjectStore.refreshBranches(forCheckoutAt:)` — whether the mover was another session, the
+shell drawer, a standalone terminal or a terminal outside Threading.
 A detached reading is never applied on this path: a rebase detaches `HEAD` for seconds at a
 time, and clearing every record for the flicker would regroup the sidebar twice per rebase; a
 genuine detachment still lands per session at its own stopped-working moment. **Settings >
 General > "Follow the checkout's branch"** turns the following off and restores the frozen
 record, for whoever wants the sidebar to say where a conversation *happened* rather than
 where it would resume. The record drives the sidebar's **branch grouping**
-(`SidebarTreeBuilder`, `BranchGroupNode`): inside a project, sessions sharing a branch gather
+(`SidebarTreeBuilder`, `BranchGroupNode`): inside a project, chats and standalone terminals
+sharing a branch gather
 under a heading — the earns-its-level rule as repository grouping, applied one level down —
 and once *any* branch has earned the level, lone branches earn headings too
 (`AppSettings.groupsLoneBranches`, on by default). The base rule alone left a **mixed tree**:
@@ -73,8 +77,8 @@ invisible without the hover popover — found by switching a live chat to a fres
 watching it merely *leave* the master group. All-or-nothing labelling fixes that reading
 while keeping the flat layout for a project with no shared branch at all, so the common
 one-branch-per-chat project still pays no level per row; with the refinement off, the
-original more-than-one rule stands alone. Sessions with no recorded branch always stay
-directly under the project, and a group takes its first session's position so the list keeps
+original more-than-one rule stands alone. Rows with no recorded branch always stay directly
+under the project, and a group takes its first child's position so the list keeps
 its order. Toggleable via `AppSettings.groupsSessionsByBranch` (on by default; Settings >
 General), and from where the grouping is *seen*: the **sidebar header's arrangement control**
 (`PaneHeaderView` + the "use groups" glyph, opening grouping then `SidebarSessionOrder`
