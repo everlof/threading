@@ -9,6 +9,7 @@
 #   scripts/profile_threading.sh conversation-residency-stress
 #   scripts/profile_threading.sh sidebar-stress
 #   scripts/profile_threading.sh file-tree-stress
+#   scripts/profile_threading.sh window-resize-stress
 #   scripts/profile_threading.sh sample [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh trace "Time Profiler" [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh full [seconds] [process-name-or-pid]
@@ -513,6 +514,66 @@ run_file_tree_stress() {
   ) 2>&1 | tee "${output_directory}/file-tree-stress.log"
 }
 
+run_window_resize_stress() {
+  local output_directory="$1"
+  local scale="${2:-routine}"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  local log_name="window-resize-stress.log"
+  if [[ "${scale}" == "history-heavy" ]]; then
+    log_name="window-resize-history-heavy-stress.log"
+  fi
+  echo "Running deterministic ${scale} whole-window resize sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    local history_lines=0
+    if [[ "${scale}" == "history-heavy" ]]; then
+      history_lines=5000
+    fi
+    history_lines="${THREADING_WINDOW_RESIZE_STRESS_HISTORY_LINES:-${history_lines}}"
+
+    THREADING_WINDOW_RESIZE_STRESS=1 \
+    THREADING_WINDOW_RESIZE_STRESS_TICKS="${THREADING_WINDOW_RESIZE_STRESS_TICKS:-120}" \
+    THREADING_WINDOW_RESIZE_STRESS_HISTORY_LINES="${history_lines}" \
+    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.WindowEdgeTests/testStressWholeWindowResizeWhenEnabled \
+        "${test_bundle}"
+  ) 2>&1 | tee "${output_directory}/${log_name}"
+}
+
 command="${1:-}"
 case "${command}" in
   git-stress)
@@ -550,6 +611,11 @@ case "${command}" in
     run_file_tree_stress "${output_directory}"
     ;;
 
+  window-resize-stress)
+    output_directory="$(new_run_directory window-resize-stress)"
+    run_window_resize_stress "${output_directory}"
+    ;;
+
   sample)
     seconds="${2:-15}"
     target="${3:-Threading}"
@@ -574,6 +640,7 @@ case "${command}" in
     run_conversation_stress "${output_directory}"
     run_sidebar_stress "${output_directory}"
     run_file_tree_stress "${output_directory}"
+    run_window_resize_stress "${output_directory}"
     capture_sample "${seconds}" "${target}" "${output_directory}"
 
     full_templates=(
@@ -589,6 +656,7 @@ case "${command}" in
       run_conversation_stress "${output_directory}" massive
       run_conversation_active_turn_stress "${output_directory}"
       run_conversation_residency_stress "${output_directory}"
+      run_window_resize_stress "${output_directory}" history-heavy
 
       full_plus_templates=(
         "CPU Profiler"

@@ -103,14 +103,17 @@ scripts/profile_threading.sh sidebar-stress
 # Deterministic production File pane at 100 through 20,000 entries, under System and an authored theme.
 scripts/profile_threading.sh file-tree-stress
 
+# Deterministic whole-window drag with chrome, terminal-grid and Claude-repaint phases.
+scripts/profile_threading.sh window-resize-stress
+
 # Lightweight stacks from an already-running app.
 scripts/profile_threading.sh sample 15 Threading
 
 # One Instruments template from the command line.
 scripts/profile_threading.sh trace "Time Profiler" 15 Threading
 
-# Routine sweep: Git, conversation, sidebar and file-tree fixtures, sample, Time Profiler,
-# Animation Hitches, and Allocations.
+# Routine sweep: Git, conversation, sidebar, file-tree and window-resize fixtures, sample,
+# Time Profiler, Animation Hitches, and Allocations.
 scripts/profile_threading.sh full 15 Threading
 
 # Release/investigation sweep: full plus massive, unresolved-turn and multi-conversation workloads,
@@ -126,6 +129,42 @@ same pane action during each capture. Output defaults to `/tmp/threading-profile
 `THREADING_PROFILE_OUTPUT` to retain it elsewhere. Command-line Instruments can still require
 macOS Developer Tools authorization the first time, but it requires no interactive Instruments
 launch or template setup.
+
+## Whole-window resize stress target
+
+`WindowEdgeTests.testStressWholeWindowResizeWhenEnabled` drives 120 bottom-right window-resize
+ticks through the production `MainWindowController`. It measures plain window chrome, a Claude
+alternate-screen terminal with its natural frame-derived grid, the same terminal with grid changes
+suppressed, and both grid modes with a generated full-screen Claude repaint after every tick. The
+natural/frozen delta isolates SwiftTerm resize work from AppKit layout and terminal drawing;
+`grid_changes` verifies that the control really differs.
+
+`scripts/profile_threading.sh window-resize-stress` runs the ordinary empty-history case. Set
+`THREADING_WINDOW_RESIZE_STRESS_HISTORY_LINES` for a one-point investigation. The routine `full`
+sweep uses empty history; `full+` adds 5,000 input lines before entering the alternate screen so
+hidden normal-buffer reflow cannot escape the release edge.
+
+The first Debug sweep showed that neither window chrome nor Claude repainting owned the reported
+stall:
+
+| Stage | Hidden history input lines | Repaint | Resize p50 | Resize p95 | Ticks over 16.7 ms |
+|---|---:|---:|---:|---:|---:|
+| Original SwiftTerm resize | 0 | No | 20.3 ms | 241.4 ms | 66 / 120 |
+| Logical buffer rows only | 0 | No | 5.6 ms | 8.5 ms | 0 / 120 |
+| Logical rows, eager hidden reflow | 5,000 | No | 116.9 ms | 253.0 ms | 119 / 120 |
+| Lazy hidden reflow | 5,000 | No | 2.6 ms | 4.2 ms | 0 / 120 |
+| Lazy hidden reflow | 5,000 | Yes | 5.7 ms | 7.2 ms | 0 / 120 |
+
+`CircularBufferLineList.maxLength` is capacity, but SwiftTerm's width path iterated it as content.
+Subscript reads materialize empty slots, so the first resize of a fresh 24-row terminal allocated
+and resized all 10,000 reserved scrollback rows. Buffer resize now visits `lines.count` only.
+
+A real 5,000-line normal buffer was still reflowed on every tick while Claude's alternate buffer
+covered it. Terminal resize now updates the visible alternate grid immediately and synchronizes the
+normal buffer only when it becomes visible again. The deliberately extreme fixture pays 177.5 ms
+once on alternate-screen exit instead of 117–253 ms on every drag tick. A generic debounce was not
+added: after removing invisible work, live grid updates and repaints fit within one 60 Hz frame and
+keep terminal content tracking the pointer.
 
 ## Git Review as the first stress target
 
@@ -403,7 +442,7 @@ session order and grouping defaults and never reads or changes the user's projec
 
 `scripts/profile_threading.sh sidebar-stress` runs 500, 1,000, 2,000 and 5,000 sessions in fresh
 `xctest` processes. The profiler's DerivedData lives inside that run's artifact directory: parallel
-developer builds cannot lock its build database, while the three deterministic workloads in `full`
+developer builds cannot lock its build database, while the deterministic workloads in `full`
 reuse the same isolated build. Results are `THREADING_PERF project-sidebar` lines in
 `project-sidebar-stress.log`.
 
