@@ -140,6 +140,7 @@ final class ToastRenderTests: XCTestCase {
             ])
 
             let presenter = ToastPresenter(host: host, above: footer.topAnchor)
+            defer { presenter.invalidate() }
             presenter.present(request)
 
             AppThemeRefresh.repaint(host)

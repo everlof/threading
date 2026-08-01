@@ -370,6 +370,30 @@ every presented row. Exact minimap navigation resolves the target by timeline id
 target view exists, lands using the table's estimated/cached row geometry, and corrects after the
 target materializes. This keeps exact-row navigation without restoring the old full-history layout
 chain.
+
+Cold tool rows stop at their collapsed header. A result label or edit `DiffView` is constructed on
+first expansion, reused while that materialized row closes and reopens, and released with the row
+host. The table's measured-height callback validates the table row and stable presentation identity
+captured when the host was configured; scanning the full presentation for each of a viewport's
+measurements made an exact jump grow with transcript depth even though its native view count did
+not.
+
+The extension composition seam is similarly pay-for-play. A user, assistant or tool row whose
+customization resolution is empty keeps its native subtree directly instead of receiving a
+container, composition host and observer that immediately return that same subtree. One controller
+observer reloads the visible viewport only when an extension event changes whether a row needs a
+wrapper; an already-customized wrapper handles content-only refresh itself. Permission cards remain
+wrapped even when empty because they are rare retained interactions which must acquire late
+customization without reconstructing or losing their decision authority.
+
+Replay also has no table row to invalidate until its one final reload. A result arriving during
+reduction therefore clears only the diagnostic height mirror; searching the growing presentation
+for a non-existent materialized row made generated 1,000-turn histories quadratic. Live timeline
+rows resolve through the identity index, and the streaming placeholder resolves directly at the
+tail, where it remains until the authoritative completed message replaces it. Those lookup rules
+keep result attachment and token updates independent of transcript depth without changing row
+lifetime or exact navigation.
+
 The facts live in the model:
 `Turn` carries `endIndex`, `finalAssistantIndex` and `duration`, and durations are retained
 per turn from `.turnFinished` (they used to pass through to the status line and be
@@ -496,6 +520,14 @@ points — and checked by rendering it.
 It is **incremental, not a fold**: `apply` takes one event and returns only the changes, because
 the same type serves a live stream and a replay, and recomputing every row per token would make
 streaming quadratic. Replay is `apply` in a loop.
+
+The rail follows the same rule. Stable user-row identities and compacted user/assistant preview
+strings are cached once when their immutable source enters `ConversationTimeline`; a turn's extent,
+chosen conclusion and duration are still derived from the canonical rows. Replay installs the
+complete rail once at its boundary. Live traffic replaces only the settling tail preview and
+appends one new mark for the next user turn. Besides making a 1,000-turn append independent of
+history depth, settlement now updates the current hover preview immediately instead of leaving it
+answerless until another question arrives.
 
 The split exists because the interesting decisions — what a tool call's one-line subject is,
 which result attaches to which call, when a streamed placeholder is discarded — were previously

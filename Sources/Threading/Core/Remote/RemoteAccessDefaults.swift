@@ -1,7 +1,7 @@
 import Foundation
 
-/// Tunables for remote access — the second loopback HTTP/WebSocket server that the HTTPS relay
-/// exposes so a session can be watched and driven from a browser or the iOS app.
+/// Tunables for remote access — the second loopback HTTP/WebSocket server that the selected HTTPS
+/// transports expose so a session can be watched and driven from a browser or the iOS app.
 ///
 /// This server is deliberately separate from `MCPServer` and `ExtensionHostService`: those
 /// endpoints broker tool permissions and host extensions, and the tunnel must never reach
@@ -10,7 +10,7 @@ enum RemoteAccessDefaults {
 
     // MARK: - Listener
 
-    /// Loopback only. The tunnel forwards to this port; nothing binds to a routable address.
+    /// Loopback only. A selected transport forwards to this port; nothing binds to a routable address.
     static let host = "127.0.0.1"
 
     /// The serial queue that owns the listener, every connection's I/O, WebSocket framing and
@@ -101,6 +101,11 @@ enum RemoteAccessDefaults {
     /// A minted share expires after this unless the caller chose otherwise. A share is a public
     /// door, so it closes on its own rather than staying open until someone remembers to revoke.
     static let defaultShareExpiry: TimeInterval = 24 * 60 * 60
+
+    /// A consumed owner bootstrap is cached just long enough for the same device to retry a lost
+    /// acceptance response. The QR rotates immediately, so a photographed old code cannot pair a
+    /// second device during this window.
+    static let pairingRetrySeconds: TimeInterval = 60
 
     /// How long the device-approval poll (`GET /api/me` returning `pendingApproval`) waits
     /// between polls, echoed to the client so the two agree.

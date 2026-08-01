@@ -26,7 +26,7 @@ final class ProjectTerminalViewController: NSViewController {
         terminalID = terminal.id
         session = TerminalSession(
             profile: ThemeAssignments.profile(forTerminal: terminal.id),
-            identifier: SessionID(terminal.id.rawValue)
+            identity: .projectTerminal(terminal.id)
         )
         super.init(nibName: nil, bundle: nil)
         session.delegate = self

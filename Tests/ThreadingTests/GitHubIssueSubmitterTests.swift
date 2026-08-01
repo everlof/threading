@@ -237,6 +237,7 @@ final class GitHubIssueSubmitterTests: XCTestCase {
         let cut = GitHubIssueSubmitter.truncate(long, to: GitHubIssueDefaults.webFormBodyLimit)
 
         XCTAssertLessThan(cut.count, long.count)
+        XCTAssertLessThanOrEqual(cut.count, GitHubIssueDefaults.webFormBodyLimit)
         XCTAssertTrue(cut.hasSuffix(L10n.string("_Report truncated._")))
     }
 
@@ -261,6 +262,40 @@ final class GitHubIssueSubmitterTests: XCTestCase {
         )
 
         XCTAssertNil(json["labels"], "an empty label list is a validation refusal waiting")
+    }
+
+    func testTheAPIBodyAndLabelCollectionAreBoundedBeforeEncoding() throws {
+        let draft = GitHubIssueDraft(
+            title: "Bounded",
+            body: String(repeating: "x", count: GitHubIssueDefaults.apiBodyLimit + 500),
+            labels: (0..<(GitHubIssueDefaults.labelCountLimit + 5)).map { index in
+                "label-\(index)-" + String(repeating: "y", count: 100)
+            }
+        )
+        let data = try XCTUnwrap(GitHubIssueSubmitter.requestBody(for: draft))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let body = try XCTUnwrap(json["body"] as? String)
+        let labels = try XCTUnwrap(json["labels"] as? [String])
+
+        XCTAssertLessThanOrEqual(body.count, GitHubIssueDefaults.apiBodyLimit)
+        XCTAssertTrue(body.hasSuffix(L10n.string("_Report truncated._")))
+        XCTAssertEqual(labels.count, GitHubIssueDefaults.labelCountLimit)
+        XCTAssertTrue(labels.allSatisfy {
+            $0.count <= GitHubIssueDefaults.labelCharacterLimit
+        })
+    }
+
+    func testKnownResponseEnvelopesDecodeStrictly() {
+        XCTAssertNil(GitHubIssueSubmitter.createdIssue(from: Data(
+            #"{"number":"42","html_url":"https://github.com/everlof/threading/issues/42"}"#.utf8
+        )))
+        XCTAssertEqual(
+            GitHubIssueSubmitter.refusalMessage(
+                status: 422,
+                body: Data(#"{"message":17}"#.utf8)
+            ),
+            L10n.format("GitHub refused the report (%lld).", 422)
+        )
     }
 
     // MARK: - Composition

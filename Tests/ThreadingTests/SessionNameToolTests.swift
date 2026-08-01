@@ -163,6 +163,79 @@ final class SessionNameToolTests: XCTestCase {
         XCTAssertFalse(store.updateAgentTitle("worktree diff crash", for: SessionID()))
     }
 
+    // MARK: - Chosen Over Reported
+
+    /// The clobber this distinction exists for. A PTY-attached Claude re-asserts its own
+    /// `ai-title` through the terminal title within seconds of the tool call, and the
+    /// turn-end transcript read re-reads the same record — so without the source rule, the
+    /// rename the user just asked for was silently put back before they looked up.
+    func testAChosenNameSurvivesWhatTheTransportsKeepReporting() throws {
+        let (store, session) = try makeSessionInProject(named: "app")
+        store.updateAgentTitle("Explore integration options", for: session.id)
+
+        XCTAssertTrue(store.updateAgentTitle(
+            "Chrome sessions and passwords", for: session.id, source: .chosen
+        ))
+
+        // The terminal title, then the transcript read: both re-report the old name.
+        XCTAssertFalse(store.updateAgentTitle("✻ Explore integration options", for: session.id))
+        XCTAssertFalse(store.updateAgentTitle("Explore integration options", for: session.id))
+        XCTAssertEqual(
+            store.session(withID: session.id)?.agentTitle,
+            "Chrome sessions and passwords"
+        )
+    }
+
+    /// Asking again is the one thing that moves a chosen name — the tool's own description
+    /// tells the agent to call it when the work has moved on.
+    func testANewChosenNameReplacesTheOldChosenOne() throws {
+        let (store, session) = try makeSessionInProject(named: "app")
+
+        XCTAssertTrue(store.updateAgentTitle("first chosen name", for: session.id, source: .chosen))
+        XCTAssertTrue(store.updateAgentTitle("second chosen name", for: session.id, source: .chosen))
+        XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "second chosen name")
+    }
+
+    /// While nothing was chosen, the transports keep doing what they always did: the last
+    /// report wins, which is what lets a name arrive at all before anyone asks for one.
+    func testAReportedTitleStillFollowsWhileNothingWasChosen() throws {
+        let (store, session) = try makeSessionInProject(named: "app")
+
+        XCTAssertTrue(store.updateAgentTitle("what it opened with", for: session.id))
+        XCTAssertTrue(store.updateAgentTitle("what it became", for: session.id))
+        XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "what it became")
+    }
+
+    /// Choosing the words a transport already reported must still pin them: the store answers
+    /// "already so" either way, but only the pin stops the next report from moving the name.
+    func testChoosingTheNameATransportAlreadyReportedStillPinsIt() throws {
+        let (store, session) = try makeSessionInProject(named: "app")
+        store.updateAgentTitle("worktree diff crash", for: session.id)
+
+        XCTAssertTrue(store.updateAgentTitle(
+            "worktree diff crash", for: session.id, source: .chosen
+        ))
+
+        XCTAssertFalse(store.updateAgentTitle("something reported later", for: session.id))
+        XCTAssertEqual(store.session(withID: session.id)?.agentTitle, "worktree diff crash")
+    }
+
+    /// The pin is part of the record: a chosen name that survived to the next launch must
+    /// keep outranking the transports, which resume re-reporting the moment the CLI is back.
+    func testTheChosenSourceSurvivesEncoding() throws {
+        let (store, session) = try makeSessionInProject(named: "app")
+        store.updateAgentTitle("Chrome sessions and passwords", for: session.id, source: .chosen)
+
+        let stored = try XCTUnwrap(store.session(withID: session.id))
+        let decoded = try JSONDecoder().decode(
+            AgentSession.self,
+            from: try JSONEncoder().encode(stored)
+        )
+
+        XCTAssertEqual(decoded.agentTitle, "Chrome sessions and passwords")
+        XCTAssertEqual(decoded.agentTitleSource, .chosen)
+    }
+
     // MARK: - When the Menu Offers It
 
     /// The first of the three gates. A session with no agent running has nothing to ask, so
@@ -188,6 +261,15 @@ final class SessionNameToolTests: XCTestCase {
     /// nothing, which would leave the request sitting unsent in the agent's prompt.
     func testTheTerminalRequestIsSubmittedWithReturn() {
         XCTAssertEqual(SessionRenameRequest.submitKey, "\r")
+    }
+
+    /// And in its own write, later. Bundled with the text, the return arrives inside the
+    /// chunk the CLI's paste heuristic classifies as pasted content — Claude Code inserts it
+    /// as a line break and the request sits unsent until the user presses Return themselves,
+    /// which is exactly how this shipped broken. The delay is what makes it a keypress.
+    func testTheReturnFollowsTheTextRatherThanSharingItsWrite() {
+        XCTAssertGreaterThan(SessionRenameRequest.submitDelay, 0)
+        XCTAssertFalse(SessionRenameRequest.promptKey.contains(SessionRenameRequest.submitKey))
     }
 
     // MARK: - Fixtures

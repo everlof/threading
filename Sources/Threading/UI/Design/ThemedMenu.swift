@@ -1130,6 +1130,15 @@ private final class ThemedMenuRowView: ThemedControl {
             // Pinned to both edges of the title column rather than sized to its text: a label
             // whose width followed the name it is morphing *into* would resize under its own
             // animation, and the transition would read as the row twitching.
+            let trailing = preview.view.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -ThemedMenuMetrics.contentInset
+            )
+            // The document owns the row's frame. While AppKit first attaches its zero-width
+            // document view, the temporary autoresizing-mask width must be allowed to win;
+            // once the document lays out, this equality becomes satisfiable and resumes its
+            // ordinary job. Making the row itself constraint-driven loses that manual frame.
+            trailing.priority = NSLayoutConstraint.Priority(999)
             NSLayoutConstraint.activate([
                 preview.view.leadingAnchor.constraint(
                     equalTo: leadingAnchor,
@@ -1138,10 +1147,7 @@ private final class ThemedMenuRowView: ThemedControl {
                         hasPreviewColumn: hasPreviewColumn
                     )
                 ),
-                preview.view.trailingAnchor.constraint(
-                    equalTo: trailingAnchor,
-                    constant: -ThemedMenuMetrics.contentInset
-                ),
+                trailing,
                 preview.view.centerYAnchor.constraint(equalTo: centerYAnchor)
             ])
         }

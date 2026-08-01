@@ -173,6 +173,20 @@ enum AgentSessionConfiguration: Equatable {
   }
 }
 
+// MARK: - Agent Title Source
+
+/// How a session's `agentTitle` was obtained, which decides what may replace it — the same
+/// shape as `ProjectIconSource`: a deliberate act is never displaced by an automatic one.
+enum AgentTitleSource: String, Codable {
+  /// Reported by a transport on its own — the terminal title while a PTY is attached, or
+  /// the transcript's title records read when a turn ends. Follows whatever comes next.
+  case reported
+  /// Asked for — `set_session_name`, which the user requested via Rename with Agent or the
+  /// agent judged worth calling. Only another chosen name or the user's own rename outranks
+  /// it; the transports re-reporting the CLI's old idea of a title do not.
+  case chosen
+}
+
 // MARK: - Agent Session
 
 /// A single agent conversation belonging to a project.
@@ -204,6 +218,12 @@ struct AgentSession: Codable, Identifiable {
   /// Stored under the `terminalTitle` key it had when the terminal was the only transport,
   /// so existing records decode unchanged.
   var agentTitle: String?
+
+  /// How the current `agentTitle` arrived, which decides what may replace it: a name the
+  /// session was asked for stays until another is asked for, while a merely reported one
+  /// follows whatever the transports say next. Nil — every record from before the
+  /// distinction — reads as reported.
+  var agentTitleSource: AgentTitleSource?
 
   let createdAt: Date
   var lastActiveAt: Date
@@ -432,6 +452,7 @@ struct AgentSession: Codable, Identifiable {
     self.title = title
     self.customTitle = nil
     self.agentTitle = nil
+    self.agentTitleSource = nil
     self.createdAt = Date()
     self.lastActiveAt = Date()
     self.resumeState = ResumeState.initial(for: configuration.kind)
@@ -452,6 +473,7 @@ struct AgentSession: Codable, Identifiable {
   private enum CodingKeys: String, CodingKey {
     case id, kind, title, customTitle, createdAt, lastActiveAt
     case agentTitle = "terminalTitle"
+    case agentTitleSource
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
     case fastMode, remoteControl, permissionMode, archived, pinned, nativeUI, forkParent
     case continuationSource, continuationSourceKind
@@ -470,6 +492,10 @@ struct AgentSession: Codable, Identifiable {
     title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
     customTitle = try container.decodeIfPresent(String.self, forKey: .customTitle)
     agentTitle = try container.decodeIfPresent(String.self, forKey: .agentTitle)
+    agentTitleSource = try container.decodeIfPresent(
+      AgentTitleSource.self,
+      forKey: .agentTitleSource
+    )
     createdAt = decodedCreatedAt ?? Date()
     lastActiveAt =
       try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
@@ -612,6 +638,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encode(title, forKey: .title)
     try container.encodeIfPresent(customTitle, forKey: .customTitle)
     try container.encodeIfPresent(agentTitle, forKey: .agentTitle)
+    try container.encodeIfPresent(agentTitleSource, forKey: .agentTitleSource)
     try container.encode(createdAt, forKey: .createdAt)
     try container.encode(lastActiveAt, forKey: .lastActiveAt)
     try container.encodeIfPresent(resumeState.transcriptID, forKey: .agentSessionID)

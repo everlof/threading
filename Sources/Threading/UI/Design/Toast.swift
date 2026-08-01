@@ -284,6 +284,14 @@ final class ToastView: NSView {
         dwellRail.hold()
     }
 
+    /// Ends layer work before an off-screen host disappears. Render fixtures create and discard
+    /// many presenters in one run; leaving those drains committed after their view trees are
+    /// gone eventually asks Core Animation to update a dead context.
+    func stopDwell() {
+        isDwellRunning = false
+        dwellRail.stop()
+    }
+
     // MARK: - Private Methods
 
     private func configureLabels() {
@@ -539,6 +547,11 @@ private final class ToastDwellRail: NSView, ThemedComponent {
         withoutImplicitAnimation { ink.setValue(held, forKeyPath: Animation.path) }
     }
 
+    func stop() {
+        ink.removeAnimation(forKey: Animation.key)
+        isHidden = true
+    }
+
     // MARK: - Private Methods
 
     /// A layer animates every property it is handed unless told otherwise, and each of these
@@ -583,6 +596,10 @@ final class ToastPresenter {
     /// the queue rather than by sitting through it.
     var queued: [ToastRequest] { pending }
 
+    /// The interval behind the current clock. Readable for the same reason as `queued`: choosing
+    /// the request's dwell over the pane default is state, and tests should not sleep to infer it.
+    private(set) var scheduledDwell: TimeInterval?
+
     private weak var host: NSView?
     private let bottom: NSLayoutYAxisAnchor
     private var bottomConstraint: NSLayoutConstraint?
@@ -596,6 +613,12 @@ final class ToastPresenter {
     init(host: NSView, above bottom: NSLayoutYAxisAnchor) {
         self.host = host
         self.bottom = bottom
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            invalidate()
+        }
     }
 
     // MARK: - Public Methods
@@ -656,6 +679,18 @@ final class ToastPresenter {
                 self?.showNext()
             }
         })
+    }
+
+    /// Ends this presenter's ownership immediately. Pane owners normally get this through
+    /// `deinit`; short-lived off-screen renderers call it explicitly because AppKit may extend a
+    /// local object's debug lifetime beyond its lexical scope while its layer work is committed.
+    func invalidate() {
+        stopClock()
+        pending.removeAll()
+        current?.stopDwell()
+        current?.removeFromSuperview()
+        current = nil
+        bottomConstraint = nil
     }
 
     // MARK: - Private Methods
@@ -734,6 +769,7 @@ final class ToastPresenter {
     /// reads as a glitch rather than as a replacement.
     private func removeCurrent() {
         stopClock()
+        current?.stopDwell()
         current?.removeFromSuperview()
         current = nil
         bottomConstraint = nil
@@ -745,6 +781,7 @@ final class ToastPresenter {
         stopClock()
         guard let current else { return }
         let interval = current.request.dwell ?? dwell
+        scheduledDwell = interval
         dismissal = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) {
             [weak self] _ in
             MainActor.assumeIsolated { self?.dismiss() }
@@ -763,6 +800,7 @@ final class ToastPresenter {
     private func stopClock() {
         dismissal?.invalidate()
         dismissal = nil
+        scheduledDwell = nil
     }
 
     /// The band takes no focus and disappears by itself, so without this it is invisible to

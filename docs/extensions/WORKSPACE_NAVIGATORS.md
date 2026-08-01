@@ -34,6 +34,13 @@ The extension owns the navigator document, grouping, labels, filters, and action
 the split-view column, resize/collapse behavior, theme and accessibility semantics, collection
 virtualization, focus, user selection, and the authority to navigate to live host entities.
 
+Those host responsibilities are deliberately split in source. `WorkspaceSidebarContainerViewController`
+owns selection persistence, process-generation replacement and atomic Native failback;
+`WorkspaceNavigatorHostViewController` owns one validated document and its virtualized renderers.
+A list or grid item that throws while being realized is a document render failure, not an empty
+cell: the renderer escalates it to the container, which replaces that exact process generation
+with Native. A stale failure from an old generation cannot evict its replacement.
+
 ## Why collections are separate
 
 An `ExtensionNode.stack` eagerly realizes every child. That is correct for panels and compact

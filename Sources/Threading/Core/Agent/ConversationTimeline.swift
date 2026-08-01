@@ -161,6 +161,14 @@ struct ConversationTimeline {
     /// a duration is a fact only the event stream carries, and row indices never move.
     private var turnDurations: [Int: TimeInterval] = [:]
 
+    /// Stable turn identities and their one-line preview text. Rows never move, and message text
+    /// never changes after append, so compacting the same historical Markdown on every minimap
+    /// refresh is pure duplicate work. The turn's extent remains derived from `rows`; these
+    /// mirrors cache only the immutable identity/text transformation.
+    private var turnStartIndices: [Int] = []
+    private var compactedUserTextByRow: [Int: String] = [:]
+    private var compactedAssistantTextByRow: [Int: String] = [:]
+
     /// Row index of the user message that opened the turn currently in flight, so its
     /// terminal event can be attributed to it.
     private var currentTurnStartIndex: Int?
@@ -193,7 +201,10 @@ struct ConversationTimeline {
 
         case .userMessage(let text):
             let change = append(.userMessage(text))
-            currentTurnStartIndex = rows.count - 1
+            let index = rows.count - 1
+            turnStartIndices.append(index)
+            compactedUserTextByRow[index] = Self.compact(text)
+            currentTurnStartIndex = index
             return [change]
 
         case .transcriptNotice(let text):
@@ -263,27 +274,20 @@ struct ConversationTimeline {
         }
     }
 
-    /// The conversation's exchanges, in order.
-    ///
-    /// Derived rather than accumulated: turns are a *view* of the rows, and keeping a second
-    /// list in step with the first through every append and result-attachment would be the
-    /// bug this type was written to avoid. Conversations are hundreds of rows, not millions.
+    /// The conversation's exchanges, in order. Stable user-row identities and compacted preview
+    /// strings are cached when their immutable source arrives; extent, conclusion and duration
+    /// remain derived from the canonical rows so result attachment has no parallel turn model to
+    /// keep in step.
     var turns: [Turn] {
-        var turns: [Turn] = []
-
-        for index in rows.indices {
-            if let turn = turn(startingAt: index) { turns.append(turn) }
-        }
-
-        return turns
+        turnStartIndices.compactMap { turn(startingAt: $0) }
     }
 
     /// Derives one known turn without rebuilding every earlier exchange. A settle change already
     /// carries its opening row, so replay folding should pay for that turn's rows only.
     func turn(startingAt index: Int) -> Turn? {
         guard rows.indices.contains(index),
-              case .userMessage(let text) = rows[index] else { return nil }
-        let compacted = Self.compact(text)
+              case .userMessage = rows[index] else { return nil }
+        let compacted = compactedUserTextByRow[index] ?? ""
         guard !compacted.isEmpty else { return nil }
 
         let conclusion = finalAssistant(after: index)
@@ -310,7 +314,7 @@ struct ConversationTimeline {
             case .userMessage:
                 return (latest.index, latest.text, endIndex)
             case .assistant(let markdown):
-                let compacted = Self.compact(markdown)
+                let compacted = compactedAssistantTextByRow[index] ?? Self.compact(markdown)
                 if !compacted.isEmpty { latest = (index, compacted) }
                 endIndex = index
             default:
@@ -338,7 +342,9 @@ struct ConversationTimeline {
     private mutating func apply(_ block: ContentBlock) -> [Change] {
         switch block {
         case .text(let text) where !text.isEmpty:
-            return [append(.assistant(markdown: text))]
+            let change = append(.assistant(markdown: text))
+            compactedAssistantTextByRow[rows.count - 1] = Self.compact(text)
+            return [change]
 
         case .thinking(let text) where !text.isEmpty:
             return [append(.thinking(text))]

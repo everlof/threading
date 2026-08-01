@@ -7,7 +7,7 @@ final class TerminalSession: NSObject {
 
     // MARK: - Properties
 
-    let identifier: SessionID
+    let identity: TerminalInstanceIdentity
     let terminalView: EmojiFixedTerminalView
     private(set) var title: String
     private(set) var currentDirectory: URL?
@@ -74,8 +74,12 @@ final class TerminalSession: NSObject {
 
     // MARK: - Initialization
 
-    init(profile: TerminalProfile = .default, frame: NSRect = .zero, identifier: SessionID? = nil) {
-        self.identifier = identifier ?? SessionID()
+    init(
+        profile: TerminalProfile = .default,
+        frame: NSRect = .zero,
+        identity: TerminalInstanceIdentity = .ephemeral(UUID())
+    ) {
+        self.identity = identity
         self.profile = profile
         self.title = profile.shellPath
         self.terminalView = EmojiFixedTerminalView(frame: frame)
@@ -108,7 +112,7 @@ final class TerminalSession: NSObject {
         }
 
         terminalView.onUserInput = { [weak self] in
-            guard let sessionID = self?.identifier else { return }
+            guard let sessionID = self?.identity.ownerSessionID else { return }
             Task { @MainActor in
                 RemoteNotificationService.shared.recordOwnerInteraction(
                     sessionID: sessionID
@@ -324,8 +328,8 @@ final class TerminalSession: NSObject {
         }
 
         // Per-session history file
-        HistoryManager.ensureHistoryDirectoryExists()
-        let historyPath = HistoryManager.historyFilePath(for: identifier)
+        HistoryManager.prepareHistoryFile(for: identity)
+        let historyPath = HistoryManager.historyFilePath(for: identity)
         env["HISTFILE"] = historyPath.path
 
         return env.map { "\($0.key)=\($0.value)" }

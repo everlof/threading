@@ -13,6 +13,10 @@ import XCTest
 final class ToastTests: XCTestCase {
 
     private var previousTheme: AppTheme!
+    /// `NSView.window` is weak. Most tests need only the host and anchor, but the never-shown
+    /// window must still outlive the run-loop work they exercise or AppKit can tear its graphics
+    /// context down while a toast is being committed.
+    private var fixtureWindows: [NSWindow] = []
 
     override func setUp() {
         super.setUp()
@@ -23,6 +27,7 @@ final class ToastTests: XCTestCase {
     override func tearDown() {
         AppThemeLibrary.apply(previousTheme)
         Design.Motion.reduceMotionOverrideForTesting = nil
+        fixtureWindows.removeAll()
         super.tearDown()
     }
 
@@ -47,6 +52,7 @@ final class ToastTests: XCTestCase {
             footer.trailingAnchor.constraint(equalTo: host.trailingAnchor),
             footer.bottomAnchor.constraint(equalTo: host.bottomAnchor)
         ])
+        fixtureWindows.append(window)
         return (host, footer.topAnchor, window)
     }
 
@@ -87,6 +93,7 @@ final class ToastTests: XCTestCase {
             footer.bottomAnchor.constraint(equalTo: column.bottomAnchor)
         ])
         root.layoutSubtreeIfNeeded()
+        fixtureWindows.append(window)
         return (column, footer.topAnchor, window)
     }
 
@@ -318,13 +325,32 @@ final class ToastTests: XCTestCase {
         request.dwell = 30
         presenter.present(request)
 
-        waitForRunLoop(0.3)
-
+        XCTAssertEqual(presenter.scheduledDwell, 30)
         XCTAssertNotNil(
             presenter.current,
             "the band left on the pane's clock instead of on its own"
         )
-        presenter.dismiss()
+        presenter.invalidate()
+    }
+
+    /// A presenter belongs to its pane owner, not to the run loop. Tearing that owner down must
+    /// synchronously cancel both clocks and layer work rather than leaving an off-screen render
+    /// committed against a view tree that no longer exists.
+    func testPresenterTeardownStopsTheClockAndRemovesTheBand() {
+        let (host, bottom, _) = pane()
+        var presenter: ToastPresenter? = ToastPresenter(host: host, above: bottom)
+        var request = archiveRequest()
+        request.dwell = 30
+        presenter?.present(request)
+
+        let toast = presenter?.current
+        XCTAssertNotNil(toast)
+
+        presenter?.invalidate()
+
+        XCTAssertNil(toast?.superview)
+        XCTAssertFalse(host.subviews.contains { $0 is ToastView })
+        presenter = nil
     }
 
     /// A way back that expires while it is being reached for is worse than no way back, because

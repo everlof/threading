@@ -52,6 +52,14 @@ the sidebar still says what it said before. Two further outcomes are reported as
 a caveat rather than as failures, because both are the user's own settled choice: a `customTitle`
 already showing, and **Settings ▸ General** set to ignore agent titles at all.
 
+The tool writes as **`.chosen`** where the two transports write as `.reported`
+(`AgentTitleSource`), and a reported write cannot displace a chosen name. Without that rule the
+call worked and the sidebar never showed it: a PTY-attached Claude re-asserts its own `ai-title`
+through the terminal title within seconds, and the turn-end transcript read re-reads the same
+record, so the rename the user had just asked for was silently put back by both. Only another
+chosen name moves it — the agent calling the tool again — or the user's own rename, which
+outranks everything; see the naming ladder in [`sessions.md`](sessions.md).
+
 Three deliberate choices in the launch line:
 
 - **The display tool is pre-approved** with `--allowedTools mcp__threading__*` for Claude and a
@@ -82,6 +90,13 @@ lists. `MCPToolCatalog.catalogIssues` and `MCPToolDefinitions.definitionIssues` 
 load-bearing invariant: every built-in has exactly one catalog row and exactly one schema, and
 the row's family agrees with the type. A broken declaration is omitted instead of being
 advertised ambiguously.
+
+The source boundary mirrors that contract. `MCPBuiltInTool.swift` owns only closed identity,
+family policy and behavior annotations. `MCPTools.swift` owns the wire argument values, decoder
+and schema definitions. `MCPToolCatalog.swift` owns the user-facing catalog and enablement
+policy. Do not move identity back beside thousands of lines of schema literals: capability
+review must remain a small exhaustive switch, while the large declarative schema catalog is
+allowed to stay mechanically repetitive.
 
 The catalog is also the runtime admission policy. `tools/list`, launch preapproval and
 `MCPServer` dispatch consume the same enabled definitions. A valid built-in command whose group

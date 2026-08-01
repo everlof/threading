@@ -1,5 +1,18 @@
 import Foundation
 import Network
+import os
+
+/// The immutable identity established by the first valid authentication frame.
+///
+/// A connection's parser and socket remain queue-owned, but UI and notification consumers need
+/// to inspect the authenticated peer from the main actor. Publishing one value atomically avoids
+/// both cross-executor reads of queue-owned fields and partially-observed authentication state.
+struct RemoteAuthenticatedPeer: Equatable, Sendable {
+    let authorization: RemoteAuthorization
+    let deviceID: String?
+    let deviceName: String?
+    let authenticatedAt: Date
+}
 
 /// One remote client socket, from either side of the tunnel. It begins as HTTP/1.1 (reusing
 /// `MCPConnection.parseRequest`) and, on a successful WebSocket upgrade, switches its own
@@ -8,9 +21,9 @@ import Network
 /// Everything here runs on the server's single serial queue, which is why there are no locks:
 /// the PTY tap and the store live on main and hop *to* this queue to send, and this connection
 /// hops to main to reach them.
-/// `RemoteConnection` is safe to pass between executors only as an identity. All of its mutable
-/// socket and parser state is owned by `queue`; public send operations immediately enqueue there.
-/// The server never reads queue-owned properties from another executor.
+/// `RemoteConnection` is safe to pass between executors as an identity and send endpoint. All of
+/// its mutable socket and parser state is owned by `queue`; public send operations immediately
+/// enqueue there. The one cross-executor value, `authenticatedPeer`, is published behind a lock.
 final class RemoteConnection: @unchecked Sendable {
 
     // MARK: - Delegate
@@ -30,22 +43,25 @@ final class RemoteConnection: @unchecked Sendable {
 
     // MARK: - Properties
 
-    /// Assigned by the delegate after a successful auth frame. Nil while unauthenticated.
-    var authorization: RemoteAuthorization?
+    private let authenticatedPeerState = OSAllocatedUnfairLock<RemoteAuthenticatedPeer?>(
+        initialState: nil
+    )
+
+    /// A single coherent snapshot for consumers outside the network queue.
+    var authenticatedPeer: RemoteAuthenticatedPeer? {
+        authenticatedPeerState.withLock { $0 }
+    }
+
+    /// Queue-side conveniences. These are lock-backed too, so an accidental future read from
+    /// another executor remains safe; main-actor code should prefer `authenticatedPeer` so a
+    /// multi-field decision observes one snapshot.
+    var authorization: RemoteAuthorization? { authenticatedPeer?.authorization }
+    var deviceID: String? { authenticatedPeer?.deviceID }
+    var deviceName: String? { authenticatedPeer?.deviceName }
+    var authenticatedAt: Date? { authenticatedPeer?.authenticatedAt }
 
     /// The session id parsed from a `/ws/session/<id>` upgrade path, before auth.
     private(set) var routedSessionID: String?
-
-    /// A browser-minted device id, carried on the auth frame, used for the approval record.
-    var deviceID: String?
-
-    /// What the device calls itself, for the sharing pane's rows. Nil for a client that predates
-    /// the field, which the pane renders as the pseudonymous id instead.
-    var deviceName: String?
-
-    /// When this socket authenticated — the "watching since" the sharing pane shows, and the only
-    /// place a live view's age exists: connections are not persisted anywhere.
-    private(set) var authenticatedAt: Date?
 
     private let connection: NWConnection
     private let queue: DispatchQueue
@@ -97,13 +113,29 @@ final class RemoteConnection: @unchecked Sendable {
         close()
     }
 
-    /// Marks the socket authenticated: cancels the auth deadline and begins keepalive pings.
-    /// Called by the delegate once the first frame's token has been verified.
-    func markAuthenticated() {
+    /// Atomically publishes authentication, cancels its deadline, and begins keepalive pings.
+    /// Called on the connection queue after the first frame's token has been verified.
+    @discardableResult
+    func authenticate(
+        authorization: RemoteAuthorization,
+        deviceID: String?,
+        deviceName: String?
+    ) -> Bool {
+        let installed = authenticatedPeerState.withLock { peer in
+            guard peer == nil else { return false }
+            peer = RemoteAuthenticatedPeer(
+                authorization: authorization,
+                deviceID: deviceID,
+                deviceName: deviceName,
+                authenticatedAt: Date()
+            )
+            return true
+        }
+        guard installed else { return false }
         authTimer?.cancel()
         authTimer = nil
-        authenticatedAt = Date()
         armPingTimer()
+        return true
     }
 
     // MARK: - Sending (any caller; hops to the server queue)

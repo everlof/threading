@@ -1,18 +1,19 @@
 import AppKit
 
-/// The walkthrough's third page: every conversation the discovered accounts hold, grouped by
-/// the checkout it ran in, with the last two days pre-checked.
+/// The walkthrough's third page: every conversation the discovered accounts hold, one flat
+/// list newest first, with the last two days pre-checked.
 ///
-/// Continue performs the import — each group whose conversations are checked becomes (or
-/// reuses) a project at its folder, and the checked conversations are adopted resumable, the
-/// same records `ProjectStore.importSession` has always written. Skip performs nothing; every
-/// conversation stays importable later from its project's composer.
+/// The folders a conversation ran in are deliberately not shown — a wall of checkout paths is
+/// project bookkeeping the user has not opted into yet. Continue performs the import: each
+/// checked conversation's folder becomes (or reuses) a project implicitly, and the checked
+/// conversations are adopted resumable, the same records `ProjectStore.importSession` has
+/// always written. Skip performs nothing; every conversation stays importable later from its
+/// project's composer.
 final class OnboardingImportPageViewController: NSViewController, OnboardingPage {
 
     private enum Layout {
         static let contentWidth: CGFloat = 620
         static let iconSide: CGFloat = 16
-        static let listHeight: CGFloat = 300
     }
 
     var pageTitle: String { L10n.string("Conversations") }
@@ -20,11 +21,11 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
 
     private static let relativeDate = RelativeDateTimeFormatter()
 
-    /// One group's live selection state.
+    /// One folder's live selection state — invisible in the list, but still the unit the
+    /// import creates projects from.
     @MainActor
     private final class Group {
         let data: DiscoveredProjectImports
-        var header: ThemedCheckbox?
         var rows: [(session: ImportableSession, checkbox: ThemedCheckbox)] = []
 
         init(data: DiscoveredProjectImports) {
@@ -38,6 +39,11 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
 
     private var groups: [Group] = []
     private var scanResult: GlobalScanResult?
+    /// The enabled logins the current scan covered. The accounts page sits *before* this one
+    /// and can now switch logins off, so a cached result is only current while that set is —
+    /// coming forward again after a toggle rescans instead of showing the stale list.
+    private var scannedAccountIDs: Set<AccountID>?
+    private var scanGeneration = 0
     private let summaryLabel = NSTextField(wrappingLabelWithString: "")
     private let listHost = NSView()
 
@@ -47,9 +53,21 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
     }
 
     func pageWillAppear() {
-        guard scanResult == nil else { return }
+        let enabled = Set(
+            (AgentAccountDiscovery.accounts(for: .claude)
+                + AgentAccountDiscovery.accounts(for: .codex)).map(\.id)
+        )
+        guard scanResult == nil || enabled != scannedAccountIDs else { return }
+
+        scannedAccountIDs = enabled
+        scanResult = nil
+        rebuildList()
+
+        scanGeneration += 1
+        let generation = scanGeneration
         GlobalSessionScan.discover { [weak self] result in
-            self?.apply(result: result)
+            guard let self, self.scanGeneration == generation else { return }
+            self.apply(result: result)
         }
     }
 
@@ -87,6 +105,9 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         summaryLabel.alignment = .center
 
         listHost.translatesAutoresizingMaskIntoConstraints = false
+        // The list takes the page's slack, so the scroll clips at the footer's separator the
+        // way every settings pane does — a fixed height clipped a row mid-air above dead space.
+        listHost.setContentHuggingPriority(.defaultLow, for: .vertical)
 
         let stack = NSStackView(views: [heading, summaryLabel, listHost])
         stack.orientation = .vertical
@@ -99,13 +120,9 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: view.topAnchor, constant: Design.Spacing.pane),
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            stack.bottomAnchor.constraint(
-                lessThanOrEqualTo: view.bottomAnchor,
-                constant: -Design.Spacing.pane
-            ),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             summaryLabel.widthAnchor.constraint(lessThanOrEqualToConstant: Layout.contentWidth),
-            listHost.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
-            listHost.heightAnchor.constraint(equalToConstant: Layout.listHeight)
+            listHost.widthAnchor.constraint(equalToConstant: Layout.contentWidth)
         ])
 
         rebuildList()
@@ -118,12 +135,14 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
 
         guard let result = scanResult else {
             summaryLabel.stringValue = L10n.string("Looking through your past conversations…")
-            let spinner = ThemedSpinner()
-            spinner.translatesAutoresizingMaskIntoConstraints = false
-            listHost.addSubview(spinner)
+            // The scan reads every transcript each login holds, which can take long enough to
+            // read as "stuck" against a blank page — the working orb says otherwise.
+            let orb = WorkingOrbView()
+            orb.selectRandomVariant()
+            listHost.addSubview(orb)
             NSLayoutConstraint.activate([
-                spinner.centerXAnchor.constraint(equalTo: listHost.centerXAnchor),
-                spinner.centerYAnchor.constraint(equalTo: listHost.centerYAnchor)
+                orb.centerXAnchor.constraint(equalTo: listHost.centerXAnchor),
+                orb.centerYAnchor.constraint(equalTo: listHost.centerYAnchor)
             ])
             return
         }
@@ -131,28 +150,35 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         let now = Date()
         groups = result.groups.map(Group.init)
 
-        guard !groups.isEmpty else {
+        guard !groups.isEmpty || result.totalFailureCount > 0 else {
             summaryLabel.stringValue = L10n.string(
-                "No conversations to import — everything starts fresh."
+                "No conversations to import. Everything starts fresh."
             )
             return
         }
 
-        let sections: [NSView] = groups.map { group in
-            let rows = [headerRow(for: group)] + group.data.conversations.map { session in
-                conversationRow(for: session, in: group, now: now)
-            }
-            return SettingsCard(rows: rows)
+        var cards: [NSView] = []
+        if let failureCard = failureCard(for: result) {
+            cards.append(failureCard)
         }
 
-        let column = NSStackView(views: sections)
+        // One flat card, newest first across every folder — the folder is import bookkeeping,
+        // not something the user has to triage by.
+        let ordered: [(session: ImportableSession, group: Group)] = groups
+            .flatMap { group in group.data.conversations.map { (session: $0, group: group) } }
+            .sorted { $0.session.lastActiveAt > $1.session.lastActiveAt }
+        if !ordered.isEmpty {
+            cards.append(SettingsCard(rows: ordered.map { entry in
+                conversationRow(for: entry.session, in: entry.group, now: now)
+            }))
+        }
+
+        let column = NSStackView(views: cards)
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = Design.Spacing.inset
         column.translatesAutoresizingMaskIntoConstraints = false
-        for section in sections {
-            section.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
-        }
+        cards.forEach { $0.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
 
         // The settings-page scroll shape: a flipped document so the first group sits at the
         // top, themed scrollers, no background of its own.
@@ -186,40 +212,48 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
                 equalTo: document.trailingAnchor,
                 constant: -Design.Size.glowGutter
             ),
-            column.bottomAnchor.constraint(equalTo: document.bottomAnchor)
+            // The same halo gutter below, so the card's glow survives scrolling to the end.
+            column.bottomAnchor.constraint(
+                equalTo: document.bottomAnchor,
+                constant: -Design.Size.glowGutter
+            )
         ])
 
         refreshSummary()
     }
 
-    private func headerRow(for group: Group) -> NSView {
-        let folderName = (group.data.folder as NSString).lastPathComponent
-        let header = ThemedCheckbox(
-            title: folderName,
-            accessibility: L10n.format("Include conversations in %@", folderName)
-        ) { [weak self, weak group] state in
-            guard let group else { return }
-            for row in group.rows {
-                row.checkbox.state = state
-            }
-            self?.refreshSummary()
+    /// A partial scan is useful, but never looks like a complete empty inventory. The bounded
+    /// failure card leaves the readable conversations actionable and names the paths whose
+    /// permissions or on-disk state need attention.
+    private func failureCard(for result: GlobalScanResult) -> SettingsCard? {
+        guard result.totalFailureCount > 0 else { return nil }
+
+        var rows = result.failures.map { failure -> NSView in
+            let path = NSTextField(labelWithString: failure.path)
+            path.applyFont(.body)
+            path.textColor = Design.Text.label
+            path.lineBreakMode = .byTruncatingMiddle
+
+            let reason = NSTextField(wrappingLabelWithString: failure.reason)
+            reason.applyFont(.caption)
+            reason.textColor = Design.Text.secondary
+
+            let labels = NSStackView(views: [path, reason])
+            labels.orientation = .vertical
+            labels.alignment = .leading
+            labels.spacing = Design.Spacing.tight
+            return SettingsUI.fullRow(labels)
         }
-        group.header = header
-
-        let path = NSTextField(
-            labelWithString: (group.data.folder as NSString).abbreviatingWithTildeInPath
-        )
-        path.applyFont(.caption)
-        path.textColor = Design.Text.tertiary
-        path.lineBreakMode = .byTruncatingMiddle
-        path.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let content = NSStackView(views: [header, path])
-        content.orientation = .horizontal
-        content.alignment = .centerY
-        content.spacing = Design.Spacing.small
-
-        return SettingsUI.fullRow(content)
+        if result.additionalFailureCount > 0 {
+            let omitted = NSTextField(labelWithString: L10n.format(
+                "%lld more unreadable folders were omitted.",
+                Int64(result.additionalFailureCount)
+            ))
+            omitted.applyFont(.caption)
+            omitted.textColor = Design.Text.secondary
+            rows.append(SettingsUI.fullRow(omitted))
+        }
+        return SettingsCard(rows: rows)
     }
 
     private func conversationRow(
@@ -230,10 +264,8 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         let checkbox = ThemedCheckbox(
             title: session.title,
             state: GlobalSessionScan.isPrechecked(session, now: now) ? .on : .off
-        ) { [weak self, weak group] _ in
-            guard let self, let group else { return }
-            self.refreshHeader(of: group)
-            self.refreshSummary()
+        ) { [weak self] _ in
+            self?.refreshSummary()
         }
         group.rows.append((session, checkbox))
 
@@ -262,14 +294,11 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         content.orientation = .horizontal
         content.alignment = .centerY
         content.spacing = Design.Spacing.small
+        // `.fill` hands the row's slack to the low-hugging checkbox column, so the icon and
+        // the age read as one trailing-aligned column down the card.
+        content.distribution = .fill
 
         return SettingsUI.fullRow(content)
-    }
-
-    private func refreshHeader(of group: Group) {
-        let states = group.rows.map(\.checkbox.state)
-        let onCount = states.filter { $0 == .on }.count
-        group.header?.state = onCount == 0 ? .off : (onCount == states.count ? .on : .mixed)
     }
 
     private func refreshSummary() {
@@ -277,20 +306,29 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
 
         let total = groups.reduce(0) { $0 + $1.data.conversations.count }
         let selected = groups.reduce(0) { $0 + $1.selected.count }
-        for group in groups {
-            refreshHeader(of: group)
+
+        if total == 0, result.totalFailureCount > 0 {
+            summaryLabel.stringValue = L10n.string(
+                "Some conversation folders could not be read. The results are incomplete."
+            )
+            return
         }
 
         var summary = L10n.format(
-            "%lld conversations in %lld folders — %lld selected to import.",
+            "%lld conversations found. %lld selected to import.",
             Int64(total),
-            Int64(groups.count),
             Int64(selected)
         )
         if result.missingFolderConversations > 0 {
             summary += " " + L10n.format(
                 "%lld more ran in folders that no longer exist and were left out.",
                 Int64(result.missingFolderConversations)
+            )
+        }
+        if result.totalFailureCount > 0 {
+            summary += " " + L10n.format(
+                "%lld conversation folders could not be read; these results are incomplete.",
+                Int64(result.totalFailureCount)
             )
         }
         summaryLabel.stringValue = summary

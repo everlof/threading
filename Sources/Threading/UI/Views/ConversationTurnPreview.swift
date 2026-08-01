@@ -21,6 +21,11 @@ final class ConversationTurnPreview: NSView {
 
     init() {
         super.init(frame: .zero)
+        // This view is sized by its internal constraints and then positioned with a frame by
+        // `ConversationMinimapView`. Leaving autoresizing-mask translation enabled adds an
+        // implicit zero-size constraint before that first frame is assigned, which conflicts
+        // with the preview's real width and content height during layout.
+        translatesAutoresizingMaskIntoConstraints = false
         setupViews()
     }
 

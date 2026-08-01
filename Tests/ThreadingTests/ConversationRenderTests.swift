@@ -201,6 +201,44 @@ final class ConversationRenderTests: XCTestCase {
         XCTAssertLessThan(tallest, 120, "A collapsed tool row was \(tallest)pt tall")
     }
 
+    func testCollapsedToolCallsDeferTheirBodiesUntilFirstExpansion() {
+        let edit = ToolCallView(
+            tool: .edit,
+            summary: "Sources/Feature.swift",
+            diff: [
+                DiffLine(kind: .removed, text: "let oldValue = true"),
+                DiffLine(kind: .added, text: "let newValue = true")
+            ]
+        )
+
+        XCTAssertFalse(Self.descendants(in: edit).contains { $0 is DiffView })
+        edit.setExpanded(true)
+        XCTAssertEqual(Self.descendants(in: edit).filter { $0 is DiffView }.count, 1)
+        edit.setExpanded(false)
+        edit.setExpanded(true)
+        XCTAssertEqual(
+            Self.descendants(in: edit).filter { $0 is DiffView }.count,
+            1,
+            "reopening a materialized tool should reuse its body"
+        )
+
+        let output = "deferred tool output\nwith a second line"
+        let read = ToolCallView(tool: .read, summary: "Sources/Feature.swift")
+        read.setResult(output, outcome: .succeeded)
+        XCTAssertFalse(
+            Self.descendants(in: read)
+                .compactMap { $0 as? NSTextField }
+                .contains { $0.stringValue == output }
+        )
+        read.setExpanded(true)
+        XCTAssertTrue(
+            Self.descendants(in: read)
+                .compactMap { $0 as? NSTextField }
+                .contains { $0.stringValue == output },
+            "a deferred result must appear when its row first opens"
+        )
+    }
+
     // MARK: - Pane
 
     /// The whole pane: the column capped and centred, with the turn rail in the gutter that
@@ -316,6 +354,27 @@ final class ConversationRenderTests: XCTestCase {
                 runConversationStress(shape: workload.shape, turns: workload.turns)
             }
         }
+    }
+
+    /// A large history is cheap once settled because its work is folded. This separate gate
+    /// measures the opposite state: one current turn accumulating hundreds of addressable tool
+    /// rows, results and streaming text before it is allowed to fold.
+    func testStressActiveConversationTurnWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_CONVERSATION_ACTIVE_STRESS"] == "1",
+            "Set THREADING_CONVERSATION_ACTIVE_STRESS=1 to run the active-turn sweep."
+        )
+
+        let environment = ProcessInfo.processInfo.environment
+        let baseTurns = environment["THREADING_CONVERSATION_ACTIVE_BASE_TURNS"]
+            .flatMap(Int.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? 100
+        let toolCount = environment["THREADING_CONVERSATION_ACTIVE_TOOLS"]
+            .flatMap(Int.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? 100
+        runActiveTurnStress(baseTurns: baseTurns, toolCount: toolCount)
     }
 
     /// Opt-in retained-controller workload. Production keeps every live native conversation in
@@ -499,6 +558,52 @@ final class ConversationRenderTests: XCTestCase {
             "The exact target row was not materialized after the deep jump"
         )
         XCTAssertLessThan(controller.rowViews.count, 40)
+    }
+
+    func testLiveMinimapAppendsAndSettlesOnlyTheTrailingTurn() {
+        let controller = ConversationViewController(
+            agentSession: AgentSession(kind: .codex, title: "Live rail", usesNativeUI: true),
+            project: Project(
+                name: "Live rail",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+
+        Self.apply([
+            .userMessage("First question"),
+            .assistantMessage(blocks: [.text("First answer")]),
+            .turnFinished(
+                text: nil,
+                isError: false,
+                metrics: TurnMetrics(duration: 1)
+            )
+        ], to: controller)
+
+        XCTAssertEqual(controller.minimapTurnCount, 1)
+        XCTAssertEqual(controller.lastMinimapTurn?.userText, "First question")
+        XCTAssertEqual(controller.lastMinimapTurn?.assistantText, "First answer")
+        XCTAssertEqual(controller.lastMinimapTurn?.duration, 1)
+
+        Self.apply([.userMessage("Second question")], to: controller)
+
+        XCTAssertEqual(controller.minimapTurnCount, 2)
+        XCTAssertEqual(controller.lastMinimapTurn?.userText, "Second question")
+        XCTAssertNil(controller.lastMinimapTurn?.assistantText)
+
+        Self.apply([
+            .assistantMessage(blocks: [.text("Second answer")]),
+            .turnFinished(
+                text: nil,
+                isError: false,
+                metrics: TurnMetrics(duration: 2)
+            )
+        ], to: controller)
+
+        XCTAssertEqual(controller.minimapTurnCount, 2)
+        XCTAssertEqual(controller.lastMinimapTurn?.assistantText, "Second answer")
+        XCTAssertEqual(controller.lastMinimapTurn?.duration, 2)
     }
 
     private enum StressShape: String {
@@ -690,12 +795,15 @@ final class ConversationRenderTests: XCTestCase {
     }
 
     private func runConversationStress(shape: StressShape, turns: Int) {
+        let baselineMemory = Self.physicalFootprintBytes()
         let events = Self.stressEvents(shape: shape, turns: turns)
+        let fixtureMemory = Self.physicalFootprintBytes()
 
         var modelTimeline = ConversationTimeline(sessionID: SessionID())
         let modelStarted = DispatchTime.now().uptimeNanoseconds
         for event in events { _ = modelTimeline.apply(event) }
         let modelElapsed = DispatchTime.now().uptimeNanoseconds - modelStarted
+        let modelMemory = Self.physicalFootprintBytes()
 
         let session = AgentSession(kind: .codex, title: "Conversation stress", usesNativeUI: true)
         let controller = ConversationViewController(
@@ -715,6 +823,7 @@ final class ConversationRenderTests: XCTestCase {
         )
         controller.view.layoutSubtreeIfNeeded()
         controller.isReplaying = true
+        let rendererBaselineMemory = Self.physicalFootprintBytes()
 
         let replayStarted = DispatchTime.now().uptimeNanoseconds
         Self.apply(events, to: controller)
@@ -725,17 +834,20 @@ final class ConversationRenderTests: XCTestCase {
         let replayEnded = DispatchTime.now().uptimeNanoseconds
         controller.view.layoutSubtreeIfNeeded()
         let layoutEnded = DispatchTime.now().uptimeNanoseconds
+        let renderedMemory = Self.physicalFootprintBytes()
 
         let rowCount = controller.timeline.rows.count
         let materializedRowCount = controller.rowViews.count
         let presentedCount = controller.presentationItems.count
         let cachedHeightCount = controller.rowHeightCache.count
         let descendantCount = Self.descendantCount(in: controller.view)
+        XCTAssertEqual(controller.minimapTurnCount, turns)
         print(
             "THREADING_PERF conversation-replay "
                 + "shape=\(shape.rawValue) turns=\(turns) events=\(events.count) "
                 + "rows=\(rowCount) materialized=\(materializedRowCount) "
-                + "presented=\(presentedCount) cached_heights=\(cachedHeightCount) "
+                + "presented=\(presentedCount) minimap_turns=\(controller.minimapTurnCount) "
+                + "cached_heights=\(cachedHeightCount) "
                 + "descendants=\(descendantCount) "
                 + "model_ms=\(Self.milliseconds(modelElapsed)) "
                 + "presentation_ms="
@@ -744,10 +856,20 @@ final class ConversationRenderTests: XCTestCase {
                 + "minimap_ms=\(Self.milliseconds(replayEnded - reloadEnded)) "
                 + "render_ms=\(Self.milliseconds(replayEnded - replayStarted)) "
                 + "layout_ms=\(Self.milliseconds(layoutEnded - replayEnded)) "
-                + "elapsed_ms=\(Self.milliseconds(layoutEnded - replayStarted))"
+                + "elapsed_ms=\(Self.milliseconds(layoutEnded - replayStarted)) "
+                + "baseline_mb=\(Self.megabytes(baselineMemory)) "
+                + "fixture_mb=\(Self.megabytes(fixtureMemory)) "
+                + "model_mb=\(Self.megabytes(modelMemory)) "
+                + "rendered_mb=\(Self.megabytes(renderedMemory)) "
+                + "renderer_delta_mb="
+                + Self.megabytes(Self.positiveDifference(
+                    renderedMemory,
+                    rendererBaselineMemory
+                ))
         )
 
         if let lastTurn = controller.timeline.turns.last {
+            let targetRow = controller.presentationRow(forTimelineIndex: lastTurn.rowIndex)
             let jumpStarted = DispatchTime.now().uptimeNanoseconds
             controller.scrollToTimelineRow(lastTurn.rowIndex, animated: false)
             controller.view.layoutSubtreeIfNeeded()
@@ -757,7 +879,26 @@ final class ConversationRenderTests: XCTestCase {
                     + "shape=\(shape.rawValue) turns=\(turns) target_row=\(lastTurn.rowIndex) "
                     + "elapsed_ms=\(Self.milliseconds(jumpElapsed))"
             )
+            if let targetRow {
+                XCTAssertTrue(
+                    controller.tableView.rect(ofRow: targetRow)
+                        .intersects(controller.scrollView.contentView.documentVisibleRect),
+                    "the exact deepest turn did not land in the viewport"
+                )
+                XCTAssertNotNil(
+                    controller.rowViews[lastTurn.rowIndex],
+                    "the exact deepest turn was not materialized after its jump"
+                )
+            } else {
+                XCTFail("the deepest turn had no presentation row")
+            }
         }
+
+        XCTAssertLessThan(
+            controller.rowViews.count,
+            40,
+            "a massive conversation materialized more than a viewport-sized working set"
+        )
 
         controller.isReplaying = false
         let liveTurn = turns
@@ -783,6 +924,8 @@ final class ConversationRenderTests: XCTestCase {
         ], to: controller)
         controller.view.layoutSubtreeIfNeeded()
         let appendElapsed = DispatchTime.now().uptimeNanoseconds - appendStarted
+        XCTAssertEqual(controller.minimapTurnCount, turns + 1)
+        XCTAssertEqual(controller.lastMinimapTurn?.userText, "Run one more deep incremental check.")
         print(
             "THREADING_PERF conversation-incremental-append "
                 + "shape=\(shape.rawValue) base_turns=\(turns) added_rows=11 "
@@ -814,6 +957,10 @@ final class ConversationRenderTests: XCTestCase {
         ], to: controller)
         controller.view.layoutSubtreeIfNeeded()
         let foldElapsed = DispatchTime.now().uptimeNanoseconds - foldStarted
+        XCTAssertEqual(
+            controller.lastMinimapTurn?.assistantText,
+            "The incremental update completed and the pane stayed responsive."
+        )
         print(
             "THREADING_PERF conversation-result-and-fold "
                 + "shape=\(shape.rawValue) base_turns=\(turns) folded_rows=9 "
@@ -837,6 +984,267 @@ final class ConversationRenderTests: XCTestCase {
         )
 
         XCTAssertEqual(controller.timeline.rows.count, modelTimeline.rows.count + 12)
+    }
+
+    private func runActiveTurnStress(baseTurns: Int, toolCount: Int) {
+        let controller = ConversationViewController(
+            agentSession: AgentSession(
+                kind: .codex,
+                title: "Active turn stress",
+                usesNativeUI: true
+            ),
+            project: Project(
+                name: "Active turn stress",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: Render.viewportHeight
+        )
+        controller.view.layoutSubtreeIfNeeded()
+        controller.isReplaying = true
+        Self.apply(Self.stressEvents(shape: .mixed, turns: baseTurns), to: controller)
+        controller.finishReplayRendering()
+        controller.isReplaying = false
+        controller.refreshMinimap()
+        controller.view.layoutSubtreeIfNeeded()
+
+        let baseRows = controller.timeline.rows.count
+        let basePresented = controller.presentationItems.count
+        let baselineMemory = Self.physicalFootprintBytes()
+        var peakMemory = baselineMemory
+        let activeStartIndex = baseRows
+
+        let userStarted = DispatchTime.now().uptimeNanoseconds
+        Self.apply([
+            .userMessage("Run a deliberately broad active-turn workload without folding it early.")
+        ], to: controller)
+        controller.view.layoutSubtreeIfNeeded()
+        let userElapsed = DispatchTime.now().uptimeNanoseconds - userStarted
+
+        let toolIDs = (0..<toolCount).map { "active-stress-\($0)" }
+        let batchSize = 10
+        var appendDurations: [UInt64] = []
+        for start in stride(from: 0, to: toolCount, by: batchSize) {
+            let end = min(start + batchSize, toolCount)
+            let blocks = (start..<end).map { index in
+                Self.activeToolBlock(index: index, id: toolIDs[index])
+            }
+            let started = DispatchTime.now().uptimeNanoseconds
+            Self.apply([.assistantMessage(blocks: blocks)], to: controller)
+            controller.view.layoutSubtreeIfNeeded()
+            appendDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            peakMemory = max(peakMemory, Self.physicalFootprintBytes())
+        }
+
+        let activeRows = controller.timeline.rows.count
+        let activePresented = controller.presentationItems.count
+        XCTAssertEqual(activeRows, baseRows + toolCount + 1)
+        XCTAssertEqual(activePresented, basePresented + toolCount + 2)
+        XCTAssertEqual(controller.minimapTurnCount, baseTurns + 1)
+        XCTAssertLessThan(
+            controller.rowViews.count,
+            40,
+            "an unfolded active turn materialized more than a viewport"
+        )
+
+        let targetTimelineRow = activeStartIndex + 1 + toolCount / 2
+        guard let targetPresentationRow = controller.presentationRow(
+            forTimelineIndex: targetTimelineRow
+        ) else {
+            XCTFail("the middle active tool had no presentation identity")
+            return
+        }
+        let jumpStarted = DispatchTime.now().uptimeNanoseconds
+        let jumpMeasurements = controller.scrollToTimelineRow(
+            targetTimelineRow,
+            animated: false
+        )
+        controller.view.layoutSubtreeIfNeeded()
+        let jumpElapsed = DispatchTime.now().uptimeNanoseconds - jumpStarted
+        XCTAssertNotNil(jumpMeasurements)
+        XCTAssertTrue(
+            controller.tableView.rect(ofRow: targetPresentationRow)
+                .intersects(controller.scrollView.contentView.documentVisibleRect),
+            "the exact middle active tool did not land in the viewport"
+        )
+        XCTAssertNotNil(
+            controller.rowViews[targetTimelineRow],
+            "the exact middle active tool was not materialized"
+        )
+        let targetRowHeight = controller.tableView.rect(ofRow: targetPresentationRow).height
+        let activeMaterialized = controller.rowViews.count
+
+        let streamStarted = DispatchTime.now().uptimeNanoseconds
+        for index in 0..<250 {
+            Self.apply([
+                .textDelta(" active-chunk-\(index) with deterministic streaming content")
+            ], to: controller)
+        }
+        controller.view.layoutSubtreeIfNeeded()
+        let streamElapsed = DispatchTime.now().uptimeNanoseconds - streamStarted
+        XCTAssertEqual(controller.presentationItems.count, activePresented + 1)
+        peakMemory = max(peakMemory, Self.physicalFootprintBytes())
+
+        var resultDurations: [UInt64] = []
+        let reversedIDs = Array(toolIDs.reversed())
+        for start in stride(from: 0, to: toolCount, by: batchSize) {
+            let end = min(start + batchSize, toolCount)
+            let results = reversedIDs[start..<end].map { id in
+                ToolResult(
+                    toolUseID: id,
+                    text: "Completed deterministic active-turn work for \(id).",
+                    isError: false
+                )
+            }
+            let started = DispatchTime.now().uptimeNanoseconds
+            Self.apply([.toolResults(Array(results))], to: controller)
+            controller.view.layoutSubtreeIfNeeded()
+            resultDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            peakMemory = max(peakMemory, Self.physicalFootprintBytes())
+        }
+        for index in (activeStartIndex + 1)..<(activeStartIndex + 1 + toolCount) {
+            guard case .toolCall(let call) = controller.timeline.rows[index] else {
+                XCTFail("active row \(index) was not a tool call")
+                return
+            }
+            XCTAssertNotNil(call.result, "active tool \(index) lost its result")
+        }
+        let activePeakMemory = peakMemory
+
+        let finalAnswer = "The broad active-turn workload completed without losing a tool row."
+        let finalAssistantIndex = controller.timeline.rows.count
+        let settleStarted = DispatchTime.now().uptimeNanoseconds
+        Self.apply([
+            .assistantMessage(blocks: [.text(finalAnswer)]),
+            .turnFinished(
+                text: nil,
+                isError: false,
+                metrics: TurnMetrics(
+                    duration: 12.5,
+                    outputTokens: 512,
+                    effort: "high",
+                    contextTokens: 48_000,
+                    contextWindow: 200_000
+                )
+            )
+        ], to: controller)
+        controller.view.layoutSubtreeIfNeeded()
+        let settleElapsed = DispatchTime.now().uptimeNanoseconds - settleStarted
+        let settledMemory = Self.physicalFootprintBytes()
+
+        XCTAssertTrue(controller.foldedTurnStarts.contains(activeStartIndex))
+        XCTAssertNil(
+            controller.presentationRow(forTimelineIndex: targetTimelineRow),
+            "settlement left a folded tool addressable in the presentation"
+        )
+        XCTAssertEqual(controller.presentationItems.count, basePresented + 4)
+        XCTAssertEqual(controller.lastMinimapTurn?.assistantText, finalAnswer)
+        XCTAssertLessThan(controller.rowViews.count, 40)
+
+        guard let finalPresentationRow = controller.presentationRow(
+            forTimelineIndex: finalAssistantIndex
+        ) else {
+            XCTFail("the final active-turn answer had no presentation identity")
+            return
+        }
+        let finalJumpStarted = DispatchTime.now().uptimeNanoseconds
+        controller.scrollToTimelineRow(finalAssistantIndex, animated: false)
+        controller.view.layoutSubtreeIfNeeded()
+        let finalJumpElapsed = DispatchTime.now().uptimeNanoseconds - finalJumpStarted
+        XCTAssertTrue(
+            controller.tableView.rect(ofRow: finalPresentationRow)
+                .intersects(controller.scrollView.contentView.documentVisibleRect),
+            "the final active-turn answer did not land in the viewport"
+        )
+        XCTAssertNotNil(controller.rowViews[finalAssistantIndex])
+
+        print(
+            "THREADING_PERF conversation-active-build "
+                + "base_turns=\(baseTurns) tools=\(toolCount) batch_size=\(batchSize) "
+                + "base_rows=\(baseRows) active_rows=\(activeRows) "
+                + "presented=\(activePresented) materialized=\(activeMaterialized) "
+                + "batches=\(appendDurations.count) "
+                + "user_ms=\(Self.milliseconds(userElapsed)) "
+                + "append_total_ms=\(Self.milliseconds(appendDurations.reduce(0, +))) "
+                + "append_p50_ms="
+                + Self.milliseconds(Self.percentile(appendDurations, 0.50)) + " "
+                + "append_p95_ms="
+                + Self.milliseconds(Self.percentile(appendDurations, 0.95)) + " "
+                + "append_max_ms=\(Self.milliseconds(appendDurations.max() ?? 0)) "
+                + "middle_jump_ms=\(Self.milliseconds(jumpElapsed)) "
+                + "jump_target_height=\(String(format: "%.1f", targetRowHeight)) "
+                + "jump_geometry_ms="
+                + Self.milliseconds(jumpMeasurements?.geometryNanoseconds ?? 0) + " "
+                + "jump_layout_ms="
+                + Self.milliseconds(jumpMeasurements?.landingLayoutNanoseconds ?? 0) + " "
+                + "jump_correction_ms="
+                + Self.milliseconds(jumpMeasurements?.correctionNanoseconds ?? 0) + " "
+                + "jump_visible_turns_ms="
+                + Self.milliseconds(jumpMeasurements?.visibleTurnsNanoseconds ?? 0) + " "
+                + "jump_measured_total_ms="
+                + Self.milliseconds(jumpMeasurements?.totalNanoseconds ?? 0) + " "
+                + "stream_deltas=250 stream_ms=\(Self.milliseconds(streamElapsed)) "
+                + "baseline_mb=\(Self.megabytes(baselineMemory)) "
+                + "peak_mb=\(Self.megabytes(activePeakMemory)) "
+                + "active_delta_mb="
+                + Self.megabytes(Self.positiveDifference(activePeakMemory, baselineMemory))
+        )
+        print(
+            "THREADING_PERF conversation-active-results "
+                + "base_turns=\(baseTurns) tools=\(toolCount) batches=\(resultDurations.count) "
+                + "result_total_ms=\(Self.milliseconds(resultDurations.reduce(0, +))) "
+                + "result_p50_ms="
+                + Self.milliseconds(Self.percentile(resultDurations, 0.50)) + " "
+                + "result_p95_ms="
+                + Self.milliseconds(Self.percentile(resultDurations, 0.95)) + " "
+                + "result_max_ms=\(Self.milliseconds(resultDurations.max() ?? 0))"
+        )
+        print(
+            "THREADING_PERF conversation-active-settle "
+                + "base_turns=\(baseTurns) tools=\(toolCount) "
+                + "settle_ms=\(Self.milliseconds(settleElapsed)) "
+                + "rows=\(controller.timeline.rows.count) "
+                + "presented=\(controller.presentationItems.count) "
+                + "materialized=\(controller.rowViews.count) "
+                + "final_jump_ms=\(Self.milliseconds(finalJumpElapsed)) "
+                + "settled_delta_mb="
+                + Self.megabytes(Self.positiveDifference(settledMemory, baselineMemory))
+        )
+    }
+
+    private static func activeToolBlock(index: Int, id: String) -> ContentBlock {
+        switch index % 3 {
+        case 0:
+            return .toolUse(
+                id: id,
+                tool: .read,
+                input: [
+                    "file_path": .string("Sources/Active/Feature\(index)/Case.swift")
+                ]
+            )
+        case 1:
+            return .toolUse(
+                id: id,
+                tool: .bash,
+                input: ["command": .string("swift test --filter ActiveCase\(index)")]
+            )
+        default:
+            return .toolUse(
+                id: id,
+                tool: .edit,
+                input: [
+                    "file_path": .string("Sources/Active/Feature\(index)/Case.swift"),
+                    "old_string": .string("let value = \(index)"),
+                    "new_string": .string("let value = \(index + 1)")
+                ]
+            )
+        }
     }
 
     private static func stressEvents(shape: StressShape, turns: Int) -> [StreamEvent] {
@@ -984,6 +1392,16 @@ final class ConversationRenderTests: XCTestCase {
             pending.append(contentsOf: view.subviews)
         }
         return count
+    }
+
+    private static func descendants(in root: NSView) -> [NSView] {
+        var result: [NSView] = []
+        var pending = root.subviews
+        while let view = pending.popLast() {
+            result.append(view)
+            pending.append(contentsOf: view.subviews)
+        }
+        return result
     }
 
     private static func firstDescendant<T: NSView>(_ type: T.Type, in root: NSView) -> T? {

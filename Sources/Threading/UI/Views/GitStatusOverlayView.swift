@@ -38,7 +38,12 @@ enum GitStatusOverlayDefaults {
     static let maxWidth: CGFloat = 360
 
     /// From the card's edge to the first and last row.
-    static let verticalInset: CGFloat = Design.Spacing.small
+    ///
+    /// A step up from `small`: with the rows on `small` and the edges on `small` too, a
+    /// three-fact card read as text pressed against its own border — called out as "too tight
+    /// vertically" twice. The single-row pill grows with it, deliberately: one geometry,
+    /// whichever row count the card holds, is the rule the whole file is built on.
+    static let verticalInset: CGFloat = Design.Spacing.medium
     /// Between one reading and the next. Tighter than the inset, so the rows read as a list
     /// inside a card rather than as three cards sharing a border.
     ///
@@ -46,8 +51,10 @@ enum GitStatusOverlayDefaults {
     /// 26-point band and leave every row below it bare with the stack spaced at zero, so the
     /// gap under the first line was the band's own half-padding and the gaps under the rest
     /// were nothing. Three facts came out at 6 / 0 / 0 — the branch floating alone and the
-    /// counters and the agent line stuck together underneath it.
-    static let rowGap: CGFloat = Design.Spacing.tight
+    /// counters and the agent line stuck together underneath it. `tight` fixed the rhythm and
+    /// still read cramped; `small` is the step that gives each fact its own line of air while
+    /// staying inside the inset.
+    static let rowGap: CGFloat = Design.Spacing.small
     /// Quiet at rest, per the design system; full under the pointer.
     ///
     /// Carried by the card's **contents** rather than by the card. On the view it also thinned
@@ -882,16 +889,34 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// was which was to click: the agent line and an extension row do nothing, and the two button
     /// rows go somewhere else entirely.
     ///
-    /// Grown by the children row's own padding, so the shape the pointer lights around a line of
-    /// *text* is the shape it lights around the same line as a button. The two sit one above the
-    /// other in the same card; a wash that hugged the text tighter than the button's would read as
-    /// two conventions rather than one list.
+    /// This union is the **hit target and cursor rect only** — the wash is drawn per row, see
+    /// `gitWashRects`. The target stays one rect so the gap between the two rows is not a dead
+    /// zone a click can fall through; grown by the children row's own padding so a pointer lands
+    /// on it as easily as on the button below.
     private var gitRegion: NSRect? {
         guard hasGitReceipt else { return nil }
         let rows = [summaryRow, countersRow].filter { !$0.isHidden }.map(\.frame)
         guard var union = rows.first else { return nil }
         for row in rows.dropFirst() { union = union.union(row) }
         return convert(union, from: content).insetBy(dx: 0, dy: -childrenRowInset)
+    }
+
+    /// The wash, one rect per Git row rather than their union.
+    ///
+    /// Both rows lift together — they are one destination — but each lights the line it covers:
+    /// branch and counters as one solid block read as one *fact*, and they are two. Each rect is
+    /// grown by less than the children row's own padding where the union could afford the full
+    /// amount, because the two washes must not fuse across the gap they share — a hairline of
+    /// ground has to survive between them.
+    private var gitWashRects: [NSRect] {
+        guard hasGitReceipt else { return [] }
+        let breathing = min(
+            childrenRowInset,
+            (GitStatusOverlayDefaults.rowGap - Design.Spacing.hairline) / 2
+        )
+        return [summaryRow, countersRow]
+            .filter { !$0.isHidden }
+            .map { convert($0.frame, from: content).insetBy(dx: 0, dy: -breathing) }
     }
 
     /// Draws the wash under the rows that act.
@@ -902,8 +927,10 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// the children row already lifts to (`ink.surfaceHover`), measured against the terminal's
     /// backdrop like everything else the card draws.
     override func draw(_ dirtyRect: NSRect) {
-        guard isGitHovered, let region = gitRegion else { return }
-        ThemedSurface.draw(region, fill: ink.surfaceHover)
+        guard isGitHovered else { return }
+        for rect in gitWashRects {
+            ThemedSurface.draw(rect, fill: ink.surfaceHover)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -964,10 +991,15 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// Where the pointer is *now*, rather than where an event last said it was — which is the
     /// question to ask when the card moved and the pointer did not.
     private func refreshGitHover() {
-        guard isHovered, let window else {
+        guard isHovered else {
             isGitHovered = false
             return
         }
+        // No window, no pointer to measure against: keep the event stream's last answer. A
+        // fixture card has no window, and its layout pass ran through here and erased the
+        // hover the test had just delivered — the wash the assertions then looked for was
+        // drawn once and repainted away before the capture.
+        guard let window else { return }
         updateGitHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 

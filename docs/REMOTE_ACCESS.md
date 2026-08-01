@@ -1,17 +1,32 @@
 # Remote access
 
 Remote access mirrors Threading sessions to a browser or to the native `ThreadingMobile` iOS app.
-It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac
-and turn on **Remote Access**. The page follows the local listener and secure relay live, then
-shows the iPhone pairing code in place once the connection is ready.
+It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac,
+choose a connection, and turn on **Remote Access**:
+
+- **Relay** keeps the existing Cloudflare path and supports ordinary public share links.
+- **Tailscale** publishes Threading only inside the owner's tailnet. It is the private option for
+  owner devices and can also share a chat with somebody already in that tailnet.
+- **Both** uses Tailscale for owner pairing and the relay for one-chat share links. Selecting it
+  explicitly starts both transports while Remote Access is on.
+
+All three terminate at the same loopback server, protocol and authorization checks. A transport
+changes who can route packets to Threading; it never expands what a bearer may do.
 
 ## Pair an iPhone
 
 1. Keep Threading running on the Mac.
-2. Wait for the Remote Access status to say the secure relay is ready.
+2. Choose **Relay**, **Tailscale**, or **Both** and wait for the selected pairing connection.
 3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
-The iOS app stores the paired host and bearer token in the Keychain. It shows all unarchived
+The QR value is a one-time bootstrap. The Mac exchanges it for a unique 256-bit, device-bound
+owner credential, rotates the code immediately, and stores the device record in the login
+Keychain. iOS stores the paired host and its credential in its Keychain. Pairing therefore
+survives a Threading restart and also survives turning Remote Access off and back on. Settings
+lists each paired owner device with an explicit **Revoke** action; **Reset Everything** also
+deletes the Mac-side owner credentials. A browser owner pairing deliberately remains tab-scoped.
+
+The iOS app shows all unarchived
 sessions grouped by project or ordered by recent activity, including dormant sessions. Pinned sessions
 stay at the top on both Mac and iPhone, and the archive is available from the dashboard.
 Opening a dormant session resumes it
@@ -82,9 +97,9 @@ different verbs:
 
 A member who *is* watching appears once, in the live group, where there is more to say about
 them — both sources know that person, and listing them from each reads as two people with one
-name. The owner's paired devices carry no Revoke: they hold the pairing token rather than a
-share of this chat, so dropping one is unpairing the Mac, and the section says so and links to
-Settings.
+name. The owner's paired devices carry no Revoke in a single chat: they are paired with the Mac
+rather than members of that share. The section links to Settings, where the device itself can be
+revoked.
 
 Revoking a person is a `ConfirmationPrompt` case (`revokeChatAccess`, `alwaysAsks(.irreversible)`)
 because the way back is a *different* action the owner has to know to take — the invitation was
@@ -151,7 +166,8 @@ extension policy are documented in [iOS themed dialogs](IOS_THEMED_DIALOGS.md).
 Pairing and sharing are deliberately different actions:
 
 - **Pair iPhone** is for your own trusted devices. A paired owner device sees your unarchived
-  chats, can manage sessions and themes, and may approve bounded Native permission requests.
+  chats, can manage sessions and themes, and may approve bounded Native permission requests. Its
+  credential remains paired across Mac/app restarts until explicitly revoked.
 - **Share Chat…** in a session's `…` menu creates a single-use invitation for exactly that chat.
   Approval is a separate per-member, per-chat right: a trusted collaborator can review a complete
   Native permission request caused by their work without gaining settings, lifecycle, project, or
@@ -172,9 +188,10 @@ Pairing and sharing are deliberately different actions:
 - An unused invitation expires after 24 hours. Accepting it consumes that URL and creates a new
   device-bound membership without a 24-hour timer. The member keeps access until **Stop
   Sharing**, Remote Access is disabled, or the Mac app exits. Create another invitation for
-  another person; forwarding an already accepted invite does not clone the membership.
+  another person; forwarding an already accepted invite does not clone the membership. Guest
+  memberships remain launch-scoped: turning Remote Access off or quitting the Mac revokes them.
 
-Use **Open Locally** to test the browser client without leaving the Mac. The owner pairing link
+Use **Open in Browser** to test the browser client without leaving the Mac. The owner pairing link
 can also be copied from the pairing sheet, but it is intentionally not presented as a general
 sharing action.
 
@@ -267,23 +284,30 @@ feature lock.
 
 - The remote server listens only on `127.0.0.1` and is separate from Threading's MCP and extension
   servers.
-- `cloudflared` opens an outbound tunnel to that one loopback listener. No router port or inbound
-  firewall rule is opened. Remote session traffic passes through Cloudflare's relay, where TLS
-  is terminated, so use this beta only for work you are comfortable sending through that service.
-- Every launch mints a random 128-bit owner-device bearer token, and every chat invite mints an
+- In **Relay** or **Both**, `cloudflared` opens an outbound tunnel to that one listener. No router
+  port or inbound firewall rule is opened. Traffic passes through Cloudflare, where TLS is
+  terminated, so use that transport only for work you are comfortable sending through it.
+- In **Tailscale** or **Both**, Tailscale Serve exposes the same listener as HTTPS/WSS on dedicated
+  port 8443, reachable only according to the tailnet's identity and ACL policy. Threading removes
+  only that exact Serve handler when it stops and never runs `tailscale serve reset`, which could
+  erase unrelated services. Tailscale still relays encrypted WireGuard traffic when peers cannot
+  connect directly. Enabling Tailscale HTTPS publishes the machine/tailnet DNS name in public
+  certificate-transparency logs; it does not publish chat contents or make the service public.
+- Every launch mints a random 128-bit, one-time owner bootstrap, and every chat invite mints an
   independent random 256-bit single-use token scoped to one session. It arrives in the URL
   fragment, so the browser does not include it in its initial HTTP request or referrer. On
-  acceptance the host replaces it with a fresh device-bound membership bearer. iOS stores that
-  bearer in Keychain; the browser stores accepted guest membership for that origin while keeping
-  owner pairing tab-scoped. The fragment is removed from the address bar and history.
-- The owner token is base32 and 128-bit rather than base64url and 256-bit *because it has to be
+  acceptance the host replaces it with a fresh 256-bit device-bound bearer. Native owner
+  credentials live in Keychain on both Mac and iPhone; browser owner access remains tab-scoped.
+  The fragment is removed from the address bar and history.
+- The owner bootstrap is base32 and 128-bit rather than base64url and 256-bit *because it has to be
   photographed*. Its whole payload is a QR code, and QR's alphanumeric mode — 5.5 bits per
   character against byte mode's 8 — has no lower case, so a mixed-case token forces the densest
   possible symbol. Written as base32, alongside an upper-cased scheme and host
   (`RemoteConnectionLink.scannablePayload`), a median relay host encodes in 37 modules instead of
-  41. 128 bits remains an unguessable online-only bearer held behind a secret relay hostname,
-  in memory, revoked when Remote Access stops. Invitation and device bearers are unchanged at
-  256-bit base64url: they travel by copied link, never by camera, so they buy nothing from it.
+  41. It remains an unguessable online-only bootstrap held in memory, is accepted once (with a
+  short same-device retry window for a lost response), and rotates immediately. Invitation and
+  durable device bearers remain 256-bit base64url: they travel by copied link or protocol
+  exchange, never by camera, so they buy nothing from the QR trade.
 - **The 128-bit choice is forced by the host, not by the token, and should be revisited when the
   relay moves to a short custom domain.** A 52-character `trycloudflare.com` hostname is most of
   the payload, which is what leaves the token paying for the last version. Measured at level M
@@ -302,20 +326,31 @@ feature lock.
   Archiving a live session immediately disconnects any remote viewer already attached to it.
 - Authentication failures are rate-limited globally and per device, and slow WebSocket consumers
   are dropped instead of being allowed to back-pressure an agent's terminal.
-- Unused invitations expire after 24 hours; accepted memberships do not. Stopping a share,
-  turning Remote Access off, or quitting Threading revokes the relevant membership tokens and
-  disconnects already-open sockets immediately.
+- Unused invitations expire after 24 hours; accepted guest memberships do not expire while that
+  launch continues. Stopping a share, turning Remote Access off, or quitting Threading revokes
+  guest memberships and disconnects every open socket immediately. Paired owner credentials are
+  suspended while the listener is off and reloaded from Keychain next time; revoke the named
+  device in Settings to remove one permanently.
 
 Treat the owner QR code and every copied share URL like passwords. The owner code is intentionally
 much stronger than a guest URL; only show it to devices you control.
 
 ## Beta limitations
 
-The automatic relay uses a Cloudflare Quick Tunnel. Quick Tunnels are intended for development
-and testing, have no uptime guarantee, and receive a new public hostname whenever Threading starts.
-The iPhone therefore needs to be paired again after the Mac app restarts. A production release
-should replace this with an account-backed stable relay or a rendezvous service, named-device
-approval/revocation, and account-backed invitations. Without recipient accounts Threading cannot
+The automatic relay still uses a Cloudflare Quick Tunnel. Quick Tunnels are intended for
+development and testing, have no uptime guarantee, and receive a new public hostname whenever
+Threading starts. The durable device credential survives, but an iPhone paired to that old origin
+cannot discover the new Quick Tunnel and must scan again. The planned stable Cloudflare hostname
+can replace this transport without changing pairing or authorization. Tailscale already has a
+stable tailnet origin, so an owner paired through Tailscale reconnects after a Mac/app restart
+without rescanning as long as Tailscale is available on both devices.
+
+On iPhone, Tailscale must be connected before its `*.ts.net` origin is reachable. iOS permits only
+one active packet-tunnel VPN at a time, so another VPN may prevent that connection; use Relay in
+that situation.
+
+An operated release can add account-backed rendezvous and invitations. Without recipient
+accounts Threading cannot
 push to a friend *before* they accept a share link; their messaging app carries the invitation,
 then Threading registers that accepted capability and can notify the device from then on.
 
@@ -334,10 +369,20 @@ If `cloudflared` is not installed, local browser mirroring still works. Install 
 brew install cloudflared
 ```
 
+For Tailscale mode, install and sign in to Tailscale on the Mac and iPhone, enable HTTPS for the
+tailnet, and make sure its ACLs allow the iPhone identity to reach the Mac. Threading invokes the
+local `tailscale` CLI; it does not sign in, change tailnet ACLs, or enable the VPN for you.
+
+At the server boundary, socket parsing remains on one serial network queue. Successful
+authentication publishes one immutable `RemoteAuthenticatedPeer` under a lock — authorization,
+device id, display name and authentication time become visible together. Main-actor sharing and
+notification code reads that snapshot once per decision; it never assembles an identity from
+independently mutable connection fields.
+
 ## Implementation map
 
-- `Sources/Threading/Core/Remote`: loopback HTTP/WebSocket server, authentication, relay lifecycle,
-  routing and live session mirrors.
+- `Sources/Threading/Core/Remote`: loopback HTTP/WebSocket server, durable owner-device registry,
+  authentication, pluggable Cloudflare/Tailscale transports, routing and live session mirrors.
 - `Sources/Threading/Resources/RemoteClient`: dependency-free browser client.
 - `ThreadingRemoteKit`: versioned wire DTOs and pairing-link parsing shared by macOS and iOS.
 - `Sources/ThreadingMobile`: SwiftUI iOS shell, UIKit Native-conversation timeline and SwiftTerm

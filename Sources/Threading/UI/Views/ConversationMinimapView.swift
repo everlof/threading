@@ -68,6 +68,22 @@ final class ConversationMinimapView: NSView {
         updateVisibility()
     }
 
+    /// Live conversations change only at the tail. Keeping that fact here avoids copying the
+    /// entire turn array and resetting hover state whenever one exchange begins or settles.
+    func appendTurn(_ turn: ConversationTimeline.Turn) {
+        turns.append(turn)
+        needsDisplay = true
+        invalidateIntrinsicContentSize()
+        updateVisibility()
+    }
+
+    func replaceTurn(_ turn: ConversationTimeline.Turn, at index: Int) {
+        guard turns.indices.contains(index) else { return }
+        turns[index] = turn
+        if activeIndex == index { updatePreview() }
+        needsDisplay = true
+    }
+
     func setVisibleTurnIndices(_ indices: Set<Int>) {
         visibleTurnIndices = indices
     }

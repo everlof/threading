@@ -506,13 +506,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         let projects = ProjectStore.shared.projects
-        let activeSessionIDs = Set(
-            projects.flatMap { project in
-                project.sessions.map(\.id)
-                    + project.terminals.map { SessionID($0.id.rawValue) }
+        let activeIdentities = Set(projects.flatMap { project in
+            project.sessions.flatMap { session in
+                [
+                    TerminalInstanceIdentity.agentSession(session.id),
+                    TerminalInstanceIdentity.sessionShell(session.id),
+                ]
+            } + project.terminals.map { terminal in
+                TerminalInstanceIdentity.projectTerminal(terminal.id)
             }
-        )
-        HistoryManager.cleanupOrphanedHistoryFiles(activeSessionIDs: activeSessionIDs)
+        })
+        HistoryManager.cleanupOrphanedHistoryFiles(activeIdentities: activeIdentities)
     }
 
     // MARK: - Menu Setup

@@ -465,6 +465,13 @@ final class SessionRowView: NSTableCellView {
         dismissPopover()
     }
 
+    /// A sidebar reload can discard this row without reuse and without a pointer exit; a
+    /// popover anchored to a row that left the window would keep floating over nothing.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { hoverDidEnd(animated: false) }
+    }
+
     private func presentPopover() {
         guard let popoverInfo, let sessionID, window != nil, popover == nil else { return }
         guard let controller = makeSessionHoverCard(

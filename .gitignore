@@ -140,3 +140,8 @@ default.profraw
 # The marketing site is its own git repository checked out here; the app repo must not
 # swallow it as a bare gitlink.
 /web/
+
+# Python tooling and one-off repository probes are generated artifacts.
+__pycache__/
+*.py[cod]
+*.probe

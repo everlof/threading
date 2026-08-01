@@ -49,7 +49,7 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
 
         let caption = NSTextField(
             wrappingLabelWithString: L10n.string(
-                "Threading dresses itself. Pick a look and everything follows it — including the rest of this setup. Change it anytime in Settings ▸ Themes."
+                "Threading dresses itself. Pick a look and everything follows it, including the rest of this setup. Change it anytime in Settings ▸ Themes."
             )
         )
         caption.applyFont(.body)

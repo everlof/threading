@@ -49,6 +49,12 @@ extension AgentToolCoordinator {
     /// an agent that wrote there would be pinning a name the user never chose, and silently
     /// switching off every later update including its own.
     ///
+    /// It writes as `.chosen`, which is what keeps the name on screen: the terminal title
+    /// re-asserts the CLI's old `ai-title` within seconds and the turn-end transcript read
+    /// re-reads the same record, and both used to put the old name straight back. Those
+    /// transports write as `.reported` and now lose to this; only another chosen name — or
+    /// the user's own rename, which outranks everything — moves it again.
+    ///
     /// The name goes through `ProjectStore.updateAgentTitle` rather than being validated here,
     /// so a tool call is held to exactly the rule the two title transports are held to. What
     /// it answers with is what actually happened: a name refused as the agent's, the account's
@@ -70,7 +76,7 @@ extension AgentToolCoordinator {
             return .failure("This session is no longer in the sidebar.")
         }
 
-        guard dependencies.projects.updateAgentTitle(name, for: sessionID) else {
+        guard dependencies.projects.updateAgentTitle(name, for: sessionID, source: .chosen) else {
             return .failure("""
                 “\(name)” was not used: it repeats something the row already shows — the \
                 agent's name, the account's, or the project's. Name the conversation \

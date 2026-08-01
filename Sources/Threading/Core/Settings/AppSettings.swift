@@ -734,6 +734,22 @@ final class AppSettings {
         }
     }
 
+    /// Which network doors publish the dedicated remote-access listener. An absent or unknown
+    /// value stays on the relay for compatibility with installations that predate private
+    /// tailnet access; an unknown future value must not silently enable an additional endpoint.
+    var remoteAccessConnectionMode: RemoteAccessConnectionMode {
+        get {
+            guard let raw = defaults.string(forKey: Keys.remoteAccessConnectionMode) else {
+                return .relay
+            }
+            return RemoteAccessConnectionMode(rawValue: raw) ?? .relay
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.remoteAccessConnectionMode)
+            notifyChanged()
+        }
+    }
+
     /// Whether Threading may ask its release feed whether a newer version exists.
     ///
     /// Defaults to **on**, and `defaults.bool` cannot express that — an unset key reads `false`,
@@ -895,6 +911,7 @@ final class AppSettings {
         static let claudeRemoteControl = "claudeRemoteControl"
         static let defaultPermissionMode = "defaultPermissionMode"
         static let remoteAccessEnabled = "remoteAccessEnabled"
+        static let remoteAccessConnectionMode = "remoteAccessConnectionMode"
         static let automaticUpdateChecksEnabled = "automaticUpdateChecksEnabled"
         static let githubAppClientID = "githubAppClientID"
         static let workingOrbStyle = "workingOrbStyle"

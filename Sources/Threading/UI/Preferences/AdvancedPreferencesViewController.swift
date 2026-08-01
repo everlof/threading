@@ -213,6 +213,12 @@ final class AdvancedPreferencesViewController: NSViewController {
         guard ConfirmationAlert.ask(request) else { return }
 
         do {
+            if case .everything = scope {
+                // An app-data reset must not leave durable owner credentials behind. Stop the
+                // listener first, then erase the one app-owned Keychain item before moving the
+                // file state aside. A settings-only reset deliberately keeps pairings.
+                try RemoteAccessCoordinator.shared.deleteOwnerDevicesForAppReset()
+            }
             let outcome = try AppDataReset.perform(scope, at: Date())
             ThreadingLogger.agent.info(
                 "Reset app data into \(outcome.backup.lastPathComponent, privacy: .public)"
@@ -290,7 +296,7 @@ enum AdvancedStrings {
     static var resetEverythingTitle: String { L10n.string("Reset everything") }
     static var resetEverythingDetail: String {
         L10n.string(
-            "The above, plus every project, session, conversation and cache. "
+            "The above, plus every project, session, conversation, cache and paired owner device. "
                 + "Threading restarts as if newly installed."
         )
     }
@@ -308,16 +314,17 @@ enum AdvancedStrings {
     static var confirmEverythingBody: String {
         L10n.string(
             "Threading will restart as if newly installed: no projects, no sessions, no "
-                + "conversations. Everything is moved into a dated folder beside your data "
-                + "rather than deleted, so it can be recovered by hand."
+                + "conversations. Files are moved into a dated folder beside your data so they "
+                + "can be recovered by hand. Paired-owner credentials are revoked and cannot "
+                + "be recovered from that folder."
         )
     }
 
     static var keptNote: String {
         L10n.string(
-            "A reset moves the old state into “Threading Resets” rather than deleting it. "
-                + "Nothing outside Threading's own two locations is touched — agent logins and "
-                + "anything the Claude or Codex CLIs keep for themselves stay where they are."
+            "A reset moves file state into “Threading Resets” rather than deleting it. Reset "
+                + "Everything also revokes paired-owner credentials; Reset Settings keeps them. "
+                + "Agent logins and anything the Claude or Codex CLIs keep stay where they are."
         )
     }
 

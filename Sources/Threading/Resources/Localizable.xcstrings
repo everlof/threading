@@ -1,9 +1,209 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "A reset moves file state into “Threading Resets” rather than deleting it. Reset Everything also revokes paired-owner credentials; Reset Settings keeps them. Agent logins and anything the Claude or Codex CLIs keep stay where they are.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "En återställning flyttar filstatus till ”Threading Resets” i stället för att radera den. Återställ allt återkallar även autentiseringsuppgifter för parkopplade ägarenheter; Återställ inställningar behåller dem. Agentinloggningar och allt som Claude- eller Codex-CLI:erna sparar ligger kvar." } }
+      }
+    },
+    "The above, plus every project, session, conversation, cache and paired owner device. Threading restarts as if newly installed.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Ovanstående samt alla projekt, sessioner, konversationer, cacheminnen och parkopplade ägarenheter. Threading startar om som nyinstallerat." } }
+      }
+    },
+    "Threading will restart as if newly installed: no projects, no sessions, no conversations. Files are moved into a dated folder beside your data so they can be recovered by hand. Paired-owner credentials are revoked and cannot be recovered from that folder.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Threading startar om som nyinstallerat: inga projekt, inga sessioner, inga konversationer. Filer flyttas till en daterad mapp bredvid dina data så att de kan återställas manuellt. Autentiseringsuppgifter för parkopplade ägarenheter återkallas och kan inte återställas från den mappen." } }
+      }
+    },
+    "Remote Access starts at a loopback listener": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Fjärråtkomst börjar med en loopback-lyssnare" } }
+      }
+    },
+    "The listener binds to 127.0.0.1 and the selected HTTPS relay or Tailscale Serve publishes only that listener. Threading opens no LAN listener, so macOS never asks for Local Network access.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Lyssnaren binds till 127.0.0.1 och det valda HTTPS-reläet eller Tailscale Serve publicerar bara den lyssnaren. Threading öppnar ingen LAN-lyssnare, så macOS frågar aldrig efter åtkomst till lokalt nätverk." } }
+      }
+    },
+    "Available privately through %@.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Tillgänglig privat via %@." } }
+      }
+    },
+    "Both": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Båda" } }
+      }
+    },
+    "Last seen %@": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Senast sedd %@" } }
+      }
+    },
+    "No durable owner devices are paired yet.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Inga varaktiga ägarenheter är parkopplade än." } }
+      }
+    },
+    "Only scan this owner code on a device you control. It can access every chat on this Mac. The code expires after one successful pairing; that device stays paired until you revoke it here.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Skanna bara den här ägarkoden på en enhet du kontrollerar. Den kan komma åt alla chattar på den här Mac-datorn. Koden upphör efter en lyckad parkoppling; enheten förblir parkopplad tills du återkallar den här." } }
+      }
+    },
+    "Open Threading on iPhone, choose Pair a Mac, then scan this one-time code.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Öppna Threading på iPhone, välj Parkoppla en Mac och skanna sedan den här engångskoden." } }
+      }
+    },
+    "Paired %@": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Parkopplad %@" } }
+      }
+    },
+    "Paired devices unavailable": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Parkopplade enheter är inte tillgängliga" } }
+      }
+    },
+    "Paired devices": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Parkopplade enheter" } }
+      }
+    },
+    "Pairing Unavailable": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Parkoppling inte tillgänglig" } }
+      }
+    },
+    "Pairing unavailable": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Parkoppling inte tillgänglig" } }
+      }
+    },
+    "Private Tailscale pairing and public share links are both ready.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Privat Tailscale-parkoppling och offentliga delningslänkar är båda redo." } }
+      }
+    },
+    "Private connection unavailable": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Privat anslutning inte tillgänglig" } }
+      }
+    },
+    "Private pairing is ready. Sharing relay: %@": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Privat parkoppling är redo. Delningsrelä: %@" } }
+      }
+    },
+    "Private pairing is ready; the sharing relay is connecting…": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Privat parkoppling är redo; delningsreläet ansluter…" } }
+      }
+    },
+    "Relay supports ordinary share links. Tailscale keeps access inside your private tailnet. Both uses Tailscale for pairing and the relay for sharing.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Relä stöder vanliga delningslänkar. Tailscale håller åtkomsten inom ditt privata tailnet. Båda använder Tailscale för parkoppling och reläet för delning." } }
+      }
+    },
+    "Relay": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Relä" } }
+      }
+    },
+    "Retry Connection": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Försök ansluta igen" } }
+      }
+    },
+    "Revoke %@": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Återkalla %@" } }
+      }
+    },
+    "Revoke %@?": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Återkalla %@?" } }
+      }
+    },
+    "Tailscale pairing and share links are ready.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Tailscale-parkoppling och delningslänkar är redo." } }
+      }
+    },
+    "Tailscale": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Tailscale" } }
+      }
+    },
+    "The QR code appears here as soon as the selected connection is ready.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "QR-koden visas här så snart den valda anslutningen är redo." } }
+      }
+    },
+    "The local mirror is ready on 127.0.0.1:%lld. Waiting for %@…": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Den lokala speglingen är redo på 127.0.0.1:%lld. Väntar på %@…" } }
+      }
+    },
+    "This device loses owner access immediately. Pair it again with a new code if you want to restore access.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Den här enheten förlorar ägaråtkomsten omedelbart. Parkoppla den igen med en ny kod om du vill återställa åtkomsten." } }
+      }
+    },
+    "Threading could not read its paired-device Keychain item. It will not overwrite that item or issue a credential it cannot preserve.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Threading kunde inte läsa nyckelringsposten för parkopplade enheter. Posten skrivs inte över och en autentiseringsuppgift som inte kan bevaras utfärdas inte." } }
+      }
+    },
+    "Turn on Remote Access. Threading will start a local mirror and connect it to %@.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Slå på Fjärråtkomst. Threading startar en lokal spegling och ansluter den till %@." } }
+      }
+    },
+    "Turning it off closes every connection and shared-chat link. Your explicitly paired devices remain paired for the next time.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "När du stänger av funktionen stängs alla anslutningar och delade chattlänkar. Dina uttryckligen parkopplade enheter förblir parkopplade till nästa gång." } }
+      }
+    },
+    "You can still test the browser on this Mac, or retry the selected connection.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Du kan fortfarande testa webbläsaren på den här Mac-datorn eller försöka med den valda anslutningen igen." } }
+      }
+    },
+    "the HTTPS relay": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "HTTPS-reläet" } }
+      }
+    },
+    "the relay": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "reläet" } }
+      }
+    },
+    "your Tailscale tailnet": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "ditt Tailscale-tailnet" } }
+      }
+    },
+    "your tailnet": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "ditt tailnet" } }
+      }
+    },
     "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Appägda tillfälliga ytor med temaanpassat utseende, Escape, återställd fokus och tillgänglighet." } }
+      }
+    },
+    "ThemedAlert": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "ThemedAlert" } }
+      }
+    },
+    "ThemedPopover & ThemedPopoverChromeView": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "ThemedPopover och ThemedPopoverChromeView" } }
       }
     },
     "Open alert": {
@@ -19,6 +219,16 @@
     "Open popover": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Öppna poppfönster" } }
+      }
+    },
+    "ThemedFileIconView": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "ThemedFileIconView" } }
+      }
+    },
+    "Native Finder artwork under System; semantic, theme-owned file kinds under authored themes.": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Inbyggd Finder-grafik med System; semantiska, temaägda filtyper med skapade teman." } }
       }
     },
     "Presentation": {
@@ -20950,12 +21160,12 @@
         }
       }
     },
-    "Threading dresses itself. Pick a look and everything follows it — including the rest of this setup. Change it anytime in Settings ▸ Themes.": {
+    "Threading dresses itself. Pick a look and everything follows it, including the rest of this setup. Change it anytime in Settings ▸ Themes.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Threading klär sig självt. Välj ett utseende så följer allt annat med — även resten av den här installationen. Ändra när som helst i Inställningar ▸ Teman."
+            "value": "Threading klär sig självt. Välj ett utseende så följer allt annat med, även resten av den här installationen. Ändra när som helst i Inställningar ▸ Teman."
           }
         }
       }
@@ -21010,12 +21220,12 @@
         }
       }
     },
-    "Threading found these agent logins on this Mac. Sessions can start on any of them — name or disable them later in Settings ▸ Accounts.": {
+    "Threading found these agent logins on this Mac. Sessions can start on any switched-on login. Name them later in Settings ▸ Accounts.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Threading hittade de här agentinloggningarna på den här datorn. Sessioner kan starta på vilken som helst av dem — namnge eller inaktivera dem senare i Inställningar ▸ Konton."
+            "value": "Threading hittade de här agentinloggningarna på den här datorn. Sessioner kan starta på vilken påslagen inloggning som helst. Namnge dem senare i Inställningar ▸ Konton."
           }
         }
       }
@@ -21030,12 +21240,12 @@
         }
       }
     },
-    "No agent logins found. Sign in to Claude Code or Codex from a terminal first — Threading picks logins up from their config folders.": {
+    "No agent logins found. Sign in to Claude Code or Codex from a terminal first. Threading picks logins up from their config folders.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inga agentinloggningar hittades. Logga in i Claude Code eller Codex från en terminal först — Threading plockar upp inloggningar från deras konfigurationsmappar."
+            "value": "Inga agentinloggningar hittades. Logga in i Claude Code eller Codex från en terminal först. Threading plockar upp inloggningar från deras konfigurationsmappar."
           }
         }
       }
@@ -21050,12 +21260,12 @@
         }
       }
     },
-    "Not on your shell's PATH — sessions cannot launch until it is. Install: %@": {
+    "Not on your shell's PATH, so sessions cannot launch. Install: %@": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Finns inte på ditt skals PATH — sessioner kan inte starta förrän det gör det. Installera: %@"
+            "value": "Finns inte på ditt skals PATH, så sessioner kan inte starta. Installera: %@"
           }
         }
       }
@@ -21120,32 +21330,22 @@
         }
       }
     },
-    "No conversations to import — everything starts fresh.": {
+    "No conversations to import. Everything starts fresh.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inga konversationer att importera — allt börjar från noll."
+            "value": "Inga konversationer att importera. Allt börjar från noll."
           }
         }
       }
     },
-    "Include conversations in %@": {
+    "%lld conversations found. %lld selected to import.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ta med konversationer i %@"
-          }
-        }
-      }
-    },
-    "%lld conversations in %lld folders — %lld selected to import.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld konversationer i %lld mappar — %lld valda att importera."
+            "value": "%lld konversationer hittades. %lld valda att importera."
           }
         }
       }
@@ -21156,6 +21356,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld till kördes i mappar som inte längre finns och lämnades utanför."
+          }
+        }
+      }
+    },
+    "%lld conversation folders could not be read; these results are incomplete.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld konversationsmappar kunde inte läsas; resultaten är ofullständiga."
+          }
+        }
+      }
+    },
+    "%lld more unreadable folders were omitted.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ytterligare oläsbara mappar utelämnades."
+          }
+        }
+      }
+    },
+    "Some conversation folders could not be read. The results are incomplete.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vissa konversationsmappar kunde inte läsas. Resultaten är ofullständiga."
           }
         }
       }
@@ -21180,12 +21410,12 @@
         }
       }
     },
-    "Agents work for minutes at a time. A notification says when one is blocked on an approval, or finished while you were elsewhere — only then, and only while Threading is in the background.": {
+    "Agents work for minutes at a time. A notification says when one is blocked on an approval, or finished while you were elsewhere. Only then, and only while Threading is in the background.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Agenter arbetar flera minuter i taget. En notis berättar när en väntar på ett godkännande, eller blev klar medan du var någon annanstans — bara då, och bara medan Threading är i bakgrunden."
+            "value": "Agenter arbetar flera minuter i taget. En notis berättar när en väntar på ett godkännande, eller blev klar medan du var någon annanstans. Bara då, och bara medan Threading är i bakgrunden."
           }
         }
       }
@@ -21240,12 +21470,12 @@
         }
       }
     },
-    "Skipping is fine — Threading will ask the first time there is something to say.": {
+    "Skipping is fine. Threading will ask the first time there is something to say.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Det går bra att hoppa över — Threading frågar första gången det finns något att säga."
+            "value": "Det går bra att hoppa över. Threading frågar första gången det finns något att säga."
           }
         }
       }

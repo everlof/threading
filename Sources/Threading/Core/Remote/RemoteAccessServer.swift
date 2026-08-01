@@ -679,7 +679,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                   let redemption = self.invitationRedeemer?.redeemInvitation(
                       token: token,
                       deviceID: deviceID,
-                      displayName: displayName
+                      displayName: displayName,
+                      // Browser owner access remains tab-scoped by design. Native clients keep
+                      // their exchanged bearer in Keychain and therefore receive a Mac-side
+                      // durable record as well.
+                      persistsOwnerDevice:
+                        request.header(RemoteRouter.clientHeader)?.lowercased()
+                          == "threading-ios"
                   ) else {
                 self?.queue.async { [weak self] in
                     self?.recordFailedAuth(reason: "invalid invitation", device: deviceID)
@@ -1342,10 +1348,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if routed == RemoteRouter.themeEventsRouteID {
-            connection.authorization = authorization
-            connection.deviceID = device
-            connection.deviceName = deviceName
-            connection.markAuthenticated()
+            guard connection.authenticate(
+                authorization: authorization,
+                deviceID: device,
+                deviceName: deviceName
+            ) else { return }
             DispatchQueue.main.async {
                 RemoteSessionMirrorRegistry.shared.attachThemeEvents(connection)
             }
@@ -1363,10 +1370,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
-        connection.authorization = authorization
-        connection.deviceID = device
-        connection.deviceName = deviceName
-        connection.markAuthenticated()
+        guard connection.authenticate(
+            authorization: authorization,
+            deviceID: device,
+            deviceName: deviceName
+        ) else { return }
 
         DispatchQueue.main.async {
             let attached = RemoteSessionMirrorRegistry.shared.attach(

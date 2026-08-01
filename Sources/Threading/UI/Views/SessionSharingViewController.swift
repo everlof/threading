@@ -17,7 +17,7 @@ import ThreadingRemoteKit
 ///
 /// The owner's own paired devices sit in the live section with the guests, because in the moment
 /// that matters — something is watching this chat — they are the same fact. They carry no Revoke:
-/// a paired device holds the pairing token rather than a share of this chat, so dropping it is
+/// a paired device holds a durable owner credential rather than a share of this chat, so dropping it is
 /// unpairing the Mac, which belongs in Settings and says so.
 final class SessionSharingViewController: NSViewController {
 
@@ -28,6 +28,14 @@ final class SessionSharingViewController: NSViewController {
     /// Asks the window for a fresh invitation, so the sheet, its grant choice and its copy
     /// behaviour stay in the one place that already owns them.
     var onShare: (() -> Void)?
+
+    /// Test seams at the user-decision boundary. Production leaves these nil and reaches the
+    /// coordinator/pasteboard; render and behavior tests can verify the pane without mutating
+    /// durable sharing state or presenting a modal sheet.
+    var confirmRevocation: ((ConfirmationRequest) -> Bool)?
+    var onRevokeMember: ((String) -> Void)?
+    var onRevokeLink: ((String) -> Void)?
+    var onCopyInvitation: ((String) -> Void)?
 
     private let appEvents = AppEventObservations()
     nonisolated(unsafe) private var tickTimer: Timer?
@@ -145,10 +153,20 @@ final class SessionSharingViewController: NSViewController {
         subtitleLabel.stringValue = ProjectStore.shared
             .session(withID: sessionID)?.displayTitle ?? ""
 
-        let sections = Self.sections(
+        apply(
             followers: RemoteSessionMirrorRegistry.shared.followers(of: sessionID),
             access: RemoteAccessCoordinator.shared.access(for: sessionID)
         )
+    }
+
+    /// Installs a known read model. Kept internal for behavior/render tests; live refreshes use
+    /// the exact same path after reading the two authoritative stores above.
+    func apply(
+        followers: [RemoteSessionMirrorRegistry.Follower],
+        access: RemoteAccessCoordinator.SessionAccess
+    ) {
+        guard isViewLoaded else { return }
+        let sections = Self.sections(followers: followers, access: access)
 
         let shape = self.shape(
             followers: sections.watching,
@@ -316,9 +334,13 @@ final class SessionSharingViewController: NSViewController {
             actions.append(.init(
                 title: L10n.string("Copy"),
                 accessibility: L10n.string("Copy this invitation link"),
-                action: {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                action: { [weak self] in
+                    if let onCopyInvitation = self?.onCopyInvitation {
+                        onCopyInvitation(url.absoluteString)
+                    } else {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                    }
                 }
             ))
         }
@@ -457,12 +479,20 @@ final class SessionSharingViewController: NSViewController {
             ),
             confirmTitle: L10n.string("Revoke")
         )
-        guard ConfirmationAlert.ask(request) else { return }
-        RemoteAccessCoordinator.shared.revokeMember(member.id, in: sessionID)
+        guard confirmRevocation?(request) ?? ConfirmationAlert.ask(request) else { return }
+        if let onRevokeMember {
+            onRevokeMember(member.id)
+        } else {
+            RemoteAccessCoordinator.shared.revokeMember(member.id, in: sessionID)
+        }
     }
 
     private func revoke(_ link: RemoteAccessCoordinator.SessionAccess.Link) {
-        RemoteAccessCoordinator.shared.revokeLink(link.id, in: sessionID)
+        if let onRevokeLink {
+            onRevokeLink(link.id)
+        } else {
+            RemoteAccessCoordinator.shared.revokeLink(link.id, in: sessionID)
+        }
     }
 
     @objc private func openRemoteAccessSettings() {

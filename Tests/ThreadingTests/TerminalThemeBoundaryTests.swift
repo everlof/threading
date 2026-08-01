@@ -8,6 +8,38 @@ import SwiftTerm
 @MainActor
 final class TerminalThemeBoundaryTests: XCTestCase {
 
+    func testTerminalIdentityKeepsProjectTerminalsOutOfTheSessionDomain() {
+        let raw = UUID()
+        let session = SessionID(raw)
+        let terminal = TerminalID(raw)
+
+        XCTAssertEqual(
+            TerminalInstanceIdentity.agentSession(session).ownerSessionID,
+            session
+        )
+        XCTAssertNil(TerminalInstanceIdentity.projectTerminal(terminal).ownerSessionID)
+        XCTAssertEqual(
+            TerminalInstanceIdentity.projectTerminal(terminal).historyFileStem,
+            "terminal-\(terminal.uuidString)"
+        )
+        XCTAssertEqual(
+            TerminalInstanceIdentity.sessionShell(session).historyFileStem,
+            "shell-\(session.uuidString)"
+        )
+        XCTAssertNotEqual(
+            TerminalInstanceIdentity.agentSession(session).historyFileStem,
+            TerminalInstanceIdentity.sessionShell(session).historyFileStem
+        )
+        XCTAssertEqual(
+            Set([
+                TerminalInstanceIdentity.agentSession(session).historyFileStem,
+                TerminalInstanceIdentity.projectTerminal(terminal).historyFileStem,
+                TerminalInstanceIdentity.sessionShell(session).historyFileStem
+            ]).count,
+            3
+        )
+    }
+
     private func terminal() -> EmojiFixedTerminalView {
         EmojiFixedTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
     }

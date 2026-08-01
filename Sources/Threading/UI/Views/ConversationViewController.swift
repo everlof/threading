@@ -112,6 +112,7 @@ final class ConversationViewController: NSViewController {
     private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
     private var transcriptRecheckGeneration: [String: Int] = [:]
     let customizationLookup: ComponentCustomizationHost.Lookup
+    private let appEvents = AppEventObservations()
 
     /// Invoked for semantic actions in extension-provided reply accessories.
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
@@ -227,6 +228,14 @@ final class ConversationViewController: NSViewController {
         case fold(turnStart: Int)
         case retained(UUID)
         case streaming
+    }
+
+    struct ExactNavigationMeasurements {
+        let geometryNanoseconds: UInt64
+        let landingLayoutNanoseconds: UInt64
+        let correctionNanoseconds: UInt64
+        let visibleTurnsNanoseconds: UInt64
+        let totalNanoseconds: UInt64
     }
 
     struct PresentationItem {
@@ -434,6 +443,9 @@ final class ConversationViewController: NSViewController {
             )
         }
         super.init(nibName: nil, bundle: nil)
+        appEvents.observe(ComponentCustomizationDidChange.self) { [weak self] event in
+            self?.refreshConversationRowsIfCustomizationChanged(event)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -501,8 +513,16 @@ final class ConversationViewController: NSViewController {
     func customizeConversationRow(
         _ nativeContent: NSView,
         target: ExtensionComponentTarget
-    ) -> ConversationRowCustomizationView {
-        ConversationRowCustomizationView(
+    ) -> NSView {
+        // No extension owns this row in the normal case. A composition container, host and
+        // notification observer around every viewport row made a cold jump rebuild machinery
+        // that would render exactly the native subtree it was handed.
+        let resolution = customizationLookup(target)
+        guard target.component == .conversationPermissionCard || !resolution.isEmpty else {
+            return nativeContent
+        }
+
+        return ConversationRowCustomizationView(
             nativeContent: nativeContent,
             target: target,
             lookup: customizationLookup,
@@ -515,6 +535,37 @@ final class ConversationViewController: NSViewController {
                 }
             }
         )
+    }
+
+    /// Rows which were native-only when materialized still need to acquire a wrapper if an
+    /// extension is installed later, and an emptied row should shed one. One controller observer
+    /// handles those structural transitions; an already-customized wrapper handles content-only
+    /// refresh itself. Permission cards stay wrapped because they are rare retained interactions.
+    private func refreshConversationRowsIfCustomizationChanged(
+        _ event: ComponentCustomizationDidChange
+    ) {
+        guard isViewLoaded else { return }
+        let wrapperStateChanged = rowViews.contains { timelineIndex, view in
+            guard timeline.rows.indices.contains(timelineIndex),
+                  let target = componentTarget(for: timeline.rows[timelineIndex]),
+                  customizationChange(event, affects: target) else { return false }
+            let shouldWrap = !customizationLookup(target).isEmpty
+            let isWrapped = view is ConversationRowCustomizationView
+            return shouldWrap != isWrapped
+        }
+
+        if wrapperStateChanged { reloadConversationRows() }
+    }
+
+    private func customizationChange(
+        _ event: ComponentCustomizationDidChange,
+        affects target: ExtensionComponentTarget
+    ) -> Bool {
+        event.targets?.contains { changed in
+            changed.component == target.component
+                && changed.contractVersion == target.contractVersion
+                && (changed.entityID == nil || changed.entityID == target.entityID)
+        } ?? true
     }
 
     /// These controls edit the persisted session while it is idle. Claude uses its control
@@ -691,6 +742,46 @@ final class ConversationViewController: NSViewController {
         updateVisibleTurns()
     }
 
+    /// A live user message closes the preceding preview and opens exactly one new rail entry.
+    /// Replay still replaces the complete rail once at its boundary; live traffic never needs
+    /// to re-derive or copy every historical turn.
+    func noteMinimapTurnStarted(at startIndex: Int) {
+        if let previousPosition = minimapTurns.indices.last,
+           minimapTurns[previousPosition].rowIndex != startIndex,
+           let previous = timeline.turn(startingAt: minimapTurns[previousPosition].rowIndex) {
+            minimapTurns[previousPosition] = previous
+            minimap.replaceTurn(previous, at: previousPosition)
+        }
+
+        guard let current = timeline.turn(startingAt: startIndex) else {
+            updateVisibleTurns()
+            return
+        }
+        if let lastPosition = minimapTurns.indices.last,
+           minimapTurns[lastPosition].rowIndex == startIndex {
+            minimapTurns[lastPosition] = current
+            minimap.replaceTurn(current, at: lastPosition)
+        } else {
+            minimapTurns.append(current)
+            minimap.appendTurn(current)
+        }
+        updateVisibleTurns()
+    }
+
+    /// Settlement supplies the final assistant preview and duration for the current mark.
+    func noteMinimapTurnSettled(at startIndex: Int) {
+        guard let lastPosition = minimapTurns.indices.last,
+              minimapTurns[lastPosition].rowIndex == startIndex,
+              let settled = timeline.turn(startingAt: startIndex) else { return }
+        minimapTurns[lastPosition] = settled
+        minimap.replaceTurn(settled, at: lastPosition)
+        updateVisibleTurns()
+    }
+
+    /// Stable diagnostics used by the generated-chat contract without exposing the rail view.
+    var minimapTurnCount: Int { minimapTurns.count }
+    var lastMinimapTurn: ConversationTimeline.Turn? { minimapTurns.last }
+
     /// Which turns are on screen, so the rail can say where you are as well as what is there.
     private func updateVisibleTurns() {
         let visibleRect = scrollView.contentView.documentVisibleRect
@@ -719,20 +810,36 @@ final class ConversationViewController: NSViewController {
     /// Exact row navigation does not depend on the target having a materialized view. The table
     /// resolves its rect from cached and estimated heights, then a second correction after the
     /// animated landing accounts for any newly measured rows around the target.
-    func scrollToTimelineRow(_ index: Int, animated: Bool) {
-        guard let tableRow = presentationRow(forTimelineIndex: index) else { return }
+    @discardableResult
+    func scrollToTimelineRow(
+        _ index: Int,
+        animated: Bool
+    ) -> ExactNavigationMeasurements? {
+        guard let tableRow = presentationRow(forTimelineIndex: index) else { return nil }
 
         // The user deliberately went somewhere; only their own gesture re-pins.
         autoScroll.noteJumpedToRow()
 
+        let started = DispatchTime.now().uptimeNanoseconds
+        let geometryStarted = DispatchTime.now().uptimeNanoseconds
         let target = max(0, tableView.rect(ofRow: tableRow).minY - Design.Spacing.large)
+        let geometryEnded = DispatchTime.now().uptimeNanoseconds
 
         guard animated else {
             scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: target))
             scrollView.reflectScrolledClipView(scrollView.contentView)
+            let layoutStarted = DispatchTime.now().uptimeNanoseconds
             view.layoutSubtreeIfNeeded()
-            settleTimelineScroll(to: index)
-            return
+            let layoutEnded = DispatchTime.now().uptimeNanoseconds
+            let settlement = settleTimelineScroll(to: index, measuring: true)
+            let ended = DispatchTime.now().uptimeNanoseconds
+            return ExactNavigationMeasurements(
+                geometryNanoseconds: geometryEnded - geometryStarted,
+                landingLayoutNanoseconds: layoutEnded - layoutStarted,
+                correctionNanoseconds: settlement.correctionNanoseconds,
+                visibleTurnsNanoseconds: settlement.visibleTurnsNanoseconds,
+                totalNanoseconds: ended - started
+            )
         }
 
         NSAnimationContext.runAnimationGroup { context in
@@ -742,17 +849,29 @@ final class ConversationViewController: NSViewController {
         } completionHandler: { [weak self] in
             Task { @MainActor in self?.settleTimelineScroll(to: index) }
         }
+        return nil
     }
 
-    private func settleTimelineScroll(to index: Int) {
-        guard let correctedRow = presentationRow(forTimelineIndex: index) else { return }
+    @discardableResult
+    private func settleTimelineScroll(
+        to index: Int,
+        measuring: Bool = false
+    ) -> (correctionNanoseconds: UInt64, visibleTurnsNanoseconds: UInt64) {
+        let correctionStarted = measuring ? DispatchTime.now().uptimeNanoseconds : 0
+        guard let correctedRow = presentationRow(forTimelineIndex: index) else { return (0, 0) }
         let correctedTarget = max(
             0,
             tableView.rect(ofRow: correctedRow).minY - Design.Spacing.large
         )
         scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: correctedTarget))
         scrollView.reflectScrolledClipView(scrollView.contentView)
+        let correctionEnded = measuring ? DispatchTime.now().uptimeNanoseconds : 0
         updateVisibleTurns()
+        let visibleTurnsEnded = measuring ? DispatchTime.now().uptimeNanoseconds : 0
+        return (
+            correctionNanoseconds: measuring ? correctionEnded - correctionStarted : 0,
+            visibleTurnsNanoseconds: measuring ? visibleTurnsEnded - correctionEnded : 0
+        )
     }
 
     // MARK: - Public Methods

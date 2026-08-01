@@ -443,9 +443,17 @@ final class TerminalContainerViewController: NSViewController {
         addChild(drawerHostController)
         drawerHostController.view.translatesAutoresizingMaskIntoConstraints = false
         drawerHost.addSubview(drawerHostController.view)
+        let drawerContentBottom = drawerHostController.view.bottomAnchor.constraint(
+            equalTo: drawerHost.bottomAnchor
+        )
+        // Closed means the host is exactly zero high, while the reusable controller retains a
+        // real 40pt tab-strip constraint. Let the clipped child keep that intrinsic floor for
+        // the closed pass instead of asking Auto Layout to break a required constraint. The
+        // equality becomes satisfiable—and therefore exact—the moment the drawer opens.
+        drawerContentBottom.priority = .init(999)
         NSLayoutConstraint.activate([
             drawerHostController.view.topAnchor.constraint(equalTo: drawerHost.topAnchor),
-            drawerHostController.view.bottomAnchor.constraint(equalTo: drawerHost.bottomAnchor),
+            drawerContentBottom,
             drawerHostController.view.leadingAnchor.constraint(equalTo: drawerHost.leadingAnchor),
             drawerHostController.view.trailingAnchor.constraint(equalTo: drawerHost.trailingAnchor)
         ])
@@ -472,6 +480,7 @@ final class TerminalContainerViewController: NSViewController {
             drawerHostController.showSession(nil)
             drawerHeight.constant = 0
             drawerDivider.isHidden = true
+            drawerHost.isHidden = true
             return
         }
 
@@ -479,6 +488,7 @@ final class TerminalContainerViewController: NSViewController {
         drawerHostController.ensureDefaultShellTab(for: sessionID)
         drawerHostController.showSession(sessionID)
 
+        drawerHost.isHidden = false
         drawerHeight.constant = clampedDrawerHeight(drawerHeightValue)
         drawerDivider.isHidden = false
         if focusing { drawerHostController.focusActiveTab() }

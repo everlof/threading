@@ -23,7 +23,7 @@ final class ToolCallView: NSView {
     )
     private lazy var titleLabel = makeLabel(ToolGlyph.forTool(tool).label, role: .caption)
     private lazy var detailLabel = makeLabel(summary, role: .code())
-    private lazy var metaLabel = makeLabel("running…", role: .caption)
+    private lazy var metaLabel = makeLabel(Self.runningText, role: .caption)
     private lazy var chevron: NSImageView = {
         let image = NSImageView()
         image.translatesAutoresizingMaskIntoConstraints = false
@@ -41,12 +41,18 @@ final class ToolCallView: NSView {
     }()
 
     /// Whichever body this row expands to show — a diff for an edit, plain text otherwise.
-    private lazy var bodyView = makeBody(summary: summary)
+    /// A cold table jump can materialize a viewport of collapsed tools at once; building hidden
+    /// diffs there made navigation pay for content the user had not asked to see.
+    private var bodyView: NSView?
     private var textBody: NSTextField?
+    private var resultText: String?
+    private var resultOutcome: ToolOutcome?
 
     private var isExpanded = false
     private var canExpand = false
     private var isHovered = false
+
+    private static var runningText: String { L10n.string("running") + "…" }
 
     /// Recyclable conversation rows persist this state in their controller and invalidate the
     /// table's cached height. Standalone renderers can leave it nil.
@@ -87,9 +93,7 @@ final class ToolCallView: NSView {
 
         // Reads while a call is still running, so the row is not blank until the result lands.
         metaLabel.textColor = Design.Text.tertiary
-        bodyView.isHidden = true
-
-        [glyphLabel, titleLabel, detailLabel, metaLabel, chevron, bodyView].forEach(addSubview)
+        [glyphLabel, titleLabel, detailLabel, metaLabel, chevron].forEach(addSubview)
         setupConstraints()
 
         // A diff is known from the call's arguments, so an edit is expandable at once — its
@@ -113,7 +117,10 @@ final class ToolCallView: NSView {
         }
 
         let field = makeLabel("", role: .code())
-        field.textColor = Design.Text.secondary
+        field.stringValue = resultText ?? ""
+        field.textColor = resultOutcome == .failed
+            ? Design.Status.negative
+            : Design.Text.secondary
         field.isSelectable = true
         textBody = field
         return field
@@ -141,10 +148,7 @@ final class ToolCallView: NSView {
         equalTo: bottomAnchor,
         constant: -Design.Spacing.small
     )
-    private lazy var bodyBottom = bodyView.bottomAnchor.constraint(
-        equalTo: bottomAnchor,
-        constant: -Design.Spacing.small
-    )
+    private var bodyBottom: NSLayoutConstraint?
 
     private func setupConstraints() {
         let inset = Design.Spacing.small
@@ -169,11 +173,7 @@ final class ToolCallView: NSView {
 
             chevron.leadingAnchor.constraint(equalTo: metaLabel.trailingAnchor, constant: Design.Spacing.small),
             chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            chevron.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            bodyView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: inset),
-            bodyView.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            bodyView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
+            chevron.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor)
         ])
 
         detailLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -212,8 +212,12 @@ final class ToolCallView: NSView {
             return
         }
 
-        textBody?.stringValue = text
-        textBody?.textColor = failed ? Design.Status.negative : Design.Text.secondary
+        resultText = text
+        resultOutcome = outcome
+        if let textBody {
+            textBody.stringValue = text
+            textBody.textColor = failed ? Design.Status.negative : Design.Text.secondary
+        }
 
         let hasText = !text.isEmpty
         metaLabel.stringValue = hasText
@@ -238,6 +242,8 @@ final class ToolCallView: NSView {
 
     func setExpanded(_ expanded: Bool, notifying: Bool = true) {
         guard canExpand, expanded != isExpanded else { return }
+        if expanded { installBodyIfNeeded() }
+        guard let bodyView, let bodyBottom else { return }
 
         isExpanded = expanded
         bodyView.isHidden = !isExpanded
@@ -252,6 +258,30 @@ final class ToolCallView: NSView {
         invalidateIntrinsicContentSize()
         superview?.needsLayout = true
         if notifying { onExpansionChanged?(isExpanded) }
+    }
+
+    /// Installs expansion content only on the first open. The body remains with this materialized
+    /// row for cheap close/reopen, then leaves with the row when the table recycles its host.
+    private func installBodyIfNeeded() {
+        guard bodyView == nil else { return }
+
+        let body = makeBody(summary: summary)
+        body.translatesAutoresizingMaskIntoConstraints = false
+        body.isHidden = true
+        addSubview(body)
+
+        let inset = Design.Spacing.small
+        let bottom = body.bottomAnchor.constraint(
+            equalTo: bottomAnchor,
+            constant: -inset
+        )
+        bodyView = body
+        bodyBottom = bottom
+        NSLayoutConstraint.activate([
+            body.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: inset),
+            body.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
+        ])
     }
 
     @objc private func toggle() {

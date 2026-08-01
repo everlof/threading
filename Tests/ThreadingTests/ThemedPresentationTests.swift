@@ -47,6 +47,87 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertEqual(globalTip.y, anchor.maxY + ThemedPopoverLayout.anchorGap, accuracy: 0.5)
     }
 
+    // MARK: - Popover chrome drawing
+
+    /// The border must run unbroken through the two junctions where the arrow leaves the body.
+    ///
+    /// The chrome used to fill and stroke the body and the arrow as two paths and repaint
+    /// their seam in surface colour — which also erased the tails of the arrow's own stroked
+    /// sides, leaving gaps at exactly those junctions. The gap was visible in a picture and in
+    /// no assertion, so this samples the drawn pixels along the outline itself.
+    func testPopoverBorderRunsUnbrokenThroughTheArrowJunctions() throws {
+        let placement = ThemedPopoverLayout.place(
+            anchor: NSRect(x: 40, y: 300, width: 20, height: 20),
+            contentSize: NSSize(width: 220, height: 140),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_200, height: 800),
+            preferredEdge: .maxX
+        )
+        XCTAssertEqual(placement.edge, .maxX, "the fixture wants the arrow on the left edge")
+
+        let chrome = ThemedPopoverChromeView(
+            frame: NSRect(origin: .zero, size: placement.panelFrame.size)
+        )
+        chrome.placement = placement
+        let rep = try rendered(chrome, scale: 3)
+        try writeRender(of: rep, named: "popover-chrome-left-arrow")
+
+        let body = placement.bodyFrame
+        let inset = Design.Radius.border / 2
+        let wallX = body.minX + inset
+        let tip = NSPoint(x: inset, y: placement.arrowTip.y)
+        let half = ThemedPopoverLayout.arrowBreadth / 2
+        let baseTop = NSPoint(x: wallX, y: tip.y + half)
+        let baseBottom = NSPoint(x: wallX, y: tip.y - half)
+        let surface = try pixel(of: rep, at: NSPoint(x: body.midX, y: body.midY), in: chrome)
+
+        let samples: [(NSPoint, String)] = [
+            (NSPoint(x: wallX, y: baseTop.y + 8), "the wall above the arrow"),
+            (NSPoint(x: wallX, y: baseBottom.y - 8), "the wall below the arrow"),
+            (along(baseTop, tip, 0.5), "the arrow's upper side"),
+            (along(baseBottom, tip, 0.5), "the arrow's lower side"),
+            // The two junctions — the exact pixels the seam repaint used to erase.
+            (along(baseTop, tip, 0.05), "the upper junction"),
+            (along(baseBottom, tip, 0.05), "the lower junction")
+        ]
+        for (point, place) in samples {
+            let sample = try pixel(of: rep, at: point, in: chrome)
+            XCTAssertGreaterThan(
+                contrast(sample, surface), 0.03,
+                "\(place) shows no border ink at (\(point.x), \(point.y))"
+            )
+        }
+    }
+
+    func testPopoverChromeRendersEveryArrowEdge() throws {
+        let screen = NSRect(x: 0, y: 0, width: 1_200, height: 800)
+        let anchors: [(NSRectEdge, NSRect)] = [
+            (.maxX, NSRect(x: 300, y: 390, width: 20, height: 20)),
+            (.minX, NSRect(x: 880, y: 390, width: 20, height: 20)),
+            (.maxY, NSRect(x: 590, y: 240, width: 20, height: 20)),
+            (.minY, NSRect(x: 590, y: 560, width: 20, height: 20)),
+        ]
+        var renders = Set<Data>()
+
+        for (edge, anchor) in anchors {
+            let placement = ThemedPopoverLayout.place(
+                anchor: anchor,
+                contentSize: NSSize(width: 220, height: 140),
+                visibleFrame: screen,
+                preferredEdge: edge
+            )
+            XCTAssertEqual(placement.edge, edge)
+            let chrome = ThemedPopoverChromeView(
+                frame: NSRect(origin: .zero, size: placement.panelFrame.size)
+            )
+            chrome.placement = placement
+            let rep = try rendered(chrome, scale: 2)
+            try writeRender(of: rep, named: "popover-chrome-\(edge.rawValue)-arrow")
+            renders.insert(try XCTUnwrap(rep.representation(using: .png, properties: [:])))
+        }
+
+        XCTAssertEqual(renders.count, anchors.count, "an arrow edge rendered as another edge")
+    }
+
     // MARK: - Dismissal and focus
 
     func testPopoverEscapeClosesOnceAndReturnsFocus() throws {
@@ -77,6 +158,54 @@ final class ThemedPresentationTests: XCTestCase {
 
         popover.close()
         XCTAssertEqual(closes, 1, "closing an already closed surface must be idempotent")
+    }
+
+    func testPopoverClosesWhenItsAnchorLeavesTheHierarchy() throws {
+        let window = testWindow()
+        defer { window.close() }
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 80))
+        content.preferredContentSize = content.view.frame.size
+        let popover = ThemedPopover()
+        popover.animates = false
+        popover.contentViewController = content
+        var closes = 0
+        popover.onClose = { closes += 1 }
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+
+        anchor.removeFromSuperview()
+        popover.reposition()
+
+        XCTAssertFalse(popover.isShown)
+        XCTAssertNil(popover.presentedWindow)
+        XCTAssertEqual(closes, 1)
+    }
+
+    func testDroppingPopoverOwnerDetachesAndTearsDownItsPanel() throws {
+        let window = testWindow()
+        defer { window.close() }
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 80))
+        content.preferredContentSize = content.view.frame.size
+
+        var popover: ThemedPopover? = ThemedPopover()
+        popover?.animates = false
+        popover?.contentViewController = content
+        popover?.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        let panel = try XCTUnwrap(popover?.presentedWindow)
+        XCTAssertTrue(window.childWindows?.contains(panel) == true)
+
+        popover = nil
+        let detached = expectation(description: "panel detached on owner deinit")
+        DispatchQueue.main.async {
+            XCTAssertNil(panel.parent)
+            XCTAssertFalse(panel.isVisible)
+            XCTAssertNil(panel.contentViewController)
+            detached.fulfill()
+        }
+        wait(for: [detached], timeout: 1)
     }
 
     func testAlertEscapeEndsTheSheetAndReturnsFocus() throws {

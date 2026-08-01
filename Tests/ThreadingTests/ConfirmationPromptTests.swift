@@ -40,6 +40,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "revokeAllWebsiteAccess",
             "removeProject",
             "revokeChatAccess",
+            "revokePairedDevice",
             "deleteSession",
             "deleteArchivedSession",
             "deleteAppTheme",

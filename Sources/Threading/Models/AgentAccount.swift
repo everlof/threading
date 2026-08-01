@@ -5,7 +5,7 @@ import Foundation
 /// Both CLIs support multiple accounts by pointing an environment variable at an alternate
 /// config directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). Each such directory is its own
 /// account with its own conversation history.
-struct AgentAccount: Equatable, Identifiable {
+struct AgentAccount: Equatable, Identifiable, Sendable {
 
     // MARK: - Properties
 

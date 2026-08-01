@@ -229,6 +229,148 @@ final class RemoteServerIntegrationTests: XCTestCase {
         _ = socket
     }
 
+    func testSharingPaneRendersOwnerMemberAndUnusedLinkAtNarrowWidthAndRoutesActions()
+        throws
+    {
+        func descendants(in root: NSView) -> [NSView] {
+            root.subviews.flatMap { [$0] + descendants(in: $0) }
+        }
+        func button(titled title: String, in row: SessionSharingRowView) -> ThemedButton? {
+            descendants(in: row).compactMap { $0 as? ThemedButton }.first { $0.title == title }
+        }
+
+        let previousEnabled = AppSettings.shared.remoteAccessEnabled
+        let previousTheme = AppThemeLibrary.current
+        defer {
+            AppSettings.shared.remoteAccessEnabled = previousEnabled
+            AppThemePalette.set(previousTheme)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: previousTheme.id))
+        }
+        AppSettings.shared.remoteAccessEnabled = true
+
+        let ownerSocket = NSObject()
+        let guestSocket = NSObject()
+        let followers = [
+            RemoteSessionMirrorRegistry.Follower(
+                id: ObjectIdentifier(ownerSocket),
+                memberName: nil,
+                memberID: nil,
+                deviceName: "David’s iPhone",
+                deviceLabel: "device-owner",
+                isOwnerDevice: true,
+                capability: .interact,
+                canApprovePermissions: true,
+                surface: "conversation",
+                viewport: nil,
+                watchingSince: Date(timeIntervalSinceNow: -180),
+                isTyping: false
+            ),
+            RemoteSessionMirrorRegistry.Follower(
+                id: ObjectIdentifier(guestSocket),
+                memberName: "Anna",
+                memberID: "member-anna",
+                deviceName: "Chrome on Mac",
+                deviceLabel: "device-guest",
+                isOwnerDevice: false,
+                capability: .interact,
+                canApprovePermissions: false,
+                surface: "terminal",
+                viewport: (cols: 46, rows: 35),
+                watchingSince: Date(timeIntervalSinceNow: -90),
+                isTyping: true
+            ),
+        ]
+        let access = RemoteAccessCoordinator.SessionAccess(
+            members: [
+                .init(
+                    id: "member-anna",
+                    displayName: "Anna",
+                    deviceID: "guest-device",
+                    capability: .interact,
+                    canApprovePermissions: false,
+                    joinedAt: Date(timeIntervalSinceNow: -3_600),
+                    lastSeenAt: Date(timeIntervalSinceNow: -600)
+                ),
+                .init(
+                    id: "member-jonas",
+                    displayName: "Jonas",
+                    deviceID: "away-device",
+                    capability: .view,
+                    canApprovePermissions: false,
+                    joinedAt: Date(timeIntervalSinceNow: -7_200),
+                    lastSeenAt: nil
+                ),
+            ],
+            links: [.init(
+                id: "unused-link",
+                capability: .view,
+                canApprovePermissions: false,
+                createdAt: Date(timeIntervalSinceNow: -300),
+                expiresAt: Date(timeIntervalSinceNow: 3_600),
+                url: URL(string: "https://share.example/invite")
+            )]
+        )
+
+        let controller = SessionSharingViewController(sessionID: SessionID())
+        var copied: String?
+        var revokedMember: String?
+        var revokedLink: String?
+        controller.onCopyInvitation = { copied = $0 }
+        controller.confirmRevocation = { _ in true }
+        controller.onRevokeMember = { revokedMember = $0 }
+        controller.onRevokeLink = { revokedLink = $0 }
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 280, height: 560)
+        controller.apply(followers: followers, access: access)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let rows = descendants(in: controller.view).compactMap {
+            $0 as? SessionSharingRowView
+        }
+        XCTAssertEqual(rows.count, 4, "live member must not be repeated in With access")
+        let labels = rows.compactMap { $0.accessibilityLabel() }
+        XCTAssertTrue(labels.contains { $0.contains("David’s iPhone") })
+        XCTAssertTrue(labels.contains { $0.contains("Anna") && $0.contains("typing") })
+        XCTAssertTrue(labels.contains { $0.contains("Jonas") })
+        XCTAssertTrue(labels.contains { $0.contains("View only") })
+
+        let jonas = try XCTUnwrap(rows.first { $0.accessibilityLabel()?.contains("Jonas") == true })
+        let invitation = try XCTUnwrap(rows.first { button(titled: "Copy", in: $0) != nil })
+        try XCTUnwrap(button(titled: "Revoke", in: jonas)).performClick()
+        try XCTUnwrap(button(titled: "Copy", in: invitation)).performClick()
+        try XCTUnwrap(button(titled: "Revoke", in: invitation)).performClick()
+        XCTAssertEqual(revokedMember, "member-jonas")
+        XCTAssertEqual(copied, "https://share.example/invite")
+        XCTAssertEqual(revokedLink, "unused-link")
+
+        let window = NSWindow(
+            contentRect: controller.view.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        let copy = try XCTUnwrap(button(titled: "Copy", in: invitation))
+        XCTAssertTrue(window.makeFirstResponder(copy), "row actions must remain keyboard focusable")
+
+        var renders = Set<Data>()
+        for theme in [AppTheme.system, AppThemeStyles.cyberpunk] {
+            AppThemePalette.set(theme)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
+            controller.view.layoutSubtreeIfNeeded()
+            let rep = try XCTUnwrap(
+                controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds)
+            )
+            controller.view.cacheDisplay(in: controller.view.bounds, to: rep)
+            renders.insert(try XCTUnwrap(rep.representation(using: .png, properties: [:])))
+        }
+        XCTAssertEqual(renders.count, 2, "sharing rows ignored the authored theme")
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
+        window.close()
+        _ = [ownerSocket, guestSocket]
+    }
+
     /// A device's own label is shown beside a Revoke button, so it arrives from the network held
     /// to the same rules a member's display name is: bounded, printable, whitespace-collapsed.
     /// It is never an identity — the device id is what authorization binds to — and this is what
@@ -759,6 +901,29 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertEqual(accepted.me.share.scope, "all")
     }
 
+    func testOnlyTheNativeIOSClientRequestsDurableOwnerPairing() throws {
+        let redeemer = InvitationPersistenceSpy()
+        server.invitationRedeemer = redeemer
+        let request = try JSONEncoder().encode(
+            RemoteAcceptInvitationRequestDTO(displayName: "Test iPhone")
+        )
+
+        XCTAssertEqual(try XCTUnwrap(post(
+            RemoteRouter.invitationAcceptancePath,
+            bearer: "ios-bootstrap",
+            body: request,
+            headers: ["X-Threading-Client": "Threading-iOS"]
+        )).status, 201)
+        XCTAssertEqual(try XCTUnwrap(post(
+            RemoteRouter.invitationAcceptancePath,
+            bearer: "browser-bootstrap",
+            body: request,
+            headers: ["X-Threading-Client": "Threading-Web"]
+        )).status, 201)
+
+        XCTAssertEqual(redeemer.persistenceRequests, [true, false])
+    }
+
     func testBearerSchemeIsCaseInsensitive() {
         let raw = "GET /api/me HTTP/1.1\r\nAuthorization: bearer goodtoken\r\n\r\n"
         guard case .request(let request, _) = MCPConnection.parseRequest(from: Data(raw.utf8)) else {
@@ -1262,5 +1427,221 @@ final class RemoteServerIntegrationTests: XCTestCase {
         let received = recv(fd, &buffer, buffer.count, 0)
         guard received > 0 else { return "" }
         return String(decoding: buffer[0..<received], as: UTF8.self)
+    }
+}
+
+@MainActor
+private final class InvitationPersistenceSpy: RemoteInvitationRedeeming {
+    private(set) var persistenceRequests: [Bool] = []
+
+    func redeemInvitation(
+        token: String,
+        deviceID: String,
+        displayName: String,
+        persistsOwnerDevice: Bool
+    ) -> RemoteInvitationRedemption? {
+        persistenceRequests.append(persistsOwnerDevice)
+        return RemoteInvitationRedemption(
+            accessToken: "accepted-\(token)",
+            authorization: RemoteAuthorization(
+                shareID: "owner-\(token)",
+                capability: .interact,
+                scope: .allSessions,
+                principal: .ownerDevice,
+                boundDeviceID: deviceID
+            )
+        )
+    }
+}
+
+// MARK: - Remote transport and durable-owner policy
+
+@MainActor
+final class RemoteAccessTransportPolicyTests: XCTestCase {
+
+    func testTailscaleStatusBecomesAStablePrivateHTTPSOrigin() throws {
+        let status = Data("""
+        {
+          "BackendState": "Running",
+          "Self": { "DNSName": "threading-mac.example.ts.net." }
+        }
+        """.utf8)
+
+        XCTAssertEqual(
+            TailscaleRemoteTransport.origin(fromStatusJSON: status),
+            URL(string: "https://threading-mac.example.ts.net:8443/")
+        )
+        XCTAssertNil(TailscaleRemoteTransport.origin(fromStatusJSON: Data("""
+        {
+          "BackendState": "Stopped",
+          "Self": { "DNSName": "threading-mac.example.ts.net." }
+        }
+        """.utf8)))
+    }
+
+    func testTailscaleOwnsOnlyItsDedicatedServePort() {
+        XCTAssertEqual(TailscaleRemoteTransport.statusArguments, [
+            "status", "--json", "--peers=false",
+        ])
+        XCTAssertEqual(TailscaleRemoteTransport.serveArguments(localPort: 49152), [
+            "serve", "--bg", "--https=8443", "http://127.0.0.1:49152",
+        ])
+        XCTAssertEqual(TailscaleRemoteTransport.stopArguments, [
+            "serve", "--https=8443", "off",
+        ])
+        XCTAssertFalse(TailscaleRemoteTransport.stopArguments.contains("reset"))
+    }
+
+    func testOwnerCredentialIsBoundToTheDeviceThatReceivedIt() {
+        let authorization = RemoteAuthorization(
+            shareID: "owner-device",
+            capability: .interact,
+            scope: .allSessions,
+            principal: .ownerDevice,
+            boundDeviceID: "device-one"
+        )
+
+        XCTAssertTrue(authorization.isBound(to: "device-one"))
+        XCTAssertFalse(authorization.isBound(to: "device-two"))
+        XCTAssertFalse(authorization.isBound(to: nil))
+    }
+
+    func testConnectionModeDefaultsAndRoundTripsWithoutEnablingAnotherDoor() throws {
+        let suite = "RemoteConnectionMode.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.remoteAccessConnectionMode, .relay)
+        settings.remoteAccessConnectionMode = .tailscaleAndRelay
+        XCTAssertEqual(AppSettings(defaults: defaults).remoteAccessConnectionMode, .tailscaleAndRelay)
+
+        defaults.set("future-mode", forKey: "remoteAccessConnectionMode")
+        XCTAssertEqual(AppSettings(defaults: defaults).remoteAccessConnectionMode, .relay)
+    }
+}
+
+@MainActor
+final class RemoteOwnerDeviceRegistryTests: XCTestCase {
+
+    private let tokenA = String(repeating: "a", count: 43)
+    private let tokenB = String(repeating: "b", count: 43)
+
+    func testPairedOwnerCredentialSurvivesRegistryRecreationAndCanBeRevoked() throws {
+        let store = InMemoryRemoteOwnerDeviceStore()
+        let first = RemoteOwnerDeviceRegistry(store: store)
+        let pairedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let record = try XCTUnwrap(first.pair(
+            deviceID: "phone-1",
+            displayName: "David’s iPhone",
+            token: tokenA,
+            now: pairedAt
+        ))
+
+        let afterRestart = RemoteOwnerDeviceRegistry(store: store)
+        XCTAssertEqual(afterRestart.devices, [record])
+        XCTAssertEqual(afterRestart.devices.first?.authorization.boundDeviceID, "phone-1")
+
+        XCTAssertEqual(afterRestart.revoke(id: record.id), record)
+        XCTAssertTrue(RemoteOwnerDeviceRegistry(store: store).devices.isEmpty)
+    }
+
+    func testPairingTheSameDeviceRotatesItsBearerWithoutDuplicatingTheDevice() throws {
+        let store = InMemoryRemoteOwnerDeviceStore()
+        let registry = RemoteOwnerDeviceRegistry(store: store)
+        let first = try XCTUnwrap(registry.pair(
+            deviceID: "phone-1",
+            displayName: "Phone",
+            token: tokenA
+        ))
+        let rotated = try XCTUnwrap(registry.pair(
+            deviceID: "phone-1",
+            displayName: "Renamed Phone",
+            token: tokenB
+        ))
+
+        XCTAssertEqual(rotated.id, first.id)
+        XCTAssertEqual(rotated.token, tokenB)
+        XCTAssertEqual(rotated.displayName, "Renamed Phone")
+        XCTAssertEqual(registry.devices.count, 1)
+        XCTAssertEqual(RemoteOwnerDeviceRegistry(store: store).devices, [rotated])
+    }
+
+    func testUnreadablePersistenceFailsClosedWithoutOverwritingIt() {
+        let store = FailingOwnerDeviceStore(failsLoad: true)
+        let registry = RemoteOwnerDeviceRegistry(store: store)
+
+        XCTAssertNotNil(registry.persistenceError)
+        XCTAssertNil(registry.pair(
+            deviceID: "phone-1",
+            displayName: "Phone",
+            token: tokenA
+        ))
+        XCTAssertEqual(store.saveCount, 0)
+    }
+
+    func testFailedRevokeKeepsTheLiveCredential() throws {
+        let initial = RemoteOwnerDeviceRecord(
+            id: "owner-1",
+            token: tokenA,
+            deviceID: "phone-1",
+            displayName: "Phone",
+            pairedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastSeenAt: nil
+        )
+        let store = FailingOwnerDeviceStore(devices: [initial], failsSave: true)
+        let registry = RemoteOwnerDeviceRegistry(store: store)
+
+        XCTAssertNil(registry.revoke(id: initial.id))
+        XCTAssertEqual(registry.devices, [initial])
+        XCTAssertNotNil(registry.persistenceError)
+    }
+
+    func testFullResetCanDeleteEvenAnUnreadableCredentialItem() throws {
+        let store = FailingOwnerDeviceStore(failsLoad: true)
+        let registry = RemoteOwnerDeviceRegistry(store: store)
+        XCTAssertNotNil(registry.persistenceError)
+
+        try registry.deleteAllForAppReset()
+
+        XCTAssertEqual(store.deleteCount, 1)
+        XCTAssertTrue(registry.devices.isEmpty)
+        XCTAssertNil(registry.persistenceError)
+    }
+}
+
+private final class FailingOwnerDeviceStore: RemoteOwnerDevicePersisting {
+    enum Failure: Error { case expected }
+
+    var devices: [RemoteOwnerDeviceRecord]
+    let failsLoad: Bool
+    let failsSave: Bool
+    private(set) var saveCount = 0
+    private(set) var deleteCount = 0
+
+    init(
+        devices: [RemoteOwnerDeviceRecord] = [],
+        failsLoad: Bool = false,
+        failsSave: Bool = false
+    ) {
+        self.devices = devices
+        self.failsLoad = failsLoad
+        self.failsSave = failsSave
+    }
+
+    func load() throws -> [RemoteOwnerDeviceRecord] {
+        if failsLoad { throw Failure.expected }
+        return devices
+    }
+
+    func save(_ devices: [RemoteOwnerDeviceRecord]) throws {
+        saveCount += 1
+        if failsSave { throw Failure.expected }
+        self.devices = devices
+    }
+
+    func deleteAll() throws {
+        deleteCount += 1
+        devices = []
     }
 }

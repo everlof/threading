@@ -245,10 +245,13 @@ full. That lift is the card waking up and it stays, but it said "all of this is 
 card most of which is not, and the pointing hand over the *whole* card said it a second time, on a
 card holding no Git sentence at all where a click did nothing. The Git rows now raise a wash
 (`ink.surfaceHover`, the weight the children row already lifts to) under the words that open Git
-Review, grown by the children row's own vertical padding so the shape around a line of text is the
-shape around the same line as a button. `gitRegion` is one answer used three times — the wash, the
-click, and the cursor rect — because a hover promising a destination the click does not deliver is
-worse than no hover. The two button rows lift themselves, as controls always did; the audience row
+Review — **one rect per row, lit together**. They lift as one because they are one destination,
+but drawn as one union the branch and the counters read as one *fact*, and they are two; each
+wash hugs its own line (`gitWashRects`), with less growth than the button convention exactly
+where the two rects would otherwise fuse across the gap they share. The click and the cursor
+rect stay on the union (`gitRegion`) so the gap between the rows is not a dead zone — a hover
+promising a destination the click does not deliver is worse than no hover, and the reverse is
+too. The two button rows lift themselves, as controls always did; the audience row
 was being handed neither `contentTintColor` nor `hoverFill`, so it drew in AppKit's own label tier
 and lifted to nothing — inert by omission rather than by design. The card also answers
 `accessibilityPerformPress` now: it has called itself a button since it first carried a receipt,
@@ -298,14 +301,21 @@ mark is worth the column it costs. The **agent line** can lead too (a detached h
 tree), and so can the children row.
 
 **The card is padded, not banded, and that is a fix.** Its rows sit at their own heights with
-`verticalInset` above the first and below the last and `rowGap` between each pair; one 14-point
-line inset top and bottom *is* the 26-point pill, so a one-row card is the shape it always was
+`verticalInset` above the first and below the last and `rowGap` between each pair; one line of
+the card's own type inset top and bottom *is* the pill, so a one-row card is the same shape
 whichever of the four rows is the one showing. It used to centre whichever row led in a 26-point
 band and leave the rest bare in a stack spaced at zero, which meant the gap under the leading row
 was that band's own half-padding and every gap below it was nothing: a card showing branch,
 counters and agent line came out 6 / 0 / 0, the branch floating alone with the other two stuck
 together underneath. The band also had to *move* — to the counters row on a detached head, to the
 agent line on a clean one — three special cases for a padding the card can simply have.
+
+The measures have been stepped up once since: `tight` gaps inside `small` insets fixed the
+rhythm and still read as text pressed against the card's own border — called "too tight
+vertically" twice in review — so the card now sits on `small` gaps inside `medium` insets, the
+gap still inside the inset so the rows read as a list in a card. The single-row pill grows with
+it, deliberately: one geometry whatever the row count is the rule the padding replaced the band
+to get.
 
 The children row is the one row that pads itself, because it is a `ThemedButton` sized around a
 hit target rather than a line of text. Wherever it meets an inset or a gap, that inset or gap

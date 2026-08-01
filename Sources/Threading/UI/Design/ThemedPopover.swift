@@ -26,7 +26,9 @@ final class ThemedPopover {
     private(set) var isShown = false
     var presentedWindow: NSWindow? { panel }
 
-    private var panel: ThemedPopoverPanel?
+    // `nonisolated(unsafe)` so deinit can hand a never-closed panel to `detach`; every other
+    // access stays on the main actor.
+    nonisolated(unsafe) private var panel: ThemedPopoverPanel?
     private weak var anchorView: NSView?
     private var anchorRect: NSRect = .zero
     private var preferredEdge: NSRectEdge = .maxY
@@ -175,6 +177,14 @@ final class ThemedPopover {
             matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
             guard let self, self.isShown else { return event }
+            // The anchor can leave the hierarchy without any notification this type observes —
+            // a sidebar reload discards its rows in place — and an owner waiting on hover exit
+            // never hears about it either. The next interaction anywhere is the moment a
+            // popover pointing at nothing disappears, whatever the behavior mode.
+            if self.anchorView?.window == nil {
+                self.close()
+                return event
+            }
             if event.type == .keyDown, event.charactersIgnoringModifiers == "\u{1b}" {
                 self.close()
                 return nil
@@ -201,7 +211,31 @@ final class ThemedPopover {
     deinit {
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
         observations.forEach(NotificationCenter.default.removeObserver)
+        // An owner that drops its last reference without close() must not strand the panel:
+        // the parent window retains its child windows, so an unclosed panel stays on screen
+        // with the monitors that could dismiss it already gone.
+        if let panel {
+            self.panel = nil
+            Self.detach(ThemedPopoverPanelHandoff(panel))
+        }
     }
+
+    private nonisolated static func detach(_ handoff: ThemedPopoverPanelHandoff) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                let panel = handoff.panel
+                panel.parent?.removeChildWindow(panel)
+                panel.orderOut(nil)
+                panel.contentViewController = nil
+            }
+        }
+    }
+}
+
+/// Carries the panel across the deinit-to-main hop; see `ThemedPopover.detach`.
+private final class ThemedPopoverPanelHandoff: @unchecked Sendable {
+    let panel: ThemedPopoverPanel
+    init(_ panel: ThemedPopoverPanel) { self.panel = panel }
 }
 
 // MARK: - Placement
@@ -221,8 +255,6 @@ enum ThemedPopoverLayout {
         let bodyFrame: NSRect
         let contentFrame: NSRect
         let arrowTip: NSPoint
-        let arrowBaseA: NSPoint
-        let arrowBaseB: NSPoint
     }
 
     static func place(
@@ -282,29 +314,19 @@ enum ThemedPopoverLayout {
         let anchorLocal = NSPoint(x: anchor.midX - origin.x, y: anchor.midY - origin.y)
         let half = arrowBreadth / 2
         let arrowTip: NSPoint
-        let a: NSPoint
-        let b: NSPoint
         switch edge {
         case .maxX:
             let y = min(max(anchorLocal.y, bodyFrame.minY + half), bodyFrame.maxY - half)
             arrowTip = NSPoint(x: 0, y: y)
-            a = NSPoint(x: bodyFrame.minX + borderInset, y: y - half)
-            b = NSPoint(x: bodyFrame.minX + borderInset, y: y + half)
         case .minX:
             let y = min(max(anchorLocal.y, bodyFrame.minY + half), bodyFrame.maxY - half)
             arrowTip = NSPoint(x: panelSize.width, y: y)
-            a = NSPoint(x: bodyFrame.maxX - borderInset, y: y + half)
-            b = NSPoint(x: bodyFrame.maxX - borderInset, y: y - half)
         case .minY:
             let x = min(max(anchorLocal.x, bodyFrame.minX + half), bodyFrame.maxX - half)
             arrowTip = NSPoint(x: x, y: panelSize.height)
-            a = NSPoint(x: x - half, y: bodyFrame.maxY - borderInset)
-            b = NSPoint(x: x + half, y: bodyFrame.maxY - borderInset)
         default:
             let x = min(max(anchorLocal.x, bodyFrame.minX + half), bodyFrame.maxX - half)
             arrowTip = NSPoint(x: x, y: 0)
-            a = NSPoint(x: x + half, y: bodyFrame.minY + borderInset)
-            b = NSPoint(x: x - half, y: bodyFrame.minY + borderInset)
         }
 
         return Placement(
@@ -312,10 +334,92 @@ enum ThemedPopoverLayout {
             panelFrame: panelFrame,
             bodyFrame: bodyFrame,
             contentFrame: contentFrame,
-            arrowTip: arrowTip,
-            arrowBaseA: a,
-            arrowBaseB: b
+            arrowTip: arrowTip
         )
+    }
+
+    /// The popover's silhouette — body and arrow as **one closed path**, walked once around.
+    ///
+    /// The chrome used to fill and stroke the rounded body and the arrow triangle separately,
+    /// then repaint the seam where the triangle's base lay inside the body. That repaint also
+    /// erased the last half-point of the arrow's own stroked sides, which read as gaps in the
+    /// border exactly where the arrow met the body. A single outline has no seam to repaint and
+    /// its joins are drawn by the stroke itself.
+    ///
+    /// `strokeWidth` insets the path so a stroke centred on it lands fully inside the panel;
+    /// the arrow's base corners are kept clear of the corner arcs.
+    static func outline(
+        for placement: Placement,
+        cornerRadius: CGFloat,
+        strokeWidth: CGFloat
+    ) -> NSBezierPath {
+        let inset = strokeWidth / 2
+        let rect = placement.bodyFrame.insetBy(dx: inset, dy: inset)
+        let radius = max(0, min(cornerRadius, min(rect.width, rect.height) / 2))
+        let half = arrowBreadth / 2
+
+        // The tip sits on the panel's very edge; pulled in by the same half stroke as the body
+        // so its point is not shaved flat by the panel bounds.
+        var tip = placement.arrowTip
+        switch placement.edge {
+        case .maxX: tip.x += inset
+        case .minX: tip.x -= inset
+        case .minY: tip.y -= inset
+        default: tip.y += inset
+        }
+
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: rect.minX + radius, y: rect.minY))
+
+        // Bottom edge — carries the arrow when the popover sits above its anchor (.maxY).
+        if placement.edge == .maxY {
+            path.line(to: NSPoint(x: max(tip.x - half, rect.minX + radius), y: rect.minY))
+            path.line(to: tip)
+            path.line(to: NSPoint(x: min(tip.x + half, rect.maxX - radius), y: rect.minY))
+        }
+        path.line(to: NSPoint(x: rect.maxX - radius, y: rect.minY))
+        path.appendArc(
+            withCenter: NSPoint(x: rect.maxX - radius, y: rect.minY + radius),
+            radius: radius, startAngle: 270, endAngle: 360
+        )
+
+        // Right edge — the arrow when the popover sits left of its anchor (.minX).
+        if placement.edge == .minX {
+            path.line(to: NSPoint(x: rect.maxX, y: max(tip.y - half, rect.minY + radius)))
+            path.line(to: tip)
+            path.line(to: NSPoint(x: rect.maxX, y: min(tip.y + half, rect.maxY - radius)))
+        }
+        path.line(to: NSPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.appendArc(
+            withCenter: NSPoint(x: rect.maxX - radius, y: rect.maxY - radius),
+            radius: radius, startAngle: 0, endAngle: 90
+        )
+
+        // Top edge — the arrow when the popover sits below its anchor (.minY).
+        if placement.edge == .minY {
+            path.line(to: NSPoint(x: min(tip.x + half, rect.maxX - radius), y: rect.maxY))
+            path.line(to: tip)
+            path.line(to: NSPoint(x: max(tip.x - half, rect.minX + radius), y: rect.maxY))
+        }
+        path.line(to: NSPoint(x: rect.minX + radius, y: rect.maxY))
+        path.appendArc(
+            withCenter: NSPoint(x: rect.minX + radius, y: rect.maxY - radius),
+            radius: radius, startAngle: 90, endAngle: 180
+        )
+
+        // Left edge — the arrow when the popover sits right of its anchor (.maxX).
+        if placement.edge == .maxX {
+            path.line(to: NSPoint(x: rect.minX, y: min(tip.y + half, rect.maxY - radius)))
+            path.line(to: tip)
+            path.line(to: NSPoint(x: rect.minX, y: max(tip.y - half, rect.minY + radius)))
+        }
+        path.line(to: NSPoint(x: rect.minX, y: rect.minY + radius))
+        path.appendArc(
+            withCenter: NSPoint(x: rect.minX + radius, y: rect.minY + radius),
+            radius: radius, startAngle: 180, endAngle: 270
+        )
+        path.close()
+        return path
     }
 
     private static func supported(_ edge: NSRectEdge) -> Bool {
@@ -405,8 +509,10 @@ private final class ThemedPopoverHostController: NSViewController {
     }
 }
 
+/// Internal rather than private for the same reason `ThemedPopoverLayout` is: the border's
+/// continuity around the arrow is asserted on drawn pixels in `ThemedPresentationTests`.
 @MainActor
-private final class ThemedPopoverChromeView: NSView, ThemedComponent {
+final class ThemedPopoverChromeView: NSView, ThemedComponent {
     var placement: ThemedPopoverLayout.Placement? {
         didSet { needsLayout = true; needsDisplay = true }
     }
@@ -453,35 +559,18 @@ private final class ThemedPopoverChromeView: NSView, ThemedComponent {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let placement else { return }
-        let body = NSBezierPath(
-            roundedRect: placement.bodyFrame.insetBy(dx: 0.5, dy: 0.5),
-            xRadius: Design.Radius.panel,
-            yRadius: Design.Radius.panel
+        // One silhouette, filled once and stroked once — see `ThemedPopoverLayout.outline`.
+        let width = Design.Radius.border
+        let outline = ThemedPopoverLayout.outline(
+            for: placement,
+            cornerRadius: Design.Radius.panel,
+            strokeWidth: width
         )
-        let arrow = NSBezierPath()
-        arrow.move(to: placement.arrowTip)
-        arrow.line(to: placement.arrowBaseA)
-        arrow.line(to: placement.arrowBaseB)
-        arrow.close()
-
         Design.Surface.elevated.setFill()
-        body.fill()
-        arrow.fill()
-
+        outline.fill()
         Design.Surface.border.setStroke()
-        body.lineWidth = Design.Radius.border
-        body.stroke()
-        arrow.lineWidth = Design.Radius.border
-        arrow.stroke()
-
-        // The triangle's base lies inside the body. Repainting that seam produces one continuous
-        // surface rather than a border line cutting through the arrow.
-        let seam = NSBezierPath()
-        seam.move(to: placement.arrowBaseA)
-        seam.line(to: placement.arrowBaseB)
-        Design.Surface.elevated.setStroke()
-        seam.lineWidth = max(2, Design.Radius.border + 1)
-        seam.stroke()
+        outline.lineWidth = width
+        outline.stroke()
     }
 }
 

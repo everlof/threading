@@ -20,6 +20,8 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
     private let cliCardHost = NSView()
     private var probeSpinner: ThemedSpinner?
     private var cliResults: [AgentCLIProbe.Result]?
+    /// The accounts the rows were built from, so a toggle's tag maps back to its account.
+    private var shownAccounts: [AgentAccount] = []
     private let appEvents = AppEventObservations()
 
     override func loadView() {
@@ -55,8 +57,8 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
 
         let caption = NSTextField(
             wrappingLabelWithString: L10n.string(
-                "Threading found these agent logins on this Mac. Sessions can start on any of "
-                    + "them — name or disable them later in Settings ▸ Accounts."
+                "Threading found these agent logins on this Mac. Sessions can start on any "
+                    + "switched-on login. Name them later in Settings ▸ Accounts."
             )
         )
         caption.applyFont(.body)
@@ -104,26 +106,27 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
     private func rebuildAccountRows() {
         let accounts = AgentAccountDiscovery.allAccounts(for: .claude)
             + AgentAccountDiscovery.allAccounts(for: .codex)
+        shownAccounts = accounts
 
         let rows: [NSView]
         if accounts.isEmpty {
             let empty = NSTextField(
                 wrappingLabelWithString: L10n.string(
                     "No agent logins found. Sign in to Claude Code or Codex from a terminal "
-                        + "first — Threading picks logins up from their config folders."
+                        + "first. Threading picks logins up from their config folders."
                 )
             )
             empty.applyFont(.body)
             empty.textColor = Design.Text.secondary
             rows = [SettingsUI.fullRow(empty)]
         } else {
-            rows = accounts.map { row(for: $0) }
+            rows = accounts.enumerated().map { row(for: $0.element, at: $0.offset) }
         }
 
         install(SettingsCard(rows: rows), in: accountsCardHost)
     }
 
-    private func row(for account: AgentAccount) -> NSView {
+    private func row(for account: AgentAccount, at index: Int) -> NSView {
         let icon = NSImageView()
         icon.image = account.provider.icon
         icon.imageScaling = .scaleProportionallyDown
@@ -153,13 +156,47 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = Design.Spacing.hairline
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let content = NSStackView(views: [icon, labels])
+        // The same switch the Accounts settings page carries, so a login the user does not
+        // want offered never has to be visited later: off here is off there.
+        let enabled = SettingsUI.toggle(
+            isOn: account.isEnabled,
+            target: self,
+            action: #selector(accountEnabledChanged(_:))
+        )
+        enabled.tag = index
+        enabled.toolTip = AccountsPreferencesStrings.enabledTooltip
+        enabled.setAccessibilityLabel(
+            AccountsPreferencesStrings.enabledLabel(account.displayName)
+        )
+
+        // A switched-off login stays listed and goes quiet; the switch that brings it back
+        // keeps full ink — the Accounts settings page's rule.
+        let dimmed = account.isEnabled ? 1 : AccountsPreferencesLayout.disabledRowAlpha
+        icon.alphaValue = dimmed
+        labels.alphaValue = dimmed
+
+        let content = NSStackView(views: [icon, labels, enabled])
         content.orientation = .horizontal
         content.alignment = .centerY
         content.spacing = Design.Spacing.small
+        // `.gravityAreas` leaves the row's slack unassigned; `.fill` hands it to the label
+        // column, which is what keeps the switch on the trailing edge of every row.
+        content.distribution = .fill
 
         return SettingsUI.fullRow(content)
+    }
+
+    @objc private func accountEnabledChanged(_ sender: ThemedToggle) {
+        guard sender.tag >= 0, sender.tag < shownAccounts.count else { return }
+        let account = shownAccounts[sender.tag]
+
+        AccountPreferencesStore.shared.setEnabled(sender.state == .on, for: account.id)
+        rebuildAccountRows()
+        // The sidebar and composer draw from the accounts a provider offers — same signal the
+        // Accounts settings page sends.
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 
     // MARK: - CLI health
@@ -167,6 +204,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
     private func rebuildCLIRows() {
         guard let results = cliResults else {
             let spinner = ThemedSpinner()
+            spinner.isAnimating = true
             probeSpinner = spinner
             let checking = NSTextField(
                 labelWithString: L10n.string("Checking your shell's PATH…")
@@ -199,7 +237,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         } else {
             detail = NSTextField(
                 wrappingLabelWithString: L10n.format(
-                    "Not on your shell's PATH — sessions cannot launch until it is. Install: %@",
+                    "Not on your shell's PATH, so sessions cannot launch. Install: %@",
                     OnboardingCLIDefaults.installCommand(for: result.executable)
                 )
             )
@@ -227,6 +265,9 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         content.orientation = .horizontal
         content.alignment = .centerY
         content.spacing = Design.Spacing.medium
+        // `.fill` gives the row's slack to the low-hugging label column, so the status reads
+        // as a trailing-aligned column rather than trailing each row's own text.
+        content.distribution = .fill
 
         return SettingsUI.fullRow(content)
     }

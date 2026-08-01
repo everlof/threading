@@ -76,6 +76,15 @@ composer. The PTY begins when the terminal is first shown, is retained by
 After a normal exit the row remains dormant and **Start Again** creates a fresh shell in its
 last recorded directory. The record survives relaunch; process state and scrollback do not.
 
+`TerminalSession` therefore carries a `TerminalInstanceIdentity`, not a conveniently converted
+`SessionID`. Agent PTYs, a conversation's drawer shell, standalone project terminals and
+fixture/ephemeral terminals are separate enum cases. History filenames derive from that typed
+identity (`<session UUID>`, `shell-<session UUID>`, `terminal-<terminal UUID>`, or an ephemeral prefix),
+and cleanup compares those stems rather than UUIDs from one model domain. The two legacy bare-UUID
+forms are disambiguated by migrating known project-terminal files before cleanup; new domains
+are explicitly namespaced so a coincident UUID cannot make one terminal inherit or preserve
+another's history.
+
 `ProjectTerminalViewController` accepts OSC 7 working-directory reports and also samples the
 shell process directory, because not every shell emits OSC 7. The cwd decides sidebar
 placement: among already-added projects in the same git worktree, the deepest project folder
@@ -245,7 +254,12 @@ the conversation. `SessionNaming` holds the rules; three names remain, resolved 
    reported it: the terminal title while a PTY is attached, or the transcript's title records
    read when the session stops working — which is what names a *native* session and what
    survives a surface switch. Retained after the agent exits. (Stored under the old
-   `terminalTitle` key, so existing records decode unchanged.)
+   `terminalTitle` key, so existing records decode unchanged.) The slot carries a source
+   (`AgentTitleSource`, persisted beside it): a name *chosen* through `set_session_name`
+   is not displaced by what a transport merely *reports* — the terminal title re-asserts
+   the CLI's old `ai-title` within seconds and the turn-end read re-reads the same record,
+   and both used to put the old name straight back over a rename the user had just asked
+   for. Only another chosen name moves a chosen name.
 3. `title` — derived from the **first prompt** (first line, capped): set at creation when the
    composer has the prompt, or by the first `UserPromptSubmit` hook report for a prompt typed
    straight into the terminal. Empty until then; the display falls back to "New Session".
@@ -294,7 +308,11 @@ into the transcript as a user turn: an instruction sent to an agent invisibly is
 cannot see, correct, or account for when the reply arrives, and this one spends their usage.
 Native sessions take it over the stream; a terminal has no send-or-refuse, so the text is typed
 into the PTY and a carriage return submits it — `\r`, not `\n`, which several TUI composers
-insert as a line break and send nothing.
+insert as a line break and send nothing. The return goes in its **own write, a beat later**
+(`SessionRenameRequest.submitDelay`): input arriving in one chunk is precisely what a TUI's
+paste heuristic detects, so a return bundled with the text is "pasted content" — Claude Code
+inserted it as a line break and the request sat unsent in its composer until the user pressed
+Return themselves. Sent separately it is a keypress again.
 
 **`launchName` is nil unless the user renamed the session**, and the `--name` flag is only
 passed then. This is load-bearing: `--name` marks the conversation custom-titled in the CLI,

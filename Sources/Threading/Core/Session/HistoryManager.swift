@@ -25,11 +25,44 @@ enum HistoryManager {
         return threadingDir.appendingPathComponent(historyDirectoryName, isDirectory: true)
     }
 
-    /// Returns the history file path for a given session identifier.
-    static func historyFilePath(for sessionID: SessionID) -> URL {
+    /// Returns the history file path for a typed terminal owner.
+    static func historyFilePath(for identity: TerminalInstanceIdentity) -> URL {
         return historyDirectory
-            .appendingPathComponent(sessionID.uuidString)
+            .appendingPathComponent(identity.historyFileStem)
             .appendingPathExtension(historyFileExtension)
+    }
+
+    /// Standalone terminals historically borrowed the bare UUID filename used by agent
+    /// sessions. Move that file into the terminal namespace before either cleanup or launch.
+    /// A matching active agent wins the ambiguous legacy filename; there is no honest way to
+    /// tell which owner wrote old bytes when the two UUID domains happen to coincide.
+    private static func migrateLegacyProjectHistory(
+        for identity: TerminalInstanceIdentity,
+        preservingAgentStems: Set<String>
+    ) {
+        guard case .projectTerminal(let terminalID) = identity,
+              !preservingAgentStems.contains(terminalID.uuidString) else { return }
+
+        let legacy = historyDirectory
+            .appendingPathComponent(terminalID.uuidString)
+            .appendingPathExtension(historyFileExtension)
+        let destination = historyFilePath(for: identity)
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: legacy.path),
+              !fileManager.fileExists(atPath: destination.path) else { return }
+
+        do {
+            try fileManager.moveItem(at: legacy, to: destination)
+        } catch {
+            ThreadingLogger.session.error(
+                "Failed to migrate project terminal history: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    static func prepareHistoryFile(for identity: TerminalInstanceIdentity) {
+        ensureHistoryDirectoryExists()
+        migrateLegacyProjectHistory(for: identity, preservingAgentStems: [])
     }
 
     // MARK: - Directory Management
@@ -52,27 +85,36 @@ enum HistoryManager {
 
     /// Removes history files for sessions that no longer exist.
     ///
-    /// Call this on app launch with the set of active session identifiers.
-    static func cleanupOrphanedHistoryFiles(activeSessionIDs: Set<SessionID>) {
+    /// Call this on app launch with every terminal identity whose history should survive.
+    static func cleanupOrphanedHistoryFiles(
+        activeIdentities: Set<TerminalInstanceIdentity>
+    ) {
         let fileManager = FileManager.default
         let directory = historyDirectory
 
         guard fileManager.fileExists(atPath: directory.path) else { return }
 
         do {
-            let historyFiles = try fileManager.contentsOfDirectory(
+            let agentStems = Set(activeIdentities.compactMap { identity -> String? in
+                guard case .agentSession = identity else { return nil }
+                return identity.historyFileStem
+            })
+            for identity in activeIdentities {
+                migrateLegacyProjectHistory(for: identity, preservingAgentStems: agentStems)
+            }
+
+            let activeStems = Set(activeIdentities.map(\.historyFileStem))
+            let migratedHistoryFiles = try fileManager.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: nil
             )
-
-            for fileURL in historyFiles {
-                // Extract UUID from filename (e.g., "ABC123.history" -> "ABC123")
+            for fileURL in migratedHistoryFiles {
                 let filename = fileURL.deletingPathExtension().lastPathComponent
-
-                if let fileSessionID = SessionID(uuidString: filename) {
-                    if !activeSessionIDs.contains(fileSessionID) {
-                        try fileManager.removeItem(at: fileURL)
-                    }
+                guard TerminalInstanceIdentity.recognizesHistoryFileStem(filename) else {
+                    continue
+                }
+                if !activeStems.contains(filename) {
+                    try fileManager.removeItem(at: fileURL)
                 }
             }
         } catch {
@@ -81,11 +123,18 @@ enum HistoryManager {
     }
 
     /// Removes the history file for a specific session.
-    static func removeHistoryFile(for sessionID: SessionID) {
+    static func removeHistoryFile(for identity: TerminalInstanceIdentity) {
         let fileManager = FileManager.default
-        let filePath = historyFilePath(for: sessionID)
+        var filePaths = [historyFilePath(for: identity)]
+        if case .projectTerminal(let terminalID) = identity {
+            filePaths.append(
+                historyDirectory
+                    .appendingPathComponent(terminalID.uuidString)
+                    .appendingPathExtension(historyFileExtension)
+            )
+        }
 
-        if fileManager.fileExists(atPath: filePath.path) {
+        for filePath in filePaths where fileManager.fileExists(atPath: filePath.path) {
             do {
                 try fileManager.removeItem(at: filePath)
             } catch {

@@ -353,6 +353,71 @@ final class ExtensionRendererTests: XCTestCase {
         wait(for: [failedBack], timeout: 1)
     }
 
+    func testVirtualizedNavigatorRowRenderFailureIsEscalatedInsteadOfInstallingPlaceholder()
+        throws
+    {
+        enum FixtureError: Error { case render }
+        var failures = 0
+        let controller = WorkspaceNavigatorCollectionViewController(
+            collection: .init(
+                id: "broken-list",
+                layout: .list,
+                items: [.init(
+                    id: "broken-row",
+                    content: .text("Never shown", role: .body)
+                )]
+            ),
+            restoredState: nil,
+            renderContent: { _ in throw FixtureError.render },
+            onActivation: { _, _ in },
+            onRenderFailure: { _ in failures += 1 }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let outline = try XCTUnwrap(
+            descendants(in: controller.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+        XCTAssertNil(outline.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        XCTAssertGreaterThanOrEqual(failures, 1)
+        XCTAssertFalse(descendants(in: controller.view).contains {
+            ($0 as? NSTextField)?.stringValue == "Unable to render navigator item"
+        })
+    }
+
+    func testVirtualizedNavigatorGridRenderFailureIsEscalatedWithoutABlankCell() throws {
+        enum FixtureError: Error { case render }
+        var failures = 0
+        let controller = WorkspaceNavigatorCollectionViewController(
+            collection: .init(
+                id: "broken-grid",
+                layout: .grid(columns: 2),
+                items: [.init(
+                    id: "broken-cell",
+                    content: .text("Never shown", role: .body),
+                    accessibilityLabel: "Broken cell"
+                )]
+            ),
+            restoredState: nil,
+            renderContent: { _ in throw FixtureError.render },
+            onActivation: { _, _ in },
+            onRenderFailure: { _ in failures += 1 }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let table = try XCTUnwrap(
+            descendants(in: controller.view).compactMap { $0 as? ThemedTableView }.first
+        )
+        XCTAssertNil(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        XCTAssertGreaterThanOrEqual(failures, 1)
+        XCTAssertFalse(descendants(in: controller.view).contains {
+            $0 is NavigatorGridItemView
+        })
+    }
+
     func testInvalidWorkspaceNavigatorRuntimeResponseFailsClosed() throws {
         let navigator = ExtensionWorkspaceNavigator(
             id: "activity",
@@ -3870,10 +3935,9 @@ final class ExtensionRendererTests: XCTestCase {
       }
     }
 
-    XCTAssertEqual(
-      filesWithRawConstruction,
-      ["UI/Extensions/HostPopoverCatalog.swift"]
-    )
+    // Empty since the factory moved onto the app-owned ThemedPopover: nothing in the app
+    // may build a stock NSPopover at all, the catalogue included.
+    XCTAssertEqual(filesWithRawConstruction, [])
   }
 
   func testComposerAccessoryHooksPreserveNativeInputsAndRouteActions() throws {
@@ -4018,6 +4082,86 @@ final class ExtensionRendererTests: XCTestCase {
     )
   }
 
+  func testConversationRowsStayNativeUntilCustomizationAppears() throws {
+    let registry = ComponentCustomizationRegistry()
+    try registry.register(HostComponentContracts.conversationUserMessage)
+
+    let session = AgentSession(kind: .codex, title: "Late custom row")
+    let project = Project(
+      name: "Late custom row",
+      folderURL: URL(fileURLWithPath: "/tmp/LateCustomRow")
+    )
+    let sessionID = session.id.uuidString.lowercased()
+    let controller = ConversationViewController(
+      agentSession: session,
+      project: project,
+      customizationLookup: registry.customization(for:)
+    )
+    _ = controller.view
+    controller.view.frame = NSRect(x: 0, y: 0, width: 720, height: 800)
+    for change in controller.timeline.apply(.userMessage("Native until patched")) {
+      controller.apply(change)
+    }
+    controller.view.layoutSubtreeIfNeeded()
+    _ = controller.tableView.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
+    XCTAssertFalse(
+      descendants(in: controller.view).contains { $0 is ConversationRowCustomizationView },
+      "an empty extension resolution should not wrap the native row"
+    )
+
+    let source = ComponentCustomizationSource(
+      extensionIdentifier: "com.example.late-conversation-row",
+      processGeneration: "one",
+      order: 0
+    )
+    try registry.replacePatches(
+      [
+        .init(
+          id: "late-user-note",
+          target: .conversationUserMessage(sessionID: sessionID),
+          hook: .stack(
+            axis: .vertical,
+            spacing: .small,
+            children: [.proceed, .status("Attached later", role: .positive)]
+          )
+        ),
+      ],
+      from: source
+    )
+    controller.view.layoutSubtreeIfNeeded()
+    XCTAssertFalse(
+      registry.customization(for: .conversationUserMessage(sessionID: sessionID)).isEmpty
+    )
+    _ = controller.tableView.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
+    let wrapper = try XCTUnwrap(
+      descendants(in: controller.view)
+        .compactMap { $0 as? ConversationRowCustomizationView }
+        .first
+    )
+    XCTAssertTrue(
+      descendants(in: wrapper.nativeContent)
+        .compactMap { ($0 as? NSTextField)?.stringValue }
+        .contains("Native until patched")
+    )
+    XCTAssertTrue(
+      descendants(in: wrapper)
+        .compactMap { ($0 as? NSTextField)?.stringValue }
+        .contains("Attached later")
+    )
+
+    registry.removePatches(
+      extensionIdentifier: source.extensionIdentifier,
+      processGeneration: source.processGeneration
+    )
+    controller.view.layoutSubtreeIfNeeded()
+    _ = controller.tableView.view(atColumn: 0, row: 0, makeIfNecessary: true)
+    XCTAssertFalse(
+      descendants(in: controller.view).contains { $0 is ConversationRowCustomizationView }
+    )
+  }
+
   func testConversationRowHooksRetainNativeStateAndPermissionAuthority() throws {
     let registry = ComponentCustomizationRegistry()
     for contract in [
@@ -4108,6 +4252,7 @@ final class ExtensionRendererTests: XCTestCase {
     controller.onCustomizationAction = { actions.append($0) }
     controller.isVisible = true
     _ = controller.view
+    controller.view.frame = NSRect(x: 0, y: 0, width: 720, height: 800)
 
     for event in [
       StreamEvent.userMessage("Keep this exact user message"),
@@ -4134,6 +4279,11 @@ final class ExtensionRendererTests: XCTestCase {
       )
     ) {
       permissionDecision = $0
+    }
+
+    controller.view.layoutSubtreeIfNeeded()
+    for row in 0..<controller.tableView.numberOfRows {
+      _ = controller.tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
     }
 
     let wrappers = descendants(in: controller.view).compactMap {
@@ -4185,6 +4335,8 @@ final class ExtensionRendererTests: XCTestCase {
     {
       controller.apply(change)
     }
+    let nativeTool = try XCTUnwrap(tool.nativeContent as? ToolCallView)
+    nativeTool.setExpanded(true)
     XCTAssertTrue(
       descendants(in: tool.nativeContent)
         .compactMap { ($0 as? NSTextField)?.stringValue }

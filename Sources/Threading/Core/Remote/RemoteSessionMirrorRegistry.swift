@@ -295,8 +295,8 @@ final class RemoteSessionMirrorRegistry {
         let message = encode(event)
         var count = 0
         for connection in themeEventSubscribers.values {
-            guard let authorization = connection.authorization,
-                  predicate(authorization, connection.deviceID) else { continue }
+            guard let peer = connection.authenticatedPeer,
+                  predicate(peer.authorization, peer.deviceID) else { continue }
             connection.sendText(message)
             count += 1
         }
@@ -408,7 +408,7 @@ final class RemoteSessionMirrorRegistry {
         for connection: RemoteConnection,
         sessionID: SessionID
     ) {
-        guard let authorization = connection.authorization,
+        guard let peer = connection.authenticatedPeer,
               mirrors[sessionID]?.surface == "conversation",
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let conversation = AgentRuntime.shared.conversation(for: sessionID) else {
@@ -421,7 +421,7 @@ final class RemoteSessionMirrorRegistry {
         let revision = mirrors[sessionID]?.conversationRevision ?? 0
         connection.sendText(encode(RemoteConversationWirePolicy.authorized(
             RemoteConversationWirePolicy.initial(current, revision: revision),
-            for: authorization
+            for: peer.authorization
         )))
     }
 
@@ -526,7 +526,7 @@ final class RemoteSessionMirrorRegistry {
         cols: Int,
         rows: Int
     ) {
-        guard connection.authorization?.capability == .interact,
+        guard connection.authenticatedPeer?.authorization.capability == .interact,
               (20...240).contains(cols),
               (4...160).contains(rows),
               mirrors[sessionID]?.surface == "terminal",
@@ -569,7 +569,7 @@ final class RemoteSessionMirrorRegistry {
     ) {
         guard state == "typing" || state == "idle",
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
-              connection.authorization?.capability == .interact else {
+              connection.authenticatedPeer?.authorization.capability == .interact else {
             return
         }
         broadcastPresence(state, from: connection, sessionID: sessionID)
@@ -613,7 +613,7 @@ final class RemoteSessionMirrorRegistry {
         mirrors[sessionID] = mirror
 
         for connection in mirror.subscribers.values {
-            guard let authorization = connection.authorization else { continue }
+            guard let authorization = connection.authenticatedPeer?.authorization else { continue }
             if let delta {
                 connection.sendText(encode(RemoteConversationWirePolicy.authorized(
                     delta,
@@ -695,8 +695,8 @@ final class RemoteSessionMirrorRegistry {
         guard let mirror = mirrors[sessionID] else { return }
         let message = encode(event)
         for connection in mirror.subscribers.values {
-            guard let authorization = connection.authorization,
-                  canManageSessions(authorization) else { continue }
+            guard let peer = connection.authenticatedPeer,
+                  canManageSessions(peer.authorization) else { continue }
             connection.sendText(message)
         }
     }
@@ -719,7 +719,7 @@ final class RemoteSessionMirrorRegistry {
         /// Stable for the life of the socket; a reconnect is a different follower.
         let id: ObjectIdentifier
         /// The member's own name for a guest; nil for one of the owner's paired devices, which
-        /// carry the pairing token and have never been asked for one.
+        /// carry an owner credential and have never been asked for a guest member name.
         let memberName: String?
         let memberID: String?
         /// What the device calls itself, when it said. Never an identity — see
@@ -757,15 +757,16 @@ final class RemoteSessionMirrorRegistry {
         guard let mirror = mirrors[sessionID] else { return [] }
         let typing = typingConnections[sessionID] ?? []
         return mirror.subscribers.map { key, connection in
-            let authorization = connection.authorization
+            let peer = connection.authenticatedPeer
+            let authorization = peer?.authorization
             let request = mirror.viewportRequests[key]
             return Follower(
                 id: key,
                 memberName: authorization?.member?.displayName,
                 memberID: authorization?.member?.id,
-                deviceName: connection.deviceName,
+                deviceName: peer?.deviceName,
                 deviceLabel: MacRemoteDiagnostics.pseudonym(
-                    connection.deviceID ?? "unknown",
+                    peer?.deviceID ?? "unknown",
                     prefix: "device"
                 ),
                 isOwnerDevice: authorization?.principal == .ownerDevice,
@@ -773,7 +774,7 @@ final class RemoteSessionMirrorRegistry {
                 canApprovePermissions: authorization?.canApprovePermissions ?? false,
                 surface: mirror.surface,
                 viewport: request.map { (cols: $0.cols, rows: $0.rows) },
-                watchingSince: connection.authenticatedAt,
+                watchingSince: peer?.authenticatedAt,
                 isTyping: typing.contains(key)
             )
         }
@@ -912,8 +913,9 @@ final class RemoteSessionMirrorRegistry {
         from connection: RemoteConnection,
         sessionID: SessionID
     ) {
-        guard let authorization = connection.authorization,
+        guard let peer = connection.authenticatedPeer,
               let mirror = mirrors[sessionID] else { return }
+        let authorization = peer.authorization
 
         // The Mac watches this as well as relaying it. A guest composing a reply is the one
         // piece of live state the sharing pane can show that a list of names cannot.
@@ -927,7 +929,7 @@ final class RemoteSessionMirrorRegistry {
         if wasTyping != (state == "typing") { followersChanged(sessionID) }
 
         let memberID = authorization.member?.id
-            ?? "owner:\(connection.deviceID ?? "device")"
+            ?? "owner:\(peer.deviceID ?? "device")"
         let displayName = authorization.member?.displayName ?? "Owner"
         let message = encode(RemotePresenceDTO(
             memberID: memberID,
@@ -944,8 +946,8 @@ final class RemoteSessionMirrorRegistry {
         to connection: RemoteConnection,
         sessionID: SessionID
     ) {
-        guard let authorization = connection.authorization,
-              canManageSessions(authorization),
+        guard let peer = connection.authenticatedPeer,
+              canManageSessions(peer.authorization),
               let event = latestWorkspaceActivity[sessionID] else {
             return
         }

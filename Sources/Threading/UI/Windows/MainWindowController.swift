@@ -327,6 +327,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // controls now that they exist too, especially the surface button whose glyph depends
         // on the restored session and which must disappear when there is no session.
         updateToolbarControlStates()
+        splitViewController.sidebarCollapseStateDidChange = { [weak self] _ in
+            self?.updatePaneToggleSelection()
+        }
         splitViewController.sidebarTransitionDidComplete = { [weak self] isCollapsed in
             self?.updateHeaderInset(sidebarIsCollapsed: isCollapsed)
             if !isCollapsed {

@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 
 /// A button drawn from the theme, replacing `NSButton`.
 ///
@@ -465,7 +466,12 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             x += Layout.imageSize + gap
         }
 
-        let height = ceil(titleFont.boundingRectForFont.height)
+        // Centred on the *line box* (ascender to descender), not `boundingRectForFont`: that
+        // rect adds the font's glyph extremes, and `draw(in:)` top-aligns its line in whatever
+        // rect it is given. Under SF the two heights all but coincide, so this looked right —
+        // under a serif theme family the bounding rect runs several points taller and every
+        // title quietly sat that much above centre.
+        let height = lineHeight(of: titleFont)
 
         if !title.isEmpty {
             // Drawn into whatever is left rather than into the measured width, so a squeezed
@@ -490,15 +496,41 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         }
 
         guard shortcutWidth > 0 else { return }
+        let shortcutHeight = lineHeight(of: shortcutFont)
         (shortcutText as NSString).draw(
             in: NSRect(
                 x: x,
-                y: content.midY - ceil(shortcutFont.boundingRectForFont.height) / 2,
+                y: content.midY - shortcutHeight / 2 + shortcutOpticalDrop,
                 width: max(0, content.maxX - x),
-                height: ceil(shortcutFont.boundingRectForFont.height)
+                height: shortcutHeight
             ),
             withAttributes: shortcutAttributes
         )
+    }
+
+    /// The height `draw(in:)` actually lays a single line out at, so a rect made from it
+    /// centres the text instead of top-aligning it in slack the font's extremes reserved.
+    private func lineHeight(of font: NSFont) -> CGFloat {
+        ceil(font.ascender - font.descender + font.leading)
+    }
+
+    /// How far below the line-box centre this chord's *ink* wants to sit.
+    ///
+    /// A chord is symbols, not prose: `↩` carries no descender and its arrow rides near the cap
+    /// line, so on the line box's centre it floats visibly high beside the title — the higher
+    /// the quieter the theme's font, since the glyph comes from a fallback face either way.
+    /// Measuring the drawn line's path bounds centres what is actually inked; for a lettered
+    /// chord like `⌘K` the correction is a fraction of a point, so nothing else moves.
+    private var shortcutOpticalDrop: CGFloat {
+        let text = shortcutText
+        guard !text.isEmpty else { return 0 }
+        let line = CTLineCreateWithAttributedString(
+            NSAttributedString(string: text, attributes: [.font: shortcutFont])
+        )
+        let ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        guard !ink.isNull, ink.height > 0 else { return 0 }
+        let lineBoxCentre = (shortcutFont.ascender + shortcutFont.descender) / 2
+        return ink.midY - lineBoxCentre
     }
 
     /// The hint's ink: the title's colour, stepped back rather than replaced — see

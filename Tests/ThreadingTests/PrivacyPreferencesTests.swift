@@ -523,8 +523,9 @@ final class PrivacyPreferencesTests: XCTestCase {
     private func keychainPage(
         enabled: Bool = false,
         accounts: [AgentAccount] = [],
-        availability: @escaping (String) -> ClaudeKeychainCredentials.Availability = { _ in .missing },
-        grant: @escaping (String) -> Bool = { _ in
+        availability:
+            @escaping @Sendable (String) -> ClaudeKeychainCredentials.Availability = { _ in .missing },
+        grant: @escaping @Sendable (String) -> Bool = { _ in
             XCTFail("nothing here may request keychain access")
             return false
         },

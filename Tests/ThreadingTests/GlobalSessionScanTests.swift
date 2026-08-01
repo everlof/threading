@@ -97,6 +97,75 @@ final class GlobalSessionScanTests: XCTestCase {
         XCTAssertEqual(result.missingFolderConversations, 1)
     }
 
+    func testUnreadableClaudeAccountIsReportedInsteadOfBecomingAnEmptyScan() {
+        let account = AgentAccount(
+            provider: .claude,
+            handle: .named("work"),
+            configPath: "/accounts/work"
+        )
+        let discovery = GlobalSessionScan.claudeConversations(
+            accounts: [account],
+            directoryContents: { _, _, _ in
+                throw CocoaError(.fileReadNoPermission)
+            }
+        )
+
+        XCTAssertTrue(discovery.conversations.isEmpty)
+        XCTAssertEqual(discovery.failures.count, 1)
+        XCTAssertEqual(discovery.failures.first?.accountID, account.id)
+        XCTAssertEqual(
+            discovery.failures.first?.path,
+            "/accounts/work/\(AgentDefaults.claudeProjectsSubdirectory)"
+        )
+
+        let result = GlobalSessionScan.grouped(
+            discovery.conversations,
+            knownTranscriptIDs: [],
+            rootResolver: { _ in nil },
+            folderExists: { _ in true },
+            failures: discovery.failures,
+            additionalFailureCount: discovery.additionalFailureCount
+        )
+        XCTAssertEqual(result.totalFailureCount, 1)
+        XCTAssertTrue(result.groups.isEmpty)
+    }
+
+    func testFailureDetailsHaveAnInputBudget() {
+        let failures = (0..<(GlobalSessionScan.maximumReportedFailures + 5)).map { index in
+            GlobalScanFailure(
+                accountID: AccountID(provider: .codex, handle: .standard),
+                path: "/unreadable/\(index)",
+                reason: "denied"
+            )
+        }
+        let result = GlobalScanResult(
+            groups: [],
+            missingFolderConversations: 0,
+            failures: failures
+        )
+
+        XCTAssertEqual(result.failures.count, GlobalSessionScan.maximumReportedFailures)
+        XCTAssertEqual(result.additionalFailureCount, 5)
+        XCTAssertEqual(result.totalFailureCount, failures.count)
+    }
+
+    func testAnAccountThatHasNeverCreatedItsConversationDirectoryIsSimplyEmpty() {
+        let account = AgentAccount(
+            provider: .claude,
+            handle: .standard,
+            configPath: "/accounts/fresh"
+        )
+        let discovery = GlobalSessionScan.claudeConversations(
+            accounts: [account],
+            directoryContents: { _, _, _ in
+                throw CocoaError(.fileReadNoSuchFile)
+            }
+        )
+
+        XCTAssertTrue(discovery.conversations.isEmpty)
+        XCTAssertTrue(discovery.failures.isEmpty)
+    }
+
     // MARK: - Worktree identity
 
     /// A chat in a nested worktree must group to *that* worktree, not the enclosing repo —

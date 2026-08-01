@@ -69,7 +69,13 @@ swatches is a measured fit, not a preference (four of 128 clipped the first row)
 else does: `AgentCLIProbe` resolves `claude`/`codex` against the same login shell
 `AgentLauncher` uses (`command -v`, the `ExternalAppLauncher.locate` shape), so the probe and
 the launch cannot disagree about PATH. A missing CLI is a sentence and an install command
-here, instead of `command not found` inside the first session's terminal.
+here, instead of `command not found` inside the first session's terminal. Each login also
+carries the Accounts settings page's enable switch (`AccountPreferencesStore.setEnabled`,
+same dimming, same `ProjectsDidChange` signal), so an unwanted login is dealt with where it
+is first seen rather than remembered for later. The probe's "Found" answer is per-shell
+truth: a machine with several installs (a native `~/.local/bin/claude` beside a stale
+`/usr/local/bin` npm one) shows whichever the *login shell* resolves, because that is the one
+a session will actually run.
 
 **Conversations** runs `GlobalSessionScan` — `SessionImporter`'s direction inverted. The
 project-scoped importer answers "what ran in this folder"; onboarding has no folders yet, so
@@ -79,14 +85,25 @@ without one is skipped (the slug directory is a lossy `/`→`-` encoding). Group
 each cwd to its **worktree root** (`GitInfo.repositoryRoot`, memoized cwd→root — the
 `TranscriptUsageService` lesson), so a chat in a subdirectory lands with its checkout and a
 chat in a nested worktree lands with *that* worktree. Conversations whose folder no longer
-exists are counted and said, not silently dropped. The last 48 hours
+exists are counted and said, not silently dropped. The list itself is **flat, newest first
+across every folder** — the grouping is import bookkeeping, not something the user triages
+by, so folder header rows (tried first) were dropped: a wall of checkout paths asked the
+user to reason about projects before they had any. The last 48 hours
 (`GlobalSessionScan.precheckWindow`) start checked; Continue creates/reuses a project per
 group (`addProject` dedups by path) and adopts the checked conversations through
 `ProjectStore.importSessions` — the batch exists because the single `importSession` saves and
 notifies per call, and a heavy user's import would stutter through hundreds of sidebar
-reloads. Adopted sessions are `.resumable` with their account handle, so resume routes
+reloads. Because the accounts page sits before this one and can now switch logins off, the
+scan result is cached against the *enabled-account set* that produced it; coming forward
+after a toggle rescans (generation-guarded) instead of showing a list a disabled login fed. Adopted sessions are `.resumable` with their account handle, so resume routes
 `--resume`/`codex resume` through the right `CLAUDE_CONFIG_DIR`/`CODEX_HOME` exactly as
 composer-imported ones always have.
+
+Discovery is fail-closed about completeness. Enumeration failures are carried in
+`GlobalScanResult` as a bounded list plus an omitted count, and the page labels the result
+incomplete before offering any empty/fresh-account conclusion. Successful conversations remain
+selectable — one unreadable account does not discard the others — but a permissions or I/O
+failure can never be interpreted as proof that no conversations exist.
 
 **Notifications** shows the three `AttentionAlert` kinds as rows whose toggles are **disabled
 until macOS grants permission** — visible so it is clear what could be configured, inert so

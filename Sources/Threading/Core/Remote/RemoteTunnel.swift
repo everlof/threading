@@ -4,17 +4,12 @@ import Foundation
 ///
 /// The origin remains loopback-only. `cloudflared` makes an outbound connection and publishes
 /// only the dedicated remote-access server; MCP, extension hosting, and every other listener
-/// stay unreachable. Quick Tunnels deliberately match the launch-scoped share token: both URL
-/// and capability disappear with this process.
+/// stay unreachable. Quick Tunnels remain launch-scoped: public guest shares disappear with this
+/// process, while a durable owner credential needs a stable relay origin before it can reconnect.
 @MainActor
-final class RemoteTunnel {
+final class RemoteTunnel: RemoteAccessTransport {
 
-    enum State: Equatable, Sendable {
-        case stopped
-        case starting
-        case connected(URL)
-        case unavailable(String)
-    }
+    typealias State = RemoteTransportState
 
     private(set) var state: State = .stopped
     private var process: Process?

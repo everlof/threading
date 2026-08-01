@@ -88,19 +88,24 @@ final class ImageCompareRenderTests: XCTestCase {
     // MARK: - Theming
 
     /// The seam is the control, so it wears the theme's accent — sampled by hue the way the
-    /// toggle's track is, since exact bytes drift with anti-aliasing. The seam spans the full
-    /// canvas height, which is what makes the sample immune to the bitmap's vertical origin.
+    /// toggle's track is, since exact bytes drift with anti-aliasing. The sample point comes
+    /// from the canvas's own layout: at fraction ½ the seam is the picture's vertical midline,
+    /// and a few points below the picture's top is on the seam but clear of both the caption
+    /// band above it and the handle at its centre.
     func testTheSeamTakesTheThemeAccentAndFollowsALiveSwitch() {
         let canvas = makeCanvas()
         canvas.mode = .wipeHorizontal
         canvas.fraction = 0.5
 
+        let picture = canvas.currentLayout.placement.canvasRect
+        let seam = (x: Int(picture.midX), y: Int(picture.minY) + 10)
+
         AppThemePalette.set(AppThemeStyles.cyberpunk)
-        let cyber = sample(bitmap(of: canvas), x: 200, y: 20)
+        let cyber = sample(bitmap(of: canvas), x: seam.x, y: seam.y)
 
         // The same instance redrawn — a frozen layer colour would survive this switch.
         AppThemePalette.set(AppThemeStyles.swissMinimalist)
-        let swiss = sample(bitmap(of: canvas), x: 200, y: 20)
+        let swiss = sample(bitmap(of: canvas), x: seam.x, y: seam.y)
 
         XCTAssertGreaterThan(cyber.greenComponent, cyber.redComponent, "Cyberpunk's seam is not green")
         XCTAssertGreaterThan(swiss.redComponent, swiss.greenComponent, "Swiss's seam is not red")
@@ -130,7 +135,7 @@ final class ImageCompareRenderTests: XCTestCase {
                     view.fraction = 0.6
 
                     let width: CGFloat = 480
-                    let host = NSView(frame: NSRect(
+                    let host = FilledHost(frame: NSRect(
                         x: 0, y: 0, width: width,
                         height: view.preferredHeight(forWidth: width)
                     ))
@@ -148,7 +153,72 @@ final class ImageCompareRenderTests: XCTestCase {
         print("Image compare renders: \(Render.directory.path)")
     }
 
+    /// The focused canvas, ring and all. The ring strokes the surface's own bounds, so this is
+    /// the one state where the captions' clearance from the edge can be judged — and no fixture
+    /// drew it, which is how the titles shipped sitting on the ring.
+    func testRendersTheFocusedCanvasLightAndDark() throws {
+        try FileManager.default.createDirectory(
+            at: Render.directory, withIntermediateDirectories: true
+        )
+
+        for (appearanceName, suffix) in [
+            (NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")
+        ] {
+            guard let appearance = NSAppearance(named: appearanceName) else { continue }
+            var data: Data?
+            var focused = false
+            appearance.performAsCurrentDrawingAppearance {
+                let canvas = ImageCompareCanvas(frame: .zero)
+                canvas.appearance = appearance
+                canvas.old = .init(image: Self.patternImage(base: .systemRed), title: "baseline.png")
+                canvas.new = .init(image: Self.patternImage(base: .systemBlue), title: "current.png")
+                canvas.mode = .wipeHorizontal
+                canvas.fraction = 0.6
+
+                let width: CGFloat = 480
+                let host = FilledHost(frame: NSRect(
+                    x: 0, y: 0, width: width,
+                    height: canvas.preferredCanvasHeight(forWidth: width)
+                ))
+                host.appearance = appearance
+                canvas.frame = host.bounds
+                host.addSubview(canvas)
+
+                // Built, never shown — an unshown window still takes a first responder, which
+                // is all the ring asks of it.
+                let window = NSWindow(
+                    contentRect: host.bounds,
+                    styleMask: [.titled],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.isReleasedWhenClosed = false
+                window.appearance = appearance
+                window.contentView = host
+                defer { window.close() }
+                focused = window.makeFirstResponder(canvas)
+
+                data = Self.png(of: host)
+            }
+            XCTAssertTrue(focused, "the canvas did not take focus, so no ring was drawn")
+            let url = Render.directory
+                .appendingPathComponent("image-compare-focused-\(suffix).png")
+            try XCTUnwrap(data, "no focused render for \(suffix)").write(to: url)
+        }
+        print("Image compare renders: \(Render.directory.path)")
+    }
+
     // MARK: - Helpers
+
+    /// Fills the window background behind the surface, the way a pane does. The canvas paints
+    /// no ground of its own, so a PNG of it alone puts dark mode's white ink on transparency —
+    /// legible in the app, invisible in the fixture.
+    private final class FilledHost: NSView {
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.windowBackgroundColor.setFill()
+            bounds.fill()
+        }
+    }
 
     /// 400×200 canvas holding a red 200×100 old and a blue 200×100 new: the union fits the
     /// bounds exactly at 2×, so the canvas is the whole view and sample points are plain.

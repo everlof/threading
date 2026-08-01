@@ -4,8 +4,11 @@
 #
 #   scripts/profile_threading.sh git-stress
 #   scripts/profile_threading.sh conversation-stress
+#   scripts/profile_threading.sh conversation-massive-stress
+#   scripts/profile_threading.sh conversation-active-turn-stress
 #   scripts/profile_threading.sh conversation-residency-stress
 #   scripts/profile_threading.sh sidebar-stress
+#   scripts/profile_threading.sh file-tree-stress
 #   scripts/profile_threading.sh sample [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh trace "Time Profiler" [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh full [seconds] [process-name-or-pid]
@@ -23,7 +26,7 @@ performance_directory="${THREADING_PROFILE_OUTPUT:-/tmp/threading-profiles}"
 built_in_directory="${HOME}/Library/Application Support/Threading/Performance"
 
 usage() {
-  sed -n '3,14p' "$0"
+  sed -n '3,16p' "$0"
 }
 
 resolve_pid() {
@@ -138,9 +141,14 @@ run_git_stress() {
 
 run_conversation_stress() {
   local output_directory="$1"
+  local scale="${2:-routine}"
+  local log_name="conversation-stress.log"
+  if [[ "${scale}" == "massive" ]]; then
+    log_name="conversation-massive-stress.log"
+  fi
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
   local derived_data="${output_directory}/derived-data"
-  echo "Running deterministic native-conversation sweep…"
+  echo "Running deterministic ${scale} native-conversation sweep…"
 
   (
     cd "${repository_directory}"
@@ -182,6 +190,15 @@ run_conversation_stress() {
       "prose:125"
       "tool-heavy:100"
     )
+    if [[ "${scale}" == "massive" ]]; then
+      workloads=(
+        "mixed:250"
+        "mixed:500"
+        "mixed:1000"
+        "prose:1000"
+        "tool-heavy:1000"
+      )
+    fi
     if [[ -n "${THREADING_CONVERSATION_STRESS_TURNS:-}" ]]; then
       workloads=(
         "${THREADING_CONVERSATION_STRESS_SHAPE:-mixed}:${THREADING_CONVERSATION_STRESS_TURNS}"
@@ -200,7 +217,73 @@ run_conversation_stress() {
           -XCTest ThreadingTests.ConversationRenderTests/testStressNativeConversationWhenEnabled \
           "${test_bundle}"
     done
-  ) 2>&1 | tee "${output_directory}/conversation-stress.log"
+  ) 2>&1 | tee "${output_directory}/${log_name}"
+}
+
+run_conversation_active_turn_stress() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  echo "Running deterministic unfolded active-turn sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    local workloads=(
+      "100:25"
+      "100:100"
+      "100:500"
+      "1000:500"
+    )
+    if [[ -n "${THREADING_CONVERSATION_ACTIVE_TOOLS:-}" \
+       || -n "${THREADING_CONVERSATION_ACTIVE_BASE_TURNS:-}" ]]; then
+      workloads=(
+        "${THREADING_CONVERSATION_ACTIVE_BASE_TURNS:-100}:${THREADING_CONVERSATION_ACTIVE_TOOLS:-100}"
+      )
+    fi
+    local workload base_turns tool_count
+    for workload in "${workloads[@]}"; do
+      base_turns="${workload%%:*}"
+      tool_count="${workload##*:}"
+      THREADING_CONVERSATION_ACTIVE_STRESS=1 \
+      THREADING_CONVERSATION_ACTIVE_BASE_TURNS="${base_turns}" \
+      THREADING_CONVERSATION_ACTIVE_TOOLS="${tool_count}" \
+      DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.ConversationRenderTests/testStressActiveConversationTurnWhenEnabled \
+          "${test_bundle}"
+    done
+  ) 2>&1 | tee "${output_directory}/conversation-active-turn-stress.log"
 }
 
 run_conversation_residency_stress() {
@@ -342,6 +425,94 @@ run_sidebar_stress() {
   ) 2>&1 | tee "${output_directory}/project-sidebar-stress.log"
 }
 
+run_file_tree_stress() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  echo "Running deterministic file-tree sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    # Each point gets a new process. The fixture is made before its timer starts, and the fresh
+    # process keeps AppKit/LaunchServices caches and allocator high-water marks comparable.
+    local workloads=(
+      "system:flat:100"
+      "system:flat:1000"
+      "system:flat:5000"
+      "system:flat:20000"
+      "system:expanded:5000"
+      "system:expanded:20000"
+      "neo-brutalism:flat:100"
+      "neo-brutalism:flat:1000"
+      "neo-brutalism:flat:5000"
+      "neo-brutalism:flat:20000"
+      "neo-brutalism:expanded:5000"
+      "neo-brutalism:expanded:20000"
+    )
+    if [[ -n "${THREADING_FILE_TREE_STRESS_SHAPE:-}" \
+       || -n "${THREADING_FILE_TREE_STRESS_ENTRIES:-}" ]]; then
+      workloads=(
+        "${THREADING_FILE_TREE_STRESS_THEME:-system}:${THREADING_FILE_TREE_STRESS_SHAPE:-flat}:${THREADING_FILE_TREE_STRESS_ENTRIES:-5000}"
+      )
+    elif [[ -n "${THREADING_FILE_TREE_STRESS_THEME:-}" ]]; then
+      workloads=(
+        "${THREADING_FILE_TREE_STRESS_THEME}:flat:100"
+        "${THREADING_FILE_TREE_STRESS_THEME}:flat:1000"
+        "${THREADING_FILE_TREE_STRESS_THEME}:flat:5000"
+        "${THREADING_FILE_TREE_STRESS_THEME}:flat:20000"
+        "${THREADING_FILE_TREE_STRESS_THEME}:expanded:5000"
+        "${THREADING_FILE_TREE_STRESS_THEME}:expanded:20000"
+      )
+    fi
+    local workload theme shape entries remainder
+    for workload in "${workloads[@]}"; do
+      theme="${workload%%:*}"
+      remainder="${workload#*:}"
+      shape="${remainder%%:*}"
+      entries="${workload##*:}"
+      THREADING_FILE_TREE_STRESS=1 \
+      THREADING_FILE_TREE_STRESS_THEME="${theme}" \
+      THREADING_FILE_TREE_STRESS_SHAPE="${shape}" \
+      THREADING_FILE_TREE_STRESS_ENTRIES="${entries}" \
+      DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.FileTreeViewTests/testStressFileTreeWhenEnabled \
+          "${test_bundle}"
+    done
+  ) 2>&1 | tee "${output_directory}/file-tree-stress.log"
+}
+
 command="${1:-}"
 case "${command}" in
   git-stress)
@@ -354,6 +525,16 @@ case "${command}" in
     run_conversation_stress "${output_directory}"
     ;;
 
+  conversation-massive-stress)
+    output_directory="$(new_run_directory conversation-massive-stress)"
+    run_conversation_stress "${output_directory}" massive
+    ;;
+
+  conversation-active-turn-stress)
+    output_directory="$(new_run_directory conversation-active-turn-stress)"
+    run_conversation_active_turn_stress "${output_directory}"
+    ;;
+
   conversation-residency-stress)
     output_directory="$(new_run_directory conversation-residency-stress)"
     run_conversation_residency_stress "${output_directory}"
@@ -362,6 +543,11 @@ case "${command}" in
   sidebar-stress)
     output_directory="$(new_run_directory sidebar-stress)"
     run_sidebar_stress "${output_directory}"
+    ;;
+
+  file-tree-stress)
+    output_directory="$(new_run_directory file-tree-stress)"
+    run_file_tree_stress "${output_directory}"
     ;;
 
   sample)
@@ -387,6 +573,7 @@ case "${command}" in
     run_git_stress "${output_directory}"
     run_conversation_stress "${output_directory}"
     run_sidebar_stress "${output_directory}"
+    run_file_tree_stress "${output_directory}"
     capture_sample "${seconds}" "${target}" "${output_directory}"
 
     full_templates=(
@@ -399,6 +586,8 @@ case "${command}" in
     done
 
     if [[ "${command}" == "full+" ]]; then
+      run_conversation_stress "${output_directory}" massive
+      run_conversation_active_turn_stress "${output_directory}"
       run_conversation_residency_stress "${output_directory}"
 
       full_plus_templates=(

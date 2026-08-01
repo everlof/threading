@@ -239,10 +239,20 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
 
         // A PTY has no send-or-refuse — the text is typed in, and the carriage return is what
-        // submits it, exactly as the user pressing Return would.
+        // submits it, exactly as the user pressing Return would. In two writes, not one:
+        // arriving in the same chunk as the text, the return is part of what the CLI's paste
+        // heuristic treats as pasted content, and Claude Code inserts it as a line break with
+        // the request left sitting unsent in its composer. A beat later it is a keypress.
         guard let controller = AgentRuntime.shared.controller(for: sessionID),
               controller.isRunning else { return }
-        controller.session.insertText(prompt + SessionRenameRequest.submitKey)
+        controller.session.insertText(prompt)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + SessionRenameRequest.submitDelay
+        ) {
+            guard let controller = AgentRuntime.shared.controller(for: sessionID),
+                  controller.isRunning else { return }
+            controller.session.insertText(SessionRenameRequest.submitKey)
+        }
     }
 
     func setUsesNativeUI(_ usesNative: Bool, for sessionID: SessionID) {
@@ -690,6 +700,13 @@ enum SessionRenameRequest {
     /// What submits the line in a terminal. Return, as the user's own keypress arrives — not
     /// `\n`, which several TUI composers insert as a newline instead of sending.
     static let submitKey = "\r"
+
+    /// How long after the text the return is sent. The two cannot share a write: input
+    /// arriving in one chunk is what a TUI's paste heuristic *is*, so a return bundled with
+    /// the text is "pasted content" and becomes a line break in the composer. The pause only
+    /// needs to clear that heuristic's window — milliseconds — so it is a beat no one waits
+    /// on, far above any burst the PTY could still coalesce.
+    static let submitDelay: TimeInterval = 0.3
 }
 
 // MARK: - New Chat Opening Message

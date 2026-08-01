@@ -7,6 +7,11 @@ import AppKit
 /// menu both route through this method, so overriding it fixes every entry point at once.
 final class SidebarSplitViewController: NSSplitViewController {
 
+    /// Reports the model-state change immediately, before the visual transition finishes.
+    /// Controls whose value represents visibility use this callback; geometry consumers use
+    /// `sidebarTransitionDidComplete` below, after AppKit has committed the final frames.
+    var sidebarCollapseStateDidChange: ((Bool) -> Void)?
+
     /// Reports the requested stable state after AppKit has finished the visual transition and
     /// the split view has committed its final frames.
     var sidebarTransitionDidComplete: ((Bool) -> Void)?
@@ -117,11 +122,15 @@ final class SidebarSplitViewController: NSSplitViewController {
     /// The one place a pane's collapse is animated and reported, so a pane shut at its divider
     /// arrives in the same state, by the same route, as one shut from the toolbar.
     private func setCollapsed(_ collapsed: Bool, on item: NSSplitViewItem) {
+        let isSidebar = item === splitViewItems.first
         NSAnimationContext.runAnimationGroup(
             { context in
                 context.duration = Design.Motion.standard
                 context.allowsImplicitAnimation = true
                 item.isCollapsed = collapsed
+                if isSidebar {
+                    sidebarCollapseStateDidChange?(collapsed)
+                }
             },
             completionHandler: { [weak self] in
                 // The completion runs before AppKit commits the split views' final model
@@ -131,7 +140,7 @@ final class SidebarSplitViewController: NSSplitViewController {
                     self.splitView.layoutSubtreeIfNeeded()
                     // The report is about the *sidebar* — it moves the pane header out from
                     // under the window controls — so another pane's collapse must not raise it.
-                    guard item === self.splitViewItems.first else { return }
+                    guard isSidebar else { return }
                     self.sidebarTransitionDidComplete?(collapsed)
                 }
             }

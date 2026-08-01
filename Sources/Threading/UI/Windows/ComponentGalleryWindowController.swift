@@ -113,9 +113,11 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedCheckbox",
         "ThemedClipView",
         "ThemedControl",
+        "ThemedFileIconView",
         "ThemedOutlineView",
         "ThemedPopUp",
         "ThemedPopover",
+        "ThemedPopoverChromeView",
         "ThemedProgressBar",
         "ThemedScroller",
         "ThemedScrollView",
@@ -1041,9 +1043,14 @@ final class ComponentGalleryViewController: NSViewController {
             note: "Open each surface, switch the theme while it is visible, and dismiss it with Escape.",
             rows: [
                 story(
-                    "ThemedAlert & ThemedPopover",
+                    "ThemedAlert",
                     "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.",
-                    row([alert, popover])
+                    alert
+                ),
+                story(
+                    "ThemedPopover & ThemedPopoverChromeView",
+                    "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.",
+                    popover
                 )
             ]
         )
@@ -1116,6 +1123,11 @@ final class ComponentGalleryViewController: NSViewController {
                         + "the media inspector. The one below has no file behind it, so it refuses and "
                         + "stays out of the key loop; that refusal is the state to check.",
                     makeImagePreviewSample()
+                ),
+                story(
+                    "ThemedFileIconView",
+                    "Native Finder artwork under System; semantic, theme-owned file kinds under authored themes.",
+                    makeFileIconSample()
                 ),
                 story(
                     "ThemedTableView & ThemedTableHeaderView",
@@ -1341,6 +1353,36 @@ final class ComponentGalleryViewController: NSViewController {
             row.heightAnchor.constraint(equalToConstant: 160)
         ])
         return row
+    }
+
+    /// A path-only corpus covering every semantic class. The names are fixture data rather than
+    /// prose: switching between System and an authored theme above is the interaction under test.
+    private func makeFileIconSample() -> NSView {
+        let fixtures: [(name: String, isDirectory: Bool)] = [
+            ("Sources", true),
+            ("Parser.swift", false),
+            ("README.md", false),
+            ("theme.json", false),
+            ("preview.png", false),
+            ("voice.mp3", false),
+            ("demo.mov", false),
+            ("release.zip", false),
+            ("Threading.xcodeproj", false),
+            ("build.sh", false),
+            ("NOTICE", false)
+        ]
+
+        let samples = fixtures.map { fixture -> NSView in
+            let url = URL(fileURLWithPath: "/component-gallery/\(fixture.name)")
+            let icon = ThemedFileIconView(url: url, isDirectory: fixture.isDirectory)
+            let label = smallLabel(fixture.name)
+            let sample = NSStackView(views: [icon, label])
+            sample.orientation = .vertical
+            sample.alignment = .centerX
+            sample.spacing = Design.Spacing.hairline
+            return sample
+        }
+        return row(samples)
     }
 
     private func makeSubagentSummarySample() -> NSView {

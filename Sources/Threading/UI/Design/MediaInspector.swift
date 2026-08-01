@@ -239,6 +239,7 @@ final class MediaInspectorView: NSView, ThemedComponent {
     private var selectedItem: MediaInspectorItem { items[selectedIndex] }
 
     var showsCollectionRail: Bool { items.count > 1 && !railScrollView.isHidden }
+    var collectionThumbnailCount: Int { thumbnails.count }
 
     private func setup() {
         setAccessibilityElement(true)
@@ -309,7 +310,9 @@ final class MediaInspectorView: NSView, ThemedComponent {
                 + CGFloat(max(0, items.count - 1)) * Design.Spacing.small,
             height: Design.Size.mediaInspectorRailHeight
         )
-        railScrollView.documentView = railStack
+        if items.count > 1 {
+            railScrollView.documentView = railStack
+        }
 
         for view in [canvas, documentView, headerSeparator, railSeparator, railScrollView,
                      titleLabel, detailLabel, zoomLabel, zoomModeControl, previousButton,
@@ -395,6 +398,7 @@ final class MediaInspectorView: NSView, ThemedComponent {
 
     override func layout() {
         super.layout()
+        guard items.count > 1 else { return }
         let desiredWidth = max(railScrollView.bounds.width, railStack.fittingSize.width)
         railStack.frame = NSRect(
             x: 0,
@@ -507,6 +511,13 @@ final class MediaInspectorView: NSView, ThemedComponent {
             railStack.removeArrangedSubview(thumbnail)
             thumbnail.removeFromSuperview()
         }
+        let showsRail = items.count > 1
+        railScrollView.isHidden = !showsRail
+        railSeparator.isHidden = !showsRail
+        guard showsRail else {
+            thumbnails = []
+            return
+        }
         thumbnails = items.enumerated().map { index, item in
             let thumbnail = MediaInspectorThumbnail(item: item)
             thumbnail.onChoose = { [weak self] in
@@ -524,8 +535,6 @@ final class MediaInspectorView: NSView, ThemedComponent {
             railStack.addArrangedSubview(thumbnail)
             return thumbnail
         }
-        railScrollView.isHidden = items.count < 2
-        railSeparator.isHidden = items.count < 2
         updateRailSelection()
     }
 

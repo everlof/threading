@@ -31,7 +31,8 @@ final class ShellDrawerViewController: NSViewController {
     private let directory: () -> URL
 
     private lazy var session = TerminalSession(
-        profile: ThemeAssignments.profile(for: sessionID)
+        profile: ThemeAssignments.profile(for: sessionID),
+        identity: .sessionShell(sessionID)
     )
     private let appEvents = AppEventObservations()
 

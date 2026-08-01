@@ -42,8 +42,9 @@ final class PrivacyPreferencesViewController: NSViewController {
     /// Injected keychain probes, so a test asserts on stated answers rather than on whatever
     /// the developer's own keychain holds — the same rule as `reader`.
     private let claudeAccounts: () -> [AgentAccount]
-    private let keychainAvailability: (String) -> ClaudeKeychainCredentials.Availability
-    private let keychainGrant: (String) -> Bool
+    private let keychainAvailability:
+        @Sendable (String) -> ClaudeKeychainCredentials.Availability
+    private let keychainGrant: @Sendable (String) -> Bool
     private let prefetchUsage: () -> Void
     private var rows: [SystemPrivacyPermission: PermissionRow] = [:]
     private var shown: [SystemPrivacyPermission: SystemPrivacyStatus] = [:]
@@ -65,10 +66,11 @@ final class PrivacyPreferencesViewController: NSViewController {
         claudeAccounts: @escaping () -> [AgentAccount] = {
             AgentAccountDiscovery.accounts(for: .claude)
         },
-        keychainAvailability: @escaping (String) -> ClaudeKeychainCredentials.Availability = {
+        keychainAvailability:
+            @escaping @Sendable (String) -> ClaudeKeychainCredentials.Availability = {
             ClaudeKeychainCredentials.availability(forConfigPath: $0)
         },
-        keychainGrant: @escaping (String) -> Bool = {
+        keychainGrant: @escaping @Sendable (String) -> Bool = {
             ClaudeKeychainCredentials.requestAccess(forConfigPath: $0)
         },
         prefetchUsage: @escaping () -> Void = { AccountUsageMenu.prefetch() }
@@ -319,10 +321,10 @@ final class PrivacyPreferencesViewController: NSViewController {
             ),
             SettingsUI.detailRow(
                 symbol: "network",
-                title: "Remote Access stays on this Mac",
-                detail: "The listener binds to 127.0.0.1 and your iPhone reaches it through an "
-                    + "outbound encrypted relay, so nothing is published on your local "
-                    + "network and macOS never asks for that permission."
+                title: "Remote Access starts at a loopback listener",
+                detail: "The listener binds to 127.0.0.1 and the selected HTTPS relay or "
+                    + "Tailscale Serve publishes only that listener. Threading opens no LAN "
+                    + "listener, so macOS never asks for Local Network access."
             )
         ])
     }

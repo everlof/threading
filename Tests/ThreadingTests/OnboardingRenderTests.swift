@@ -121,7 +121,14 @@ final class OnboardingRenderTests: XCTestCase {
                     ]
                 )
             ],
-            missingFolderConversations: 2
+            missingFolderConversations: 2,
+            failures: [
+                GlobalScanFailure(
+                    accountID: AccountID(provider: .claude, handle: .named("work")),
+                    path: "/Users/dev/.claude-work/projects/archived",
+                    reason: "You don’t have permission to view this folder."
+                )
+            ]
         )
 
         var pages: [(String, () -> NSViewController)] = [

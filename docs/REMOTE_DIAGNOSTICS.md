@@ -1,7 +1,7 @@
 # Remote diagnostics and support plan
 
-Remote access spans one Mac, a relay, one or more memberships, live WebSockets, APNs and one or
-more iOS devices. A useful report must answer **where a flow stopped** without collecting the
+Remote access spans one Mac, one or more selected transports, memberships, live WebSockets, APNs
+and one or more iOS devices. A useful report must answer **where a flow stopped** without collecting the
 chat, repository, notification text, or credentials.
 
 ## Support workflow
@@ -37,7 +37,7 @@ iOS permission allowed
 → iOS received/opened event
 ```
 
-The first missing transition identifies the owner: app permission, relay/auth, membership
+The first missing transition identifies the owner: app permission, transport/auth, membership
 routing, provider credentials, Apple delivery, or presentation policy.
 
 ## Diagnostic contract
@@ -118,7 +118,7 @@ Checks are read-only unless the user explicitly chooses a test delivery.
 
 ### macOS
 
-- Loopback listener, relay process and public relay state.
+- Loopback listener plus the selected Cloudflare and/or Tailscale transport state.
 - APNs provider key load, team/key/topic presence and key age without exposing their values.
 - Subscription matrix counts by owner/member, notification kind, environment and approval
   capability—never tokens or names.
@@ -150,7 +150,7 @@ its report code. A guest can export its own report but cannot inspect another pa
 - Durable Mac remote journal and one-click share-safe support report.
 - Browser privacy-bounded local journal plus explicit 30-minute iOS/browser forwarding into the
   paired Mac's share-safe timeline.
-- Mac listener, relay, auth, registration, socket, permission and APNs transitions.
+- Mac listener, transport, auth, registration, socket, permission and APNs transitions.
 - Mac APNs acceptance/refusal records with notification trace and `apns-id`.
 - Opt-in real APNs and Claude → MCP → APNs tests in `ThreadingNotificationE2E`.
 

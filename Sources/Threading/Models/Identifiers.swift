@@ -82,6 +82,44 @@ struct TerminalID: Hashable, Sendable, Codable, CustomStringConvertible {
     }
 }
 
+/// The semantic owner of one live terminal process.
+///
+/// A project terminal and an agent session may both happen to use UUIDs, but that does not put
+/// them in the same identity domain. Keeping the variants distinct prevents terminal-only code
+/// from manufacturing a `SessionID` merely to reuse history or interaction APIs.
+enum TerminalInstanceIdentity: Hashable, Sendable {
+    case agentSession(SessionID)
+    case projectTerminal(TerminalID)
+    case sessionShell(SessionID)
+    case ephemeral(UUID)
+
+    var ownerSessionID: SessionID? {
+        switch self {
+        case .agentSession(let id), .sessionShell(let id): return id
+        case .projectTerminal, .ephemeral: return nil
+        }
+    }
+
+    /// Agent sessions retain their historical filenames. Every other terminal domain is
+    /// namespaced so coincident UUIDs cannot share history.
+    var historyFileStem: String {
+        switch self {
+        case .agentSession(let id): return id.uuidString
+        case .projectTerminal(let id): return "terminal-\(id.uuidString)"
+        case .sessionShell(let id): return "shell-\(id.uuidString)"
+        case .ephemeral(let id): return "ephemeral-\(id.uuidString)"
+        }
+    }
+
+    static func recognizesHistoryFileStem(_ stem: String) -> Bool {
+        if UUID(uuidString: stem) != nil { return true }
+        for prefix in ["terminal-", "shell-", "ephemeral-"] where stem.hasPrefix(prefix) {
+            return UUID(uuidString: String(stem.dropFirst(prefix.count))) != nil
+        }
+        return false
+    }
+}
+
 /// The provider-issued identifier used to locate and resume a CLI transcript.
 ///
 /// Unlike `SessionID`, this value belongs to the agent CLI's identity space. Encoding it as a

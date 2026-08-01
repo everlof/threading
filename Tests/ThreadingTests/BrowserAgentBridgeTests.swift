@@ -2749,7 +2749,10 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
                       #submit {
                         height: 44px; left: 40px; position: absolute; top: 60px; width: 200px;
                       }
-                      #prose { left: 40px; position: absolute; top: 140px; }
+                      #prose {
+                        height: 24px; left: 40px; line-height: 24px; margin: 0;
+                        position: absolute; top: 140px; width: 240px;
+                      }
                       iframe {
                         border: 0; height: 120px; left: 20px; position: absolute;
                         top: 200px; width: 300px;

@@ -157,8 +157,9 @@ hurting at the third.
 
 ### Why the integration differs from the other three dependencies
 
-`SwiftTerm`, `ThinkingOrbs` and `LabelMorph` are submodule forks because each has a seam that is
-ours (see [`dependencies.md`](dependencies.md)). Sparkle has no such seam: everything worth
+`ThinkingOrbs` and `LabelMorph` are submodule forks, while SwiftTerm is a vendored fork in the
+main repository; each has a seam that is ours (see [`dependencies.md`](dependencies.md)).
+Sparkle has no such seam: everything worth
 customising is reachable through its public API, so it is an `XCRemoteSwiftPackageReference` —
 `upToNextMinorVersion` from 2.9.4, matching the existing `NativeDiffKit` reference rather than
 pinning exactly, so security patches arrive without a project edit.

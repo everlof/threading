@@ -50,8 +50,9 @@ mode is silent: an unregistered test file builds nothing and `xcodebuild test` r
 
 ## Dependencies
 
-Three local Swift packages, each a git submodule referenced as an `XCLocalSwiftPackageReference`.
-**All three are our forks — modify their source directly** rather than working around them.
+Three local Swift packages are referenced as `XCLocalSwiftPackageReference`s. ThinkingOrbs and
+LabelMorph are git submodules; SwiftTerm is vendored directly in this repository. **All three
+are our forks — modify their source directly** rather than working around them.
 
 | | Location / upstream | What it draws |
 |---|---|---|
@@ -275,7 +276,7 @@ Three levels, one entry point — `scripts/test.sh <level>`. **Run `fast` while 
 
 | Level | Command | Covers | Cost |
 |---|---|---|---|
-| **fast** | `scripts/test.sh` | `Threading-Fast` test plan — the whole `ThreadingTests` target minus the three tests that order a window on screen | default; nothing appears on screen |
+| **fast** | `scripts/test.sh` | `Threading-Fast` test plan — the whole `ThreadingTests` target minus the cases that must order a window on screen | default; nothing appears on screen |
 | **all** | `scripts/test.sh all` | `Threading-All` test plan — the entire target | adds ~14 live-WKWebView tests that flash real windows and load real pages |
 | **e2e** | `scripts/test.sh e2e` | `ThreadingNotificationE2E` scheme — real APNs delivery; `--claude` also spawns a real Claude | needs the four `THREADING_APNS_*` credentials; exits 2 without them, so it never fires by accident |
 
@@ -291,7 +292,7 @@ pushes skip the gate. Bypass deliberately with `THREADING_SKIP_TESTS=1 git push`
 `--no-verify`, which also skips Git LFS.
 
 **Never run `git push` to try something out.** `submodule.recurse` is true, so a push recurses
-into `LabelMorph`, `ThinkingOrbs` and `SwiftTerm` and publishes them to their real GitHub
+into `LabelMorph` and `ThinkingOrbs` and publishes them to their real GitHub
 remotes — even when the outer push targets a local throwaway path, and even though the main repo
 has no remote configured. To exercise the hook, pipe fabricated ref lines into
 `scripts/pre_push.sh` directly.
@@ -299,7 +300,8 @@ has no remote configured. To exercise the hook, pipe fabricated ref lines into
 **Fast is defined by "orders a window on screen", not by "is UI".** Almost every UI test here —
 all the `*RenderTests`, the themed component tests, the pane header/footer tests — builds an
 *unshown* window and `cacheDisplay`s it, which draws nothing on screen and stays in `fast`. Only
-three tests genuinely need to be visible, and they are skipped by name in `Threading-Fast.xctestplan`:
+the following cases genuinely need to be visible, and they are skipped by name in
+`Threading-Fast.xctestplan`:
 
 - `BrowserAgentBridgeIntegrationTests` (the whole class) — WKWebView will not load or render
   offscreen, so each test calls `orderFront`. Note the sibling class in the same file,
@@ -307,11 +309,6 @@ three tests genuinely need to be visible, and they are skipped by name in `Threa
 - `ThemedControlTests/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()` and
   `testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()` — both assert on first
   responder, which requires a key window.
-- `PromptInputTests/testImagePreviewOpensTheSystemQuickLookPanel()` — screen-captures a real
-  `QLPreviewPanel`, which is a *system* window backed by an out-of-process service. Run in
-  `fast`, agents opened that panel on the user's screen all day — and when the service was
-  slow to connect, the test's `orderOut` didn't take, stranding a panel that then froze
-  (its owning test host was busy with later tests) until the host exited.
 
 **Adding a test that needs a real window?** Add it to `skippedTests` in
 `TestPlans/Threading-Fast.xctestplan` and say why here. Anything that can be asserted against an

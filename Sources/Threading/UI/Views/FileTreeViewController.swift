@@ -8,6 +8,7 @@ final class FileNode: NSObject {
 
     let url: URL
     let isDirectory: Bool
+    let name: String
 
     /// Nil until this directory has been read. The distinction matters: an unread directory is
     /// expandable on the strength of being a directory, while one that read as empty is not.
@@ -16,9 +17,8 @@ final class FileNode: NSObject {
     init(url: URL, isDirectory: Bool) {
         self.url = url
         self.isDirectory = isDirectory
+        name = url.lastPathComponent
     }
-
-    var name: String { url.lastPathComponent }
 
     /// What handing this row to another app means. A directory is a place to work in; a file is
     /// a file, and this tree knows no line inside it.
@@ -34,15 +34,22 @@ final class FileNode: NSObject {
 
     func reload() {
         guard isDirectory else { return }
-        children = Self.read(url)
+        children = Self.read(url, reusing: children ?? [])
     }
 
     /// Directories first, then case-insensitive by name — the order every file browser uses, and
     /// the only one in which a deep tree can be scanned by eye.
+    /// Existing siblings are keyed by name, which is their stable path identity relative to this
+    /// directory. Building canonical absolute paths here made a 20,000-row hot refresh pay for
+    /// tens of thousands of URL standardizations it did not need.
     ///
     /// Dotfiles are skipped. A project root is full of them (`.git`, `.build`, every tool's
     /// config) and none of it is what someone opening a file tree came to find.
-    private static func read(_ url: URL) -> [FileNode] {
+    private static func read(_ url: URL, reusing existing: [FileNode] = []) -> [FileNode] {
+        let existingByName = Dictionary(
+            existing.map { ($0.name, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let entries = (try? FileManager.default.contentsOfDirectory(
             at: url,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -52,6 +59,10 @@ final class FileNode: NSObject {
         return entries
             .map { entry in
                 let isDirectory = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                if let existing = existingByName[entry.lastPathComponent],
+                   existing.isDirectory == isDirectory {
+                    return existing
+                }
                 return FileNode(url: entry, isDirectory: isDirectory)
             }
             .sorted { lhs, rhs in
@@ -181,13 +192,25 @@ final class FileTreeViewController: NSViewController {
         guard isRoot || outlineView.isItemExpanded(node) else { return }
 
         node.reload()
-        node.children?.forEach { reloadExpanded(from: $0) }
+        for child in node.children ?? [] where child.isDirectory {
+            reloadExpanded(from: child)
+        }
     }
 
     private func expandedNodes() -> [FileNode] {
-        (0..<outlineView.numberOfRows)
-            .compactMap { outlineView.item(atRow: $0) as? FileNode }
-            .filter { outlineView.isItemExpanded($0) }
+        var result: [FileNode] = []
+        collectExpandedDirectories(from: root, into: &result)
+        return result
+    }
+
+    /// Expansion is a directory property. Walking every visible file row made refresh O(all
+    /// expanded files) just to discover the much smaller set of open folders.
+    private func collectExpandedDirectories(from node: FileNode, into result: inout [FileNode]) {
+        for child in node.children ?? [] where child.isDirectory {
+            guard outlineView.isItemExpanded(child) else { continue }
+            result.append(child)
+            collectExpandedDirectories(from: child, into: &result)
+        }
     }
 
     private var clickedNode: FileNode? {
@@ -336,20 +359,14 @@ extension FileTreeViewController: NSOutlineViewDelegate {
 
 // MARK: - Row
 
-/// One row: the file's own icon and its name.
-///
-/// The icon is the system's, not a symbol of ours — a file tree is the one place where matching
-/// what Finder shows is more useful than matching the app, since the user is looking for a file
-/// they already recognise by its icon.
+/// One row: the file's themed icon and its name. System keeps Finder artwork; authored themes use
+/// the semantic design-system renderer described in `ThemedFileIconView`.
 private final class FileTreeRowView: NSView {
 
     init(node: FileNode) {
         super.init(frame: .zero)
 
-        let icon = NSImageView()
-        icon.image = NSWorkspace.shared.icon(forFile: node.url.path)
-        icon.imageScaling = .scaleProportionallyDown
-        icon.translatesAutoresizingMaskIntoConstraints = false
+        let icon = ThemedFileIconView(url: node.url, isDirectory: node.isDirectory)
 
         let label = NSTextField(labelWithString: node.name)
         label.applyFont(.caption)

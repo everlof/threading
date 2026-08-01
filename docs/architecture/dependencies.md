@@ -6,7 +6,7 @@ ours.
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 - **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
-  - Location: `./SwiftTerm/` (git submodule)
+  - Location: `./SwiftTerm/` (vendored source in the main repository, not a git submodule)
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
   - **The scroller seam is ours.** `MacTerminalView.installScroller` lets the embedding app
@@ -105,8 +105,8 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 - **ThinkingOrbs** (local fork): the dotted "working" thought-orb drawn beside the
   conversation status while a turn is in flight.
-  - Location: `./ThinkingOrbs/` (git submodule), referenced as a local Swift package the same
-    way SwiftTerm is (`XCLocalSwiftPackageReference`, mirrored entries in `project.pbxproj`).
+  - Location: `./ThinkingOrbs/` (git submodule), referenced as a local Swift package through
+    `XCLocalSwiftPackageReference` and mirrored entries in `project.pbxproj`.
   - Upstream: https://github.com/everlof/thinking-orbs-swift — **our fork**, mod it directly.
   - The app uses only the AppKit `ThinkingOrbView` (a plain `NSView` drawing through a
     CoreGraphics engine, display link on 14+ / 60Hz timer on 13). SwiftUI ships in the package

@@ -1,5 +1,4 @@
 import AppKit
-import QuickLookUI
 import XCTest
 @testable import Threading
 
@@ -73,15 +72,11 @@ final class PromptInputTests: XCTestCase {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
 
-    /// The two halves of every image fixture. The Quick Look assertion looks for these same
-    /// colours in the captured panel, so they are named once rather than written twice.
+    /// The two halves of every image fixture, named once so the generated files remain visually
+    /// recognisable in rendered-state tests.
     private enum FixtureSwatch {
         static let leading = NSColor.systemTeal
         static let trailing = NSColor.systemOrange
-
-        static let hueTolerance: CGFloat = 12
-        static let minimumSaturation: CGFloat = 0.25
-        static let minimumBrightness: CGFloat = 0.25
     }
 
     private func makeImageFile(
@@ -106,103 +101,6 @@ final class PromptInputTests: XCTestCase {
             .appendingPathComponent("\(UUID().uuidString)-\(name)")
         try data.write(to: url, options: .atomic)
         return url
-    }
-
-    private func captureQuickLookFixture(_ panel: QLPreviewPanel, directory: String) throws {
-        let deadline = Date(timeIntervalSinceNow: 2)
-        var captured: (rep: NSBitmapImageRep, png: Data)?
-        var colours = (leading: false, trailing: false)
-        repeat {
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
-            if let image = CGWindowListCreateImage(
-                .null,
-                .optionIncludingWindow,
-                CGWindowID(panel.windowNumber),
-                [.boundsIgnoreFraming]
-            ) {
-                let rep = NSBitmapImageRep(cgImage: image)
-                if let png = rep.representation(using: .png, properties: [:]) {
-                    captured = (rep, png)
-                    colours = quickLookFixtureColours(in: rep)
-                }
-            }
-        } while !(colours.leading && colours.trailing) && Date() < deadline
-
-        let (rep, png) = try XCTUnwrap(
-            captured,
-            "The window server did not capture Quick Look"
-        )
-        XCTAssertGreaterThan(png.count, 10_000, "Quick Look rendered as an empty image")
-        colours = quickLookFixtureColours(in: rep)
-
-        let output = URL(fileURLWithPath: directory, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: output,
-            withIntermediateDirectories: true
-        )
-        try png.write(to: output.appendingPathComponent("quick-look-panel.png"))
-
-        // QLPreviewPanel vends the right item above, but the out-of-process UI service can be
-        // unavailable in a hosted test session (for example behind WindowServer's automation
-        // shield). That is an environment skip, not evidence that the app handed Quick Look
-        // the wrong file. Keep the capture as a diagnostic and distinguish it from a product
-        // assertion.
-        try XCTSkipUnless(
-            colours.leading && colours.trailing,
-            "Quick Look's UI service did not render the fixture in this test session"
-        )
-    }
-
-    /// Match the swatches by hue, not by raw components.
-    ///
-    /// The window server hands back the capture in the *display's* colour space — Display P3 on
-    /// this hardware — and `colorAt` reports those components verbatim: `usingColorSpace` does not
-    /// convert them, so an sRGB teal of `(0.00, 0.82, 0.88)` reads as `(0.43, 0.84, 0.89)`. Any
-    /// threshold written against the fixture's own red/green/blue therefore fails on a wide-gamut
-    /// display while the panel is plainly rendering the right picture. Hue survives the round trip
-    /// — the same teal measures 183.8° in the fixture and 186–187° in the capture — so the two
-    /// halves are identified by hue proximity instead, which stays true on any display.
-    private func quickLookFixtureColours(
-        in rep: NSBitmapImageRep
-    ) -> (leading: Bool, trailing: Bool) {
-        var foundLeading = false
-        var foundTrailing = false
-
-        for y in stride(from: 0, to: rep.pixelsHigh, by: 16) {
-            for x in stride(from: 0, to: rep.pixelsWide, by: 16) {
-                guard let color = rep.colorAt(x: x, y: y) else { continue }
-                foundLeading = foundLeading || matches(color, FixtureSwatch.leading)
-                foundTrailing = foundTrailing || matches(color, FixtureSwatch.trailing)
-                if foundLeading, foundTrailing { break }
-            }
-            if foundLeading, foundTrailing { break }
-        }
-        return (foundLeading, foundTrailing)
-    }
-
-    /// A captured pixel counts as one of the fixture's swatches when it carries the same hue and
-    /// is saturated and bright enough not to be panel chrome. The tolerance is wide enough for the
-    /// gamut shift above and far narrower than the 155° between the two swatches.
-    private func matches(_ pixel: NSColor, _ swatch: NSColor) -> Bool {
-        // `getHue` needs an RGB colour space; a capture is never monochrome, but converting keeps
-        // the helper honest if one ever is.
-        guard let measured = pixel.usingColorSpace(.sRGB),
-              let expected = swatch.usingColorSpace(.sRGB) else { return false }
-        let (pixelHue, saturation, brightness) = hueSaturationBrightness(measured)
-        guard saturation > FixtureSwatch.minimumSaturation,
-              brightness > FixtureSwatch.minimumBrightness else { return false }
-        let (expectedHue, _, _) = hueSaturationBrightness(expected)
-        let separation = abs(pixelHue - expectedHue)
-        return min(separation, 360 - separation) <= FixtureSwatch.hueTolerance
-    }
-
-    private func hueSaturationBrightness(_ color: NSColor) -> (CGFloat, CGFloat, CGFloat) {
-        var hue: CGFloat = 0
-        var saturation: CGFloat = 0
-        var brightness: CGFloat = 0
-        var alpha: CGFloat = 0
-        color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
-        return (hue * 360, saturation, brightness)
     }
 
     private func captureAppFixture(_ window: NSWindow, named name: String) throws {
@@ -429,7 +327,7 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(prompt.submissionValue, "Compare this layout")
     }
 
-    func testImagePreviewOpensTheSystemQuickLookPanel() throws {
+    func testImagePreviewOpensTheInWindowMediaInspector() throws {
         let imageURL = try makeImageFile(
             named: "quick look.png",
             size: NSSize(width: 600, height: 400)
@@ -439,7 +337,7 @@ final class PromptInputTests: XCTestCase {
         let prompt = PromptView()
         prompt.showsImageAttachments = true
         let window = makeWindow(hosting: prompt)
-        window.makeKeyAndOrderFront(nil)
+        defer { MediaInspectorPresenter.dismiss(in: window) }
         prompt.attachFiles(at: [imageURL.path])
 
         let thumbnail = try XCTUnwrap(
@@ -451,28 +349,21 @@ final class PromptInputTests: XCTestCase {
         XCTAssertTrue(thumbnail.acceptsFirstResponder)
         XCTAssertEqual(
             thumbnail.accessibilityHelp(),
-            "Press to open \(imageURL.lastPathComponent) in Quick Look"
+            "Press to inspect \(imageURL.lastPathComponent)"
         )
         XCTAssertTrue(thumbnail.accessibilityPerformPress())
+        XCTAssertTrue(MediaInspectorPresenter.isPresenting(in: window))
 
-        let panel = try XCTUnwrap(QLPreviewPanel.shared())
-        defer {
-            panel.orderOut(nil)
-            window.orderOut(nil)
-        }
-        XCTAssertTrue(panel.isVisible)
-        XCTAssertEqual(panel.dataSource?.numberOfPreviewItems(in: panel), 1)
-
-        let item = try XCTUnwrap(
-            panel.dataSource?.previewPanel(panel, previewItemAt: 0)
+        let inspector = try XCTUnwrap(
+            descendants(of: try XCTUnwrap(window.contentView))
+                .compactMap { $0 as? MediaInspectorView }
+                .first
         )
-        XCTAssertEqual(item.previewItemURL, imageURL)
-
-        let renderDirectory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
-            ?? FileManager.default.temporaryDirectory
-                .appendingPathComponent("ThreadingRenders", isDirectory: true)
-                .path
-        try captureQuickLookFixture(panel, directory: renderDirectory)
+        XCTAssertEqual(
+            inspector.accessibilityLabel(),
+            "Media inspector, \(imageURL.lastPathComponent)"
+        )
+        XCTAssertEqual(inspector.collectionThumbnailCount, 0)
     }
 
     func testImagePreviewContextMenuOffersStandardFileActions() throws {
@@ -499,12 +390,13 @@ final class PromptInputTests: XCTestCase {
                 .filter { $0.accessibilityRole() == .menuItem }
                 .compactMap { $0.accessibilityTitle() },
             [
-                "Quick Look",
+                "Inspect",
                 "Open in Default App",
                 "Reveal in Finder",
                 "Copy Image",
                 "Copy File Name",
                 "Copy File Path",
+                "Open in System Quick Look",
                 "Remove Attachment"
             ]
         )

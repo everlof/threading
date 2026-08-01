@@ -177,12 +177,20 @@ a session that no longer exists.
 
 ## 2026-07-30 — Where it all is, and starting over
 
-Two locations hold everything Threading remembers, and `AppDataLocations` is the only place that
+Two file locations hold Threading's ordinary state, and `AppDataLocations` is the only place that
 says so: the **preferences domain** (the bundle identifier, `codes.threading`) and one directory,
 `~/Library/Application Support/Threading`, which is `StateManager`'s root and therefore also the
 store, the panel layouts and their cached PNGs, project icons, avatars, usage history,
 icon-research records and the instance lock. Settings ▸ **Advanced** shows both and reveals them,
 because "where is my data" is a question answered with a path to copy rather than a sentence.
+
+Security capabilities are the deliberate third category. Native owner-device records, including
+their 256-bit bearers, live in one versioned login-Keychain item with
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`; the paired iPhone keeps its side in its own
+Keychain. A decode or write failure is fail-closed: the app neither overwrites an unreadable item
+nor issues a credential it cannot persist. Turning Remote Access off clears runtime authority but
+does not unpair devices. Named revocation writes Keychain first, then drops live authority and
+sockets, so a failed revoke cannot appear successful and return after restart.
 
 **What is deliberately outside the two.** Anything written into *another* program's folder is not
 ours to reset: the Claude status-line cache under `Claudex/ClaudeStatus` is there because that is
@@ -214,3 +222,9 @@ directory. Three decisions carry it:
 The reset is `ConfirmationPrompt.resetAppData`, on the `.alwaysAsks(.irreversible)` branch. Not
 strictly true — the state is kept — but nothing *in the app* brings it back, and Return belongs on
 Cancel for a button that restarts the app under you.
+
+`Reset Everything` also stops Remote Access and deletes the paired-owner Keychain item before the
+file reset. That is the one intentionally non-recoverable piece: backing up live bearer tokens as
+plain files would turn the reset folder into a credential export. A settings-only reset keeps
+pairings; a full reset is explicit authority to delete even a corrupt Keychain item that normal
+fail-closed revocation refuses to overwrite.

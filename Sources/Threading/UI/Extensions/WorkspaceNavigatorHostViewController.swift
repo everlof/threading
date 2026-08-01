@@ -23,6 +23,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private var collectionStates: [String: WorkspaceNavigatorCollectionState] = [:]
     private var synchronizedDestination: ExtensionWorkspaceNavigatorDestination?
     private var actionSequence = 0
+    private var isFailingClosed = false
     private lazy var toasts = ToastPresenter(host: view, above: view.bottomAnchor)
 
     init(
@@ -145,6 +146,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                 },
                 onActivation: { [weak self] activation, itemID in
                     self?.activate(activation, itemID: itemID)
+                },
+                onRenderFailure: { [weak self] error in
+                    self?.failClosed(afterRendering: error)
                 }
             )
             addChild(controller)
@@ -321,9 +325,16 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     /// Rendering can fail while the container is in the middle of installing this controller.
     /// Defer the failback one run-loop turn so that swap completes before Native replaces it.
     private func failClosed() {
+        guard !isFailingClosed else { return }
+        isFailingClosed = true
         DispatchQueue.main.async { [weak self] in
             self?.onUnavailable()
         }
+    }
+
+    private func failClosed(afterRendering error: Error) {
+        presentError(error.localizedDescription)
+        failClosed()
     }
 
     private func capturePresentationState() {
@@ -433,7 +444,7 @@ private struct WorkspaceNavigatorFocusIdentity {
     let elementIdentifier: String
 }
 
-private struct WorkspaceNavigatorCollectionState {
+struct WorkspaceNavigatorCollectionState {
     let selectedItemID: String?
     let expandedItemIDs: Set<String>
     let topVisibleItemID: String?
@@ -460,7 +471,7 @@ private final class WorkspaceNavigatorCollectionNode: NSObject {
 }
 
 /// One virtualized list, outline, or grid in a navigator document.
-private final class WorkspaceNavigatorCollectionViewController:
+final class WorkspaceNavigatorCollectionViewController:
     NSViewController,
     NSOutlineViewDataSource,
     NSOutlineViewDelegate,
@@ -469,12 +480,14 @@ private final class WorkspaceNavigatorCollectionViewController:
 {
     typealias ContentRenderer = (ExtensionNode) throws -> ExtensionNodeHostView
     typealias ActivationHandler = (ExtensionWorkspaceNavigatorActivation, String) -> Void
+    typealias RenderFailureHandler = (Error) -> Void
 
     let collectionID: String
 
     private let collection: ExtensionWorkspaceNavigatorCollection
     private let renderContent: ContentRenderer
     private let onActivation: ActivationHandler
+    private let onRenderFailure: RenderFailureHandler
     private let restoredState: WorkspaceNavigatorCollectionState?
     private var roots: [WorkspaceNavigatorCollectionNode] = []
     private var nodesByItemID: [String: WorkspaceNavigatorCollectionNode] = [:]
@@ -522,13 +535,15 @@ private final class WorkspaceNavigatorCollectionViewController:
         collection: ExtensionWorkspaceNavigatorCollection,
         restoredState: WorkspaceNavigatorCollectionState?,
         renderContent: @escaping ContentRenderer,
-        onActivation: @escaping ActivationHandler
+        onActivation: @escaping ActivationHandler,
+        onRenderFailure: @escaping RenderFailureHandler
     ) {
         collectionID = collection.id
         self.collection = collection
         self.restoredState = restoredState
         self.renderContent = renderContent
         self.onActivation = onActivation
+        self.onRenderFailure = onRenderFailure
         super.init(nibName: nil, bundle: nil)
         buildModel()
     }
@@ -906,10 +921,8 @@ private final class WorkspaceNavigatorCollectionViewController:
         do {
             try host.install(renderContent(content))
         } catch {
-            try? host.install(renderContent(.status(
-                L10n.string("Unable to render navigator item"),
-                role: .negative
-            )))
+            onRenderFailure(error)
+            return nil
         }
         return host
     }
@@ -946,17 +959,22 @@ private final class WorkspaceNavigatorCollectionViewController:
             owner: self
         ) as? WorkspaceNavigatorGridRowHostView ?? WorkspaceNavigatorGridRowHostView()
         host.identifier = identifier
-        host.install(
-            gridRows[row],
-            collectionID: collectionID,
-            columns: gridColumnCount,
-            selectedItemID: selectedGridItemID,
-            renderContent: renderContent,
-            onActivate: { [weak self] item in
-                self?.activate(item)
-                self?.tableView.reloadData()
-            }
-        )
+        do {
+            try host.install(
+                gridRows[row],
+                collectionID: collectionID,
+                columns: gridColumnCount,
+                selectedItemID: selectedGridItemID,
+                renderContent: renderContent,
+                onActivate: { [weak self] item in
+                    self?.activate(item)
+                    self?.tableView.reloadData()
+                }
+            )
+        } catch {
+            onRenderFailure(error)
+            return nil
+        }
         return host
     }
 
@@ -1064,17 +1082,16 @@ private final class WorkspaceNavigatorGridRowHostView: NSView {
         selectedItemID: String?,
         renderContent: (ExtensionNode) throws -> ExtensionNodeHostView,
         onActivate: @escaping (ExtensionWorkspaceNavigatorItem) -> Void
-    ) {
-        installed?.removeFromSuperview()
+    ) throws {
 
         let content: NSView
         switch row {
         case .header(let header):
-            content = (try? renderContent(header)) ?? NSView()
+            content = try renderContent(header)
 
         case .items(let items):
-            var cells: [NSView] = items.map { item in
-                let semantic = (try? renderContent(item.content)) ?? NSView()
+            var cells: [NSView] = try items.map { item in
+                let semantic = try renderContent(item.content)
                 let cell = NavigatorGridItemView(content: semantic)
                 cell.isEnabled = item.isEnabled
                 cell.isSelected = item.id == selectedItemID
@@ -1102,6 +1119,9 @@ private final class WorkspaceNavigatorGridRowHostView: NSView {
             content = stack
         }
 
+        // Build the complete row first. A failed replacement leaves the previous reusable row
+        // intact until the host atomically swaps back to the native navigator.
+        installed?.removeFromSuperview()
         installed = content
         addSubview(content)
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -1111,147 +1131,5 @@ private final class WorkspaceNavigatorGridRowHostView: NSView {
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
             content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.small)
         ])
-    }
-}
-
-/// Keeps the native controller alive while swapping only what the split item presents.
-final class WorkspaceSidebarContainerViewController: NSViewController {
-    private let nativeController: ProjectSidebarViewController
-    private let routing: ExtensionWorkspaceNavigatorRouting
-    private let contextProvider: WorkspaceNavigatorHostViewController.ContextProvider
-    private let destinationHandler: WorkspaceNavigatorHostViewController.DestinationHandler
-    private var visibleController: NSViewController?
-    private var extensionController: WorkspaceNavigatorHostViewController?
-    private var desiredSelection: WorkspaceNavigatorSelection = .native
-    private var settingsOverride = false
-    private var unavailableGeneration: String?
-
-    private(set) var effectiveSelection: WorkspaceNavigatorSelection = .native
-
-    init(
-        nativeController: ProjectSidebarViewController,
-        routing: ExtensionWorkspaceNavigatorRouting,
-        contextProvider: @escaping WorkspaceNavigatorHostViewController.ContextProvider,
-        destinationHandler: @escaping WorkspaceNavigatorHostViewController.DestinationHandler
-    ) {
-        self.nativeController = nativeController
-        self.routing = routing
-        self.contextProvider = contextProvider
-        self.destinationHandler = destinationHandler
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func loadView() {
-        view = NSView()
-        show(nativeController)
-    }
-
-    func activate(_ selection: WorkspaceNavigatorSelection) {
-        if selection != desiredSelection {
-            unavailableGeneration = nil
-        }
-        desiredSelection = selection
-        refreshAvailability()
-    }
-
-    func setSettingsOverride(_ enabled: Bool) {
-        settingsOverride = enabled
-        refreshAvailability()
-    }
-
-    func refreshAvailability() {
-        guard !settingsOverride else {
-            effectiveSelection = .native
-            show(nativeController)
-            return
-        }
-        guard case .extensionNavigator(let extensionIdentifier, let navigatorID) =
-            desiredSelection,
-              let inventory = routing.registeredWorkspaceNavigator(
-                  extensionIdentifier: extensionIdentifier,
-                  navigatorID: navigatorID
-              ),
-              inventory.processGeneration != unavailableGeneration else {
-            effectiveSelection = .native
-            extensionController = nil
-            show(nativeController)
-            return
-        }
-        unavailableGeneration = nil
-
-        let controller: WorkspaceNavigatorHostViewController
-        if let current = extensionController,
-           current.extensionIdentifier == extensionIdentifier,
-           current.navigatorID == navigatorID,
-           current.processGeneration == inventory.processGeneration {
-            controller = current
-        } else {
-            controller = WorkspaceNavigatorHostViewController(
-                inventory: inventory,
-                routing: routing,
-                contextProvider: contextProvider,
-                destinationHandler: destinationHandler,
-                onUnavailable: { [weak self] in
-                    self?.failBack(
-                        extensionIdentifier: extensionIdentifier,
-                        navigatorID: navigatorID,
-                        processGeneration: inventory.processGeneration
-                    )
-                }
-            )
-            extensionController = controller
-        }
-        effectiveSelection = desiredSelection
-        show(controller)
-    }
-
-    func refreshDocument() {
-        extensionController?.refresh()
-    }
-
-    func synchronizeSelection(with destination: ExtensionWorkspaceNavigatorDestination?) {
-        extensionController?.synchronizeSelection(with: destination)
-    }
-
-    private func failBack(
-        extensionIdentifier: String,
-        navigatorID: String,
-        processGeneration: String
-    ) {
-        guard let current = extensionController,
-              current.extensionIdentifier == extensionIdentifier,
-              current.navigatorID == navigatorID,
-              current.processGeneration == processGeneration else {
-            return
-        }
-        unavailableGeneration = processGeneration
-        extensionController = nil
-        effectiveSelection = .native
-        show(nativeController)
-    }
-
-    private func show(_ controller: NSViewController) {
-        guard visibleController !== controller else { return }
-
-        let previous = visibleController
-        addChild(controller)
-        let presented = controller.view
-        presented.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(presented)
-        NSLayoutConstraint.activate([
-            presented.topAnchor.constraint(equalTo: view.topAnchor),
-            presented.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            presented.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            presented.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-        visibleController = controller
-
-        previous?.view.removeFromSuperview()
-        previous?.removeFromParent()
     }
 }

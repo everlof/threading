@@ -56,6 +56,7 @@ enum ConfirmationPrompt: String, CaseIterable {
 
     case removeProject
     case revokeChatAccess
+    case revokePairedDevice
     case deleteSession
     case deleteArchivedSession
     case deleteAppTheme
@@ -189,6 +190,9 @@ enum ConfirmationPrompt: String, CaseIterable {
              // the chat again and getting the new link to them. Return therefore belongs on
              // Cancel, next to a Revoke button sitting inches from a name.
              .revokeChatAccess,
+             // Re-pairing is possible, but only by scanning a new one-time owner code. Treat
+             // revocation like the corresponding guest action: Return belongs on Cancel.
+             .revokePairedDevice,
              .deleteSession,
              .deleteArchivedSession,
              .deleteAppTheme,

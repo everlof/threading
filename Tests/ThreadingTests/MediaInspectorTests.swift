@@ -71,6 +71,8 @@ final class MediaInspectorTests: XCTestCase {
         let inspector = MediaInspectorView(items: fixture.items, selectedIndex: 0)
         inspector.frame = NSRect(x: 0, y: 0, width: 800, height: 560)
         inspector.layoutSubtreeIfNeeded()
+        XCTAssertFalse(inspector.showsCollectionRail)
+        XCTAssertEqual(inspector.collectionThumbnailCount, 0)
         let escape = try keyEvent("\u{1b}", keyCode: 53)
         var dismissals = 0
         inspector.onDismiss = { dismissals += 1 }

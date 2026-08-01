@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import os
 import Security
 
 // MARK: - Claude Keychain Credentials
@@ -57,10 +58,10 @@ enum ClaudeKeychainCredentials {
 
     // MARK: - Properties
 
-    /// Tokens already read, keyed by config path. Guarded by `cacheLock`: the fetcher asks from
-    /// a detached task while the Privacy page asks from the main actor.
-    private static var cache: [String: Token] = [:]
-    private static let cacheLock = NSLock()
+    /// Tokens already read, keyed by config path. The fetcher asks from a detached task while
+    /// the Privacy page asks from the main actor, so the synchronization must be visible to the
+    /// strict-concurrency checker rather than described by an `NSLock` beside a global `var`.
+    private static let cache = OSAllocatedUnfairLock(initialState: [String: Token]())
 
     /// All keychain traffic is serialised here because the no-prompt guarantee rests on a
     /// process-global switch (`SecKeychainSetUserInteractionAllowed`); two concurrent reads
@@ -85,9 +86,7 @@ enum ClaudeKeychainCredentials {
               isUsable(token, at: Date())
         else { return nil }
 
-        cacheLock.lock()
-        cache[configPath] = token
-        cacheLock.unlock()
+        cache.withLock { $0[configPath] = token }
         return token
     }
 
@@ -104,9 +103,7 @@ enum ClaudeKeychainCredentials {
         )
         guard status == errSecSuccess, let data, let token = parse(data) else { return false }
 
-        cacheLock.lock()
-        cache[configPath] = token
-        cacheLock.unlock()
+        cache.withLock { $0[configPath] = token }
         return true
     }
 
@@ -121,9 +118,7 @@ enum ClaudeKeychainCredentials {
         let (status, data) = copyItemData(service: service, allowingPrompt: false)
 
         if status == errSecSuccess, let data, let token = parse(data) {
-            cacheLock.lock()
-            cache[configPath] = token
-            cacheLock.unlock()
+            cache.withLock { $0[configPath] = token }
             return .granted
         }
         if status == errSecItemNotFound { return .missing }
@@ -134,16 +129,12 @@ enum ClaudeKeychainCredentials {
     /// Drops a cached token the API just refused — the CLI rotates the item in place, so the
     /// next read may find a fresh one where the stale one was.
     static func invalidate(configPath: String) {
-        cacheLock.lock()
-        cache.removeValue(forKey: configPath)
-        cacheLock.unlock()
+        _ = cache.withLock { $0.removeValue(forKey: configPath) }
     }
 
     /// For tests.
     static func forgetAll() {
-        cacheLock.lock()
-        cache.removeAll()
-        cacheLock.unlock()
+        cache.withLock { $0.removeAll() }
     }
 
     // MARK: - Internal Methods (pure, testable)
@@ -209,15 +200,14 @@ enum ClaudeKeychainCredentials {
     // MARK: - Private Methods
 
     private static func cachedToken(forConfigPath configPath: String) -> Token? {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-
-        guard let token = cache[configPath] else { return nil }
-        guard isUsable(token, at: Date()) else {
-            cache.removeValue(forKey: configPath)
-            return nil
+        cache.withLock { values in
+            guard let token = values[configPath] else { return nil }
+            guard isUsable(token, at: Date()) else {
+                values.removeValue(forKey: configPath)
+                return nil
+            }
+            return token
         }
-        return token
     }
 
     /// The one place secret data is requested. With `allowingPrompt` false the read runs

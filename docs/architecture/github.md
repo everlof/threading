@@ -74,6 +74,12 @@ A write is not a read, and three rules are the POST's own:
 Every tier refusing ends at the form rather than at an error, because "no credential here may
 write to that repository" is a permission answer with somewhere to go.
 
+The REST request and response are fixed wire contracts, so they use small `Codable` envelopes
+rather than `[String: Any]`. The generated API body is capped at 60,000 characters, the browser
+fallback at 6,000, and labels have explicit count and length budgets. Truncation includes its
+marker inside the budget. An accepted POST with an unreadable response still counts as created:
+retrying would risk filing a duplicate.
+
 ### The screenshot is not in the issue, and cannot be
 
 `POST /repos/{owner}/{repo}/issues` takes markdown. Image attachments in the web UI go through

@@ -11,13 +11,14 @@ optional beyond the first click:
 1. **Appearance** — pick the app's look from every built-in theme. The walkthrough itself
    restyles the moment you click a tile, and everything is changeable later under
    **Settings ▸ Themes**.
-2. **Accounts** — the Claude Code and Codex logins found on this Mac, and whether the
-   `claude`/`codex` commands are actually reachable from your shell; a missing one shows the
-   install command instead of failing later inside a terminal.
-3. **Conversations** — chats you already have on disk, grouped by the folder they ran in,
-   with the last two days pre-checked. Importing creates the matching projects and adopts the
-   checked conversations so they resume in place; **Skip for now** leaves everything where it
-   is — each project's composer offers the same import later.
+2. **Accounts** — the Claude Code and Codex logins found on this Mac, each with a switch that
+   takes it out of use on the spot (the same switch as **Settings ▸ Accounts**), and whether
+   the `claude`/`codex` commands are actually reachable from your shell; a missing one shows
+   the install command instead of failing later inside a terminal.
+3. **Conversations** — chats you already have on disk, one list newest first, with the last
+   two days pre-checked. Importing creates a project for each checked conversation's folder
+   implicitly and adopts the conversations so they resume in place; **Skip for now** leaves
+   everything where it is — each project's composer offers the same import later.
 4. **Notifications** — what Threading would notify about, disabled until you press **Enable
    notifications** and macOS asks its own question. Skipping is fine: Threading will ask the
    first time there is genuinely something to say.
@@ -1098,9 +1099,12 @@ read like a conversation; use the terminal when you need the complete agent inte
 
 ## Remote Access (beta)
 
-Turn on **Settings > General > Remote Access > Allow remote access** to mirror Threading from a
-browser or the Threading iPhone app. **Open Locally** tests the browser client on the Mac,
-and **Pair iPhone…** shows an owner-device QR code for the native app. Pairing is for your own
+Open **Settings > Remote Access**, choose **Relay**, **Tailscale**, or **Both**, and turn on
+**Remote Access** to mirror Threading from a browser or the Threading iPhone app. Relay supports
+ordinary public share links; Tailscale keeps the connection inside your tailnet; Both uses
+Tailscale for owner pairing and the relay for one-chat sharing. **Open in Browser** tests the
+client on the Mac, and the page shows an owner-device QR code for the native app. Pairing is for
+your own
 trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded
 Native permission requests. To involve somebody else, use a session's **… > Share Chat…** and
 choose an invitation for that chat alone. The sheet names each grant and what it withholds:
@@ -1175,10 +1179,14 @@ client closes. Raw logs, messages, prompts, terminal output, paths, URLs, notifi
 credentials are never sent, and one-chat guest links do not get this control.
 
 Every link is a password, but an owner pairing code is much more powerful than a one-chat guest
-link. Each Threading launch creates a fresh owner link. Turning Remote Access off, or quitting the
-app, closes the local listener and secure relay and revokes the links immediately. Remote
-traffic uses a temporary Cloudflare HTTPS relay; without `cloudflared`, **Open Locally** still
-works but access from another device does not. See [Remote access](docs/REMOTE_ACCESS.md) for
+link. It is a one-time bootstrap exchanged for a unique device credential kept in Keychain on
+both Mac and iPhone. Turning Remote Access off or quitting closes every connection and revokes
+guest shares, but explicitly paired owner devices remain paired; revoke a named device on the
+Remote Access settings page. A Tailscale pairing has a stable private origin and reconnects after
+restart. The current Cloudflare Quick Tunnel changes origin at restart, so it still needs a new
+scan until the planned stable relay URL lands. Without `cloudflared`, Relay is unavailable;
+without a signed-in Tailscale installation, Tailscale is unavailable. **Open in Browser** still
+works locally. See [Remote access](docs/REMOTE_ACCESS.md) for
 pairing, notifications, the complete security model, and beta limitations.
 
 ## Display Panel
@@ -1870,7 +1878,6 @@ than borrowing an unrelated app translation.
 - **Reopen the last session at launch**
 - **Confirmations** — one switch per prompt, plus **Hidden extension messages ▸ Show All**;
   see [Confirmations](#confirmations)
-- **Allow remote access** — see [Remote Access](#remote-access-beta)
 - **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)
 - **Hide Claude's status line in Threading terminals** — see [Agent hooks](#agent-hooks)
 - **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
@@ -2035,11 +2042,12 @@ uploads it; sending it is your decision.
 **What is never asked for.** Threading has no analytics and no identifier for your install. It
 requests no camera, microphone, contacts, calendar, location or Full Disk Access.
 Remote Access does not need the Local Network permission either: the listener binds to
-`127.0.0.1` and your iPhone reaches it through an outbound encrypted relay, so nothing is
-published on the network you are attached to.
+`127.0.0.1`, and the selected HTTPS relay or Tailscale Serve publishes only that loopback
+listener. Threading never opens a listener on the physical LAN.
 
 **Stored credentials** live in your login keychain, never in Threading's own database — the GitHub
-connection, any model API keys you enter, and secrets an extension stores. Agent logins are not
+connection, paired-owner device credentials, any model API keys you enter, and secrets an
+extension stores. Agent logins are not
 among them: Threading reads *which* accounts exist under `~/.claude` and `~/.codex` so it can
 route a session to one, and never reads or copies their credentials.
 
@@ -2187,34 +2195,40 @@ that deleting does not return.
 ### Advanced
 Where Threading keeps what it remembers, and how to start over.
 
-Everything lives in exactly two places, and both are shown with a **Reveal** button rather than
-described:
+Ordinary settings and work live in exactly two file locations, and both are shown with a
+**Reveal** button rather than described:
 
 | | Where | Holds |
 |---|---|---|
 | Settings | `~/Library/Preferences/codes.threading.plist` | Themes, profiles, every preference |
 | Data | `~/Library/Application Support/Threading` | Projects, sessions, conversations, panel layouts, icons, caches |
 
+Security capabilities are separate: paired-owner device credentials live in the login Keychain,
+not in either file location or the database.
+
 Two ways to start over, because they cost different things:
 
 - **Reset Settings…** puts themes, profiles and every preference back to their defaults. Projects,
   sessions and conversations are untouched. This is the one for "something in my settings is
   wrong", and it is worth trying before the other.
-- **Reset Everything…** also clears the data directory, so Threading restarts as if newly
-  installed — no projects, no sessions, no conversations.
+- **Reset Everything…** also clears the data directory and revokes paired-owner credentials, so
+  Threading restarts as if newly installed — no projects, no sessions, no conversations, no
+  paired devices.
 
-**Nothing is deleted.** Both resets *move* the old state into a dated folder,
+**File state is not deleted.** Both resets *move* the old files into a dated folder,
 `~/Library/Application Support/Threading Resets/2026-07-30 14-32-05/`, so a reset you regret is a
 drag back rather than a loss, and a database that was corrupt is still there to be looked at. The
 folders stay until you remove them, which is the other reason the page reveals that location.
+Paired-owner credentials are deliberately not copied there — that would turn a backup folder into
+a credential export — so their revocation by Reset Everything cannot be undone from the folder.
 
 Threading restarts itself immediately after a reset. That is not a convenience: the running app
 holds your projects and window layout in memory and would write them straight back over the reset
 otherwise.
 
-**Only Threading's own two places are touched.** Your agent logins, and anything the Claude or
-Codex CLIs keep for themselves, live in their own folders and are left exactly where they are —
-so a reset does not sign you out.
+**Only Threading's two file locations and, for Reset Everything, its paired-owner Keychain item
+are touched.** Your agent logins, and anything the Claude or Codex CLIs keep for themselves, live
+in their own stores and are left exactly where they are — so a reset does not sign you out.
 
 ### Profiles, Themes, AI
 Terminal font and cursor, colour schemes, and AI provider configuration.

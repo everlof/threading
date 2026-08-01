@@ -9,7 +9,7 @@ import Foundation
 /// `ExternalAppLauncher.locate`), so its answer and the launch cannot disagree about PATH.
 enum AgentCLIProbe {
 
-    struct Result: Equatable {
+    struct Result: Equatable, Sendable {
         let executable: String
         /// The absolute path the login shell resolves, or nil when the command is not found.
         let resolvedPath: String?
@@ -22,7 +22,7 @@ enum AgentCLIProbe {
     @MainActor
     static func resolve(
         executables: [String],
-        completion: @escaping @MainActor ([Result]) -> Void
+        completion: @escaping @MainActor @Sendable ([Result]) -> Void
     ) {
         let shell = AgentLauncher.loginShellPath
         DispatchQueue.global(qos: .userInitiated).async {

@@ -53,6 +53,9 @@ struct RemoteAuthorization: Equatable, Sendable {
     let principal: RemotePrincipal
     let expiresAt: Date?
     let member: RemoteMember?
+    /// A cryptographic capability is still the credential; this binds that credential to the
+    /// stable device identifier that received it so copying only the bearer is insufficient.
+    let boundDeviceID: String?
     private let permissionApproval: Bool
 
     init(
@@ -62,6 +65,7 @@ struct RemoteAuthorization: Equatable, Sendable {
         principal: RemotePrincipal? = nil,
         expiresAt: Date? = nil,
         member: RemoteMember? = nil,
+        boundDeviceID: String? = nil,
         canApprovePermissions: Bool? = nil
     ) {
         self.shareID = shareID
@@ -72,6 +76,7 @@ struct RemoteAuthorization: Equatable, Sendable {
         self.principal = principal ?? (scope == .allSessions ? .ownerDevice : .guest)
         self.expiresAt = expiresAt
         self.member = member
+        self.boundDeviceID = boundDeviceID ?? member?.deviceID
         permissionApproval = canApprovePermissions
             ?? (self.principal == .ownerDevice && capability == .interact)
     }
@@ -91,8 +96,8 @@ struct RemoteAuthorization: Equatable, Sendable {
     }
 
     func isBound(to deviceID: String?) -> Bool {
-        guard let member else { return true }
-        return member.deviceID == RemoteInboundPolicy.normalizedDeviceID(deviceID)
+        guard let boundDeviceID else { return true }
+        return boundDeviceID == RemoteInboundPolicy.normalizedDeviceID(deviceID)
     }
 }
 

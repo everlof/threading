@@ -6,8 +6,9 @@ import ThreadingRemoteKit
 /// the coordinator (main) mints and revokes into it, so it guards its own state with a lock
 /// rather than borrowing the coordinator's main-actor isolation.
 ///
-/// Owner pairing and exact-session guest links are all launch-scoped today. A future persisted
-/// device/share store can replace this in-memory authority without changing server routing.
+/// Durable owner devices and launch-scoped guest links are loaded into the same runtime map.
+/// Stopping remote access empties this map immediately; starting it rehydrates only the owner
+/// records whose per-device credentials survived in Keychain.
 final class RemoteAuthorityStore: RemoteAuthorizing, @unchecked Sendable {
     private let lock = NSLock()
     private var byToken: [String: RemoteAuthorization] = [:]
@@ -43,16 +44,17 @@ protocol RemoteInvitationRedeeming: AnyObject, Sendable {
     func redeemInvitation(
         token: String,
         deviceID: String,
-        displayName: String
+        displayName: String,
+        persistsOwnerDevice: Bool
     ) -> RemoteInvitationRedemption?
 }
 
 /// The one facade the app and UI talk to for remote access: a master switch that owns the
-/// server and HTTPS relay, and publishes statuses other views can render.
+/// server and its selected HTTPS transports, and publishes statuses other views can render.
 @MainActor
 final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
-    static let shared = RemoteAccessCoordinator()
+    static let shared = RemoteAccessCoordinator(ownerDeviceStore: defaultOwnerDeviceStore())
 
     /// Posted whenever `status` changes, so a Settings page can redraw.
     static let statusDidChange = Notification.Name("RemoteAccessStatusDidChange")
@@ -64,13 +66,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         case failed(reason: String)
     }
 
-    enum RelayStatus: Equatable {
-        case inactive
-        case starting
-        case connected(URL)
-        case unavailable(String)
-    }
-
     private(set) var status: Status = .disabled {
         didSet {
             guard status != oldValue else { return }
@@ -78,26 +73,53 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         }
     }
 
-    private(set) var relayStatus: RelayStatus = .inactive {
+    private(set) var relayStatus: RemoteTransportState = .stopped {
         didSet {
             guard relayStatus != oldValue else { return }
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
     }
 
+    private(set) var tailscaleStatus: RemoteTransportState = .stopped {
+        didSet {
+            guard tailscaleStatus != oldValue else { return }
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        }
+    }
+
     private let server = RemoteAccessServer()
     private let tunnel = RemoteTunnel()
+    private let tailscale = TailscaleRemoteTransport()
     private let authority = RemoteAuthorityStore()
-    private var ownerToken: String?
+    private let ownerDevices: RemoteOwnerDeviceRegistry
+    private var pairingBootstrapToken: String?
+    private var pairingRedemptions: [String: PairingRedemption] = [:]
     private var sessionShares: [SessionID: [SessionShare]] = [:]
     /// Invalidates a listener completion that was already enqueued on main when the user
     /// switched the feature off. Without it, a fast off-after-on could put the UI back into
     /// `listening` after `stop()` had already closed the listener and revoked its token.
     private var lifecycleGeneration = 0
+    /// Transport callbacks have their own generation because changing Relay/Tailscale mode keeps
+    /// the listener and all current authorizations alive.
+    private var transportGeneration = 0
 
-    private init() {
+    private init(ownerDeviceStore: RemoteOwnerDevicePersisting) {
+        ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         server.authorizer = authority
         server.invitationRedeemer = self
+    }
+
+    private static func defaultOwnerDeviceStore() -> RemoteOwnerDevicePersisting {
+        if NSClassFromString("XCTestCase") != nil {
+            return InMemoryRemoteOwnerDeviceStore()
+        }
+        return RemoteOwnerDeviceKeychainStore()
+    }
+
+    private struct PairingRedemption {
+        let deviceID: String
+        let redemption: RemoteInvitationRedemption
+        let expiresAt: Date
     }
 
     private struct MemberRecord {
@@ -124,6 +146,28 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         let expiresAt: Date
         let canApprovePermissions: Bool
     }
+
+    struct PairedOwnerDevice: Equatable, Identifiable {
+        let id: String
+        let displayName: String
+        let pairedAt: Date
+        let lastSeenAt: Date?
+    }
+
+    var pairedOwnerDevices: [PairedOwnerDevice] {
+        ownerDevices.devices
+            .map {
+                PairedOwnerDevice(
+                    id: $0.id,
+                    displayName: $0.displayName,
+                    pairedAt: $0.pairedAt,
+                    lastSeenAt: $0.lastSeenAt
+                )
+            }
+            .sorted { $0.pairedAt < $1.pairedAt }
+    }
+
+    var ownerDevicePersistenceError: String? { ownerDevices.persistenceError }
 
     // MARK: - Access read model
 
@@ -161,27 +205,28 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         }
     }
 
-    /// The local browser door for this launch. The bearer stays in the fragment, which browsers
-    /// do not send in the HTTP request or a referrer. It is intentionally not persisted: turning
-    /// access off, or quitting Threading, invalidates every copied link.
+    /// The local browser pairing door for this launch. The bootstrap bearer stays in the
+    /// fragment and is exchanged for a device-bound credential before any session is returned.
     var localURL: URL? {
-        guard case .listening(let port) = status, let ownerToken else { return nil }
+        guard case .listening(let port) = status, let pairingBootstrapToken else { return nil }
         var components = URLComponents()
         components.scheme = "http"
         components.host = RemoteAccessDefaults.host
         components.port = Int(port)
         components.path = "/"
-        components.fragment = ownerToken
+        components.fragment = pairingBootstrapToken
         return components.url
     }
 
-    /// The HTTPS door intended for another device. Nil while the relay is still starting or
-    /// unavailable; the local browser link remains usable independently.
+    /// The HTTPS door intended for another device. Nil while the selected pairing transport is
+    /// still starting or unavailable; the local browser link remains usable independently.
     var remoteURL: URL? {
-        guard case .connected(let origin) = relayStatus, let ownerToken else { return nil }
+        guard ownerDevices.persistenceError == nil,
+              let origin = pairingOrigin,
+              let pairingBootstrapToken else { return nil }
         var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)
         components?.path = "/"
-        components?.fragment = ownerToken
+        components?.fragment = pairingBootstrapToken
         return components?.url
     }
 
@@ -192,13 +237,34 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     /// encodes in half the symbol. `RemoteConnectionLink` owns the difference, and normalises
     /// the case back on the way in, so both are the same credential.
     var pairingCodePayload: String? {
-        guard case .connected(let origin) = relayStatus,
-              let ownerToken,
-              let link = RemoteConnectionLink(baseURL: origin, token: ownerToken)
+        guard ownerDevices.persistenceError == nil,
+              let origin = pairingOrigin,
+              let pairingBootstrapToken,
+              let link = RemoteConnectionLink(baseURL: origin, token: pairingBootstrapToken)
         else {
             return nil
         }
         return link.scannablePayload
+    }
+
+    private var pairingOrigin: URL? {
+        switch AppSettings.shared.remoteAccessConnectionMode {
+        case .relay:
+            if case .connected(let origin) = relayStatus { return origin }
+        case .tailscale, .tailscaleAndRelay:
+            if case .connected(let origin) = tailscaleStatus { return origin }
+        }
+        return nil
+    }
+
+    private var invitationOrigin: URL? {
+        switch AppSettings.shared.remoteAccessConnectionMode {
+        case .relay, .tailscaleAndRelay:
+            if case .connected(let origin) = relayStatus { return origin }
+        case .tailscale:
+            if case .connected(let origin) = tailscaleStatus { return origin }
+        }
+        return nil
     }
 
     /// Mints a short-lived, single-use invitation for exactly one chat.
@@ -224,7 +290,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         capability: RemoteCapability,
         canApprovePermissions requestedPermissionApproval: Bool = false
     ) -> CreatedShare? {
-        guard case .connected = relayStatus,
+        guard invitationOrigin != nil,
               RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID))
         else {
             return nil
@@ -267,17 +333,57 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
     /// Consumes one invitation and returns a durable, device-bound chat membership.
     ///
-    /// "Durable" means until the owner stops sharing, Remote Access is disabled, or this Mac
-    /// process exits. The 24-hour timer applies only while the invitation remains unused.
+    /// Owner bootstraps are exchanged for a unique device bearer; one-chat invitations follow
+    /// the existing guest-membership path. A short retry cache makes a lost pairing response
+    /// idempotent without leaving the photographed bootstrap valid for the rest of the launch.
     func redeemInvitation(
         token: String,
         deviceID: String,
-        displayName: String
+        displayName: String,
+        persistsOwnerDevice: Bool
     ) -> RemoteInvitationRedemption? {
         guard let normalizedDeviceID = RemoteInboundPolicy.normalizedDeviceID(deviceID),
               let normalizedName = RemoteInboundPolicy.normalizedMemberName(displayName)
         else {
             return nil
+        }
+
+        let now = Date()
+        pairingRedemptions = pairingRedemptions.filter { $0.value.expiresAt > now }
+        if let cached = pairingRedemptions[token], cached.deviceID == normalizedDeviceID {
+            return cached.redemption
+        }
+        if token == pairingBootstrapToken {
+            let accessToken = Self.randomToken()
+            if persistsOwnerDevice {
+                let previousToken = ownerDevices.devices.first(where: {
+                    $0.deviceID == normalizedDeviceID
+                })?.token
+                return pairNewOwnerDevice(
+                    bootstrap: token,
+                    deviceID: normalizedDeviceID,
+                    displayName: normalizedName,
+                    accessToken: accessToken,
+                    previousToken: previousToken,
+                    now: now
+                )
+            } else {
+                let authorization = RemoteAuthorization(
+                    shareID: "owner-browser-\(UUID().uuidString.lowercased())",
+                    capability: .interact,
+                    scope: .allSessions,
+                    principal: .ownerDevice,
+                    boundDeviceID: normalizedDeviceID
+                )
+                authority.set(authorization, forToken: accessToken)
+                return finishPairing(
+                    bootstrap: token,
+                    deviceID: normalizedDeviceID,
+                    accessToken: accessToken,
+                    authorization: authorization,
+                    now: now
+                )
+            }
         }
 
         for sessionID in Array(sessionShares.keys) {
@@ -323,13 +429,63 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         return nil
     }
 
+    private func pairNewOwnerDevice(
+        bootstrap: String,
+        deviceID: String,
+        displayName: String,
+        accessToken: String,
+        previousToken: String?,
+        now: Date
+    ) -> RemoteInvitationRedemption? {
+        guard let record = ownerDevices.pair(
+            deviceID: deviceID,
+            displayName: displayName,
+            token: accessToken,
+            now: now
+        ) else {
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+            return nil
+        }
+        if let previousToken { authority.set(nil, forToken: previousToken) }
+        authority.set(record.authorization, forToken: accessToken)
+        server.revokeConnections(shareID: record.id)
+        return finishPairing(
+            bootstrap: bootstrap,
+            deviceID: deviceID,
+            accessToken: accessToken,
+            authorization: record.authorization,
+            now: now
+        )
+    }
+
+    private func finishPairing(
+        bootstrap: String,
+        deviceID: String,
+        accessToken: String,
+        authorization: RemoteAuthorization,
+        now: Date
+    ) -> RemoteInvitationRedemption {
+        let redemption = RemoteInvitationRedemption(
+            accessToken: accessToken,
+            authorization: authorization
+        )
+        pairingRedemptions[bootstrap] = PairingRedemption(
+            deviceID: deviceID,
+            redemption: redemption,
+            expiresAt: now.addingTimeInterval(RemoteAccessDefaults.pairingRetrySeconds)
+        )
+        pairingBootstrapToken = Self.pairingToken()
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        return redemption
+    }
+
     func hasSessionShares(_ sessionID: SessionID) -> Bool {
         !(sessionShares[sessionID]?.isEmpty ?? true)
     }
 
     /// Who can reach this chat: the people who accepted an invitation, and the invitations still
     /// waiting to be used. The owner's own paired devices are deliberately absent — they hold the
-    /// pairing token rather than a share, reach every chat, and are shown by the sharing pane
+    /// owner credential rather than a share, reach every chat, and are shown by the sharing pane
     /// from the live connection instead, where they can be told apart from a guest.
     func access(for sessionID: SessionID) -> SessionAccess {
         let shares = sessionShares[sessionID] ?? []
@@ -370,12 +526,38 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     /// Keyed by `shareID`, which for a membership *is* the member id — the authorization a
     /// connection carries has no other back-reference to the share it came from.
     func noteMemberSeen(shareID: String) {
+        if ownerDevices.devices.contains(where: { $0.id == shareID }) {
+            ownerDevices.noteSeen(id: shareID)
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+            return
+        }
         for (sessionID, shares) in sessionShares {
             for (shareIndex, share) in shares.enumerated() where share.members[shareID] != nil {
                 sessionShares[sessionID]?[shareIndex].members[shareID]?.lastSeenAt = Date()
                 return
             }
         }
+    }
+
+    @discardableResult
+    func revokeOwnerDevice(_ deviceID: String) -> Bool {
+        guard let record = ownerDevices.revoke(id: deviceID) else {
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+            return false
+        }
+        authority.set(nil, forToken: record.token)
+        RemoteNotificationService.shared.revoke(shareID: record.id)
+        server.revokeConnections(shareID: record.id)
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        return true
+    }
+
+    /// Full app reset is the one operation authorized to erase the Keychain record itself,
+    /// including a corrupt record that ordinary fail-closed revocation refuses to overwrite.
+    func deleteOwnerDevicesForAppReset() throws {
+        stop()
+        try ownerDevices.deleteAllForAppReset()
     }
 
     /// Ends one person's access to one chat, closing whatever they have open.
@@ -436,7 +618,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     }
 
     private func invitationURL(token: String) -> URL? {
-        guard case .connected(let origin) = relayStatus else { return nil }
+        guard let origin = invitationOrigin else { return nil }
         var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)
         components?.path = "/"
         components?.fragment = token
@@ -477,17 +659,33 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         if enabled { start() } else { stop() }
     }
 
-    /// Stops the tunnel, then the server, then forgets every token. On app quit this must
-    /// run before the listeners so a child tunnel process cannot outlive the app.
+    func setConnectionMode(_ mode: RemoteAccessConnectionMode) {
+        guard AppSettings.shared.remoteAccessConnectionMode != mode else { return }
+        AppSettings.shared.remoteAccessConnectionMode = mode
+        guard case .listening(let port) = status else {
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+            return
+        }
+        startTransports(port: port)
+    }
+
+    func retryTransports() {
+        guard case .listening(let port) = status else { return }
+        startTransports(port: port)
+    }
+
+    /// Stops every network door and clears runtime capabilities. Durable owner-device records
+    /// remain in Keychain and are rehydrated on the next start; guest shares stay deliberately
+    /// launch-scoped and are revoked here.
     func stop() {
         lifecycleGeneration += 1
-        tunnel.stop()
-        relayStatus = .inactive
+        stopTransports()
         server.stop()
         RemoteSessionMirrorRegistry.shared.remoteAccessStopped()
         RemoteNotificationService.shared.reset()
         authority.removeAll()
-        ownerToken = nil
+        pairingBootstrapToken = nil
+        pairingRedemptions.removeAll()
         sessionShares.removeAll()
         status = .disabled
     }
@@ -508,23 +706,19 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             return
         }
 
-        // An in-memory owner-device token, not persisted. Settings exposes its loopback URL for
-        // local testing and its relay form only in the deliberately privileged pairing sheet.
+        // The photographed value is a bootstrap, never the durable capability. It is consumed
+        // and rotated when a device exchanges it for its own 256-bit bearer.
         let token = Self.pairingToken()
         lifecycleGeneration += 1
         let generation = lifecycleGeneration
-        ownerToken = token
+        pairingBootstrapToken = token
+        pairingRedemptions.removeAll()
         status = .starting
-        relayStatus = .inactive
-        authority.set(
-            RemoteAuthorization(
-                shareID: "my-devices",
-                capability: .interact,
-                scope: .allSessions,
-                principal: .ownerDevice
-            ),
-            forToken: token
-        )
+        stopTransports()
+        authority.removeAll()
+        for record in ownerDevices.devices {
+            authority.set(record.authorization, forToken: record.token)
+        }
 
         server.start { [weak self] port in
             guard let self else { return }
@@ -535,38 +729,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             if let port {
                 self.status = .listening(port: port)
                 RemoteSessionMirrorRegistry.shared.remoteAccessStarted()
-                self.relayStatus = .starting
-                self.tunnel.start(port: port) { [weak self] state in
-                    guard let self,
-                          self.lifecycleGeneration == generation,
-                          AppSettings.shared.remoteAccessEnabled else {
-                        return
-                    }
-                    switch state {
-                    case .stopped:
-                        self.relayStatus = .inactive
-                    case .starting:
-                        self.relayStatus = .starting
-                    case .connected(let url):
-                        self.relayStatus = .connected(url)
-                        MacRemoteDiagnostics.record(.relayConnected, fields: [
-                            .transport: "https",
-                        ])
-                        EventLog.shared.record(.remote, "Remote relay connected", [
-                            "host": url.host ?? "unknown"
-                        ])
-                    case .unavailable(let reason):
-                        self.relayStatus = .unavailable(reason)
-                        MacRemoteDiagnostics.record(
-                            .relayFailed,
-                            level: .warning,
-                            fields: [.reason: Self.diagnosticReason(reason)]
-                        )
-                        EventLog.shared.record(.remote, "Remote relay unavailable", [
-                            "reason": reason
-                        ])
-                    }
-                }
+                self.startTransports(port: port)
                 ThreadingLogger.remote.info(
                     "Remote access local URL: http://127.0.0.1:\(port)/#\(token, privacy: .private)"
                 )
@@ -575,10 +738,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                     .transport: "loopback",
                 ])
             } else {
-                self.tunnel.stop()
-                self.relayStatus = .inactive
+                self.stopTransports()
                 self.authority.removeAll()
-                self.ownerToken = nil
+                self.pairingBootstrapToken = nil
+                self.pairingRedemptions.removeAll()
                 self.sessionShares.removeAll()
                 self.status = .failed(reason: "listener")
                 EventLog.shared.record(.remote, "Remote access failed to start")
@@ -588,6 +751,86 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                     fields: [.reason: "listener"]
                 )
             }
+        }
+    }
+
+    // MARK: - Transports
+
+    private func startTransports(port: UInt16) {
+        transportGeneration += 1
+        let generation = transportGeneration
+        tunnel.stop()
+        tailscale.stop()
+        relayStatus = .stopped
+        tailscaleStatus = .stopped
+
+        let mode = AppSettings.shared.remoteAccessConnectionMode
+        if mode.usesRelay {
+            relayStatus = .starting
+            tunnel.start(port: port) { [weak self] state in
+                self?.transportChanged(
+                    .relay,
+                    state: state,
+                    generation: generation
+                )
+            }
+        }
+        if mode.usesTailscale {
+            tailscaleStatus = .starting
+            tailscale.start(port: port) { [weak self] state in
+                self?.transportChanged(
+                    .tailscale,
+                    state: state,
+                    generation: generation
+                )
+            }
+        }
+    }
+
+    private func stopTransports() {
+        transportGeneration += 1
+        tunnel.stop()
+        tailscale.stop()
+        relayStatus = .stopped
+        tailscaleStatus = .stopped
+    }
+
+    private func transportChanged(
+        _ kind: RemoteTransportKind,
+        state: RemoteTransportState,
+        generation: Int
+    ) {
+        guard transportGeneration == generation,
+              AppSettings.shared.remoteAccessEnabled,
+              case .listening = status else { return }
+        switch kind {
+        case .relay: relayStatus = state
+        case .tailscale: tailscaleStatus = state
+        }
+
+        switch state {
+        case .connected:
+            MacRemoteDiagnostics.record(.relayConnected, fields: [
+                .transport: kind.rawValue,
+            ])
+            EventLog.shared.record(.remote, "Remote transport connected", [
+                "transport": kind.rawValue,
+            ])
+        case .unavailable(let reason):
+            MacRemoteDiagnostics.record(
+                .relayFailed,
+                level: .warning,
+                fields: [
+                    .transport: kind.rawValue,
+                    .reason: Self.diagnosticReason(reason),
+                ]
+            )
+            EventLog.shared.record(.remote, "Remote transport unavailable", [
+                "transport": kind.rawValue,
+                "reason": Self.diagnosticReason(reason),
+            ])
+        case .stopped, .starting:
+            break
         }
     }
 
@@ -610,7 +853,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    /// The owner bearer, which is the one token that has to survive being *photographed*.
+    /// The one-time owner bootstrap, which is the one token that has to survive being
+    /// *photographed*.
     ///
     /// Base32 rather than base64url, and 16 bytes rather than 32, because this token is the
     /// tail of a QR payload: base64url is mixed case, so it forces a byte-mode segment worth
@@ -618,11 +862,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     /// `trycloudflare.com` host that is 41 modules before and 37 after — and a symbol with
     /// fewer, larger modules is one a camera finds faster, which is the whole job here.
     ///
-    /// 128 bits, not 256. It is still an unguessable online-only bearer against a secret
-    /// relay hostname, held in memory and revoked when Remote Access stops. Shortening it
-    /// further would reach 33 modules, and that is where this stops: the trade turns from
-    /// "spend entropy nobody can use" into "spend entropy", and a code that is 10% chunkier is
-    /// not worth arguing about the second one.
+    /// 128 bits, not 256. It is an unguessable online-only bootstrap, held in memory, rotated
+    /// immediately after a successful exchange, and revoked when Remote Access stops.
+    /// Shortening it further would reach 33 modules, and that is where this stops: the trade
+    /// turns from "spend entropy nobody can use" into "spend entropy", and a code that is 10%
+    /// chunkier is not worth arguing about the second one.
     ///
     /// **Revisit this when the relay moves off `trycloudflare.com`.** The 52-character host is
     /// what makes the token pay for the last version; against a short custom domain a 256-bit

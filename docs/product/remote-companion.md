@@ -13,9 +13,14 @@ workflow.
 
 ## Pair explicitly
 
-A remote device begins with a pairing flow initiated from the desktop app.
-Pairing establishes the device relationship; it does not automatically expose
-every project or session.
+A remote device begins with a one-time pairing flow initiated from the desktop app. The Mac and
+native device keep the exchanged, device-bound owner credential in Keychain, so the relationship
+survives restarts until the owner explicitly revokes that named device. Owner pairing exposes the
+remote-manageable sessions on that Mac; it is intentionally stronger than sharing one
+conversation with another person.
+
+The connection is separately selectable: Relay for ordinary share links, Tailscale for a private
+tailnet, or Both for private owner pairing alongside public one-chat sharing.
 
 ## Share a conversation
 
@@ -30,8 +35,9 @@ Use the narrowest role that supports the intended collaboration.
 
 ## Revoke access
 
-You can stop sharing a conversation, revoke a paired device, or disable remote
-access. Revocation should be treated as a normal control, not an emergency-only
+You can stop sharing a conversation, revoke a paired device, or disable remote access. Disabling
+closes the listener and suspends paired devices without forgetting them; revocation removes the
+device credential. Revocation should be treated as a normal control, not an emergency-only
 feature.
 
 ## What remote access is not
@@ -45,4 +51,3 @@ conversation and the capabilities allowed by its role.
 The mobile and browser interfaces prioritize attention, conversation, and
 decisions over full desktop parity. Detailed local workflows such as broad
 repository navigation remain better suited to the Mac.
-

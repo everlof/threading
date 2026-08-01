@@ -44,13 +44,17 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
 
     /// Injectable so hosted tests can drive every state without the real notification center,
     /// which refuses to answer for an unbundled test host.
-    var readAuthorization: (@escaping @MainActor (UNAuthorizationStatus) -> Void) -> Void = { completion in
+    var readAuthorization: (
+        @escaping @MainActor @Sendable (UNAuthorizationStatus) -> Void
+    ) -> Void = { completion in
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             let status = settings.authorizationStatus
             DispatchQueue.main.async { completion(status) }
         }
     }
-    var requestAuthorization: (@escaping @MainActor (Bool) -> Void) -> Void = { completion in
+    var requestAuthorization: (
+        @escaping @MainActor @Sendable (Bool) -> Void
+    ) -> Void = { completion in
         // The same options the standing ask-on-first-alert path requests — see
         // `AttentionAlertCenter.post`. No badge: sessions are not unread counts.
         UNUserNotificationCenter.current().requestAuthorization(
@@ -95,7 +99,7 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
         let caption = NSTextField(
             wrappingLabelWithString: L10n.string(
                 "Agents work for minutes at a time. A notification says when one is blocked on "
-                    + "an approval, or finished while you were elsewhere — only then, and only "
+                    + "an approval, or finished while you were elsewhere. Only then, and only "
                     + "while Threading is in the background."
             )
         )
@@ -128,13 +132,18 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
         statusLabel.textColor = Design.Text.secondary
         statusLabel.alignment = .center
 
+        let card = SettingsCard(rows: rows)
+
         let stack = NSStackView(views: [
-            heading, caption, SettingsCard(rows: rows), enableButton, statusLabel
+            heading, caption, card, enableButton, statusLabel
         ])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = Design.Spacing.inset
         stack.setCustomSpacing(Design.Spacing.large, after: caption)
+        // The card is the page's whole content; hemmed in by its own hug it read cramped, so
+        // it keeps the walkthrough's shared measure and room below before the follow-up line.
+        stack.setCustomSpacing(Design.Spacing.large, after: card)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(stack)
@@ -146,6 +155,7 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
                 constant: -Design.Spacing.pane
             ),
             caption.widthAnchor.constraint(lessThanOrEqualToConstant: Layout.contentWidth),
+            card.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
             statusLabel.widthAnchor.constraint(lessThanOrEqualToConstant: Layout.contentWidth)
         ])
 
@@ -194,7 +204,7 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
             enableButton.isHidden = false
             enableButton.title = L10n.string("Enable notifications")
             statusLabel.stringValue = L10n.string(
-                "Skipping is fine — Threading will ask the first time there is something to say."
+                "Skipping is fine. Threading will ask the first time there is something to say."
             )
         }
     }

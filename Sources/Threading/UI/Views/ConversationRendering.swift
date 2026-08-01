@@ -44,8 +44,11 @@ extension ConversationViewController {
                 opensTurn: startsTurn && timeline.rows.count == 1
             ))
 
-            // The rail indexes user turns, so it only ever changes when one is added.
-            if case .userMessage = row, !isReplaying { refreshMinimap() }
+            // A live user row advances the rail by one; settlement later fills that mark's
+            // answer and duration without rebuilding its historical prefix.
+            if case .userMessage = row, !isReplaying {
+                noteMinimapTurnStarted(at: index)
+            }
 
         case .resultAttached(let index):
             guard case .toolCall(let call) = timeline.rows[index],
@@ -115,6 +118,7 @@ extension ConversationViewController {
             } else {
                 foldTurn(startingAt: startIndex, stopped: false)
             }
+            if !isReplaying { noteMinimapTurnSettled(at: startIndex) }
             appendChangedFilesCard(forTurnStartingAt: startIndex)
 
         case .adoptedSessionID(let agentSessionID):
@@ -295,7 +299,7 @@ extension ConversationViewController {
     /// Conversation contracts are scoped to the session, not to message text or row indexes.
     /// Extensions may annotate a kind of row in a known session without receiving transcript
     /// content as an accidental data API.
-    private func componentTarget(
+    func componentTarget(
         for row: ConversationTimeline.Row
     ) -> ExtensionComponentTarget? {
         let sessionID = agentSession.id.uuidString.lowercased()
@@ -496,7 +500,8 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
             onRelease: releaseHandler(for: item, content: content),
             onMeasuredHeight: { [weak self] height in
                 guard let self,
-                      self.presentationItems.contains(where: { $0.id == item.id }),
+                      self.presentationItems.indices.contains(tableRow),
+                      self.presentationItems[tableRow].id == item.id,
                       height > 0 else { return }
                 self.rowHeightCache[item.id] = height
             }
@@ -577,7 +582,25 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
 
     func notePresentationHeightChanged(_ id: PresentationID) {
         rowHeightCache[id] = nil
-        guard let row = presentationItems.firstIndex(where: { $0.id == id }),
+        // Replay has no materialized table row to invalidate and finishes with one full reload.
+        // Searching the growing presentation for every replayed tool result made transcript
+        // construction quadratic even though the virtualized AppKit working set stayed bounded.
+        guard !isReplaying else { return }
+
+        let row: Int?
+        switch id {
+        case .timeline(let index):
+            row = presentationRow(forTimelineIndex: index)
+        case .streaming where presentationItems.last?.id == .streaming:
+            // The streaming placeholder is appended at the tail and remains there until the
+            // authoritative completed message replaces it. Avoid walking the whole transcript
+            // for every token-sized update in a long conversation.
+            row = presentationItems.indices.last
+        default:
+            row = presentationItems.firstIndex(where: { $0.id == id })
+        }
+
+        guard let row,
               row < tableView.numberOfRows else { return }
         tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
     }

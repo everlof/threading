@@ -17,6 +17,12 @@ enum GitHubIssueDefaults {
     /// browsers, proxies and GitHub itself each draw their own line somewhere above this.
     static let webFormBodyLimit = 6000
 
+    /// The API can carry more than a URL, but a generated diagnostic report is still
+    /// input-controlled data. Keep requests comfortably bounded and make truncation explicit.
+    static let apiBodyLimit = 60_000
+    static let labelCountLimit = 10
+    static let labelCharacterLimit = 50
+
     static let apiVersionHeader = "X-GitHub-Api-Version"
 }
 
@@ -241,29 +247,51 @@ struct GitHubIssueSubmitter: Sendable {
 
     // MARK: - Wire Format
 
-    static func requestBody(for draft: GitHubIssueDraft) -> Data? {
-        var payload: [String: Any] = [
-            "title": draft.title,
-            "body": draft.body
-        ]
-        if !draft.labels.isEmpty {
-            payload["labels"] = draft.labels
+    private struct IssueRequest: Encodable {
+        let title: String
+        let body: String
+        let labels: [String]?
+    }
+
+    private struct CreatedIssueResponse: Decodable {
+        let number: Int
+        let htmlURL: String
+
+        enum CodingKeys: String, CodingKey {
+            case number
+            case htmlURL = "html_url"
         }
-        return try? JSONSerialization.data(withJSONObject: payload)
+    }
+
+    private struct ErrorResponse: Decodable {
+        let message: String
+    }
+
+    static func requestBody(for draft: GitHubIssueDraft) -> Data? {
+        let labels = draft.labels.isEmpty ? nil : draft.labels
+            .prefix(GitHubIssueDefaults.labelCountLimit)
+            .map { String($0.prefix(GitHubIssueDefaults.labelCharacterLimit)) }
+        let payload = IssueRequest(
+            title: draft.title,
+            body: truncate(draft.body, to: GitHubIssueDefaults.apiBodyLimit),
+            labels: labels
+        )
+        return try? JSONEncoder().encode(payload)
     }
 
     static func createdIssue(from data: Data) -> (url: URL, number: Int)? {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let link = json["html_url"] as? String,
-              let url = URL(string: link) else { return nil }
-        return (url, json["number"] as? Int ?? 0)
+        guard let response = try? JSONDecoder().decode(CreatedIssueResponse.self, from: data),
+              let url = URL(string: response.htmlURL),
+              url.scheme == "https",
+              url.host != nil else { return nil }
+        return (url, response.number)
     }
 
     /// GitHub's own words when it has them: `message` is the one field every error shares, and
     /// a validation refusal explains itself far better than a status code does.
     static func refusalMessage(status: Int, body: Data) -> String {
-        let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
-        guard let detail = json?["message"] as? String, !detail.isEmpty else {
+        let response = try? JSONDecoder().decode(ErrorResponse.self, from: body)
+        guard let detail = response?.message, !detail.isEmpty else {
             return L10n.format("GitHub refused the report (%lld).", status)
         }
         return L10n.format("GitHub refused the report (%lld): %@", status, detail)
@@ -271,7 +299,9 @@ struct GitHubIssueSubmitter: Sendable {
 
     static func truncate(_ text: String, to limit: Int) -> String {
         guard text.count > limit else { return text }
-        return String(text.prefix(limit)) + "\n\n" + L10n.string("_Report truncated._")
+        let marker = "\n\n" + L10n.string("_Report truncated._")
+        guard marker.count < limit else { return String(marker.prefix(limit)) }
+        return String(text.prefix(limit - marker.count)) + marker
     }
 }
 

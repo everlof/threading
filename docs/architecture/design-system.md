@@ -108,6 +108,11 @@ Components so far:
 | `MediaInspectorView` / `MediaInspectorCanvas` | The in-window inspection surface for visible files. Images use an app-owned renderer with fit/actual/custom zoom, anchored pinch, pan, collection navigation and a thumbnail rail. PDFKit and embedded `QLPreviewView` live only inside `MediaInspectorDocumentView`, a named `SystemChromeBoundary`; System Quick Look is an action-menu fallback rather than the primary route. |
 | `ImageCompareView` | Two images against each other: a draggable wipe seam (either axis), a crossfade, a pixel difference, and side by side, with per-side captions and a mode chip. The captions are given a band **outside** the images before anything is fitted, never a pill over them: printed on the picture they hid the pixels the comparison exists to show, and at rest they sat exactly where the wipe starts, so reading a label meant scrubbing it out from under. Position carries the mapping — old at the start of the scrub's travel, new at its end, above and below it for the vertical wipe, over each image in side by side — the new side is inked a step darker, and difference names the pair `old → new` centred rather than splitting two titles across edges that mode has no sides for. One scrubbed fraction serves every mode — there is deliberately no slider control: the seam *is* the control (accent-inked, since it is the one thing on the surface asking to be used), fade held at the middle is the onion skin, and both images draw at one shared scale so a resized asset stays visibly resized rather than being normalised into "looks identical". The canvas is a `ThemedControl`: arrow keys nudge the scrub, Space recentres it, and VoiceOver reads it as a slider. |
 
+`ToastPresenter` teardown is synchronous: `invalidate()` cancels its timer and layer drain before
+removing the band, with `deinit` as the fallback. Short-lived render hosts invalidate explicitly;
+AppKit may extend a local object's debug lifetime beyond its lexical scope while layer work is
+still committed.
+
 **A component is its interaction contract, not its resting render.** Before a new component is
 finished, walk it through pointer, keyboard, assistive technology, and the ordinary AppKit host
 that will contain it. Decide hover, press, drag cancellation, first-click behavior and cursor;

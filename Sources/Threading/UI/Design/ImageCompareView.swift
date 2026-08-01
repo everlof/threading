@@ -10,9 +10,13 @@ enum ImageCompareDefaults {
     static let checkerSquare: CGFloat = 8
     /// The arrow-key nudge, as a fraction of the canvas.
     static let keyboardStep: CGFloat = 0.05
-    /// Between a caption and the pixels it names. The band reserved for it is this plus the
-    /// caption's own measured line.
+    /// Between a caption and the pixels it names.
     static let captionGap: CGFloat = Design.Spacing.small
+    /// Between a caption and the surface's outer edge, on every side. The focus ring strokes
+    /// the bounds, so text flush against them sits on the ring; the band reserved for a caption
+    /// is this margin plus the measured line plus `captionGap`, and sideways the text keeps
+    /// this much clear of the bounds wherever the picture itself reaches them.
+    static let captionMargin: CGFloat = Design.Spacing.small
     /// Past this many points per pixel the images are icons being inspected, and interpolation
     /// smears exactly the pixels the comparison is looking for.
     static let crispScaleThreshold: CGFloat = 4
@@ -292,7 +296,8 @@ final class ImageCompareCanvas: ThemedControl {
     /// fitted. A band is only reserved where something is written, so an unnamed single image
     /// still gets the whole surface.
     private var captionBands: ImageCompareLayout.CaptionBands {
-        let band = captionLineHeight + ImageCompareDefaults.captionGap
+        let band = ImageCompareDefaults.captionMargin + captionLineHeight
+            + ImageCompareDefaults.captionGap
         let isNamed = old != nil || new != nil
         // The vertical wipe's mapping is vertical, so the new side is named under the image.
         let namesNewSideBelow = effectiveMode == .wipeVertical && old != nil && new != nil
@@ -663,9 +668,13 @@ final class ImageCompareCanvas: ThemedControl {
         CGRect(x: canvas.minX, y: band.minY, width: canvas.width, height: band.height)
     }
 
-    /// One line of caption, hugging the outer edge of its band. Truncating rather than
-    /// wrapping: the line is one line high, and `NSString.draw(in:)` wraps by default, which
-    /// would draw the second word over the pixels the band exists to keep clear.
+    /// One line of caption, a margin in from the outer edge of its band — flush, it sat on the
+    /// canvas's own focus ring — with the rest of the band, the gap, between it and the
+    /// picture. Sideways the slot is clamped a margin inside the surface for the same reason:
+    /// the band hugs the picture, and where the picture reaches the bounds the ring is there
+    /// too. Truncating rather than wrapping: the line is one line high, and
+    /// `NSString.draw(in:)` wraps by default, which would draw the second word over the pixels
+    /// the band exists to keep clear.
     private func drawCaption(
         _ text: String,
         ink: NSColor,
@@ -682,12 +691,16 @@ final class ImageCompareCanvas: ThemedControl {
             .foregroundColor: ink,
             .paragraphStyle: style
         ]
-        let line = min(captionLineHeight, slot.height)
+        let margin = ImageCompareDefaults.captionMargin
+        let leading = max(slot.minX, bounds.minX + margin)
+        let trailing = min(slot.maxX, bounds.maxX - margin)
+        guard trailing > leading else { return }
+        let line = min(captionLineHeight, max(0, slot.height - margin))
         (text as NSString).draw(
             in: CGRect(
-                x: slot.minX,
-                y: edge == .top ? slot.minY : slot.maxY - line,
-                width: slot.width,
+                x: leading,
+                y: edge == .top ? slot.minY + margin : slot.maxY - line - margin,
+                width: trailing - leading,
                 height: line
             ),
             withAttributes: attributes

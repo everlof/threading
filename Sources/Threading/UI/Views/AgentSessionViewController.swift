@@ -58,7 +58,7 @@ final class AgentSessionViewController: NSViewController {
             ?? SubagentSessionState(sessionID: agentSession.id)
         self.session = TerminalSession(
             profile: ThemeAssignments.profile(for: agentSession.id),
-            identifier: agentSession.id
+            identity: .agentSession(agentSession.id)
         )
         super.init(nibName: nil, bundle: nil)
         session.delegate = self

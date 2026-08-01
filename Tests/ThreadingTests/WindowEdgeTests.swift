@@ -77,11 +77,10 @@ final class WindowEdgeTests: XCTestCase {
     /// Compares **every** channel. The first version of this compared green alone and passed
     /// against a white divider, which shares the pane's green exactly — a test that could not
     /// see the thing it was written for.
-    private func isPaneFill(_ colour: NSColor) -> Bool {
-        let fill = Fixture.paneFill
-        return abs(colour.redComponent - fill.redComponent) < 0.1
-            && abs(colour.greenComponent - fill.greenComponent) < 0.1
-            && abs(colour.blueComponent - fill.blueComponent) < 0.1
+    private func matchesPane(_ colour: NSColor, reference: NSColor) -> Bool {
+        abs(colour.redComponent - reference.redComponent) < 0.1
+            && abs(colour.greenComponent - reference.greenComponent) < 0.1
+            && abs(colour.blueComponent - reference.blueComponent) < 0.1
     }
 
     private func colour(_ rep: NSBitmapImageRep, x: Int, y: Int) throws -> NSColor {
@@ -94,13 +93,18 @@ final class WindowEdgeTests: XCTestCase {
     func testACollapsedTrailingPaneLeavesNoSeamAtTheWindowsEdge() throws {
         let rep = try render(collapsingTrailingPane: true)
         let middleRow = rep.pixelsHigh / 2
+        // Cached AppKit views may be tagged with the active display profile after a test-host
+        // restart, so even an sRGB source does not necessarily round-trip to its literal source
+        // components. Compare the edge to the pane as actually rendered; the divider is still
+        // deliberately nowhere near this saturated reference.
+        let pane = try colour(rep, x: rep.pixelsWide / 2, y: middleRow)
 
         // Every column, not just the last: the seam is thicker than a pixel under a heavy
         // ruling theme, and the point is that there is no rule anywhere in a one-pane window.
         for x in 0..<rep.pixelsWide {
             let sampled = try colour(rep, x: x, y: middleRow)
             XCTAssertTrue(
-                isPaneFill(sampled),
+                matchesPane(sampled, reference: pane),
                 "a collapsed pane left its divider drawn at x=\(x) of \(rep.pixelsWide): \(sampled)"
             )
         }
@@ -111,9 +115,10 @@ final class WindowEdgeTests: XCTestCase {
     func testTwoOpenPanesStillHaveASeamBetweenThem() throws {
         let rep = try render(collapsingTrailingPane: false)
         let middleRow = rep.pixelsHigh / 2
+        let pane = try colour(rep, x: 0, y: middleRow)
 
         let seam = try (0..<rep.pixelsWide).first { x in
-            try !isPaneFill(colour(rep, x: x, y: middleRow))
+            try !matchesPane(colour(rep, x: x, y: middleRow), reference: pane)
         }
         let found = try XCTUnwrap(seam, "the two panes run together with no seam between them")
         XCTAssertLessThan(

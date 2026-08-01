@@ -46,7 +46,6 @@ final class OnboardingFlowViewController: NSViewController {
     private(set) var pageIndex = 0
 
     private let contentContainer = NSView()
-    private let stepLabel = NSTextField(labelWithString: "")
     private lazy var backButton = ThemedButton(
         title: L10n.string("Back"),
         target: self,
@@ -91,26 +90,22 @@ final class OnboardingFlowViewController: NSViewController {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(contentContainer)
 
-        stepLabel.applyFont(.caption)
-        stepLabel.textColor = Design.Text.secondary
-        stepLabel.setAccessibilityElement(false)
-
         backButton.emphasis = .secondary
         skipButton.emphasis = .secondary
 
         let separator = SeparatorView()
 
-        let footer = NSStackView(views: [backButton, stepLabel, skipButton, continueButton])
+        let footer = NSStackView(views: [backButton, skipButton, continueButton])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.spacing = Design.Spacing.inset
         footer.setCustomSpacing(Design.Spacing.small, after: skipButton)
         footer.translatesAutoresizingMaskIntoConstraints = false
 
-        // The step count floats between Back and the actions; the spacer is the gap.
+        // Back keeps the leading edge, the actions the trailing one; the spacer is the gap.
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        footer.insertArrangedSubview(spacer, at: 2)
+        footer.insertArrangedSubview(spacer, at: 1)
 
         view.addSubview(separator)
         view.addSubview(footer)
@@ -174,11 +169,6 @@ final class OnboardingFlowViewController: NSViewController {
         continueButton.title = page.continueTitle
         skipButton.isHidden = page.skipTitle == nil
         skipButton.title = page.skipTitle ?? ""
-        stepLabel.stringValue = L10n.format(
-            "%lld of %lld",
-            Int64(pageIndex + 1),
-            Int64(pages.count)
-        )
     }
 
     @objc private func goBack() {

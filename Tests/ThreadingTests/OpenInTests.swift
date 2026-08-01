@@ -139,12 +139,19 @@ final class OpenInTests: XCTestCase {
         let previous = PreferenceStore.shared.string(forKey: key)
         defer { PreferenceStore.shared.set(previous, forKey: key) }
 
+        // Compared before-and-after rather than asserted nil: the key is a real choice the
+        // *app* legitimately stores in `.standard`, so on a machine whose developer has picked
+        // an Open In app the value exists before this test does anything. What must hold is
+        // that the test's own write did not land there.
+        let standardBefore = UserDefaults.standard.string(forKey: key)
+
         let finder = try XCTUnwrap(ExternalApps.app(id: ExternalApps.finderID))
         ExternalAppLauncher.shared.setPreferred(finder)
 
         XCTAssertEqual(PreferenceStore.shared.string(forKey: key), ExternalApps.finderID)
-        XCTAssertNil(
+        XCTAssertEqual(
             UserDefaults.standard.string(forKey: key),
+            standardBefore,
             "the choice leaked into the defaults the running app reads"
         )
     }

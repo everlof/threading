@@ -1,5 +1,47 @@
 # Reliability & Type-Safety Roadmap
 
+> **Status:** the original July 2026 roadmap is complete and retained below as architectural
+> history. The follow-up review on 31 July 2026 found and closed the smaller regressions that
+> accumulated during the next refactoring wave.
+
+## Follow-up review — 31 July 2026
+
+- [x] Sidebar collapse state is published synchronously; animation completion is reserved for
+      geometry work, so tests and command state no longer race AppKit animation timing.
+- [x] Conversation previews opt out of autoresizing-mask constraints, and the closed drawer
+      removes its required child-height conflict instead of logging runtime layout warnings.
+- [x] Remote authentication publishes one locked `RemoteAuthenticatedPeer` snapshot rather
+      than five independently mutable identity fields.
+- [x] Global conversation discovery reports bounded per-path failures and marks partial scans
+      incomplete; an unreadable account can no longer masquerade as an empty/fresh account.
+- [x] GitHub request and response envelopes are typed `Codable` values, with explicit body,
+      label-count and label-length budgets and strict success validation.
+- [x] Workspace navigator row/grid render failures immediately fail back to Native, and the
+      generation-aware container is separated from document rendering/virtualization.
+- [x] Terminal history uses `TerminalInstanceIdentity`, keeping agent sessions, drawer shells,
+      standalone project terminals and ephemeral terminals in distinct identity domains.
+- [x] Popover lifecycle/arrow coverage and narrow session-sharing interaction/theme coverage
+      protect the presentation code that had previously been exercised only incidentally.
+- [x] Every concrete design component again has a live Component Gallery story; menu rows,
+      workspace failback and toast presenters now have explicit frame/lifetime teardown rules.
+- [x] Built-in MCP identity and capability policy are separated from the wire argument/schema
+      catalog; exhaustive switches and completeness gates remain the contract.
+- [x] Stale dependency/release documentation and tracked probe/cache artifacts were corrected.
+
+Current size is recorded for orientation, not as a trend against the historical baseline: the
+application has grown several major subsystems since that snapshot.
+
+| Metric (31 July 2026) | Count |
+|---|---:|
+| Test methods | 2,543 |
+| `@MainActor` annotations (sources + tests) | 994 |
+| `[String: Any]` occurrences in sources | 282 |
+| `JSONSerialization` references in sources | 71 |
+| `try?` occurrences in sources | 471 |
+| Conditional casts (`as?`) in sources | 705 |
+| `static let shared` occurrences in sources | 53 |
+| Swift files / lines in sources | 492 / 174,839 |
+
 A prioritized working checklist from the July 2026 architectural review. Check items off as
 they land; strike evidence references that a fix makes obsolete. Line numbers are as of the
 review and will drift — the file and symbol names are the durable pointers.
@@ -311,7 +353,7 @@ The architecture has already extracted this logic, so it is covered without a UI
 
 ---
 
-## Baseline metrics (July 2026)
+## Historical baseline metrics (start of July 2026)
 
 Track these downward as tiers land:
 

@@ -2,10 +2,10 @@ import Foundation
 
 // MARK: - App Data Locations
 
-/// Every place Threading keeps something, named once.
+/// Every file location where Threading keeps ordinary state, named once.
 ///
 /// There are exactly two: the preferences domain, and one directory under Application Support.
-/// Everything durable is under one of them — the SQLite store, panel layouts and their cached
+/// Ordinary durable state is under one of them — the SQLite store, panel layouts and their cached
 /// PNGs, project icons, avatars, usage history, icon-research records, the single-instance lock.
 /// Stores reach it through `ProjectIconDefaults.applicationDirectoryName`, which is the same
 /// `Threading` folder `StateManager` owns.
@@ -15,6 +15,10 @@ import Foundation
 /// reads it from, and per-session hook and MCP config files are handed to an agent process.
 /// Those are not Threading's state to reset, and a reset that took them would be reaching into
 /// someone else's directory on the strength of having written there once.
+///
+/// App-owned security capabilities are the exception: paired-owner bearers live in Keychain.
+/// `AdvancedPreferencesViewController` erases that item before `Reset Everything`, rather than
+/// exporting secrets into the recoverable reset folder. A settings-only reset preserves it.
 enum AppDataLocations {
 
     /// The preferences domain, which is the bundle identifier — `codes.threading`.

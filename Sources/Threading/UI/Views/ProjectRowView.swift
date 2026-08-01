@@ -589,6 +589,13 @@ final class ProjectRowView: NSTableCellView {
         customizationHost.deactivate()
     }
 
+    /// A sidebar reload can discard this row without reuse and without a pointer exit; a
+    /// popover anchored to a row that left the window would keep floating over nothing.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { hoverDidEnd(animated: false) }
+    }
+
     private func presentPopover() {
         guard let project = popoverProject, window != nil, popover == nil else { return }
         guard let controller = makeProjectHoverCard(for: project) else { return }

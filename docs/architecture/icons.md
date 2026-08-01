@@ -1,6 +1,6 @@
 # Icons
 
-Agent marks, account chips, project icons and their discovery.
+Agent marks, account chips, project icons, file-tree marks and their discovery.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -127,6 +127,22 @@ leave the machine.
 Coverage is honestly thin — of five logins on this machine only one resolved, so the hashed
 initial is the chip's working case rather than its fallback. The chip's cache key carries
 `hasAvatar`, so one landing later replaces a drawn initial instead of being ignored.
+
+## File-tree icons
+
+`ThemedFileIconView` makes the File pane follow the same ownership boundary as the rest of the
+chrome without pretending Finder artwork is tintable. Under **System**, the view asks
+`NSWorkspace` for the path's real icon and draws that finished artwork unchanged. Under an
+authored theme it classifies the path into a small semantic vocabulary — folder, source, text,
+data, image, audio, video, archive, package, executable, or generic document — and draws an SF
+Symbol in `Design.Text.secondary`; folders also carry a quiet `Design.Surface.controlResting`
+fill. Classification reads only the name and directory fact, never file contents.
+
+The split is also a performance rule. A materialized row in an authored theme does no
+LaunchServices icon lookup. Switching from an authored theme to System loads Finder artwork
+lazily, while the reverse switch keeps it cached for a later return. One design-system view owns
+both renderers, pixel alignment, and live theme changes, so feature code does not construct a
+parallel `NSImageView` path or recolour a foreign bitmap.
 
 ## The app's own icon
 
