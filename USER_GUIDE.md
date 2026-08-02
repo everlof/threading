@@ -882,9 +882,10 @@ usage is comfortable; a value turns orange past 75% and red past 92% of its wind
 pill sits at the trailing edge of the **session pane** — when the display panel opens, the
 panel's own controls slide right and the pill stays over the conversation it describes.
 
-Click it for the full picture: every rate-limit window (the 5-hour session window and the
+Hover it for the full picture: every rate-limit window (the 5-hour session window and the
 weekly one), each with its own bar, percentage and reset countdown, plus how fresh the
-reading is. Hovering the pill shows the same summary as a tooltip.
+reading is. The detail opens the moment the pointer settles on the pill and closes the
+moment it leaves.
 
 For Claude accounts the freshest numbers come from **Settings ▸ Privacy ▸ Live usage from
 your Claude login**; without it the pill reads the CLI's local caches, which can lag by

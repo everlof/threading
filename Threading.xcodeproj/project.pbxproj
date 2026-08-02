@@ -215,6 +215,7 @@
 		F0A21BA27F92514E0A255664 /* GrokSessionDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 244FEA39A08DC20B24140ECC /* GrokSessionDiscoveryTests.swift */; };
 		3E6E81E57DD8C41BDC94402E /* ThemedDisclosureRowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFACC47FFA3D9E65F088C12B /* ThemedDisclosureRowTests.swift */; };
 		CA8E1DF8CF5FDD4028FB49BD /* SettingsDisclosureRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 236E8666EB868F3E405EA4C5 /* SettingsDisclosureRenderTests.swift */; };
+		1C23B0EEAAE51FEB8D0DF9CF /* HoverPopoverSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED89053FCE8B49E45BAC458D /* HoverPopoverSchedulerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -474,6 +475,7 @@
 		244FEA39A08DC20B24140ECC /* GrokSessionDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GrokSessionDiscoveryTests.swift; sourceTree = "<group>"; };
 		AFACC47FFA3D9E65F088C12B /* ThemedDisclosureRowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedDisclosureRowTests.swift; sourceTree = "<group>"; };
 		236E8666EB868F3E405EA4C5 /* SettingsDisclosureRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsDisclosureRenderTests.swift; sourceTree = "<group>"; };
+		ED89053FCE8B49E45BAC458D /* HoverPopoverSchedulerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HoverPopoverSchedulerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -795,6 +797,7 @@
 				244FEA39A08DC20B24140ECC /* GrokSessionDiscoveryTests.swift */,
 				AFACC47FFA3D9E65F088C12B /* ThemedDisclosureRowTests.swift */,
 				236E8666EB868F3E405EA4C5 /* SettingsDisclosureRenderTests.swift */,
+				ED89053FCE8B49E45BAC458D /* HoverPopoverSchedulerTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -1360,6 +1363,7 @@
 				F0A21BA27F92514E0A255664 /* GrokSessionDiscoveryTests.swift in Sources */,
 				3E6E81E57DD8C41BDC94402E /* ThemedDisclosureRowTests.swift in Sources */,
 				CA8E1DF8CF5FDD4028FB49BD /* SettingsDisclosureRenderTests.swift in Sources */,
+				1C23B0EEAAE51FEB8D0DF9CF /* HoverPopoverSchedulerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

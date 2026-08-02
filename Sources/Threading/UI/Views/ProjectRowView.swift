@@ -104,8 +104,16 @@ final class ProjectRowView: NSTableCellView {
     /// none. The popover's content is built at dwell time rather than configure time, because
     /// hovering is what refreshes the count it shows.
     private var popoverProject: Project?
-    private var hoverTimer: Timer?
     private var popover: ThemedPopover?
+
+    /// Decides when the hover card opens and closes; `SessionPopoverDefaults.hoverPolicy`
+    /// waits out the dwell and closes the instant the pointer leaves the row.
+    private lazy var popoverScheduler: HoverPopoverScheduler = {
+        let scheduler = HoverPopoverScheduler(policy: SessionPopoverDefaults.hoverPolicy)
+        scheduler.onPresent = { [weak self] in self?.presentPopover() }
+        scheduler.onDismiss = { [weak self] in self?.dismissPopover() }
+        return scheduler
+    }()
 
     /// Retained so colours can be reapplied when the selection state changes.
     private var isHeading = false
@@ -570,15 +578,7 @@ final class ProjectRowView: NSTableCellView {
         // count is usually fresh again by the time the popover opens.
         CodeStatsService.shared.refreshIfAged(project)
 
-        hoverTimer?.invalidate()
-        hoverTimer = Timer.scheduledTimer(
-            withTimeInterval: SessionPopoverDefaults.hoverDelay,
-            repeats: false
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.presentPopover()
-            }
-        }
+        popoverScheduler.pointerEntered()
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -590,7 +590,7 @@ final class ProjectRowView: NSTableCellView {
     private func hoverDidEnd(animated: Bool) {
         isHovered = false
         setHoverButtonVisible(false, animated: animated)
-        dismissPopover()
+        popoverScheduler.pointerExited()
     }
 
     override func prepareForReuse() {
@@ -683,8 +683,7 @@ final class ProjectRowView: NSTableCellView {
     }
 
     private func dismissPopover() {
-        hoverTimer?.invalidate()
-        hoverTimer = nil
+        popoverScheduler.cancelPendingWork()
         popover?.close()
         popover = nil
     }

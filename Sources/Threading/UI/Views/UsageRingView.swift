@@ -70,7 +70,17 @@ enum AccountUsageItemDefaults {
     /// Between window segments in the pill's summary.
     static let segmentSeparator = " · "
 
-    /// Grace period after the pointer leaves the pill before the hover popover closes, long enough
-    /// to cross the gap into the popover itself.
-    static let hoverCloseDelay: TimeInterval = 0.35
+    /// While the popover shows only the native reading: visible exactly while the pointer is
+    /// on the pill — instant in, instant out, nothing in it to reach for.
+    static let readingPopoverPolicy = HoverPopoverScheduler.Policy.whilePointerOnAnchor
+
+    /// The moment an extension composes content into the popover it may carry actions, and a
+    /// surface that closes as the pointer reaches for it cannot be operated: still instant to
+    /// open, but with the same gap-crossing grace an extension's detail grants, held while
+    /// the pointer rests on the popover.
+    static let actionablePopoverPolicy = HoverPopoverScheduler.Policy(
+        openDelay: 0,
+        closeGrace: ExtensionDisclosureDefaults.popoverPolicy.closeGrace,
+        holdsWhilePointerOnPopover: true
+    )
 }

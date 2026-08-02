@@ -61,6 +61,9 @@
     "1 tool": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 verktyg" } } }
     },
+    "Dwell (sidebar cards)": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dröjning (sidofältets kort)" } } }
+    },
     "Extensions are copied into Threading before they can run. Import a .threadingextension package or an unpacked development directory; importing leaves one disabled, and enabling it starts a supervised process with the capabilities declared in its manifest.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillägg kopieras till Threading innan de kan köras. Importera ett .threadingextension-paket eller en uppackad utvecklingsmapp; ett importerat tillägg lämnas inaktiverat, och när det aktiveras startas en övervakad process med funktionerna som anges i manifestet." } } }
     },
@@ -175,6 +178,18 @@
     "Enable Tailscale HTTPS for this tailnet, then retry.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera Tailscale HTTPS för detta tailnet och försök sedan igen." } } }
     },
+    "Grants a grace to cross the gap, and holds while the pointer rests here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ger en frist att korsa glappet och håller kvar medan pekaren vilar här." } } }
+    },
+    "Held (extension detail)": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hålls kvar (tilläggsdetaljen)" } } }
+    },
+    "Hover timing as configured policy: instant, dwell, and dwell with a grace that holds.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hovringstiming som konfigurerad policy: omedelbar, dröjning, och dröjning med frist som håller kvar." } } }
+    },
+    "HoverPopoverScheduler": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "HoverPopoverScheduler" } } }
+    },
     "In Private + Sharing, let your paired devices use Relay when Tailscale cannot be reached. Off fails closed on the private path.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "I Privat + delning kan parkopplade enheter använda reläet när Tailscale inte kan nås. Av innebär att den privata vägen stängs vid fel." } } }
     },
@@ -183,6 +198,9 @@
     },
     "Install Tailscale on this Mac, then retry.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Installera Tailscale på denna Mac och försök sedan igen." } } }
+    },
+    "Instant (usage pill)": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Omedelbar (användningspillret)" } } }
     },
     "Keep Sharing Relay Ready": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Håll delningsreläet redo" } } }
@@ -255,6 +273,9 @@
     },
     "Turn on Tailscale on this Mac, then retry.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Slå på Tailscale på denna Mac och försök sedan igen." } } }
+    },
+    "Visible exactly while the pointer is on the anchor.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Synlig exakt så länge pekaren är på ankaret." } } }
     },
     "Waiting for Tailscale.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väntar på Tailscale." } } }
@@ -686,6 +707,9 @@
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Föregående objekt" } }
       }
+    },
+    "Waits out a dwell, then closes the instant the pointer leaves.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väntar ut en dröjning och stängs i samma ögonblick som pekaren lämnar." } } }
     },
     "\n\nThe run's full output: Project Icon > Open Last Research Log.": {
       "extractionState": "stale",

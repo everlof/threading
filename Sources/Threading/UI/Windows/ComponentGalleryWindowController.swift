@@ -87,6 +87,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ChipView",
         "FileActivityMapView",
         "GlyphView",
+        "HoverPopoverScheduler",
         "ImageCompareCanvas",
         "ImageCompareView",
         "MediaInspectorCanvas",
@@ -148,6 +149,10 @@ final class ComponentGalleryViewController: NSViewController {
     /// it more than once.
     private var toastPresenter: ToastPresenter?
     private var galleryPopover: ThemedPopover?
+
+    /// The hover-policy story's demos, retained so their schedulers and popovers outlive the
+    /// pass that built the section.
+    private var hoverPolicyDemos: [GalleryHoverPolicyDemo] = []
 
     private let themePopUp = ThemedPopUp()
     /// The mark stories' views, retained so the replay control can reach them.
@@ -1037,6 +1042,7 @@ final class ComponentGalleryViewController: NSViewController {
         alert.setAccessibilityIdentifier("gallery.presentation.alert")
         let popover = button("Open popover", action: #selector(showGalleryPopover(_:)))
         popover.setAccessibilityIdentifier("gallery.presentation.popover")
+        let hoverPolicies = makeHoverPolicySample()
 
         return section(
             "Presentation",
@@ -1051,9 +1057,41 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThemedPopover & ThemedPopoverChromeView",
                     "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.",
                     popover
+                ),
+                story(
+                    "HoverPopoverScheduler",
+                    "Hover timing as configured policy: instant, dwell, and dwell with a grace that holds.",
+                    hoverPolicies
                 )
             ]
         )
+    }
+
+    /// The three shipped hover policies, each on its own live anchor.
+    private func makeHoverPolicySample() -> NSView {
+        let demos = [
+            GalleryHoverPolicyDemo(
+                title: L10n.string("Instant (usage pill)"),
+                message: L10n.string("Visible exactly while the pointer is on the anchor."),
+                policy: AccountUsageItemDefaults.readingPopoverPolicy
+            ),
+            GalleryHoverPolicyDemo(
+                title: L10n.string("Dwell (sidebar cards)"),
+                message: L10n.string("Waits out a dwell, then closes the instant the pointer leaves."),
+                policy: SessionPopoverDefaults.hoverPolicy
+            ),
+            GalleryHoverPolicyDemo(
+                title: L10n.string("Held (extension detail)"),
+                message: L10n.string("Grants a grace to cross the gap, and holds while the pointer rests here."),
+                policy: ExtensionDisclosureDefaults.popoverPolicy
+            )
+        ]
+        hoverPolicyDemos = demos
+
+        let stack = NSStackView(views: demos.map(\.anchor))
+        stack.orientation = .horizontal
+        stack.spacing = Design.Spacing.medium
+        return stack
     }
 
     private func makeContainersSection() -> NSView {
@@ -2653,5 +2691,100 @@ private final class ComponentGalleryFlippedView: NSView {
 private extension Collection {
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+// MARK: - Hover Policy Demo
+
+/// One `HoverPopoverScheduler` policy made hoverable: a labelled anchor that presents a small
+/// themed popover under the policy's timing, including the popover-side hold when the policy
+/// grants one. The gallery shows the shipped policies rather than invented ones, so what is
+/// felt here is what the product does.
+@MainActor
+private final class GalleryHoverPolicyDemo {
+
+    let anchor: HoverTrackingView
+
+    private let scheduler: HoverPopoverScheduler
+    private let message: String
+    private var popover: ThemedPopover?
+
+    init(title: String, message: String, policy: HoverPopoverScheduler.Policy) {
+        self.message = message
+        scheduler = HoverPopoverScheduler(policy: policy)
+
+        let label = NSTextField(labelWithString: title)
+        label.applyFont(.subheading)
+        label.textColor = Design.Text.secondary
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        anchor = HoverTrackingView()
+        anchor.translatesAutoresizingMaskIntoConstraints = false
+        anchor.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: anchor.leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: anchor.trailingAnchor),
+            label.topAnchor.constraint(equalTo: anchor.topAnchor),
+            label.bottomAnchor.constraint(equalTo: anchor.bottomAnchor)
+        ])
+
+        anchor.onHoverChange = { [weak self] hovering in
+            if hovering {
+                self?.scheduler.pointerEntered()
+            } else {
+                self?.scheduler.pointerExited()
+            }
+        }
+        scheduler.onPresent = { [weak self] in self?.present() }
+        scheduler.onDismiss = { [weak self] in self?.dismiss() }
+    }
+
+    private func present() {
+        guard anchor.window != nil, popover?.isShown != true else { return }
+
+        let text = NSTextField(wrappingLabelWithString: message)
+        text.applyFont(.subheading)
+        text.textColor = Design.Text.secondary
+        text.preferredMaxLayoutWidth = 220
+        text.translatesAutoresizingMaskIntoConstraints = false
+
+        // The popover's own hover feeds the scheduler, so a policy that holds can be felt.
+        let content = HoverTrackingView()
+        content.onHoverChange = { [weak self] hovering in
+            self?.scheduler.popoverHoverChanged(hovering)
+        }
+        content.addSubview(text)
+        NSLayoutConstraint.activate([
+            text.leadingAnchor.constraint(
+                equalTo: content.leadingAnchor, constant: Design.Spacing.inset
+            ),
+            text.trailingAnchor.constraint(
+                equalTo: content.trailingAnchor, constant: -Design.Spacing.inset
+            ),
+            text.topAnchor.constraint(equalTo: content.topAnchor, constant: Design.Spacing.inset),
+            text.bottomAnchor.constraint(
+                equalTo: content.bottomAnchor, constant: -Design.Spacing.inset
+            )
+        ])
+
+        let controller = NSViewController()
+        controller.view = content
+
+        let presented = ThemedPopover()
+        presented.behavior = .applicationDefined
+        presented.animates = false
+        presented.contentViewController = controller
+        presented.onClose = { [weak self, weak presented] in
+            guard let self, self.popover === presented else { return }
+            self.popover = nil
+        }
+        presented.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        popover = presented
+    }
+
+    private func dismiss() {
+        scheduler.cancelPendingWork()
+        popover?.close()
+        popover = nil
     }
 }

@@ -37,9 +37,22 @@ final class AccountUsageItemView: BackdropOverlay {
 
     private var popover: ThemedPopover?
 
-    /// Pending close of the hover popover, cancelled when the pointer returns to the pill or moves
-    /// into the popover before it fires.
-    private var closeWorkItem: DispatchWorkItem?
+    /// Decides when the popover opens and closes; what it shows stays the pill's business.
+    /// The policy follows the content — `readingPopoverPolicy` while the popover is the
+    /// native reading, `actionablePopoverPolicy` once an extension composes content in —
+    /// and `makeAccountUsagePopover` is where that decision is made.
+    private lazy var popoverScheduler: HoverPopoverScheduler = {
+        let scheduler = HoverPopoverScheduler(
+            policy: AccountUsageItemDefaults.readingPopoverPolicy
+        )
+        scheduler.onPresent = { [weak self] in self?.showPopover() }
+        scheduler.onDismiss = { [weak self] in self?.closePopover() }
+        return scheduler
+    }()
+
+    /// The policy currently applied to the hover popover — read by tests asserting that it
+    /// follows the content.
+    var popoverPolicyForTesting: HoverPopoverScheduler.Policy { popoverScheduler.policy }
     private let customizationLookup: ComponentCustomizationHost.Lookup
     private let usagePopoverContentProvider: UsagePopoverContentProvider
 
@@ -156,9 +169,8 @@ final class AccountUsageItemView: BackdropOverlay {
     /// pays for it.
     func configure(account: AgentAccount?, model: String? = nil) {
         if self.account?.id != account?.id {
-            cancelScheduledClose()
-            popover?.close()
-            popover = nil
+            popoverScheduler.cancelPendingWork()
+            closePopover()
         }
         self.account = account
         self.model = model
@@ -285,23 +297,22 @@ final class AccountUsageItemView: BackdropOverlay {
         // closes — the move the pointer is never told about. See `NSView.hoverIsStale`.
         if hoverIsStale(isHovered) {
             isHovered = false
-            scheduleClose()
+            popoverScheduler.pointerExited()
         }
     }
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        cancelScheduledClose()
-        showPopover()
+        popoverScheduler.pointerEntered()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        scheduleClose()
+        popoverScheduler.pointerExited()
     }
 
-    /// Opens the detail popover on hover. A short close delay plus the popover's own hover
-    /// tracking let the pointer cross the gap between pill and popover without it vanishing.
+    /// Opens the detail popover on hover; `popoverScheduler` decides when this is called and
+    /// when the popover closes again.
     private func showPopover() {
         guard let account, popover?.isShown != true else { return }
 
@@ -319,8 +330,13 @@ final class AccountUsageItemView: BackdropOverlay {
     }
 
     /// Builds the account presentation independently from the toolbar hover trigger. The outer
-    /// tracking view remains host-owned, so replacing all visual content cannot break the
-    /// pointer bridge which keeps the popover open.
+    /// tracking view remains host-owned, so replacing all visual content cannot take over the
+    /// popover's own hover reporting — the policy decides whether that report holds it open.
+    ///
+    /// This is also where the policy is decided: the native reading closes with the pointer,
+    /// but the moment an extension composes content in, the popover may carry actions the
+    /// pointer must be able to reach, so it gains the grace and the hold. Re-decided on every
+    /// build and on every live resolution change, so it always describes what is showing.
     func makeAccountUsagePopover(for account: AgentAccount) -> NSViewController? {
         let target = ExtensionComponentTarget.accountUsagePopover(
             accountID: account.id.rawValue
@@ -328,14 +344,11 @@ final class AccountUsageItemView: BackdropOverlay {
         let native = usagePopoverContentProvider(account)
         let initialResolution = customizationLookup(target)
         guard native != nil || !initialResolution.isEmpty else { return nil }
+        applyPopoverPolicy(for: initialResolution)
 
         let hoverContainer = HoverTrackingView()
         hoverContainer.onHoverChange = { [weak self] hovering in
-            if hovering {
-                self?.cancelScheduledClose()
-            } else {
-                self?.scheduleClose()
-            }
+            self?.popoverScheduler.popoverHoverChanged(hovering)
         }
 
         let hasNativeContent = native != nil
@@ -361,14 +374,22 @@ final class AccountUsageItemView: BackdropOverlay {
                 }
             },
             onResolution: { [weak self] resolution in
+                guard let self else { return }
+                applyPopoverPolicy(for: resolution)
                 if !hasNativeContent, resolution.isEmpty {
-                    self?.popover?.close()
-                    self?.popover = nil
+                    popover?.close()
+                    popover = nil
                 }
             }
         )
         controller.view.setAccessibilityIdentifier("toolbar.account-usage-popover")
         return controller
+    }
+
+    private func applyPopoverPolicy(for resolution: ComponentCustomizationResolution) {
+        popoverScheduler.policy = resolution.isEmpty
+            ? AccountUsageItemDefaults.readingPopoverPolicy
+            : AccountUsageItemDefaults.actionablePopoverPolicy
     }
 
     private static func nativeUsagePopoverContent(
@@ -377,22 +398,9 @@ final class AccountUsageItemView: BackdropOverlay {
         AccountUsagePopoverViewController(account: account, isEmbedded: true)
     }
 
-    private func scheduleClose() {
-        cancelScheduledClose()
-        let item = DispatchWorkItem { [weak self] in
-            self?.popover?.close()
-            self?.popover = nil
-        }
-        closeWorkItem = item
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + AccountUsageItemDefaults.hoverCloseDelay,
-            execute: item
-        )
-    }
-
-    private func cancelScheduledClose() {
-        closeWorkItem?.cancel()
-        closeWorkItem = nil
+    private func closePopover() {
+        popover?.close()
+        popover = nil
     }
 
     private func updateBackground() {

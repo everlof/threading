@@ -3890,6 +3890,81 @@ final class ExtensionRendererTests: XCTestCase {
     )
   }
 
+  func testAccountUsagePopoverPolicyFollowsWhetherExtensionContentIsIn() throws {
+    let registry = ComponentCustomizationRegistry()
+    let contract = HostComponentContracts.toolbarAccountUsagePopover
+    let account = AgentAccount(
+      provider: .codex,
+      handle: .standard,
+      configPath: "/tmp/codex"
+    )
+    let target = ExtensionComponentTarget.accountUsagePopover(
+      accountID: account.id.rawValue
+    )
+    try registry.register(contract)
+
+    let item = AccountUsageItemView(
+      customizationLookup: registry.customization(for:),
+      usagePopoverContentProvider: { _ in
+        self.labelController("Native usage windows")
+      }
+    )
+
+    // The native reading has nothing to reach for: the popover shows exactly while the
+    // pointer is on the pill.
+    XCTAssertNotNil(item.makeAccountUsagePopover(for: account))
+    XCTAssertEqual(
+      item.popoverPolicyForTesting,
+      AccountUsageItemDefaults.readingPopoverPolicy
+    )
+
+    // The moment an extension composes content in, it may carry actions, so the popover
+    // gains the gap-crossing grace and holds while the pointer rests on it.
+    let source = ComponentCustomizationSource(
+      extensionIdentifier: "com.example.budget",
+      processGeneration: "one",
+      order: 0
+    )
+    try registry.replacePatches(
+      [
+        .init(
+          id: "budget-details",
+          target: target,
+          hook: .stack(
+            axis: .vertical,
+            spacing: .small,
+            children: [
+              .proceed,
+              .button(
+                id: "open-budget",
+                title: "Open Budget",
+                role: .standard,
+                isEnabled: true
+              ),
+            ]
+          )
+        )
+      ],
+      from: source
+    )
+    XCTAssertNotNil(item.makeAccountUsagePopover(for: account))
+    XCTAssertEqual(
+      item.popoverPolicyForTesting,
+      AccountUsageItemDefaults.actionablePopoverPolicy
+    )
+
+    // And back: the extension leaving returns the popover to a plain reading.
+    registry.removePatches(
+      extensionIdentifier: source.extensionIdentifier,
+      processGeneration: source.processGeneration
+    )
+    XCTAssertNotNil(item.makeAccountUsagePopover(for: account))
+    XCTAssertEqual(
+      item.popoverPolicyForTesting,
+      AccountUsageItemDefaults.readingPopoverPolicy
+    )
+  }
+
   func testEveryProductPopoverIsNamedAndHasAnExplicitExtensionBoundary() throws {
     for id in HostPopoverID.allCases {
       switch id.exposure {

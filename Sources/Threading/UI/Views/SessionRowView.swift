@@ -48,8 +48,16 @@ final class SessionRowView: NSTableCellView {
 
     /// Content for the hover popover, refreshed on every configure.
     private var popoverInfo: SessionInfoPopoverViewController.Info?
-    private var hoverTimer: Timer?
     private var popover: ThemedPopover?
+
+    /// Decides when the hover card opens and closes; `SessionPopoverDefaults.hoverPolicy`
+    /// waits out the dwell and closes the instant the pointer leaves the row.
+    private lazy var popoverScheduler: HoverPopoverScheduler = {
+        let scheduler = HoverPopoverScheduler(policy: SessionPopoverDefaults.hoverPolicy)
+        scheduler.onPresent = { [weak self] in self?.presentPopover() }
+        scheduler.onDismiss = { [weak self] in self?.dismissPopover() }
+        return scheduler
+    }()
     private let sessionHoverContentProvider: SessionHoverContentProvider
 
     /// Invoked when the row's action button is pressed, carrying the row's session.
@@ -434,18 +442,7 @@ final class SessionRowView: NSTableCellView {
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
         setActionVisible(true, animated: true)
-
-        // The popover waits out a dwell, so it does not flash while the pointer crosses
-        // rows on its way somewhere else.
-        hoverTimer?.invalidate()
-        hoverTimer = Timer.scheduledTimer(
-            withTimeInterval: SessionPopoverDefaults.hoverDelay,
-            repeats: false
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.presentPopover()
-            }
-        }
+        popoverScheduler.pointerEntered()
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -457,7 +454,7 @@ final class SessionRowView: NSTableCellView {
     private func hoverDidEnd(animated: Bool) {
         isHovered = false
         setActionVisible(false, animated: animated)
-        dismissPopover()
+        popoverScheduler.pointerExited()
     }
 
     override func prepareForReuse() {
@@ -543,8 +540,7 @@ final class SessionRowView: NSTableCellView {
     }
 
     private func dismissPopover() {
-        hoverTimer?.invalidate()
-        hoverTimer = nil
+        popoverScheduler.cancelPendingWork()
         popover?.close()
         popover = nil
     }

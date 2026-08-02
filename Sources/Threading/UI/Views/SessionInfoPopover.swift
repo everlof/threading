@@ -242,4 +242,13 @@ enum SessionPopoverDefaults {
     /// Hover dwell before the popover opens, so it does not flash while the pointer crosses
     /// rows on its way somewhere else.
     static let hoverDelay: TimeInterval = 0.35
+
+    /// Both sidebar hover cards: wait out the dwell, then close the instant the pointer leaves
+    /// the row. The card is a reading with nothing to click, so there is no gap worth
+    /// crossing and no grace to cross it under.
+    static let hoverPolicy = HoverPopoverScheduler.Policy(
+        openDelay: hoverDelay,
+        closeGrace: 0,
+        holdsWhilePointerOnPopover: false
+    )
 }

@@ -3656,6 +3656,7 @@ final class ThemedControlTests: XCTestCase {
                 "ChipView",
                 "FileActivityMapView",
                 "GlyphView",
+                "HoverPopoverScheduler",
                 "ImageCompareCanvas",
                 "ImageCompareView",
                 "MediaInspectorCanvas",

@@ -3,15 +3,16 @@ import AppKit
 // MARK: - Defaults
 
 enum ExtensionDisclosureDefaults {
-    /// Dwell before the second level opens, so it does not flash while the pointer crosses the
-    /// row on its way somewhere else. The sidebar's hover cards wait exactly as long, and a
-    /// reveal that behaves differently in each corner of the app is two gestures to learn.
-    static let hoverDelay = SessionPopoverDefaults.hoverDelay
-
-    /// Grace for the pointer to cross the gap from the row into what it opened. The detail is
-    /// the one level allowed to carry actions, and a surface that closes as you reach for it is
-    /// worse than no surface.
-    static let closeDelay: TimeInterval = 0.25
+    /// The sidebar's dwell before the second level opens — a reveal that behaves differently
+    /// in each corner of the app is two gestures to learn — then a grace for the pointer to
+    /// cross the gap into what it opened, held while the pointer rests there. The detail is
+    /// the one level allowed to carry actions, and a surface that closes as you reach for it
+    /// is worse than no surface.
+    static let popoverPolicy = HoverPopoverScheduler.Policy(
+        openDelay: SessionPopoverDefaults.hoverDelay,
+        closeGrace: 0.25,
+        holdsWhilePointerOnPopover: true
+    )
 
     static let contentWidth: CGFloat = 260
 
@@ -59,8 +60,15 @@ final class ExtensionDisclosureNodeView: NSView {
     private let row = NSStackView()
     private let mark = NSImageView()
     private var popover: ThemedPopover?
-    nonisolated(unsafe) private var hoverTimer: Timer?
-    nonisolated(unsafe) private var closeWorkItem: DispatchWorkItem?
+
+    /// Decides when the dwell opens the detail and when leaving closes it; a click bypasses
+    /// it either way.
+    private lazy var popoverScheduler: HoverPopoverScheduler = {
+        let scheduler = HoverPopoverScheduler(policy: ExtensionDisclosureDefaults.popoverPolicy)
+        scheduler.onPresent = { [weak self] in self?.reveal() }
+        scheduler.onDismiss = { [weak self] in self?.dismiss() }
+        return scheduler
+    }()
     private var isHovered = false {
         didSet {
             guard isHovered != oldValue else { return }
@@ -113,11 +121,6 @@ final class ExtensionDisclosureNodeView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    deinit {
-        hoverTimer?.invalidate()
-        closeWorkItem?.cancel()
-    }
-
     // MARK: - Reveal
 
     /// Opens the second level, or does nothing if it is already open.
@@ -126,7 +129,7 @@ final class ExtensionDisclosureNodeView: NSView {
     /// into one presentation, and a test is a third.
     func reveal() {
         guard window != nil, popover?.isShown != true else { return }
-        cancelScheduledClose()
+        popoverScheduler.cancelPendingWork()
 
         let content = makeDetailSurface()
         detailContent = content.view
@@ -155,9 +158,7 @@ final class ExtensionDisclosureNodeView: NSView {
     }
 
     func dismiss() {
-        cancelScheduledClose()
-        hoverTimer?.invalidate()
-        hoverTimer = nil
+        popoverScheduler.cancelPendingWork()
         popover?.close()
         popover = nil
         detailContent = nil
@@ -179,15 +180,11 @@ final class ExtensionDisclosureNodeView: NSView {
         stack.spacing = Design.Spacing.small
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        // The pointer bridge: hovering the detail cancels the close the row scheduled when the
-        // pointer left it, so crossing the gap keeps it open.
+        // The pointer bridge: the policy holds the detail open while the pointer rests on it,
+        // so crossing the gap from the row does not lose it.
         let container = HoverTrackingView()
         container.onHoverChange = { [weak self] hovering in
-            if hovering {
-                self?.cancelScheduledClose()
-            } else {
-                self?.scheduleClose()
-            }
+            self?.popoverScheduler.popoverHoverChanged(hovering)
         }
         container.translatesAutoresizingMaskIntoConstraints = false
 
@@ -238,8 +235,7 @@ final class ExtensionDisclosureNodeView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         // A click is the deliberate way in, and the way out of one opened by dwelling.
-        hoverTimer?.invalidate()
-        hoverTimer = nil
+        popoverScheduler.cancelPendingWork()
         if popover?.isShown == true {
             dismiss()
         } else {
@@ -249,21 +245,12 @@ final class ExtensionDisclosureNodeView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        cancelScheduledClose()
-        hoverTimer?.invalidate()
-        hoverTimer = Timer.scheduledTimer(
-            withTimeInterval: ExtensionDisclosureDefaults.hoverDelay,
-            repeats: false
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reveal() }
-        }
+        popoverScheduler.pointerEntered()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        hoverTimer?.invalidate()
-        hoverTimer = nil
-        scheduleClose()
+        popoverScheduler.pointerExited()
     }
 
     override func updateTrackingAreas() {
@@ -279,7 +266,7 @@ final class ExtensionDisclosureNodeView: NSView {
         // pinned to a pane that opens and closes. See `NSView.hoverIsStale`.
         if hoverIsStale(isHovered) {
             isHovered = false
-            scheduleClose()
+            popoverScheduler.pointerExited()
         }
     }
 
@@ -290,23 +277,6 @@ final class ExtensionDisclosureNodeView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil { dismiss() }
-    }
-
-    private func scheduleClose() {
-        cancelScheduledClose()
-        let item = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated { self?.dismiss() }
-        }
-        closeWorkItem = item
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + ExtensionDisclosureDefaults.closeDelay,
-            execute: item
-        )
-    }
-
-    private func cancelScheduledClose() {
-        closeWorkItem?.cancel()
-        closeWorkItem = nil
     }
 
     // MARK: - Appearance
