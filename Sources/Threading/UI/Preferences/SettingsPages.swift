@@ -75,6 +75,10 @@ enum SettingsPages {
         let hostPage: ExtensionHostSettingsPage?
         let title: String
         let symbol: String
+        /// The sidebar section the page sits under — presentation, like the title, and
+        /// localized the same way. Pages sharing a group must be contiguous in `builtIn`;
+        /// the sidebar draws one caption per run.
+        let group: String
         let searchTerms: [String]
         let make: () -> NSViewController
 
@@ -126,12 +130,29 @@ enum SettingsPages {
     static var themesTitle: String { L10n.string("Themes") }
     static var keyboardTitle: String { L10n.string("Keyboard") }
 
+    // The sidebar's sections. Six, and the membership is the argument: **App** is how the app
+    // itself behaves, **Appearance** how it looks (the terminal profile lives here — its font
+    // and cursor are appearance, wherever the word "profile" suggests otherwise), **Agents**
+    // everything about the agents Threading launches (their logins, the tools they reach, what
+    // they spent), **Access** who reaches the app and what the app may reach (a paired iPhone,
+    // GitHub, the macOS grants), **Data** what is on disk and the resets — the pages that are
+    // reports and housekeeping rather than preferences, which is exactly what a caption can
+    // finally say — and **Extensions** the packages plus every page one contributes.
+    static var appGroup: String { L10n.string("App") }
+    static var appearanceGroup: String { L10n.string("Appearance") }
+    static var agentsGroup: String { L10n.string("Agents") }
+    static var accessGroup: String { L10n.string("Access") }
+    static var dataGroup: String { L10n.string("Data") }
+    static var extensionsGroup: String { L10n.string("Extensions") }
+
     static let builtIn: [Page] = [
+        // MARK: App
         Page(
             id: generalID,
             hostPage: .general,
             title: L10n.string("General"),
             symbol: "gearshape",
+            group: appGroup,
             searchTerms: terms(
                 "sessions", "agent", "attachments", "startup", "closing", "shell",
                 "branch", "project icons", "account avatars", "Codex hooks",
@@ -141,108 +162,113 @@ enum SettingsPages {
             )
         ) { GeneralPreferencesViewController() },
         Page(
-            id: remoteAccessID,
-            hostPage: nil,
-            title: L10n.string("Remote Access"),
-            symbol: "iphone",
-            searchTerms: terms("iPhone", "pair", "QR code", "remote", "device", "security")
-        ) { RemoteAccessPreferencesViewController() },
-        Page(
-            id: accountsID,
-            hostPage: .accounts,
-            title: L10n.string("Accounts"),
-            symbol: "person.2",
-            searchTerms: terms("Claude", "Codex", "login", "avatar", "emoji", "name", "enabled")
-        ) { AccountsPreferencesViewController() },
-        Page(
-            id: privacyID,
-            hostPage: nil,
-            title: L10n.string("Privacy"),
-            symbol: "hand.raised",
+            id: keyboardID,
+            hostPage: .keyboard,
+            title: keyboardTitle,
+            symbol: "keyboard",
+            group: appGroup,
             searchTerms: terms(
-                "permissions", "accessibility", "screen recording", "notifications",
-                "files and folders", "keychain", "sandbox", "TCC", "security"
+                "shortcuts", "keys", "bindings", "commands", "reset",
+                "return", "enter", "send", "new line", "composer"
             )
-        ) { PrivacyPreferencesViewController() },
-        Page(
-            id: githubID,
-            hostPage: nil,
-            title: L10n.string("GitHub"),
-            symbol: "checkmark.seal",
-            searchTerms: terms(
-                "checks", "credentials", "device flow", "gh", "token", "connect",
-                "private repositories", "client ID", "app"
-            )
-        ) { GitHubPreferencesViewController() },
-        Page(
-            id: profilesID,
-            hostPage: .profiles,
-            title: L10n.string("Profiles"),
-            symbol: "person.crop.circle",
-            searchTerms: terms(
-                "terminal font", "terminal size", "cursor", "scrollback", "colour",
-                "background", "dropped images"
-            )
-        ) { ProfilePreferencesViewController() },
+        ) { KeyboardPreferencesViewController() },
+        // MARK: Appearance
         Page(
             id: themesID,
             hostPage: .themes,
             title: themesTitle,
             symbol: "paintpalette",
+            group: appearanceGroup,
             searchTerms: terms(
                 "appearance", "app theme", "terminal theme", "font", "typeface",
                 "text size", "colors", "colours", "palette", "large text"
             )
         ) { ThemePreferencesViewController() },
         Page(
+            id: profilesID,
+            hostPage: .profiles,
+            title: L10n.string("Profiles"),
+            symbol: "person.crop.circle",
+            group: appearanceGroup,
+            searchTerms: terms(
+                "terminal font", "terminal size", "cursor", "scrollback", "colour",
+                "background", "dropped images"
+            )
+        ) { ProfilePreferencesViewController() },
+        Page(
             id: motionID,
             hostPage: .motion,
             title: L10n.string("Motion"),
             symbol: "sparkles",
+            group: appearanceGroup,
             searchTerms: terms("animation", "working indicator", "orb", "chat names", "transition")
         ) { MotionPreferencesViewController() },
+        // MARK: Agents
         Page(
-            id: extensionsID,
-            hostPage: .extensions,
-            title: L10n.string("Extensions"),
-            symbol: "puzzlepiece.extension",
-            searchTerms: terms(
-                "plugins", "install", "enable", "reload", "remove", "capabilities",
-                "identity rendering"
-            )
-        ) { ExtensionsPreferencesViewController() },
+            id: accountsID,
+            hostPage: .accounts,
+            title: L10n.string("Accounts"),
+            symbol: "person.2",
+            group: agentsGroup,
+            searchTerms: terms("Claude", "Codex", "login", "avatar", "emoji", "name", "enabled")
+        ) { AccountsPreferencesViewController() },
         Page(
             id: toolsID,
             hostPage: .tools,
             title: L10n.string("Tools"),
             symbol: "wrench.and.screwdriver",
+            group: agentsGroup,
             searchTerms: terms(
                 "MCP", "browser", "agents", "permissions", "enabled",
                 "website access", "origin", "revoke"
             )
         ) { ToolsPreferencesViewController() },
         Page(
-            id: keyboardID,
-            hostPage: .keyboard,
-            title: keyboardTitle,
-            symbol: "keyboard",
-            searchTerms: terms(
-                "shortcuts", "keys", "bindings", "commands", "reset",
-                "return", "enter", "send", "new line", "composer"
-            )
-        ) { KeyboardPreferencesViewController() },
-        Page(
             id: usageID,
             hostPage: .usage,
             title: usageTitle,
             symbol: "chart.bar",
+            group: agentsGroup,
             searchTerms: terms("tokens", "cost", "spend", "account", "checkout", "model", "day")
         ) { UsagePreferencesViewController() },
+        // MARK: Access
+        Page(
+            id: remoteAccessID,
+            hostPage: nil,
+            title: L10n.string("Remote Access"),
+            symbol: "iphone",
+            group: accessGroup,
+            searchTerms: terms("iPhone", "pair", "QR code", "remote", "device", "security")
+        ) { RemoteAccessPreferencesViewController() },
+        Page(
+            id: githubID,
+            hostPage: nil,
+            title: L10n.string("GitHub"),
+            symbol: "checkmark.seal",
+            group: accessGroup,
+            searchTerms: terms(
+                "checks", "credentials", "device flow", "gh", "token", "connect",
+                "private repositories", "client ID", "app"
+            )
+        ) { GitHubPreferencesViewController() },
+        Page(
+            id: privacyID,
+            hostPage: nil,
+            title: L10n.string("Privacy"),
+            symbol: "hand.raised",
+            group: accessGroup,
+            searchTerms: terms(
+                "permissions", "accessibility", "screen recording", "notifications",
+                "files and folders", "keychain", "sandbox", "TCC", "security"
+            )
+        ) { PrivacyPreferencesViewController() },
+        // MARK: Data
         Page(
             id: storageID,
             hostPage: .storage,
             title: storageTitle,
             symbol: "internaldrive",
+            group: dataGroup,
             searchTerms: terms("disk", "build output", "cache", "reclaim", "remove", "space")
         ) { StoragePreferencesViewController() },
         Page(
@@ -250,10 +276,13 @@ enum SettingsPages {
             hostPage: .archived,
             title: L10n.string("Archived"),
             symbol: "archivebox",
+            group: dataGroup,
             searchTerms: terms("conversations", "sessions", "restore", "delete")
         ) { ArchivedPreferencesViewController() },
-        // Last, and deliberately: it is the page nobody needs until something is wrong, and its
-        // two buttons are the widest-reaching in Settings.
+        // Last of the built-in destinations, and deliberately: it is the page nobody needs
+        // until something is wrong, and its two buttons are the widest-reaching in Settings.
+        // Only the Extensions section follows, because `all` appends extension-contributed
+        // pages at the end and they have to land inside their own section's run.
         Page(
             id: advancedID,
             hostPage: nil,
@@ -261,11 +290,24 @@ enum SettingsPages {
             // Not `wrench.and.screwdriver`: Tools already wears it, and two sidebar rows in
             // one icon read as one destination twice.
             symbol: "gearshape.2",
+            group: dataGroup,
             searchTerms: terms(
                 "reset", "start over", "fresh", "erase", "corrupt", "preferences file",
                 "application support", "where", "location", "reveal", "backup", "restart"
             )
-        ) { AdvancedPreferencesViewController() }
+        ) { AdvancedPreferencesViewController() },
+        // MARK: Extensions
+        Page(
+            id: extensionsID,
+            hostPage: .extensions,
+            title: L10n.string("Extensions"),
+            symbol: "puzzlepiece.extension",
+            group: extensionsGroup,
+            searchTerms: terms(
+                "plugins", "install", "enable", "reload", "remove", "capabilities",
+                "identity rendering"
+            )
+        ) { ExtensionsPreferencesViewController() }
     ]
 
     static var all: [Page] {
@@ -275,6 +317,7 @@ enum SettingsPages {
                 hostPage: nil,
                 title: "\(registered.extensionName) — \(registered.page.title)",
                 symbol: registered.page.symbol,
+                group: extensionsGroup,
                 searchTerms: ExtensionSettingsRegistry.searchTerms(for: registered)
             ) {
                 ExtensionSettingsViewController(page: registered)
@@ -304,7 +347,8 @@ enum SettingsPages {
                 id: $0.id,
                 title: $0.title,
                 symbol: $0.symbol,
-                searchText: $0.searchableText
+                searchText: $0.searchableText,
+                group: $0.group
             )
         }
     }

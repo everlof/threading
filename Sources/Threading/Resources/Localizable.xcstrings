@@ -22506,6 +22506,98 @@
           }
         }
       }
+    },
+    "A takeover theme's frame, drawn by the app. The band drags this very window, and its buttons really close, minimize, and zoom it.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "A takeover theme's frame, drawn by the app. The band drags this very window, and its buttons really close, minimize, and zoom it." } } }
+    },
+    "Available in Grok Terminal; not available in native Chat yet": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillgängligt i Grok-terminalen men ännu inte i inbyggd chatt" } } }
+    },
+    "BETA": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "BETA" } } }
+    },
+    "Beta build": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Betaversion" } } }
+    },
+    "DEV": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "DEV" } } }
+    },
+    "Development build": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Utvecklingsversion" } } }
+    },
+    "The border drawn around a takeover window's edges, seated by the theme's border role.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "The border drawn around a takeover window's edges, seated by the theme's border role." } } }
+    },
+    "The title band with square-plate buttons, and the bare-glyph style on its own ground.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "The title band with square-plate buttons, and the bare-glyph style on its own ground." } } }
+    },
+    "Window chrome": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fönsterkrom" } } }
+    },
+    "WindowChromeFrameView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "WindowChromeFrameView" } } }
+    },
+    "WindowTitleBandView & WindowChromeButton": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "WindowTitleBandView & WindowChromeButton" } } }
+    },
+    "NIGHTLY": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "NIGHTLY" } } }
+    },
+    "Nightly build": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nattlig version" } } }
+    },
+    "Close comparison": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Stäng jämförelse" } } }
+    },
+    "Comparison, %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Jämförelse, %@" } } }
+    },
+    "Open comparison": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna jämförelse" } } }
+    },
+    "Detected paths are normally kept to the session's own project, because a paired phone can fetch anything in the list and printed text is not a handoff. Turn this on to list them wherever they are; Threading copies each one in. Images you attach or the agent shows are never affected.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Upptäckta sökvägar hålls normalt till sessionens eget projekt, eftersom en ihopparad telefon kan hämta allt i listan och utskriven text inte är en överlämning. Slå på detta för att lista dem var de än ligger; Threading kopierar in var och en. Bilder du bifogar eller som agenten visar påverkas aldrig." } } }
+    },
+    "Files this session named outside the project are listed, and a paired phone can fetch them. Hiding them leaves the list to files inside the project.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Filer som den här sessionen namngett utanför projektet listas, och en ihopparad telefon kan hämta dem. Att dölja dem lämnar listan till filer inuti projektet." } } }
+    },
+    "Files this session named outside the project are not listed, so nothing outside it can be fetched by a paired phone. Showing them copies them into Threading.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Filer som den här sessionen namngett utanför projektet listas inte, så inget utanför det kan hämtas av en ihopparad telefon. Att visa dem kopierar in dem i Threading." } } }
+    },
+    "Hide files outside this project": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dölj filer utanför det här projektet" } } }
+    },
+    "Hide": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dölj" } } }
+    },
+    "Include files outside the project": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inkludera filer utanför projektet" } } }
+    },
+    "OUTSIDE THIS PROJECT  %lld": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "UTANFÖR DET HÄR PROJEKTET  %lld" } } }
+    },
+    "Show files outside this project": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visa filer utanför det här projektet" } } }
+    },
+    "ImageCompareView & CompareInspectorView": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ImageCompareView och CompareInspectorView" } } }
+    },
+    "Two renderings of one asset. Drag the seam or arrow-key it, and pick a mode from the chip: Fade held at the middle is the onion skin, Difference answers whether anything changed at all. The button beside the chip opens the same comparison at the window's size, where Escape closes it and hands back the mode and the scrub it was left at.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Två renderingar av samma resurs. Dra i skarven eller använd piltangenterna, och välj läge i chippet: Toning hållen i mitten är lökskalet, Skillnad svarar på om något ändrats över huvud taget. Knappen bredvid chippet öppnar samma jämförelse i fönstrets storlek, där Esc stänger den och lämnar tillbaka läget och positionen den lämnades i." } } }
+    },
+    "Agents": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenter" } } }
+    },
+    "Access": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Åtkomst" } } }
+    },
+    "Data": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Data" } } }
     }
   },
   "version": "1.0"

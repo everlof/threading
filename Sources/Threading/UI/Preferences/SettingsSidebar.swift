@@ -14,6 +14,17 @@ final class SettingsSidebar: NSView {
         let title: String
         let symbol: String
         let searchText: String
+        /// The section this page sits under, already localized. Consecutive items sharing a
+        /// group draw one quiet caption above their run; nil rows stand on their own.
+        var group: String?
+
+        init(id: String, title: String, symbol: String, searchText: String, group: String? = nil) {
+            self.id = id
+            self.title = title
+            self.symbol = symbol
+            self.searchText = searchText
+            self.group = group
+        }
     }
 
     // MARK: - Properties
@@ -105,6 +116,19 @@ final class SettingsSidebar: NSView {
             makeRow(title: item.title, symbol: item.symbol, opens: item.id)
         }
 
+        // Rows interleaved with their group captions: one caption per surviving run, so a
+        // filtered list keeps only the sections it still has rows for. Deliberately compact —
+        // this sidebar does not scroll, so a caption costs one small line, not a band.
+        var resultViews: [NSView] = []
+        var lastGroup: String?
+        for (offset, item) in displayedItems.enumerated() {
+            if let group = item.group, group != lastGroup {
+                resultViews.append(groupCaption(group, isFirst: resultViews.isEmpty))
+            }
+            lastGroup = item.group
+            resultViews.append(rows[offset])
+        }
+
         let noResults = NSTextField(
             wrappingLabelWithString: L10n.string("No settings found.")
         )
@@ -113,7 +137,7 @@ final class SettingsSidebar: NSView {
         noResults.alignment = .center
         noResults.isHidden = !rows.isEmpty
 
-        let resultViews: [NSView] = rows.isEmpty ? [noResults] : rows
+        if rows.isEmpty { resultViews = [noResults] }
         let stack = NSStackView(views: resultViews)
         stack.orientation = .vertical
         stack.alignment = rows.isEmpty ? .centerX : .leading
@@ -143,6 +167,36 @@ final class SettingsSidebar: NSView {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         select(id: selectedID ?? "")
+    }
+
+    /// A section's quiet caption: the settings pages' own caption voice, indented to the rows'
+    /// title line, with its separation carried as padding so the stack's row spacing stays one
+    /// value.
+    private func groupCaption(_ title: String, isFirst: Bool) -> NSView {
+        let label = NSTextField(labelWithString: title.localizedUppercase)
+        label.applyFont(.caption)
+        label.textColor = Design.Text.tertiary
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(
+                equalTo: container.topAnchor,
+                constant: isFirst ? Design.Spacing.tight : Design.Spacing.medium
+            ),
+            label.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -Design.Spacing.tight
+            ),
+            label.leadingAnchor.constraint(
+                equalTo: container.leadingAnchor,
+                constant: Design.Spacing.inset
+            ),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor)
+        ])
+        return container
     }
 
     private func makeRow(title: String, symbol: String, opens pageID: String) -> ThemedTabItemView {

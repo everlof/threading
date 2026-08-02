@@ -223,6 +223,55 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         XCTAssertEqual(written, Render.fixtures.count)
     }
 
+    /// The grouped sidebar: one caption per section run, and a filtered list keeping only the
+    /// sections that still have rows.
+    @MainActor
+    func testRendersTheGroupedSettingsSidebar() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { AppThemePalette.set(.system) }
+
+        for fixture in Render.fixtures {
+            AppThemePalette.set(fixture.theme)
+            let sidebar = SettingsSidebar(items: SettingsPages.sidebarItems)
+            let host = laidOut(sidebar, height: 700, width: 240)
+            let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            host.appearance = appearance
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+
+            var data: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                data = self.png(of: host)
+            }
+            let url = directory.appendingPathComponent("sidebar-\(fixture.name).png")
+            try XCTUnwrap(data, "no sidebar render for \(fixture.name)").write(to: url)
+        }
+    }
+
+    @MainActor
+    func testFilteringKeepsOnlySectionsWithSurvivingRows() {
+        let sidebar = SettingsSidebar(items: [
+            .init(id: "a", title: "Alpha", symbol: "gearshape", searchText: "alpha", group: "One"),
+            .init(id: "b", title: "Beta", symbol: "keyboard", searchText: "beta", group: "One"),
+            .init(id: "c", title: "Gamma", symbol: "paintpalette", searchText: "gamma", group: "Two")
+        ])
+
+        sidebar.updateSearchQuery("gamma")
+
+        XCTAssertEqual(sidebar.visibleItemIDs, ["c"])
+        let captions = labels(in: sidebar).filter { $0.stringValue == "ONE" || $0.stringValue == "TWO" }
+        XCTAssertEqual(
+            captions.map(\.stringValue), ["TWO"],
+            "a section with no surviving rows kept its caption"
+        )
+    }
+
+    @MainActor
+    private func labels(in root: NSView) -> [NSTextField] {
+        descendants(of: root, type: NSTextField.self)
+    }
+
     @objc private func noop() {}
 
     /// Fails naming the widest offender, so a regression reads as "this label pushed" rather
@@ -255,8 +304,12 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     // MARK: - Helpers
 
     @MainActor
-    private func laidOut(_ view: NSView, height: CGFloat = Render.height) -> NSView {
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: Render.width, height: height))
+    private func laidOut(
+        _ view: NSView,
+        height: CGFloat = Render.height,
+        width: CGFloat = Render.width
+    ) -> NSView {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         view.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(view)
         NSLayoutConstraint.activate([
