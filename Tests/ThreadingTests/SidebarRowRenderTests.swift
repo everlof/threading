@@ -218,6 +218,44 @@ final class SidebarRowRenderTests: XCTestCase {
         )
     }
 
+    /// The same margin, on a *recycled* row. A fresh row always passed the assertion above,
+    /// yet in the app one project's `+ ⋯` sat against its name while another's sat on the
+    /// margin: reuse had toggled the slot's visibility and width, and with the slot arranged
+    /// in the row's stack its position rested on a hugging tie the solver could break either
+    /// way. The slot is pinned to the row now; this holds the reuse path to the same line.
+    func testTrailingControlsKeepTheMarginOnAReusedRow() throws {
+        let margin = Fixture.width - SidebarRowDefaults.trailingInset
+
+        let row = ProjectRowView(customizationLookup: { _ in .empty })
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.configureAsRepository(named: "sondalabs", count: 3)
+        Self.layOut(row)
+
+        row.prepareForReuse()
+        row.configure(
+            with: Project(
+                name: "AnotherTerminal",
+                folderURL: URL(fileURLWithPath: "/tmp/AnotherTerminal")
+            ),
+            collapsedSessionCount: 2
+        )
+        Self.layOut(row)
+
+        let count = try XCTUnwrap(row.descendant(identified: "sidebar.project.count"))
+        XCTAssertEqual(
+            count.alignmentRect(forFrame: count.convert(count.bounds, to: row)).maxX,
+            margin,
+            accuracy: 0.5,
+            "A reused row's count should sit on the row's trailing margin"
+        )
+        try assertOpticalEdge(
+            ofControlsIn: "sidebar.project.actions",
+            of: row,
+            equals: margin,
+            "a reused project row's ⋯"
+        )
+    }
+
     /// Reads the trailing control's *ink* edge: its frame pulled in by the padding it reports.
     private func assertOpticalEdge(
         ofControlsIn identifier: String,

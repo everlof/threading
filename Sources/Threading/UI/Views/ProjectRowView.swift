@@ -26,7 +26,7 @@ final class ProjectRowView: NSTableCellView {
     private let trailingSlot = NSView()
     private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeContent)
     private lazy var rowContentStack = NSStackView(
-        views: [contentContainer, afterTitleSlot, trailingSlot]
+        views: [contentContainer, afterTitleSlot]
     )
     private lazy var customizationHost = ComponentCustomizationHost(
         target: .init(
@@ -322,17 +322,22 @@ final class ProjectRowView: NSTableCellView {
                 equalTo: leadingAnchor,
                 constant: SidebarRowDefaults.leadingInset
             ),
+            rowContentStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingSlot.leadingAnchor,
+                constant: -SidebarRowDefaults.horizontalSpacing
+            ),
+            rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
             // Pulled out by the padding the hover button holds around its glyph, the way
             // `PaneFooterView` places a trailing control — see `OpticalInsetProviding`. The
             // count inside the slot is pulled back in by the same amount, so the two land on
             // one line instead of the edge stepping inboard when the pointer arrives.
-            rowContentStack.trailingAnchor.constraint(
+            trailingSlot.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -(
                     SidebarRowDefaults.trailingInset - hoverButton.opticalHorizontalInset
                 )
             ),
-            rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            trailingSlot.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
             iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth)
         ])
@@ -370,11 +375,16 @@ final class ProjectRowView: NSTableCellView {
         afterTitleSlot.isHidden = true
         afterTitleSlot.setAccessibilityIdentifier("sidebar.project.slot.after-title")
 
+        // The trailing slot is **not** in the stack — pinned to the row instead, for the
+        // reason `SessionRowView` states at its own trailing slot: an arranged slot reaches
+        // the edge only when the stack can stretch something to its left, so it came to rest
+        // against the name on some rows and on the margin on others.
         rowContentStack.orientation = .horizontal
         rowContentStack.alignment = .centerY
         rowContentStack.spacing = SidebarRowDefaults.horizontalSpacing
         rowContentStack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(rowContentStack)
+        addSubview(trailingSlot)
 
         _ = customizationHost
     }
