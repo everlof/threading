@@ -114,6 +114,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     var newSessionButton: ThemedIconButton?
     var shellDrawerToolbarButton: ThemedIconButton?
     var displayPaneToolbarButton: ThemedIconButton?
+    var statusCardToolbarButton: ThemedIconButton?
     var sessionContextToolbarButton: ThemedIconButton?
     var surfaceToggleToolbarButton: ThemedIconButton?
     var openInToolbarButton: ThemedIconButton?
@@ -1573,6 +1574,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateToolbarControlStates()
     }
 
+    /// Shows or hides the session pane's floating corner card.
+    ///
+    /// No session check, unlike the shell: this is a standing preference about a surface rather
+    /// than an action on the conversation, and it is as legitimate to switch the card off from
+    /// a pane that has none as it is to switch it on before opening one.
+    func toggleStatusCard() {
+        containerViewController.toggleGitStatusOverlay()
+        updateToolbarControlStates()
+    }
+
     /// A filled pane button means that pane is actually visible, however it was closed.
     ///
     /// Split out of `updateToolbarControlStates` because the divider drag needs exactly this
@@ -1599,6 +1610,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateOpenInControls()
         shellDrawerToolbarButton?.isEnabled = hasSession
         shellDrawerToolbarButton?.isSelected = containerViewController.isShellDrawerOpen
+        // The standing choice, not whether a card is on screen right now: a pane too narrow to
+        // carry one withdraws it without the user having decided anything, and a button that
+        // unfilled itself on a divider drag would report a switch nobody threw.
+        statusCardToolbarButton?.isSelected = containerViewController.isGitStatusOverlayEnabled
         sessionContextToolbarButton?.isEnabled = hasSession || containerViewController.isShowingSettings
 
         if let session, session.kind.supportsNativeUI {
@@ -2401,6 +2416,32 @@ enum SidebarWidth {
     static func record(_ width: CGFloat) {
         guard width >= SidebarDefaults.minWidth else { return }
         PreferenceStore.shared.set(Double(width), forKey: key)
+    }
+}
+
+// MARK: - Status Card Visibility
+
+/// Whether the session pane carries its floating corner card.
+///
+/// Through `PreferenceStore` rather than `.standard`, for the same reason `DisplayPaneWidth`
+/// is: it records a **choice the user made with a control**, and the test bundle is hosted in
+/// the app, so a test that switches the card off would otherwise decide what the developer's
+/// own next launch opens into.
+///
+/// Kept out of `AppSettings` too, which holds behaviour set deliberately on a settings page.
+/// This is a surface toggled from the header, and it belongs with the panes toggled beside it.
+enum StatusCardVisibility {
+    private static let key = "ThreadingShowsStatusCard"
+
+    /// On unless the user turned it off.
+    ///
+    /// Read as an *optional* rather than through `bool(forKey:)`, because absent has to mean on
+    /// and `bool(forKey:)` cannot say the difference between "switched off" and "never asked".
+    /// Registering a default would answer it too, but only for a process that has run the
+    /// registration — and this is read from the pane's first layout pass.
+    static var isEnabled: Bool {
+        get { PreferenceStore.shared.object(forKey: key) as? Bool ?? true }
+        set { PreferenceStore.shared.set(newValue, forKey: key) }
     }
 }
 

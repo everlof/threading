@@ -230,6 +230,17 @@ extension MainWindowController: NSToolbarDelegate {
         ToolbarButtonGroupView(buttons: [
             makeSessionContextButton(),
             makeSurfaceToggleButton(),
+            // Beside the two drawers rather than off on its own: all three answer "is this
+            // surface on screen", and the card is the one of the three that floats *over* the
+            // session rather than beside it — which is exactly why it needs a way off.
+            makePaneToggleButton(
+                symbolName: "rectangle.inset.topright.filled",
+                label: "Status card",
+                toolTip: "Show or Hide the Status Card",
+                store: { [weak self] in self?.statusCardToolbarButton = $0 }
+            ) { [weak self] in
+                self?.toggleStatusCard()
+            },
             makePaneToggleButton(
                 symbolName: "rectangle.bottomthird.inset.filled",
                 label: "Shell",

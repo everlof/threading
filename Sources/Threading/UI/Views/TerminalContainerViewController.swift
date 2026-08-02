@@ -156,6 +156,33 @@ final class TerminalContainerViewController: NSViewController {
         }
     }
 
+    /// The one place the corner card's room is re-measured.
+    ///
+    /// Both sides of that question move here and nowhere else: the pane's width, on a divider
+    /// drag or a window resize, and the card's own width, when a branch name or a set of rows
+    /// changes underneath it. A layout pass is what they have in common — the card is a subview
+    /// with constraints, so its own resize brings the pane through here too.
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        updateGitStatusOverlayVisibility(animated: true)
+    }
+
+    /// Shows or hides the corner card, and remembers the answer.
+    ///
+    /// The pane owns the toggle rather than the card, because the card is not the only thing
+    /// that decides: a pane too narrow to carry it overrules the switch, and both answers have
+    /// to be re-asked together or the card comes back the moment the window is resized.
+    func toggleGitStatusOverlay() {
+        StatusCardVisibility.isEnabled.toggle()
+        updateGitStatusOverlayVisibility(animated: true)
+    }
+
+    /// Whether the *user* has the card switched on — not whether it is on screen. The toolbar
+    /// button reflects the standing choice, so a card withdrawn for width still reads as on:
+    /// the button is what the press will do next, and a press on a narrow pane cannot be
+    /// answered by showing a card there is no room for.
+    var isGitStatusOverlayEnabled: Bool { StatusCardVisibility.isEnabled }
+
     /// Repaints the pane behind whatever surface is on screen after a theme change.
     ///
     /// Resolves the colour here rather than reading it off the terminal view, because the
@@ -955,6 +982,30 @@ private extension TerminalContainerViewController {
                 constant: -Design.Spacing.inset
             )
         ])
+    }
+
+    /// Re-asks both halves of "is the card allowed here" and hands the card one answer.
+    ///
+    /// It is one answer on purpose. The card would otherwise have to reconcile a switch it
+    /// cannot see with a width it cannot measure, and the two disagree constantly — every
+    /// divider drag is a width change, and the switch outlives the session.
+    func updateGitStatusOverlayVisibility(animated: Bool) {
+        gitStatusOverlay.setAllowedOnScreen(
+            StatusCardVisibility.isEnabled && paneHasRoomForGitStatusOverlay,
+            animated: animated
+        )
+    }
+
+    /// Whether the pane is wide enough to spend on a floating card.
+    ///
+    /// Measured against the card's *fitting* width rather than its frame: a withdrawn card has
+    /// been laid out at that size all along, and asking the frame would make the answer depend
+    /// on the answer — the card comes back, which makes it wide, which sends it away again.
+    private var paneHasRoomForGitStatusOverlay: Bool {
+        GitStatusOverlayDefaults.hasRoom(
+            forCardWidth: gitStatusOverlay.fittingSize.width,
+            inPaneWidth: view.bounds.width
+        )
     }
 
     /// Follows the selection: the card and its watcher serve the checkout on screen, and a

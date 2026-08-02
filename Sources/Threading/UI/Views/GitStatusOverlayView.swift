@@ -43,7 +43,24 @@ enum GitStatusOverlayDefaults {
     /// three-fact card read as text pressed against its own border — called out as "too tight
     /// vertically" twice. The single-row pill grows with it, deliberately: one geometry,
     /// whichever row count the card holds, is the rule the whole file is built on.
-    static let verticalInset: CGFloat = Design.Spacing.medium
+    static let verticalInset: CGFloat = Design.Spacing.inset
+
+    /// The air a row keeps around its own words — what the hover wash paints, and what the two
+    /// button rows are sized to, so all four rows are one shape.
+    ///
+    /// The card used to have no such number, and it showed the moment the pointer was on it: a
+    /// text row's line box is 15pt, the wash could grow by whatever `rowGap` left over, and
+    /// `rowGap` left 2 — a 19pt wash around 15pt of words, beside a children button that pads
+    /// itself to 22. The wash was *shorter* than the button it sat above, and read as shrink-wrap
+    /// on the text rather than as a row lighting up.
+    static let rowPadding: CGFloat = Design.Spacing.tight
+
+    /// One row of the card: its words, and `rowPadding` above and below them.
+    ///
+    /// Every row is this tall — the text rows because the wash says so, the button rows because
+    /// they are constrained to it. That is what makes `childrenRowInset` exactly `rowPadding`
+    /// rather than whatever height `ThemedButton` happened to pick for itself.
+    static var rowHeight: CGFloat { textRowHeight + rowPadding * 2 }
     /// Between one reading and the next. Tighter than the inset, so the rows read as a list
     /// inside a card rather than as three cards sharing a border.
     ///
@@ -54,7 +71,12 @@ enum GitStatusOverlayDefaults {
     /// counters and the agent line stuck together underneath it. `tight` fixed the rhythm and
     /// still read cramped; `small` is the step that gives each fact its own line of air while
     /// staying inside the inset.
-    static let rowGap: CGFloat = Design.Spacing.small
+    /// Wide enough for two washes to sit in it and still leave a hairline of ground between
+    /// them: `rowPadding` grows each row's wash toward its neighbour, so the gap has to carry
+    /// both of them plus the line that keeps them from fusing into one block. At `small` it
+    /// could not, and the wash was clamped to 2pt to compensate — the gap was setting the
+    /// padding, which is backwards.
+    static let rowGap: CGFloat = Design.Spacing.medium
     /// Quiet at rest, per the design system; full under the pointer.
     ///
     /// Carried by the card's **contents** rather than by the card. On the view it also thinned
@@ -68,6 +90,37 @@ enum GitStatusOverlayDefaults {
     /// of the rows *is* one — the children line.
     static let markSlot = ThemedButton.markSlotWidth
     static let markGap = ThemedButton.markTitleGap
+
+    /// The most of the pane's width the card may take before it withdraws on its own.
+    ///
+    /// The card floats **over** the terminal rather than beside it, so what it costs is the text
+    /// underneath. At a comfortable width that is a corner; on a pane dragged narrow the same
+    /// card is a lid, and the agent's output runs behind it.
+    ///
+    /// A share rather than a minimum width, because the card's width is the *branch name's* —
+    /// a long name on a middling pane is exactly as tight as a short name on a narrow one, and
+    /// one rule answers both. Half is where a floating card stops reading as an annotation on
+    /// the pane and starts reading as a second column of it.
+    static let maximumPaneShare: CGFloat = 0.5
+
+    /// Whether a card that wants `cardWidth` may show in a pane `paneWidth` wide.
+    ///
+    /// Stated here rather than inline at the one call site so the rule can be read, and asserted,
+    /// without a window and a session behind it.
+    ///
+    /// A pane with no width has not been laid out yet rather than being narrow, and answering
+    /// "no room" there would hide the card for the whole of the first layout pass.
+    static func hasRoom(forCardWidth cardWidth: CGFloat, inPaneWidth paneWidth: CGFloat) -> Bool {
+        guard paneWidth > 0 else { return true }
+        return cardWidth <= paneWidth * maximumPaneShare
+    }
+
+    /// How far the card lifts while it is off screen.
+    ///
+    /// Toward the edge it is pinned to, so it tucks away rather than drifting in a direction
+    /// nothing else in the pane moves. One step: the motion is punctuation on the fade, and a
+    /// card that travels far enough to be watched is a card the eye has to wait for.
+    static let withdrawnRise: CGFloat = Design.Spacing.small
 }
 
 // MARK: - View
@@ -153,6 +206,28 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// Whether there is a Git sentence to click through to Git Review with.
     private var hasGitReceipt = false
 
+    /// Whether the card has anything to say at all — any row survived the last rebuild.
+    ///
+    /// One of the **two** answers that decide whether the card is on screen, and deliberately
+    /// separate from the other: a card with no branch is absent because there is nothing to
+    /// show, and a card the user switched off is absent because they said so. Only the second
+    /// is a transition anybody watches, so only the second animates.
+    private var hasContent = false
+
+    /// Whether the pane is willing to carry the card: the user's standing choice, and whether
+    /// there is width to spend on it. Set from the pane, which is the only thing that knows.
+    private var isAllowedOnScreen = true
+
+    /// The applied answer, so a change that does not move the card animates nothing. `isHidden`
+    /// cannot serve as this: it lands at the *end* of a vanish, and a second toggle arriving
+    /// mid-flight would read the card as still shown and do nothing.
+    private var isShowing = false
+
+    /// Which transition is in flight, so a completion cannot land on a card that has since been
+    /// asked for the opposite. Toggling twice inside `Motion.vanish` did exactly that, and the
+    /// card came back and then hid itself a tenth of a second later.
+    private var visibilityGeneration = 0
+
     /// The `session.corner-card@1` `top-trailing` slot: extension rows under the summary line.
     ///
     /// The slot ID names the corner, not the content — a future leading card becomes a
@@ -189,16 +264,21 @@ final class GitStatusOverlayView: BackdropOverlay {
         }
     }
 
-    /// Whether the pointer is on the rows that open Git Review, rather than merely on the card.
+    /// Which Git row the pointer is on — not merely *whether* it is on one.
     ///
     /// The card is **not one button**, and lifting all of it under the pointer said it was: the
     /// Git rows open Git Review, the children row opens the Subagents tab, the audience row opens
     /// sharing, and the agent line and any extension row are readings that do nothing at all. The
     /// two button rows have lit their own words since they were controls; this is what gives the
     /// third destination — the one drawn as text — the same answer.
-    private var isGitHovered = false {
+    ///
+    /// Held as the row rather than as a flag because branch and counters share that destination
+    /// and still only one of them is under the pointer. Lighting both answered a question nobody
+    /// asked — a hover reports where the pointer *is*, and the destination is what the click is
+    /// for. Weak, so a rebuilt card cannot keep drawing under a row it no longer holds.
+    private weak var hoveredGitRow: NSView? {
         didSet {
-            guard isGitHovered != oldValue else { return }
+            guard hoveredGitRow !== oldValue else { return }
             needsDisplay = true
         }
     }
@@ -354,6 +434,17 @@ final class GitStatusOverlayView: BackdropOverlay {
         slotTopConstraint = slotTop
 
         NSLayoutConstraint.activate([
+            // The two control rows take the card's row height rather than the one `ThemedButton`
+            // sizes itself to. A plain button pads its title to a hit target it picked without
+            // knowing what it would sit under, and here that made it 22 beside text rows whose
+            // hover reached 19 — three rows on two rhythms. Constrained, every row is one shape
+            // and `childrenRowInset` is a number this file states rather than discovers.
+            subagentsButton.heightAnchor.constraint(
+                equalToConstant: GitStatusOverlayDefaults.rowHeight
+            ),
+            audienceButton.heightAnchor.constraint(
+                equalToConstant: GitStatusOverlayDefaults.rowHeight
+            ),
             widthAnchor.constraint(lessThanOrEqualToConstant: GitStatusOverlayDefaults.maxWidth),
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.medium),
             content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.medium),
@@ -482,7 +573,21 @@ final class GitStatusOverlayView: BackdropOverlay {
         subagentsButton.isHidden = true
         audienceButton.isHidden = true
         modelRow.isHidden = true
-        isHidden = true
+        hasContent = false
+        applyVisibility(animated: false)
+    }
+
+    /// Whether the pane will carry the card — the user's toggle, and whether the pane is wide
+    /// enough to spend the room on it.
+    ///
+    /// Animated, unlike the content answer: this is a change the user either asked for or
+    /// caused with a divider, and both are worth watching land. A card with nothing to say
+    /// stays hidden either way; this only ever decides whether one that *has* something is
+    /// allowed to show it.
+    func setAllowedOnScreen(_ allowed: Bool, animated: Bool) {
+        guard allowed != isAllowedOnScreen else { return }
+        isAllowedOnScreen = allowed
+        applyVisibility(animated: animated)
     }
 
     /// Binds the extension slot to the session on screen, or detaches it between sessions.
@@ -548,7 +653,8 @@ final class GitStatusOverlayView: BackdropOverlay {
         let hasSubagents = subagentCounts.working + subagentCounts.done > 0
         let hasAudience = !audienceReading.isEmpty
         guard hasGitReceipt || hasSubagents || hasAudience || model != nil else {
-            isHidden = true
+            hasContent = false
+            applyVisibility(animated: false)
             return
         }
 
@@ -689,17 +795,22 @@ final class GitStatusOverlayView: BackdropOverlay {
             setAccessibilityLabel(parts.joined(separator: "  ·  "))
             toolTip = nil
         }
-        isHidden = false
+        hasContent = true
+        applyVisibility(animated: false)
     }
 
-    /// The vertical air the children row already draws inside its own frame.
+    /// The vertical air a button row draws inside its own frame.
     ///
-    /// It is the one row that is a control rather than a line of text: `ThemedButton` sizes a
-    /// plain button around a hit target, so its title sits inboard of its frame by this much at
-    /// the top and the bottom. Every other row is a bare label whose frame is its line box.
-    private var childrenRowInset: CGFloat {
-        max(0, (subagentsButton.intrinsicContentSize.height - Self.textRowHeight) / 2)
-    }
+    /// It is the one row that is a control rather than a line of text: its title sits inboard of
+    /// its frame by this much at the top and the bottom, while every other row is a bare label
+    /// whose frame is its line box. Wherever the two meet — a gap, the card's own inset — that
+    /// space gives the padding back so the ink lands on one rhythm.
+    ///
+    /// Stated rather than measured off `intrinsicContentSize`, now that the button rows are
+    /// constrained to `rowHeight`: asking the control what height it chose was asking the wrong
+    /// party, and the answer (22 against a 15pt line) was the number the card then had to work
+    /// around instead of the number it wanted.
+    private var childrenRowInset: CGFloat { GitStatusOverlayDefaults.rowPadding }
 
     /// The height of a row that is just words — an `NSTextField.label` at the card's font, which
     /// is its line box and nothing else.
@@ -880,6 +991,76 @@ final class GitStatusOverlayView: BackdropOverlay {
         count.formatted(.number.notation(.compactName))
     }
 
+    // MARK: - Visibility
+
+    /// Puts the card on screen, or takes it off, in the app's own tempo.
+    ///
+    /// The fade is what carries it; the lift is punctuation. Both are needed: alpha alone on a
+    /// card that floats over live terminal text reads as the text brightening rather than as a
+    /// card leaving, because the thing arriving underneath is moving too.
+    ///
+    /// Arriving eases *out* and leaving eases *in*, at `Motion.appear` and `Motion.vanish` —
+    /// the asymmetry every other surface here uses, since arriving is information the eye
+    /// follows and leaving is a decision already made.
+    private func applyVisibility(animated: Bool) {
+        let shouldShow = hasContent && isAllowedOnScreen
+        guard shouldShow != isShowing else { return }
+        isShowing = shouldShow
+        visibilityGeneration &+= 1
+        let generation = visibilityGeneration
+
+        // `reducesMotion` is checked here rather than left to the zero durations below, because
+        // a zero-length animation still defers its completion by a run-loop turn — and the end
+        // state is what a caller under Reduce Motion is entitled to have *now*.
+        guard animated, !Design.Motion.reducesMotion else {
+            settleVisibility(shouldShow)
+            return
+        }
+
+        if shouldShow {
+            isHidden = false
+            alphaValue = 0
+            layer?.transform = withdrawnTransform
+        }
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = shouldShow ? Design.Motion.appear : Design.Motion.vanish
+            context.timingFunction = CAMediaTimingFunction(
+                name: shouldShow ? .easeOut : .easeIn
+            )
+            context.allowsImplicitAnimation = true
+            animator().alphaValue = shouldShow ? 1 : 0
+            layer?.transform = shouldShow ? CATransform3DIdentity : withdrawnTransform
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.visibilityGeneration == generation else { return }
+                self.settleVisibility(shouldShow)
+            }
+        })
+    }
+
+    /// Where the card rests while it is off screen: lifted toward the edge it hangs from.
+    ///
+    /// A layer transform rather than the constraint that positions it, because this is not a
+    /// change of layout — the card's place in the pane is the same place while it is away, and
+    /// a constraint animated here would be a second opinion about it that outlives the fade.
+    private var withdrawnTransform: CATransform3D {
+        CATransform3DMakeTranslation(0, GitStatusOverlayDefaults.withdrawnRise, 0)
+    }
+
+    /// The end state, with nothing in flight between here and it.
+    private func settleVisibility(_ shown: Bool) {
+        isHidden = !shown
+        alphaValue = shown ? 1 : 0
+        layer?.transform = CATransform3DIdentity
+        guard !shown else { return }
+        // No exit is delivered to a view hidden out from under the pointer, so a card that left
+        // lit would come back lit — and come back lit on whichever row the pointer happened to
+        // be over when it went.
+        isHovered = false
+        hoveredGitRow = nil
+    }
+
     // MARK: - Interaction
 
     /// The part of the card that opens Git Review, or nil when there is nothing to open.
@@ -889,37 +1070,41 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// was which was to click: the agent line and an extension row do nothing, and the two button
     /// rows go somewhere else entirely.
     ///
-    /// This union is the **hit target and cursor rect only** — the wash is drawn per row, see
-    /// `gitWashRects`. The target stays one rect so the gap between the two rows is not a dead
-    /// zone a click can fall through; grown by the children row's own padding so a pointer lands
-    /// on it as easily as on the button below.
+    /// This union is the **hit target and cursor rect only** — the wash is drawn under the single
+    /// row the pointer is on, see `washRect(for:)`. The target stays one rect so the gap between
+    /// the two rows is not a dead zone a click can fall through; grown by the children row's own
+    /// padding so a pointer lands on it as easily as on the button below.
     private var gitRegion: NSRect? {
-        guard hasGitReceipt else { return nil }
-        let rows = [summaryRow, countersRow].filter { !$0.isHidden }.map(\.frame)
+        let rows = gitRows.map(\.frame)
         guard var union = rows.first else { return nil }
         for row in rows.dropFirst() { union = union.union(row) }
         return convert(union, from: content).insetBy(dx: 0, dy: -childrenRowInset)
     }
 
-    /// The wash, one rect per Git row rather than their union.
-    ///
-    /// Both rows lift together — they are one destination — but each lights the line it covers:
-    /// branch and counters as one solid block read as one *fact*, and they are two. Each rect is
-    /// grown by less than the children row's own padding where the union could afford the full
-    /// amount, because the two washes must not fuse across the gap they share — a hairline of
-    /// ground has to survive between them.
-    private var gitWashRects: [NSRect] {
+    /// The rows that open Git Review, top down and only while they are on screen.
+    private var gitRows: [NSView] {
         guard hasGitReceipt else { return [] }
-        let breathing = min(
-            childrenRowInset,
-            (GitStatusOverlayDefaults.rowGap - Design.Spacing.hairline) / 2
-        )
-        return [summaryRow, countersRow]
-            .filter { !$0.isHidden }
-            .map { convert($0.frame, from: content).insetBy(dx: 0, dy: -breathing) }
+        return [summaryRow, countersRow].filter { !$0.isHidden }
     }
 
-    /// Draws the wash under the rows that act.
+    /// The wash under one Git row — its own line, never the pair's union.
+    ///
+    /// Branch and counters as one solid block read as one *fact*, and they are two, so the rect
+    /// is a row's line box grown to `rowHeight`: the same shape the button rows below it hold,
+    /// which is what makes a lit text row and a lit control row read as the same kind of thing.
+    ///
+    /// The `min` is a guard, not the rule. `rowGap` is chosen to carry both neighbouring washes
+    /// and the hairline between them, and the clamp is what says so out loud — two washes fusing
+    /// across the gap would put the pair back to the single block this whole shape avoids.
+    private func washRect(for row: NSView) -> NSRect {
+        let breathing = min(
+            GitStatusOverlayDefaults.rowPadding,
+            (GitStatusOverlayDefaults.rowGap - Design.Spacing.hairline) / 2
+        )
+        return convert(row.frame, from: content).insetBy(dx: 0, dy: -breathing)
+    }
+
+    /// Draws the wash under the one row the pointer is on.
     ///
     /// On the card rather than in a control of its own, because the rows *are* the card's own
     /// layout — the marks share one column with the children row's, and a wrapper around two of
@@ -927,10 +1112,8 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// the children row already lifts to (`ink.surfaceHover`), measured against the terminal's
     /// backdrop like everything else the card draws.
     override func draw(_ dirtyRect: NSRect) {
-        guard isGitHovered else { return }
-        for rect in gitWashRects {
-            ThemedSurface.draw(rect, fill: ink.surfaceHover)
-        }
+        guard let row = hoveredGitRow, !row.isHidden else { return }
+        ThemedSurface.draw(washRect(for: row), fill: ink.surfaceHover)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -981,7 +1164,7 @@ final class GitStatusOverlayView: BackdropOverlay {
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        isGitHovered = false
+        hoveredGitRow = nil
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -992,7 +1175,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// question to ask when the card moved and the pointer did not.
     private func refreshGitHover() {
         guard isHovered else {
-            isGitHovered = false
+            hoveredGitRow = nil
             return
         }
         // No window, no pointer to measure against: keep the event stream's last answer. A
@@ -1003,8 +1186,26 @@ final class GitStatusOverlayView: BackdropOverlay {
         updateGitHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 
+    /// Which row the wash belongs to for a pointer at `point`.
+    ///
+    /// The hit target is the pair's union and the washes are the two lines inside it, so the
+    /// union is wider and taller than they are: the gap they leave between them, the padding
+    /// grown past it, and — since the rows are as wide as their own words — the ground beside
+    /// the shorter of the two. A pointer there clicks through to Git Review, so it lights the
+    /// row it is nearest rather than nothing at all; anywhere else on the card lights nothing.
     private func updateGitHover(at point: NSPoint) {
-        isGitHovered = gitRegion?.contains(point) ?? false
+        guard let region = gitRegion, region.contains(point) else {
+            hoveredGitRow = nil
+            return
+        }
+        let rows = gitRows
+        if let under = rows.first(where: { washRect(for: $0).contains(point) }) {
+            hoveredGitRow = under
+            return
+        }
+        hoveredGitRow = rows.min {
+            abs(point.y - washRect(for: $0).midY) < abs(point.y - washRect(for: $1).midY)
+        }
     }
 
     /// The pointing hand belongs to the rows that act, and to nothing else on the card. It used

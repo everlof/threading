@@ -1325,27 +1325,37 @@ final class ThemedIndicatorsTests: XCTestCase {
 
             appearance.performAsCurrentDrawingAppearance {
                 MainActor.assumeIsolated {
-                    let host = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 460))
+                    // Built before the host, because the host's height *is* the cards': a fixed
+                    // canvas clipped the last card off the sheet, and the last card is the
+                    // hovered one — the single state this storybook exists to show.
+                    let cards: [(card: GitStatusOverlayView, hovered: Bool, size: NSSize)] =
+                        states.map { state in
+                            let card = GitStatusOverlayView()
+                            state.apply(card)
+                            card.applyInk(WindowBackdrop.ink)
+                            return (card, state.hovered, card.fittingSize)
+                        }
+                    let height = cards.reduce(Design.Spacing.inset) {
+                        $0 + $1.size.height + Design.Spacing.large
+                    }
+
+                    let host = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: height))
                     host.appearance = appearance
                     host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
 
                     // Laid out from the top down, the way the pane's corner stacks them.
                     var top = Design.Spacing.inset
                     var lit: [GitStatusOverlayView] = []
-                    for state in states {
-                        let card = GitStatusOverlayView()
-                        state.apply(card)
-                        card.applyInk(WindowBackdrop.ink)
-                        let size = card.fittingSize
-                        card.frame = NSRect(
-                            x: host.bounds.width - size.width - Design.Spacing.inset,
-                            y: host.bounds.height - top - size.height,
-                            width: size.width,
-                            height: size.height
+                    for entry in cards {
+                        entry.card.frame = NSRect(
+                            x: host.bounds.width - entry.size.width - Design.Spacing.inset,
+                            y: host.bounds.height - top - entry.size.height,
+                            width: entry.size.width,
+                            height: entry.size.height
                         )
-                        host.addSubview(card)
-                        if state.hovered { lit.append(card) }
-                        top += size.height + Design.Spacing.large
+                        host.addSubview(entry.card)
+                        if entry.hovered { lit.append(entry.card) }
+                        top += entry.size.height + Design.Spacing.large
                     }
 
                     host.layoutSubtreeIfNeeded()
@@ -1440,6 +1450,56 @@ final class ThemedIndicatorsTests: XCTestCase {
                        "the wash outlived the pointer that raised it")
     }
 
+    /// One row lights at a time, even though both open Git Review.
+    ///
+    /// They used to lift together, on the reasoning that they are one destination. But a hover
+    /// answers *where the pointer is*; the destination is what the click is for. Lighting the
+    /// counters because the pointer is on the branch reports a pointer that is not there.
+    func testOnlyTheGitRowUnderThePointerLights() throws {
+        let card = try laidOutCard()
+        card.mouseEntered(with: NSEvent())
+        let awake = try drawing(of: card)
+
+        card.mouseMoved(with: pointer(at: try centre(of: "main", in: card)))
+        let onBranch = try drawing(of: card)
+
+        card.mouseMoved(with: pointer(at: try centre(of: "12", in: card)))
+        let onCounters = try drawing(of: card)
+
+        XCTAssertNotEqual(onBranch, awake, "the branch row drew no wash under the pointer")
+        XCTAssertNotEqual(onCounters, awake, "the counters row drew no wash under the pointer")
+        XCTAssertNotEqual(onBranch, onCounters,
+                          "both Git rows lit for a pointer that was only ever on one of them")
+    }
+
+    /// Splitting the wash in two opens a gap the union does not have: the ground between the
+    /// rows, and the padding grown past it, are inside the hit target but inside neither row. A
+    /// pointer that opens Git Review while the card shows nothing lit is the same broken promise
+    /// as a wash over a row that does not act, told backwards — so every point that clicks
+    /// through lights the row it is nearest. Swept rather than sampled at one guessed offset,
+    /// because where the rows end and the gap starts is exactly what this must not assume.
+    func testNoPointThatOpensGitReviewLeavesTheCardUnlit() throws {
+        let card = try laidOutCard()
+        card.mouseEntered(with: NSEvent())
+        let awake = try drawing(of: card)
+
+        let branch = try centre(of: "main", in: card)
+        let counters = try centre(of: "12", in: card)
+        var opened = 0
+        card.onOpen = { opened += 1 }
+
+        for step in 0...10 {
+            let point = NSPoint(x: branch.x,
+                                y: branch.y + (counters.y - branch.y) * CGFloat(step) / 10)
+            card.mouseMoved(with: pointer(at: point))
+            XCTAssertNotEqual(try drawing(of: card), awake,
+                              "nothing lit at \(point), between the two rows that act")
+            card.mouseDown(with: pointer(at: point))
+        }
+
+        XCTAssertEqual(opened, 11, "a lit point did not open Git Review")
+    }
+
     /// The lit rows and the clickable rows are the same rows. A hover that promises a
     /// destination the click does not deliver — or the reverse — is worse than no hover.
     func testTheGitRowsAreTheCardsHitTargetRatherThanTheWholeCard() throws {
@@ -1495,6 +1555,153 @@ final class ThemedIndicatorsTests: XCTestCase {
             XCTAssertEqual(button.contentTintColor, WindowBackdrop.ink.secondary,
                            "\(button.title) is not inked for the backdrop it floats on")
         }
+    }
+
+    // MARK: - Switching the Card Off
+
+    /// The switch and "has anything to say" are two answers, and the card needs both.
+    func testTheCardCanBeSwitchedOffAndBackOnWithoutLosingWhatItSays() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let card = try laidOutCard()
+        XCTAssertFalse(card.isHidden, "a card with a branch and a switch left on is not on screen")
+
+        card.setAllowedOnScreen(false, animated: true)
+        XCTAssertTrue(card.isHidden, "the card stayed after being switched off")
+
+        card.setAllowedOnScreen(true, animated: true)
+        XCTAssertFalse(card.isHidden, "the card did not come back")
+        XCTAssertEqual(card.alphaValue, 1, accuracy: 0.001,
+                       "the card came back still faded out")
+    }
+
+    /// Switching it on is permission, not content. A pane with no checkout has nothing to show,
+    /// and a switch cannot conjure a branch.
+    func testSwitchingTheCardOnShowsNothingWhenItHasNothingToSay() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let card = try laidOutCard()
+        card.clear()
+        XCTAssertTrue(card.isHidden)
+
+        card.setAllowedOnScreen(false, animated: false)
+        card.setAllowedOnScreen(true, animated: false)
+        XCTAssertTrue(card.isHidden, "an empty card was shown because the switch was on")
+    }
+
+    /// A card switched off while the pointer was on it must not return already lit: no exit is
+    /// delivered to a view hidden out from under the pointer.
+    func testACardHiddenUnderThePointerDoesNotComeBackLit() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let card = try laidOutCard()
+        let quiet = try drawing(of: card)
+
+        card.mouseEntered(with: NSEvent())
+        card.mouseMoved(with: pointer(at: try centre(of: "main", in: card)))
+        XCTAssertNotEqual(try drawing(of: card), quiet, "the pointer lit nothing to begin with")
+
+        card.setAllowedOnScreen(false, animated: false)
+        card.setAllowedOnScreen(true, animated: false)
+
+        XCTAssertEqual(try drawing(of: card), quiet,
+                       "the card came back wearing the hover it left with")
+    }
+
+    /// The leaving is animated rather than instant — which is exactly why `isHidden` cannot be
+    /// the state the next toggle reads.
+    func testTheCardAnimatesAwayRatherThanBlinkingOut() throws {
+        Design.Motion.reduceMotionOverrideForTesting = false
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let card = try laidOutCard()
+        card.setAllowedOnScreen(false, animated: true)
+        XCTAssertFalse(card.isHidden, "the card was hidden before its fade had a chance to run")
+
+        // Back before the vanish could finish. The card is wanted on screen, and the stale
+        // completion still in flight must not take it away a beat later.
+        card.setAllowedOnScreen(true, animated: true)
+        XCTAssertFalse(card.isHidden)
+
+        let settled = expectation(description: "both transitions finished")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { settled.fulfill() }
+        wait(for: [settled], timeout: 2)
+
+        XCTAssertFalse(card.isHidden, "a stale vanish hid a card that had been asked back")
+        XCTAssertEqual(card.alphaValue, 1, accuracy: 0.001)
+    }
+
+    /// Under Reduce Motion the end state is owed *now*, not a run-loop turn later: a zero-length
+    /// animation still defers its completion, and a caller that read `isHidden` straight after
+    /// would get the state the card was leaving.
+    func testReduceMotionPutsTheCardWhereItIsGoingImmediately() throws {
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+
+        let card = try laidOutCard()
+        card.setAllowedOnScreen(false, animated: true)
+        XCTAssertTrue(card.isHidden)
+        XCTAssertEqual(card.alphaValue, 0, accuracy: 0.001)
+    }
+
+    // MARK: - Room for the Card
+
+    /// The card floats *over* the terminal, so what it costs is the text underneath. Half the
+    /// pane is where it stops being an annotation and starts being a second column.
+    func testTheCardKeepsToHalfThePaneOrWithdraws() {
+        XCTAssertTrue(GitStatusOverlayDefaults.hasRoom(forCardWidth: 200, inPaneWidth: 800))
+        XCTAssertTrue(GitStatusOverlayDefaults.hasRoom(forCardWidth: 200, inPaneWidth: 400),
+                      "exactly half is still room")
+        XCTAssertFalse(GitStatusOverlayDefaults.hasRoom(forCardWidth: 200, inPaneWidth: 320),
+                       "the card covered most of a narrow pane and stayed")
+
+        // The rule is a share because the card's width is the branch name's: the same pane is
+        // roomy for one checkout and tight for another.
+        XCTAssertTrue(GitStatusOverlayDefaults.hasRoom(forCardWidth: 140, inPaneWidth: 320))
+    }
+
+    /// A pane with no width has not been laid out yet rather than being narrow. Answering "no
+    /// room" there hides the card for the whole of the first layout pass.
+    func testAPaneThatHasNotBeenLaidOutYetIsNotCalledTooNarrow() {
+        XCTAssertTrue(GitStatusOverlayDefaults.hasRoom(forCardWidth: 200, inPaneWidth: 0))
+    }
+
+    /// Every row of the card is one height, and the hover wash is that height.
+    ///
+    /// It was two heights and neither was stated: a text row's line box is 15pt, a plain
+    /// `ThemedButton` pads itself to 22, and the wash grew by whatever `rowGap` had left over —
+    /// which was 2, so the lit row came out *shorter* than the control sitting under it. The
+    /// numbers now come from `rowPadding`, and this is what says so.
+    func testEveryRowOfTheCardIsOneHeightAndTheWashIsThatHeight() throws {
+        let card = try laidOutCard()
+        card.updateSubagents(workingCount: 2, doneCount: 9)
+        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+        card.layoutSubtreeIfNeeded()
+
+        let button = try XCTUnwrap(descendants(of: card).compactMap { $0 as? ThemedButton }.first)
+        XCTAssertEqual(button.frame.height, GitStatusOverlayDefaults.rowHeight, accuracy: 0.5,
+                       "the children row kept the height ThemedButton picked for itself")
+
+        // The wash is not reachable directly, so it is measured the way it is drawn: a text row's
+        // line box grown by the padding either side.
+        let words = try XCTUnwrap(descendants(of: card).compactMap { $0 as? NSTextField }
+            .first { $0.stringValue.contains("main") })
+        let lit = words.frame.height + GitStatusOverlayDefaults.rowPadding * 2
+        XCTAssertEqual(lit, GitStatusOverlayDefaults.rowHeight, accuracy: 0.5,
+                       "a lit text row and the control row below it are different shapes")
+    }
+
+    /// The gap has to carry both neighbouring washes *and* a hairline of ground between them.
+    /// It did not, so the wash was clamped to fit the gap — the gap was setting the padding.
+    func testTheRowGapLeavesRoomForTwoWashesAndAHairline() {
+        XCTAssertGreaterThanOrEqual(
+            GitStatusOverlayDefaults.rowGap,
+            GitStatusOverlayDefaults.rowPadding * 2 + Design.Spacing.hairline,
+            "two lit rows would fuse into the single block the per-row wash exists to avoid"
+        )
     }
 
     // MARK: - Card Fixtures

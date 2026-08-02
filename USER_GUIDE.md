@@ -1473,9 +1473,20 @@ without asking the agent for it. A clean checkout shows just the branch; a proje
 not a repository shows no card at all.
 
 The card holds more than one destination, so **the pointer says which part goes where**: the
-branch and totals highlight together and open Git Review, the children row opens Subagents, the
-audience row opens Sharing, and the model line — a reading rather than a destination — stays
-quiet under the pointer and does nothing when clicked.
+branch and the totals each light on their own and both open Git Review, the children row opens
+Subagents, the audience row opens Sharing, and the model line — a reading rather than a
+destination — stays quiet under the pointer and does nothing when clicked.
+
+**You can switch the card off.** The header's `▣` button (View ▸ Status Card, rebindable in
+Settings ▸ Shortcuts) hides and shows it, and the choice sticks across launches. The card fades
+out and tucks toward the top of the pane rather than blinking away.
+
+It also **withdraws on its own when the pane gets narrow** — when it would cover more than half
+the width, which is where a floating card stops being an annotation on the terminal and starts
+covering the output. Widening the pane brings it straight back. That is not a change to the
+switch: the button stays lit while the card is away for width, because it reports what you chose
+rather than what happens to fit right now. A long branch name makes the card wider, so the same
+pane can be roomy for one checkout and tight for another.
 
 The model line names whatever the session is running, including when you never chose one. If you
 pinned a model in the composer, or your Claude account's `settings.json` names one, that is what
@@ -2310,6 +2321,7 @@ sharing control.
 | Git Review | Cmd+Shift+R |
 | Session Info | Cmd+Shift+I |
 | Shell drawer | Ctrl+` |
+| Status Card (the session pane's floating corner card) | unbound by default — assign one in Settings ▸ Keyboard |
 | Previous / Next tab (in the focused tab strip — drawer or panel) | Cmd+Shift+[ / Cmd+Shift+] |
 | Tab by its place in the strip | Cmd+1 … Cmd+9 |
 | Inspect Element | Cmd+Option+I |

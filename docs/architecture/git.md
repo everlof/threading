@@ -245,17 +245,72 @@ full. That lift is the card waking up and it stays, but it said "all of this is 
 card most of which is not, and the pointing hand over the *whole* card said it a second time, on a
 card holding no Git sentence at all where a click did nothing. The Git rows now raise a wash
 (`ink.surfaceHover`, the weight the children row already lifts to) under the words that open Git
-Review — **one rect per row, lit together**. They lift as one because they are one destination,
-but drawn as one union the branch and the counters read as one *fact*, and they are two; each
-wash hugs its own line (`gitWashRects`), with less growth than the button convention exactly
-where the two rects would otherwise fuse across the gap they share. The click and the cursor
+Review — **one rect, under the row the pointer is on**. Drawn as one union the branch and the
+counters read as one *fact*, and they are two; each wash hugs its own line (`washRect(for:)`),
+with less growth than the button convention exactly where the two rects would otherwise fuse
+across the gap they share. Both rows lit together at first, on the reasoning that they are one
+destination — but a hover answers *where the pointer is*, and the destination is what the click
+is for; lighting the counters because the pointer is on the branch reports a pointer that is not
+there. So the hover state is the row (`hoveredGitRow`), not a flag. The click and the cursor
 rect stay on the union (`gitRegion`) so the gap between the rows is not a dead zone — a hover
 promising a destination the click does not deliver is worse than no hover, and the reverse is
-too. The two button rows lift themselves, as controls always did; the audience row
+too. That union being larger than the two rows put together is why the wash falls back to the
+nearest row: the gap, the padding grown past it, and the ground beside whichever row is the
+shorter word all click through, so all of them light something. The two button rows lift themselves, as controls always did; the audience row
 was being handed neither `contentTintColor` nor `hoverFill`, so it drew in AppKit's own label tier
 and lifted to nothing — inert by omission rather than by design. The card also answers
 `accessibilityPerformPress` now: it has called itself a button since it first carried a receipt,
 and a button that cannot be pressed is a label wearing the wrong role.
+
+**The card can be switched off, and withdraws on its own when the pane is too narrow for it.**
+It floats *over* the terminal rather than beside it, so what it costs is the text underneath —
+a corner at a comfortable width, a lid on a pane dragged narrow. Two answers decide whether it
+is on screen and they are deliberately separate: `hasContent` (any row survived the last
+rebuild) and `isAllowedOnScreen` (the user's switch, and whether there is room). Only the second
+animates — a card with no branch is absent because there is nothing to show, which nobody
+watches; a card the user dismissed is a transition they asked for.
+
+The room test is `GitStatusOverlayDefaults.maximumPaneShare`: the card withdraws when it would
+take more than **half** the pane. A share rather than a minimum width, because the card's width
+*is* the branch name's — a long name on a middling pane is exactly as tight as a short name on a
+narrow one, and one rule answers both. It is measured against the card's `fittingSize`, not its
+frame: a withdrawn card has been laid out at that size all along, and asking the frame makes the
+answer depend on itself — the card returns, which makes it wide, which sends it away again.
+`TerminalContainerViewController.viewDidLayout` is the single place both halves are re-asked,
+because a layout pass is what a divider drag and a rename of the branch have in common.
+
+The switch is `StatusCardVisibility`, through `PreferenceStore` for the same reason
+`DisplayPaneWidth` is, and it is read as an *optional* — absent has to mean on, and
+`bool(forKey:)` cannot tell "switched off" from "never asked". The header button reflects the
+**standing choice** rather than what is on screen, so a card withdrawn for width still reads as
+on: the button says what the next press does, and a press on a narrow pane cannot be answered by
+showing a card there is no room for. The button sits in the session-actions group beside Shell
+and Panel — it belongs to the *pane*, not the window, so it is not an `NSToolbar` item; see
+[`window-chrome.md`](window-chrome.md).
+
+The transition is a fade plus one step of lift toward the edge the card hangs from
+(`Motion.appear` / `Motion.vanish`, eased out arriving and in leaving). Both are needed: alpha
+alone over live terminal text reads as the text brightening rather than as a card leaving,
+because what arrives underneath is moving too. The lift is a **layer transform**, not the
+constraint that positions it — the card's place in the pane is the same place while it is away,
+and an animated constraint would be a second opinion about it that outlives the fade. A
+generation counter guards the completion: toggling twice inside `Motion.vanish` otherwise let a
+stale completion hide a card that had since been asked back.
+
+**Every row is one height, and the card states it.** `rowPadding` is the air a row keeps around
+its own words; `rowHeight` is `textRowHeight + rowPadding * 2`; the hover wash paints exactly
+that, and the two button rows are **constrained** to it. Before, nobody stated it and the card
+had two rhythms: a text row's line box is 15pt, a plain `ThemedButton` pads itself to 22, and the
+wash grew by whatever `rowGap` had left over — which was 2. So the lit row came out 19pt, *shorter
+than the control sitting under it*, and read as shrink-wrap on the text rather than as a row
+lighting up. `childrenRowInset` is now `rowPadding` rather than a measurement taken off
+`intrinsicContentSize`: asking the control what height it chose was asking the wrong party, and
+its answer became the number the card had to work around.
+
+`rowGap` follows from that rather than being picked: it has to carry two neighbouring washes
+**and** the hairline that keeps them from fusing, so it is at least `rowPadding * 2 + hairline`.
+At `small` it could not, which is why the wash was clamped — the gap was setting the padding,
+backwards. The `min` in `washRect(for:)` is the guard that says so out loud, not the rule.
 
 **The card's rows are set at the control size**, `numericControl(weight: .medium)` — one role for
 branch, counters, agent line and both button rows, so the stack holds one line box and one column.

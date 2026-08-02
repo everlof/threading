@@ -872,6 +872,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.sessionInfo, action: #selector(openInfo)))
         menu.addItem(commandItem(AppCommands.ID.shell, action: #selector(toggleShell)))
         menu.addItem(commandItem(AppCommands.ID.displayPanel, action: #selector(toggleDisplayPanel)))
+        menu.addItem(commandItem(AppCommands.ID.statusCard, action: #selector(toggleStatusCard)))
 
         menu.addItem(.separator())
 
@@ -1268,6 +1269,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func toggleDisplayPanel() {
         mainWindowController?.toggleDisplayPane()
+    }
+
+    @objc private func toggleStatusCard() {
+        mainWindowController?.toggleStatusCard()
     }
 
     @objc private func toggleCurrentTheme() {
