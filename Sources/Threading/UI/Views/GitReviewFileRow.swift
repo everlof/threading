@@ -38,6 +38,16 @@ final class GitReviewFileRow: NSView {
     /// One hunk, by its index into `file.hunks`.
     var onStageHunk: ((Int) -> Void)?
 
+    /// Provider-neutral chat context. Assignments also reach a body built during `init` for a
+    /// row restored expanded, matching the image-provider handoff below.
+    var onAddContextAttachment: ((ConversationContextAttachment) -> Void)? {
+        didSet { wireContextDiffs() }
+    }
+    var onRequestContextComment: ((ConversationContextAttachment) -> Void)? {
+        didSet { wireContextDiffs() }
+    }
+    private var contextDiffs: [DiffView] = []
+
     /// Fetches the file's bytes at the mode's two endpoints, for an image row's body. Wired by
     /// the pane, which knows the mode and the checkout; the row only knows it has a picture.
     /// Completion arrives on main.
@@ -280,22 +290,41 @@ final class GitReviewFileRow: NSView {
     }
 
     private func presentContextMenu(at anchor: ThemedMenuAnchor) -> Bool {
-        guard let openInTarget,
-              FileManager.default.fileExists(atPath: openInTarget.url.path) else { return false }
-
         var entries: [ThemedMenuEntry] = []
-        if let openIn = OpenInMenu.submenuEntry(for: openInTarget) {
-            entries.append(openIn)
+        let context = fileContextAttachment
+        if onAddContextAttachment != nil {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Add file to chat"),
+                onChoose: { [weak self] in self?.onAddContextAttachment?(context) }
+            )))
         }
-        entries.append(.item(ThemedMenuItem(
-            title: L10n.string("Reveal in Finder"),
-            onChoose: { [weak self] in self?.revealInFinderClicked() }
-        )))
-        entries.append(.separator)
-        entries.append(.item(ThemedMenuItem(
-            title: L10n.string("Copy Path"),
-            onChoose: { [weak self] in self?.copyPathClicked() }
-        )))
+        if onRequestContextComment != nil {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Comment on file…"),
+                onChoose: { [weak self] in self?.onRequestContextComment?(context) }
+            )))
+        }
+
+        if let openInTarget,
+           FileManager.default.fileExists(atPath: openInTarget.url.path) {
+            if !entries.isEmpty { entries.append(.separator) }
+            if let openIn = OpenInMenu.submenuEntry(for: openInTarget) {
+                entries.append(openIn)
+            }
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Reveal in Finder"),
+                onChoose: { [weak self] in self?.revealInFinderClicked() }
+            )))
+            entries.append(.separator)
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Copy Path"),
+                onChoose: { [weak self] in self?.copyPathClicked() }
+            )))
+        }
+        guard entries.contains(where: {
+            if case .item = $0 { return true }
+            return false
+        }) else { return false }
 
         contextMenuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: OpenInMenuDefaults.menuWidth),
@@ -306,6 +335,18 @@ final class GitReviewFileRow: NSView {
             onDismiss: { [weak self] in self?.contextMenuSession = nil }
         )
         return contextMenuSession != nil
+    }
+
+    private var fileContextAttachment: ConversationContextAttachment {
+        ConversationContextAttachment(
+            kind: .reference,
+            source: isImageComparison ? .attachment : .code,
+            title: file.path,
+            excerpt: L10n.format("Changed file · +%lld −%lld", Int64(file.added), Int64(file.removed)),
+            locator: file.path,
+            lineStart: firstChangedLine,
+            lineEnd: firstChangedLine
+        )
     }
 
     private var firstChangedLine: Int? { Self.firstChangedLine(in: file) }
@@ -408,6 +449,8 @@ final class GitReviewFileRow: NSView {
                 addBodyRow(makeHunkHeader(hunk, index: index))
             }
             let diff = DiffView(gitLines: hunk.lines, displayCap: remaining, path: file.path, wraps: wraps)
+            contextDiffs.append(diff)
+            wireContextDiff(diff)
             addBodyRow(wraps ? diff : Self.horizontallyScrolling(diff))
             remaining -= hunk.lines.count
         }
@@ -415,6 +458,15 @@ final class GitReviewFileRow: NSView {
         if skipped > 0 {
             addBodyRow(makeNote("… \(skipped) more lines in later hunks"))
         }
+    }
+
+    private func wireContextDiffs() {
+        contextDiffs.forEach(wireContextDiff)
+    }
+
+    private func wireContextDiff(_ diff: DiffView) {
+        diff.onAddContextAttachment = onAddContextAttachment
+        diff.onRequestComment = onRequestContextComment
     }
 
     /// The compare surface, fed with the file's bytes at the mode's two endpoints. Fetched on

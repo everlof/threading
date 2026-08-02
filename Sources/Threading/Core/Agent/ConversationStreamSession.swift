@@ -36,3 +36,12 @@ protocol ConversationStreamSession: AnyObject {
     func finish()
     func terminate()
 }
+
+extension ConversationStreamSession {
+    /// The shared context boundary. Providers continue to own only their text wire protocol;
+    /// every reference and comment reaches Claude, Codex, and ACP in the same durable envelope.
+    @discardableResult
+    func send(_ prompt: ConversationPrompt) -> Bool {
+        send(prompt.transportText)
+    }
+}

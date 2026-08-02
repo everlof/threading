@@ -1,6 +1,93 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld comments": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld kommentarer" } } }
+    },
+    "%lld references": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld referenser" } } }
+    },
+    "1 comment": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 kommentar" } } }
+    },
+    "1 reference": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 referens" } } }
+    },
+    "Add attachment to chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till bilagan i chatten" } } }
+    },
+    "Add file to chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till filen i chatten" } } }
+    },
+    "Add line to chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till raden i chatten" } } }
+    },
+    "Add message to chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till meddelandet i chatten" } } }
+    },
+    "Add response to chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till svaret i chatten" } } }
+    },
+    "Add to Chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till i chatten" } } }
+    },
+    "Add to chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till i chatten" } } }
+    },
+    "Agent response": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agentsvar" } } }
+    },
+    "Agent response actions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Åtgärder för agentsvar" } } }
+    },
+    "Changed file · +%lld −%lld": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ändrad fil · +%lld −%lld" } } }
+    },
+    "Chat…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chatt…" } } }
+    },
+    "Code change": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kodändring" } } }
+    },
+    "Comment on %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommentera %@" } } }
+    },
+    "Comment on %@.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommentera %@." } } }
+    },
+    "Comment on attachment…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommentera bilagan…" } } }
+    },
+    "Comment on file…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommentera filen…" } } }
+    },
+    "Comment on line…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommentera raden…" } } }
+    },
+    "Comment…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kommentera…" } } }
+    },
+    "ConversationContextRailView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ConversationContextRailView" } } }
+    },
+    "Reference and comment receipts. Open either chip to comment or remove it.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Referens- och kommentarskvitton. Öppna en bricka för att kommentera eller ta bort den." } } }
+    },
+    "Remove from prompt": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ta bort från meddelandet" } } }
+    },
+    "Removed %@ from the prompt.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tog bort %@ från meddelandet." } } }
+    },
+    "What should change?": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad ska ändras?" } } }
+    },
+    "Your earlier message": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ditt tidigare meddelande" } } }
+    },
+    "Your message actions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Åtgärder för ditt meddelande" } } }
+    },
     "%lld archived conversations": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld arkiverade konversationer" } } }
     },

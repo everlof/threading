@@ -83,7 +83,14 @@ final class ConversationViewController: NSViewController {
                 sessionID: self.sessionID,
                 projectRoot: URL(fileURLWithPath: self.project.folderPath, isDirectory: true)
             )
-            _ = self.submit(text)
+            _ = self.submit(text, context: self.promptView.contextAttachments)
+        }
+        prompt.onRequestContextComment = { [weak self] attachment in
+            self?.requestComment(on: attachment)
+        }
+        prompt.onRequestImageComment = { [weak self] path in
+            guard let self else { return }
+            self.requestComment(on: self.attachmentContext(path: path))
         }
         return prompt
     }()
@@ -550,7 +557,8 @@ final class ConversationViewController: NSViewController {
                   let target = componentTarget(for: timeline.rows[timelineIndex]),
                   customizationChange(event, affects: target) else { return false }
             let shouldWrap = !customizationLookup(target).isEmpty
-            let isWrapped = view is ConversationRowCustomizationView
+            let customizationContent = (view as? ConversationMessageContextView)?.content ?? view
+            let isWrapped = customizationContent is ConversationRowCustomizationView
             return shouldWrap != isWrapped
         }
 
@@ -978,9 +986,10 @@ final class ConversationViewController: NSViewController {
     @discardableResult
     func sendRemotePrompt(
         _ text: String,
+        context: [ConversationContextAttachment] = [],
         authorization: RemoteAuthorization
     ) -> Bool {
-        submit(text, authorization: authorization)
+        submit(text, context: context, authorization: authorization)
     }
 
     /// A prompt the app composed on the user's behalf — the sidebar's "Rename with Agent".
@@ -1001,8 +1010,13 @@ final class ConversationViewController: NSViewController {
         let rows = timeline.rows.enumerated().map { index, row in
             let id = String(index)
             switch row {
-            case .userMessage(let text):
-                return RemoteConversationRowDTO(id: id, kind: "user", text: text)
+            case .userMessage(let message):
+                return RemoteConversationRowDTO(
+                    id: id,
+                    kind: "user",
+                    text: message.text,
+                    contextAttachments: message.context.map(\.remoteDTO)
+                )
             case .assistant(let markdown):
                 return RemoteConversationRowDTO(id: id, kind: "assistant", text: markdown)
             case .thinking(let text):
@@ -1041,15 +1055,112 @@ final class ConversationViewController: NSViewController {
         activePermissionCard?.resolveRemote(id: id, decision: decision) ?? false
     }
 
+    // MARK: - Context Attachments
+
+    /// One staging door for messages, diffs, images, the attachments pane, and remote clients.
+    /// The prompt owns the receipt UI; the controller owns session routing and focus.
+    func stageContextAttachment(_ attachment: ConversationContextAttachment) {
+        promptView.addContextAttachment(attachment)
+    }
+
+    func requestComment(on attachment: ConversationContextAttachment) {
+        let request = TextPromptRequest(
+            title: L10n.format("Comment on %@", attachment.title),
+            message: attachment.excerpt,
+            confirmTitle: L10n.string("Add to Chat"),
+            placeholder: L10n.string("What should change?")
+        )
+        guard case .text(let body)? = TextPromptAlert.ask(request) else { return }
+        stageContextAttachment(attachment.commenting(body))
+    }
+
+    func attachmentContext(path: String, displayPath: String? = nil) -> ConversationContextAttachment {
+        let locator = displayPath ?? projectRelativePath(for: path)
+        return ConversationContextAttachment(
+            kind: .reference,
+            source: .attachment,
+            title: URL(fileURLWithPath: path).lastPathComponent,
+            excerpt: locator,
+            locator: locator
+        )
+    }
+
+    /// Wires the contextual action shell after row virtualization creates it. The model values
+    /// stay in the timeline; a recycled view owns no durable callback state of its own.
+    func configureContextActions(
+        in view: NSView,
+        row: ConversationTimeline.Row,
+        rowIndex: Int
+    ) {
+        if let toolView = view as? ToolCallView {
+            toolView.onAddContextAttachment = { [weak self] attachment in
+                self?.stageContextAttachment(attachment)
+            }
+            toolView.onRequestContextComment = { [weak self] attachment in
+                self?.requestComment(on: attachment)
+            }
+            return
+        }
+        guard let messageView = view as? ConversationMessageContextView else { return }
+
+        let title: String
+        let excerpt: String
+        switch row {
+        case .userMessage(let message):
+            title = L10n.string("Your earlier message")
+            excerpt = message.text
+        case .assistant(let markdown):
+            title = L10n.string("Agent response")
+            excerpt = markdown
+        default:
+            return
+        }
+
+        let reference = ConversationContextAttachment(
+            kind: .reference,
+            source: .message,
+            title: title,
+            excerpt: excerpt,
+            locator: "conversation-row:\(rowIndex)"
+        )
+        messageView.onReferenceMessage = { [weak self] in
+            self?.stageContextAttachment(reference)
+        }
+        messageView.onCommentMessage = { [weak self] in
+            self?.requestComment(on: reference)
+        }
+        messageView.onReferenceContext = { [weak self] attachment in
+            self?.stageContextAttachment(attachment)
+        }
+        messageView.onCommentContext = { [weak self] attachment in
+            self?.requestComment(on: attachment)
+        }
+    }
+
+    private func projectRelativePath(for path: String) -> String {
+        let root = URL(fileURLWithPath: project.folderPath, isDirectory: true)
+            .standardizedFileURL.path
+        let candidate = URL(fileURLWithPath: path).standardizedFileURL.path
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        guard candidate.hasPrefix(prefix) else {
+            return URL(fileURLWithPath: candidate).lastPathComponent
+        }
+        return String(candidate.dropFirst(prefix.count))
+    }
+
+
     // MARK: - Input
 
     @discardableResult
     private func submit(
         _ text: String,
+        context: [ConversationContextAttachment] = [],
         authorization: RemoteAuthorization? = nil
     ) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        let context = ConversationContextPolicy.normalized(context)
+        guard !trimmed.isEmpty || !context.isEmpty else { return false }
+        let localPrompt = ConversationPrompt(text: trimmed, context: context)
 
         let transported: String
         if let authorization, let member = authorization.member {
@@ -1060,12 +1171,14 @@ final class ConversationViewController: NSViewController {
             // The provider transport has no participant-metadata channel. A short, explicit
             // envelope lets the agent understand who "me" and another named member refer to,
             // while the locally rendered bubble remains the person's original message.
-            transported = "Message from \(member.displayName) in the shared chat:\n\(trimmed)"
+            transported = "Message from \(member.displayName) in the shared chat:\n\(localPrompt.visibleText)"
         } else {
             RemoteNotificationService.shared.recordOwnerInteraction(sessionID: sessionID)
-            transported = trimmed
+            transported = localPrompt.visibleText
         }
-        guard stream.send(transported) else { return false }
+        guard stream.send(ConversationPrompt(text: transported, context: context)) else {
+            return false
+        }
         refreshConversationControls()
         runProgress = nil
 
@@ -1074,7 +1187,7 @@ final class ConversationViewController: NSViewController {
         // Anchoring is decided *before* the echo lands so its `addRow` cannot first yank the
         // view to the bottom.
         autoScroll.noteMessageSent()
-        apply(timeline.apply(.userMessage(trimmed)))
+        apply(timeline.appendUserMessage(localPrompt.userMessage))
         anchorSentMessage(at: timeline.rows.count - 1)
 
         // Drawn here, which is the moment the turn starts and the only place the status enters

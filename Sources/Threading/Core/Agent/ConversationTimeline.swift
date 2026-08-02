@@ -24,13 +24,19 @@ struct ConversationTimeline {
 
     /// One thing shown in the conversation, in the order it happened.
     enum Row: Equatable {
-        case userMessage(String)
+        case userMessage(ConversationUserMessage)
         case assistant(markdown: String)
         case thinking(String)
         case toolCall(ToolCall)
 
         /// Neither said nor tool output: a truncation note, a failed turn, an orphan result.
         case notice(String, kind: NoticeKind)
+
+        /// Keeps existing fixtures and provider adapters terse while the associated value carries
+        /// structured context for the paths that have it.
+        static func userMessage(_ text: String) -> Row {
+            .userMessage(ConversationUserMessage(text: text))
+        }
     }
 
     enum NoticeKind: Equatable {
@@ -200,10 +206,11 @@ struct ConversationTimeline {
             return changes
 
         case .userMessage(let text):
-            let change = append(.userMessage(text))
+            let message = ConversationPrompt.replaying(text)
+            let change = append(.userMessage(message))
             let index = rows.count - 1
             turnStartIndices.append(index)
-            compactedUserTextByRow[index] = Self.compact(text)
+            compactedUserTextByRow[index] = Self.compact(message.text)
             currentTurnStartIndex = index
             return [change]
 
@@ -335,6 +342,17 @@ struct ConversationTimeline {
     /// which are the view's to raise rather than the stream's.
     mutating func appendNotice(_ text: String, kind: NoticeKind) -> Change {
         append(.notice(text, kind: kind))
+    }
+
+    /// Local turns already have their typed context, so they enter without a serialize/parse
+    /// round-trip. Replayed provider text takes the `StreamEvent.userMessage` path above.
+    mutating func appendUserMessage(_ message: ConversationUserMessage) -> Change {
+        let change = append(.userMessage(message))
+        let index = rows.count - 1
+        turnStartIndices.append(index)
+        compactedUserTextByRow[index] = Self.compact(message.text)
+        currentTurnStartIndex = index
+        return change
     }
 
     // MARK: - Private Methods

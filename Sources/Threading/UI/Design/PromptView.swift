@@ -15,12 +15,14 @@ final class PromptView: NSView, ThemedComponent {
     // MARK: - Properties
 
     private let contentStack = NSStackView()
+    private let contextRail = ConversationContextRailView(mode: .composer)
     private let attachmentScrollView = ThemedScrollView()
     private let attachmentStack = NSStackView()
     private let scrollView = ThemedScrollView()
     private let textView = PromptTextView(frame: .zero, textContainer: nil)
     private let submitButton = ThemedButton()
     private var attachments: [PromptImageAttachment] = []
+    private(set) var contextAttachments: [ConversationContextAttachment] = []
     private var isTextFocused = false
 
     /// Drives the growth. Held so the height can be recomputed as the text changes.
@@ -38,6 +40,11 @@ final class PromptView: NSView, ThemedComponent {
     /// Called on every edit. Exists so what is typed can be kept somewhere it survives the
     /// app, rather than only in this field.
     var onChange: ((String) -> Void)?
+
+    /// The prompt owns presentation and removal; its conversation owner supplies the short text
+    /// prompt that turns an existing reference or image into a comment.
+    var onRequestContextComment: ((ConversationContextAttachment) -> Void)?
+    var onRequestImageComment: ((String) -> Void)?
 
     /// Placeholder shown while empty. Set before the view is added.
     var placeholder: String = "" {
@@ -157,8 +164,16 @@ final class PromptView: NSView, ThemedComponent {
         contentStack.spacing = Design.Spacing.medium
         contentStack.detachesHiddenViews = true
         contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(contextRail)
         contentStack.addArrangedSubview(attachmentScrollView)
         contentStack.addArrangedSubview(scrollView)
+
+        contextRail.onRemove = { [weak self] attachment in
+            self?.removeContextAttachment(id: attachment.id)
+        }
+        contextRail.onComment = { [weak self] attachment in
+            self?.onRequestContextComment?(attachment)
+        }
 
         addSubview(contentStack)
         addSubview(submitButton)
@@ -368,6 +383,26 @@ final class PromptView: NSView, ThemedComponent {
     func clear() {
         stringValue = ""
         clearAttachments()
+        clearContextAttachments()
+    }
+
+    /// Stages one provider-neutral reference or comment. Duplicate ids are ignored so choosing
+    /// Add to chat twice cannot silently send the same context twice.
+    func addContextAttachment(_ attachment: ConversationContextAttachment) {
+        guard !contextAttachments.contains(where: { $0.id == attachment.id }) else { return }
+        contextAttachments = ConversationContextPolicy.normalized(contextAttachments + [attachment])
+        contextRail.setAttachments(contextAttachments)
+        updateSubmitState()
+        updateHeight()
+        focus()
+    }
+
+    func clearContextAttachments() {
+        guard !contextAttachments.isEmpty else { return }
+        contextAttachments.removeAll()
+        contextRail.setAttachments([])
+        updateSubmitState()
+        updateHeight()
     }
 
     /// Attachments are intentionally not drafts: raw clipboard images live in a temporary
@@ -464,6 +499,11 @@ final class PromptView: NSView, ThemedComponent {
                 guard let self, let thumbnail else { return }
                 self.removeAttachment(id: attachment.id, thumbnail: thumbnail)
             }
+            if onRequestImageComment != nil {
+                thumbnail.onComment = { [weak self] in
+                    self?.onRequestImageComment?(attachment.path)
+                }
+            }
             attachmentStack.addArrangedSubview(thumbnail)
         }
 
@@ -499,6 +539,15 @@ final class PromptView: NSView, ThemedComponent {
         thumbnail.removeFromSuperview()
         attachmentScrollView.isHidden = attachments.isEmpty
         layoutAttachmentStrip()
+        updateSubmitState()
+        updateHeight()
+        focus()
+    }
+
+    private func removeContextAttachment(id: UUID) {
+        guard contextAttachments.contains(where: { $0.id == id }) else { return }
+        contextAttachments.removeAll { $0.id == id }
+        contextRail.setAttachments(contextAttachments)
         updateSubmitState()
         updateHeight()
         focus()
@@ -544,7 +593,7 @@ final class PromptView: NSView, ThemedComponent {
         let hasText = !textView.string
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty
-        let hasContent = hasText || !attachments.isEmpty
+        let hasContent = hasText || !attachments.isEmpty || !contextAttachments.isEmpty
 
         submitButton.contentTintColor = hasContent ? Design.Surface.accent : Design.Text.tertiary
     }
@@ -572,12 +621,15 @@ final class PromptView: NSView, ThemedComponent {
         let attachmentHeight = attachments.isEmpty
             ? 0
             : Design.Size.promptAttachmentThumbnail + Design.Spacing.medium
+        let contextHeight = contextAttachments.isEmpty
+            ? 0
+            : Design.Size.chipHeight + Design.Spacing.medium
         let textFitted = min(
             max(textHeight + chrome, minimumHeight),
             max(Design.Size.inputMaxHeight, minimumHeight)
         )
 
-        let fitted = textFitted + attachmentHeight
+        let fitted = textFitted + attachmentHeight + contextHeight
 
         // Past the cap the box stops growing, so the scroller has to take over. Decided before
         // the height guard below, because the box is already at its cap by the time the text
@@ -617,6 +669,7 @@ private final class PromptAttachmentThumbnail: ThemedControl {
     private var menuSession: AnyObject?
 
     var onRemove: (() -> Void)?
+    var onComment: (() -> Void)?
     var inspectorSelectionProvider: (() -> MediaInspectorSelection?)?
 
     init(attachment: PromptImageAttachment) {
@@ -768,8 +821,13 @@ private final class PromptAttachmentThumbnail: ThemedControl {
     private func presentContextMenu(at anchor: ThemedMenuAnchor) -> Bool {
         guard menuSession == nil else { return true }
 
-        let entries: [ThemedMenuEntry] = [
-            item("Inspect") { [weak self] in _ = self?.performPrimaryAction() },
+        var entries: [ThemedMenuEntry] = [
+            item("Inspect") { [weak self] in _ = self?.performPrimaryAction() }
+        ]
+        if onComment != nil {
+            entries.append(item("Comment…") { [weak self] in self?.onComment?() })
+        }
+        entries += [
             item("Open in Default App") { [weak self] in self?.openInDefaultApp() },
             item("Reveal in Finder") { [weak self] in self?.revealInFinder() },
             .separator,

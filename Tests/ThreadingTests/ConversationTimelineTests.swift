@@ -67,8 +67,12 @@ final class ConversationTimelineTests: XCTestCase {
         for fixture in Fixture.allCases {
             for row in try timeline(for: fixture).rows {
                 switch row {
-                case .userMessage(let text), .assistant(let text),
-                     .thinking(let text), .notice(let text, _):
+                case .userMessage(let message):
+                    XCTAssertFalse(
+                        message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        "\(fixture.rawValue) produced an empty row"
+                    )
+                case .assistant(let text), .thinking(let text), .notice(let text, _):
                     XCTAssertFalse(
                         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                         "\(fixture.rawValue) produced an empty row"
@@ -78,6 +82,79 @@ final class ConversationTimelineTests: XCTestCase {
                 }
             }
         }
+    }
+
+    func testStructuredContextRoundTripsThroughProviderTranscriptText() {
+        let attachment = ConversationContextAttachment(
+            id: UUID(uuidString: "A9143D6F-B539-468D-8CD7-B244CFC50E26")!,
+            kind: .comment,
+            source: .code,
+            title: "PromptView.swift:42",
+            excerpt: "guard canSend else { return }",
+            comment: "Should this explain why sending is disabled?",
+            locator: "Sources/Threading/UI/Design/PromptView.swift",
+            lineStart: 42,
+            lineEnd: 42
+        )
+        let prompt = ConversationPrompt(
+            text: "Please update this while keeping the existing behavior.",
+            context: [attachment]
+        )
+
+        XCTAssertTrue(prompt.transportText.contains("<threading_context_attachments version=\"1\">"))
+        XCTAssertEqual(ConversationPrompt.replaying(prompt.transportText), prompt.userMessage)
+    }
+
+    func testCommentOnlyPromptGetsReadableFallbackWithoutFlatteningReceipt() {
+        let comment = ConversationContextAttachment(
+            kind: .comment,
+            source: .attachment,
+            title: "layout.png",
+            comment: "The spacing above the toolbar feels too large.",
+            locator: "attachments/layout.png"
+        )
+        let prompt = ConversationPrompt(text: "", context: [comment])
+
+        XCTAssertEqual(prompt.visibleText, "Please address the comment above.")
+        XCTAssertEqual(prompt.userMessage.context, [comment])
+        XCTAssertEqual(ConversationPrompt.replaying(prompt.transportText), prompt.userMessage)
+    }
+
+    func testMalformedContextMarkerRemainsVisibleUserText() {
+        let value = """
+            Keep this literal.
+
+            <threading_context_attachments version="1">
+            not-json
+            </threading_context_attachments>
+            """
+
+        XCTAssertEqual(ConversationPrompt.replaying(value), ConversationUserMessage(text: value))
+    }
+
+    func testContextBatchIsBoundedAsOneReplayableEnvelope() throws {
+        let attachments = (0..<ConversationContextPolicy.maximumAttachments).map { index in
+            ConversationContextAttachment(
+                kind: .comment,
+                source: .attachment,
+                title: "large-\(index).txt",
+                excerpt: String(repeating: "e", count: ConversationContextPolicy.maximumDetailCharacters),
+                comment: String(repeating: "c", count: ConversationContextPolicy.maximumDetailCharacters),
+                locator: "attachments/" + String(
+                    repeating: "p",
+                    count: ConversationContextPolicy.maximumLocatorCharacters
+                )
+            )
+        }
+        let prompt = ConversationPrompt(text: "Review these.", context: attachments)
+        let encoded = try ConversationContextPolicy.encoder.encode(prompt.context)
+
+        XCTAssertLessThan(prompt.context.count, attachments.count)
+        XCTAssertLessThanOrEqual(
+            encoded.count,
+            ConversationContextPolicy.maximumEnvelopeUTF8Bytes
+        )
+        XCTAssertEqual(ConversationPrompt.replaying(prompt.transportText), prompt.userMessage)
     }
 
     // MARK: - Tool Calls

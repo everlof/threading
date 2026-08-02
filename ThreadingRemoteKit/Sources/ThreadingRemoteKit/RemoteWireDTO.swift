@@ -1138,6 +1138,43 @@ public struct RemoteEndedDTO: Codable, Equatable, Sendable {
 
 // MARK: - Native conversation
 
+/// A provider-neutral reference or comment attached to a native conversation row.
+public struct RemoteConversationContextAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    /// "reference" or "comment".
+    public let kind: String
+    /// "message", "code", or "attachment".
+    public let source: String
+    public let title: String
+    public let excerpt: String?
+    public let comment: String?
+    public let locator: String?
+    public let lineStart: Int?
+    public let lineEnd: Int?
+
+    public init(
+        id: String,
+        kind: String,
+        source: String,
+        title: String,
+        excerpt: String? = nil,
+        comment: String? = nil,
+        locator: String? = nil,
+        lineStart: Int? = nil,
+        lineEnd: Int? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.source = source
+        self.title = title
+        self.excerpt = excerpt
+        self.comment = comment
+        self.locator = locator
+        self.lineStart = lineStart
+        self.lineEnd = lineEnd
+    }
+}
+
 /// A provider-neutral row in the native conversation surface. The Mac has already normalised
 /// Claude and Codex into this vocabulary, so mobile clients do not need either provider parser.
 public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendable {
@@ -1149,6 +1186,8 @@ public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendab
     public let summary: String?
     public let result: String?
     public let isError: Bool
+    /// Additive so older peers decode the rest of the row unchanged.
+    public let contextAttachments: [RemoteConversationContextAttachmentDTO]?
 
     public init(
         id: String,
@@ -1157,7 +1196,8 @@ public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendab
         toolName: String? = nil,
         summary: String? = nil,
         result: String? = nil,
-        isError: Bool = false
+        isError: Bool = false,
+        contextAttachments: [RemoteConversationContextAttachmentDTO]? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -1166,6 +1206,7 @@ public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendab
         self.summary = summary
         self.result = result
         self.isError = isError
+        self.contextAttachments = contextAttachments
     }
 }
 

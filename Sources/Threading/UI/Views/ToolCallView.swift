@@ -47,6 +47,14 @@ final class ToolCallView: NSView {
     private var textBody: NSTextField?
     private var resultText: String?
     private var resultOutcome: ToolOutcome?
+    private weak var contextDiff: DiffView?
+
+    var onAddContextAttachment: ((ConversationContextAttachment) -> Void)? {
+        didSet { contextDiff?.onAddContextAttachment = onAddContextAttachment }
+    }
+    var onRequestContextComment: ((ConversationContextAttachment) -> Void)? {
+        didSet { contextDiff?.onRequestComment = onRequestContextComment }
+    }
 
     private var isExpanded = false
     private var canExpand = false
@@ -113,7 +121,11 @@ final class ToolCallView: NSView {
             // For an editing tool the one-line subject *is* the path, which is what says which
             // language the diff is in. Anything else fails the extension lookup and renders
             // plain, so a subject that is not a path costs nothing.
-            return DiffView(lines: diffLines, path: summary)
+            let diff = DiffView(lines: diffLines, path: summary)
+            diff.onAddContextAttachment = onAddContextAttachment
+            diff.onRequestComment = onRequestContextComment
+            contextDiff = diff
+            return diff
         }
 
         let field = makeLabel("", role: .code())

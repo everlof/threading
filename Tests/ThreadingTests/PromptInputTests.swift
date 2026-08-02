@@ -418,6 +418,32 @@ final class PromptInputTests: XCTestCase {
         XCTAssertTrue(prompt.attachmentPaths.isEmpty)
     }
 
+    func testChatImagePreviewCanRequestAnAttachmentComment() throws {
+        let imageURL = try makeImageFile(named: "comment target.png")
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+
+        let prompt = PromptView()
+        prompt.showsImageAttachments = true
+        var commentedPaths: [String] = []
+        prompt.onRequestImageComment = { commentedPaths.append($0) }
+        let window = makeWindow(hosting: prompt)
+        prompt.attachFiles(at: [imageURL.path])
+
+        let thumbnail = try XCTUnwrap(
+            descendants(of: prompt).first {
+                $0.accessibilityRole() == .image
+                    && $0.accessibilityLabel() == imageURL.lastPathComponent
+            }
+        )
+        try performMenuItem(
+            named: "Comment…",
+            from: thumbnail,
+            in: try XCTUnwrap(window.contentView)
+        )
+
+        XCTAssertEqual(commentedPaths, [imageURL.path])
+    }
+
     func testAnImageAloneCanBeSubmitted() throws {
         let imageURL = try makeImageFile(named: "image only.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }

@@ -85,6 +85,7 @@ final class ComponentGalleryViewController: NSViewController {
         "BrowserDeviceToolbar",
         "BrowserFindBar",
         "ChipView",
+        "ConversationContextRailView",
         "FileActivityMapView",
         "GlyphView",
         "HoverPopoverScheduler",
@@ -827,6 +828,32 @@ final class ComponentGalleryViewController: NSViewController {
             )
         }
 
+        let contextRail = ConversationContextRailView(mode: .composer)
+        contextRail.setAttachments([
+            ConversationContextAttachment(
+                kind: .reference,
+                source: .code,
+                title: "PromptView.swift:42",
+                excerpt: "guard canSend else { return }",
+                locator: "Sources/Threading/UI/Design/PromptView.swift",
+                lineStart: 42,
+                lineEnd: 42
+            ),
+            ConversationContextAttachment(
+                kind: .comment,
+                source: .attachment,
+                title: "layout.png",
+                comment: "Reduce the space above the toolbar.",
+                locator: "attachments/layout.png"
+            )
+        ])
+        contextRail.onComment = { [weak self] attachment in
+            self?.showReceipt(L10n.format("Comment on %@.", attachment.title))
+        }
+        contextRail.onRemove = { [weak self] attachment in
+            self?.showReceipt(L10n.format("Removed %@ from the prompt.", attachment.title))
+        }
+
         // Armed, it swallows key equivalents, so a chord that is already a menu shortcut can be
         // pressed here and captured rather than firing its command — which is the behaviour worth
         // being able to try by hand.
@@ -878,6 +905,11 @@ final class ComponentGalleryViewController: NSViewController {
                     "PromptView",
                     "Growing composer, submission, paste, and file-drop behavior.",
                     prompt
+                ),
+                story(
+                    "ConversationContextRailView",
+                    "Reference and comment receipts. Open either chip to comment or remove it.",
+                    contextRail
                 )
             ]
         )

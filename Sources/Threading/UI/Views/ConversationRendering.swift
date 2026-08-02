@@ -192,12 +192,29 @@ extension ConversationViewController {
         let row = timeline.rows[index]
         let (nativeView, _) = ConversationRowView.make(for: row)
         configureDisclosureState(in: nativeView, rowIndex: index)
-        let view: NSView
+        let customizedView: NSView
         if let target = componentTarget(for: row) {
-            view = customizeConversationRow(nativeView, target: target)
+            customizedView = customizeConversationRow(nativeView, target: target)
         } else {
-            view = nativeView
+            customizedView = nativeView
         }
+        let view: NSView
+        switch row {
+        case .userMessage(let message):
+            view = ConversationMessageContextView(
+                content: customizedView,
+                speaker: .user,
+                context: message.context
+            )
+        case .assistant:
+            view = ConversationMessageContextView(
+                content: customizedView,
+                speaker: .agent
+            )
+        case .thinking, .notice, .toolCall:
+            view = customizedView
+        }
+        configureContextActions(in: view, row: row, rowIndex: index)
         rowViews[index] = view
 
         // A missing or interrupted result may still arrive while this instance is visible.

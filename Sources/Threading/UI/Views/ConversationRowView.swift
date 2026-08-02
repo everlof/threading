@@ -57,8 +57,8 @@ enum ConversationRowView {
     /// space above it is a user turn beginning, which only the row kind knows.
     static func make(for row: ConversationTimeline.Row) -> (view: NSView, startsTurn: Bool) {
         switch row {
-        case .userMessage(let text):
-            return (userBubble(text), true)
+        case .userMessage(let message):
+            return (userBubble(message.text), true)
 
         case .assistant(let markdown):
             return (MarkdownView(markdown: markdown), false)

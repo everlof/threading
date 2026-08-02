@@ -153,6 +153,12 @@ final class SessionAttachmentsViewController: NSViewController {
         target: self,
         action: #selector(copySelectedPath)
     )
+    private lazy var chatButton = ThemedButton(
+        title: L10n.string("Chat…"),
+        target: self,
+        action: #selector(showChatActions)
+    )
+    private var chatMenuSession: AnyObject?
     private lazy var emptyLabel: NSTextField = {
         let label = NSTextField(wrappingLabelWithString:
             L10n.string("Images and PDFs mentioned by this session will appear here.")
@@ -229,7 +235,7 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func setupActions() {
-        for control in [openButton, revealButton, copyButton] {
+        for control in [openButton, revealButton, copyButton, chatButton] {
             control.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(control)
         }
@@ -313,7 +319,12 @@ final class SessionAttachmentsViewController: NSViewController {
                 equalTo: revealButton.trailingAnchor,
                 constant: Design.Spacing.tight
             ),
-            copyButton.trailingAnchor.constraint(lessThanOrEqualTo: fileLabel.trailingAnchor),
+            chatButton.centerYAnchor.constraint(equalTo: openButton.centerYAnchor),
+            chatButton.leadingAnchor.constraint(
+                equalTo: copyButton.trailingAnchor,
+                constant: Design.Spacing.tight
+            ),
+            chatButton.trailingAnchor.constraint(lessThanOrEqualTo: fileLabel.trailingAnchor),
             // The floor is a limit, not a home: the footer sits under the preview's content
             // and the pane's slack falls *below* it, empty. Pinned `==` here, a tall pane
             // stretched the preview to fill the difference — see `previewHeightConstraint`.
@@ -397,6 +408,8 @@ final class SessionAttachmentsViewController: NSViewController {
         openButton.isHidden = !hasAttachments
         revealButton.isHidden = !hasAttachments
         copyButton.isHidden = !hasAttachments
+        chatButton.isHidden = !hasAttachments
+            || AgentRuntime.shared.conversation(for: sessionID) == nil
         emptyLabel.isHidden = hasAttachments
 
         guard hasAttachments else {
@@ -557,6 +570,37 @@ final class SessionAttachmentsViewController: NSViewController {
         guard let attachment = selectedAttachment else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(attachment.url.path, forType: .string)
+    }
+
+    @objc private func showChatActions() {
+        guard chatMenuSession == nil,
+              let attachment = selectedAttachment,
+              let conversation = AgentRuntime.shared.conversation(for: sessionID) else { return }
+        let context = conversation.attachmentContext(
+            path: attachment.url.path,
+            displayPath: attachment.relativePath
+        )
+        let entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Add attachment to chat"),
+                onChoose: { [weak conversation] in
+                    conversation?.stageContextAttachment(context)
+                }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Comment on attachment…"),
+                onChoose: { [weak conversation] in
+                    conversation?.requestComment(on: context)
+                }
+            ))
+        ]
+        chatMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 200),
+            from: chatButton,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.chatMenuSession = nil }
+        )
     }
 }
 

@@ -40,6 +40,25 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(view.arrangedSubviews.count, 3)
     }
 
+    func testDiffLineContextKeepsProjectPathNumberAndExcerpt() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let lines = file.hunks.flatMap(\.lines)
+        let view = DiffView(
+            gitLines: lines,
+            displayCap: 100,
+            path: "Sources/Foo.swift"
+        )
+        let addedIndex = try XCTUnwrap(lines.firstIndex { $0.text == "new line" })
+
+        let reference = try XCTUnwrap(view.contextAttachment(atDisplayedLine: addedIndex))
+        XCTAssertEqual(reference.source, .code)
+        XCTAssertEqual(reference.title, "Sources/Foo.swift:2")
+        XCTAssertEqual(reference.locator, "Sources/Foo.swift")
+        XCTAssertEqual(reference.lineStart, 2)
+        XCTAssertEqual(reference.lineEnd, 2)
+        XCTAssertEqual(reference.excerpt, "new line")
+    }
+
     func testEditToolDiffViewKeepsTwoLabelRows() {
         let view = DiffView(lines: [
             DiffLine(kind: .removed, text: "a"),

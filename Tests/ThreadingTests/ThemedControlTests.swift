@@ -3654,6 +3654,7 @@ final class ThemedControlTests: XCTestCase {
                 "BrowserDeviceToolbar",
                 "BrowserFindBar",
                 "ChipView",
+                "ConversationContextRailView",
                 "FileActivityMapView",
                 "GlyphView",
                 "HoverPopoverScheduler",

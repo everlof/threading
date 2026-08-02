@@ -358,6 +358,14 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         row.onStageFile = { [weak self] in self?.stageFile(file) }
         row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
+        if let conversation = AgentRuntime.shared.conversation(for: sessionID) {
+            row.onAddContextAttachment = { [weak conversation] attachment in
+                conversation?.stageContextAttachment(attachment)
+            }
+            row.onRequestContextComment = { [weak conversation] attachment in
+                conversation?.requestComment(on: attachment)
+            }
+        }
         // The row knows it holds a picture; the pane knows which two endpoints the mode
         // measures between. `currentDiffRequest` already answers for an opened commit too.
         row.imagePairProvider = { [weak self] file, completion in

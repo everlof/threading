@@ -9,6 +9,12 @@ import NativeDiffCore
 final class DiffView: DiffAppKitView {
     private let appEvents = AppEventObservations()
     private var observesTheme = false
+    private var contextLines: [DiffLine] = []
+    private var contextPath: String?
+    private var contextMenuSession: AnyObject?
+
+    var onAddContextAttachment: ((ConversationContextAttachment) -> Void)?
+    var onRequestComment: ((ConversationContextAttachment) -> Void)?
 
     convenience init(lines: [DiffLine], path: String? = nil, wraps: Bool = true) {
         self.init(
@@ -25,6 +31,8 @@ final class DiffView: DiffAppKitView {
             ),
             theme: .threading()
         )
+        contextLines = Array(lines.prefix(max(DiffDefaults.displayCap, 0)))
+        contextPath = path
         beginObservingTheme()
     }
 
@@ -48,7 +56,72 @@ final class DiffView: DiffAppKitView {
             ),
             theme: .threading()
         )
+        contextLines = Array(gitLines.prefix(max(displayCap, 0)))
+        contextPath = path
         beginObservingTheme()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard onAddContextAttachment != nil || onRequestComment != nil,
+              let index = lineIndex(at: convert(event.locationInWindow, from: nil)),
+              let reference = contextAttachment(atDisplayedLine: index) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        presentContextMenu(for: reference, at: event.locationInWindow)
+    }
+
+    private func lineIndex(at point: NSPoint) -> Int? {
+        arrangedSubviews.enumerated().first { _, row in
+            row.frame.contains(point)
+        }?.offset
+    }
+
+    private func presentContextMenu(
+        for reference: ConversationContextAttachment,
+        at windowPoint: NSPoint
+    ) {
+        guard contextMenuSession == nil else { return }
+        var entries: [ThemedMenuEntry] = []
+        if onAddContextAttachment != nil {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Add line to chat"),
+                onChoose: { [weak self] in self?.onAddContextAttachment?(reference) }
+            )))
+        }
+        if onRequestComment != nil {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Comment on line…"),
+                onChoose: { [weak self] in self?.onRequestComment?(reference) }
+            )))
+        }
+        contextMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 180),
+            from: self,
+            anchor: .pointer(windowPoint),
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.contextMenuSession = nil }
+        )
+    }
+
+    /// The anchor corresponding to a rendered row. Kept as a small test seam because the
+    /// package view owns line layout, while Threading owns the durable source locator.
+    func contextAttachment(atDisplayedLine index: Int) -> ConversationContextAttachment? {
+        guard contextLines.indices.contains(index) else { return nil }
+        let line = contextLines[index]
+        let number = line.newNumber ?? line.oldNumber
+        let path = contextPath ?? L10n.string("Code change")
+        let title = number.map { "\(path):\($0)" } ?? path
+        return ConversationContextAttachment(
+            kind: .reference,
+            source: .code,
+            title: title,
+            excerpt: line.text,
+            locator: contextPath,
+            lineStart: number,
+            lineEnd: number
+        )
     }
 
     private func beginObservingTheme() {
